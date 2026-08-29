@@ -100,8 +100,8 @@ def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
-    rc = _run().main(_resume_argv(ep / "family.yaml"),
-                     lifecycle=_Recorder(order), visualize=lambda p: None)
+    rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder(order),
+                     visualize=lambda p: None, preflight=T.no_preflight)
     assert rc == 0
     assert order == ["lifecycle"]
 
@@ -113,7 +113,8 @@ def test_947_resume_run_returns_its_own_run_dir_and_verdict(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
-    rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None)
+    rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec,
+                     visualize=lambda p: None, preflight=T.no_preflight)
     run_dir = rec.kwargs["run_dir"]
     assert rc == 0
     assert (run_dir / "report.md").is_file()
@@ -128,7 +129,8 @@ def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_ma
     before = sorted(p.name for p in base.iterdir())
     with pytest.raises(SystemExit) as bad:
         _run().main(_resume_argv(ep / "family.yaml", world="zzz"),
-                    lifecycle=_Recorder([]), visualize=lambda p: None)
+                    lifecycle=_Recorder([]), visualize=lambda p: None,
+                    preflight=T.no_preflight)
     assert "zzz" in str(bad.value)
     assert sorted(p.name for p in base.iterdir()) == before
 
@@ -141,7 +143,8 @@ def test_947_resume_refuses_update_ticket(tmp_path):
     assert _run().parse_args(_resume_argv(manifest)).update_ticket is False
     with pytest.raises(SystemExit) as bad:
         _run().main([*_resume_argv(manifest), "--update-ticket"],
-                    lifecycle=_Recorder([]), visualize=lambda p: None)
+                    lifecycle=_Recorder([]), visualize=lambda p: None,
+                    preflight=T.no_preflight)
     assert "--update-ticket" in str(bad.value)
 
 
@@ -168,7 +171,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
 
     writer = Writer()
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
-                visualize=lambda p: None, ticket_writer=writer)
+                visualize=lambda p: None, preflight=T.no_preflight, ticket_writer=writer)
     assert writer.calls == []
 
 
@@ -182,6 +185,7 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
     seen: list[str] = []
     rec = _Recorder([])
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
+                preflight=T.no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen == [], "a sibling reached the curation lane"
     assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
@@ -193,7 +197,8 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     channel that never carries anything."""
     base, src = T.runs_base(tmp_path)
     seen: list[str] = []
-    _run().main([str(src / "alert.json")], lifecycle=_Recorder([]), visualize=lambda p: None,
+    _run().main([str(src / "alert.json")], lifecycle=_Recorder([]),
+                visualize=lambda p: None, preflight=T.no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen, "an ordinary run reached no curation lane"
 
@@ -356,7 +361,8 @@ def test_947_each_sibling_captures_its_own_provenance_stamp(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None)
+    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
+                preflight=T.no_preflight)
     stamp = rec.kwargs["run_dir"] / "provenance.json"
     assert stamp.is_file()
     assert "commit" in json.loads(stamp.read_text(encoding="utf-8"))
@@ -368,7 +374,8 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None)
+    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
+                preflight=T.no_preflight)
     assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
     assert T.sym("_run_id", "is_valid_run_id")(f"{T.EPISODE_ID}-b")
 
@@ -385,5 +392,5 @@ def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     with pytest.raises(SystemExit) as bad:
         _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
-                    visualize=lambda p: None)
+                    visualize=lambda p: None, preflight=T.no_preflight)
     assert "alert" in str(bad.value)

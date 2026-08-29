@@ -84,14 +84,28 @@ def test_947_questioner_deps_subtype_is_frozen_and_carries_only_role():
     assert deps_cls.role is T.sym("runtime.agent_role", "AgentRole").QUESTIONER
 
 
-def test_947_an_ordinary_run_still_starts_after_the_questioner_role_lands(tmp_path):
+def test_947_an_ordinary_run_still_starts_after_the_questioner_role_lands(tmp_path, monkeypatch):
     """An ordinary investigation still starts once the questioner joins the agent registry: the
     role-model preflight sweeps every registered definition at every run start, and the reader
-    that sweeps it returns a zero status for a roster that includes the new role."""
+    that sweeps it returns a zero status for a roster that includes the new role.
+
+    EVERY PROVIDER IS CREDENTIALED FIRST, with a value that could not buy anything. The sweep
+    returns 2 on two unrelated conditions — a model thunk it cannot use, and a provider key it
+    cannot resolve — and only the first is what this demand is about (S42: "exits 2 on an
+    unusable thunk"). Left to the ambient environment the assertion measured whether the HOST
+    holds a billable key, which is why it passed on a developer's machine and failed on CI for
+    the pre-#947 ten roles just as readily as for the eleven. Pinned this way it can only fail
+    for the reason it names."""
     preflight = T.sym("run", "preflight_role_models")
+    providers = T.mod("runtime.providers")
     AGENTS = T.sym("agents", "AGENTS")
     AgentRole = T.sym("runtime.agent_role", "AgentRole")
     assert AgentRole.QUESTIONER in AGENTS
+    for var in providers.api_key_vars():
+        monkeypatch.setenv(var, "not-a-billable-key")
+    # The sweep is over `AGENTS.values()`, so what it covers is the roster itself: eleven
+    # definitions, one per role, none of them sharing a key with another.
+    assert sorted(defn.role.value for defn in AGENTS.values()) == sorted(r.value for r in AgentRole)
     assert preflight(None) == 0
 
 
