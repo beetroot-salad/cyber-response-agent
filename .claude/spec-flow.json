@@ -104,8 +104,8 @@
           "defender/runtime/session_store.py::StoreHandle.set_last_render_len",
           "defender/runtime/session_store.py::open_store",
           "defender/runtime/session_store.py::write_case_pointer",
-          "defender/runtime/lead_zero.py::dispatch_correlation",
-          "defender/runtime/driver.py::_make_store_render_processor"
+          "defender/runtime/lead_zero/_items.py::dispatch_correlation",
+          "defender/runtime/driver/_build.py::_make_store_render_processor"
         ],
         "readers": [
           "defender/runtime/session_store.py::hydrate",
@@ -167,9 +167,9 @@
       },
       "run_dir": {
         "writers": [
-          "defender/runtime/box.py::_plant",
+          "defender/runtime/box/_lifecycle.py::_plant",
           "defender/runtime/observe.py::write_trace",
-          "defender/runtime/driver.py::run_investigation",
+          "defender/runtime/driver/__init__.py::run_investigation",
           "defender/runtime/observe.py::RequestLogger",
           "defender/runtime/observe.py::denial_logger",
           "defender/runtime/session_store.py::write_case_pointer",
@@ -182,16 +182,16 @@
           "defender/hooks/record_lead.py::claim_lead",
           "defender/_io.py::write_atomic",
           "defender/runtime/tools_gather.py::_persist_gather_summary",
-          "defender/runtime/tools.py::_record_lesson_load",
-          "defender/runtime/tools.py::_tool_write_file",
-          "defender/runtime/tools.py::_tool_edit_file",
+          "defender/runtime/tools/_deps.py::_record_lesson_load",
+          "defender/runtime/tools/_files.py::_tool_write_file",
+          "defender/runtime/tools/_files.py::_tool_edit_file",
           "defender/scripts/case_history/ticket_writer.py::_write_receipt",
           "defender/scripts/visualize/visualize_run.py::render_and_mirror",
-          "defender/runtime/lead_zero.py::resolve_lead_zero",
-          "defender/runtime/lead_zero.py::dispatch_correlation",
-          "defender/runtime/lead_zero.py::prepare_correlation_lead",
-          "defender/runtime/lead_zero.py::_declare_l_finding",
-          "defender/runtime/lead_zero.py::_record_manual_row"
+          "defender/runtime/lead_zero/__init__.py::resolve_lead_zero",
+          "defender/runtime/lead_zero/_items.py::dispatch_correlation",
+          "defender/runtime/lead_zero/__init__.py::prepare_correlation_lead",
+          "defender/runtime/lead_zero/_capture.py::_declare_l_finding",
+          "defender/runtime/lead_zero/_capture.py::_record_manual_row"
         ],
         "readers": [
           "defender/runtime/scrub.py::scrub",
@@ -199,7 +199,7 @@
           "defender/run_common.py::enqueue_learning",
           "defender/learning/lead_repository.py::joined",
           "defender/_run_paths.py::contained_payload",
-          "defender/runtime/lead_zero.py::_rows_for",
+          "defender/runtime/lead_zero/_capture.py::_rows_for",
           "defender/evals/oracle_golden/build_case.py::main"
         ],
         "grep": [
@@ -219,11 +219,11 @@
       },
       "drain_worktree": {
         "writers": [
-          "defender/runtime/box.py::_plant",
+          "defender/runtime/box/_lifecycle.py::_plant",
           "defender/learning/author/drain.py::_restore_corpus",
           "defender/learning/author/drain.py::_revert_strays",
-          "defender/runtime/tools.py::_tool_write_file",
-          "defender/runtime/tools.py::_tool_edit_file",
+          "defender/runtime/tools/_files.py::_tool_write_file",
+          "defender/runtime/tools/_files.py::_tool_edit_file",
           "defender/learning/leads/draft_synthesis.py::synthesize_drafts",
           "defender/learning/author/shared.py::commit_corpus"
         ],
@@ -232,9 +232,9 @@
           "defender/learning/author/drain.py::_snapshot_corpus",
           "defender/learning/author/branch.py::AuthorBranch",
           "defender/learning/leads/_lead_spine.py::_verify_corpus_scope",
-          "defender/learning/leads/lead_author.py::discover_system_drafts",
+          "defender/learning/leads/lead_author/_handoff.py::discover_system_drafts",
           "defender/learning/leads/pitfalls_curator.py::_pitfalls_path_rule",
-          "defender/learning/leads/lead_author.py::_skills_path_rule",
+          "defender/learning/leads/lead_author/_rules.py::_skills_path_rule",
           "defender/learning/leads/declared_systems.py::declared_systems"
         ],
         "grep": [
@@ -245,6 +245,46 @@
           "changes_outside"
         ],
         "note": "#869's grounding added the two writers the SPAWNED-AGENT-ONLY reading of this root missed. `synthesize_drafts` is a HOST-side writer into the worktree's catalog — it mkdir+writes `<catalog>/{system}/_draft/{suffix}.md` from a model-supplied `query_id` BEFORE the agent is spawned, which is the whole of #869's C12 reachability finding and was invisible to a census that only listed the agent's file tools. `commit_corpus` is the sink's actual commit (git add over the `defender/skills` pathspec) and the last gate any path rule sits in front of. The readers added are the ones that ask the tree a MEMBERSHIP question: the git-status scope walk that applies the per-actor path rule, the `_draft/` discovery that turns a directory name into a handoff `system`, and the two per-actor path rules themselves. THE THIRD READER THIS ORIGINALLY LISTED WAS `pitfalls_curator.py::_is_real_system`, THE `SKILL.md` PROBE — and #869 DELETES that symbol, so the entry that seeds the next run's census would have named a symbol resolving to nothing, which this block's own rule forbids and which a resolver cannot distinguish from a row nobody wrote. Replaced with the threaded membership readers that survive the change (`_pitfalls_path_rule`, `_skills_path_rule`); the resolver they are threaded from, `learning/leads/declared_systems.py::declared_systems`, is deliberately NOT listed yet because it does not exist until write-code-from-spec builds it — add it in the same commit that does, or this list under-counts the membership readers by one."
+      },
+      "episode_dir": {
+        "writers": [
+          "defender/learning/branch/capture.py::prime_base",
+          "defender/learning/branch/ledger.py::Ledger.record"
+        ],
+        "readers": [
+          "defender/learning/branch/ledger.py::base_file",
+          "defender/learning/branch/ledger.py::Ledger.base_payload",
+          "defender/learning/branch/cli.py::episode_dir_for",
+          "defender/learning/branch/cli.py::prepare_episode"
+        ],
+        "grep": [
+          "episodes/",
+          "served/",
+          "base.jsonl",
+          "episode_dir",
+          "for_world"
+        ],
+        "note": "Declared by #947's grounding. AT b8a63e66 `capture.py:130-136` composes it as `resolve_runs_base()/'episodes'/<id>/` — a sibling of the run dirs, inside the runs base. #947 MOVES BOTH ENDS OF THAT, and this note is written against the design, not the base: (1) the episodes root becomes a CONFIGURED location (`DEFENDER_EPISODES_BASE`), outside both the runs base and the checkout, with NO default derivation — a reader that re-derives it from the runs base silently restores the containment hole the relocation closed (#947 §7 round 2, F5-EPISODE-ROOT); and (2) the three sibling run dirs move UNDER it, at `{episode_dir}/runs/`, so the episode dir is a PARENT of run dirs rather than their sibling. `cli.py::episode_dir_for` is the symbol whose semantics change: it is the production resolver every reader of an episode must go through once the root is configured, and the one to follow instead of re-composing a path. The old safety clause here read 'a SIBLING of the run dirs, never inside one, so it is not bound into any box' — that is verbatim the reason `capture.py:134`'s waiver states, and #947 REFUTES it on that reason (claim C26): the episode dir now contains three rw box binds. The conclusion survives on a different ground, recorded as an examined no: the bind is the run dir alone, `served/` and `worlds/` stay unreachable from inside a box, and every archive read goes through the `_run_paths.artifact_file` / `stage_tables` screens. Rewrite `capture.py:134`'s waiver text in the same commit that moves the root. Today it holds only `served/`: `prime_base` writes `served/base.jsonl` once and `Ledger.record` appends `served/<world_id>.jsonl`, one writer per file — which is the whole of the launcher's parallel-safety premise. The directory is created as a side effect of `_io.append_jsonl`'s parent mkdir, NOT through `guarded_mkdir`, and NOTHING anywhere removes an episode dir: both `prepare_episode` and `prime_base` treat an existing one as a permanent refusal. #947 adds family.yaml, staged.yaml, review.yaml, provenance.json, worlds/<X>/ AND runs/<sibling>/ here — add those writers (staging.py, review.py, archive.py, _family.py) IN THE COMMIT THAT CREATES THEM, not before: a row naming a symbol that resolves to nothing is indistinguishable to a resolver from a row nobody wrote."
+      },
+      "elastic_corpus": {
+        "writers": [],
+        "readers": [
+          "defender/scripts/adapters/elastic_adapter.py::query",
+          "defender/scripts/adapters/elastic_adapter.py::alerts",
+          "defender/scripts/adapters/elastic_adapter.py::esql",
+          "defender/scripts/adapters/confinement.py::confine_index",
+          "defender/scripts/adapters/confinement.py::is_world_view",
+          "defender/learning/branch/estate/stagers/elastic.py::redirect"
+        ],
+        "grep": [
+          "ELASTIC_EVENTS_INDEX",
+          "ELASTIC_ALERTS_INDEX",
+          "world_view",
+          "VIEW_NAMESPACE",
+          "ignore_unavailable",
+          "docker_exec_curl"
+        ],
+        "note": "Declared by #947's grounding as an EMPTY-WRITER root, which is the fact worth recording: at b8a63e66 nothing in defender/ creates an Elasticsearch index or alias (re-verified: the only `_aliases`/`put_alias` hits are a yaml dumper flag and the model-provider alias table). Every listed reader reaches the cluster through the one read-confined door, `elastic_adapter._http_json` -> `confinement.guard_outbound` -> `confine_read_endpoint(verb_class='r')`, whose elastic allowlist is exactly `/*/_search POST`, `/_query POST`, `/_cluster/health GET`, `/api/status GET`. #947's corpus staging is the FIRST writer; it must call `transport.docker_exec_curl` directly, and note that `guard_outbound` is also the capture recorder, so a write door that skips it records nothing anywhere but `staged.yaml`."
       }
     }
   },
