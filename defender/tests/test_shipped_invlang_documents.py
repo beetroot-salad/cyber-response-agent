@@ -55,6 +55,127 @@ def test_a_shipped_document_would_survive_the_write_gate(path: Path) -> None:
     assert validate_companion(path.read_text(encoding="utf-8"), None) == []
 
 
+#: The documents that ship concluding the priced keyword, NAMED rather than filtered.
+#:
+#: A filter would make the cheap repair invisible: a document that stopped concluding
+#: `inconclusive` would simply leave the parametrization, and the test that exists to forbid
+#: that repair would go green by losing its subject. Both are named, and the census below fails
+#: in both directions — one leaving, or a sixth arriving unclassified.
+_INCONCLUSIVE_DOCS = (
+    _DEFENDER / "examples" / "example-c-cumulative-escalation.md",
+    _DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md",
+)
+
+
+def _concluded_disposition(path: Path) -> str | None:
+    body, _warnings = parse_dense_companion(path.read_text(encoding="utf-8"))
+    value = (body.get("conclude") or {}).get("disposition")
+    return value if isinstance(value, str) else None
+
+
+def _with_only_gap_row(text: str, row: str) -> str:
+    """The same document with its `:T conclude` gap rows replaced by exactly one `row`.
+
+    Inserts when the document carries none yet, which is the state on this base: the mutant is
+    then a document whose ONLY gap row is the one under test, in both directions, whether or
+    not the fixture repair has landed."""
+    kept = [ln for ln in text.splitlines(keepends=True) if not ln.startswith("ceiling_test")]
+    out: list[str] = []
+    inserted = False
+    for line in kept:
+        out.append(line)
+        if not inserted and line.rstrip("\n") == ":T conclude":
+            out.append(f"{'ceiling_test':<22} \"{row}\"\n")
+            inserted = True
+    assert inserted, "the `:T conclude` fence moved — re-anchor this walk"
+    return "".join(out)
+
+
+@pytest.mark.parametrize("path", _INCONCLUSIVE_DOCS, ids=corpus_id)
+def test_a_shipped_inconclusive_document_names_its_gap_in_the_ceiling_test_block(
+    path: Path,
+) -> None:
+    """#923. A shipped document concluding `inconclusive` PAYS the entry price at both
+    boundaries, and what makes it pay is a row naming an unretrieved DATA SOURCE or an
+    unavailable CAPABILITY — J1's settled predicate as §7 round 4 widened it, collected here
+    through the real gate rather than through any predicate this test owns.
+
+    THE TWO REPAIRS THIS FORBIDS ARE THE TWO CHEAP ONES, and the shape of the test is what
+    forbids them. Re-concluding under an unpriced keyword is refused by the census assertion:
+    the documents that conclude this keyword are named, so a document leaving the set fails
+    here instead of quietly leaving a filter. Satisfying the gate with a row that merely states
+    something is refused by the mutation control: the same document, its gap rows replaced by a
+    row naming a host and no source, must be REFUSED at both boundaries — that is the assertion
+    a build implementing `_row_states_something` fails, and the reason this test reads the real
+    price and never that helper.
+
+    WHAT EACH DOCUMENT OWES IS NOT THE SAME. BOTH of the prose gaps in
+    `fixtures-e2e/golden-v2sshd/investigation.md` are data sources — process identity
+    unresolvable because auditd was not collected, and the Zeek outbound query blocked — so
+    that document's repair lifts sentences the run already wrote.
+    `examples/example-c-cumulative-escalation.md` has no unretrieved-source sentence at all,
+    and under J1's ROUND-3 wording its repair had to author one: its `termination.rationale`
+    says the hypothesis "cannot be driven to ++ with available tooling", and calling that
+    tooling a data source was a relabelling a human had to vouch for. THE ROUND-4 WIDENING
+    REMOVES THAT: the document's own prose already states the gap as a CAPABILITY — "confirming
+    C2 would require sandbox detonation or traffic-content inspection, and neither is in the
+    runtime tool surface" — so its repair lifts a sentence the run wrote, exactly as the other
+    document's does, and the row it owes names the missing sandbox rather than a source that
+    was never missing. Retiring it from the corpus was refused: it is the only shipped
+    escalation-shaped close.
+    """
+    from defender.skills.invlang.validate import disposition_entry_price
+
+    from defender.tests._spec923 import (
+        CAPABILITY_ROW,
+        GAP_MEMBER,
+        HOST_ONLY_ROW,
+        SOURCE_ONLY_ROW,
+    )
+
+    concluding = {p for p in corpus_docs() if _concluded_disposition(p) == GAP_MEMBER}
+    assert concluding == set(_INCONCLUSIVE_DOCS), (
+        f"the shipped `{GAP_MEMBER}` census moved: "
+        f"{sorted(corpus_id(p) for p in concluding ^ set(_INCONCLUSIVE_DOCS))} — a document "
+        f"that stopped concluding the priced keyword satisfied the gate by re-concluding, "
+        f"which is the repair this demand exists to forbid; a new one has to be classified"
+    )
+
+    text = path.read_text(encoding="utf-8")
+    assert validate_companion(text, None) == [], (
+        f"{corpus_id(path)} concludes `{GAP_MEMBER}` and does not pay at the write gate"
+    )
+    assert disposition_entry_price(GAP_MEMBER, text).owed == (), (
+        f"{corpus_id(path)} concludes `{GAP_MEMBER}` and does not pay at the close — the gap "
+        f"it describes in prose never reached the receipt"
+    )
+
+    host_only = _with_only_gap_row(text, HOST_ONLY_ROW)
+    assert validate_companion(host_only, None) != [], (
+        "a row naming a host and neither a data source nor a capability paid at the write "
+        "gate — the price is the predicate J1 REJECTED, and this document's gap is a sentence "
+        "anyone can go and check"
+    )
+    assert disposition_entry_price(GAP_MEMBER, host_only).owed, (
+        "a row naming a host and neither a data source nor a capability paid at the close"
+    )
+
+    # And the refusal above is the PREDICATE, not the edit: the same surgery with a row that
+    # DOES pay clears both boundaries. Without this the mutation control is also satisfied by
+    # a build that refuses every edited document. Both paying shapes are driven, because the
+    # capability row is the one this fixture actually owes and a build that pays only for
+    # source-shaped rows leaves the escalation document unrepairable in its own words.
+    for row, why in (
+        (SOURCE_ONLY_ROW, "a deployment-wide row naming a source and no host was refused"),
+        (CAPABILITY_ROW, "a row naming an unavailable capability and no data source was "
+                         "refused — that is the shape this document's own prose states its "
+                         "gap in, and the shape §7 round 4 widened the predicate to accept"),
+    ):
+        pays = _with_only_gap_row(text, row)
+        assert validate_companion(pays, None) == [], f"{why} at the write gate"
+        assert disposition_entry_price(GAP_MEMBER, pays).owed == (), f"{why} at the close"
+
+
 def _example_a_fences() -> str:
     """Example A's fences, concatenated in document order — the document the run would hold
     after writing every block the example shows, which is what the gate sees.
