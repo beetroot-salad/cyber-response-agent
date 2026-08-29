@@ -47,8 +47,16 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
-def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), **seams):
+def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), capture=(), **seams):
+    """Drive one episode through the real launcher.
+
+    `capture` lands rows in the SOURCE run's queries table before the launch, which is the only
+    way to give an episode a primed base: the launcher primes from the source, so a scenario
+    that needs the review to have something to replay has to put it there.
+    """
     base, src = T.runs_base(tmp_path)
+    for row in capture:
+        T.capture_call(src, **row)
     if spawn is None:
         spawn = T.FakeSpawn()
     if door is None:
@@ -214,8 +222,14 @@ def test_947_all_siblings_in_one_family_share_one_continuation_prompt(tmp_path):
 def test_947_accepted_siblings_are_started_together_as_processes(tmp_path):
     """The accepted siblings are started TOGETHER as child processes: each launch is a `run.py
     --resume` command line naming its own world, the launches overlap in time rather than
-    running to completion one after another, and each child runs the sibling entry point."""
-    slow = T.FakeSpawn()
+    running to completion one after another, and each child runs the sibling entry point.
+
+    The fake BLOCKS, and it has to: a child that answers in microseconds of pure Python is never
+    preempted mid-call, so N launchers released together would still enter and leave it one at a
+    time and `overlap` would read False for an implementation that did start them together. A
+    real `run.py` child blocks for the length of an investigation; `Fault(delay=…)` is the
+    fake's stand-in for that."""
+    slow = T.FakeSpawn(fault=T.Fault(delay=0.25))
     rc, spawn, ep = _launch(tmp_path, spawn=slow)
     assert sorted(spawn.worlds) == ["a", "b", "c"]
     for launch in spawn.launches:
@@ -252,10 +266,21 @@ def test_947_a_rejected_world_ends_the_episode_and_the_record_archives(tmp_path)
 def test_947_no_sibling_process_starts_when_any_world_is_rejected(tmp_path):
     """No sibling process starts when ANY world is rejected — not the rejected one and not its
     accepted siblings: the process seam records no launch at all, which is the observable that
-    separates "the episode stopped" from "one world was skipped"."""
-    adapters = T.FakeAdapters(by_target={T.world_token("c"): {"hits": [{"_id": "planted"}]}})
+    separates "the episode stopped" from "one world was skipped".
+
+    World C is the one rejected, and it is rejected on REACHABILITY rather than on a live read:
+    it declares a patch on `web-1`, the discriminating envelope comes back holding a different
+    host, so the difference C declares is not visible in the world C would run in. A review does
+    not gather evidence — nothing here matches a world token against a call that a patches-only
+    overlay never retargets — and the base world, which declares nothing, stays accepted
+    throughout."""
+    adapters = T.FakeAdapters({("elastic", "esql"): {"hits": [{"host": "other-host"}]}})
     rc, spawn, ep = _launch(tmp_path, adapters=adapters,
                             invoke=T.FakeAgent(*["contradiction"] * 24))
+    record = T.review_doc(ep)
+    assert record["worlds"]["c"]["decision"] == "rejected"
+    assert record["worlds"]["c"]["reachability"]["patched_visible"] is False
+    assert record["worlds"]["a"]["decision"] == "accepted"
     assert spawn.launches == []
     assert spawn.worlds == []
 
@@ -277,33 +302,66 @@ def test_947_any_failure_in_steps_two_to_four_aborts_the_episode(tmp_path, monke
     the cluster (step 4) each abort the episode the same way — teardown fires and no sibling
     process starts."""
     cases = {
-        "questioner": {"questioner": T.FakeAgent(T.family_doc(),
-                                                 fault=T.Fault(raise_after=1))},
-        "staging": {"door": T.FakeDoor(fault=T.Fault(raise_after=1))},
-        "review": {"adapters": T.FakeAdapters(fault=T.Fault(raise_after=0))},
+        # `staged` is whether the abort happens AFTER the first name was created. It is not a
+        # softer expectation for the questioner arm: teardown removes exactly what the staging
+        # record names, so an abort in step 2 leaves an empty record and a correct teardown makes
+        # no delete call at all. What that arm can be held to — and is — is the stronger claim
+        # that nothing was created in the first place.
+        "questioner": ({"questioner": T.FakeAgent(T.family_doc(),
+                                                  fault=T.Fault(raise_after=1))}, False),
+        # `raise_after=2` and not 1: step 1's own reachability probe and the sweep each open a
+        # connection, so a door that dies on the second one never reaches step 3 at all and this
+        # arm would be a second reading of the preflight rather than of staging.
+        "staging": ({"door": T.FakeDoor(fault=T.Fault(raise_after=2))}, True),
+        # STEP 4 FAILS ON THE COMPARATOR, not on a cluster the review cannot reach: a review
+        # replays and does not gather evidence, so its only outbound call is the discriminating
+        # envelope and a failing one is a recorded reachability result rather than an abort. What
+        # can still end step 4 is the judgment itself — here the model answers `mutation` on the
+        # review seat, which admits three verdicts and not that one, and the comparator refuses a
+        # wrong-seat answer rather than filing it as a contradiction.
+        "review": ({"capture": [{"system": "identity", "verb": "get-user",
+                                 "payload": {"hits": [{"host": "web-1", "owner": "soc"}]}}],
+                    "invoke": T.FakeAgent(*["mutation"] * 8)}, True),
     }
-    for step, seams in cases.items():
+    for step, (seams, staged) in cases.items():
         # Each arm gets its own episodes root: three aborts sharing one would make the second
         # and third meet a directory the first left behind, and the ordering — not the abort
         # rule — would be what they observed.
         monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / f"episodes-{step}"))
         door = seams.pop("door", None) or T.FakeDoor()
+        capture = seams.pop("capture", ())
         spawn = T.FakeSpawn()
         with pytest.raises(SystemExit):
-            _launch(tmp_path, spawn=spawn, door=door, **seams)
+            _launch(tmp_path, spawn=spawn, door=door, capture=capture, **seams)
         assert spawn.launches == [], f"{step}: a sibling started after the abort"
-        assert door.deleted(), f"{step}: teardown did not fire on the abort"
+        if staged:
+            assert door.deleted(), f"{step}: teardown left the names it recorded on the cluster"
+            assert set(door.deleted()) >= set(door.created()), (
+                f"{step}: teardown removed fewer names than the abort created")
+        else:
+            assert door.created() == [], f"{step}: a name was created before the abort"
 
 
-def test_947_teardown_runs_on_rejection_completion_and_exception(tmp_path):
+def test_947_teardown_runs_on_rejection_completion_and_exception(tmp_path, monkeypatch):
     """Teardown runs on every exit the launcher has: on a rejection, on a clean completion, and
-    on an exception raised after the first staging append."""
+    on an exception raised after the first staging append.
+
+    EACH EXIT GETS ITS OWN EPISODE. An episode id is derived from (source run, branch point), so
+    three launches from one source share one — and the first leaves a manifest behind, which the
+    relaunch rule refuses on purpose. Sharing a root would make the second and third arms observe
+    that refusal rather than the exit they are about."""
     rejecting = T.FakeAdapters(by_target={T.world_token("b"): {"hits": [{"_id": "planted"}]}})
-    for kwargs in ({}, {"adapters": rejecting, "invoke": T.FakeAgent(*["contradiction"] * 24)}):
+    exits = [
+        ("clean", {}),
+        ("rejection", {"adapters": rejecting, "invoke": T.FakeAgent(*["contradiction"] * 24)}),
+    ]
+    for name, kwargs in exits:
+        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / f"episodes-{name}"))
         door = T.FakeDoor()
         with contextlib.suppress(SystemExit):
             _launch(tmp_path, door=door, **kwargs)
-        assert door.deleted(), f"teardown did not run for {kwargs or 'the clean exit'}"
+        assert door.deleted(), f"teardown did not run for the {name} exit"
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-exception"))
     crashing = T.FakeDoor(fault=T.Fault(raise_after=2))
     with pytest.raises(SystemExit):
         _launch(tmp_path, door=crashing)
@@ -567,9 +625,16 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
     store_mod = T.mod("runtime.session_store")
     import threading
 
+    from defender.tests import _session_store_705 as S
+
     base, src = T.runs_base(tmp_path)
     handle = store_mod.open_store(case_id="case-947", runs_base=base)
-    sid = handle.new_session(kind="main")
+    sid = handle.new_session(agent_id="main")
+    # A REAL BRANCH POINT. `fork` walks the prefix at `at_message_id` and refuses one holding an
+    # unresolved call, so a fork needs a session with a complete pair in it and the id of that
+    # pair's last row — which is exactly the boundary a sibling resumes from.
+    at = handle.append(sid, [S.user_request("investigate the alert"), *S.complete_pair()],
+                       agent_id="main")[-1]
     made: list[str] = []
     lock = threading.Lock()
     barrier = threading.Barrier(3)
@@ -577,7 +642,7 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
     def fork():
         barrier.wait()
         h = store_mod.open_store(case_id="case-947", runs_base=base)
-        child = h.fork(sid, at_message_id=None)
+        child = h.fork(sid, at_message_id=at)
         with lock:
             made.append(child)
 

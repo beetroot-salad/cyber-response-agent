@@ -58,6 +58,7 @@ import importlib
 import json
 import re
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -425,6 +426,15 @@ class FakeSpawn:
             if self._live > 1:
                 self.overlap = True
         self.launches.append({"argv": list(argv), "env": dict(env or {}), "kw": dict(kw)})
+        # THE DELAY IS WHAT MAKES `overlap` OBSERVABLE. A child that answers in microseconds of
+        # pure Python is never preempted mid-call — CPython hands the GIL over at a switch
+        # interval measured in milliseconds — so N launchers released together still enter and
+        # leave this frame one at a time, and `overlap` reads False for an implementation that
+        # did start them together. A real `run.py` child blocks for the length of an
+        # investigation; `delay` is the fake's stand-in for that, and it is what the fault spec
+        # has always documented it as ("seconds a call blocks before answering").
+        if self.fault.delay:
+            time.sleep(self.fault.delay)
         world = _world_of(argv)
         if self.fault.hits(world or ""):
             with self._lock:
@@ -538,6 +548,14 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
     """
     ep = (root if root is not None else tmp_path / "episodes") / episode_id
     (ep / "served").mkdir(parents=True, exist_ok=True)
+    # THE BASE IS PRIMED, EMPTY, because that is the shape `prepare_episode` always leaves and
+    # an episode holding a manifest and no base is a state production never produces. `Ledger`
+    # refuses a missing base as the ordering guarantee that priming ran before any sibling
+    # forked, so a fixture without one makes every world registry unbuildable for a reason the
+    # scenario is not about. `base_capture` overwrites it wherever a scenario has rows.
+    base = ep / "served" / "base.jsonl"
+    if not base.exists():
+        base.write_text("", encoding="utf-8")
     write_family(ep, doc)
     return ep
 
@@ -558,7 +576,84 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Pa
                                           encoding="utf-8")
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
+    # THE STAMP EVERY ORDINARY RUN DIR CARRIES. `materialize_run_dir` writes one at the single
+    # place a run the box will execute is ever created, so a source run without one is not a run
+    # any production path could have produced — and the containment walks read exactly this file
+    # to tell an ordinary run from an episode's contents.
+    (src / "provenance.json").write_text(json.dumps(provenance_record()), encoding="utf-8")
+    seed_source_session(base, src)
     return base, src
+
+
+#: The case this fixture's source run belongs to. One id, because the case POINTER in the run
+#: dir and the store the pointer names have to agree — that reconciliation is what
+#: `open_source_store` checks, and it is the whole reason a branch can find its source's session.
+SOURCE_CASE_ID = "case-947-fresh"
+
+
+def seed_source_session(base: Path, src: Path) -> None:
+    """Give the source run the session store a branch is actually taken from.
+
+    A RUN WITHOUT ONE IS NOT BRANCHABLE, and pretending otherwise pushed the cost into the
+    production code: T0 is the moment the branch point was written, `branch_point_time` reads it
+    off the store because the store is the only thing that knows, and a fixture with no store
+    forces every caller into a fallback. Seeded here, once, so every launcher scenario derives
+    its clock the way a real episode does.
+
+    LONG ENOUGH TO HOLD THE BRANCH POINT. `BRANCH_MESSAGE_ID` is a row id on the run's own main
+    path, so the session has to have at least that many rows before the id names anything —
+    complete pairs are appended until it does, which is also the shape `validate` admits as a
+    branch point (a resolved call/return boundary rather than a dangling call).
+
+    Idempotent: `runs_base` is called more than once in some scenarios, and a second session
+    under one case id would make "the run's own main session" ambiguous.
+    """
+    ss = mod("runtime.session_store")
+    if (src / "session_store_pointer.json").exists():
+        return
+    from defender.tests import _session_store_705 as S
+
+    store = ss.open_store(case_id=SOURCE_CASE_ID, runs_base=base)
+    try:
+        ss.write_case_pointer(src, case_id=SOURCE_CASE_ID, store_path=store.path)
+        session_id = store.new_session(agent_id="main")
+        store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")
+        while BRANCH_MESSAGE_ID not in ss.path_row_ids(store, session_id):
+            store.append(session_id, list(S.complete_pair()), agent_id="main")
+    finally:
+        store.close()
+
+
+def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
+                 params: dict | None = None, payload: Any = None, lead: str = "l-001",
+                 seq: int = 0) -> dict:
+    """Land ONE captured call in a source run: the queries-table row and the sidecar it names.
+
+    The shape `query_tool` writes and `prime_base` reads — a real `query_id` (so the row is a
+    capture rather than a writer-only sentinel), `exit_code: 0` (so it is an ANSWER, which is
+    the only thing the family tier has a representation for), and a payload file at the path the
+    row names.
+
+    Here rather than inside one scenario because it is the only way to give a LAUNCHER test a
+    primed capture at all: the launcher primes from the source run's own table, so a test that
+    needs the episode's base to hold a key has to put that key in the source.
+    """
+    row = {
+        "lead_id": lead, "seq": seq, "system": system, "verb": verb,
+        "query_id": f"{system}.{verb}", "params": params or {"index": EVENTS_PATTERN},
+        "payload_path": f"gather_raw/{lead}/{seq}.json",
+        "exit_code": 0, "error_class": None, "payload_status": "ok",
+    }
+    table = run_dir / "executed_queries.jsonl"
+    with table.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
+    sidecar = run_dir / str(row["payload_path"])
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(
+        json.dumps(payload if payload is not None else {"hits": [{"_id": "d1"}]},
+                   sort_keys=True),
+        encoding="utf-8")
+    return row
 
 
 #: The three NON-CLEAN stamp shapes `_provenance.capture_tree` can actually return, spelled once
@@ -784,7 +879,8 @@ __all__ = [
     "DoorCall", "FakeAdapters", "FakeAgent", "FakeDoor", "FakeSpawn", "FakeTransport",
     "UNTRUSTED_FRAME", "assert_wrapped_untrusted", "outside_untrusted_frames", "untrusted_frames",
     "Fault", "base_capture", "captured_row",
-    "archived_world", "base_world", "configured_layout", "corpus_document",
+    "archived_world", "base_world", "capture_call", "configured_layout",
+    "corpus_document",
     "elastic_overlay", "episode", "family_doc", "provenance_record",
     "lesson_row", "mod", "overlay", "refusals", "replace", "review_doc", "runs_base",
     "sibling_run_dir",

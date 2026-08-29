@@ -933,8 +933,30 @@ def _launch(  # noqa: PLR0913 — see `main`
         # exception raised after the first staging append. The cluster does not care why the
         # episode ended, and a staged name left live under this episode's token is one the next
         # launch's sweep will refuse to touch and nothing else will ever remove.
-        staging_mod.teardown(episode_dir, door=write_door,
-                             review_path=episode_dir / REVIEW_NAME)
+        _teardown_without_masking(episode_dir, write_door)
+
+
+def _teardown_without_masking(episode_dir: Path, door: Any) -> None:
+    """Tear the episode's staged names down, and NEVER let that displace the abort in flight.
+
+    A `finally` is the one frame where a second exception silently replaces the first, and the
+    two are not interchangeable here: the abort says why the episode ended and is what the
+    operator has to act on, while a teardown failure says the cleanup also went wrong. Reported
+    the other way round, "the door died on its third connection" is what an operator sees for an
+    episode that was actually rejected in review.
+
+    NOT SWALLOWED, though — `teardown` has already written the unverified names into the review
+    record before it raises, which is the obligation, and this frame adds the stderr line. With
+    nothing else propagating, the failure is the answer and it is re-raised.
+    """
+    try:
+        staging_mod.teardown(episode_dir, door=door, review_path=episode_dir / REVIEW_NAME)
+    except Exception as cleanup_failed:  # noqa: BLE001 — see the docstring: never mask
+        if sys.exc_info()[0] is None:
+            raise
+        print(f"[branch] teardown also failed ({cleanup_failed!r}); the names it could not "
+              "verify gone are in the review record, and the failure that ended the episode "
+              "is what follows", file=sys.stderr)
 
 
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams

@@ -95,13 +95,20 @@ def test_947_an_ordinary_run_still_starts_after_the_questioner_role_lands(tmp_pa
     assert preflight(None) == 0
 
 
-def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(tmp_path):
+def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(tmp_path,
+                                                                                monkeypatch):
     """The role-model preflight runs at family level, before the questioner is paid for, AND
     again inside each sibling process — the family-level pass is an early exit, never a
-    substitute for the sibling's own."""
+    substitute for the sibling's own.
+
+    Both CONFIGURED roots point inside `tmp_path`: the episodes root is read from configuration
+    and the launcher refuses to invent one, so a scenario that drives `main` has to name it or
+    it observes that refusal instead of the thing it is about."""
     cli = T.mod("learning.branch.cli")
     seen: list[str] = []
     base, src = T.runs_base(tmp_path)
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     spawn = T.FakeSpawn()
     cli.main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
              preflight=lambda model: seen.append("family") or 0,

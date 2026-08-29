@@ -587,8 +587,22 @@ def check_identities(family: Family) -> None:
     base-capture name, the roles must be distinct, and each composed world token must round-trip
     the naming rule the four comparing sites read it back through.
     """
-    seen: dict[str, str] = {}
+    # THE ROLES FIRST, because that rule is the FAMILY's and the rest are each world's own. A
+    # role is the world's name in every report and in the comparison the archive publishes, so
+    # two arms sharing one is a family that cannot be read at all — a stronger and earlier fact
+    # than any one label being unnameable. Asked in the other order, a manifest with both faults
+    # was refused for the label and the operator fixed one problem at a time.
     roles: dict[str, str] = {}
+    for world in family.worlds:
+        if world.role is None:
+            continue
+        if world.role in roles:
+            raise FamilyError(
+                f"worlds {roles[world.role]!r} and {world.world_id!r} both declare role "
+                f"{world.role!r} — a family is a set of DIFFERENT worlds, and two arms sharing "
+                "a role cannot be told apart in any report")
+        roles[world.role] = world.world_id
+    seen: dict[str, str] = {}
     token_head = episode_token_for(family.episode_id)
     for world in family.worlds:
         label = world.world_id
@@ -608,13 +622,6 @@ def check_identities(family: Family) -> None:
                 "filesystem folds case, and each names a run dir, a ledger file and a staged "
                 "corpus")
         seen[folded] = label
-        if world.role is not None:
-            if world.role in roles:
-                raise FamilyError(
-                    f"worlds {roles[world.role]!r} and {label!r} both declare role "
-                    f"{world.role!r} — a family is a set of DIFFERENT worlds, and two arms "
-                    "sharing a role cannot be told apart in any report")
-            roles[world.role] = label
         token = f"{token_head}.{label}"
         try:
             refuse_unnameable_world(label)

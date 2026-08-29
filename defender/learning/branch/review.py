@@ -200,19 +200,27 @@ class Replay:
 
 def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
                world: Any = None, applier: Any = None, ledger: Any = None,
-               ctx: Any = None) -> Replay:
+               ctx: Any = None, captured: str | None = None) -> Replay:
     """Ask one call again, as `world` would have asked it, and hand back what came back.
 
-    THE SERVING PATH'S SHAPE, host-side: stage the call onto the world's corpus, answer from the
-    family tier if it holds the key, otherwise reach the adapter; take the world's own corpus
-    identity back out of the response, then apply the world's difference to it. The ledger it
-    reads and writes is the scratch one, so a key asked twice in one replay costs one adapter
-    call and the second answer cannot differ from the first — the same memo guarantee a sibling
-    gets from the primed capture, over a base that is deliberately empty.
+    THE SERVING PATH'S SHAPE, host-side: stage the call onto the world's corpus, take the base
+    answer, then apply the world's difference to it.
 
-    `world is None` is the bare replay: no staging, no patch, nothing to restore. That is what
-    the positive control for the unasked-query rule uses, and it is also the honest reading for
-    a caller that has a call and no world.
+    **`captured` IS THE REVIEW'S WHOLE ANSWER, AND IT IS NOT OPTIONAL THERE.** A review does not
+    gather evidence: a key the capture already holds is answered from the capture, and the
+    adapter is never reached for it. That is a decision, not an optimisation — a review that
+    re-asked the estate would be measuring the estate's drift since the source run rather than
+    the world's declared difference, and it would be spending a live read per captured key per
+    world to do it. With `captured` in hand there is nothing to `restore` either: a captured
+    payload is what the SOURCE run was served, so it never carried a world's corpus identity in
+    the first place.
+
+    THE ADAPTER ARM SURVIVES FOR THE CALL THE REVIEW ASKS ON PURPOSE — the discriminating
+    envelope, which is a question the capture does not hold and which the reachability half
+    exists to run. That is the whole of the read surface: everything the capture holds is
+    replayed, and the one thing it does not hold is the one thing the review deliberately asks.
+
+    `world is None` is the bare replay: no staging, no patch, nothing to apply.
     """
     system, verb, params = call
     context = ctx if ctx is not None else verb_context(episode_dir)
@@ -220,7 +228,7 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
     prepared = dict(params) if world is None else applier.prepare(
         system, verb, dict(params), world, context)
     asked = dict(params) if prepared != params else None
-    recorded = book.base_payload(system, verb, prepared)
+    recorded = captured if captured is not None else book.base_payload(system, verb, prepared)
     if recorded is None:
         served = adapters(system, verb, **prepared)
         restored = served if asked is None else applier.restore(
@@ -326,9 +334,10 @@ def _review_world(world: World, *, family: Family, episode_dir: Path, rows: Sequ
     ledger = scratch_ledger(episode_dir, world_label=world.world_id, root=deps.scratch)
     is_control = world.role == BASE_ROLE
 
-    def replay(call: tuple[str, str, dict]) -> Replay:
+    def replay(call: tuple[str, str, dict], captured: str | None = None) -> Replay:
         return replay_one(call, episode_dir=episode_dir, adapters=deps.adapters,
-                          world=resumed, applier=applier, ledger=ledger, ctx=deps.ctx)
+                          world=resumed, applier=applier, ledger=ledger, ctx=deps.ctx,
+                          captured=captured)
 
     consistency = _consistency(rows, replay=replay, control=control, is_control=is_control,
                                invoke=deps.invoke)
@@ -362,12 +371,18 @@ def _consistency(rows: Sequence[dict], *, replay: Any, control: Sequence[str],
     it to a world would reject one for something every world would show. What remains is a
     difference this world made.
 
-    A FAULT IS NEVER A CONTRADICTION and never reaches the comparator. A call that failed for
-    one world and not for its control is contamination — the estate was up for one and down for
-    the other — and classifying it as a corpus contradiction would reject a world for the
-    weather. It is recorded, in its own class, and the comparator is not asked about bytes
-    nobody got.
+    A FAULT IS NEVER A CONTRADICTION and never reaches the comparator. A call that could not be
+    replayed for one world and could be for its control is contamination — a staging refusal for
+    one arm, an unreadable row for all of them — and classifying it as a corpus contradiction
+    would reject a world for the harness. It is recorded, in its own class, and the comparator is
+    not asked about bytes nobody got.
+
+    NOTHING HERE REACHES AN ADAPTER. Every key this pass judges is a key the capture holds, and
+    each world's answer is its own difference applied to the captured payload. A review does not
+    gather evidence: re-asking the estate would measure how far it has moved since the source
+    run rather than what the world declares, and it would do it once per captured key per world.
     """
+    drifted = _capture_drift(rows)
     replayed: list[dict] = []
     mismatches: list[dict] = []
     faults: list[dict] = []
@@ -380,28 +395,85 @@ def _consistency(rows: Sequence[dict], *, replay: Any, control: Sequence[str],
             faults.append({"key": key, "detail": "the captured row carries no payload text"})
             continue
         try:
-            answer = replay(call)
+            answer = replay(call, captured)
         except Exception as fault:  # noqa: BLE001 — every estate fault is a reading, not a raise
             faults.append({"key": key, "detail": str(fault) or type(fault).__name__})
             continue
         replayed.append({"key": key})
-        verdict = mechanical(captured, answer.text)
-        if verdict is Verdict.SAME:
+        outcome = _row_outcome(key, captured, answer.text, drifted=drifted, control=control,
+                               is_control=is_control, invoke=invoke)
+        if outcome is None:
             continue
-        if is_control:
-            drift.append(key)
+        if outcome is DRIFT:
+            if is_control and key not in drift:
+                drift.append(key)
             continue
-        if key in control:
-            continue
-        if verdict is None:
-            verdict = compare(captured, answer.text, None, invoke=invoke)
-        mismatches.append({"key": key, "verdict": verdict.value})
+        mismatches.append({"key": key, "verdict": outcome.value})
     return {
         "replayed": replayed,
         "mismatches": mismatches,
         "control_mismatch_keys": drift if is_control else list(control),
         "faults": faults,
     }
+
+
+#: "This key is the episode's drift, not this world's difference." A sentinel rather than a
+#: `Verdict` member, because the comparator's vocabulary is what a MODEL may answer and this is
+#: a reading the review makes for itself — a member here would be a sixth verdict no seat admits.
+DRIFT = object()
+
+
+def _row_outcome(key: str, captured: str, replayed: str, *, drifted: set[str],
+                 control: Sequence[str], is_control: bool, invoke: Any) -> Any:
+    """How one replayed row stands to its capture: agreed (`None`), `DRIFT`, or a verdict.
+
+    THE CAPTURE DISAGREEING WITH ITSELF IS DRIFT, and it is the only drift a replay-only review
+    can see — which is right, because it is the only drift that happened while the evidence this
+    episode reasons over was being written. The source run asked one question twice and was
+    answered twice; the estate moved underneath it, and every world inherits that key's ambiguity
+    equally. Charged to a world it would reject one for something all three show.
+
+    THE CONTROL NEVER REACHES THE COMPARATOR. It applies nothing, so its replay is the capture
+    and any difference it could show is the capture's own — which is drift by definition, and
+    spending a model call to have that confirmed would be paying to be told what the bytes
+    already say.
+    """
+    if key in drifted:
+        return DRIFT
+    verdict = mechanical(captured, replayed)
+    if verdict is Verdict.SAME:
+        return None
+    if is_control:
+        return DRIFT
+    if key in control:
+        return None
+    return verdict if verdict is not None else compare(captured, replayed, None, invoke=invoke)
+
+
+def _capture_drift(rows: Sequence[dict]) -> set[str]:
+    """The correlation keys the capture itself answers two different ways.
+
+    A key the source run asked more than once, and was served differently each time, is a key
+    whose truth moved WHILE the evidence was being gathered. It is a fact about the episode
+    rather than about any world, so it is subtracted from every world the way a live control's
+    mismatch set used to be — and unlike a live control it costs nothing to observe, because it
+    is already written down.
+
+    First-row-wins is the ledger's own rule for which answer a key HAS; this asks the different
+    question of whether the rows agree at all, so it compares every later row against the first.
+    """
+    first: dict[str, str] = {}
+    drifted: set[str] = set()
+    for row in rows:
+        key = str(row.get("correlation_key"))
+        text = row.get("payload_text")
+        if not isinstance(text, str):
+            continue
+        if key not in first:
+            first[key] = text
+        elif mechanical(first[key], text) is not Verdict.SAME:
+            drifted.add(key)
+    return drifted
 
 
 # ---------------------------------------------------------------------------------------

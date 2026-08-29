@@ -7,10 +7,22 @@ through the episode's own ledger would read the capture back and agree with itse
 review that proves nothing. Its verb context is host-side over the episode dir, and its capture
 recorder is absent, so the replay writes no query row anywhere.
 
-World A is replayed FIRST as the control, and its mismatch set is drift. For B and C a key that
-mismatches, is not in the control's set and is not formatting is a contradiction, and one
-contradiction rejects. A FAULT is never a contradiction: a difference between a world and its
-control that is fault-shaped is contamination, not signal.
+**A REVIEW DOES NOT GATHER EVIDENCE** (decided after the spec was written, and recorded here
+because the prose above it predates the decision). Every key the capture holds is answered FROM
+the capture — each world's replayed answer is its own difference applied to the captured payload
+— and no adapter is reached for it. Re-asking the estate would measure how far it has moved
+since the source run rather than what the world declares, once per captured key per world. The
+one call the review still ASKS is the discriminating envelope, which the capture does not hold
+and which the reachability half exists to run; `test_947_an_uncaptured_key_does_reach_the_adapter`
+is its positive control.
+
+World A is replayed FIRST as the control, and its mismatch set is drift — under replay-only that
+is the drift the capture records against ITSELF, a key the source run asked twice and was
+answered twice, which is the only estate movement that happened while this episode's evidence
+was being written. For B and C a key that mismatches, is not in the control's set and is not
+formatting is a contradiction, and one contradiction rejects. A FAULT is never a contradiction: a
+call that could not be replayed for one world and could be for its control is contamination, not
+signal.
 
 The comparator is blind by SIGNATURE — two payloads and an axis, nothing else — and mechanical
 first: a canonical re-dump answers `same` or `formatting` with no model call at all.
@@ -136,23 +148,36 @@ def test_947_an_uncaptured_key_does_reach_the_adapter(tmp_path):
 
 def test_947_control_world_is_replayed_first_and_its_mismatches_are_drift(tmp_path):
     """World A is replayed first as the control, and the keys it mismatches on are recorded as
-    the episode's drift rather than as anything a world did."""
+    the episode's drift rather than as anything a world did.
+
+    The drift is IN THE CAPTURE: the source run asked `k1` twice and was served two different
+    answers, so the estate moved while the evidence this episode reasons over was being written.
+    That is the whole of the drift a replay-only review can see, and it is the only drift that
+    can matter — the world A of a replay applies nothing, so it can never differ from the
+    capture by itself."""
     ep = T.episode(tmp_path)
-    T.base_capture(ep, [T.captured_row(key="k1", payload={"hits": [{"_id": "old"}]})])
-    adapters = T.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "new"}]}})
-    record = _run_review(ep, adapters=adapters)
+    T.base_capture(ep, [T.captured_row(key="k1", payload={"hits": [{"_id": "old"}]}),
+                        T.captured_row(key="k1", payload={"hits": [{"_id": "new"}]})])
+    record = _run_review(ep)
     assert list(record["worlds"])[0] == "a"
     assert record["worlds"]["a"]["consistency"]["control_mismatch_keys"] == ["k1"]
 
 
 def test_947_mismatch_outside_control_and_not_formatting_is_a_contradiction(tmp_path):
     """A key that mismatches in a world, is not in the control's mismatch set and is not merely
-    a formatting difference is recorded as a contradiction, and the world is rejected."""
+    a formatting difference is recorded as a contradiction, and the world is rejected.
+
+    Driven through the REPLAYED captured value: world B patches `web-1`'s owner, the capture
+    holds one answer naming that host, and applying the patch to it produces a payload that
+    cannot be true of the same corpus. The capture agrees with itself on `k1`, so the key is not
+    in the control's set and the blind comparator is what decides."""
     ep = T.episode(tmp_path)
-    T.base_capture(ep, [T.captured_row(key="k1", payload={"hits": [{"_id": "d1"}]})])
-    adapters = T.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "d1"}]}},
-                              by_target={TOKEN_B: {"hits": [{"_id": "planted"}]}})
-    record = _run_review(ep, adapters=adapters, invoke=T.FakeAgent("contradiction"))
+    T.base_capture(ep, [T.captured_row(
+        system="identity", verb="get-user", key="k1",
+        payload={"hits": [{"host": "web-1", "owner": "soc"}]})])
+    doc = T.family_doc(worlds=[T.base_world(), T.world_doc("b", ov=T.overlay(
+        patches={"identity": {"web-1": {"owner": "platform"}}}))])
+    record = _run_review(ep, doc=doc, invoke=T.FakeAgent("contradiction"))
     b = record["worlds"]["b"]
     verdicts = {m["key"]: m["verdict"] for m in b["consistency"]["mismatches"]}
     assert verdicts.get("k1") == "contradiction"
@@ -161,33 +186,57 @@ def test_947_mismatch_outside_control_and_not_formatting_is_a_contradiction(tmp_
 
 def test_947_key_that_also_mismatches_in_the_control_does_not_reject(tmp_path):
     """A key that also mismatches in the control is drift and never rejects a world: the same
-    key that would be a contradiction on its own is subtracted by the control's own result."""
+    key that would be a contradiction on its own is subtracted by the control's own result.
+
+    The fixture is the contradiction test's, plus one thing: the capture answers `k1` twice and
+    differently. That alone moves the key into the control's set, and the world whose patch
+    would otherwise contradict it is accepted — which is what makes this the subtraction's
+    control rather than a second reading of it."""
     ep = T.episode(tmp_path)
-    T.base_capture(ep, [T.captured_row(key="k1", payload={"hits": [{"_id": "old"}]})])
-    adapters = T.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "new"}]}})
-    record = _run_review(ep, adapters=adapters, invoke=T.FakeAgent(*["contradiction"] * 12))
+    T.base_capture(ep, [
+        T.captured_row(system="identity", verb="get-user", key="k1",
+                       payload={"hits": [{"host": "web-1", "owner": "soc"}]}),
+        T.captured_row(system="identity", verb="get-user", key="k1",
+                       payload={"hits": [{"host": "web-1", "owner": "netops"}]}),
+    ])
+    doc = T.family_doc(worlds=[T.base_world(), T.world_doc("b", ov=T.overlay(
+        patches={"identity": {"web-1": {"owner": "platform"}}}))])
+    record = _run_review(ep, doc=doc, invoke=T.FakeAgent(*["contradiction"] * 12))
     assert "k1" in record["worlds"]["a"]["consistency"]["control_mismatch_keys"]
     assert record["worlds"]["b"]["decision"] == "accepted"
 
 
-def test_947_contradicting_world_is_rejected_before_any_sibling_starts(tmp_path):
+def test_947_contradicting_world_is_rejected_before_any_sibling_starts(tmp_path, monkeypatch):
     """A world whose replayed answer contradicts the capture is rejected in the review, before
-    any sibling process is started, and the review record names the contradicting key."""
+    any sibling process is started, and the review record names the contradicting key.
+
+    Driven end to end: the SOURCE run carries the captured call, so the launcher's own priming
+    is what puts `k1` in the episode's base, and the world the questioner authors patches the
+    entity that answer names. Both configured roots point inside `tmp_path`, because
+    `episode_dir_for` refuses to invent an episodes root."""
     base, src = T.runs_base(tmp_path)
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    T.capture_call(src, system="identity", verb="get-user",
+                   payload={"hits": [{"host": "web-1", "owner": "soc"}]})
     spawn = T.FakeSpawn()
     cli = T.mod("learning.branch.cli")
-    T.base_capture(T.episode(tmp_path), [T.captured_row(key="k1")])
-    adapters = T.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "d1"}]}},
-                              by_target={TOKEN_B: {"hits": [{"_id": "planted"}]}})
+    patched = T.world_doc("b", ov=T.overlay(
+        patches={"identity": {"web-1": {"owner": "platform"}}}))
     rc = cli.main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-                  spawn=spawn, door=T.FakeDoor(), adapters=adapters,
-                  invoke=T.FakeAgent("contradiction"),
-                  questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")))
+                  spawn=spawn, door=T.FakeDoor(), adapters=T.FakeAdapters(),
+                  invoke=T.FakeAgent(*["contradiction"] * 12),
+                  questioner=T.FakeAgent(
+                      T.family_doc(worlds=[T.base_world(), patched]), patched))
     ep = cli.episode_dir_for(T.EPISODE_ID)
     assert rc != 0
     assert spawn.launches == [], "a sibling started for a rejected episode"
-    assert T.review_doc(ep)["episode"]["decision"] == "rejected"
-    assert "k1" in json.dumps(T.review_doc(ep))
+    doc = T.review_doc(ep)
+    assert doc["episode"]["decision"] == "rejected"
+    assert doc["worlds"]["b"]["decision"] == "rejected"
+    named = [m["key"] for m in doc["worlds"]["b"]["consistency"]["mismatches"]]
+    assert named, "the review record names no contradicting key"
+    assert json.dumps(doc).count(named[0]) >= 1
 
 
 def test_947_a_fault_shaped_replay_difference_is_recorded_as_a_fault_not_a_contradiction(tmp_path):
@@ -195,10 +244,15 @@ def test_947_a_fault_shaped_replay_difference_is_recorded_as_a_fault_not_a_contr
     fault: it is never classified as a corpus contradiction, and it never reaches the
     comparator, because a fault-shaped difference is contamination rather than signal."""
     ep = T.episode(tmp_path)
-    T.base_capture(ep, [T.captured_row(key="k1")])
+    # A captured ES|QL call the stager cannot retarget: it opens with no `FROM`, so a world that
+    # STAGES the event stream refuses to prepare it while the control, which stages nothing,
+    # passes it through untouched. One captured row, two arms, and the difference between them
+    # is the harness rather than the world — which is exactly what must not be read as a corpus
+    # contradiction.
+    T.base_capture(ep, [T.captured_row(system="elastic", verb="esql", key="k1",
+                                       params={"query": "SHOW INFO"})])
     invoke = T.FakeAgent(*["same"] * 8)
-    record = _run_review(ep, adapters=T.FakeAdapters(fault=T.Fault(fail_on=("elastic.query",))),
-                         invoke=invoke)
+    record = _run_review(ep, invoke=invoke)
     faults = record["worlds"]["b"]["consistency"].get("faults", [])
     assert any(f["key"] == "k1" for f in faults)
     assert not record["worlds"]["b"]["consistency"]["mismatches"]

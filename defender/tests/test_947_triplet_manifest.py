@@ -270,7 +270,7 @@ def test_947_an_empty_string_axis_on_a_non_base_world_is_refused():
 def test_947_disposition_declared_is_gated_by_the_same_enum_the_report_is():
     """A world's declared disposition is gated by the shipped disposition vocabulary, the same
     membership gate the report is held to — not by a second, looser list."""
-    vocab = T.mod("learning.core._vocab")
+    vocab = T.mod("_vocab")
     with pytest.raises(_refusal()) as bad:
         _load(T.family_doc(worlds=[T.base_world(),
                                    T.world_doc("b", disposition_declared="probably-bad")]))
@@ -312,7 +312,13 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_staging(t
         ([T.base_world(), T.world_doc("B")], "b"),
         ([T.base_world(), T.world_doc("base")], "base"),
         ([T.base_world(), T.world_doc("b-1")], "b-1"),
-        ([T.base_world(), T.world_doc("b"), T.world_doc("c", role="B")], "role"),
+        # TWO WORLDS, ONE LABEL. As a document that is a role collision — both declare `B` —
+        # which is what the direct leg reads. Driven through the launcher it is a LABEL
+        # collision instead, because the seats assign `B` and `C` before the gate sees them, and
+        # two worlds sharing one label share a run dir, a ledger file and a staged corpus. One
+        # fixture, both halves of the identity gate, and neither half collapses into the
+        # family the questioner authors from a clean plan.
+        ([T.base_world(), T.world_doc("b"), T.world_doc("b")], "role"),
     )
     for worlds, needle in bad_families:
         with pytest.raises(_refusal()) as bad:
