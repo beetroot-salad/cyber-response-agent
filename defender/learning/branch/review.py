@@ -43,7 +43,7 @@ from typing import Any
 
 import yaml
 
-from defender._io import read_jsonl_rows, read_jsonl_rows_report, write_atomic
+from defender._io import read_jsonl_rows, read_jsonl_rows_report, write_guarded
 from defender.run_common import DEFENDER_DIR, resolve_runs_base, run_env
 from defender.runtime.branch._family import (
     BASE_ROLE,
@@ -282,10 +282,15 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
         # somewhere no reader expects one.
         shutil.rmtree(scratch, ignore_errors=True)
     record = _record(family, worlds=worlds, unreadable=unreadable)
-    write_atomic(  # lint-unguarded-tree-write: ok — `write_atomic` IS `write_guarded(mode="replace")`, and the episode dir is host-side under the configured episodes root, outside every box mount  # noqa: E501
+    # `write_guarded`, not `write_atomic`. They are the same lane — `write_atomic` IS
+    # `write_guarded(mode="replace")` — but `write_atomic` is ALSO the marker #719's census
+    # reads to find every function that rewrites a queue file wholesale, and that census is one
+    # name wide on purpose ("exactly one function under `defender/learning` rewrites a queue
+    # file"). A review record is not a queue, and a frame that spells the queue writer's own
+    # primitive joins a census it does not belong to.
+    write_guarded(
         episode_dir / REVIEW_NAME,
-                 yaml.safe_dump(record, sort_keys=False, allow_unicode=True,
-                                default_flow_style=False))
+        yaml.safe_dump(record, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return record
 
 

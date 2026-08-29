@@ -490,6 +490,18 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # label the manifest does not declare costs nothing at all.
     world = _resume_target(ns)
 
+    # THE CASE INPUT IS RESOLVED AND SCREENED BEFORE ANYTHING IS SPENT, and before the
+    # preflight rather than after it. A link planted at the source run's `alert.json` is a fact
+    # about the operator's own arguments — the same class as an unknown world label — so it is
+    # answered while they are still just arguments, and its refusal does not depend on whether
+    # this host happens to have a usable model key.
+    if world is not None:
+        alert = _screened_source_alert(Path(world.family.source_run_dir))
+        run_id: str | None = world.run_id
+    else:
+        alert = ns.alert.resolve()
+        run_id = ns.run_id
+
     model = driver.resolve_main_model(ns.model)
     # ONE provider-key pass: the all-roles preflight is a strict superset of the
     # investigator+gather pair (same resolvers, same per-provider key sourcing, and MAIN/GATHER
@@ -501,17 +513,10 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     if rc:
         return rc
 
-    # ONE BUILDER CALL, and the two paths differ only in what they hand it. A sibling's case
-    # input is the SOURCE run's alert, screened first because that directory is a prior box's
-    # rw bind; an ordinary run's is the operator's own path. The run id follows the same split:
-    # a sibling's is derived from the manifest (`{episode_id}-{world}`), an ordinary run's is
-    # the operator's `--run-id` or the auto timestamp.
-    if world is not None:
-        alert = _screened_source_alert(Path(world.family.source_run_dir))
-        run_id: str | None = world.run_id
-    else:
-        alert = ns.alert.resolve()
-        run_id = ns.run_id
+    # ONE BUILDER CALL. The two paths differed only in what they hand it, and both values were
+    # settled above: a sibling's case input is the SOURCE run's screened alert and its run id is
+    # derived from the manifest (`{episode_id}-{world}`); an ordinary run's are the operator's
+    # own path and `--run-id` (or the auto timestamp).
     run_dir = materialize(alert, run_id, model=model)
 
     if ns.update_ticket:
