@@ -337,7 +337,7 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_staging(t
             T.mod("learning.branch.cli").main(
                 [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
                 spawn=T.FakeSpawn(), door=door, adapters=T.FakeAdapters(),
-                invoke=T.FakeAgent(*["same"] * 24),
+                invoke=T.FakeAgent(*["same"] * 24), preflight=T.no_preflight,
                 questioner=T.FakeAgent(T.family_doc(worlds=worlds), *worlds[1:]))
         assert door.created() == [], "a name was staged before the identity gate ran"
 

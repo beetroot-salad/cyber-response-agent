@@ -113,6 +113,27 @@ def sym(dotted: str, name: str):
     return getattr(mod(dotted), name)
 
 
+def no_preflight(_model: str | None = None) -> int:
+    """The role-model preflight, neutralised — for every scenario that is not about it.
+
+    `preflight_role_models` sources a BILLABLE provider key and exits 2 when there is none, so a
+    launcher scenario that leaves it to the ambient environment passes or fails on whether the
+    host happens to be credentialed rather than on the thing it asserts. CI is not credentialed
+    and a developer's machine usually is, which is the shape that makes a suite look flaky.
+
+    The second cost is worse than the first: a scenario asserting "this refuses" is SATISFIED by
+    the preflight's own refusal, so it goes green in an uncredentialed runner without ever
+    reaching the check it names. Injected here, those arms refuse for their own reason or not
+    at all.
+
+    The family-level preflight is not left unexercised by this — it has its own demand and its
+    own test, `test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling`,
+    which injects a RECORDING seam and observes the call. That test deliberately does not use
+    this one.
+    """
+    return 0
+
+
 def world_token(world_id: str, *, episode_token: str = EPISODE_TOKEN) -> str:
     """`f"{episode_token}.{X}"` — the ONE spelling the four comparing sites use."""
     return f"{episode_token}.{world_id}"

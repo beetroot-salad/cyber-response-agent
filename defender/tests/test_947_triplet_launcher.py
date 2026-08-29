@@ -65,6 +65,12 @@ def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), capture=(), **sea
                      T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")))
     seams.setdefault("adapters", T.FakeAdapters())
     seams.setdefault("invoke", T.FakeAgent(*["same"] * 24))
+    # The role-model preflight is injected for every scenario that is not about it: left to the
+    # ambient environment it decides these tests on whether the host holds a billable key, and
+    # it SATISFIES the ones that assert a refusal without their reaching the check they name.
+    # `test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling` injects its
+    # own recording seam and is what discharges the demand.
+    seams.setdefault("preflight", T.no_preflight)
     rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
                       *argv_extra],
                      spawn=spawn, door=door, **seams)
@@ -94,7 +100,8 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
         _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-                    spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=agent)
+                    spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=agent,
+                    preflight=T.no_preflight)
     assert agent.calls == 0
 
 
@@ -145,8 +152,12 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
         agent = T.FakeAgent()
         prepare()
         with pytest.raises(SystemExit):
+            # The role-model preflight is neutralised: each arm has to refuse for the reason it
+            # names, and an uncredentialed host would otherwise satisfy every one of them with
+            # the preflight's own refusal before the check under test was ever reached.
             _cli().main([str(src), *argv_extra, "--continuation-prompt", "go"],
-                        spawn=T.FakeSpawn(), door=door, questioner=agent)
+                        spawn=T.FakeSpawn(), door=door, questioner=agent,
+                        preflight=T.no_preflight)
         assert agent.calls == 0, "the questioner was paid for before the preflight refused"
 
     for out_of_range in ("-1", str(10 ** 9)):
@@ -177,7 +188,8 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     with pytest.raises(T.refusals()) as refusal:
         _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-                    spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=agent)
+                    spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=agent,
+                    preflight=T.no_preflight)
     assert "alert" in str(refusal.value)
     assert agent.prompts == [], "the planted link reached the questioner's prompt"
     assert "ROOT-PRIVATE-KEY" not in str(refusal.value)

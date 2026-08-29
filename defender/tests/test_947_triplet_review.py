@@ -225,7 +225,7 @@ def test_947_contradicting_world_is_rejected_before_any_sibling_starts(tmp_path,
         patches={"identity": {"web-1": {"owner": "platform"}}}))
     rc = cli.main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
                   spawn=spawn, door=T.FakeDoor(), adapters=T.FakeAdapters(),
-                  invoke=T.FakeAgent(*["contradiction"] * 12),
+                  invoke=T.FakeAgent(*["contradiction"] * 12), preflight=T.no_preflight,
                   questioner=T.FakeAgent(
                       T.family_doc(worlds=[T.base_world(), patched]), patched))
     ep = cli.episode_dir_for(T.EPISODE_ID)
