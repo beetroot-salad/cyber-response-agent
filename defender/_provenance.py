@@ -150,6 +150,13 @@ class RunProvenance:
     #: this scope changes is the day every already-archived stamp starts meaning something
     #: different, and an episode recomputed later has no other way to know which it holds.
     scope: str | None = None
+    #: The model this run RESOLVED, recorded beside the commit. #947's family stamp holds the
+    #: model constant the way it holds the commit: the role preflight resolves per process, so
+    #: three siblings launched into a changed environment are a comparison across two models
+    #: with a perfectly agreeing commit and nothing anywhere saying so. Carried IN the record
+    #: because the stamp is the only artifact a later reader has, and `None` reads as "this
+    #: record does not say" exactly as an absent `scope` does.
+    model: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a record no capture could have produced — HERE, so nothing can build one.
@@ -220,6 +227,7 @@ class RunProvenance:
                 "dirty_path_count": self.dirty_path_count,
                 "unavailable": self.unavailable,
                 "scope": self.scope,
+                "model": self.model,
             },
             indent=2,
             sort_keys=True,
@@ -262,6 +270,7 @@ class RunProvenance:
         # a real run, and refusing it would make every archived episode unreadable to settle a
         # question about a field it never carried. `None` reads as "this record does not say".
         scope = obj.get("scope")
+        model = obj.get("model")
         # WHAT MAKES A RECORD COHERENT IS NOT ASKED HERE. `__post_init__` holds those rules, so
         # this seam only has to decide what each FIELD is, and a well-typed object that no
         # capture could have produced is refused by the construction itself. The parser and the
@@ -276,6 +285,7 @@ class RunProvenance:
                 ),
                 unavailable=unavailable,
                 scope=scope if isinstance(scope, str) else None,
+                model=(model if isinstance(model, str) else None),
             )
         except ValueError:
             return None

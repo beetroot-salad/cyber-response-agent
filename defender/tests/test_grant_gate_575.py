@@ -62,6 +62,7 @@ from defender.agents import (  # noqa: E402
     LEAD_AUTHOR_DEF,
     MAIN_DEF,
     ORACLE_DEF,
+    QUESTIONER_DEF,
     SUPPORT_DEF,
     VERIFY_DEF,
 )
@@ -200,6 +201,10 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
         # program in one of them worth catching.
         "support": compile_policy_for(SUPPORT_DEF, run_dir=env.run, defender_dir=env.dfn),
         "composer": compile_policy_for(COMPOSER_DEF, run_dir=env.run, defender_dir=env.dfn),
+        # #947's questioner, here for that same reason: it is registered in AGENTS, so a
+        # compiled policy of its exists whether or not this dict looks at it. Its expected
+        # shape is the empty one — the whole posture of the role is that it grants nothing.
+        "questioner": compile_policy_for(QUESTIONER_DEF, run_dir=env.run, defender_dir=env.dfn),
     }
 
 
@@ -430,8 +435,9 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     # producing nothing the composer could route, leaving two. SUPPORT is claimed by two
     # calls, so roles and calls have not matched here since #796. This counts registered
     # roles, so a deliberately added or retired role moves it; what the test checks is the
-    # table property below.
-    assert len(AGENTS) == 10
+    # table property below. #947 added the eleventh, QUESTIONER — one more deny-all role, and
+    # (like SUPPORT) one claimed by more calls than it has keys.
+    assert len(AGENTS) == 11
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
     assert "corpus_author" in pols
     for name, pol in pols.items():

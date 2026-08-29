@@ -187,13 +187,29 @@ def test_an_id_carrying_upper_case_is_not(run_id: str) -> None:
 
 
 def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
-    """At the MINT, where the world docstring says every id rule belongs: refused later, the
-    cost is a primed episode and however many siblings already ran against a live model."""
-    from defender.learning.branch import cli
+    """At the MINT, where every id rule belongs: refused later, the cost is a primed episode and
+    however many siblings already ran against a live model.
 
-    with pytest.raises(SystemExit) as caught:
-        cli.World(world_id="Base")
-    assert "base" in str(caught.value)
+    RE-POINTED AT #947's MINT. `learning/branch/cli.World` was the launcher's own world type,
+    and #947's D2 retires it — a world is declared in the family manifest and the systems it
+    touches are DERIVED from its overlay, so the launcher parses no worlds at all. The mint is
+    now the manifest's identity gate, which runs over the whole family BEFORE anything is staged
+    (§7 FORK-4) and is the same one-place-for-every-id-rule this test was written to pin."""
+    from defender.runtime.branch import _family
+
+    doc = {
+        "world_id": "Base", "role": "B", "story": "s", "axis": "an axis",
+        "disposition_declared": "malicious", "label_basis": "policy-rule", "overlay": {},
+    }
+    with pytest.raises(_family.FamilyError) as caught:
+        _family.check_identities(_family.parse_family({
+            "episode_id": "ep1", "source_run_dir": "/runs/src", "source_run_id": "src",
+            "branch_message_id": 1, "fences_at": 1, "as_of": "2026-07-28T16:18:45Z",
+            "continuation_prompt": "go", "base_story": "b",
+            "discriminator": {"predicate": "p"},
+            "worlds": [{**doc, "world_id": "a", "role": "A", "axis": None}, doc],
+        }))
+    assert "base" in str(caught.value).casefold()
 
 
 def test_an_episode_id_carrying_upper_case_is_refused() -> None:

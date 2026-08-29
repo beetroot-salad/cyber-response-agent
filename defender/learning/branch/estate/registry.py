@@ -20,26 +20,39 @@ from __future__ import annotations
 import functools
 import json
 import sys
-from collections.abc import Mapping
-from dataclasses import fields, is_dataclass, replace
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
 from defender.runtime.verbs import ModuleVerbRegistry
 from defender.runtime.verb_grant import VerbGrant
+from defender.scripts.adapters.confinement import (
+    VIEW_NAMESPACE,
+    ConfinementFault,
+    is_world_view,
+)
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 
 from ..ledger import BASE, FAULT, REFUSED, Ledger, LedgerError, ServedCall, payload_text
 from . import applier as applier_module
 from .applier import WorldApplier
+from .stagers.dispatch import STAGERS
 
 
 class EstateError(Exception):
     """A world that cannot be served honestly."""
 
 
-def validate_world_touches(world: Any, grant: VerbGrant) -> tuple[str, ...]:
-    """Validate the systems a world declares against its serving grant.
+def validate_world_touches(derived: Any, grant: VerbGrant) -> tuple[str, ...]:
+    """Validate the systems a world's difference touches against its serving grant.
+
+    THE DERIVED SET, not an authored field (D2). `World.touches` retires as something a manifest
+    spells: the systems a world touches are read off its overlay by `_family.touches_of` on every
+    read, because a stored set is a second place for the answer to live and the copy that drifts
+    is the one that stops staging. What stays is this check — a derived name can still be a name
+    this ROLE may not query, and an overlay keyed on a system outside the grant would apply no
+    difference while every ledger row read honestly.
 
     A declaration is authoring input, not an advisory label: it decides whether staging or
     patches run at all. An unknown name therefore cannot be allowed to degrade to the honest
@@ -47,11 +60,16 @@ def validate_world_touches(world: Any, grant: VerbGrant) -> tuple[str, ...]:
     roster because a system outside it cannot be queried by this role even if an adapter file
     happens to exist.
 
-    Kept as one helper for both the CLI boundary and this registry boundary. The CLI can then
-    refuse before priming an immutable episode, while programmatic callers cannot bypass the
-    check by constructing a world directly.
+    Kept as one helper for both the manifest boundary and this registry boundary. The launcher
+    can then refuse before priming an immutable episode, while programmatic callers cannot
+    bypass the check by constructing a world directly — and both ask the same question of the
+    same value, since neither of them authors it any more.
+
+    Typed `Any` rather than `Iterable[str]`, deliberately: what arrives is unvalidated authoring
+    input, and the shapes refused below (a bare string, a non-sequence, a non-string name) are
+    exactly the ones an annotation would have promised away without checking.
     """
-    declared = getattr(world, "touches", ())
+    declared = derived
     if not isinstance(declared, (str, list, tuple, set, frozenset)):
         raise EstateError(
             f"a world's `touches` must be a sequence of system names (or one name), got "
@@ -72,6 +90,131 @@ def validate_world_touches(world: Any, grant: VerbGrant) -> tuple[str, ...]:
             f"served to role {grant.role!r} are {sorted(grant.systems)} — an unknown name "
             "would apply no difference and record only `passthrough` rows")
     return names
+
+
+@dataclass(frozen=True)
+class ServingWorld:
+    """A world as the serving path needs it: a token, the systems it touches, its difference.
+
+    The three fields every serving site reads off `ResumeWorld`, with none of the manifest half
+    a call cannot use — so a caller serving ONE call (the review's replay, a probe, this
+    module's own serve point) does not have to materialise an episode directory and a `Family`
+    to ask a question about an index name.
+
+    `touches` is passed rather than re-derived because a caller may legitimately serve a world
+    that touches LESS than its overlay would imply — the control world in a triplet is exactly
+    that: an empty overlay and an empty set, which is the world the isolation refusal has to
+    cover, since its applier returns every call untouched and threads no world label at all.
+    """
+
+    world_id: str
+    touches: tuple[str, ...]
+    overlay: Any
+
+
+def world_for(*, token: str, touches: Iterable[str], overlay: Any) -> ServingWorld:
+    """Build a serving world from the three things a served call needs to know.
+
+    THE TOKEN, never the short manifest label. `world_id` reaches the stager's view name, the
+    ledger's row key and the confinement declaration below unfiltered, and each of those has to
+    carry the episode or two episodes' world `b` collide in one alias, one filename and one row.
+
+    The overlay is PARSED when it arrives as a document, by the manifest's own parser, so a
+    world assembled here and a world loaded from `family.yaml` carry the same object and the
+    applier has one shape to read. `{}` is the base world's own overlay and is legal — the empty
+    difference is a world, not a missing argument.
+    """
+    # Imported HERE rather than at module scope: the manifest module reads the corpus patterns
+    # off this package's own stager (`_family._configured_patterns`), so a top-level import
+    # would close a cycle between the two halves of the branch — and the estate must stay
+    # importable by a run that never loads a manifest at all.
+    from defender.runtime.branch._family import Overlay, parse_overlay
+
+    parsed = overlay if isinstance(overlay, Overlay) else parse_overlay(overlay)
+    return ServingWorld(world_id=token, touches=tuple(touches), overlay=parsed)
+
+
+def refuse_a_foreign_world_view(world: Any, system: str, verb: str, params: Mapping) -> None:
+    """Refuse a call that names ANOTHER world's staged view, before anything runs (FORK-6).
+
+    Inside one episode the siblings share a cluster, and each stages its own private corpus
+    under the view namespace. A world naming a SIBLING's view by hand reads that sibling's
+    injected documents and the effect of its exclusions — the one cross-world channel the whole
+    per-world-view scheme exists to close.
+
+    **ABOVE PER-WORLD STAGING, and that placement is what the executed probe forced.** A world
+    that DOES stage this system has its foreign name rewritten by the stager — `FROM wv-c-…`
+    comes back as `wv-a-wv-c-…`, a view of nothing — so a check written into the stager passes
+    its own test while the live hole stays open: the world that can actually make the read is
+    the CONTROL, which stages nothing, whose applier hands the parameters straight back and
+    threads no world label onto the context. Every episode with a control has exactly one such
+    sibling by construction. Asked here, above the applier, the control is covered by the same
+    line as its staging siblings.
+
+    **AND NOT IN THE OUTBOUND HTTP GUARD**, which is where a target-fidelity check would
+    otherwise live. `guard_outbound` is handed the URL, and the index is in the URL for the
+    param-indexed arm (`/wv-a-logs-/_search`) and inside the request BODY for the query-language
+    arm (`/_query`) — so the guard can only see half the traffic, and the half it cannot see is
+    the one the probe drove through to the transport unrefused.
+
+    Both query languages are read through the STAGER's own source reader, because which of a
+    verb's parameters addresses a corpus is vendor knowledge and has one home. `ctx` is not
+    passed: an omitted index resolves to the run's configured default, which is a configured
+    pattern and cannot be a foreign view — so the config read is pure cost here, and skipping it
+    keeps this frame total. A body this seam cannot parse is left to `prepare`, which parses it
+    again and raises the stager's own refusal for the world that stages; for a world that does
+    not, it is a call that names no view and there is nothing here to answer.
+    """
+    stager = STAGERS.get(system)
+    reader = getattr(stager, "source_pattern", None) if stager is not None else None
+    if stager is None or reader is None:
+        return
+    try:
+        source = reader(verb, dict(params), None)
+    except Exception:  # noqa: BLE001 — see docstring: an unparseable body is `prepare`'s answer
+        return
+    if not isinstance(source, str) or not source.startswith(f"{VIEW_NAMESPACE}-"):
+        return
+    # THE WORLD'S OWN VIEW STAYS ADMISSIBLE, so the refusal is a boundary rather than a channel
+    # that answers nothing — and only for a system this world actually stages, since a world
+    # that stages nothing has no view of its own for any name to be.
+    if system in getattr(world, "touches", ()) and is_world_view(
+            source, stager.configured_patterns(), world.world_id):
+        return
+    raise ConfinementFault(
+        f"index expression {source!r} names a staged corpus this world does not read — "
+        "refused before the call was issued")
+
+
+def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: Any,
+              applier: Any = None, ctx: Any = None) -> Any:
+    """Serve ONE call for `world` through `adapters` — the serve point, above staging.
+
+    The narrow waist every branched read passes: refuse first, then let the world's applier
+    point the call at its own corpus, then run it, then take the world's corpus identity back
+    out of what came back. `WorldRegistry._served` is this same order with the ledger's four
+    row-writing arms around it; this frame is the order itself, callable by anything that holds
+    a world and an adapter layer — the review's replay, a probe, a single-call harness — without
+    priming an episode.
+
+    THE REFUSAL IS FIRST AND OUTSIDE EVERYTHING. It runs before `prepare`, so no stager gets to
+    rewrite a foreign name into a harmless one; and before the adapter is called at all, so a
+    refused cross-world read leaves no call on the wire and no row claiming one was made.
+
+    `restore` is the mirror of `prepare` and is called on the same condition the ledger records
+    `asked_params` under — the call staging moved is the call whose echoed corpus identity has
+    to come back out.
+    """
+    refuse_a_foreign_world_view(world, system, verb, params)
+    applier = (  # lint-default: ok — DI seam owning its default, the same one `WorldRegistry` resolves at construction  # noqa: E501
+        applier if applier is not None else WorldApplier())
+    asked = dict(params)
+    prepared = applier.prepare(system, verb, dict(asked), world, ctx)
+    payload = adapters(system, verb, **prepared)
+    moved = asked if prepared != asked else None
+    payload = applier.restore(system, verb, payload, moved, prepared, ctx)
+    _decision, out = applier.apply(system, verb, prepared, payload, world)
+    return out
 
 
 class WorldRegistry(ModuleVerbRegistry):
@@ -118,7 +261,7 @@ class WorldRegistry(ModuleVerbRegistry):
         # Unknown names route every real response to `passthrough`, so a misspelt difference
         # vanishes while the ledger remains internally honest. The CLI calls this before
         # priming; this call is the non-bypassable boundary for programmatic worlds.
-        declared = validate_world_touches(world, grant)
+        declared = validate_world_touches(getattr(world, "touches", ()), grant)
         # AND NAMEABLE, which `str` and non-empty do not cover. A staged system derives its
         # per-world corpus name from this id, so one a stager cannot carry does not fail a
         # query, it fails EVERY query on that system — the sibling records a `refused` row per
@@ -145,7 +288,13 @@ class WorldRegistry(ModuleVerbRegistry):
         # A `Mapping` rather than a `dict`, because an applier is a DI seam and a read-only
         # mapping is a reasonable thing to hand one; `isinstance(..., dict)` skipped the whole
         # check for it without a word.
-        patches = getattr(self.applier, "patches", None)
+        # THE EFFECTIVE TABLE, which is the world's own overlay wherever it carries one — the
+        # applier reads the patches off the world at `apply` time (D2: one authored copy), so a
+        # constructor field is only what is applied for a world assembled without a manifest.
+        # Asking the constructor field here would check a table this world will never be served
+        # from and skip the one it will.
+        table = getattr(self.applier, "patch_table", None)
+        patches = table(world) if callable(table) else getattr(self.applier, "patches", None)
         if isinstance(patches, Mapping):
             unappliable = applier_module.unappliable(world, patches)
             if unappliable:
@@ -205,6 +354,12 @@ class WorldRegistry(ModuleVerbRegistry):
             # refusal handler below.
             ctx = _carrying(ctx, as_of=self.as_of)
             try:
+                # THE SERVE POINT'S OWN REFUSAL, above staging and inside the recording handler
+                # below: a cross-world read is evidence, and one that raised without a row would
+                # be indistinguishable from the sibling never asking. Asked here rather than in
+                # `serve_one` alone so the registry every sibling process actually serves
+                # through carries it too.
+                refuse_a_foreign_world_view(world, system, verb, params)
                 prepared = applier.prepare(system, verb, params, world, ctx)
             except Exception as refusal:
                 # A refusal is EVIDENCE, and an unrecorded one is indistinguishable from the

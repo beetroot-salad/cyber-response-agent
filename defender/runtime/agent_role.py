@@ -24,6 +24,12 @@ class AgentRole(Enum):
     # own trace file and agent id; neither of those is keyed on the role.
     SUPPORT = "support"
     COMPOSER = "composer"
+    # The same rule again, one level out: the questioner's THREE authoring calls plus the
+    # comparator's judging call all run under this ONE key, because none of them holds a grant
+    # and a second key would be a second compiled policy over the same empty one. What keeps
+    # the four apart is their `agent_id` — `questioner`, `questioner:b`, `questioner:c`,
+    # `compare` — which is what the wire log and the per-id trace are partitioned on.
+    QUESTIONER = "questioner"
 
 
 #: The `agent_id` namespaces the run's ONE wire log (`llm_requests.jsonl`) is partitioned by:
