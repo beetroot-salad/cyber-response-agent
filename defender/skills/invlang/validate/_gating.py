@@ -6,11 +6,14 @@ has not paid its price is refused here.
 """
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from defender._vocab import normalized_disposition
+from defender._text import strip_zero_width
+from defender._vocab import DISPOSITION_ENUM
 from .. import _walkers, vocab
 from ..parser import (
     is_conclude_empty_marker,
@@ -24,6 +27,26 @@ from ._diag import REFUTED_WEIGHT
 from ._refs import _HYPOTHESIS_DECLARING_BLOCKS, _known_ids, _leads
 from ._structure import _cell
 from ._state import _check_benign_authz, _check_benign_open_slots
+
+
+def _rendered_disposition(value: object) -> str | None:
+    """What `value` renders as, FORGIVINGLY — zero-width stripped, exact membership beneath
+    that. #923's write-side price dispatch: it must keep failing CLOSED on a zero-width-laced
+    spelling of a priced keyword (still owes), which is the opposite direction from
+    `defender._vocab.normalized_disposition`'s #923 change (which stops coercing on the READ
+    side, so a laced keyword no longer reads back as the clean member it resembles). The two
+    normalizers now disagree on purpose — the write side may still recognize a keyword through
+    an invisible character in order to hold it to a stricter obligation; the read side must
+    never recognize one in order to hand back a clean answer."""
+    if not isinstance(value, str):
+        return None
+    candidate = strip_zero_width(value).strip()
+    # lint-vocabulary: ok — deliberately NOT `_vocab.normalized_disposition`: that reader is
+    # exact-only after #923 (the READ side must never coerce a malformed verdict), and this
+    # WRITE-side price dispatch needs the opposite — it must keep recognizing a zero-width-laced
+    # spelling of a priced keyword so it keeps failing CLOSED on one. See this function's own
+    # docstring.
+    return candidate if candidate in DISPOSITION_ENUM else None
 
 
 
@@ -221,9 +244,152 @@ _FALSE_POSITIVE_PRICE = _Price(
     ),
 )
 
+#: Confusable-fold table for the gap row's OWN emptiness check — deliberately NOT shared with
+#: `defender._vocab.normalized_disposition` (#923's read side must not gain a second disguise
+#: it recognizes; see `_rendered_disposition`'s docstring). Handles the handful of Cyrillic
+#: letters visually identical to their Latin lookalikes; NFKC (applied separately) reaches the
+#: fullwidth spelling, and `strip_zero_width` the zero-width one.
+_CONFUSABLE_FOLD = str.maketrans({
+    "а": "a", "А": "A", "е": "e", "Е": "E", "о": "o", "О": "O", "р": "p", "Р": "P",
+    "с": "c", "С": "C", "у": "y", "У": "Y", "х": "x", "Х": "X", "і": "i", "І": "I",
+})
+
+
+def _row_renders_as_empty_marker(value: object) -> bool:
+    """Does a `ceiling_test` row render to a HUMAN as the format's own empty marker
+    (`none`/`n/a`), whatever codepoints it is spelled with? `is_conclude_empty_marker` alone
+    catches only the literal spellings (plus its own case/whitespace/quoting folding); this
+    reaches the zero-width, fullwidth and Cyrillic-homoglyph spellings P10's probe measured
+    still paying (#923's hardening, J24)."""
+    if not isinstance(value, str):
+        return False
+    folded = unicodedata.normalize("NFKC", strip_zero_width(value)).translate(_CONFUSABLE_FOLD)
+    return is_conclude_empty_marker(folded)
+
+
+#: A hyphenated identifier ending in digits — `web-1`, `office-ws-1`, `host-003` — the shape
+#: every checked-in host name in this corpus takes. Stripped before judging whether a
+#: `ceiling_test` row names a check anyone can go make, so naming ONLY a host (no source, no
+#: capability) cannot pass as "stating something".
+_HOST_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+)*-\d+\b", re.IGNORECASE)
+
+#: The format's own vague "we tried and couldn't" phrasing — states that a check was attempted,
+#: names no check. Stripped alongside the host token so `web-1 could not be fully checked`
+#: reduces to nothing.
+_VAGUE_CHECK_PHRASES = (
+    "could not be fully checked", "could not be checked", "was not fully checked",
+    "was not checked", "not fully verified", "not verified", "not confirmed",
+    "not reviewed", "not examined", "not tested",
+)
+
+#: Connective/logistics words that carry no claim of their own — filtered before asking whether
+#: a row still names something concrete.
+_FILLER_WORDS_RE = re.compile(
+    r"\b(not|no|never|nor|is|was|were|are|be|been|being|to|the|a|an|on|in|at|of|for|so|and|"
+    r"that|this|here|anywhere|available|collected|retrieved|executed|deployment|runtime|"
+    r"fully|with|nothing|it|its)\b",
+    re.IGNORECASE,
+)
+
+
+def _row_names_a_source_or_capability(row: str) -> bool:
+    """The settled J1 predicate (§7 round 4, `spec-flow/specs/spec_graph_923-inconclusive.yaml`
+    demand `a_gap_row_pays_by_naming_a_source_or_a_capability`): a `ceiling_test` row pays when
+    it names a specific unretrieved DATA SOURCE or an unavailable CAPABILITY. A host is
+    PERMITTED but never REQUIRED, and a row naming only a host and no source or capability
+    (`web-1 could not be fully checked`) does not pay — it is a row that "states something", so
+    the weaker predicate the design first offered (and the human rejected) would accept it, and
+    it names no check anyone can go make.
+
+    Approximated over free text: strip any host-shaped token and the format's own vague
+    "could not be checked" phrasing, then ask whether a content word of substance is still
+    standing. It is a heuristic, not a parser — measured against the demand's three
+    discriminating rows and both shipped documents' own gap rows, and the accepted cost (a row
+    reading any sentence about a limitation as a capability claim) is on the record in the
+    demand and in `_INCONCLUSIVE_PRICE`'s rationale below."""
+    text = _HOST_TOKEN_RE.sub(" ", row.lower())
+    for phrase in _VAGUE_CHECK_PHRASES:
+        text = text.replace(phrase, " ")
+    text = _FILLER_WORDS_RE.sub(" ", text)
+    return bool(re.search(r"[a-z]{4,}", text))
+
+
+#: The bound on the accumulated `ceiling_test` text a priced `inconclusive` close may carry.
+#: Rows ride verbatim into the committed report, the judge model's prompt and (absent a `cause`)
+#: the ticket bridge's outbound resolution — nothing else bounds them once every priced close
+#: carries them rather than two fixture documents. The value is not measured; the demand pins
+#: only that an ordinary one-row receipt clears it and a hundred padded rows do not.
+#:
+#: Deliberately WELL under `_artifact_schema.REPORT_FRONTMATTER_MAX` (512 bytes) rather than
+#: independently chosen: the rows this gate prices are the SAME rows `close_tool.render_report`
+#: carries verbatim into that frontmatter (#923's coverage channel), so a bound picked without
+#: the cap in mind can pass a document at the price gate that the commit then refuses anyway —
+#: a paid close failing for a reason the model cannot see coming. 300 leaves headroom for the
+#: `disposition`/`outcome`/`cause`/`ceiling_test` scaffolding lines and the per-row `"- "`
+#: prefix and still clears an ordinary one-row receipt by a wide margin.
+_MAX_CEILING_TEXT_CHARS = 300
+
+
+def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
+    """`inconclusive` owes a named gap (O1): at least one `ceiling_test` row that pays
+    `_row_names_a_source_or_capability`. Three hardenings, each its own refusal: a row that
+    renders as the empty marker (however spelled) does not pay; rows must be DISTINCT — the
+    same sentence written twice does not pay for two gaps; and the accumulated row text is
+    BOUNDED. All three fire at both boundaries this check is collected from (the `investigation.
+    md` write gate and the close), because the table (`_DISPOSITION_GATES`) is collected at
+    both from one definition."""
+    conclude = companion.get("conclude") or {}
+    rows = conclude.get("ceiling_test") or []
+    seen: set[str] = set()
+    paying: list[str] = []
+    total_chars = 0
+    errors: list[str] = []
+    for row in rows:
+        if not isinstance(row, str) or _row_renders_as_empty_marker(row):
+            continue
+        if row in seen:
+            errors.append(
+                f"disposition inconclusive blocked: `ceiling_test` row {row!r} repeats an "
+                f"earlier one — each row must name a DISTINCT gap; repetition does not pay "
+                f"for a second one. Edit or drop the duplicate."
+            )
+            continue
+        seen.add(row)
+        total_chars += len(row)
+        if _row_names_a_source_or_capability(row):
+            paying.append(row)
+    if total_chars > _MAX_CEILING_TEXT_CHARS:
+        errors.append(
+            f"disposition inconclusive blocked: the accumulated `ceiling_test` text is "
+            f"{total_chars} characters, over the {_MAX_CEILING_TEXT_CHARS}-character bound — "
+            f"summarise the gaps rather than listing every one in full."
+        )
+    if not paying:
+        errors.append(
+            "disposition inconclusive blocked: no `ceiling_test` row names an unretrieved data "
+            "source or an unavailable capability — a host may be named too, but naming a host "
+            "alone is not enough. Add one `ceiling_test  \"<data source or capability> not "
+            "retrieved/available>\"` row per gap to `:T conclude` (repeat the key for more "
+            "than one)."
+        )
+    return errors
+
+
+_INCONCLUSIVE_PRICE = _Price(
+    check=_check_inconclusive_gating,
+    rationale=(
+        "`inconclusive` says the investigating model could not settle the case, which is "
+        "worth nothing to an analyst unless the report names what specifically it could not "
+        "check — so it is reachable only from a `:T conclude` naming at least one unretrieved "
+        "data source or unavailable capability, distinct, non-blank in any spelling, and "
+        "under the accumulated text bound."
+    ),
+)
+
 _DISPOSITION_GATES: dict[str, _Price] = {
     "benign": _BENIGN_PRICE,
     "false-positive": _FALSE_POSITIVE_PRICE,
+    "inconclusive": _INCONCLUSIVE_PRICE,
 }
 
 
@@ -246,6 +412,18 @@ class EntryPrice:
         return bool(self.owed)
 
 
+def conclude_ceiling_test_rows(companion_text: str) -> tuple[str, ...]:
+    """Every string `:T conclude.ceiling_test` row a companion wrote, in document order.
+
+    Public alongside `disposition_entry_price` for the same reason that one is: `report.md` is
+    written from the close's disposition ARGUMENT and never re-reads the companion, so the
+    close carries these rows into the committed report itself (#923's coverage channel) by
+    calling this — the one place model-authored text belongs in a host-rendered report."""
+    companion, _ = parse_dense_companion(companion_text)
+    conclude = companion.get("conclude") or {}
+    return tuple(r for r in (conclude.get("ceiling_test") or []) if isinstance(r, str))
+
+
 def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice:
     """What `disposition` still owes, read off an `investigation.md` — nothing owed when it
     owes nothing, and nothing owed for the keywords `_DISPOSITION_GATES` prices at nothing.
@@ -261,7 +439,9 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
     dispatches on the disposition the DOCUMENT wrote, this one on the disposition the CALLER is
     about to commit, so a row added to `_DISPOSITION_GATES` is collected at both.
 
-    `disposition` is normalized through `normalized_disposition` for the same reason the
+    `disposition` is normalized through `_rendered_disposition` — the module's own FORGIVING
+    normalizer, not `defender._vocab.normalized_disposition` (#923 makes that one exact-only,
+    since the READ side must stop coercing a malformed verdict) — for the same reason the
     write-side dispatch is: a keyword is judged on what it RENDERS as, so a zero-width
     character cannot turn a gate off. Typed `str` rather than `object` even though the
     normalizer accepts anything: an unrecognized value takes the unpriced branch, so this
@@ -275,7 +455,7 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
     contradiction checks (`_check_benign_grounding`), which are vacuous over a document with no
     vertices.
     """
-    priced = normalized_disposition(disposition)
+    priced = _rendered_disposition(disposition)
     price = _DISPOSITION_GATES.get(priced) if priced else None
     if price is None:
         return EntryPrice(owed=(), rationale="")
@@ -286,13 +466,16 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
 def _check_disposition_gating(companion: CompanionBody) -> list[str]:
     """Run the structural checks this run's disposition is priced at, and only those.
 
-    Dispatched on what the value RENDERS as. This is the ONE branch that decides whether a
-    disposition's structural checks run at all, so a zero-width character clinging to the
-    keyword would turn them all off — a gate failing open on an invisible character in
-    model-authored text. `_check_conclude_vocab` denies the laced spelling separately, and the
-    two rules stay independent on purpose: either alone would leave a hole.
+    Dispatched on what the value RENDERS as, FORGIVINGLY (`_rendered_disposition`) — this is
+    the ONE branch that decides whether a disposition's structural checks run at all, so a
+    zero-width character clinging to the keyword would turn them all off — a gate failing open
+    on an invisible character in model-authored text. `_check_conclude_vocab` denies the laced
+    spelling separately, and the two rules stay independent on purpose: either alone would
+    leave a hole. Deliberately NOT `defender._vocab.normalized_disposition` — #923 makes that
+    reader exact-only (the READ side must not coerce a malformed verdict); this WRITE-side
+    dispatch keeps its own forgiving normalizer so it still fails closed on one.
     """
-    disposition = normalized_disposition(
+    disposition = _rendered_disposition(
         (companion.get("conclude") or {}).get("disposition")
     )
     price = _DISPOSITION_GATES.get(disposition) if disposition else None

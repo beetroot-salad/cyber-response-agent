@@ -284,7 +284,11 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     )
 
     fm, _raw, _body = split_frontmatter((run_dir / "report.md").read_text(encoding="utf-8"))
-    assert fm["disposition"] == "inconclusive", (
+    # #923: a machinery-forced override commits the HOST's own verdict, `unresolved` — not
+    # the model's `inconclusive`, which now means "the model itself could not settle this" and
+    # carries an entry price no host-forced close can pay. The drafted confident disposition
+    # still never reaches disk unreviewed; only the spelling of the override moved.
+    assert fm["disposition"] == "unresolved", (
         f"report.md committed {fm['disposition']!r} — the drafted confident disposition "
         "reached disk unreviewed"
     )
@@ -300,6 +304,11 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
 
     # Positive control: the gate reviews CONFIDENT closes only.
     bypass_deps, bypass_dir = _main_deps(tmp_path / "bypass")
+    # #923: `inconclusive` now carries its own entry price — a `ceiling_test` row naming a
+    # source or capability — collected before the bypass below is ever reached. The golden
+    # fixture's own investigation.md already names its gaps there, so writing it is what keeps
+    # this control about the GATE (nothing left to review) rather than about the price.
+    (bypass_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     bypass = close_investigation(bypass_deps, "inconclusive", stages=ReviewStages())
     assert bypass.outcome == STANDS
     assert bypass.cause == CAUSE_NOT_REVIEWED

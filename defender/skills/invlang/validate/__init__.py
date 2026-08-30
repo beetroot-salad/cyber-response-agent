@@ -194,6 +194,7 @@ from ._gating import (
     _lead_returned_a_result,
     _row_states_something,
     _weight_text,
+    conclude_ceiling_test_rows,
     disposition_entry_price,
 )
 from ._closure import (
@@ -488,6 +489,7 @@ __all__ = [
     "class_slots",
     "dataclass",
     "diagnose",
+    "conclude_ceiling_test_rows",
     "disposition_entry_price",
     "effective_vertex_state",
     "field",

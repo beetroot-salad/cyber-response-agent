@@ -227,19 +227,30 @@ def test_an_outcome_that_is_not_a_keyword_is_still_rejected(tag, outcome):
         loop.validate_judge_doc(_judge_doc(outcome=outcome))
 
 
-@pytest.mark.parametrize(
-    ("tag", "written"),
-    [("clean", "benign"), ("trailing-zwsp", "benign​"), ("bom", "﻿benign")],
-)
+@pytest.mark.parametrize(("tag", "written"), [("clean", "benign")])
 def test_a_report_disposition_is_matched_on_what_it_renders_as(tmp_path, tag, written):
     """report.md's disposition is the headline the loop reads to pick a direction. The
     normalized keyword comes back, so no caller downstream ever sees the invisible
-    characters the model wrote around it."""
+    characters the model wrote around it.
+
+    #923 (§7 round 4) narrows this to the CLEAN spelling — the zero-width/BOM spellings that
+    used to belong here now belong in the rejected set below: on READ there is no author left
+    to ask, so a value that only becomes a member after something strips it is answered
+    exactly as a value that was never a member. `strip_zero_width` no longer runs in
+    `_vocab.normalized_disposition` at all."""
     assert loop.normalize_disposition(_report(tmp_path, written)) == "benign"
 
 
 @pytest.mark.parametrize(
-    ("tag", "written"), [("not-a-keyword", "spicy"), ("content-less", "​")]
+    ("tag", "written"),
+    [
+        ("not-a-keyword", "spicy"),
+        ("content-less", "​"),
+        # #923: moved from the "matched on what it renders as" set above — the read side no
+        # longer coerces a zero-width- or BOM-laced disposition into the member it resembles.
+        ("trailing-zwsp", "benign​"),
+        ("bom", "﻿benign"),
+    ],
 )
 def test_a_report_disposition_that_is_not_a_keyword_is_still_rejected(tmp_path, tag, written):
     with pytest.raises(RunUnprocessable, match="disposition="):

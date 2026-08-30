@@ -9,6 +9,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from defender._vocab import HOST_ONLY_DISPOSITION
+
 from .. import _walkers, vocab
 from .._cells import _unquote
 from ..schema import (
@@ -525,10 +527,25 @@ def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
 def _check_conclude_vocab(companion: CompanionBody) -> list[str]:
     """`conclude`'s disposition is the run's headline, so it carries a vocabulary check like
     every other conclude field: an out-of-enum value silently skips the benign gating below,
-    and a typo would buy a document past the checks a `benign` conclusion has to pass."""
+    and a typo would buy a document past the checks a `benign` conclusion has to pass.
+
+    #923: `unresolved` is a MEMBER of `vocab.DISPOSITION` (it has to be — the model's own
+    `investigation.md` must be free to name it in prose without tripping THIS check, and the
+    tuple is shared with the tool schema), so the ordinary membership test above admits it for
+    free. It is refused with its own clause, right here, so the invlang document — one of the
+    THREE authoring surfaces the host-only verdict is refused at — cannot admit for free what
+    the close tool and the ticket resolution line both refuse."""
     disposition = (companion.get("conclude") or {}).get("disposition")
-    return _check_vocab(
+    errors = _check_vocab(
         disposition, vocab.DISPOSITION,
         f"conclude: disposition {disposition!r} is not a known disposition "
         f"(`enum disposition`)",
     )
+    if disposition == HOST_ONLY_DISPOSITION:
+        errors.append(
+            f"conclude: disposition {HOST_ONLY_DISPOSITION!r} is recorded by the host when a "
+            f"run terminates without a settled finding — the investigating model reports what "
+            f"it could not settle as `inconclusive` instead, naming the gap in `ceiling_test`; "
+            f"it never concludes {HOST_ONLY_DISPOSITION!r} itself."
+        )
+    return errors

@@ -336,16 +336,27 @@ def close_vocabulary() -> _CloseVocabulary:
 #: place because two questions on this page turn on it — "is any attempt worth counting?" and
 #: "does THIS attempt's verdict mean a review agreed?" — and an unreviewed attempt rendered
 #: as `stands` reads as "a review ran and the disposition held".
-UNREVIEWED_DISPOSITION = "inconclusive"
+#:
+#: #923: the SAME two-verdict set the close tool's no-review bypass matches
+#: (`close_tool.NO_REVIEW_DISPOSITIONS`) — both the model's own `inconclusive` and the host's
+#: own `unresolved` skip the gate, and a page that only knew the first would render a
+#: gate-forced run (which now commits `unresolved`, never `inconclusive`) as REVIEWED, which
+#: reads as "a review ran and the disposition held" for a close nothing reviewed at all. A
+#: duplicated literal rather than an import, because this module is a read-only VIEW over the
+#: run dir and importing the runtime's own close machinery here would pull a live-agent
+#: dependency into a report renderer; the duplication is why `test_923_readers.py` drives both
+#: verdicts through it rather than trusting the two to agree by construction.
+UNREVIEWED_DISPOSITIONS = ("inconclusive", "unresolved")
 
 _BYPASS_NOTE = (
     '<div class="empty">the gate reviews confident closes only — an '
-    "<code>inconclusive</code> disposition commits immediately</div>"
+    "<code>inconclusive</code> or <code>unresolved</code> disposition commits "
+    "immediately</div>"
 )
 
 
 def _was_reviewed(rec: dict) -> bool:
-    return rec.get("reviewed_disposition") != UNREVIEWED_DISPOSITION
+    return rec.get("reviewed_disposition") not in UNREVIEWED_DISPOSITIONS
 
 
 def _review_records(run_dir: Path) -> list[tuple[int, dict]]:

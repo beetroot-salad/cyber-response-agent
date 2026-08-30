@@ -196,10 +196,14 @@ def _invlang_queries_finds_the_case(_tmp_path: Path) -> None:
     )
 
 
-def _invlang_cli_accepts_it_as_a_filter(_tmp_path: Path) -> None:
+def _invlang_cli_accepts_it_as_a_filter(tmp_path: Path) -> None:
+    """`corpus_root` is a required leading positional (`_build_parser`'s own shape,
+    `test_invlang_parser.py::test_cli_prints_the_load_detail_to_stderr_and_quiet_suppresses_it`
+    drives it the same way) — a real path is threaded through so this exercises the actual
+    parser rather than a shape that omits an argument the CLI has always required."""
     from defender.skills.invlang.cli import _build_parser
 
-    args = _build_parser().parse_args(["sequence", "--disposition", MEMBER])
+    args = _build_parser().parse_args([str(tmp_path), "sequence", "--disposition", MEMBER])
     assert args.disposition == MEMBER, (
         "a read-only query filter that cannot name the new member is a reader disagreeing "
         "with the source it filters"

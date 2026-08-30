@@ -100,11 +100,15 @@ def test_a_measurable_gap_spends_a_turn_and_hands_the_ask_back(tmp_path):
 
 def test_an_unmeasurable_gap_forces_inconclusive_without_spending_a_turn(tmp_path):
     """A gap the reviewer cannot name a measurement for. Spending a forced turn on it would
-    tax the investigation for a question nobody has."""
+    tax the investigation for a question nobody has.
+
+    #923: the gate's overrule now records `unresolved` — the host's own verdict — not
+    `inconclusive`, which is reserved for the model's own close and now carries an entry
+    price."""
     deps, _run_dir = _deps(tmp_path)
     verdict = _run(deps, _bundle(composer=_composer("gap", ask=None)))
     assert verdict.outcome == FORCED_INCONCLUSIVE
-    assert verdict.disposition == "inconclusive"
+    assert verdict.disposition == "unresolved"
     assert verdict.cause == CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
     assert verdict.turns_used == 0
     assert verdict.failure_kind is None, (

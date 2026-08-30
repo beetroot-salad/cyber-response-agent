@@ -34,6 +34,7 @@ from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
 from defender._io import write_guarded
+from defender._vocab import HOST_ONLY_DISPOSITION
 
 from .. import branch
 from .. import compaction
@@ -286,10 +287,13 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
             try:
                 from ..close_tool import _close_investigation_async
 
-                # `inconclusive` short-circuits ahead of the gate, so no stage and no bound
-                # is ever consumed here; the run's own bounds are threaded anyway rather
-                # than re-resolved, so this limb cannot end up acting on a different value
-                # from the one the rest of the run was built with.
+                # #923: the HOST's own verdict, not the model's — `unresolved` short-circuits
+                # ahead of the gate exactly as `inconclusive` used to (both are in
+                # `close_tool.NO_REVIEW_DISPOSITIONS`), so no stage and no bound is ever
+                # consumed here; the run's own bounds are threaded anyway rather than
+                # re-resolved, so this limb cannot end up acting on a different value from the
+                # one the rest of the run was built with. It also carries no entry price
+                # (`inconclusive` does, and a forced caller has no model left to pay it with).
                 #: `forced=True`: the framework's own close is exempt from BOTH document
                 #: gates — the flagged-row window and the invlang structure check (#961). No
                 #: model is left to repair either, and refusing here would end the run with NO
@@ -298,7 +302,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
                 #: disposition at all is worse than either. Every close the MODEL invokes is
                 #: still gated by both.
                 await _close_investigation_async(
-                    deps, "inconclusive", stages=None, bounds=bounds, forced=True,
+                    deps, HOST_ONLY_DISPOSITION, stages=None, bounds=bounds, forced=True,
                 )
             except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
                 # ...but it must not SWALLOW it either: logging alone left a forced close that

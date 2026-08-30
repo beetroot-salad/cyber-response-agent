@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._vocab import DISPOSITION_ENUM
+from defender._vocab import DISPOSITION_ENUM, HOST_ONLY_DISPOSITION
 from defender.scripts.case_history import case_ticket
 
 
@@ -194,7 +194,9 @@ def test_alert_to_open_payload_falls_back_on_empty_strings():
 
 
 
-@pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM))
+@pytest.mark.parametrize(
+    "disposition", sorted(DISPOSITION_ENUM - {HOST_ONLY_DISPOSITION}),
+)
 def test_close_roundtrip_recovers_disposition(disposition: str):
     rec = case_ticket.CaseRecord(
         case_id="c", signature_id="5710", disposition=disposition,
@@ -205,6 +207,37 @@ def test_close_roundtrip_recovers_disposition(disposition: str):
     assert close["resolution"].startswith(disposition)
     recovered = case_ticket.parse_disposition_from_resolution(close["resolution"])
     assert recovered == disposition
+
+
+def test_close_roundtrip_refuses_an_arbitrary_reason_for_the_host_only_verdict():
+    """#923: `unresolved` is excluded from the parametrized round-trip above because it is
+    NOT a plain round-trip — it is refused unless the reason is one of the closed
+    `REPORT_CAUSES` sentences the host composes (see `parse_disposition_from_resolution`'s own
+    docstring). An arbitrary reason, as every OTHER member's round-trip case here carries,
+    means this text was never actually produced by the host's own close."""
+    from defender.runtime.close_tool import CAUSE_NOT_REVIEWED, REPORT_CAUSES
+
+    rec = case_ticket.CaseRecord(
+        case_id="c", signature_id="5710", disposition=HOST_ONLY_DISPOSITION,
+        confidence="medium", reason="Some reason — with an em dash inside.",
+    )
+    close = case_ticket.case_record_to_close(rec)
+    assert close["resolution"].startswith(HOST_ONLY_DISPOSITION)
+    with pytest.raises(case_ticket.CaseTicketError):
+        case_ticket.parse_disposition_from_resolution(close["resolution"])
+
+    # The positive control: the SAME verdict, with the reason the host actually writes for an
+    # unreviewed close, round-trips cleanly.
+    host_rec = case_ticket.CaseRecord(
+        case_id="c", signature_id="5710", disposition=HOST_ONLY_DISPOSITION,
+        confidence="medium", reason=CAUSE_NOT_REVIEWED,
+    )
+    assert CAUSE_NOT_REVIEWED in REPORT_CAUSES
+    host_close = case_ticket.case_record_to_close(host_rec)
+    assert (
+        case_ticket.parse_disposition_from_resolution(host_close["resolution"])
+        == HOST_ONLY_DISPOSITION
+    )
 
 
 def test_parse_disposition_ignores_foreign_resolution():

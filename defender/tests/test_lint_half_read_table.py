@@ -400,10 +400,14 @@ def test_its_motivating_finding_is_fixed_and_not_baselined():
     with no reader at the close; it now dispatches through `disposition_entry_price`, which
     reads `_DISPOSITION_GATES` whole.
 
-    Asserted on the SCAN, not merely on the baseline: dropping the entry while the branch
-    stood would fail `test_real_tree_clean` but would not say why, and re-introducing the
-    literal branch under a fresh baseline entry would pass it. Both halves are pinned —
-    nothing fires at that site, and the ratchet is not hiding one that does.
+    #923 legitimately adds ONE NEW, unrelated collision at this same file: the no-review
+    bypass (`if disposition in NO_REVIEW_DISPOSITIONS:`, matching the model's `inconclusive`
+    and the host's `unresolved`) answers a different question from the entry price ("does this
+    verdict skip the live review", not "what does this verdict owe") and shares nothing but
+    the literal spelling with `_DISPOSITION_GATES`'s keys — baselined, with its own reason,
+    distinct from #879's shape. What #879 pins is narrower than "nothing fires at this file at
+    all": every finding that DOES fire here must be an EXPLAINED false positive, not the price
+    dispatch itself regressing into a literal branch.
 
     Not `gate`-marked: the code-smells step's exit-0 check covers the tree being clean; this
     covers the ONE site the gate was written for being clean for the right reason.
@@ -412,11 +416,19 @@ def test_its_motivating_finding_is_fixed_and_not_baselined():
         f for f in _GATE._scan()
         if f.fingerprint.startswith("defender/runtime/close_tool.py:")
     ]
-    assert at_the_close == [], [f.display for f in at_the_close]
-    assert not any(
-        fp.startswith("defender/runtime/close_tool.py:")
-        for fp in _shipped_baseline_entries()
-    ), "#879 was fixed — a close_tool entry here means the branch came back and was buried"
+    baseline = _shipped_baseline_entries()
+    for f in at_the_close:
+        assert f.fingerprint in baseline, (
+            f"an UNBASELINED finding reached close_tool.py — #879's shape may have come back: "
+            f"{f.display}"
+        )
+        assert baseline[f.fingerprint].strip(), f"{f.fingerprint} is baselined with no reason"
+    # The #879 shape specifically: a finding whose missing key is `false-positive` or `benign`
+    # AND whose reason does not name the no-review bypass is #879 come back under cover.
+    assert all(
+        "NO_REVIEW_DISPOSITIONS" in baseline[f.fingerprint] or "bypass" in baseline[f.fingerprint]
+        for f in at_the_close
+    ), "a close_tool finding is baselined without pointing at the #923 bypass — #879 may be back"
 
 
 @pytest.mark.gate  # covered by code-smells' "Half-read-table gate"

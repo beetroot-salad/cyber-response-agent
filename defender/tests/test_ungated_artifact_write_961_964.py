@@ -52,11 +52,29 @@ _ERROR_DOC = PROLOGUE + attr_block(
 _CLEAN_DOC = PROLOGUE + attr_block("l-001|v-001|class|bastion")
 
 
+def _pay_inconclusive_price(deps) -> None:
+    """#923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a
+    source or capability) — unrelated to anything this module tests, which is about
+    #961/#964's gate on the write path itself, not about the price. Append a paying row
+    directly to the run's `investigation.md` bytes (never through a tool, so it cannot itself
+    trip the very gates this suite is testing) rather than editing every fixture document."""
+    from pathlib import Path
+
+    path = Path(deps.run_dir) / "investigation.md"
+    existing = path.read_bytes() if path.exists() else b""
+    addition = (
+        b'\n```invlang\n:T conclude\nceiling_test  "process telemetry not retrieved"\n```\n'
+    )
+    path.write_bytes(existing + addition)
+
+
 def _close(deps, disposition, **kw):
     from defender.runtime import challenge_gate
     from defender.runtime.close_tool import close_investigation
     from defender.tests import _review_bundle
 
+    if disposition == "inconclusive" and not kw.get("forced"):
+        _pay_inconclusive_price(deps)
     return close_investigation(
         deps, disposition,
         stages=_review_bundle.bundle(composer=_review_bundle.composer_reply("holds")),
@@ -124,17 +142,22 @@ def test_the_frameworks_forced_close_is_exempt(tmp_path):
     the run at persist for a MISSING report.md.
 
     A malformed companion is worse to publish than a well-formed one; a run with no
-    disposition at all is worse than either."""
+    disposition at all is worse than either.
+
+    #923: the framework's forced close commits `unresolved` — the host's own verdict — not
+    `inconclusive`, which now carries an entry price a forced caller (no model left to pay it
+    with) is refused for supplying at all (`close_tool.py`'s host-boundary check, fork J31)."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, _ERROR_DOC)
 
+    from defender._vocab import HOST_ONLY_DISPOSITION
     from defender.runtime import challenge_gate
     from defender.runtime.close_tool import _close_investigation_async
     from defender.tests import _review_bundle
     import asyncio
 
     asyncio.run(_close_investigation_async(
-        deps, "inconclusive",
+        deps, HOST_ONLY_DISPOSITION,
         stages=_review_bundle.bundle(composer=_review_bundle.composer_reply("holds")),
         bounds=challenge_gate.default_bounds(),
         forced=True,

@@ -4,6 +4,10 @@
     2
   ],
   "conclude": {
+    "ceiling_test": [
+      "auditd/execve not collected on this non-containerized host — process identity of the SSH initiator on office-ws-1 is unresolvable",
+      "Zeek outbound network flow data for office-ws-1 blocked by a permission gate in this run environment"
+    ],
     "confidence": "medium",
     "disposition": "inconclusive",
     "impact_verdict": "none-detected",

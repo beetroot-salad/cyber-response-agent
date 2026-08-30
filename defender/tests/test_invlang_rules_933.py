@@ -251,6 +251,9 @@ def test_the_same_claims_on_different_anchors_are_not_siblings() -> None:
 
 # rule #24: hypothesis persistence at CONCLUDE
 
+# #923: `disposition malicious` here, not `inconclusive` — this class is about the surviving
+# table, unrelated to `inconclusive`'s own entry price (a `ceiling_test` row this fixture
+# never writes).
 _TWO_LIVE_HYPOTHESES = _PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -264,7 +267,7 @@ p1|proposed_edge|"failures repeat on a fixed interval"
 """ + _LEAD + """\
 :T conclude
 termination.category   exhaustion
-disposition            inconclusive
+disposition            malicious
 impact_verdict         none
 confidence             low
 summary                "Neither cadence story was settled"
@@ -513,12 +516,14 @@ def test_a_quoted_deferral_reference_still_defers() -> None:
     """The ref cell is matched verbatim against `h-001.ac1`, so an unquoted read made a
     quoted row defer nothing — while the refusal told the author to add the row they had
     just written."""
+    # #923: `disposition malicious`, not `inconclusive` — this test is about the deferral
+    # table's quoted ref cell, unrelated to `inconclusive`'s own entry price.
     assert _errors(_PROLOGUE + _ONE_CONTRACT + _LEAD + """\
 :T resolutions
 h-001  null → +    [l-001 p1 mild ⟂ e-001 :: bursty]
 
 :T conclude
-disposition            inconclusive
+disposition            malicious
 confidence             low
 summary                "s"
 
@@ -670,9 +675,15 @@ def test_a_leading_decimal_point_is_not_stripped_from_a_claim() -> None:
 # them refused. They sit here rather than in their own file so they share the one prologue —
 # the same reason the blocks above do.
 
-_CLOSE_INCONCLUSIVE = """\
+#: A `:T conclude` block for tests that need SOME close and don't care which — hypothesis
+#: persistence, prediction/contract closure, deferral rationale. #923 gives `inconclusive`
+#: its own entry price (a `ceiling_test` row naming a source or capability), unrelated to any
+#: of these rules; `malicious` carries no price under any rule and keeps these fixtures
+#: exercising only what they name. (Renamed from `_CLOSE_INCONCLUSIVE`, which this no longer
+#: is.)
+_CLOSE_UNPRICED = """\
 :T conclude
-disposition            inconclusive
+disposition            malicious
 summary                "s"
 
 :T conclude.surviving [hyp_id|final_weight]
@@ -699,7 +710,7 @@ def test_an_off_vocabulary_after_token_settles_no_prediction(after: str) -> None
     `WEIGHT_BUCKETS`, so a "moved unless null" test made a misspelling the CHEAPEST row in the
     language: it discharged rule #34, skipped rule #4 (which fires on `STRONG_WEIGHTS`) and
     skipped rule #6 (which fires on `++`), where the honest `null` was refused."""
-    errors = _errors(_PROLOGUE + _ONE_PRED + _LEAD + _moved(after) + _CLOSE_INCONCLUSIVE)
+    errors = _errors(_PROLOGUE + _ONE_PRED + _LEAD + _moved(after) + _CLOSE_UNPRICED)
     assert any("h-001.p1" in e and "declared and then abandoned" in e for e in errors), errors
 
 
@@ -707,7 +718,7 @@ def test_an_off_vocabulary_after_token_settles_no_prediction(after: str) -> None
 def test_a_real_weight_still_settles_the_prediction_it_cites(after: str) -> None:
     """The liveness control: closing the off-vocabulary hole must not close the door on a
     resolution that really moved the hypothesis."""
-    assert _errors(_PROLOGUE + _ONE_PRED + _LEAD + _moved(after) + _CLOSE_INCONCLUSIVE) == []
+    assert _errors(_PROLOGUE + _ONE_PRED + _LEAD + _moved(after) + _CLOSE_UNPRICED) == []
 
 #: A `:R impact` row and the `ip1` it grades, with EVERY cell quoted — legal, and the shape
 #: that drew three simultaneous refusals before the read side learned to unquote.
@@ -747,7 +758,7 @@ def test_either_fulfills_spelling_discharges_the_contract(fulfills: str) -> None
     bare `ac<n>`. Rule #26 indexed the raw cell and looked it up bare, so the spelling the spec
     calls correct refused a close for a contract the run had answered."""
     assert _errors(
-        _PROLOGUE + _LONE_CONTRACT + _LEAD + _authz_row(fulfills) + _CLOSE_INCONCLUSIVE
+        _PROLOGUE + _LONE_CONTRACT + _LEAD + _authz_row(fulfills) + _CLOSE_UNPRICED
     ) == []
 
 
@@ -764,7 +775,7 @@ ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
 :H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|e-001|change-mgmt|"was this change approved"|escalate|escalate
 
-""" + _LEAD + _authz_row("h-001.ac1") + _CLOSE_INCONCLUSIVE)
+""" + _LEAD + _authz_row("h-001.ac1") + _CLOSE_UNPRICED)
     assert [e for e in errors if "h-002.ac1" in e], errors
     assert not [e for e in errors if "h-001.ac1" in e], errors
 
@@ -785,7 +796,7 @@ ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
 :H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|e-001|iam-policy|"a different question under the same anchor"|escalate|escalate
 
-""" + _LEAD + _authz_row("ac1") + _CLOSE_INCONCLUSIVE)
+""" + _LEAD + _authz_row("ac1") + _CLOSE_UNPRICED)
     named = [e for e in errors if "is declared and then abandoned" in e]
     assert [e for e in named if "h-001.ac1" in e], errors
     assert [e for e in named if "h-002.ac1" in e], errors
@@ -812,7 +823,7 @@ ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
 :H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|e-001|iam-policy|"a different question under the same anchor"|escalate|escalate
 
-""" + _LEAD + _authz_row("h-001.ac1") + _authz_row("h-002.ac1") + _CLOSE_INCONCLUSIVE) == []
+""" + _LEAD + _authz_row("h-001.ac1") + _authz_row("h-002.ac1") + _CLOSE_UNPRICED) == []
 
 
 @pytest.mark.parametrize(
@@ -827,7 +838,7 @@ def test_the_empty_marker_is_not_a_deferral_rationale(
     one word clearing the only guard the escape hatch has, while the honest empty cell is
     refused."""
     errors = _errors(
-        _PROLOGUE + _ONE_PRED + _LEAD + _CLOSE_INCONCLUSIVE
+        _PROLOGUE + _ONE_PRED + _LEAD + _CLOSE_UNPRICED
         + f":T conclude.deferred_preds [prediction_ref|rationale]\nh-001.p1|{rationale}\n\n"
     )
     assert (errors == []) is discharges, errors
@@ -900,7 +911,7 @@ def test_a_second_conclude_block_of_unrecognized_keys_does_not_refuse_the_close(
     A per-BLOCK "recorded nothing" flag turned exactly that write into the refusal that comment
     forbids, on a document whose close is already fully recorded."""
     assert _errors(
-        _PROLOGUE + _ONE_PRED + _LEAD + _CLOSE_INCONCLUSIVE
+        _PROLOGUE + _ONE_PRED + _LEAD + _CLOSE_UNPRICED
         + ":T conclude\nescalation_target      soc-tier2\n\n"
         + ":T conclude.deferred_preds [prediction_ref|rationale]\n"
           'h-001.p1|"telemetry never arrived"\n\n'

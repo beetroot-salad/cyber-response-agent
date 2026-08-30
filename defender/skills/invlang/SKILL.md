@@ -410,28 +410,44 @@ summary                "Login matched established bastion usage"
 ```
 
 - `disposition` — closed vocab (`enum disposition`), and the SAME keywords
-  `report.md`'s frontmatter carries. A value outside it is denied on
-  write; there is no `escalate` keyword — an escalation is
-  `termination.category exhaustion-escalation` with `disposition
-  inconclusive`. Two keywords carry an ENTRY PRICE. `benign` needs at least
-  one `:V prologue.vertices` row — a log that never recorded the alerted
-  entity accounts for nothing — plus every `??` slot resolved (§Open
-  questions) and every authz contract on a live hypothesis `authorized`
-  (§`:R authz`); `false-positive` — the one keyword
-  that describes the RULE rather than the alerted entity, for a rule that
-  fired on a different kind of behavior than it claims — needs
-  `detection_notes` and `entity_check` below. Both prices are charged twice:
-  on the write, against the keyword you conclude under, and again by
-  `close_investigation`, against the keyword you close under. So concluding
-  under a cheaper keyword buys nothing — the log itself still has to have
-  paid for the keyword the close commits.
-- `ceiling_test` — the checks you could NOT make. One row per gap, repeated,
-  naming the host and the data source:
-  `ceiling_test  "authorized_keys FIM on web-1 (auditd write events) not retrieved"`
-  Name the specific source, not the shape of the question — "session commands
-  not retrieved" tells a reader nothing about what is still open. Omit the row
-  (or write `none`) when nothing was out of reach. `ceiling_rationale` is the
-  companion scalar: why concluding anyway is sound despite those gaps.
+  `report.md`'s frontmatter carries — FIVE of them, `unresolved` the fifth.
+  A value outside the enum is denied on write; there is no `escalate`
+  keyword — an escalation is `termination.category exhaustion-escalation`
+  with `disposition inconclusive`. `unresolved` is a member of the enum
+  because it must be free to name in prose, but it is the HOST's own
+  verdict — recorded when a run is cut short without a settled finding —
+  and `conclude.disposition unresolved` is denied on write just like a
+  garbage value; you never conclude it yourself. THREE keywords carry an
+  ENTRY PRICE. `benign` needs at least one `:V prologue.vertices` row — a
+  log that never recorded the alerted entity accounts for nothing — plus
+  every `??` slot resolved (§Open questions) and every authz contract on a
+  live hypothesis `authorized` (§`:R authz`); `false-positive` — the one
+  keyword that describes the RULE rather than the alerted entity, for a
+  rule that fired on a different kind of behavior than it claims — needs
+  `detection_notes` and `entity_check` below; `inconclusive` needs at
+  least one `ceiling_test` row (below) naming a specific unretrieved data
+  source or an unavailable capability — a host may be named too, but
+  naming one alone never pays, rows must be distinct, and a row that
+  renders as the empty marker in any spelling does not pay. All three
+  prices are charged twice: on the write, against the keyword you
+  conclude under, and again by `close_investigation`, against the keyword
+  you close under. So concluding under a cheaper keyword buys nothing —
+  the log itself still has to have paid for the keyword the close commits.
+- `ceiling_test` — the checks you could NOT make. One row per gap, repeated.
+  Two independent rules read this table and want different things from it:
+  the severity-ceiling rule (`termination.category severity-ceiling`) wants
+  the host AND the data source —
+  `ceiling_test  "authorized_keys FIM on web-1 (auditd write events) not retrieved"` —
+  and `disposition inconclusive`'s entry price wants a specific data source
+  OR an unavailable capability, host optional —
+  `ceiling_test  "process-ancestry telemetry is not collected anywhere in this deployment"`
+  or `ceiling_test  "no detonation sandbox is available to this runtime"`. Either way,
+  name the specific source or capability, not the shape of the question —
+  "session commands not retrieved" tells a reader nothing about what is
+  still open, and "web-1 could not be fully checked" names no check anyone
+  can go make. Omit the row (or write `none`) when nothing was out of
+  reach. `ceiling_rationale` is the companion scalar: why concluding
+  anyway is sound despite those gaps.
 - `impact_verdict` / `impact_severity` — the roll-up over this run's
   `:R impact` rows (`enum conclude.impact_verdict`), and how large the
   consequence is (`enum conclude.impact_severity`). The pair is checked for

@@ -175,6 +175,8 @@ impact_verdict         none-detected
 confidence             medium
 matched_archetype      unattributed-loopback-ssh-retry
 summary                "H2 confirmed: local process on office-ws-1 SSH'd to ::1 with password auth for authorized owner dev.dana in a 2s automated cadence; no persistence installed; process identity unresolvable (auditd not collected, Falco no ancestry, Zeek blocked by permission gate). CMDB documents no automation for this host. Escalating inconclusive at medium confidence: authorized user, no post-auth harm detected, but initiating process cannot be named."
+ceiling_test            "auditd/execve not collected on this non-containerized host — process identity of the SSH initiator on office-ws-1 is unresolvable"
+ceiling_test            "Zeek outbound network flow data for office-ws-1 blocked by a permission gate in this run environment"
 ```
 
 ## REPORT

@@ -64,6 +64,18 @@ def _inv(run):
     return (run / "investigation.md").read_text(encoding="utf-8")
 
 
+def _pay_inconclusive_price(run) -> None:
+    """#923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a
+    source or capability), unrelated to anything this module tests — the repair window. Call
+    only once the flagged-row window is already clear (both call sites here do), so appending
+    this never masks what the test is actually driving."""
+    path = run / "investigation.md"
+    path.write_bytes(
+        path.read_bytes()
+        + b'\n```invlang\n:T conclude\nceiling_test  "process telemetry not retrieved"\n```\n'
+    )
+
+
 def _registered_tools():
     """MAIN's registered `Tool` objects, by name — the framework's own view of the roster,
     which is where the per-tool scheduling opt-in H6 sets actually lives."""
@@ -686,6 +698,7 @@ def test_the_repair_window_is_closable_while_the_run_is_still_taking_turns(tmp_p
     _fix(deps, WARN_ROW, "")
 
     assert flagged_rows(_inv(run)) == ()
+    _pay_inconclusive_price(run)
     close_investigation(
         deps, "inconclusive",
         stages=_review_bundle.bundle(composer=_review_bundle.composer_reply("holds")),
@@ -845,6 +858,7 @@ def test_fix_row_refused_once_the_close_committed(tmp_path):
 
     _fix(deps, WARN_ROW, REPAIRED_ROW)          # pre-close: the repair lands
     assert flagged_rows(_inv(run)) == ()
+    _pay_inconclusive_price(run)
 
     close_investigation(
         deps, "inconclusive",

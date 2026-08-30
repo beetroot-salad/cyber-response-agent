@@ -110,7 +110,12 @@ def _conclude(
     rows = [
         ":T conclude",
         f"termination.category   {category}",
-        "disposition            inconclusive",
+        # #923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a
+        # source or capability), unrelated to anything this module's tests are about — rule
+        # #13's severity-ceiling class here cares about `termination.category` and
+        # `ceiling_test`, never `disposition`. `malicious` carries no price under any rule and
+        # keeps every fixture below exercising only what it names.
+        "disposition            malicious",
         f"impact_verdict         {impact_verdict}",
         "confidence             medium",
     ]
