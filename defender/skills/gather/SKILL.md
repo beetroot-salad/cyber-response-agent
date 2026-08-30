@@ -183,10 +183,16 @@ defender's ANALYZE. Check the query's **exit code first**, then the content:
   **STOP and Read `{defender_dir}/skills/gather/failure-modes.md`** before your
   next query, then follow the matching branch. It carries the exit-code branch
   (including: an exit 2 is an outage you must NOT probe / cred-hunt / re-run), the
-  positive-control tool-fault test, and field-drift recovery.
+  positive-control tool-fault test, the entity-binding probe, and field-drift
+  recovery.
 
 Never report a raw unchecked zero or a null. The bound is a positive control plus
 one narrowing/shape step; past that, stop and report the quirk plainly.
+
+A filtered value you will report as an **entity** — the host, the account, the
+container this happened on — is a binding the defender cannot audit. Confirm the
+field discriminates at this source before it becomes one; see failure-modes.md
+§A filter that names an entity.
 
 ### 5. RETURN
 

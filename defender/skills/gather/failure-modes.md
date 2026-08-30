@@ -47,6 +47,31 @@ same query truncated before the aggregation — `FROM ... | WHERE <filters> | LI
 10` — fix the field name and re-run. Do **not** silently swap in a field you
 "know" without confirming it against the live shape.
 
+## A filter that names an entity
+
+A `WHERE <field> == <value>` predicate whose value you will carry into the
+summary as an entity is a claim about what that field means, and a healthy
+result never tests it: the rows come back resolved, plausible and correctly
+filtered whether or not the field identifies anything.
+
+Probe it once per field per run — the same query with that predicate dropped:
+
+```
+... | STATS COUNT(*) BY <field> | LIMIT 5
+```
+
+- **More than one value** — the predicate narrows. Carry the binding.
+- **Exactly one value** — the field is constant across this source. It excluded
+  nothing, and its value is a property of the collector rather than of the
+  event. Find the field that carries the distinction (the system SKILL's field
+  vocabulary), and **say it in the summary**: "`<field>` is constant across this
+  source — it does not attribute" is the finding, not a footnote. Reporting the
+  value as the entity hands the defender a binding it has no way to see through.
+
+A field whose only value is a sentinel (`<NA>`, `-`, `unknown`) fails the same
+way. Cardinality on a `BY` key means nothing here — one group is the right
+answer whenever the events genuinely share one.
+
 ## Result looks truncated
 
 `row_count` is exactly 1000 → ES|QL's default row cap clipped a high-cardinality
