@@ -124,9 +124,15 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     spawn = T.FakeSpawn()
+    # The review's two seams are injected for the same reason `preflight` is: this scenario
+    # drives a WHOLE launch, and the launcher refuses one it has no adapter layer or comparator
+    # for — so a scenario that left them out would observe that refusal instead of the preflight
+    # it is about. (Left out they also used to be reached as `None` and swallowed by the
+    # reachability half's own handler, which is a green launch for the wrong reason.)
     cli.main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
              preflight=lambda model: seen.append("family") or 0,
-             spawn=spawn, door=T.FakeDoor(),
+             spawn=spawn, door=T.FakeDoor(), adapters=T.FakeAdapters(),
+             invoke=T.FakeAgent(*["same"] * 24),
              questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")))
     assert seen == ["family"]
     run_src = (T.DEFENDER / "run.py").read_text(encoding="utf-8")

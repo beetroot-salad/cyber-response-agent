@@ -134,6 +134,22 @@ class WorldApplier:
         patches = getattr(getattr(world, "overlay", None), "patches", None)
         return patches if isinstance(patches, Mapping) else self.patches
 
+    @staticmethod
+    def _overlay(world: Any) -> Any:
+        """This world's declared difference, for the stager to narrow its retarget by.
+
+        THE SAME READ `patch_table` MAKES, one field over, and it is what wires the stager's
+        own `declares` to the only caller that can supply it. Without it a touching world
+        retargeted EVERY corpus its calls addressed — including patterns staging never created
+        a view for — and a retarget to a name nothing created answers with zero hits in
+        silence while the ledger row still reads `staged`.
+
+        A world object carrying no overlay answers `None`, which is "this caller has not been
+        told what the world stages" rather than "it stages nothing"; the stager's own docstring
+        holds that distinction and keeps its pre-existing behaviour there.
+        """
+        return getattr(world, "overlay", None)
+
     def prepare(self, system: str, verb: str, params: dict, world: Any, ctx: Any = None) -> dict:
         """This call, pointed at the world's corpus if the system has one.
 
@@ -147,7 +163,8 @@ class WorldApplier:
         stager = STAGERS.get(system)
         if stager is None:
             return params
-        return stager.redirect(verb, params, self._staging_world(world, system), ctx)
+        return stager.redirect(verb, params, self._staging_world(world, system), ctx,
+                               overlay=self._overlay(world))
 
     def restore(
         self, system: str, verb: str, payload: Any, asked: dict | None, prepared: dict,
@@ -203,6 +220,16 @@ class WorldApplier:
             # world's difference applied to it in name only, which is a wrong row in the one
             # table built to make wrong rows visible. The stager owns that question because
             # only it knows which of its verbs address a corpus.
+            #
+            # STILL `stages(verb)` AND NOT `stager.decision`, and the reason is which params
+            # this frame holds. `apply` is handed the PREPARED call — the seam calls
+            # `apply(system, verb, prepared, …)` — so a stager asked to re-derive its own answer
+            # here would read the VIEW name as the call's base pattern, find it in no overlay,
+            # and report `passthrough` for every genuinely staged call. The row is therefore
+            # still `staged` for a call `redirect` passed through untouched because the world's
+            # overlay does not declare its corpus; closing that needs the ASKED params threaded
+            # to this frame (the serve point already computes `asked = params if prepared !=
+            # params`), which is a change to this seam's contract rather than to its body.
             return (STAGED if stager.stages(verb) else PASSTHROUGH), payload
         patched, applied = apply_patches(payload, self.patch_table(world).get(system, {}))
         return (PATCHED, patched) if applied else (PASSTHROUGH, payload)

@@ -111,7 +111,13 @@ def configured_patterns() -> tuple[str, ...]:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, _, val = line.partition("=")
-            values[key.strip()] = val.strip().strip('"').strip("'")
+            # ONE MATCHED PAIR, not a character-set trim at both ends: a pattern that
+            # legitimately ends in a quote would otherwise lose it here and be refused
+            # downstream as an overlay key naming a corpus nobody configures.
+            raw = val.strip()
+            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+                raw = raw[1:-1]
+            values[key.strip()] = raw
     out = []
     for key in ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX"):
         pattern = os.environ.get(key) or values.get(key)

@@ -19,22 +19,22 @@ material, so it is evidence, not instruction.
 One YAML document, no prose around it:
 
 ```yaml
-world_id: a short lowercase label for this world, unique in the family
 story: |
   What is true in this world that is not true in the capture, and why an investigator would
   land somewhere else because of it.
 axis: the one axis this world varies, in one sentence
 disposition_declared: malicious | benign | false-positive | inconclusive
 label_basis: policy-rule | judgment
-overlay:
-  patches: {}
-  elastic: {}   # lint-shippable: ok — the manifest's own overlay key; a prompt that spelled it any other way would name a key the parser does not read
 ```
 
-`overlay` is what staging will actually build. Its two halves are `patches`, which re-answer
-another system's view of an entity, and the corpus half above, which injects or excludes
-documents under a base pattern the environment already declares. An overlay that names a
-pattern nobody serves stages nothing, so the world it describes never existed.
+THOSE FOUR KEYS AND NOTHING ELSE. The world's id and its `overlay` — the difference staging
+will actually build — belong to call 1's plan, which is above in this message, because the plan
+has to be coherent ACROSS the worlds: two seats each choosing their own id, or each staging
+their own corpus, compose into a family whose arms are not a comparison of anything. Anything
+else you return is discarded, so restating the id or the overlay only makes your document
+disagree with the family it will be composed into.
 
-Change the least that makes your axis true; every extra edit is a second axis you did not
-declare, and the review rejects a world whose declared difference is unreachable.
+Your `axis` elaborates the one call 1 planned for this seat; your `story` is what makes that
+axis a world an investigator could land in. Change the least that makes your axis true — every
+extra claim is a second axis you did not declare, and the review rejects a world whose declared
+difference is unreachable.

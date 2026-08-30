@@ -153,6 +153,19 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         sources = _screened_sources(world, run_dir)
         world_dir = episode_dir / WORLDS_DIRNAME / world
         guarded_mkdir(world_dir, base=episode_dir)
+        # THE DESTINATION IS SCREENED TOO, and before the first copy for the same reason the
+        # sources are. `guarded_mkdir` judges the DIRECTORY components; nothing judged the leaf,
+        # and `shutil.copy2` opens the destination for writing, which resolves a link planted
+        # there — the episode dir is reachable from a sibling box's rw bind (it is why
+        # `merge_review` and the run-dir pointer both go through the guarded seam), so an entry
+        # at `worlds/<label>/report.md` would redirect an artifact copy out of the archive.
+        for _source, name in sources:
+            dest = world_dir / name
+            if (dest.exists() or dest.is_symlink()) and not artifact_file(dest):
+                raise ArchiveRefused(
+                    f"world {world!r}: {dest} is occupied by something that is not a regular "
+                    "file — the archive is written into a tree a box can reach, and copying "
+                    "onto a link would put this world's artifact wherever it points")
         for source, name in sources:
             # Screened by `_screen` above, before this loop began: a link at any of these
             # names has already raised, so nothing here can follow one.

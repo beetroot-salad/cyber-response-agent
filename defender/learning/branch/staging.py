@@ -42,11 +42,14 @@ from typing import Any
 
 import yaml
 
+from defender import _yaml
 from defender._clock import now_iso
 from defender._io import guarded_mkdir, open_guarded, write_guarded
+from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
 from defender.scripts.adapters.confinement import (
+    VIEW_NAMESPACE,
     _reach_ok,
     _view_stem,
     is_world_view,
@@ -96,6 +99,9 @@ _BOOL_SCALARS = ("minimum_should_match", "boost")
 #: label and a configured corpus pattern — so anything outside this set is a value that reached
 #: the derivation from somewhere it should not have, and refusing is cheaper than reasoning
 #: about which layer would have escaped it.
+#: The one status a DELETE may answer that is not a failure — see `_Door._call`.
+_HTTP_NOT_FOUND = 404
+
 _NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789.-_")
 _EXPRESSION_CHARS = _NAME_CHARS | {"*"}
 
@@ -212,6 +218,18 @@ def check_configured_patterns(patterns: Sequence[str]) -> tuple[str, ...]:
     Two patterns whose view stems collide are refused for the same reason `stage_world` refuses
     two overlay keys that collide: one alias cannot serve two corpora.
     """
+    # AN EMPTY TUPLE IS NOT A CONFIGURATION, and it took the happy path through every check
+    # below by having nothing to iterate. `_probe_cluster` then returns early on it too, so the
+    # whole preflight passed for a deployment naming no corpus at all — the episode id was
+    # claimed and primed (an id that cannot be reused), three questioner calls were paid for,
+    # and `_check_overlay_keys` refused every overlay key against `allowed = []`. Which is the
+    # exact refusal this function's docstring says belongs here.
+    if not patterns:
+        raise StagingRefused(
+            "this deployment configures no corpus pattern — a world is a difference on the "
+            "corpora the deployment configures, so with none there is nothing any world could "
+            "stage and no overlay key the manifest could admit. Name the corpus patterns in "
+            "the elastic adapter's config (or in the environment) before branching")  # lint-shippable: ok — the per-vendor config the reader beside this one loads  # noqa: E501
     probe = "probe"
     stems: dict[str, str] = {}
     for pattern in patterns:
@@ -276,6 +294,39 @@ def _check_clause(clause: str, body: Any, where: str) -> None:
             f"this module cannot read is one the cluster would interpret its own way: {body!r}")
     if clause == "bool":
         _check_bool(body, f"{where}.bool")
+    if clause == "terms":
+        _check_terms(body, f"{where}.terms")
+
+
+def _check_terms(body: Mapping, where: str) -> None:
+    """A `terms` clause matches against a LIST OF VALUES, never against another index.
+
+    THE ONE ADMITTED CLAUSE WHOSE GRAMMAR HAS A SECOND MEANING, which is why the allow-list
+    over clause TYPES does not finish the job here. `{"terms": {"user.name": {"index": ...,
+    "id": ..., "path": ...}}}` is the terms LOOKUP form: the cluster fetches a field out of a
+    document in an arbitrary named index at query time and uses it as the term set. Shipped
+    inside a staged alias's filter it is a cross-index READ the verb allow-list never granted,
+    evaluated on every query through the world's view — and the model driving that world
+    observes the result as "which documents survived", which is a cardinality-and-content
+    oracle over an index it cannot otherwise reach.
+
+    `boost` is a scoring knob rather than a field, and it is a scalar; it is skipped rather
+    than refused, so the ordinary spelling stays admitted.
+    """
+    for field_name, value in body.items():
+        if str(field_name) == "boost":
+            continue
+        if not isinstance(value, (list, tuple)):
+            raise StagingRefused(
+                f"{where}.{field_name} is {type(value).__name__} rather than a list of values "
+                "— a mapping here is the terms LOOKUP form, which reads a term set out of "
+                "another index at query time. That is a cross-index read from inside the "
+                "alias filter, and the world's own model can observe its result")
+        bad = [v for v in value if not isinstance(v, (str, int, float, bool)) and v is not None]
+        if bad:
+            raise StagingRefused(
+                f"{where}.{field_name} holds non-scalar term(s) {bad!r} — a terms clause "
+                "matches values, and a document here is a clause body this module cannot read")
 
 
 def _check_bool(body: Mapping, where: str) -> None:
@@ -313,10 +364,15 @@ def read_staged(episode_dir: Path) -> list[dict]:
     under a token the next episode is about to reuse.
     """
     path = staged_path(episode_dir)
-    if not path.is_file():
+    # `artifact_file` (lstat), not `is_file()`: `staged.yaml` is the SOLE record that a cluster
+    # write happened and it lives in the episode dir, whose lower components a sibling's box can
+    # write. `is_file()` stats THROUGH a link, so a link planted at this name would have teardown
+    # reconcile against a record written somewhere else — deleting names this code did not write,
+    # or leaving live the ones it did.
+    if not artifact_file(path):
         return []
     try:
-        rows = yaml.safe_load(path.read_text(encoding="utf-8"))
+        rows = _yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as bad:
         raise StagingRefused(
             f"{STAGED_FILENAME} at {path} does not parse ({bad}) — acting on a staging record "
@@ -452,7 +508,11 @@ def stage_world(world: World, *, episode_dir: Path, episode_token: str,
         rows.append(record_staged(episode_dir, _row(
             world=token, name=plan.view, kind=KIND_ALIAS, derived_from=plan.pattern)))
         over = [*door.resolve(plan.pattern), plan.inject]
-        door.create_alias(plan.view, over=over, filter=plan.exclude)
+        # THE EXCLUSION IS THE BASE'S, so the injection index is exempt from it: the view is
+        # `base − exclude + inject`, which is what this docstring promises and what makes a
+        # `STATS … BY …` over a staged world correct by construction.
+        door.create_alias(plan.view, over=over, filter=plan.exclude,
+                          unfiltered=(plan.inject,))
     return rows
 
 
@@ -511,29 +571,61 @@ def _record_teardown_failure(failures: list[dict], review_path: Path | None) -> 
     """
     if review_path is None:
         return
-    path = Path(review_path)
+    merge_review(Path(review_path), "teardown",
+                 {"ok": False, "failures": failures,
+                  "names": [f["name"] for f in failures], "at": now_iso()})
+
+
+def merge_review(path: Path, key: str, block: dict) -> None:
+    """Put one block into the review record, over nothing else it holds.
+
+    ONE MERGER FOR ONE FILE. Both writers of `review.yaml` outside the review itself — this
+    module's teardown failure and `cli._record_episode_outcome` — do the same five steps, and
+    they run against the SAME file in one episode: the outcome is recorded, then teardown fires.
+    Written twice they had already drifted on all three of the things that decide what the file
+    looks like — one sorted its keys and one did not, one allowed unicode and one escaped it,
+    one made the parent directory — so which of the two wrote last decided the whole document's
+    shape, and a reader diffing two episodes saw churn that was not content.
+
+    `artifact_file`, not `is_file()`: the episode dir holds a sibling's archived artifacts and is
+    reachable from a box's rw bind, so an entry at the review's name may be a link — and
+    `is_file()` stats THROUGH one, which would merge this block into whatever it points at and
+    then write the merged document back over it.
+    """
+    path = Path(path)
     doc: dict[str, Any] = {}
-    if path.is_file():
+    if artifact_file(path):
         try:
-            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except yaml.YAMLError:
+            loaded = _yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
             loaded = None
         if isinstance(loaded, dict):
             doc = loaded
-    doc["teardown"] = {"ok": False, "failures": failures,
-                       "names": [f["name"] for f in failures], "at": now_iso()}
+    held = doc.get(key)
+    if isinstance(held, dict):
+        held.update(block)
+    else:
+        doc[key] = dict(block)
     guarded_mkdir(path.parent, base=path.parent.parent)
-    write_guarded(path, yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
+    write_guarded(
+        path,
+        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False),
+        encoding="utf-8")
 
 
 def sweep_glob(episode_token: str) -> str:
     """The one glob this episode's namespace answers to.
 
-    `wv-{episode_token}.*` and nothing wider. The token is injective over episode ids, so every
-    name under it belongs to THIS episode and removing it is safe; one character wider and the
-    sweep is reaching into a concurrently-running episode's live corpus.
+    `{VIEW_NAMESPACE}-{episode_token}.*` and nothing wider. The token is injective over episode
+    ids, so every name under it belongs to THIS episode and removing it is safe; one character
+    wider and the sweep is reaching into a concurrently-running episode's live corpus.
+
+    THE PREFIX IS IMPORTED, never spelled: `world_view` is what builds the names this glob has
+    to find, and a literal here would keep matching the old spelling the day the namespace moves
+    — at which point the sweep returns an empty listing, reads it as a clean namespace, and
+    leaves an earlier death's aliases live under the token this episode is about to reuse.
     """
-    return f"wv-{episode_token}.*"
+    return f"{VIEW_NAMESPACE}-{episode_token}.*"
 
 
 def sweep(episode_dir: Path, *, episode_token: str, door: Any) -> list[str]:
@@ -559,14 +651,26 @@ def sweep(episode_dir: Path, *, episode_token: str, door: Any) -> list[str]:
     glob = sweep_glob(episode_token)
     door.count(glob)
     found = list(door.list_names(glob))
-    recorded = {str(r.get("name")) for r in read_staged(episode_dir)}
+    rows = read_staged(episode_dir)
+    recorded = {str(r.get("name")) for r in rows}
     unrecorded = sorted(n for n in found if n not in recorded)
     if unrecorded:
         raise StagingRefused(
             f"the sweep found {unrecorded} under {glob!r}, which the staging record does not "
             "name — that is a name this code did not write, and removing it would be guessing")
     removed: list[str] = []
-    for name in sorted(found, reverse=True):
+    # NEWEST-FIRST OVER THE RECORD, exactly as `teardown` removes — never `sorted(reverse=True)`.
+    # The record is written in DEPENDENCY order (the injection index, then the alias that spans
+    # it), and lexicographic order is not that order: an alias name is a proper PREFIX of its
+    # own injection index (`wv-<token>-logs-` vs `wv-<token>-logs-.inject`), so reversed
+    # lexicographic put the index first and took it away while the alias still spanned it —
+    # the one state `teardown`'s docstring says must never exist. Every name here is in the
+    # record by the refusal above, so the record can order all of them.
+    live = set(found)
+    for name in (str(r.get("name") or "") for r in reversed(rows)):
+        if name not in live:
+            continue
+        live.discard(name)
         door.delete(name)
         if door.exists(name):
             raise StagingRefused(
@@ -625,8 +729,8 @@ class _Door:
     auth: str | None
 
     # -- the transport ------------------------------------------------------------------
-    def _call(self, method: str, path: str, *,
-              body: dict | None = None) -> tuple[int, dict[str, Any]]:
+    def _call(self, method: str, path: str, *, body: dict | None = None,
+              absent_ok: bool = False) -> tuple[int, dict[str, Any]]:
         """One request, and the ONE reading of its status this module admits.
 
         AN UNPARSEABLE STATUS IS A FAILURE. `split_status` recovers `(body, code)` from curl's
@@ -651,6 +755,13 @@ class _Door:
                 "status is a FAILURE and never a success: the name is already recorded, and "
                 "believing a failed create succeeded stages a world that does not exist")
         code = int(status)
+        # 404 IS A SUCCESS FOR A DELETE, and only where the caller says so. Removing a name that
+        # is not there is the outcome the caller wanted; treated as a failure it made the
+        # write-ahead record's own abort path — a row written before a create that then failed —
+        # report the name as still live on the cluster. Never widened past the one caller that
+        # asks: a 404 on a create or a read is a genuine failure and stays one.
+        if absent_ok and code == _HTTP_NOT_FOUND:
+            return code, {}
         if not 200 <= code < 300:
             raise StagingRefused(
                 f"{method} {url} answered HTTP {code}: {payload.strip()[:200]}")
@@ -693,18 +804,29 @@ class _Door:
                     body=body)
 
     def create_alias(  # noqa: A002 — `filter` is the door's shape, and the cluster's
-            self, name: str, *, over: list[str], filter: dict | None) -> None:
+            self, name: str, *, over: list[str], filter: dict | None,
+            unfiltered: Sequence[str] = ()) -> None:
         """Point `name` at every index in `over`, carrying `filter` as its exclusion.
 
         ONE `_aliases` action list rather than one request per member: the alias appears whole
         or not at all, so there is no window in which a query reads a view spanning half its
         corpus. The predicate is `must_not`-wrapped, because the world DECLARES what it removes
         and an alias filter says what it keeps.
+
+        `unfiltered` NAMES THE MEMBERS THE EXCLUSION DOES NOT SPEAK ABOUT, and the staged view
+        is `base − exclude + inject` rather than `(base + inject) − exclude`. A world's
+        exclusion is a statement about the corpus it BRANCHED FROM; carried onto the world's
+        own injection index it deletes the world's own documents, and it does so for exactly
+        the worlds whose predicate overlaps what they injected — a `match_all` exclusion (which
+        `ALLOWED_CLAUSES` admits on purpose, so "the corpus is empty except for this" is an
+        authorable world) served nothing at all, while `review._injected_retrieved` counts
+        through the raw injection index and reported the difference reachable.
         """
         _checked(name, _NAME_CHARS, "alias name")
+        exempt = set(unfiltered)
         actions = [{"add": {"index": _checked(index, _EXPRESSION_CHARS, "alias member"),
                             "alias": name,
-                            **({} if filter is None
+                            **({} if filter is None or index in exempt
                                else {"filter": {"bool": {"must_not": [filter]}}})}}
                    for index in over]
         self._call("POST", "/_aliases", body={"actions": actions})
@@ -715,18 +837,33 @@ class _Door:
         An alias and an index are removed through different APIs, and the door is handed only a
         name — so it asks the cluster which it is rather than trusting the caller's record. The
         record's `kind` is what teardown reads; this is what makes the door correct on its own.
+
+        ALREADY ABSENT IS DONE, not a failure, and that is what `absent_ok` buys. The record is
+        written AHEAD of every create, so a create that failed — a cluster refusal, a killed
+        launcher, a transport fault — leaves a row naming a name that never existed; and a delete
+        can remove an alias implicitly by removing its last backing member. `DELETE` on a name
+        that is not there answers 404, which `_call` otherwise refuses as a failure — so on the
+        ORDINARY abort path teardown reported "still present after delete" for exactly the names
+        that are not, raised, and wrote that claim into the review record an operator is told to
+        go and act on. The request is still ISSUED either way; only the 404 is read as the
+        success it is, and `exists` immediately after is what actually verifies the outcome.
         """
         _checked(name, _NAME_CHARS, "name to delete")
         if self._is_alias(name):
-            self._call("DELETE", f"/*/_alias/{self._quoted(name)}")
+            self._call("DELETE", f"/*/_alias/{self._quoted(name)}", absent_ok=True)
             return
-        self._call("DELETE", f"/{self._quoted(name)}")
+        self._call("DELETE", f"/{self._quoted(name)}", absent_ok=True)
 
     def exists(self, name: str) -> bool:
         """Is `name` still on the cluster? The half of teardown that is not a delete."""
         _checked(name, _NAME_CHARS, "name")
         found = self._resolved(name)
-        return bool(found["indices"] or found["aliases"])
+        # All three classes `_resolved` reads, so a name the engine holds in a form this door did
+        # not create still reads as present rather than as verified gone.
+        return bool(found["indices"] or found["aliases"] or found["data_streams"])
+
+    def _is_alias(self, name: str) -> bool:
+        return name in self._resolved(name)["aliases"]
 
     def list_names(self, glob: str) -> list[str]:
         """Every index and alias under `glob` — what the sweep reconciles against the record."""
@@ -760,13 +897,18 @@ class _Door:
 
     # -- the one read the door needs ----------------------------------------------------
     def _resolved(self, expression: str) -> dict[str, list[str]]:
+        """What `expression` names on the cluster, in the THREE classes `_resolve/index` answers.
+
+        THE THIRD CLASS is read as well as the two, and its absence was silent in the one
+        direction that matters: where the engine backs a configured corpus pattern with a
+        stream rather than with plain indices, the hidden backing names do not match the
+        pattern, so both `exists` and `delete` read a live name as absent.
+        """
         _code, payload = self._call("GET", f"/_resolve/index/{self._quoted(expression)}")
         return {key: [str(e.get("name")) for e in payload.get(key, [])
                       if isinstance(e, dict) and e.get("name")]
-                for key in ("indices", "aliases")}
+                for key in ("indices", "aliases", "data_streams")}
 
-    def _is_alias(self, name: str) -> bool:
-        return name in self._resolved(name)["aliases"]
 
 
 def write_door(*, ctx: Any = None, container: str, transport: Any = docker_exec_curl,
@@ -786,6 +928,13 @@ def write_door(*, ctx: Any = None, container: str, transport: Any = docker_exec_
     """
     return _Door(ctx=ctx, container=container, transport=transport, base_url=base_url,
                  timeout_sec=timeout_sec, insecure=insecure, auth=auth)
+
+
+#: The `config.env` keys this door reads, so an environment that names one the FILE omits still
+#: steers it. Named rather than derived from the file's contents: "which keys the door needs" is
+#: a property of the door, and deriving it from whatever the file happens to hold is what made
+#: an env override depend on the file already agreeing with it.
+_DOOR_CONFIG_KEYS = ("ELASTICSEARCH_URL", "ELASTIC_SSL_VERIFY")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
 
 
 @dataclass(frozen=True)
@@ -817,18 +966,43 @@ def write_door_from_env(ctx: Any = None, *, transport: Any = docker_exec_curl) -
     """
     from defender._paths import PATHS
 
-    defender_dir = getattr(ctx, "defender_dir", None) or PATHS.defender_dir
-    env: dict[str, str] = dict(getattr(ctx, "env", None) or os.environ)
+    # `is not None`, never `or` (`defender/CLAUDE.md`: "Prefer `is not None` over `or`"), and
+    # here it is load-bearing rather than stylistic: `_HostContext(env={}, ...)` is the ordinary
+    # construction for a hermetic caller, and an empty-but-PRESENT env read as absent sent this
+    # door to the developer's real shell for `ELASTICSEARCH_URL` while `write_door` below was
+    # handed the caller's own empty-env ctx — the config half and the transport half addressing
+    # two different clusters, which is the failure the paragraph below says this function exists
+    # to prevent.
+    ctx_dir = getattr(ctx, "defender_dir", None)
+    defender_dir = PATHS.defender_dir if ctx_dir is None else ctx_dir
+    ctx_env = getattr(ctx, "env", None)
+    env: dict[str, str] = dict(os.environ if ctx_env is None else ctx_env)
     values: dict[str, str] = {}
     path = Path(defender_dir) / "knowledge" / "environment" / "systems" / "elastic" / "config.env"  # lint-shippable: ok — the per-vendor config the read adapter loads
-    if path.is_file():
+    if path.is_file():  # lint-tree-read-follows-link: ok — the deployment's own config under `defender_dir`, in the checkout; no box binds that tree, and the read adapter reads the same file the same way
         for line in path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("#") or "=" not in stripped:
                 continue
             key, _, val = stripped.partition("=")
-            values[key.strip()] = val.strip().strip('"').strip("'")
-    values.update({k: v for k, v in env.items() if k in values})
+            # ONE MATCHED PAIR, never a character SET. `.strip('"').strip("'")` trims BOTH ends
+            # of BOTH characters, so a value that legitimately ends in a quote — a password, a
+            # URL carrying one — silently loses it and the door addresses a cluster the operator
+            # never named. Spelled inline rather than as a helper: `_unquoted` already exists
+            # twice in this tree under two different dotenv-ish grammars, and a third `def`
+            # sharing the name would be the duplicate the gate is about.
+            raw = val.strip()
+            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+                raw = raw[1:-1]
+            values[key.strip()] = raw
+    # THE ENVIRONMENT OVERRIDES THE FILE, INCLUDING A KEY THE FILE DOES NOT CARRY — which is
+    # the read adapter's own precedence (`elastic_adapter.load_config` applies `ctx.env` over
+    # `list(config) + REQUIRED_CONFIG_KEYS`). Gated on `k in values` it was weaker in exactly
+    # the direction nothing can see: a deployment whose `config.env` is absent or trimmed had
+    # its `ELASTICSEARCH_URL` ignored and staged against `https://localhost:9200` with TLS
+    # verification off, while every sibling's READ adapter queried the cluster the operator
+    # named — a family staged on one cluster and measured on another.
+    values.update({k: env[k] for k in (*values, *_DOOR_CONFIG_KEYS) if env.get(k)})
     return write_door(
         ctx=ctx if ctx is not None else _HostContext(env=env, defender_dir=Path(defender_dir)),
         container=env.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch"),  # lint-shippable: ok — the container the read adapter execs into

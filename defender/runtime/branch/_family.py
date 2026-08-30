@@ -33,7 +33,8 @@ from typing import Any
 
 import yaml
 
-from defender._io import guarded_mkdir, write_guarded
+from defender import _yaml
+from defender._io import guarded_mkdir, read_guarded, write_guarded
 from defender._run_id import (
     CASE_STABLE_REQUIRED,
     RUN_ID_ALLOWED,
@@ -227,7 +228,12 @@ def _parse_elastic_entry(entry: Any, at: str) -> ElasticEntry | None:
     unknown = sorted(set(entry) - {"inject", "exclude"})
     if unknown:
         raise FamilyError(f"{at} names unknown field(s) {unknown}")
-    inject = entry.get("inject") or []
+    # `is None`, never `or`: `inject: {}` / `0` / `""` are falsy NON-lists, and coalescing
+    # them to `[]` walked them straight through the isinstance check below — a malformed
+    # overlay loading clean as an empty injection in a loader whose whole docstring is
+    # "STRICT, in both directions". `exclude` two lines down already reads this way.
+    inject = entry.get("inject")
+    inject = [] if inject is None else inject
     if not isinstance(inject, list) or any(not isinstance(d, dict) for d in inject):
         raise FamilyError(f"{at}.inject must be a list of documents")
     exclude = entry.get("exclude")
@@ -338,10 +344,15 @@ def _check_label_basis(raw: Any, at: str) -> str:
     A world that omits the field is asserting the policy rule, not a judgment: the default is
     the WEAKER claim, so an omission can never be read as a stronger one.
     """
+    # THE TYPE FIRST, like every other scalar this loader narrows. `LABEL_BASES` is a frozenset,
+    # so `basis not in LABEL_BASES` HASHES the value — and `label_basis` is copied verbatim out
+    # of a model reply, so a seat answering `{...}` or `[...]` raised `TypeError: unhashable
+    # type` rather than the named `FamilyError` this module promises. `run.py --resume` catches
+    # only `FamilyError`, so the sibling died on a traceback instead of a refusal.
     basis = "policy-rule" if raw is None else raw
-    if basis not in LABEL_BASES:
+    if not isinstance(basis, str) or basis not in LABEL_BASES:
         raise FamilyError(f"{at}.label_basis is {basis!r}, outside {sorted(LABEL_BASES)}")
-    return str(basis)
+    return basis
 
 
 # ---------------------------------------------------------------------------------------
@@ -524,9 +535,17 @@ def _read_document(path: Path) -> object:
     deserializer's `Any` flowed straight into a `-> Family` return and type-checked clean over
     a promise the runtime never made.
     """
+    # SCREENED, the mirror of `write_family`'s `write_guarded` below and for its own reason:
+    # the episode dir is reachable from a sibling box's rw bind, so an entry at the manifest's
+    # name may be a link the model planted — and a plain `read_text` follows the link the write
+    # side refuses, handing every sibling a contract from outside the episode. `read_guarded`
+    # asks plainness of the OPEN DESCRIPTOR, so there is no check-then-act window either.
+    text, refusal = read_guarded(path)
+    if text is None:
+        raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as bad:
+        return _yaml.safe_load(text)
+    except yaml.YAMLError as bad:
         raise FamilyError(f"the manifest at {path} could not be read: {bad}") from bad
 
 
@@ -555,8 +574,16 @@ def write_family(episode_dir: Path, doc: dict) -> Path:
 
 
 def manifest_digest(path: Path) -> str:
-    """The manifest's content digest, recorded in the review and re-checked on resume."""
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    """The manifest's content digest, recorded in the review and re-checked on resume.
+
+    OVER THE SAME SCREENED READ `_read_document` MAKES. Hashed through `read_bytes` this frame
+    followed a link the loader is about to refuse — or, worse, agreed with a planted target and
+    certified it as the document the review accepted.
+    """
+    text, refusal = read_guarded(Path(path))
+    if text is None:
+        raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def check_manifest_digest(path: Path, recorded: str) -> None:
@@ -584,8 +611,9 @@ def check_identities(family: Family) -> None:
     Every rule the downstream names would each have refused at a different depth, and refused
     there they cost a primed episode and however many siblings had already run: the label must
     be nameable in a view, the labels must be distinct case-folded, none may be the reserved
-    base-capture name, the roles must be distinct, and each composed world token must round-trip
-    the naming rule the four comparing sites read it back through.
+    base-capture name, the label must be able to NAME A RUN, the roles must be distinct, and
+    each composed world token must round-trip the naming rule the four comparing sites read it
+    back through.
     """
     # THE ROLES FIRST, because that rule is the FAMILY's and the rest are each world's own. A
     # role is the world's name in every report and in the comparison the archive publishes, so
@@ -615,6 +643,23 @@ def check_identities(family: Family) -> None:
             refuse_unnameable_world(label)
         except ViewNameError as bad:
             raise FamilyError(f"world label {label!r} cannot name a view: {bad}") from bad
+        # AND IT HAS TO NAME A RUN, which the view rule does not cover and which the label's
+        # move from the retired `cli.World.__post_init__` to this gate lost on the way. The two
+        # grammars overlap and neither contains the other: `refuse_unnameable_world` is
+        # `confinement._nameable`, which refuses `\ / * ? " < > | ,`, whitespace, upper case and
+        # `-`, and admits `wörld`, `a+b`, `a:b`, `a#b`, `a[b]` — every one of which fails the
+        # run-id grammar. That matters MORE now than when the rule was written, because the
+        # label is MODEL-authored: each sibling's run dir is `{episode_id}-{label}`, so a label
+        # off this grammar passes the one gate that claims to hold every id rule, gets the base
+        # primed, the corpus staged, the review replayed and three processes spawned — and each
+        # child then `sys.exit`s in `run_common.materialize_run_dir` on the id. Refused at the
+        # mint, where the old code refused it and where nothing has been spent.
+        if not is_valid_run_id(f"{family.episode_id}-{label}"):
+            raise FamilyError(
+                f"world label {label!r} cannot name this episode's sibling run "
+                f"({family.episode_id}-{label}; allowed: {RUN_ID_ALLOWED}) — each sibling is a "
+                "run dir named for its world, so a label off that grammar is refused by every "
+                "child after the whole family has been authored, staged and reviewed")
         folded = label.casefold()
         if folded in seen:
             raise FamilyError(
@@ -622,21 +667,29 @@ def check_identities(family: Family) -> None:
                 "filesystem folds case, and each names a run dir, a ledger file and a staged "
                 "corpus")
         seen[folded] = label
-        token = f"{token_head}.{label}"
+        # THE COMPOSED TOKEN, not the label again. Asked of the label a second time this check
+        # was a restatement of the one four lines up and could never fire — while the thing the
+        # docstring promises, that the token the four comparing sites read back is nameable, went
+        # unasked. `world_token_for` is the join, so the value checked is the value they build.
+        token = world_token_for(token_head, label)
         try:
-            refuse_unnameable_world(label)
-        except ViewNameError as bad:  # pragma: no cover — covered by the label check above
+            refuse_unnameable_world(token)
+        except ViewNameError as bad:
             raise FamilyError(f"world token {token!r} does not round-trip: {bad}") from bad
 
 
 def episode_token_for(episode_id: str, *, override: str | None = None) -> str:
     """The episode's own token: the id with its separators normalised to one spelling.
 
-    INJECTIVE, and not by a plain character replacement: the run-id grammar admits BOTH `-` and
-    `_`, so folding one onto the other would map two distinct episode ids onto one token — and
-    the token is what the sweep's glob and every world token are built from, so a collision
-    there is one episode tearing down another's live names. `-` and `_` are therefore escaped
-    to distinct sequences before the separator is chosen.
+    INJECTIVE, and not by a plain character replacement: the run-id grammar admits `-`, `_` AND
+    `.` (`_run_id.RUN_ID_ALLOWED`), so folding one onto another would map two distinct episode
+    ids onto one token — and the token is what the sweep's glob and every world token are built
+    from, so a collision there is one episode tearing down another's live names. All THREE are
+    therefore accounted for before the separator is chosen: `_` escapes to `__` and `.` to `_p`,
+    so nothing but the folded `-` can produce a literal `.`. Escaping only `_` left the hole
+    the escape exists to close — `20260728t161845z-alert-2026.01-n5` and
+    `20260728t161845z-alert-2026-01-n5` are two ids that both folded to one token, and a run id
+    carrying a dot is ordinary (`--run-id`, and the auto id's alert label is a fixture STEM).
 
     NAMEABLE, because the token is the head of every world token and therefore of every staged
     alias. An id that cannot render is not permanently unbranchable: `override` is the escape
@@ -650,7 +703,10 @@ def episode_token_for(episode_id: str, *, override: str | None = None) -> str:
     # `refuse_bad_episode_id` holds every episode id the launcher accepts to `is_case_stable_id`,
     # so for those ids the fold is the identity, and an id reaching here unfolded came from a
     # caller that has not been through that gate.
-    escaped = episode_id.replace("_", "__").replace("-", ".").casefold()
+    # ORDER IS THE ESCAPE. `_` doubles first, so nothing that follows can produce a `__` a
+    # literal `_` did not; then `.` takes `_p`, which a literal `_p` in the id can no longer
+    # spell; only then is `-` folded onto the `.` that is now unreachable any other way.
+    escaped = episode_id.replace("_", "__").replace(".", "_p").replace("-", ".").casefold()
     return _nameable_token(escaped, f"episode id {episode_id!r}")
 
 

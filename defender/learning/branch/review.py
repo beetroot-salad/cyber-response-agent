@@ -52,6 +52,8 @@ from defender.runtime.branch._family import (
     World,
     episode_token_for,
     resume_world_from,
+    runnable_worlds,
+    world_token_for,
 )
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters.confinement import world_view
@@ -59,18 +61,29 @@ from defender.scripts.adapters.confinement import world_view
 from .comparator import Verdict, compare, mechanical
 from .estate.applier import WorldApplier
 from .estate.lookups import apply_patches
-from .ledger import BASE, Ledger, ServedCall, base_file, payload_text
+from .estate.registry import refuse_a_foreign_world_view
+from .ledger import (
+    BASE,
+    SERVED_DIRNAME,
+    Ledger,
+    ServedCall,
+    base_file,
+    correlation_key_of,
+    payload_text,
+)
+from .staging import INJECT_SUFFIX as _staging_inject_suffix
 
 #: The review's own record, beside the manifest it reviewed. Kept on a REJECTION too: the
 #: measurement of a family that did not run is the second thing O4's drift obligation is
 #: observed by, and deleting it would leave "we rejected it" as a claim with no reading behind.
 REVIEW_NAME = "review.yaml"
 
-#: The suffix staging gives a world's injection index, under its own view name. The names are
-#: constructed there and only READ here — this module never creates one — but the two must
-#: agree exactly, because a count asked of a name staging did not write answers zero and reads
-#: as an unreachable injection.
-INJECT_SUFFIX = ".inject"
+#: The suffix staging gives a world's injection index, under its own view name. IMPORTED from
+#: the module that constructs the names rather than restated: this module only READS them, and
+#: the two "must agree exactly" — a count asked of a name staging did not write answers zero and
+#: reads as an unreachable injection, which rejects the world. Re-exported because the review's
+#: own consumers name it.
+INJECT_SUFFIX = _staging_inject_suffix
 
 #: The two decisions a world or an episode can carry.
 ACCEPTED = "accepted"
@@ -140,7 +153,7 @@ def scratch_ledger(episode_dir: Path, *, world_label: str = "review",
     episode_dir = Path(episode_dir)
     if root is None:
         root = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))
-    served = Path(root) / "served"
+    served = Path(root) / SERVED_DIRNAME
     served.mkdir(  # lint-unguarded-tree-write: ok — a fresh host-made scratch tree under the system temp dir, never a box mount and never the episode's own served/  # noqa: E501
         parents=True, exist_ok=True)
     base = served / base_file(episode_dir).name
@@ -221,8 +234,20 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
     replayed, and the one thing it does not hold is the one thing the review deliberately asks.
 
     `world is None` is the bare replay: no staging, no patch, nothing to apply.
+
+    THE FORK-6 REFUSAL IS FIRST AND OUTSIDE EVERYTHING, exactly as it is in `serve_one` and in
+    `WorldRegistry._served`. This frame is the third spelling of the serve order and it was the
+    one without the guard — and it is the spelling that replays the DISCRIMINATING ENVELOPE, the
+    one call in this whole module a MODEL authored (`family.discriminator["envelope"]`, which
+    the manifest loader type-checks and does not read). Asked above `prepare`, so a world naming
+    a sibling's staged view by hand is refused before any stager can rewrite the name into a
+    harmless one and before the adapter is reached — which is the case the guard's own docstring
+    identifies as the reachable one, because the CONTROL stages nothing and its applier hands
+    the parameters straight back.
     """
     system, verb, params = call
+    if world is not None:
+        refuse_a_foreign_world_view(world, system, verb, params)
     context = ctx if ctx is not None else verb_context(episode_dir)
     book = ledger if ledger is not None else scratch_ledger(episode_dir)
     prepared = dict(params) if world is None else applier.prepare(
@@ -271,6 +296,7 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
     rows, unreadable = read_jsonl_rows_report(base_file(episode_dir))
     context = verb_context(episode_dir)
     token = episode_token_for(family.episode_id)
+    drifted = frozenset(_capture_drift(rows))
     scratch = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))
     try:
         worlds: dict[str, dict] = {}
@@ -279,7 +305,7 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
             result = _review_world(
                 world, family=family, episode_dir=episode_dir, rows=rows, control=control,
                 deps=_Deps(adapters=adapters, door=door, invoke=invoke, ctx=context,
-                           scratch=scratch, token=token))
+                           scratch=scratch, token=token, drifted=drifted))
             if world.role == BASE_ROLE:
                 control = list(result["consistency"]["control_mismatch_keys"])
             worlds[world.world_id] = result
@@ -312,6 +338,11 @@ class _Deps:
     ctx: Any
     scratch: Path
     token: str
+    #: The keys the CAPTURE itself answers two ways — a fact about the episode, so it is
+    #: derived once here rather than per world. Recomputed inside `_consistency` it re-walked
+    #: every captured row and re-canonicalised every payload once per world, to rediscover a
+    #: value that cannot vary between them.
+    drifted: frozenset[str]
 
 
 def _control_first(family: Family) -> list[World]:
@@ -321,16 +352,26 @@ def _control_first(family: Family) -> list[World]:
     world's is measured against, and the record is written in the order it was computed so a
     reader sees the same sequence the judgment used.
     """
-    base = [w for w in family.worlds if w.role == BASE_ROLE]
-    return base + [w for w in family.worlds if w.role != BASE_ROLE]
+    # THE WORLDS THE LAUNCHER RUNS, and no others. Staging (`cli._run_episode`) and the launch
+    # both walk `runnable_worlds`, which drops the `role: null` replicate arm the data model
+    # admits so an operator can ASK for one. Walked over `family.worlds` instead, the review
+    # judged that arm against a corpus staging never created: its injection index does not
+    # exist, `_injected_retrieved` counts zero, `_rejection` calls the difference unreachable,
+    # and FORK-14 then ends the whole episode — an opt-in arm making the family unrunnable.
+    runnable = runnable_worlds(family)
+    base = [w for w in runnable if w.role == BASE_ROLE]
+    return base + [w for w in runnable if w.role != BASE_ROLE]
 
 
 def _review_world(world: World, *, family: Family, episode_dir: Path, rows: Sequence[dict],
                   control: Sequence[str], deps: _Deps) -> dict:
     """One world's whole result: consistency, reachability, inventions and the decision."""
     resumed = resume_world_from(family, world.world_id, episode_dir)
-    applier = WorldApplier(patches={system: dict(table)
-                                    for system, table in world.overlay.patches.items()})
+    # NO `patches=`. `WorldApplier.patch_table` prefers the world's OWN overlay whenever the
+    # world carries one, and `resumed.overlay` IS `world.overlay` — so a table handed to the
+    # constructor here was a second copy the applier never consulted, which is exactly the drift
+    # `patch_table`'s docstring exists to prevent. The sibling path (`run.py`) builds it bare.
+    applier = WorldApplier()
     ledger = scratch_ledger(episode_dir, world_label=world.world_id, root=deps.scratch)
     is_control = world.role == BASE_ROLE
 
@@ -340,7 +381,7 @@ def _review_world(world: World, *, family: Family, episode_dir: Path, rows: Sequ
                           captured=captured)
 
     consistency = _consistency(rows, replay=replay, control=control, is_control=is_control,
-                               invoke=deps.invoke)
+                               invoke=deps.invoke, drifted=deps.drifted)
     reachability = _reachability(world, family=family, replay=replay, deps=deps)
     inventions = _inventions(world, rows=rows, reachability=reachability)
     reason = _rejection(world, consistency=consistency, reachability=reachability)
@@ -363,7 +404,7 @@ def _review_world(world: World, *, family: Family, episode_dir: Path, rows: Sequ
 
 
 def _consistency(rows: Sequence[dict], *, replay: Any, control: Sequence[str],
-                 is_control: bool, invoke: Any) -> dict:
+                 is_control: bool, invoke: Any, drifted: frozenset[str]) -> dict:
     """Replay every captured call in this world and classify what came back.
 
     THE CONTROL'S SET IS SUBTRACTED, not re-derived. A key the base world also mismatches on is
@@ -382,15 +423,23 @@ def _consistency(rows: Sequence[dict], *, replay: Any, control: Sequence[str],
     gather evidence: re-asking the estate would measure how far it has moved since the source
     run rather than what the world declares, and it would do it once per captured key per world.
     """
-    drifted = _capture_drift(rows)
     replayed: list[dict] = []
     mismatches: list[dict] = []
     faults: list[dict] = []
     drift: list[str] = []
     for row in rows:
-        key = str(row.get("correlation_key"))
+        # `correlation_key_of`, never `row.get("correlation_key")`: `ServedCall.row()` does not
+        # WRITE that column — it is a property — so a column read answered `None` for every row
+        # a real `prime_base` produced, every key of the capture folded onto one, and the whole
+        # pass read as drift. One derivation, shared with `episode._pair_key`.
+        derived = correlation_key_of(row)
         captured = row.get("payload_text")
         call = (str(row.get("system")), str(row.get("verb")), dict(row.get("params") or {}))
+        if derived is None:
+            faults.append({"key": None,
+                           "detail": "the captured row names no call, so it pairs with nothing"})
+            continue
+        key = derived
         if not isinstance(captured, str):
             faults.append({"key": key, "detail": "the captured row carries no payload text"})
             continue
@@ -400,6 +449,10 @@ def _consistency(rows: Sequence[dict], *, replay: Any, control: Sequence[str],
             faults.append({"key": key, "detail": str(fault) or type(fault).__name__})
             continue
         replayed.append({"key": key})
+        # THE COMPARATOR IS DELIBERATELY OUTSIDE THE HANDLER ABOVE. A wrong-seat verdict is not
+        # an estate fault; it is the model answering a question this call did not ask, and
+        # §7 FORK-9's one abort rule is what ends the episode on it. Filed as a fault it would
+        # be a review that recorded "we could not read the answer" and started the family anyway.
         outcome = _row_outcome(key, captured, answer.text, drifted=drifted, control=control,
                                is_control=is_control, invoke=invoke)
         if outcome is None:
@@ -423,7 +476,7 @@ def _consistency(rows: Sequence[dict], *, replay: Any, control: Sequence[str],
 DRIFT = object()
 
 
-def _row_outcome(key: str, captured: str, replayed: str, *, drifted: set[str],
+def _row_outcome(key: str, captured: str, replayed: str, *, drifted: frozenset[str],
                  control: Sequence[str], is_control: bool, invoke: Any) -> Any:
     """How one replayed row stands to its capture: agreed (`None`), `DRIFT`, or a verdict.
 
@@ -441,13 +494,21 @@ def _row_outcome(key: str, captured: str, replayed: str, *, drifted: set[str],
     if key in drifted:
         return DRIFT
     verdict = mechanical(captured, replayed)
+    if verdict is None and not is_control and key not in control:
+        # THE MODEL'S ANSWER IS FOLDED THROUGH THE SAME GATE THE ARITHMETIC'S IS. `compare` can
+        # return `same` — it is a member of `REVIEW_SEAT`, and the whole reason the model is
+        # asked is that the bytes differ in a way arithmetic could not settle. Returned as a
+        # member it was appended to `mismatches` with `verdict: same`, so `review.yaml` reported
+        # N mismatches for a world the comparator said agrees, and every reader counting that
+        # list read an agreement as a difference.
+        verdict = compare(captured, replayed, None, invoke=invoke)
     if verdict is Verdict.SAME:
         return None
     if is_control:
         return DRIFT
     if key in control:
         return None
-    return verdict if verdict is not None else compare(captured, replayed, None, invoke=invoke)
+    return verdict
 
 
 def _capture_drift(rows: Sequence[dict]) -> set[str]:
@@ -465,9 +526,9 @@ def _capture_drift(rows: Sequence[dict]) -> set[str]:
     first: dict[str, str] = {}
     drifted: set[str] = set()
     for row in rows:
-        key = str(row.get("correlation_key"))
+        key = correlation_key_of(row)
         text = row.get("payload_text")
-        if not isinstance(text, str):
+        if key is None or not isinstance(text, str):
             continue
         if key not in first:
             first[key] = text
@@ -493,21 +554,32 @@ def _reachability(world: World, *, family: Family, replay: Any, deps: _Deps) -> 
     measured nothing, and judging a world's difference against it would reject the world for the
     corpus being quiet — the same reading `exclusion_count_failed` gets one field over, where a
     count nobody could ask is recorded as unknown rather than as zero.
+
+    AND `envelope_failed` SAYS WHICH OF THE TWO IT WAS, for the same reason that field exists
+    one line further down. A quiet corpus and an envelope that RAISED — an adapter layer nobody
+    wired, a confinement refusal, a cluster outage — collapsed onto one `False`, and the record
+    a later reader opens could not tell "this world's difference is not observable" from "this
+    review measured nothing at all". It does not reject on its own, exactly as an unanswerable
+    exclusion count does not: an outage is the harness's, and rejecting a world for one would
+    charge it for the estate.
     """
     envelope = _envelope(family)
     rows: list[dict] = []
     ran = False
+    faulted: str | None = None
     if envelope is not None:
         try:
             payload = replay(envelope).payload
-        except Exception:  # noqa: BLE001 — a faulted envelope is "nothing was measured"
+        except Exception as fault:  # noqa: BLE001 — a faulted envelope is "nothing was measured"
             payload = None
+            faulted = str(fault) or type(fault).__name__
         rows = _rows_of(payload)
         ran = bool(rows)
     injected = _injected_retrieved(world, rows=rows, deps=deps)
     matched, failed, total = _exclusion_matches(world, deps=deps)
     return {
         "envelope_ran": ran,
+        "envelope_failed": faulted,
         "injected_retrieved": injected,
         "patched_visible": _patched_visible(world, rows=rows),
         "exclusion_matches": matched,
@@ -535,6 +607,15 @@ def _rows_of(payload: Any) -> list[dict]:
     `hits.hits`, and a tabular `rows`/`values`. A payload naming none of them contributes no
     rows, which reads as "nothing was retrieved" — the honest answer for a shape this frame
     cannot count, and one that never rejects a world on its own.
+
+    THE TABULAR SPELLING IS POSITIONAL, and that is not an extra tolerance — it is the ES|QL
+    payload, which is the natural discriminating envelope for a staged corpus difference.
+    `esql_payload` leaves `values` "AS THE WIRE SENT IT: rows are bare arrays, cell `i` binding
+    to `columns[i]`", so an `isinstance(row, dict)` filter over it dropped every row. The whole
+    reachability half then measured nothing: `envelope_ran` was False for every ES|QL envelope,
+    and `_rejection` returns `None` on that — so a world whose declared difference is genuinely
+    unreachable was ACCEPTED and FORK-14 never fired. Bound here, at read time, from the
+    `columns` the wire states once, exactly as the payload's own docstring says a reader must.
     """
     if not isinstance(payload, dict):
         return []
@@ -542,9 +623,30 @@ def _rows_of(payload: Any) -> list[dict]:
         found = payload.get(field_name)
         if isinstance(found, dict):
             found = found.get("hits")
-        if isinstance(found, list):
-            return [row for row in found if isinstance(row, dict)]
+        if not isinstance(found, list):
+            continue
+        bound = _bound_rows(found, payload.get("columns"))
+        return bound if bound is not None else [r for r in found if isinstance(r, dict)]
     return []
+
+
+def _bound_rows(rows: list, columns: Any) -> list[dict] | None:
+    """Positional rows bound to their column names, or `None` when this is not that shape.
+
+    `None` rather than `[]` for "not tabular", so the mapping-shaped arm above stays the
+    fallback rather than being replaced by an empty answer. A row longer or shorter than the
+    header binds what the two have in common: a truncated wire row is still evidence of a
+    retrieval, and refusing it here would read as "nothing was retrieved".
+    """
+    if not isinstance(columns, list) or not columns:
+        return None
+    names = [c.get("name") if isinstance(c, dict) else c for c in columns]
+    if any(not isinstance(n, str) for n in names):
+        return None
+    positional = [r for r in rows if isinstance(r, (list, tuple))]
+    if not positional:
+        return None
+    return [dict(zip(names, row, strict=False)) for row in positional]
 
 
 def _elastic_entries(world: World) -> list[tuple[str, ElasticEntry]]:
@@ -575,8 +677,14 @@ def _injected_retrieved(world: World, *, rows: Sequence[dict], deps: _Deps) -> i
 
 
 def _token(world: World, deps: _Deps) -> str:
-    """This world's composed token — the one spelling every staged name is built from."""
-    return f"{deps.token}.{world.world_id}"
+    """This world's composed token — through `world_token_for`, which owns that spelling.
+
+    Written out as an f-string here this module was the fifth site to compare a world on the
+    join `world_token_for`'s own docstring says must have one spelling, and the only one not
+    calling it: a change to the composition would leave the review counting documents in a name
+    staging never wrote, reading zero, and rejecting every injecting world as unreachable.
+    """
+    return world_token_for(deps.token, world.world_id)
 
 
 def _hit_count(entry: ElasticEntry, rows: Sequence[dict]) -> int:
@@ -585,13 +693,37 @@ def _hit_count(entry: ElasticEntry, rows: Sequence[dict]) -> int:
     Matched on `_id` where the injected document names one, and otherwise on the document being
     wholly contained in the row: an author who injected a document with no id still declared a
     difference, and refusing to count it would make the id field a requirement no schema states.
+
+    TWO SHAPES A MODEL-AUTHORED DOCUMENT CAN TAKE THAT THIS HAD TO ANSWER FOR. An `_id` that is
+    not a scalar is unhashable, and a set comprehension over it raised `TypeError` out of the
+    review and aborted the episode — `_parse_elastic_entry` validates that `inject` is a list of
+    mappings and nothing about the values inside them. And an EMPTY injected document makes
+    `all(...)` vacuously true, so every retrieved row counted as a hit and a world that injected
+    nothing at all read as one whose difference is reachable. Neither is refused here — this
+    frame counts, it does not judge — they just cannot match anything.
     """
-    ids = {doc.get("_id") for doc in entry.inject if doc.get("_id") is not None}
-    idless = [doc for doc in entry.inject if doc.get("_id") is None]
+    # AS STRINGS, because that is what the id round-trips as. `create_index` puts the document
+    # at `str(doc_id)` in the URL and the cluster answers `_id` as text, so a manifest that
+    # spelled `_id: 1` (YAML reads it as `int`) produced `{1}` here and `"1"` on the wire, and
+    # `"1" in {1}` is False — the world's whole injection counted zero and `_rejection` called
+    # its difference unreachable.
+    ids = {str(doc["_id"]) for doc in entry.inject
+           if isinstance(doc.get("_id"), (str, int, float))}
+    # THE BODY OF EVERY INJECTED DOCUMENT, `_id` REMOVED — not only the id-less ones. The
+    # payload this counts against is the SEARCH verb's, and `elastic_adapter` builds its `hits`
+    # from `_source` alone, so no retrieved row carries an `_id` at all: the id arm above can
+    # only fire for a payload shape that keeps one, and an id-bearing document had no second
+    # way to be recognised. Its body is exactly as good a witness, and it is the one the search
+    # payload actually holds. An EMPTY body is dropped, because `all(...)` over nothing is
+    # vacuously true and would count every retrieved row as a hit.
+    bodies = [body for body in
+              ({k: v for k, v in doc.items() if k != "_id"} for doc in entry.inject) if body]
     hits = 0
     for row in rows:
-        if row.get("_id") in ids or any(
-                all(row.get(k) == v for k, v in doc.items()) for doc in idless):
+        row_id = row.get("_id")
+        matched = isinstance(row_id, (str, int, float)) and str(row_id) in ids
+        if matched or any(
+                all(row.get(k) == v for k, v in body.items()) for body in bodies):
             hits += 1
     return hits
 
@@ -636,6 +768,13 @@ def _exclusion_matches(world: World, *, deps: _Deps) -> tuple[int | None, bool, 
             indices = deps.door.resolve(pattern)
         except Exception:  # noqa: BLE001 — an unanswerable count is unknown, never zero
             return None, True, None
+        if not indices:
+            # NOTHING TO COUNT IS NOT A COUNT OF ZERO, and the two are the same shape one line
+            # further on: `_rejection` refuses a world whose exclusion "matches zero base
+            # documents". A declared pattern that resolves to no concrete index — a corpus that
+            # is quiet right now, or one the resolver cannot see — has not been SHOWN to remove
+            # nothing, so it takes the unknown arm with the rest of the unaskable counts.
+            return None, True, None
         for index in indices:
             matched = _counted(deps.door, index, query=entry.exclude)
             held = _counted(deps.door, index)
@@ -679,10 +818,14 @@ def _inventions(world: World, *, rows: Sequence[dict], reachability: dict) -> li
     implausible, and implausibility does not reject (§7 FORK-7(a)).
     """
     notes: list[str] = []
-    captured = "\n".join(str(row.get("payload_text") or "") for row in rows)
+    # SCANNED PER ENTITY, never joined. The capture is the whole family's recording — the
+    # ledger sizes one payload in tens of kilobytes — and `"\n".join(...)` materialised all of
+    # it as one string once per world, including for the control, whose empty patch table means
+    # the string is built and never read. `any(... for row in rows)` reads the same rows and
+    # allocates nothing, and it stops at the first row that holds the entity.
     for system, table in sorted(world.overlay.patches.items()):
         for entity in sorted(table):
-            if entity not in captured:
+            if not any(entity in str(row.get("payload_text") or "") for row in rows):
                 notes.append(
                     f"{system}: entity {entity!r} appears in no captured row and no host-side "
                     "count holds a document for it — this overlay invents it")

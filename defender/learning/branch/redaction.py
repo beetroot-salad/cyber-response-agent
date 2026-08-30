@@ -45,12 +45,17 @@ from defender.scripts.adapters.confinement import VIEW_NAMESPACE
 #: names a view that then gets staged again — is removed WHOLE rather than leaving its inner
 #: half behind. The lookbehind keeps the match anchored at a token boundary: a word merely
 #: ending in the prefix's letters is not a view name and is not this filter's business.
+#: `.` AND `-` ARE NOT IN THE LOOKBEHIND, because in an index expression they are SEPARATORS
+#: rather than word characters — and excluding them left the name whole exactly where a cluster
+#: error puts it. `unknown index [logs-*,-wv-<token>-logs-]` (the exclusion spelling), and any
+#: name a stager quoted after a dot, came back byte for byte with the prefix, the template and
+#: the world token intact, on the one channel NEW-DECISION-1 was raised about.
 #: Concatenated rather than interpolated: `lint_stage_prompt_frames` refuses a module-level
 #: f-string outright, because an interpolated boundary grammar assembled at import time is how
 #: an unreviewed prompt frame got established once. This is a regex and not a frame, and the
 #: rule is still the cheaper one to keep than to argue with.
 _STAGED_NAME = re.compile(
-    r"(?<![A-Za-z0-9_.\-])" + re.escape(VIEW_NAMESPACE) + r"-[A-Za-z0-9_.*\-]*")
+    r"(?<![A-Za-z0-9_])" + re.escape(VIEW_NAMESPACE) + r"-[A-Za-z0-9_.*\-]*")
 
 #: An episode or world token, by SHAPE rather than by value — this filter is handed a string and
 #: never the world that is serving, and a filter that had to be told which world to hide would be
@@ -60,15 +65,35 @@ _STAGED_NAME = re.compile(
 #: the episode token plus one more segment, so the greedy tail removes both spellings at once and
 #: an assertion for the episode token inside a world token cannot pass on half a match.
 #:
+#: `_` IS IN THE SEGMENT CLASS, because `episode_token_for` escapes an underscore in the run id
+#: to `__` — and a run id carries one whenever the alert's own stem does (`_alert_label`). Left
+#: out, `20260728t161845z.brute__force.n12.b` matched only through `brute`, so the model was
+#: shown `[a run id]__force.n12.b`: half the episode token and the whole world label, on the
+#: one channel the decision was raised about, and with a marker announcing something was hidden.
+#:
 #: An ISO timestamp (`2026-07-28T16:18:45Z`) does not match — it carries separators inside both
 #: halves — so an ordinary cluster error naming a time window keeps it.
-_TOKEN = re.compile(r"(?<![A-Za-z0-9])\d{8}[tT]\d{6}[zZ](?:[.\-][A-Za-z0-9]+)*")
+_TOKEN = re.compile(r"(?<![A-Za-z0-9])\d{8}[tT]\d{6}[zZ](?:[.\-][A-Za-z0-9_]+)*")
 
-#: What each removal leaves behind. Named rather than blank, because the model has to be able to
-#: tell "the index you named was refused" from "the sentence lost a word": a refusal reading
-#: `index '' falls outside …` invites the model to retry with the same expression.
-_VIEW_MARK = "[a staged view]"
-_TOKEN_MARK = "[a world id]"
+#: What each removal leaves behind. Two rules, and the second one was got wrong at first.
+#:
+#: NAMED RATHER THAN BLANK, because the model has to be able to tell "the index you named was
+#: refused" from "the sentence lost a word": a refusal reading `index '' falls outside …`
+#: invites the model to retry with the same expression.
+#:
+#: AND IN THE MODEL'S OWN VOCABULARY, naming NOTHING about the scheme. The earlier spellings
+#: were `[a staged view]` and `[a world id]`, which is the entire experiment stated in English
+#: on the one channel that reaches the model — a defender told its index was "a staged view"
+#: knows its corpus is staged, and one told a name was "a world id" knows there are worlds to
+#: have ids. `test_947_the_environment_description_never_mentions_the_world_view_namespace`
+#: holds every prompt-facing document to silence about this "so the fault channel is the only
+#: way the scheme could have been learned"; the filter ON that channel was announcing it.
+#:
+#: An index and a run id are things EVERY run has, branched or not, so these two markers are
+#: producible by a run with no world at all. That is the standard: what stands in for a removed
+#: name must not be a fact only a branched run could report.
+_VIEW_MARK = "[an index]"
+_TOKEN_MARK = "[a run id]"
 
 
 def redact_model_visible(detail: str) -> str:
@@ -82,7 +107,7 @@ def redact_model_visible(detail: str) -> str:
     a driven run rather than by this function's own tests.
 
     THE VIEW NAMES FIRST, THEN THE TOKENS, and the order is load-bearing: a view name CONTAINS
-    the world token, so removing tokens first would leave `wv-[a world id]-logs-` — the prefix
+    the world token, so removing tokens first would leave `wv-[a run id]-logs-` — the prefix
     and the template, which are two of the three things the probe observed leaking, still intact
     and now advertising that something was hidden inside them.
 

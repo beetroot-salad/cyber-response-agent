@@ -197,8 +197,13 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
     (§7 FORK-4) and is the same one-place-for-every-id-rule this test was written to pin."""
     from defender.runtime.branch import _family
 
+    # NOT `Base`. The gate asks the RESERVED-label rule several lines before the case rule, so a
+    # label that is also the reserved base-capture name is refused for being reserved and this
+    # test would stay green with the case rule deleted outright. `Alpha` is unreserved, so the
+    # only rule that can refuse it is the one this test is named for — and the assertion names
+    # that rule's own words rather than a substring every message happens to carry.
     doc = {
-        "world_id": "Base", "role": "B", "story": "s", "axis": "an axis",
+        "world_id": "Alpha", "role": "B", "story": "s", "axis": "an axis",
         "disposition_declared": "malicious", "label_basis": "policy-rule", "overlay": {},
     }
     with pytest.raises(_family.FamilyError) as caught:
@@ -209,7 +214,7 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
             "discriminator": {"predicate": "p"},
             "worlds": [{**doc, "world_id": "a", "role": "A", "axis": None}, doc],
         }))
-    assert "base" in str(caught.value).casefold()
+    assert "upper case" in str(caught.value)
 
 
 def test_an_episode_id_carrying_upper_case_is_refused() -> None:

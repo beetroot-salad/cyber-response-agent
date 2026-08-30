@@ -51,12 +51,28 @@ def _serving():
     return T.mod("learning.branch.estate.registry")
 
 
-def _served_call(world_token, *, touches, verb, params, adapters=None):
-    """Drive ONE call through the real serving registry for a world with these touches."""
+def _served_call(world_token, *, touches, verb, params, adapters=None, overlay=None):
+    """Drive ONE call through the real serving registry for a world with these touches.
+
+    THE OVERLAY AGREES WITH `touches` BY DEFAULT, because in production one is derived from the
+    other (`_family.touches_of`) and the applier narrows its retarget by the overlay's declared
+    keys. A world touching `elastic` with an EMPTY overlay is a shape no manifest produces, and
+    against it the stager reads the base rather than the world's view — so the positive control
+    below would be asserting on the untouched pattern.
+    """
     registry = _serving()
-    world = registry.world_for(token=world_token, touches=touches, overlay={})
+    if overlay is None:
+        # A REAL declared difference, because `_parse_elastic_entry` normalises an entry that
+        # stages nothing to ABSENT — an overlay of empty entries is an overlay that declares no
+        # pattern, which is the same empty shape this default exists to avoid.
+        overlay = ({"elastic": T.elastic_overlay(inject=[{"_id": "i1"}])}
+                   if "elastic" in tuple(touches) else {})
+    world = registry.world_for(token=world_token, touches=touches, overlay=overlay)
+    # `.out` — the serve point hands back the whole PASSAGE (the asked and prepared params,
+    # what staging moved, the decision) because `WorldRegistry._served` needs those for its
+    # ledger rows and must not re-derive them. This driver wants the answer.
     return registry.serve_one(world, "elastic", verb, params,
-                              adapters=adapters or T.FakeAdapters())
+                              adapters=adapters or T.FakeAdapters()).out
 
 
 # ---------------------------------------------------------------------------------------
@@ -150,6 +166,39 @@ def test_947_an_ordinary_refusal_still_tells_the_model_something_actionable():
     redacted = _model_text(f"index 'wv-{TOKEN_A}-logs-' falls outside the configured patterns")
     assert redacted.strip()
     assert "falls outside the configured patterns" in redacted
+
+
+#: Words that only a BRANCHED run could honestly use about itself. A defender reading any of
+#: these in its own fault text has learned that its corpus is staged and that there are other
+#: arms to be one of — which is the whole of the scheme, and the one thing the design says it
+#: must not be able to learn.
+_SCHEME_WORDS = ("world", "staged", "staging", "episode", "sibling", "branch", "overlay",
+                 "corpus", "view")
+
+
+@pytest.mark.parametrize("detail", [
+    "Elasticsearch query failed (HTTP 404): no such index [wv-{a}-logs-]",
+    "index 'wv-{a}-logs-' falls outside the configured patterns",
+    "no such file /runs/{a}/alert.json",
+])
+def test_947_what_the_redaction_leaves_behind_names_nothing_about_the_scheme(detail):
+    """WHAT REPLACES a removed name discloses no more than the name did. The filter's markers
+    are text the model reads, so a marker reading "a staged view" or "a world id" hands over in
+    English exactly what removing the name withheld — that this run's corpus is staged and that
+    worlds exist to have ids.
+
+    The sibling demand holds every prompt-facing document to silence about the namespace "so
+    the fault channel is the only way the scheme could have been learned". This is that same
+    rule applied to the filter that sits ON the fault channel: an index and a run id are things
+    every run has, so what stands in for a removed name must be producible by a run with no
+    world at all."""
+    rendered = _model_text(detail.format(a=TOKEN_A)).casefold()
+    for word in _SCHEME_WORDS:
+        assert word not in rendered, (
+            f"the redaction's own replacement text says {word!r} — the marker discloses the "
+            "scheme the removal exists to hide")
+    assert rendered != detail.format(a=TOKEN_A).casefold(), (
+        "nothing was redacted at all, so the assertion above passed on an unfiltered string")
 
 
 def test_947_the_environment_description_never_mentions_the_world_view_namespace():

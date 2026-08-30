@@ -172,6 +172,20 @@ def refuse_a_foreign_world_view(world: Any, system: str, verb: str, params: Mapp
     try:
         source = reader(verb, dict(params), None)
     except Exception:  # noqa: BLE001 — see docstring: an unparseable body is `prepare`'s answer
+        # NOT UNCONDITIONALLY, though, and this is the half the docstring's "left to `prepare`"
+        # argument does not cover. `prepare` answers for a world that STAGES this system; a
+        # world that stages nothing gets its params handed straight back, and `esql` carries no
+        # index confinement at all — so an expression the reader refuses to reduce to one source
+        # (`FROM logs-*, wv-<other>-logs-`, which is exactly how a multi-source read spells a
+        # foreign view beside a legal one) reached the transport unrefused for the one world the
+        # guard's own docstring names as the one that can make the read. Nothing here parses the
+        # expression a second time: an unreducible call that MENTIONS the namespace at all is
+        # refused, and one that does not is the ordinary unparseable body `prepare` answers for.
+        if _names_the_namespace(params):
+            raise ConfinementFault(
+                "the call names the staged view namespace inside an index expression this seam "
+                "cannot reduce to a single corpus — refused before the call was issued, because "
+                "a multi-source read is how a foreign view rides alongside a legal one") from None
         return
     if not isinstance(source, str) or not source.startswith(f"{VIEW_NAMESPACE}-"):
         return
@@ -186,16 +200,55 @@ def refuse_a_foreign_world_view(world: Any, system: str, verb: str, params: Mapp
         "refused before the call was issued")
 
 
-def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: Any,
-              applier: Any = None, ctx: Any = None) -> Any:
-    """Serve ONE call for `world` through `adapters` — the serve point, above staging.
+def _names_the_namespace(params: Mapping) -> bool:
+    """Does any parameter value mention the staged view namespace at all?
+
+    A LAST LINE, not a parser. It is asked only where the vendor reader has already refused to
+    reduce the call to one corpus, and it answers the one question that still matters there:
+    could this call be addressing a staged view? No legitimate model-authored query names the
+    namespace — the whole scheme exists so the model never learns it — so a mention is either
+    the world's own view spelled by hand or a sibling's, and both are refusals at this seam.
+    """
+    prefix = f"{VIEW_NAMESPACE}-"
+    return any(prefix in value for value in params.values() if isinstance(value, str))
+
+
+@dataclass(frozen=True)
+class Served:
+    """One call's whole passage through the serve point, as the order produced it.
+
+    The RECORD rather than just the answer, because the two callers need different parts of it
+    and neither may re-derive its own: `serve_one`'s simple callers want `out`, and the registry
+    wants `prepared`, `moved` and `decision` for the ledger rows it writes around the same
+    passage. Handing back only `out` is what left the registry re-spelling the order inline to
+    get at the rest.
+    """
+
+    #: The params as the caller asked them, before any retarget.
+    asked: dict
+    #: The params the adapter was actually called with.
+    prepared: dict
+    #: `asked`, but ONLY when staging moved the call — the same condition the ledger records
+    #: `asked_params` under, and the one `restore` un-echoes on.
+    moved: dict | None
+    #: What came back, with the world's corpus identity taken back out.
+    payload: Any
+    #: The ledger's word for what this world did to the call.
+    decision: str
+    #: What the caller gets.
+    out: Any
+
+
+def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: Any = None,
+              applier: Any = None, ctx: Any = None, run: Any = None) -> Served:
+    """Serve ONE call for `world` — the serve point, above staging. THE order, spelled once.
 
     The narrow waist every branched read passes: refuse first, then let the world's applier
     point the call at its own corpus, then run it, then take the world's corpus identity back
-    out of what came back. `WorldRegistry._served` is this same order with the ledger's four
-    row-writing arms around it; this frame is the order itself, callable by anything that holds
-    a world and an adapter layer — the review's replay, a probe, a single-call harness — without
-    priming an episode.
+    out of what came back, then ask the world what it did to it. `WorldRegistry._served` is this
+    frame with the ledger's four row-writing arms around it, and it CALLS this one — which is
+    the whole point. Spelled twice, the fuzz suite that proves the ordering proved it of a frame
+    production never ran, and a fix to either copy left the other one unmoved.
 
     THE REFUSAL IS FIRST AND OUTSIDE EVERYTHING. It runs before `prepare`, so no stager gets to
     rewrite a foreign name into a harmless one; and before the adapter is called at all, so a
@@ -204,17 +257,33 @@ def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: 
     `restore` is the mirror of `prepare` and is called on the same condition the ledger records
     `asked_params` under — the call staging moved is the call whose echoed corpus identity has
     to come back out.
+
+    `run` IS THE ONE THING THE TWO CALLERS DO DIFFERENTLY, so it is the one thing that is a
+    seam. A plain caller has an adapter layer and wants the call made; the registry has a FAMILY
+    TIER in front of the adapter — `_base_payload`, which answers a key the capture already
+    holds without issuing a call at all — and a restore that has to happen inside that miss. It
+    is handed `(prepared, moved)` and owes back the restored payload, so everything on either
+    side of it stays here, in one order, for both.
     """
     refuse_a_foreign_world_view(world, system, verb, params)
     applier = (  # lint-default: ok — DI seam owning its default, the same one `WorldRegistry` resolves at construction  # noqa: E501
         applier if applier is not None else WorldApplier())
     asked = dict(params)
     prepared = applier.prepare(system, verb, dict(asked), world, ctx)
-    payload = adapters(system, verb, **prepared)
     moved = asked if prepared != asked else None
-    payload = applier.restore(system, verb, payload, moved, prepared, ctx)
-    _decision, out = applier.apply(system, verb, prepared, payload, world)
-    return out
+    if run is None:
+        if adapters is None:
+            raise EstateError(
+                "serve_one needs either an adapter layer or a `run` seam — with neither there "
+                "is nothing to make the call, and a frame that returned the prepared params as "
+                "if they were an answer would be a served response with no call behind it")
+        payload = applier.restore(
+            system, verb, adapters(system, verb, **prepared), moved, prepared, ctx)
+    else:
+        payload = run(prepared, moved)
+    decision, out = applier.apply(system, verb, prepared, payload, world)
+    return Served(asked=asked, prepared=prepared, moved=moved, payload=payload,
+                  decision=decision, out=out)
 
 
 class WorldRegistry(ModuleVerbRegistry):
@@ -353,56 +422,76 @@ class WorldRegistry(ModuleVerbRegistry):
             # was validated at construction — which matters because this line sits OUTSIDE the
             # refusal handler below.
             ctx = _carrying(ctx, as_of=self.as_of)
-            try:
-                # THE SERVE POINT'S OWN REFUSAL, above staging and inside the recording handler
-                # below: a cross-world read is evidence, and one that raised without a row would
-                # be indistinguishable from the sibling never asking. Asked here rather than in
-                # `serve_one` alone so the registry every sibling process actually serves
-                # through carries it too.
-                refuse_a_foreign_world_view(world, system, verb, params)
-                prepared = applier.prepare(system, verb, params, world, ctx)
-            except Exception as refusal:
-                # A refusal is EVIDENCE, and an unrecorded one is indistinguishable from the
-                # sibling never asking. Recorded against the params as ASKED — the retarget is
-                # exactly what failed, so there is no prepared form to name — then re-raised
-                # so the query tool still turns it into the fault row the model reads.
-                #
-                # WHICH class, though, is the exit code's answer and not this frame's. `prepare`
-                # reads the run's config to resolve a default index, so an ENVIRONMENT fault
-                # (a missing config file, a missing key) surfaces here too — and filing that as
-                # `refused` splits one outage along the base/sibling axis: the base world
-                # returns from `redirect` before ever reading the config, takes the identical
-                # fault out of the adapter body below, and records `fault`. One outage, two
-                # decision classes, divided by exactly the thing the table exists to measure.
-                # `refused` is the capability answer, which is the one the stager marks usage.
-                _record_beside(ledger, ServedCall(
-                    system=system, verb=verb, params=dict(params),
-                    payload_text=str(refusal),
-                    source=(
-                        REFUSED if getattr(refusal, "exit_code", None) == USAGE_EXIT_CODE
-                        else FAULT
-                    ),
-                    world_id=world.world_id,
-                ))
-                raise
-            asked = dict(params) if prepared != params else None
-            try:
-                payload, base_text = _base_payload(
-                    fn, _carrying(ctx, world_id=world.world_id) if asked is not None else ctx,
-                    prepared, system, verb, ledger, asked,
+            # WHAT THE RUN ARM REACHED, for the two recording arms below. The order itself is
+            # `serve_one`'s; the only thing this frame needs back out of it before it finishes
+            # is how far the call got, because the two rows a failure writes are different rows
+            # (see each handler). Empty until `run` is entered, which is exactly the boundary
+            # between them.
+            reached: dict[str, Any] = {}
+
+            def run(prepared: dict, moved: dict | None) -> Any:
+                """The FAMILY TIER in front of the adapter, and the restore inside its miss."""
+                reached.update(prepared=prepared, moved=moved)
+                payload, reached["base_text"] = _base_payload(
+                    fn, _carrying(ctx, world_id=world.world_id) if moved is not None else ctx,
+                    prepared, system, verb, ledger, moved,
                     # BEFORE the base row is written, so the FAMILY's shared recording carries
                     # no world's identity. That row is replayed by every sibling, and it is
                     # made by whichever world called first — so a staged recording would hand
                     # every other sibling the first one's view name as if it were the estate's.
-                    lambda served: applier.restore(
-                        system, verb, served, asked, prepared, ctx),
+                    lambda served_payload: applier.restore(
+                        system, verb, served_payload, moved, prepared, ctx),
                 )
-                decision, out = applier.apply(system, verb, prepared, payload, world)
+                return payload
+
+            try:
+                # THE ORDER, THROUGH THE FRAME THAT OWNS IT. The refusal, the retarget, the
+                # call, the restore and the decision are `serve_one`'s — this frame supplies
+                # only the family tier (`run`) and the ledger rows around it. Spelled inline
+                # here, as it was, the 240-case isolation fuzz drove the OTHER copy: it proved
+                # the refusal came first in a frame no sibling process ever entered.
+                #
+                # `applier` is a DI seam: one that retargets IN PLACE and returns the same
+                # object leaves `prepared is params`, so `moved` is `None` for a call staging
+                # DID move — and three things then silently switch off at once (the `world_id`
+                # the adapter's confinement needs to admit this world's own view, `restore`'s
+                # un-echo of the staged identity, and the `asked_params` column
+                # `correlation_key` pairs on), with every row still reading honestly. The copy
+                # `serve_one` hands `prepare` is what keeps that comparison meaningful.
+                passage = serve_one(world, system, verb, params,
+                                    applier=applier, ctx=ctx, run=run)
             except LedgerError:
                 # The table's own refusal, already accounted for. Recording a second row for it
                 # would answer "the ledger would not write this" with another write.
                 raise
-            except Exception as fault:
+            except Exception as failure:
+                if "prepared" not in reached:
+                    # BEFORE THE CALL WAS MADE: the isolation refusal, or the retarget itself.
+                    # A refusal is EVIDENCE, and an unrecorded one is indistinguishable from the
+                    # sibling never asking. Recorded against the params as ASKED — the retarget
+                    # is exactly what failed, so there is no prepared form to name — then
+                    # re-raised so the query tool still turns it into the fault row the model
+                    # reads.
+                    #
+                    # WHICH class, though, is the exit code's answer and not this frame's.
+                    # `prepare` reads the run's config to resolve a default index, so an
+                    # ENVIRONMENT fault (a missing config file, a missing key) surfaces here too
+                    # — and filing that as `refused` splits one outage along the base/sibling
+                    # axis: the base world returns from `redirect` before ever reading the
+                    # config, takes the identical fault out of the adapter body below, and
+                    # records `fault`. One outage, two decision classes, divided by exactly the
+                    # thing the table exists to measure. `refused` is the capability answer,
+                    # which is the one the stager marks usage.
+                    _record_beside(ledger, ServedCall(
+                        system=system, verb=verb, params=dict(params),
+                        payload_text=str(failure),
+                        source=(
+                            REFUSED if getattr(failure, "exit_code", None) == USAGE_EXIT_CODE
+                            else FAULT
+                        ),
+                        world_id=world.world_id,
+                    ))
+                    raise
                 # AN ESTATE FAULT IS A RESPONSE. `QueryCapture` catches whatever the body raises
                 # and hands the model a fault row, so the defender HAS seen an answer here — and
                 # a seam that wrote nothing would leave exactly the state this table exists to
@@ -411,12 +500,15 @@ class WorldRegistry(ModuleVerbRegistry):
                 # `asked_params` rides along for the same reason it does below, so a staged
                 # fault can still find its opposite number. Re-raised untouched.
                 _record_beside(ledger, ServedCall(
-                    system=system, verb=verb, params=dict(prepared),
-                    payload_text=str(fault) or type(fault).__name__, source=FAULT,
+                    system=system, verb=verb, params=dict(reached["prepared"]),
+                    payload_text=str(failure) or type(failure).__name__, source=FAULT,
                     world_id=world.world_id,
-                    asked_params=asked,
+                    asked_params=reached["moved"],
                 ))
                 raise
+            prepared, asked, out = passage.prepared, passage.moved, passage.out
+            payload, decision, base_text = (
+                passage.payload, passage.decision, reached["base_text"])
             # `out is payload` on every decision that changes nothing (STAGED, PASSTHROUGH), and
             # the base text is then the served text — the same bytes `payload_text` would
             # produce, since it is deterministic and already ran over this object. Re-dumping a

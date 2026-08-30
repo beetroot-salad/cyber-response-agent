@@ -249,13 +249,24 @@
       "episode_dir": {
         "writers": [
           "defender/learning/branch/capture.py::prime_base",
-          "defender/learning/branch/ledger.py::Ledger.record"
+          "defender/learning/branch/ledger.py::Ledger.record",
+          "defender/runtime/branch/_family.py::write_family",
+          "defender/learning/branch/staging.py::record_staged",
+          "defender/learning/branch/staging.py::_record_teardown_failure",
+          "defender/learning/branch/review.py::review",
+          "defender/learning/branch/archive.py::archive_episode",
+          "defender/learning/branch/cli.py::_record_episode_outcome",
+          "defender/learning/branch/cli.py::_write_family_stamp"
         ],
         "readers": [
           "defender/learning/branch/ledger.py::base_file",
           "defender/learning/branch/ledger.py::Ledger.base_payload",
           "defender/learning/branch/cli.py::episode_dir_for",
-          "defender/learning/branch/cli.py::prepare_episode"
+          "defender/learning/branch/cli.py::prepare_episode",
+          "defender/learning/branch/episode.py::verdicts",
+          "defender/learning/branch/episode.py::delta_o",
+          "defender/learning/branch/staging.py::read_staged",
+          "defender/runtime/branch/_family.py::load_family"
         ],
         "grep": [
           "episodes/",
@@ -264,17 +275,28 @@
           "episode_dir",
           "for_world"
         ],
-        "note": "Declared by #947's grounding. AT b8a63e66 `capture.py:130-136` composes it as `resolve_runs_base()/'episodes'/<id>/` — a sibling of the run dirs, inside the runs base. #947 MOVES BOTH ENDS OF THAT, and this note is written against the design, not the base: (1) the episodes root becomes a CONFIGURED location (`DEFENDER_EPISODES_BASE`), outside both the runs base and the checkout, with NO default derivation — a reader that re-derives it from the runs base silently restores the containment hole the relocation closed (#947 §7 round 2, F5-EPISODE-ROOT); and (2) the three sibling run dirs move UNDER it, at `{episode_dir}/runs/`, so the episode dir is a PARENT of run dirs rather than their sibling. `cli.py::episode_dir_for` is the symbol whose semantics change: it is the production resolver every reader of an episode must go through once the root is configured, and the one to follow instead of re-composing a path. The old safety clause here read 'a SIBLING of the run dirs, never inside one, so it is not bound into any box' — that is verbatim the reason `capture.py:134`'s waiver states, and #947 REFUTES it on that reason (claim C26): the episode dir now contains three rw box binds. The conclusion survives on a different ground, recorded as an examined no: the bind is the run dir alone, `served/` and `worlds/` stay unreachable from inside a box, and every archive read goes through the `_run_paths.artifact_file` / `stage_tables` screens. Rewrite `capture.py:134`'s waiver text in the same commit that moves the root. Today it holds only `served/`: `prime_base` writes `served/base.jsonl` once and `Ledger.record` appends `served/<world_id>.jsonl`, one writer per file — which is the whole of the launcher's parallel-safety premise. The directory is created as a side effect of `_io.append_jsonl`'s parent mkdir, NOT through `guarded_mkdir`, and NOTHING anywhere removes an episode dir: both `prepare_episode` and `prime_base` treat an existing one as a permanent refusal. #947 adds family.yaml, staged.yaml, review.yaml, provenance.json, worlds/<X>/ AND runs/<sibling>/ here — add those writers (staging.py, review.py, archive.py, _family.py) IN THE COMMIT THAT CREATES THEM, not before: a row naming a symbol that resolves to nothing is indistinguishable to a resolver from a row nobody wrote."
+        "note": "Declared by #947's grounding. AT b8a63e66 `capture.py:130-136` composes it as `resolve_runs_base()/'episodes'/<id>/` — a sibling of the run dirs, inside the runs base. #947 MOVES BOTH ENDS OF THAT, and this note is written against the design, not the base: (1) the episodes root becomes a CONFIGURED location (`DEFENDER_EPISODES_BASE`), outside both the runs base and the checkout, with NO default derivation — a reader that re-derives it from the runs base silently restores the containment hole the relocation closed (#947 §7 round 2, F5-EPISODE-ROOT); and (2) the three sibling run dirs move UNDER it, at `{episode_dir}/runs/`, so the episode dir is a PARENT of run dirs rather than their sibling. `cli.py::episode_dir_for` is the symbol whose semantics change: it is the production resolver every reader of an episode must go through once the root is configured, and the one to follow instead of re-composing a path. The old safety clause here read 'a SIBLING of the run dirs, never inside one, so it is not bound into any box' — that is verbatim the reason `capture.py:134`'s waiver states, and #947 REFUTES it on that reason (claim C26): the episode dir now contains three rw box binds. The conclusion survives on a different ground, recorded as an examined no: the bind is the run dir alone, `served/` and `worlds/` stay unreachable from inside a box, and every archive read goes through the `_run_paths.artifact_file` / `stage_tables` screens. Rewrite `capture.py:134`'s waiver text in the same commit that moves the root. Today it holds only `served/`: `prime_base` writes `served/base.jsonl` once and `Ledger.record` appends `served/<world_id>.jsonl`, one writer per file — which is the whole of the launcher's parallel-safety premise. The directory is created as a side effect of `_io.append_jsonl`'s parent mkdir, NOT through `guarded_mkdir`, and NOTHING anywhere removes an episode dir: both `prepare_episode` and `prime_base` treat an existing one as a permanent refusal. #947 adds family.yaml, staged.yaml, review.yaml, provenance.json, worlds/<X>/ AND runs/<sibling>/ here — add those writers (staging.py, review.py, archive.py, _family.py) IN THE COMMIT THAT CREATES THEM, not before: a row naming a symbol that resolves to nothing is indistinguishable to a resolver from a row nobody wrote. ADDED IN THE COMMIT THAT CREATED THEM, as the sentence above requires: `write_family` (family.yaml), `record_staged` and `_record_teardown_failure` (staged.yaml and the teardown block of review.yaml), `review` (review.yaml), `archive_episode` (worlds/<X>/), and `cli._record_episode_outcome` / `_write_family_stamp` (the episode's own outcome and its provenance.json). The readers gain the two derived readers, the staging record's own reader and the manifest loader."
       },
       "elastic_corpus": {
-        "writers": [],
+        "writers": [
+          "defender/learning/branch/staging.py::stage_world",
+          "defender/learning/branch/staging.py::teardown",
+          "defender/learning/branch/staging.py::sweep",
+          "defender/learning/branch/staging.py::_Door.create_index",
+          "defender/learning/branch/staging.py::_Door.create_alias",
+          "defender/learning/branch/staging.py::_Door.delete"
+        ],
         "readers": [
           "defender/scripts/adapters/elastic_adapter.py::query",
           "defender/scripts/adapters/elastic_adapter.py::alerts",
           "defender/scripts/adapters/elastic_adapter.py::esql",
           "defender/scripts/adapters/confinement.py::confine_index",
           "defender/scripts/adapters/confinement.py::is_world_view",
-          "defender/learning/branch/estate/stagers/elastic.py::redirect"
+          "defender/learning/branch/estate/stagers/elastic.py::redirect",
+          "defender/learning/branch/staging.py::_Door.resolve",
+          "defender/learning/branch/staging.py::_Door.count",
+          "defender/learning/branch/staging.py::_Door.list_names",
+          "defender/learning/branch/estate/registry.py::refuse_a_foreign_world_view"
         ],
         "grep": [
           "ELASTIC_EVENTS_INDEX",
@@ -284,7 +306,7 @@
           "ignore_unavailable",
           "docker_exec_curl"
         ],
-        "note": "Declared by #947's grounding as an EMPTY-WRITER root, which is the fact worth recording: at b8a63e66 nothing in defender/ creates an Elasticsearch index or alias (re-verified: the only `_aliases`/`put_alias` hits are a yaml dumper flag and the model-provider alias table). Every listed reader reaches the cluster through the one read-confined door, `elastic_adapter._http_json` -> `confinement.guard_outbound` -> `confine_read_endpoint(verb_class='r')`, whose elastic allowlist is exactly `/*/_search POST`, `/_query POST`, `/_cluster/health GET`, `/api/status GET`. #947's corpus staging is the FIRST writer; it must call `transport.docker_exec_curl` directly, and note that `guard_outbound` is also the capture recorder, so a write door that skips it records nothing anywhere but `staged.yaml`."
+        "note": "Declared by #947's grounding as an EMPTY-WRITER root, which is the fact worth recording: at b8a63e66 nothing in defender/ creates an Elasticsearch index or alias (re-verified: the only `_aliases`/`put_alias` hits are a yaml dumper flag and the model-provider alias table). Every listed reader reaches the cluster through the one read-confined door, `elastic_adapter._http_json` -> `confinement.guard_outbound` -> `confine_read_endpoint(verb_class='r')`, whose elastic allowlist is exactly `/*/_search POST`, `/_query POST`, `/_cluster/health GET`, `/api/status GET`. #947's corpus staging is the FIRST writer; it must call `transport.docker_exec_curl` directly, and note that `guard_outbound` is also the capture recorder, so a write door that skips it records nothing anywhere but `staged.yaml`. #947 LANDS THAT FIRST WRITER and this row now names it: `staging._Door` reaches `docker_exec_curl` directly with PUT/POST/DELETE, outside `guard_outbound`, so `staged.yaml` is the only record any of these writes happened. The host-side reads are listed beside them because `_count` and `_resolve/index` are deliberately absent from the adapter's read allowlist — they exist only on this door."
       }
     }
   },

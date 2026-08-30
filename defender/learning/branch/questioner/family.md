@@ -37,10 +37,30 @@ discriminator:
     system: the same system
     verb: the verb that would ask it
     params: {}
-axes:
-  - the axis world B should vary, in one sentence
-  - the axis world C should vary, in one sentence
+worlds:
+  - world_id: a short lowercase label for this world, unique in the family
+    axis: the axis this world varies, in one sentence
+    overlay:
+      patches: {}
+      elastic: {}   # lint-shippable: ok — the manifest's own overlay key; a prompt that spelled it any other way would name a key the parser does not read
+  - world_id: another short lowercase label
+    axis: the axis the second world varies, in one sentence
+    overlay:
+      patches: {}
+      elastic: {}   # lint-shippable: ok — the manifest's own overlay key, same as above
 ```
 
 `discriminator.predicate` must be answerable from data the environment can actually hold — one
 query, one system. An axis nobody can query is not a discriminator; it is a preference.
+
+`worlds` IS THE PLAN, and it is yours alone. You have read the capture once; calls 2 and 3
+write one world's STORY each against this plan and never re-plan it, so the ids, the axes and
+the overlays are decided here or they are decided by two calls that have not seen each other.
+Do not include the base world A — it is the capture unchanged and the launcher composes it.
+The fan-out is as wide as this list: two entries is the ordinary triplet, one is a pair.
+
+`overlay` is what staging will actually build. Its two halves are `patches`, which re-answer
+another system's view of an entity, and the corpus half, which injects or excludes documents
+under a base pattern the environment already declares. An overlay that names a pattern nobody
+serves stages nothing, so the world it describes never existed; an overlay that is empty on
+both halves is a world identical to the control.

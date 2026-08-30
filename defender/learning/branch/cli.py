@@ -62,8 +62,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-import yaml
-
+from defender import _provenance
 from defender._io import guarded_mkdir, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
@@ -146,7 +145,14 @@ def episodes_root() -> Path:
             "would be walked by every consumer that indexes runs, and derived from the checkout "
             "it would dirty the tree every sibling stamps itself against. Name a directory "
             "outside both")
+    # RESOLVED UNCONDITIONALLY. `Path.resolve()` is non-strict and answers for a path that does
+    # not exist yet, which is EVERY first launch — nothing creates the episodes root ahead of
+    # `guarded_mkdir`. Resolved only when it existed, a relative `DEFENDER_EPISODES_BASE=episodes`
+    # compared as `Path("episodes")`, whose `.parents` is `(Path("."),)`, so neither refusal
+    # fired and the episode landed inside the checkout — untracked, which is exactly what every
+    # sibling's own provenance stamp then reports as a dirty tree.
     root = Path(raw)
+    candidate = root.resolve()
     for forbidden, why in (
         (resolve_runs_base(), "the runs base — every walker of that tree descends into every "
                               "directory under it, so an episode there is indexed as runs"),
@@ -154,11 +160,15 @@ def episodes_root() -> Path:
                     "provenance stamp reports as a dirty tree"),
     ):
         forbidden = Path(forbidden).resolve()
-        candidate = root.resolve() if root.exists() else root
         if candidate == forbidden or forbidden in candidate.parents:
             raise LauncherRefused(
                 f"[branch] {EPISODES_BASE_ENV}={root} resolves inside {why}")
-    return root
+    # THE RESOLVED PATH, which is what "RESOLVED UNCONDITIONALLY" above is about. Returned
+    # unresolved, a relative `DEFENDER_EPISODES_BASE` made every path built from it relative:
+    # `sibling_runs_base` reached a child process as `DEFENDER_RUNS_BASE`, and the manifest
+    # reached it as `--resume`, both re-resolved against whatever cwd that child happened to
+    # have. The refusals judged `candidate`; every consumer has to get the same value.
+    return candidate
 
 
 def refuse_bad_episode_id(episode_id: str) -> None:  # lint-dup: ok — one RULE, two error CLASSES: `_family` owns the predicate and raises `FamilyError`; this frame owns nothing but the operator-facing `SystemExit` every other check on this command line raises
@@ -263,13 +273,7 @@ def prepare_episode(
     from running — can hand in its own without reaching into this module's globals.
     """
     episode = episode_dir_for(episode_id)
-    manifest = episode / MANIFEST_NAME
-    if manifest.exists() or manifest.is_symlink():
-        raise LedgerError(
-            f"episode {episode_id!r} already holds a manifest at {manifest} — an episode id "
-            "names one immutable family capture and the triplet authored over it. Reusing it "
-            "would mix an earlier estate into this run under first-row-wins; name a fresh "
-            "source run or branch point")
+    refuse_claimed_episode(episode, episode_id)
     # A PARTLY-RUN EPISODE IS NOT ADOPTABLE, and this is the half of FORK-2's adopt answer that
     # keeps it from being a hole. `Ledger._absorb` reads the base tier AND this world's own file,
     # first-row-wins — so a world ledger left behind by an earlier attempt at the same id would
@@ -309,17 +313,22 @@ def prepare_episode(
         #
         # #947 has that signal. The review replays EXACTLY the set the primer read, and records
         # what it replayed and what it could not; a family over an empty capture is a family
-        # whose review says so, per world, in the archive. And the launcher's own fixtures for
-        # relaunch and for the exclusive-create race are sources with no captured query at all —
-        # a run dir carrying evidence and no queries table is an ordinary imported or replayed
-        # run. So the refusal is DOWNGRADED here to an empty base plus a loud line, and nowhere
-        # else: `prime_base` keeps it for every other caller, and an episode that took this path
-        # is the one an operator was told about at launch.
+        # whose review says so, per world, in the archive. So the refusal is DOWNGRADED here to
+        # an empty base plus a loud line, and nowhere else: `prime_base` keeps it for every
+        # other caller, and an episode that took this path is the one an operator was told
+        # about at launch.
+        #
+        # ONE SOURCE SHAPE REACHES IT, and naming it is the point: a run with NO SESSION STORE.
+        # `_check_branch_point` asks `branch.validate` — which refuses a capture that reached no
+        # system — but only where there is a store to ask it of, and it returns early where
+        # there is none. An imported run dir, a replayed fixture and a pruned store are exactly
+        # the sources that arrive with evidence, no session and no queries table. A source that
+        # DOES carry a session was already refused at the preflight, before the claim above and
+        # before a model call, which is where an unbranchable source should be refused.
         #
         # Declared as a MECHANISM DEVIATION rather than a repair. If a later reader decides an
         # empty capture must abort, the change is one `raise` here and a fixture that captures.
         if not _is_empty_capture(nothing_to_prime):
-            claim.unlink(missing_ok=True)
             raise
         write_guarded(base_file(episode), "")
         print(
@@ -327,7 +336,6 @@ def prepare_episode(
             "EMPTY, so every key each sibling asks reaches the live estate and any difference "
             "between siblings includes the estate's own drift. The review records what it "
             "replayed; read it before comparing.", file=sys.stderr)
-        claim.unlink(missing_ok=True)
         return episode
     finally:
         # The claim is released on EVERY exit, including the primer's own refusal, so a refused
@@ -355,9 +363,10 @@ def _is_empty_capture(refusal: LedgerError) -> bool:
     return "primed no base rows" in str(refusal)
 
 
-def preflight_episode(
+def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8): every refusal that is knowable before a model call is asked here, so an operator with two problems is not told about them one paid episode at a time. Splitting it to satisfy an argument count would restore exactly the shape it exists to replace.
     *, source_run_dir: Path, branch_message_id: int, episode_id: str, episode_dir: Path,
     door: Any, preflight: Callable[[str | None], int], model: str | None,
+    continuation_prompt: str, episode_token: str | None = None,
 ) -> tuple[str, tuple[str, ...]]:
     """Everything that can refuse BEFORE the questioner is paid for, in one block.
 
@@ -371,9 +380,10 @@ def preflight_episode(
     to be checked and every later step needs them — recomputing either downstream is a second
     reading of a value the preflight already judged.
     """
-    token = _episode_token(episode_id)
+    token = _episode_token(episode_id, episode_token)
     patterns = staging_mod.check_configured_patterns(configured_patterns())
-    _check_branch_point(source_run_dir, branch_message_id)
+    _check_branch_point(source_run_dir, branch_message_id,
+                        continuation_prompt=continuation_prompt)
     # THE SOURCE ALERT IS SCREENED BEFORE THE QUESTIONER READS IT, and this is the third reader
     # of that surface — beside `run.py --resume`'s own seed read and the questioner's frontier
     # read. The source run dir is a prior box's rw bind, so `alert.json` there is model-writable
@@ -391,6 +401,16 @@ def preflight_episode(
             "model config is checked at family level so a missing key surfaces before the base "
             "is primed, not once per sibling after N forks have committed")
     _probe_cluster(door, patterns)
+    # ASKED BEFORE THE SWEEP, not left to `prepare_episode` twenty lines later. The sweep
+    # DELETES every `wv-<token>.*` name this episode's own `staged.yaml` records — and a second
+    # launcher on the same (source, branch point) pair derives the SAME episode id and the SAME
+    # token, so it reads the FIRST launcher's record, finds every live alias "recorded", and
+    # removes the running family's whole staged corpus before `prepare_episode` refuses it. The
+    # first launcher's siblings then read views that no longer exist, which `_search` answers
+    # 200-with-zero-hits (`ignore_unavailable=true`) while every ledger row still says `staged`.
+    # A manifest is what says the episode has been authored, and staged names exist only after
+    # one — so refusing here closes the window entirely.
+    refuse_claimed_episode(episode_dir, episode_id)
     # THE SWEEP IS THE FIRST THING THAT TOUCHES THE NAMESPACE. An episode must never author
     # worlds into a namespace still holding an earlier attempt's aliases: those names are live
     # on the cluster under exactly the token this episode is about to reuse, so a query for this
@@ -399,9 +419,35 @@ def preflight_episode(
     return token, patterns
 
 
-def _episode_token(episode_id: str) -> str:
+def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
+    """Refuse an episode id whose family has already been authored.
+
+    ONE RULE, TWO DOORS. `prepare_episode` asks it because priming a second capture under an
+    existing family is the merge its exclusive claim exists to prevent; `preflight_episode`
+    asks it because the sweep it runs one line later would delete that family's live staged
+    names first. Spelled once so the two cannot come to disagree about what "already claimed"
+    is — the second door was added after the first, and the failure it closes is destructive.
+    """
+    manifest = Path(episode_dir) / MANIFEST_NAME
+    if manifest.exists() or manifest.is_symlink():
+        raise LedgerError(
+            f"episode {episode_id!r} already holds a manifest at {manifest} — an episode id "
+            "names one immutable family capture and the triplet authored over it. Reusing it "
+            "would mix an earlier estate into this run under first-row-wins; name a fresh "
+            "source run or branch point")
+
+
+def _episode_token(episode_id: str, override: str | None = None) -> str:
+    """The episode's token, or the operator-facing refusal that names the escape.
+
+    `override` IS THAT ESCAPE, and it has to reach `episode_token_for` or the refusal below
+    names a remedy that does nothing: the operator re-runs with `--episode-token`, the flag is
+    parsed and dropped, the identical message prints again, and that source run and branch
+    point are permanently unbranchable. The override is held to exactly the same nameability
+    rule as a derived token (`_nameable_token`), so naming one buys no laxity.
+    """
     try:
-        return episode_token_for(episode_id)
+        return episode_token_for(episode_id, override=override)
     except FamilyError as bad:
         raise LauncherRefused(
             f"[branch] {bad} — pass an explicit episode token if this source run's id cannot "
@@ -437,11 +483,25 @@ def _probe_cluster(door: Any, patterns: Sequence[str]) -> None:
 MAX_BRANCH_MESSAGE_ID = 100 * 60
 
 
-def _check_branch_point(source_run_dir: Path, branch_message_id: int) -> None:
+def _check_branch_point(source_run_dir: Path, branch_message_id: int, *,
+                        continuation_prompt: str) -> None:
     """Refuse a branch point the source run could not have produced.
 
-    THE STORE IS THE AUTHORITY when there is one: `branch_point_time` reads the session and
-    refuses a message id it does not hold, or one that is not a branchable boundary.
+    THE STORE IS THE AUTHORITY when there is one, and `branch.validate` is what it is asked
+    THROUGH. That call is the seam's own set of preconditions and it is asked HERE, before the
+    questioner is paid, rather than only inside each sibling: a branch point at a dangling tool
+    call, over a capture that reached no system, at the tip of a finished investigation, or over
+    a frontier whose fence mapping was snapped is refused by every one of the three children —
+    identically, with the same message, after three model calls, a primed base, a staged corpus
+    and a full review have already been spent on it. Two of those preconditions govern what the
+    questioner is SHOWN (`read_frontier(source, fences_at=...)` slices the same document
+    `validate` judges), so a triplet authored past them was authored against material the seam
+    exists to refuse.
+
+    `branch_point_time` first, and its answer is what the spec carries: `validate` cross-checks
+    `as_of` against its own derivation, so a launcher that invented one would be refused on a
+    value it had just computed. One store handle does both, and the sibling that later opens the
+    same store re-asks the same rule — one home, two askings, no second spelling.
 
     A SOURCE RUN WITH NO SESSION STORE is still branchable, and that is a deliberate looseness
     rather than an oversight — an imported run dir, a replayed fixture and a run whose store was
@@ -463,7 +523,13 @@ def _check_branch_point(source_run_dir: Path, branch_message_id: int) -> None:
     if store is None:
         return
     try:
-        branch.branch_point_time(store, Path(source_run_dir), branch_message_id)
+        as_of = branch.branch_point_time(store, Path(source_run_dir), branch_message_id)
+        branch.validate(store, branch.BranchSpec(
+            source_run_dir=Path(source_run_dir),
+            branch_message_id=branch_message_id,
+            continuation_prompt=continuation_prompt,
+            as_of=as_of,
+        ))
     except branch.BranchError as bad:
         raise LauncherRefused(f"[branch] {bad}") from bad
     finally:
@@ -478,11 +544,22 @@ def _source_store(source_run_dir: Path) -> Any:
     database inherits nothing. Here the question is weaker: does this source have a session this
     launcher can ask about its own messages? A run with none is answered `None`, and the two
     callers above each say what they do with that.
+
+    ONLY THE ABSENT POINTER IS "NO SESSION", and the distinction is the whole of this frame.
+    `open_source_store` raises ONE class for two facts — a run dir that carries no pointer at
+    all (an imported run, a replayed fixture, a pruned store) and a pointer that does not
+    reconcile with the store it names. Catching the class swallowed the second as if it were
+    the first: a source parked off its own runs base then reported "no session store", every
+    caller took its fallback, T0 became the moment the launcher ran and the questioner was shown
+    the FINISHED document's frontier instead of the branch point's — a whole episode paid for
+    against a source both `refuse_distant_source` and this handle existed to refuse. The
+    presence of the pointer is asked HERE, so anything `open_source_store` says about a pointer
+    that IS there propagates as the refusal it is.
     """
-    try:
-        return branch.open_source_store(Path(source_run_dir))
-    except (branch.BranchError, session_store.StoreError, sqlite3.Error, OSError):
+    run_dir = Path(source_run_dir)
+    if not artifact_file(run_dir / session_store.POINTER_FILENAME):
         return None
+    return branch.open_source_store(run_dir)
 
 
 def branch_point_clock(source_run_dir: Path, branch_message_id: int) -> Any:
@@ -533,21 +610,38 @@ def sibling_runs_base(episode_dir: Path) -> Path:
     return Path(episode_dir) / RUNS_SUBDIR
 
 
-def sibling_argv(episode_dir: Path, world_label: str) -> list[str]:
-    """One sibling's command line: the manifest, and which arm of it this process is.
+def sibling_argv(episode_dir: Path, world_label: str, *, model: str | None = None) -> list[str]:
+    """One sibling's command line: the manifest, which arm of it this process is, and the model.
 
     Everything else a sibling needs is DERIVED from the manifest, which is what makes the
     manifest the contract. `sys.executable` rather than a bare `python3`, because the launcher
     already re-execs into the project venv and a child that did not would resolve a different
     interpreter with a different dependency set.
+
+    THE MODEL IS NOT DERIVABLE FROM THE MANIFEST, so it rides here. The launcher preflights
+    `--model` at family level (`preflight_episode`), and dropped from the child's argv that
+    check certified a model no sibling then ran: every arm resolved `$DEFENDER_MODEL` or the
+    built-in default instead. The failure is invisible without this line, because all N arms
+    resolve the SAME wrong model — so `_stamp_disagreement`'s `model` comparison finds perfect
+    agreement and the family is archived as comparable on a model nobody asked for.
     """
-    return [sys.executable, str(PATHS.defender_dir / "run.py"),
+    argv = [sys.executable, str(PATHS.defender_dir / "run.py"),
             "--resume", str(Path(episode_dir) / MANIFEST_NAME), "--world", world_label]
+    if model is not None:
+        argv += ["--model", model]
+    return argv
+
+
+#: The exit code recorded for an arm whose PROCESS never started — the spawn seam raised, or the
+#: rendezvous broke. Not any code a sibling can itself exit with (`run.py` returns 0, 1 or 2), so
+#: "we could not start it" stays distinguishable in the launcher's own report from "it ran and
+#: failed"; both are non-zero, which is what the launch status is about.
+SPAWN_FAILED_EXIT = 70
 
 
 def start_family(
     episode_dir: Path, world_labels: Sequence[str], *,
-    spawn: Callable[..., int] | None = None,
+    spawn: Callable[..., int] | None = None, model: str | None = None,
 ) -> dict[str, int]:
     """Start every accepted sibling TOGETHER, and wait for all of them.
 
@@ -582,11 +676,27 @@ def start_family(
         # scheduling happened to produce, and a family whose arms did not overlap would still
         # look like one that did.
         ready.wait(timeout=30)
-        exits[label] = start(sibling_argv(episode_dir, label), env=env)
+        exits[label] = start(sibling_argv(episode_dir, label, model=model), env=env)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(labels)) as pool:
-        for future in [pool.submit(launch_one, label) for label in labels]:
+        futures = {label: pool.submit(launch_one, label) for label in labels}
+    # A THREAD THAT DIED IS A RESULT, not a reason to abandon its siblings — the contract the
+    # `return_exceptions=True` fan-in this replaced spelled out loud. Re-raised here it left
+    # `_run_episode` through `_launch`'s abort arm, so `verify_family` never ran:
+    # the siblings that DID complete a whole investigation were never archived, no episode
+    # outcome was recorded, and the operator was told "no sibling started" — which is false of
+    # every arm the pool had already run to completion. It also fires for all N at once, since
+    # one late arrival breaks the shared barrier for every party.
+    #
+    # Recorded as a NON-ZERO exit rather than as a missing key: `_run_episode` reads a label's
+    # absence from this map as nothing to report, so a swallowed failure would have exited 0.
+    for label, future in futures.items():
+        try:
             future.result()
+        except Exception as never_started:  # noqa: BLE001 — one arm's failure, not the family's
+            exits[label] = SPAWN_FAILED_EXIT
+            print(f"[branch] world {label} was never started: {never_started!r}",
+                  file=sys.stderr)
     return exits
 
 
@@ -633,15 +743,26 @@ def _stamp_of(run_dir: Path) -> dict | None:
     ABSENT AND UNREADABLE ANSWER THE SAME WAY, and that is the point: neither is an agreeing
     stamp, and treating an unknown as agreement is the one error a provenance comparison must
     not make.
+
+    THROUGH `_provenance.read`, NOT a hand-rolled `artifact_file`-then-`read_text` pair. The
+    class owns what a provenance record IS, and this file lives in the sibling BOX's rw bind —
+    so the bytes at that name are whatever the box last wrote there. Read raw, a forged
+    `"commit": ["x"]` was truthy to `_clean_stamp`, `_stamp_speaks` admitted the arm, and
+    `_stamp_disagreement`'s set build then raised `TypeError: unhashable type: 'list'` out of
+    `verify_family` — before a single world was archived, destroying the expensive half of the
+    episode over one arm's file. `from_obj` refuses a non-`str` commit and a non-`bool` dirty,
+    and `read_guarded` is the alias-refusing read this frame was spelling by hand.
+
+    Re-serialised back to the record's own wire shape so every reader below keeps asking a
+    mapping — `_agreed_record` publishes it verbatim, and a field the class gains reaches the
+    family stamp without a second census here.
     """
-    stamp = Path(run_dir) / FAMILY_STAMP_NAME
-    if not artifact_file(stamp):
+    record = _provenance.read(Path(run_dir) / FAMILY_STAMP_NAME)
+    if record is None:
         return None
-    try:
-        record = json.loads(stamp.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return record if isinstance(record, dict) else None
+    # lint-parse: ok — `as_json` is the class's OWN wire shape, narrowed field by field by
+    # `RunProvenance.as_json`; this is a round-trip of a typed record, not a read of untyped input.
+    return json.loads(record.as_json())
 
 
 def _stamp_disagreement(stamps: dict[str, dict | None], *, allow_dirty: bool) -> str | None:
@@ -671,13 +792,22 @@ def _stamp_disagreement(stamps: dict[str, dict | None], *, allow_dirty: bool) ->
                 f"(dirty={stamp.get('dirty')!r}, commit={stamp.get('commit')!r}, "
                 f"unavailable={stamp.get('unavailable')!r}) — pass --allow-dirty to record the "
                 "family anyway")
-    # THE AGREEMENT IS TAKEN OVER THE STAMPS THAT SAY SOMETHING. With the override given, an
-    # arm whose git could not be asked has no commit and no tree answer to agree or disagree
-    # with, and reading its silence as disagreement would make the override unable to do the one
-    # thing it exists for. Without the override that arm never reaches here at all.
-    comparable = {label: stamp for label, stamp in stamps.items() if label not in unclean}
+    # THE AGREEMENT IS TAKEN OVER THE STAMPS THAT SAY SOMETHING, and a DIRTY tree says
+    # something. `_clean_stamp` answers one question for three shapes, and only one of them —
+    # git could not be asked, so there is no commit, no scope and no model to compare — is a
+    # silence. Dropping every non-clean arm made `--allow-dirty` waive the whole agreement:
+    # the three siblings run from ONE checkout, so a dirty tree makes all three unclean at once,
+    # `comparable` was empty, the loop below compared nothing, and a family that ran across two
+    # commits or two MODELS was archived as comparable — which is the exact fact `_provenance`
+    # grew its `model` field to catch. Kept here, a dirty arm is compared on the fields it does
+    # carry; the tree's dirtiness itself is what the override waives, and only that.
+    comparable = {label: stamp for label, stamp in stamps.items() if _stamp_speaks(stamp)}
     for field in ("commit", "scope", "model"):
-        values = {label: (stamp or {}).get(field) for label, stamp in comparable.items()}
+        # NO `or {}`: `comparable` is built from `_stamp_speaks`, which is False for `None`,
+        # and the `missing` arm above already returned for every absent stamp. Re-coalescing
+        # here made the dead case answer `None` for every field, which compares EQUAL across
+        # siblings — so a relaxed boundary would silently archive a split family as comparable.
+        values = {label: stamp.get(field) for label, stamp in comparable.items() if stamp}
         if len({v for v in values.values()}) > 1:
             return (f"siblings disagree on {field}: {values} — the family is held constant on "
                     "it, so a comparison across two values is never archived as comparable")
@@ -698,6 +828,17 @@ def _clean_stamp(stamp: dict | None) -> bool:
     return stamp.get("dirty") is False and bool(stamp.get("commit"))
 
 
+def _stamp_speaks(stamp: dict | None) -> bool:
+    """Did git answer AT ALL for this sibling — whatever it said about the tree?
+
+    The weaker half of `_clean_stamp`, and the one the AGREEMENT is taken over. A stamp with a
+    commit names a commit, a scope and a model that can agree or disagree with a sibling's; a
+    stamp without one is a silence, and reading a silence as disagreement would make
+    `--allow-dirty` unable to do the one thing it exists for.
+    """
+    return stamp is not None and bool(stamp.get("commit"))
+
+
 def _agreed_record(stamps: dict[str, dict | None]) -> dict:
     """The provenance every sibling reported, as one record.
 
@@ -705,8 +846,16 @@ def _agreed_record(stamps: dict[str, dict | None]) -> dict:
     capture above the family (that record could only ever describe the moment the launcher ran,
     which is not the moment any sibling did), so the family stamp is a CONCLUSION about N
     per-process stamps and never a reading of its own.
+
+    READ OFF A STAMP THAT SPOKE, and only after `_stamp_disagreement` has found the speakers to
+    agree. Taken from an arbitrary entry of the whole mapping it could publish the commit and
+    the model of an arm that was excluded from the very comparison this record stands for.
     """
-    any_stamp = next(iter(stamps.values())) or {}
+    speaking = [stamp for stamp in stamps.values() if stamp and _stamp_speaks(stamp)]
+    if speaking:
+        any_stamp: dict = speaking[0]
+    else:
+        any_stamp = next((stamp for stamp in stamps.values() if stamp), {})
     return {k: v for k, v in any_stamp.items() if k != "allow_dirty"}
 
 
@@ -757,8 +906,23 @@ def verify_family(
     # tree nothing certified, so copying out of it is the read the certification exists to gate.
     from defender.learning.branch import archive as archive_mod
 
-    archive_mod.archive_episode(
-        episode_dir, {label: dirs[label] for label in scrub_verified})
+    try:
+        archive_mod.archive_episode(
+            episode_dir, {label: dirs[label] for label in scrub_verified})
+    except Exception as archive_refused:  # noqa: BLE001 — recorded, then re-raised unchanged
+        # A HALF-ARCHIVE IS RECORDED BEFORE THE EXCEPTION LEAVES, which is the whole of FORK-1
+        # applied to this frame. `archive_episode` screens per world and raises on the first
+        # world whose run dir has an artifact's name occupied by something that is not the
+        # artifact — so an episode with three clean scrubs could leave `worlds/a/` behind, no
+        # `episode.outcome` written at all, and a `review.yaml` still saying "3 worlds
+        # reviewed, none rejected". `episode._refuse_incomplete` gates on a RECORDED
+        # `incomplete`, so both derived readers then answered a one-arm question for a
+        # three-arm family with nothing on disk marking it partial — the absence-means-
+        # incomplete gap the outcome field exists to close.
+        _record_episode_outcome(
+            episode_dir, outcome=INCOMPLETE,
+            reason="; ".join([*reasons, f"the archive refused: {archive_refused}"]))
+        raise
     if outcome == ACCEPTED:
         _write_family_stamp(episode_dir, stamps, allow_dirty=allow_dirty)
     _record_episode_outcome(episode_dir, outcome=outcome, reason=reason)
@@ -787,27 +951,17 @@ def _write_family_stamp(
 def _record_episode_outcome(
     episode_dir: Path, *, outcome: str, reason: str, decision: str | None = None,
 ) -> None:
-    """Merge the episode's own verdict into its review record, never over the worlds it holds."""
-    path = Path(episode_dir) / REVIEW_NAME
-    record: dict[str, Any] = {}
-    # `artifact_file`, not `is_file()`: the episode dir holds a sibling's archived artifacts and
-    # is reachable from a box's rw bind, so an entry at the review's name may be a link — and
-    # `is_file()` stats THROUGH one, which would merge this episode's outcome into whatever the
-    # link points at and then write the merged document back over it.
-    if artifact_file(path):
-        try:
-            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
-            loaded = None
-        if isinstance(loaded, dict):
-            record = loaded
-    episode = record.setdefault("episode", {})
-    if isinstance(episode, dict):
-        episode["outcome"] = outcome
-        episode["reason"] = reason
-        if decision is not None:
-            episode["decision"] = decision
-    write_guarded(path, yaml.safe_dump(record, sort_keys=False, allow_unicode=True))
+    """Merge the episode's own verdict into its review record, never over the worlds it holds.
+
+    THROUGH `staging.merge_review`, which is the ONE merger of this file. Spelled here as well,
+    the two writers had drifted on key ordering, unicode escaping and whether the parent
+    directory was made — and both run against the same document in one episode, so which of them
+    wrote last decided its whole shape.
+    """
+    block: dict[str, Any] = {"outcome": outcome, "reason": reason}
+    if decision is not None:
+        block["decision"] = decision
+    staging_mod.merge_review(Path(episode_dir) / REVIEW_NAME, "episode", block)
 
 
 # ---------------------------------------------------------------------------------------
@@ -911,20 +1065,44 @@ def _launch(  # noqa: PLR0913 — see `main`
     token, patterns = preflight_episode(
         source_run_dir=source, branch_message_id=ns.branch_message_id, episode_id=episode_id,
         episode_dir=episode_dir, door=write_door, preflight=role_preflight,
-        model=ns.model)
+        model=ns.model, continuation_prompt=ns.continuation_prompt,
+        episode_token=ns.episode_token)
+
+    # THE REMAINING SEAMS ARE ANSWERED FOR HERE, at the same boundary `door` and `preflight`
+    # are resolved at — and this one can only REFUSE, because the questioner, the comparator and
+    # the review's adapter layer have no production default to fall back to yet. Left to their
+    # `None` defaults they reached `author_family`'s `invoke(...)` and `review(adapters=None)`
+    # as a bare `TypeError`, AFTER `prepare_episode` had primed an immutable episode directory
+    # that cannot be reused — so the shipped `__main__` path burned an episode id per attempt
+    # and reported it as a crash. Refused here, the operator is told which seam is missing while
+    # nothing has been spent and no episode exists.
+    unwired = [name for name, seam in
+               (("questioner", questioner), ("adapters", adapters), ("invoke", invoke))
+               if seam is None]
+    if unwired:
+        raise LauncherRefused(
+            f"[branch] the launcher was given no {', '.join(unwired)} seam — steps 2 and 4 "
+            "drive a model and an adapter layer, and there is no production default for them "
+            "here; a caller has to supply them, and one that cannot has nothing to launch")
 
     # STEP 2 ONWARD IS THE PART THAT SPENDS. Everything from here to the archive runs inside the
     # teardown guard, because from the first staging append onward there are names live on the
     # cluster that only this process knows about (§7 FORK-9: ONE abort rule for steps 2-4).
     episode_dir = prepare_episode(episode_id, source)
+    # SET ON THE WAY OUT OF EVERY ABORT ARM, and read by the `finally`. The one thing the
+    # teardown frame has to know is whether an exception is already on its way to the operator,
+    # and the only frame that can say so is this one — see `_teardown_without_masking`.
+    aborting = False
     try:
         return _run_episode(
             ns, source=source, episode_id=episode_id, episode_dir=episode_dir, token=token,
             patterns=patterns, door=write_door, questioner=questioner,
             adapters=adapters, invoke=invoke, spawn=spawn)
     except SystemExit:
+        aborting = True
         raise
     except BaseException as failed:  # noqa: BLE001 — ONE abort rule, see `main`'s docstring
+        aborting = True
         raise LauncherRefused(
             f"[branch] episode {episode_id} aborted: {failed!r} — no sibling started and every "
             "staged name is torn down") from failed
@@ -933,10 +1111,10 @@ def _launch(  # noqa: PLR0913 — see `main`
         # exception raised after the first staging append. The cluster does not care why the
         # episode ended, and a staged name left live under this episode's token is one the next
         # launch's sweep will refuse to touch and nothing else will ever remove.
-        _teardown_without_masking(episode_dir, write_door)
+        _teardown_without_masking(episode_dir, write_door, aborting=aborting)
 
 
-def _teardown_without_masking(episode_dir: Path, door: Any) -> None:
+def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -> None:
     """Tear the episode's staged names down, and NEVER let that displace the abort in flight.
 
     A `finally` is the one frame where a second exception silently replaces the first, and the
@@ -949,10 +1127,16 @@ def _teardown_without_masking(episode_dir: Path, door: Any) -> None:
     record before it raises, which is the obligation, and this frame adds the stderr line. With
     nothing else propagating, the failure is the answer and it is re-raised.
     """
+    # PASSED IN, never inferred. `sys.exc_info()` is THREAD-global, not frame-local: read here
+    # it answers for whatever exception is being handled anywhere up this thread's stack, so a
+    # `cli.main` called from inside someone else's `except` block reported an in-flight abort
+    # for a perfectly clean episode — and a teardown that could not verify its names gone was
+    # then swallowed into an exit 0 with live aliases on the cluster. Only `_launch` knows, and
+    # it says so.
     try:
         staging_mod.teardown(episode_dir, door=door, review_path=episode_dir / REVIEW_NAME)
     except Exception as cleanup_failed:  # noqa: BLE001 — see the docstring: never mask
-        if sys.exc_info()[0] is None:
+        if not aborting:
             raise
         print(f"[branch] teardown also failed ({cleanup_failed!r}); the names it could not "
               "verify gone are in the review record, and the failure that ended the episode "
@@ -1004,7 +1188,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         return 1
 
     labels = [w.world_id for w in runnable_worlds(family)]
-    exits = start_family(episode_dir, labels, spawn=spawn)
+    exits = start_family(episode_dir, labels, spawn=spawn, model=ns.model)
     runs = sibling_runs_base(episode_dir)
     report = verify_family(
         episode_dir, [runs / f"{episode_id}-{label}" for label in labels],
@@ -1042,7 +1226,8 @@ def _author(
     from defender.learning.lead_repository import joined
 
     as_of = branch_point_clock(source, ns.branch_message_id)
-    fences = _fence_count(source)
+    fences = _fence_count(source, ns.branch_message_id,
+                          continuation_prompt=ns.continuation_prompt, as_of=as_of)
     document = questioner_mod.author_family(
         source_run_dir=source, episode_dir=episode_dir,
         invoke=questioner,
@@ -1065,15 +1250,42 @@ def _author(
     return family
 
 
-def _fence_count(source: Path) -> int:
-    """How many invlang fences the source run's document closed at the branch point."""
+def _fence_count(source: Path, branch_message_id: int, *,
+                 continuation_prompt: str, as_of: Any) -> int:
+    """How many invlang fences the source run's document closed at the branch point.
+
+    THROUGH `branch.fence_count_at`, which is the frame that owns this arithmetic and the only
+    one that can answer it AT a branch point — the document alone says how many fences the run
+    ever wrote, and the session says which of them had landed by the message being branched
+    from. Spelled here as `len(scan_fences(...).fences)` it answered 0 for every document:
+    `FenceScan` carries `bodies`/`spans`/`orphaned_headers`/`open_tail` and no `fences`, and the
+    `getattr` default swallowed the mistake — so `fences_at: 0` went into every manifest and the
+    questioner was shown an EMPTY frontier for every episode it authored.
+
+    A source with NO session store falls back to the document's own total, the same shape and
+    for the same reason `branch_point_clock` falls back to the moment its evidence stopped: an
+    imported or replayed run has no session to say when, and its whole document is the prefix.
+    """
+    from defender.runtime.branch import BranchSpec, fence_count_at, source_session
     from defender.skills.invlang.parser import scan_fences
 
     path = RunPaths(source).investigation
     if not artifact_file(path):
         return 0
-    scanned = scan_fences(path.read_text(encoding="utf-8"))
-    return len(getattr(scanned, "fences", ()) or ())
+    document = path.read_text(encoding="utf-8")
+    # `bodies` is the fence content; the complement (`orphaned_headers`) is not dropped
+    # silently — it is what `fence_count_at` is asked for instead whenever a session exists,
+    # and this arm is only reached for a run that carries none.
+    total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a COUNT of fences, not a read of their content; the orphan complement is not addressable by an index into `bodies` and `fence_count_at` below is what answers when a session can say  # noqa: E501
+    store = _source_store(source)
+    if store is None:
+        return total
+    try:
+        spec = BranchSpec(source_run_dir=Path(source), branch_message_id=branch_message_id,
+                          continuation_prompt=continuation_prompt, as_of=as_of)
+        return fence_count_at(store, source_session(store, spec), branch_message_id, document)
+    finally:
+        store.close()
 
 
 def _joined_leads(source: Path, joined: Any) -> list[dict]:

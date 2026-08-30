@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -142,6 +143,34 @@ def request_key(system: str, verb: str, params: Any) -> str:
     """
     return _request_key(
         system, verb, _json_safe_params(params) if isinstance(params, dict) else {})
+
+
+def correlation_key_of(row: Any) -> str | None:
+    """One RECORDED row's comparison identity — `ServedCall.correlation_key`, read off disk.
+
+    THE DERIVATION, not a column read. `ServedCall.row()` does not write `correlation_key`: it
+    is a property, and the columns it serialises are `system`/`verb`/`params`/`payload_text`/
+    `source`/`world_id` plus `asked_params` when staging rewrote the call. So a reader that
+    asked the row for the column got `None` on every row a real `prime_base` wrote, and every
+    key of a whole capture collapsed onto one — which is a pairing that cannot tell any two
+    questions apart. Recorded is still honoured first, so a row written by a later writer that
+    DOES carry the column keys on what it says rather than on what this frame re-derives.
+
+    `None` when the row cannot say which call it is (a torn row with no system or verb); the
+    caller decides whether that is a skipped row or a recorded fault, because the two readers
+    of this mean different things by it.
+    """
+    if not isinstance(row, Mapping):
+        return None
+    recorded = row.get("correlation_key")
+    if isinstance(recorded, str) and recorded:
+        return recorded
+    asked = row.get("asked_params")
+    params = asked if isinstance(asked, dict) else row.get("params")
+    system, verb = row.get("system"), row.get("verb")
+    if not isinstance(system, str) or not isinstance(verb, str):
+        return None
+    return request_key(system, verb, params if isinstance(params, dict) else {})
 
 
 @dataclass(frozen=True)

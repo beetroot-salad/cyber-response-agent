@@ -34,24 +34,23 @@ it from "the worlds ran and agreed".
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_guarded, read_jsonl_rows
 from defender._run_paths import artifact_dir, artifact_file
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.learning.branch.archive import WORLDS_DIRNAME
-from defender.learning.branch.comparator import DELTA_SEAT, Verdict, compare
+from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
 from defender.learning.branch.ledger import (
     Ledger,
     base_file,
-    payload_text,
-    request_key,
+    correlation_key_of,
 )
 from defender.runtime.branch._family import (
     BASE_ROLE,
@@ -107,7 +106,7 @@ def _recorded_outcome(episode_dir: Path) -> tuple[str | None, str]:
     if text is None:
         return None, ""
     try:
-        record = yaml.safe_load(text)
+        record = _yaml.safe_load(text)
     except yaml.YAMLError:
         return None, ""
     if not isinstance(record, dict):
@@ -165,7 +164,7 @@ def _declared_disposition(text: str) -> Any:
     frontmatter = parse_frontmatter_or_none(text)
     if frontmatter is None:
         try:
-            loaded = yaml.safe_load(text)
+            loaded = _yaml.safe_load(text)
         except yaml.YAMLError:
             return None
         frontmatter = loaded if isinstance(loaded, dict) else {}
@@ -192,6 +191,17 @@ def verdicts(episode_dir: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     for label in _archived_labels(episode_dir):
         report = episode_dir / WORLDS_DIRNAME / label / "report.md"
+        # ABSENT AND UNREADABLE ARE DIFFERENT ANSWERS, and `archive.py` is what forces the
+        # split: "a path that is simply not there is skipped and reported (a sibling that died
+        # before writing its report has no report)". A world archived without one is therefore
+        # a state the archive DELIBERATELY produces, and it reaches here on an ACCEPTED episode
+        # too — `verify_family` gates on the scrub verdict and the stamps, not on the report —
+        # so refusing it took every other world's readable headline down with it. Skipped, this
+        # reader answers for the worlds that concluded something; a report that EXISTS and
+        # cannot be read is still the refusal it was, because that is the archive's own line
+        # between "not there" and "something is wrong with the tree".
+        if not report.exists() and not report.is_symlink():
+            continue
         text, refusal = read_guarded(report)
         if text is None:
             raise EpisodeError(
@@ -225,36 +235,32 @@ def _pair_key(row: dict) -> str | None:
     intersects the base's keys in the EMPTY SET — every world would report no difference from
     a base it never met, silently, and silently on the event stream, where most of a run's
     evidence lives.
+
+    ONE HOME, in `ledger`, beside the `ServedCall` property whose derivation it is: `review`
+    reads the same identity off the same rows, and the copy that drifts is the one whose reader
+    stops pairing.
     """
-    recorded = row.get("correlation_key")
-    if isinstance(recorded, str) and recorded:
-        return recorded
-    asked = row.get("asked_params")
-    params = asked if isinstance(asked, dict) else row.get("params")
-    system, verb = row.get("system"), row.get("verb")
-    if not isinstance(system, str) or not isinstance(verb, str):
-        return None
-    return request_key(system, verb, params if isinstance(params, dict) else {})
+    return correlation_key_of(row)
 
 
 def _canonical(row: dict) -> str | None:
     """One row's answer, in the canonical spelling both sides of a comparison are dumped in.
 
-    Re-dumped through `ledger.payload_text` rather than compared as stored text: `sort_keys`
-    is what makes two dumps of one answer compare equal, and the source run's captured
-    sidecars were written WITHOUT it — so a byte comparison of stored text would report a
-    difference on every row of a primed capture, in a field no world touched.
+    Re-dumped through `comparator.canonical` (which is `ledger.payload_text` over the parsed
+    row) rather than compared as stored text: `sort_keys` is what makes two dumps of one answer
+    compare equal, and the source run's captured sidecars were written WITHOUT it — so a byte
+    comparison of stored text would report a difference on every row of a primed capture, in a
+    field no world touched.
     """
     text = row.get("payload_text")
     if not isinstance(text, str) or not text:
         return None
-    try:
-        return payload_text(json.loads(text))
-    except (TypeError, ValueError):
-        # Not JSON — a torn row, or an error digest. It has no canonical form, so it is
-        # compared as the bytes it is rather than dropped: two worlds recording the same
-        # unparseable answer still agree, which is the honest reading.
-        return text
+    # `comparator.canonical`, not a second copy of it. `mechanical`'s own docstring is why that
+    # function is published: "a second copy of the canonical-then-fold ladder in that module is
+    # how the two would come to disagree about what `same` means". The not-JSON arm is its too —
+    # a torn row or an error digest has no canonical form, so it is compared as the bytes it is
+    # rather than dropped, and two worlds recording the same unparseable answer still agree.
+    return canonical(text)
 
 
 def _answers(path: Path) -> dict[str, str]:
@@ -294,7 +300,15 @@ def _classify(base: dict[str, str], world: dict[str, str], keys: list[str], axis
         if base[key] == world[key]:
             out[key] = Verdict.SAME.value
             continue
-        if invoke is None:
+        # NO AXIS IS THE SAME ANSWER AS NO MODEL SEAM, and for the same reason: `undeclared`
+        # says "this world's observation differs and the difference has not been shown to be the
+        # axis it declared", which is exactly what is known about a world that declared none.
+        # `_check_axis` admits `axis: null` on a non-base world, so this arm is reachable — and
+        # asked anyway, `compare(a, b, None, …)` selects the REVIEW seat, which admits
+        # `contradiction`, which `DELTA_SEAT` does not: the first such answer raised out of
+        # `_wrong_seat` and took the WHOLE episode's ΔO with it, under a message reading "with
+        # an axis given" when none was.
+        if invoke is None or axis is None:
             out[key] = UNATTRIBUTED
             continue
         # `.value`, not the member: this reader's answer is a plain-string table a caller
@@ -310,11 +324,12 @@ def _classify(base: dict[str, str], world: dict[str, str], keys: list[str], axis
 def _wrong_seat(key: str, verdict: Verdict) -> str:
     """Unreachable through `compare`, and kept because that is a promise rather than a proof.
 
-    `compare` refuses a verdict outside the seat its axis selected, so this frame answers only
-    if that gate is ever loosened or bypassed. F2's cost is exactly this: ONE type spans both
-    seats, so nothing structurally prevents a wrong-seat member and the CALLER is what refuses
-    one. Reported, never mapped onto a member this seat does admit — that would record a guess
-    where a measurement belongs.
+    `compare` refuses a verdict outside the seat its axis selected, and `_classify` only reaches
+    it with an axis in hand — so this frame answers only if one of those two gates is ever
+    loosened or bypassed. F2's cost is exactly this: ONE type spans both seats, so nothing
+    structurally prevents a wrong-seat member and the CALLER is what refuses one. Reported,
+    never mapped onto a member this seat does admit — that would record a guess where a
+    measurement belongs.
     """
     raise EpisodeError(
         f"the comparator answered {verdict.value!r} for correlation key {key!r} with an axis "

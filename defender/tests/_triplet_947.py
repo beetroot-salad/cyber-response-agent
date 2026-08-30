@@ -308,8 +308,10 @@ class FakeDoor:
         self._gate("create_index", name, {"docs": docs})
         self.names.add(name)
 
-    def create_alias(self, name: str, *, over: list[str], filter: dict | None) -> None:
-        self._gate("create_alias", name, {"over": list(over), "filter": filter})
+    def create_alias(self, name: str, *, over: list[str], filter: dict | None,
+                     unfiltered: Any = ()) -> None:
+        self._gate("create_alias", name,
+                   {"over": list(over), "filter": filter, "unfiltered": list(unfiltered)})
         self.names.add(name)
 
     def delete(self, name: str) -> None:
@@ -581,6 +583,35 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
     return ep
 
 
+def branchable_investigation() -> str:
+    """A one-fence investigation document a branch may actually be TAKEN from.
+
+    `branch.validate` refuses a branch point with nothing OPEN in its frontier — no slot and no
+    contract is no question for a pair of worlds to divide, which is "branched too late" — and
+    the launcher asks that rule before it pays the questioner. The earlier fixture document was
+    a single `?h1` row, whose frontier is empty in all three cells: every launcher scenario was
+    therefore running against a source no production launcher would accept, and the whole suite
+    was green only while the check was missing from the launch path.
+
+    THE GOLDEN'S FIRST FENCE, rather than a hand-written open row, because "what makes a
+    frontier open" is `skills/invlang/frontier`'s answer and not this file's — a fixture that
+    spelled its own open slot would be a second opinion about the document format, and it would
+    go stale silently the day that vocabulary moves. Measured: block 1 of the golden holds 2
+    open slots and 7 held facts.
+
+    ONE fence, because the seeded session lands one `append_block` and `fence_count_at` scores
+    the branch point at 1. A document with more would make the branch point's fence index run
+    short of the total — legal, but it would mean the questioner is shown a prefix while
+    `validate` judges the same prefix, and a fixture whose two halves agree is the one that
+    makes a launcher test about the launcher.
+    """
+    from defender.skills.invlang.parser import scan_fences
+
+    bodies = scan_fences(GOLDEN_INVESTIGATION.read_text(encoding="utf-8")).bodies
+    assert bodies, f"{GOLDEN_INVESTIGATION} carries no invlang fence — the fixture moved"
+    return f"# investigation\n\n```invlang\n{bodies[0]}\n```\n"
+
+
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
 
@@ -593,10 +624,15 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Pa
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
     (src / "alert.json").write_text(json.dumps({"rule": {"id": "v2-cross-tier-ssh-pivot"}}),
                                     encoding="utf-8")
-    (src / "investigation.md").write_text("# investigation\n\n```invlang\n?h1\n```\n",
-                                          encoding="utf-8")
+    (src / "investigation.md").write_text(branchable_investigation(), encoding="utf-8")
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
+    # ONE CAPTURED CALL, because a source that captured nothing is not branchable: every
+    # proposed world agrees with an empty prefix by construction, which is the generated-world
+    # design the redesign rejected, and `branch.validate` refuses it at the launch. A scenario
+    # that wants more lands its own rows on top; one that lands this same call again writes a
+    # duplicate the primer skips, so the primed key set is unchanged for it.
+    capture_call(src)
     # THE STAMP EVERY ORDINARY RUN DIR CARRIES. `materialize_run_dir` writes one at the single
     # place a run the box will execute is ever created, so a source run without one is not a run
     # any production path could have produced — and the containment walks read exactly this file
@@ -896,6 +932,7 @@ __all__ = [
     "ALERTS_PATTERN", "AS_OF", "BRANCH_MESSAGE_ID", "CLEAN", "CONFIGURED", "DEFENDER",
     "EPISODE_ID", "EPISODE_TOKEN", "EPISODES_BASE_ENV", "EVENTS_PATTERN",
     "GIT_STATUS_FAILED", "GIT_UNAVAILABLE", "GOLDEN_INVESTIGATION", "RUNS_BASE_ENV",
+    "branchable_investigation",
     "SOURCE_RUN_ID", "WORLDS",
     "DoorCall", "FakeAdapters", "FakeAgent", "FakeDoor", "FakeSpawn", "FakeTransport",
     "UNTRUSTED_FRAME", "assert_wrapped_untrusted", "outside_untrusted_frames", "untrusted_frames",

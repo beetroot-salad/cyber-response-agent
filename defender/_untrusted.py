@@ -47,6 +47,28 @@ def wrap_fresh(content: str, tag: str) -> str:
     """
     if not isinstance(content, str):
         raise TypeError("content must be a string")
-    while (salt := secrets.token_hex(8)) in content:  # cannot collide, by construction
+    return wrap(content, tag, message_salt(content))
+
+
+def message_salt(*bodies: str) -> str:
+    """A salt for ONE assembled message that none of that message's own bodies contains.
+
+    THE MINT LOOP HAS ONE HOME. `wrap_fresh` is this over a single body; a stage that frames
+    several sections of one message in a SHARED salt — which is what lets
+    `learning._prompt.stage_user_message` say "only matching run-salted frame tags in this
+    message define prompt sections" and have that be true of a set — needs the same guarantee
+    over all of them at once. Spelled per frame it is not the same property: the loop compares a
+    candidate against its own body only, so one section's frame could still be closed from
+    inside a SIBLING section, which is the same escape #875 F-1 names one message later.
+
+    `uuid4().hex`, the older stages' spelling, is 128 unguessable bits and is not this: the body
+    it frames is attacker-written, and "the content cannot contain the delimiter" is a
+    construction here rather than an improbability.
+    """
+    for body in bodies:
+        if not isinstance(body, str):
+            raise TypeError("every body must be a string")
+    joined = "".join(bodies)
+    while (salt := secrets.token_hex(8)) in joined:  # cannot collide, by construction
         pass
-    return wrap(content, tag, salt)
+    return salt

@@ -32,8 +32,6 @@ exist (X16).
 """
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from defender.tests import _triplet_947 as T
@@ -236,7 +234,15 @@ def test_947_contradicting_world_is_rejected_before_any_sibling_starts(tmp_path,
     assert doc["worlds"]["b"]["decision"] == "rejected"
     named = [m["key"] for m in doc["worlds"]["b"]["consistency"]["mismatches"]]
     assert named, "the review record names no contradicting key"
-    assert json.dumps(doc).count(named[0]) >= 1
+    # THE OPERATOR-FACING REASON NAMES IT, which is what "the review record names the key"
+    # means. Written as `json.dumps(doc).count(named[0]) >= 1` this could only ever fail on
+    # QUOTING — `named[0]` was read out of `doc` one line up, so it is in the document by
+    # construction — and it passed for exactly as long as the key was the literal string
+    # "None", which is what `row.get("correlation_key")` answered for every row a real
+    # `prime_base` wrote (the column is a `ServedCall` property and is never serialised).
+    # A real correlation key carries `"` characters, which `json.dumps` escapes, so the
+    # tautology inverted into a false failure the moment the key became real.
+    assert named[0] in doc["worlds"]["b"]["reason"]
 
 
 def test_947_a_fault_shaped_replay_difference_is_recorded_as_a_fault_not_a_contradiction(tmp_path):
