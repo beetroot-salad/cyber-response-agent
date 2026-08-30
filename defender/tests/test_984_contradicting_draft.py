@@ -19,8 +19,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
-from defender.tests.test_lead_author import _deps, run_dir  # noqa: F401  (fixture reuse)
+from defender.tests.test_lead_author import _deps
+
+
+@pytest.fixture
+def run_dir(tmp_path: Path) -> Path:
+    """Mirrors `test_lead_author.run_dir` — kept local rather than imported so the fixture
+    name (used as a parameter in every test below) never collides with a module-level import
+    binding of the same name (ruff F811: a same-named parameter "redefines" an unused import
+    on every occurrence, not just the second)."""
+    rd = tmp_path / "test-run-001"
+    rd.mkdir()
+    (rd / "gather_raw").mkdir()
+    return rd
 
 
 def _write_draft(path: Path, *, contradicts_skill: bool | None = None) -> None:
