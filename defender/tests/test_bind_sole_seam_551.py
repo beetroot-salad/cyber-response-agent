@@ -100,6 +100,7 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.learning.author.verify_forward.engine import VerifierDeps  # noqa: E402
+from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
 from defender.learning.leads.lead_author_engine import LeadAuthorDeps  # noqa: E402
 from defender.learning.pipeline.actor_engine import ActorDeps  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import JudgeDeps  # noqa: E402
@@ -139,6 +140,7 @@ from defender.agents import (  # noqa: E402
     LEAD_AUTHOR_DEF,
     MAIN_DEF,
     ORACLE_DEF,
+    QUESTIONER_DEF,
     VERIFY_DEF,
 )
 
@@ -587,17 +589,24 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
         (bind(SUPPORT_DEF, tmp_path), SupportDeps),
         (bind(COMPOSER_DEF, tmp_path), ComposerDeps),
     ]
-    # 10 roles total: the 9 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted
-    # below). #796's surviving review roles bind with a bare `tmp_path` and nothing else — no
+    # 11 roles total: the 9 bindable ones above + two that bind does NOT build, both
+    # asserted below — CORPUS_AUTHOR (for_run-only, the #556 carve-out) and #947's QUESTIONER,
+    # whose deps type carries no run scope at all (QuestionerDeps has zero fields, so it cannot
+    # be an AgentDeps), which is why bind refuses it by name rather than minting a policy for a
+    # role that has nowhere to use one.
+    # #796's surviving review roles bind with a bare `tmp_path` and nothing else — no
     # scope, no defender_dir — which IS the assertion about them: a role that needed either
     # would be a role holding a grant, and the whole posture is that they hold none.
     # DISCRIMINATION was a third such role and is retired; the count moved with it, which is
     # what this assertion is for.
-    assert len({role for role in AgentRole}) == 10
+    assert len({role for role in AgentRole}) == 11
     for deps, expected in cases:
         assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
     with pytest.raises((ValueError, TypeError)):
         bind(CORPUS_AUTHOR_DEF, tmp_path)
+    assert QUESTIONER_DEF.deps_cls is QuestionerDeps
+    with pytest.raises((ValueError, TypeError)):
+        bind(QUESTIONER_DEF, tmp_path)
 
 
 # D3 — defender_dir threaded through resolve_roots AND _for_run (deps)

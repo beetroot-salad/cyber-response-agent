@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import dataclasses as _dataclasses
 from pathlib import Path
 
 DEFENDER_DIR = Path(__file__).resolve().parent
@@ -49,6 +50,7 @@ def _alert_label(alert: Path) -> str:
 def materialize_run_dir(
     alert: Path, run_id: str | None, *,
     provenance: _provenance.RunProvenance | None = None,
+    model: str | None = None,
 ) -> Path:
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
@@ -81,11 +83,12 @@ def materialize_run_dir(
     # N worlds: taken per world here, a commit landing mid-launch would give siblings different
     # records, and the comparison this stamp exists to protect would be the thing it failed to
     # notice.
-    _stamp(paths.provenance, provenance)
+    _stamp(paths.provenance, provenance, model=model)
     return run_dir
 
 
-def _stamp(path: Path, provenance: _provenance.RunProvenance | None) -> None:
+def _stamp(path: Path, provenance: _provenance.RunProvenance | None, *,
+           model: str | None = None) -> None:
     """Write the run's stamp, and NEVER take the run down doing it.
 
     `capture_tree` goes to some length never to raise; a write that raised beside it would
@@ -102,7 +105,14 @@ def _stamp(path: Path, provenance: _provenance.RunProvenance | None) -> None:
     not there, and an operator who needs the guarantee has the announce line saying it is
     missing."""
     try:
-        _provenance.write(path, provenance if provenance is not None else _provenance.capture_tree(REPO_ROOT))
+        record = provenance if provenance is not None else _provenance.capture_tree(REPO_ROOT)
+        # THE MODEL RIDES WITH THE COMMIT, and is set here rather than by a second write: the
+        # stamp is written once, before the box exists, and a model recorded afterwards would
+        # be a model recorded into the box's own rw bind. `None` leaves the field absent, which
+        # is what every non-branched caller means.
+        if model is not None:
+            record = _dataclasses.replace(record, model=model)
+        _provenance.write(path, record)
     except OSError as e:
         print(f"[run_common] could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "
               "nothing downstream can prove which code it ran", file=sys.stderr)

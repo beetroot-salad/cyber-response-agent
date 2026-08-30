@@ -23,6 +23,7 @@ from pydantic_ai.exceptions import (
 
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._untrusted import wrap_fresh
+from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.payload_view import render as _render_payload
 from defender.scripts.gather_tools.record_query import (
@@ -505,9 +506,16 @@ class QueryCapture(AbstractCapability[Any]):
                 payload_text=text,
                 exit_code=exit_code,
                 payload_status=_payload_status(exit_code, payload),
+                # REDACTED, and this is one of the exact two sites §7 NEW-DECISION-1 names.
+                # The failure digest is the fault's own detail, and this table sits in the
+                # gather agent's read scope while every downstream joiner reads it too — so a
+                # staged corpus name written here reaches the model on a second channel, one
+                # step later than the wrap below and with nothing between it and a reader.
+                # Redacted BEFORE the truncation, so the 160 characters kept are 160 characters
+                # of a redacted string rather than a window that happens to have cut the name.
                 payload_digest=(
                     payload_digest(text, "", 0) if exit_code == 0
-                    else f"exit={exit_code}; {detail.strip()[:160]}"
+                    else f"exit={exit_code}; {redact_model_visible(detail).strip()[:160]}"
                 ),
             )
 
@@ -531,7 +539,14 @@ class QueryCapture(AbstractCapability[Any]):
             # the untrusted boundary for this whole stream, and lifting one defender-authored
             # line out of it would put a second, differently-trusted region in a result the
             # main loop reads as one span.
-            body = detail if repeat is None else f"{repeat}\n{detail}"
+            # REDACTED HERE, at the boundary rather than at each raising site. This frame is
+            # what hands a fault's detail to the model, and the details arriving on it are
+            # authored in three different places — the stager, confinement, and the CLUSTER,
+            # whose error text is relayed verbatim and was the one observed naming a staged
+            # index. A filter at the sites we author would leave the one we do not.
+            # `redaction.redact_model_visible` says what is removed and what survives.
+            visible = redact_model_visible(detail)
+            body = visible if repeat is None else f"{repeat}\n{visible}"
             return _format_bash_result(exit_code, "", wrap_fresh(body, "untrusted"), note)
         # ONE call, no condition: `render` returns the payload verbatim when it fits and a
         # bounded view when it does not. "What counts as too big" belongs to the renderer, not

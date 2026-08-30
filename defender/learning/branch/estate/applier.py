@@ -99,11 +99,56 @@ class WorldApplier:
 
     patches: dict[str, dict] = field(default_factory=dict)
 
-    def _staging_world(self, system: str, world: Any) -> str | None:
-        """This world's id for `system`, or `None` when `system` is not staged for it."""
+    def _staging_world(self, world: Any, system: str) -> str | None:
+        """This world's TOKEN for `system`, or `None` when `system` is not staged for it.
+
+        THE WORLD FIRST, and the order is not cosmetic. Four sites compare a world token — the
+        stager's view name, the ledger's row key and filename, the serve point's confinement
+        declaration, and this one — and all four ask the WORLD for it. Written `(system, world)`
+        this frame read as a question about the system that happened to take a world, and it was
+        the only one of the four whose first argument was not the thing being identified.
+
+        `world_id` is the composed token (`<episode>.<label>`), never the short manifest label:
+        the alias, the ledger file and the row key must each carry the episode, or two episodes'
+        world `b` are one world wherever their names meet.
+        """
         if system not in STAGERS or not _touches(world, system):
             return None
         return world.world_id
+
+    def patch_table(self, world: Any) -> Mapping[str, dict]:
+        """The entity patches to apply for `world` — ITS OWN overlay, when it carries one.
+
+        The overlay is the world's difference, authored once in the manifest and parsed once by
+        `_family.parse_overlay`; an applier constructed with a patch table beside it is a second
+        copy of the same thing, and the copy that drifts is the one that stops patching. So a
+        world carrying an overlay answers for itself, and the constructor field remains for the
+        callers that hand a bare world object and its table separately (the estate seam's own
+        tests, and any programmatic world assembled without a manifest).
+
+        Read per call rather than folded in at construction because `WorldApplier()` is built
+        with NO arguments on the sibling path — the world arrives at `prepare`/`apply`, not at
+        `__init__`, and an applier that had to be told the patches up front could not be the
+        default the registry constructs for itself.
+        """
+        patches = getattr(getattr(world, "overlay", None), "patches", None)
+        return patches if isinstance(patches, Mapping) else self.patches
+
+    @staticmethod
+    def _overlay(world: Any) -> Any:
+        """This world's declared difference, for the stager to narrow its retarget by.
+
+        THE SAME READ `patch_table` MAKES, one field over, and it is what wires the stager's
+        own `declares` to the only caller that can supply it. Without it a touching world
+        retargeted EVERY corpus its calls addressed — including patterns staging never created
+        a view for — and a retarget to a name nothing created answers with zero hits in
+        silence while the ledger row still reads `staged`.
+
+        A world object carrying no overlay answers `None`, which is "this caller has not been
+        told what the world stages" rather than "it stages nothing"; the stager's own docstring
+        holds that distinction and keeps its pre-existing behaviour there.
+        """
+        return getattr(world, "overlay", None)
 
     def prepare(self, system: str, verb: str, params: dict, world: Any, ctx: Any = None) -> dict:
         """This call, pointed at the world's corpus if the system has one.
@@ -118,7 +163,8 @@ class WorldApplier:
         stager = STAGERS.get(system)
         if stager is None:
             return params
-        return stager.redirect(verb, params, self._staging_world(system, world), ctx)
+        return stager.redirect(verb, params, self._staging_world(world, system), ctx,
+                               overlay=self._overlay(world))
 
     def restore(
         self, system: str, verb: str, payload: Any, asked: dict | None, prepared: dict,
@@ -146,6 +192,7 @@ class WorldApplier:
 
     def apply(
         self, system: str, verb: str, params: dict, payload: Any, world: Any,  # noqa: ARG002
+        asked: dict | None = None,
     ) -> tuple[str, Any]:
         """What this world does to a response that has already run.
 
@@ -159,6 +206,11 @@ class WorldApplier:
         match nothing in THIS payload reports `PASSTHROUGH` too, and truthfully — the world
         changed nothing here.
 
+        `asked` IS WHAT MAKES THE STAGED ROW HONEST, and it is the same argument `restore`
+        takes, under the same rule: the params as the caller asked them when staging MOVED the
+        call, and `None` when it did not. It is the serve point's own `moved`, so this frame
+        reads what happened rather than re-deriving it — see below.
+
         The order is `touches` FIRST, then staged-ness — two independent booleans, asked as
         two. Routing through `_staging_world`'s nullable id instead folded a third state in:
         a world whose `world_id` is falsy answers `None` for a system it genuinely stages, and
@@ -167,13 +219,28 @@ class WorldApplier:
         """
         if not _touches(world, system):
             return PASSTHROUGH, payload
-        stager = STAGERS.get(system)
-        if stager is not None:
-            # STAGED names what happened to THIS CALL, not what is true of the system. A verb
-            # the stager never retargets — a liveness probe reaches no corpus to stage — had a
-            # world's difference applied to it in name only, which is a wrong row in the one
-            # table built to make wrong rows visible. The stager owns that question because
-            # only it knows which of its verbs address a corpus.
-            return (STAGED if stager.stages(verb) else PASSTHROUGH), payload
-        patched, applied = apply_patches(payload, self.patches.get(system, {}))
+        if system in STAGERS:
+            # WAS THIS CALL MOVED? That is the whole question, and it is a FACT this seam is
+            # handed rather than an answer it works out. `prepare` either points the call at
+            # the world's view or hands it back as it came, so `asked is not None` is exactly
+            # "the world's difference was applied to this call" — and the row cannot disagree
+            # with the call it describes, because it is derived from it.
+            #
+            # ASKING THE STAGER INSTEAD IS WHAT WAS WRONG. `stages(verb)` answers whether the
+            # VERB addresses a corpus, which is a property of the vendor's API and not of this
+            # call: `redirect` also passes a call through when the world's overlay does not
+            # declare the corpus it names (N11 — a pattern with no alias on the cluster reads
+            # the base), and every one of those rows read `staged` while the world had changed
+            # nothing. That is "silent scenario deletion wearing an honest label", which is the
+            # exact failure `PASSTHROUGH` exists as its own class to make visible, and it lands
+            # in the class the judge (#921) reads to attribute a difference to a world.
+            #
+            # Re-deriving it through the stager was the other candidate and is worse: it needs
+            # the overlay AND the run's config (an omitted index names the configured default,
+            # which only `ctx` can resolve), so the copy that could not see the config would
+            # answer `passthrough` for a call `redirect` genuinely staged — two independently
+            # written complements again, one step over. `redirect`'s own docstring names that
+            # hazard about `stages(verb)`; this is the same argument applied to the answer.
+            return (STAGED if asked is not None else PASSTHROUGH), payload
+        patched, applied = apply_patches(payload, self.patch_table(world).get(system, {}))
         return (PATCHED, patched) if applied else (PASSTHROUGH, payload)

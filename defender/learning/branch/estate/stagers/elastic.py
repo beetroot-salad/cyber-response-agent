@@ -84,6 +84,33 @@ PARAM_INDEXED = ("query", "alerts")
 _DEFAULT_INDEX_KEY = {"query": "ELASTIC_EVENTS_INDEX", "alerts": "ELASTIC_ALERTS_INDEX"}
 
 
+#: The two keys naming this deployment's corpus, in the order the pair is always read in.
+_PATTERN_KEYS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
+
+
+def configured_patterns() -> tuple[str, ...]:
+    """The two corpus patterns this deployment configures, in a stable order.
+
+    ONE reading of the pair the whole design keys on: the overlay-key gate, the staging
+    namespace guard and the manifest loader all ask which patterns exist, and three independent
+    readings would let a config edit widen one and narrow another.
+
+    THROUGH THE READ ADAPTER'S OWN PARSE. This frame had a private copy of that loop, because
+    `load_config` needs a `VerbContext` this seam's callers do not hold — the launcher asks
+    which patterns are configured BEFORE any run dir or verb context exists. But the context was
+    the only thing that differed; the parse and the precedence were not, and the copies had
+    already drifted on both. So the parse lives in one place that takes a path and an
+    environment, and this frame supplies the two things it knows.
+    """
+    import os
+
+    from defender._paths import PATHS
+    from defender.scripts.adapters.elastic_adapter import config_from, config_path
+
+    values = config_from(config_path(PATHS.defender_dir), os.environ, expected=_PATTERN_KEYS)
+    return tuple(values[key] for key in _PATTERN_KEYS if values.get(key))
+
+
 def check_world_id(world_id: str) -> None:
     """Refuse a world whose id no view of this corpus could be named with — BEFORE it serves.
 
@@ -408,7 +435,28 @@ def _asked_identity(verb: str, asked: dict, ctx: Any = None) -> Any:
     return source_pattern(verb, asked, ctx)
 
 
-def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None) -> dict:
+def declares(overlay: Any, base_pattern: str) -> bool:
+    """Does this world's overlay stage `base_pattern`?
+
+    KEY EQUALITY, never reach. The overlay is keyed by the base pattern it stages and staging
+    creates one alias per key, so the only names that exist on the cluster are the ones those
+    keys derive — a call naming a NARROWER source under a declared wildcard (`logs-*` declared,
+    `logs-zeek.connection-*` asked) has no view of its own, and retargeting it to the wide key's
+    alias would silently answer a query for the narrow corpus with the wide one's documents.
+    Reading the base instead is a `passthrough`, which is a recorded decision rather than an
+    absence, so the overlap — documents this world excluded that are still reachable through an
+    undeclared pattern — is visible in the ledger rather than lost.
+
+    An absent overlay is NOT "declares nothing": it is a caller that has not been given the
+    world's difference to consult, and `redirect` keeps its pre-existing behaviour there rather
+    than silently passing every staged call through. See `redirect`.
+    """
+    table = getattr(overlay, "elastic", None) or {}
+    return base_pattern in table
+
+
+def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None, *,
+             overlay: Any = None) -> dict:
     """`params` pointed at `world_id`'s view of whatever corpus they already address.
 
     `world_id is None` is the base world — it stages nothing, so its params come back untouched
@@ -422,6 +470,24 @@ def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None) -> 
     a whole evidence class from the sibling while the base kept it. The refusal below is what
     remains: a frame with no `ctx` to read the config through cannot resolve the default, and a
     view built on a guess stages a world into an index nobody reads.
+
+    `overlay` IS THE WORLD'S DIFFERENCE, and it narrows what is retargeted to the patterns the
+    world actually declares — see `declares`. A pattern the overlay does not name has no alias
+    on the cluster, and a retarget to a name nothing created returns zero hits in SILENCE
+    (`_search` appends `ignore_unavailable=true`), so the sibling would lose a whole evidence
+    class with every row still reading honestly. It reads the base instead, recorded
+    `passthrough`.
+
+    NOT SUPPLIED IS NOT "DECLARES NOTHING". A caller that does not hand over the overlay has
+    not told this seam what the world stages, and answering "nothing" would turn every staged
+    call in that frame into a base read — the silent-measurement failure again, arriving through
+    the argument list. Without an overlay the pre-existing rule stands: a touching world stages
+    every corpus its calls address.
+
+    The index-less refusal is NOT softened by the passthrough rule, and that ordering is
+    deliberate: such a call addresses the run's configured default, a frame with no `ctx`
+    cannot resolve which pattern that is, and "we could not tell whether this is declared" is
+    not the same answer as "it is not declared". Fail closed.
     """
     # `stages(verb)` rather than a second spelling of the same set: `applier.apply` already
     # asks it to decide whether a call was staged, so two independently-written complements
@@ -434,6 +500,8 @@ def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None) -> 
             raise StagingError(
                 f"{verb} addresses its corpus through the run's configured default, which "
                 "cannot be retargeted from here — pass an explicit index to stage this world")
+        if overlay is not None and not declares(overlay, base):
+            return params
         return {**params, "index": view_name(base, world_id)}
     # ONE CLAUSE for the source list AND the METADATA suffix. Read through `source_pattern`
     # and then a second time for the suffix, this arm ran `split_first_command` →
@@ -445,8 +513,10 @@ def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None) -> 
     if not isinstance(body, str):
         raise StagingError(f"esql params carry no query body: {params!r}")
     clause = _parse_from(body, "this ES|QL query")
-    view = view_name(
-        _one_source(clause.sources, "this ES|QL query's FROM clause", unquote=True), world_id)
+    base = _one_source(clause.sources, "this ES|QL query's FROM clause", unquote=True)
+    if overlay is not None and not declares(overlay, base):
+        return params
+    view = view_name(base, world_id)
     # BEFORE the rewrite, so the refusal names the query the model wrote rather than one it
     # has never seen. A `METADATA` clause selecting the corpus identity survives into the rows,
     # which `restore` cannot follow it into — see `refuse_identifying_metadata`.

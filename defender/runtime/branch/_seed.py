@@ -29,8 +29,8 @@ from typing import Any
 
 from defender._io import (
     guarded_mkdir,
+    read_guarded,
     read_jsonl_rows,
-    read_text_soft,
     write_guarded,
 )
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
@@ -141,7 +141,14 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
 
     target = RunPaths(Path(run_dir)).investigation
     refuse_seeded_run_dir(run_dir)
-    source_text, _ = read_text_soft(RunPaths(Path(spec.source_run_dir)).investigation)
+    # `read_guarded`, NOT `read_text_soft`, and the difference is the whole of the screen. The
+    # source run dir is a PRIOR BOX'S rw bind, so an entry at `investigation.md` may be a link
+    # the model planted; `read_text_soft` follows it, and the target's bytes are then written
+    # into this sibling's own `investigation.md` through `write_guarded` below — where the
+    # archive, the visualizer, the review's projector and the grader all read them as the
+    # sibling's work. The absent-file arm is unchanged: an unreadable source seeds an empty
+    # document, the same reading a missing one already got.
+    source_text, _ = read_guarded(RunPaths(Path(spec.source_run_dir)).investigation)
     text = source_text if source_text is not None else ""
     fences = fence_count_at(store, source_session(store, spec), spec.branch_message_id, text)
     bounds = scan_fences(text).spans

@@ -89,6 +89,17 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/branch/ledger.py",
     "learning/core/persist.py",
     "learning/lead_repository.py",
+    # #947's readers of the episode tree, which holds three sibling run dirs (each a box's rw
+    # bind) plus the archived copies taken out of them. `archive.py` in particular already
+    # carried a `lint-tree-read-follows-link: ok` marker, which suppressed a gate that was not
+    # scanning the file — "adding a module that reads such a tree and not adding it here is the
+    # failure mode", per the module docstring above.
+    "learning/branch/archive.py",
+    "learning/branch/episode.py",
+    "learning/branch/review.py",
+    "learning/branch/staging.py",
+    "learning/branch/questioner/__init__.py",
+    "runtime/branch/_family.py",
 })
 
 SUPPRESS_MARKERS = ("lint-tree-read-follows-link: ok",)

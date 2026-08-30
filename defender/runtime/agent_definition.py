@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +46,19 @@ class ToolSet:
     closed_tickets: bool = False
     close: bool = False
 
+    def __iter__(self) -> Iterator[str]:
+        """The names of the lanes this set GRANTS, in declaration order.
+
+        A ToolSet reads as a row of booleans, which makes "what does this role actually hold?"
+        a question every caller answers by hand — and a deny-all role's answer, the one worth
+        asserting, is the empty one, which a hand-written check states by NOT mentioning a bit
+        it forgot. Iterating yields only the True lanes, so `tuple(defn.tools) == ()` is the
+        whole deny-all claim over every lane that exists now or is added later.
+
+        Through `dataclasses.fields`, never `__dataclass_fields__`: the raw mapping also holds
+        ClassVar/InitVar pseudo-fields (#965)."""
+        return (f.name for f in fields(self) if getattr(self, f.name))
+
 
 @dataclass(frozen=True)
 class AgentDefinition:
@@ -57,7 +70,13 @@ class AgentDefinition:
     corpus_dirs: tuple[str, ...] = ()
     bash_shapes: tuple[Callable[[ResolvedRoots], tuple[Grant, ...]], ...] = ()
     write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...] = ()
-    deps_cls: type[AgentDeps] | None = None
+    #: The deps type `bind` builds for this role. Normally an `AgentDeps` subtype; typed
+    #: loosely for the one shape that cannot be one — a role holding NO grant and no run-scoped
+    #: state at all (#947's questioner), whose deps carry only their `role` ClassVar. `AgentDeps`
+    #: IS the run scope (run dir, policy, box, anchors), so a deps type with none of that cannot
+    #: inherit it; `bind` refuses such a def loudly rather than reaching for a `_for_run` that
+    #: is not there.
+    deps_cls: type[Any] | None = None
     requires_confine: bool = False
     requires_explicit_tree: bool = False
     anchors_on_tree: bool = False
@@ -281,6 +300,16 @@ def bind(
             f"{defn.role.name}_DEF declares no deps_cls — a bindable def must name the "
             "AgentDeps subtype that lives beside it (that is what keeps runtime/ from "
             "importing the learning stages to look it up)."
+        )
+    if not hasattr(defn.deps_cls, "_for_run"):
+        # A deps type outside the AgentDeps hierarchy — a role that carries no run scope
+        # because it holds no grant. There is nothing to bind, and answering with a half-built
+        # deps object would hand a caller something whose `.policy` does not exist; refuse by
+        # name instead, the way the curator's non-bindable def already does.
+        raise ValueError(
+            f"{defn.role.name}_DEF is not bindable: its deps type "
+            f"{defn.deps_cls.__name__} is not an AgentDeps subtype (it carries no run scope), "
+            "so there is no run-scoped deps for bind to build."
         )
     return defn.deps_cls._for_run(
         run_dir, policy, defender_dir=roots.defender_dir, box=box,

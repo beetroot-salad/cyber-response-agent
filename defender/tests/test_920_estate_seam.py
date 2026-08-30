@@ -231,6 +231,7 @@ class DecisionApplier:
 
     def apply(
         self, system: str, verb: str, params: dict, payload: Any, world: Any,
+        asked: dict | None = None,
     ) -> tuple[str, Any]:
         return self.decision, payload
 
@@ -259,6 +260,7 @@ class RefusingApplier:
 
     def apply(
         self, system: str, verb: str, params: dict, payload: Any, world: Any,
+        asked: dict | None = None,
     ) -> tuple[str, Any]:
         return PASSTHROUGH, payload
 
@@ -1192,15 +1194,32 @@ def test_a_touched_staged_system_reports_staged_without_touching_the_payload():
     Nothing is left to do after the fact: the difference is already IN the documents the engine
     read. Reporting it rather than staying silent is what keeps "the world changed this"
     distinguishable from "the applier never ran" — which, in a table where a missing row is the
-    alarm, is the whole distinction."""
+    alarm, is the whole distinction.
+
+    DRIVEN THROUGH `prepare` FIRST, because "was this call staged" is a fact about the call and
+    not about the system: `apply` is told whether staging MOVED it, the same way `restore` is,
+    and a test that asserted `staged` over a call it had never retargeted was asserting the
+    property the seam got wrong (a call `redirect` hands back untouched — a verb that addresses
+    no corpus, or a pattern the world's overlay does not declare — used to be recorded as the
+    world's difference all the same)."""
     applier = WorldApplier()
     payload = {"rows": [{"host": "canary-1"}]}
+    world = World("w1", ("elastic",))
+    asked = {"query": "FROM logs-* | LIMIT 5"}
 
-    decision, out = applier.apply(
-        "elastic", "esql", {"query": "FROM v"}, payload, World("w1", ("elastic",)))
+    prepared = applier.prepare("elastic", "esql", dict(asked), world)
+    assert prepared != asked, "prepare did not retarget, so the arm below proves nothing"
+
+    decision, out = applier.apply("elastic", "esql", prepared, payload, world, asked)
 
     assert decision == STAGED
     assert out is payload
+
+    # THE COMPLEMENT, in the same frame: the identical world and verb over a call staging left
+    # alone is `passthrough`, so the arm above reads as "this call was staged" rather than as
+    # "this system is a staged one".
+    assert applier.apply("elastic", "esql", asked, payload, world, None) == (
+        PASSTHROUGH, payload)
 
 
 def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):

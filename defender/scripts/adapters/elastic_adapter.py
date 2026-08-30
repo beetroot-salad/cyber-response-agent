@@ -5,6 +5,7 @@ import json
 import urllib.parse
 
 import sys as _sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path as _Path
 
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
@@ -81,8 +82,64 @@ class OutboundBody:
 
 
 
+#: Where this deployment's elastic configuration lives, relative to `defender_dir`. Named once
+#: because three readers reach it, and one of them holds no `VerbContext` to derive it from.
+CONFIG_RELPATH = ("knowledge", "environment", "systems", "elastic", "config.env")
+
+
+def config_path(defender_dir: _Path) -> _Path:
+    """The config file under `defender_dir` — for a caller that has no verb context."""
+    return _Path(defender_dir).joinpath(*CONFIG_RELPATH)
+
+
 def _config_path(ctx: VerbContext) -> _Path:
-    return ctx.defender_dir / "knowledge" / "environment" / "systems" / "elastic" / "config.env"
+    return config_path(ctx.defender_dir)
+
+
+def config_from(
+    path: _Path, env: Mapping[str, str], *, expected: Sequence[str] = (),
+) -> dict[str, str]:
+    """This deployment's elastic config: the file, with the environment over it.
+
+    THE ONE PARSE, and it is one because three readers had grown their own. This adapter loads
+    it for a run; #947's staging seam asks which corpus patterns are configured before any run
+    or verb context exists; its write door asks where the cluster is. All three read the same
+    file, and all three had a private copy of this loop — with a different quote rule and a
+    different env precedence in each, so the same `config.env` described three deployments and
+    the divergence was invisible until a staged corpus and the read of it addressed two
+    clusters.
+
+    An absent file is EMPTY here, not a fault: two of the three readers have something sensible
+    to do with a missing config and only `load_config` must refuse. What is required belongs to
+    the caller that requires it.
+
+    THE ENVIRONMENT OVERRIDES ANY KEY THE FILE CARRIES OR THE CALLER EXPECTS — not merely the
+    ones already present. Gated on presence it was weaker in exactly the direction nothing can
+    see: a deployment whose file is absent or trimmed had its `ELASTICSEARCH_URL` ignored while
+    a reader that DID apply it addressed the cluster the operator named. `expected` is how a
+    caller names the keys it will read, so an env value for one of them wins over silence.
+
+    ONE MATCHED PAIR of quotes is trimmed, never a character SET: `.strip('"').strip("'")` trims
+    both ends of both characters, so a value legitimately ending in a quote — a password, a URL
+    carrying one — silently loses it and the reader addresses something the operator never
+    named.
+    """
+    values: dict[str, str] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _, val = stripped.partition("=")
+            raw = val.strip()
+            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+                raw = raw[1:-1]
+            values[key.strip()] = raw
+    for key in (*values, *expected):
+        env_val = env.get(key)
+        if env_val is not None:
+            values[key] = env_val
+    return values
 
 
 def load_config(ctx: VerbContext) -> dict[str, str]:
@@ -92,20 +149,7 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
             f"config file not found: {path} — this file should ship with the "
             f"defender-v2-env branch; if missing, restore from git."
         )
-
-    config: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        config[key.strip()] = val.strip().strip('"').strip("'")
-
-    for key in list(config) + REQUIRED_CONFIG_KEYS:
-        env_val = ctx.env.get(key)
-        if env_val is not None:
-            config[key] = env_val
-
+    config = config_from(path, ctx.env, expected=REQUIRED_CONFIG_KEYS)
     missing = [k for k in REQUIRED_CONFIG_KEYS if not config.get(k)]
     if missing:
         raise ConfigFault(

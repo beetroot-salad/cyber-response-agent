@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar, Protocol
 
 from defender._text import is_content_less
 from defender.learning.core.config import (
@@ -14,16 +14,35 @@ from defender.learning.core.config import (
     _log,
 )
 from defender.runtime import observe, providers
+from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel, build_agent_core
-from defender.runtime.tools import AgentDeps
 
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 
+class RoleDeps(Protocol):
+    """What this module actually needs of a deps object: a TYPE that names its role.
+
+    `AgentDeps` was the annotation, and it is too narrow by exactly one role. `AgentDeps` IS the
+    run scope — run dir, compiled policy, box executor, cwd anchor — and #947's questioner
+    deliberately carries none of it: its whole input is inlined in one user message by the host,
+    so a deps object with eleven handles on a tree it may not touch is the thing that class
+    exists not to be. Nothing below reads any of those fields. `build_stage_agent` reads
+    `deps_type.role` to find the definition, and `agent.run` hands the object to tools this role
+    does not have.
+
+    So the annotation says that and no more. Every existing caller still satisfies it — each
+    `AgentDeps` subclass declares `role` — and a deps class that names no role is refused at the
+    type level rather than at `AGENTS[...]` with a `KeyError`.
+    """
+
+    role: ClassVar[AgentRole]
+
+
 def build_stage_agent(
-    deps_type: type[AgentDeps],
+    deps_type: type[RoleDeps],
     wiring: StageWiring,
     logger: observe.RequestLogger,
     *,
@@ -49,7 +68,7 @@ def build_stage_agent(
 
 
 async def _drive(
-    agent: Agent[Any, str], user: str, deps: AgentDeps, request_limit: int, timeout: int
+    agent: Agent[Any, str], user: str, deps: RoleDeps, request_limit: int, timeout: int
 ):
     return await asyncio.wait_for(
         agent.run(user, deps=deps, usage_limits=UsageLimits(request_limit=request_limit)),
@@ -78,7 +97,7 @@ def run_stage(
     stage: str,
     wiring: StageWiring,
     ctx: StageContext,
-    deps: AgentDeps,
+    deps: RoleDeps,
     make_model: MakeModel = providers.build_for_effort,
     require_output: bool = True,
     tools: Any = None,
