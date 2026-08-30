@@ -84,10 +84,8 @@ PARAM_INDEXED = ("query", "alerts")
 _DEFAULT_INDEX_KEY = {"query": "ELASTIC_EVENTS_INDEX", "alerts": "ELASTIC_ALERTS_INDEX"}
 
 
-#: Where the deployment's own corpus configuration lives. Read directly rather than through
-#: `elastic_adapter.load_config`, which needs a `VerbContext` this seam's callers do not hold —
-#: the launcher asks which patterns are configured BEFORE any run dir or verb context exists.
-_CONFIG_RELPATH = ("knowledge", "environment", "systems", "elastic", "config.env")
+#: The two keys naming this deployment's corpus, in the order the pair is always read in.
+_PATTERN_KEYS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
 
 
 def configured_patterns() -> tuple[str, ...]:
@@ -95,35 +93,22 @@ def configured_patterns() -> tuple[str, ...]:
 
     ONE reading of the pair the whole design keys on: the overlay-key gate, the staging
     namespace guard and the manifest loader all ask which patterns exist, and three independent
-    readings would let a config edit widen one and narrow another. The environment overrides the
-    file, the same precedence `load_config` applies, so a test steering the deployment steers
-    every consumer at once.
+    readings would let a config edit widen one and narrow another.
+
+    THROUGH THE READ ADAPTER'S OWN PARSE. This frame had a private copy of that loop, because
+    `load_config` needs a `VerbContext` this seam's callers do not hold — the launcher asks
+    which patterns are configured BEFORE any run dir or verb context exists. But the context was
+    the only thing that differed; the parse and the precedence were not, and the copies had
+    already drifted on both. So the parse lives in one place that takes a path and an
+    environment, and this frame supplies the two things it knows.
     """
     import os
 
     from defender._paths import PATHS
+    from defender.scripts.adapters.elastic_adapter import config_from, config_path
 
-    path = PATHS.defender_dir.joinpath(*_CONFIG_RELPATH)
-    values: dict[str, str] = {}
-    if path.is_file():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            # ONE MATCHED PAIR, not a character-set trim at both ends: a pattern that
-            # legitimately ends in a quote would otherwise lose it here and be refused
-            # downstream as an overlay key naming a corpus nobody configures.
-            raw = val.strip()
-            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
-                raw = raw[1:-1]
-            values[key.strip()] = raw
-    out = []
-    for key in ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX"):
-        pattern = os.environ.get(key) or values.get(key)
-        if pattern:
-            out.append(pattern)
-    return tuple(out)
+    values = config_from(config_path(PATHS.defender_dir), os.environ, expected=_PATTERN_KEYS)
+    return tuple(values[key] for key in _PATTERN_KEYS if values.get(key))
 
 
 def check_world_id(world_id: str) -> None:

@@ -1,12 +1,13 @@
 # The questioner — calls 2 and 3 of 3: one sibling world
 
-You are the QUESTIONER, on a later call of the same fan-out. You hold no tools; your entire
-output is one YAML document.
+This is a later call of the same fan-out, and you are authoring ONE sibling world, in the seat
+named below. Its role letter is assigned by the seat, not by you — do not restate it and do not
+claim another seat's.
 
-You are authoring ONE sibling world, in the seat named below. Its role letter is assigned by
-the seat, not by you — do not restate it and do not claim another seat's. The base world A is
-the capture unchanged, so your world is only worth running if it differs from the capture
-along your own axis and along nothing else you could have left alone.
+Call 1 planned what your world DIFFERS by; you are writing what it IS. A defender is about to
+resume a real investigation inside it and work the case end to end, so it has to hold together
+as a situation rather than as a variation — the ordinary alternative reading of this alert, with
+its own reason for the evidence to look the way it does.
 
 ## What you are handed
 
@@ -35,6 +36,13 @@ else you return is discarded, so restating the id or the overlay only makes your
 disagree with the family it will be composed into.
 
 Your `axis` elaborates the one call 1 planned for this seat; your `story` is what makes that
-axis a world an investigator could land in. Change the least that makes your axis true — every
-extra claim is a second axis you did not declare, and the review rejects a world whose declared
-difference is unreachable.
+axis a world an investigator could land in. Change the least that makes your axis true.
+
+`disposition_declared` is what a competent investigator SHOULD reach in your world, given the
+same alert and the same history. It is a claim about the world you wrote, not about the one that
+was captured, and it is what the sibling's own verdict is read against. It may match the
+capture's disposition — a world where the verdict should HOLD despite a change that invites
+flipping it is a real measurement — but then say so in the story, because a world that neither
+moves the verdict nor tempts it to move measures nothing.
+`label_basis` says which kind of claim that is: `policy-rule` when the shipped detection rules
+settle it, `judgment` when it takes a reading a rule does not encode.

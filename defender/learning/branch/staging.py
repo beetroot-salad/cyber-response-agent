@@ -48,6 +48,10 @@ from defender._io import guarded_mkdir, open_guarded, write_guarded
 from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
+from defender.scripts.adapters.elastic_adapter import (
+    config_from as elastic_config_from,
+    config_path as elastic_config_path,
+)
 from defender.scripts.adapters.confinement import (
     VIEW_NAMESPACE,
     _reach_ok,
@@ -977,32 +981,14 @@ def write_door_from_env(ctx: Any = None, *, transport: Any = docker_exec_curl) -
     defender_dir = PATHS.defender_dir if ctx_dir is None else ctx_dir
     ctx_env = getattr(ctx, "env", None)
     env: dict[str, str] = dict(os.environ if ctx_env is None else ctx_env)
-    values: dict[str, str] = {}
-    path = Path(defender_dir) / "knowledge" / "environment" / "systems" / "elastic" / "config.env"  # lint-shippable: ok — the per-vendor config the read adapter loads
-    if path.is_file():  # lint-tree-read-follows-link: ok — the deployment's own config under `defender_dir`, in the checkout; no box binds that tree, and the read adapter reads the same file the same way
-        for line in path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, _, val = stripped.partition("=")
-            # ONE MATCHED PAIR, never a character SET. `.strip('"').strip("'")` trims BOTH ends
-            # of BOTH characters, so a value that legitimately ends in a quote — a password, a
-            # URL carrying one — silently loses it and the door addresses a cluster the operator
-            # never named. Spelled inline rather than as a helper: `_unquoted` already exists
-            # twice in this tree under two different dotenv-ish grammars, and a third `def`
-            # sharing the name would be the duplicate the gate is about.
-            raw = val.strip()
-            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
-                raw = raw[1:-1]
-            values[key.strip()] = raw
-    # THE ENVIRONMENT OVERRIDES THE FILE, INCLUDING A KEY THE FILE DOES NOT CARRY — which is
-    # the read adapter's own precedence (`elastic_adapter.load_config` applies `ctx.env` over
-    # `list(config) + REQUIRED_CONFIG_KEYS`). Gated on `k in values` it was weaker in exactly
-    # the direction nothing can see: a deployment whose `config.env` is absent or trimmed had
-    # its `ELASTICSEARCH_URL` ignored and staged against `https://localhost:9200` with TLS
-    # verification off, while every sibling's READ adapter queried the cluster the operator
-    # named — a family staged on one cluster and measured on another.
-    values.update({k: env[k] for k in (*values, *_DOOR_CONFIG_KEYS) if env.get(k)})
+    # THE READ ADAPTER'S OWN PARSE, AND ITS OWN PRECEDENCE — one call rather than a third copy
+    # of the loop. `expected` is what makes the environment reach a key the file does not carry:
+    # a deployment whose `config.env` is absent or trimmed had its `ELASTICSEARCH_URL` ignored
+    # and staged against `https://localhost:9200` with TLS verification off, while every
+    # sibling's READ adapter queried the cluster the operator named — a family staged on one
+    # cluster and measured on another, which is invisible from either side.
+    values = elastic_config_from(
+        elastic_config_path(Path(defender_dir)), env, expected=_DOOR_CONFIG_KEYS)
     return write_door(
         ctx=ctx if ctx is not None else _HostContext(env=env, defender_dir=Path(defender_dir)),
         container=env.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch"),  # lint-shippable: ok — the container the read adapter execs into
