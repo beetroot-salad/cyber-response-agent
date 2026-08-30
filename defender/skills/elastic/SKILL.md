@@ -43,7 +43,7 @@ SIEM-generated signals.
 |---|---|---|
 | `logs-system.auth-*` | sshd, sudo, PAM via filebeat | `/var/log/auth.log` lines per host (Accepted/Failed sshd, sudo COMMAND=, pam_unix session open/close). The OpenSSH-format lines are ECS-parsed: `user.name`, `source.ip`, `source.port`, `event.outcome`, `system.auth.ssh.{event,method}`; the pam_unix / session / cron lines are not (see §Gaps) |
 | `logs-system.syslog-*` | journal / syslog via filebeat | general syslog (cron, baseline activity, daemon noise) |
-| `logs-falco.alerts-*` | Falco eBPF syscall monitor | rule-fire records with `falco.rule`, `falco.priority`, `falco.output_fields.{container.name,proc.name,user.name,proc.cmdline}` |
+| `logs-falco.alerts-*` | Falco eBPF syscall monitor | rule-fire records with `falco.rule`, `falco.priority`, `falco.output_fields.{container.id,proc.name,user.name,proc.cmdline}` |
 | `logs-zeek.connection-*` | Zeek conn.log via Elastic Zeek integration | per-flow records with ECS `source.{ip,port,bytes,packets}`, `destination.{...}`, `network.{protocol,transport,community_id,direction}`, plus `zeek.connection.*` |
 | `logs-zeek.dns-*` | Zeek dns.log | DNS query/answer pairs with `dns.question.name`, `dns.answers[]`, `dns.response_code` |
 | `logs-zeek.http-*` | Zeek http.log | HTTP requests with `http.request.method`, `url.original`, `user_agent.original`, and `user.name` extracted from Squid CONNECT basic-auth |
@@ -92,11 +92,14 @@ Things this Elasticsearch deployment **cannot** answer:
   <u>` line lands it clean — see
   `skills/gather/queries/elastic/sshd-auth-history.md` §Pitfalls before
   binding an equality predicate on `user.name`.
-- **Falco events name `host.hostname` as `soc-playground`** (the Docker
+- **Falco events name `host.name` as `soc-playground`** (the Docker
   host VPS), not the role-host container. Per-container attribution
-  lives in `falco.output_fields.container.name`. When asking "which
-  host fired this Falco alert", group/filter on
-  `falco.output_fields.container.name`, not `host.name`.
+  lives in `falco.output_fields.container.id` — `container.name` is
+  `<NA>` on every Falco alert (the sensor never populates it; a
+  `container.name` predicate matches zero rows, a confidently-wrong
+  empty result). When asking "which host fired this Falco alert",
+  group/filter on `falco.output_fields.container.id`, then map that id
+  back to a host through the CMDB — not through `host.name`.
 - **No CMDB / IdP integration on the events side.** Host role
   ("is web-1 prod?") and identity authorization ("is sre.alice
   permitted to sudo on db-1?") are out of band — see the cmdb /

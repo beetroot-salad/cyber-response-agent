@@ -26,6 +26,7 @@ status: draft
 scope: system-wide
 affects: [<glob> | all-templates]
 discovered_in: <run id that produced this draft>
+contradicts_skill: true   # only when this draft says SKILL.md is WRONG, not just incomplete
 ---
 
 # {Short title}
@@ -63,3 +64,10 @@ content into `defender/skills/cmdb/SKILL.md` (action: **lift**)
 or removes the draft (action: **discard**). The decision procedure
 lives in `defender/learning/leads/lead_author.md` §"Pending system-skill
 drafts".
+
+**`contradicts_skill: true` bypasses the queue-depth threshold** (#984).
+Set it only when the draft says a claim already IN `SKILL.md` is
+wrong — not merely absent — so this draft cannot be safely left
+queued behind unrelated ones while the depth count climbs toward the
+threshold. Every other draft (the default: field omitted or `false`)
+keeps waiting on the threshold as before.
