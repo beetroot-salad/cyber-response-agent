@@ -296,6 +296,15 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
     # The agent the model seam drives, built the way `run_stage` builds it — the structural half
     # (a role with a registered definition, a readable standing prompt, a deps class the builder
     # accepts) with no provider call made.
+    #
+    # THE MODEL BUILDER IS INJECTED, and it is not a convenience: `build_agent_core`'s default
+    # is `providers.build_for_effort`, which SOURCES A BILLABLE KEY. Left to the ambient
+    # environment this test asserts whether the HOST is credentialed — green on a developer's
+    # machine, red on CI — which is the same trap `T.no_preflight` exists for one seam over.
+    # The seam under test is the wiring, and the provider is what the family-level role
+    # preflight is for.
+    from pydantic_ai.models.function import FunctionModel
+
     from defender.learning._pydantic_stage import build_stage_agent
     from defender.learning.branch.questioner import (
         QuestionerDeps,
@@ -304,6 +313,7 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
     )
     from defender.learning.core.config import StageWiring
     from defender.runtime import observe
+    from defender.runtime.providers import BuiltModel
 
     role_prompt = T.DEFENDER / "learning" / "branch" / "questioner" / "role.md"
     assert role_prompt.is_file(), "the questioner has no standing system prompt to be built with"
@@ -314,6 +324,8 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
             StageWiring(prompt_path=role_prompt, model=questioner_model(),
                         effort=questioner_effort(), trace_name="t.jsonl", label="questioner"),
             logger,
+            make_model=lambda name, effort: BuiltModel(
+                FunctionModel(lambda messages, info: None), None),
         ) is not None
     finally:
         logger.close()
