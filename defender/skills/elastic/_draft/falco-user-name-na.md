@@ -46,14 +46,15 @@ This is a runtime query — if the container has been stopped or removed, the
 username cannot be recovered via any log source. ES has no stored mapping
 between container UIDs and names.
 
-## Relationship to `falco-container-name-na`
+## Relationship to the `container.name` sentinel
 
-Both sentinels (`user.name` and `container.name`) stem from the same
-Docker-socket resolution path in Falco's container plugin, but they are
-independent failures: `container.name` fails when the Docker socket lookup
-for the container record fails; `user.name` fails structurally for any
-non-zero UID because the host `/etc/passwd` does not carry container-internal
-accounts. The latter is not timing-dependent — it will always be `<NA>` for
+Both sentinels (`user.name` here and `falco.output_fields.container.name`,
+documented in `elastic/SKILL.md` §Gaps) surface as the same `<NA>` value, but
+they are independent failures with different causes: `container.name` is
+`<NA>` on every Falco alert unconditionally (the sensor never populates it,
+per SKILL.md — not a timing-dependent Docker-socket race); `user.name` fails
+structurally for any non-zero UID because the host `/etc/passwd` does not
+carry container-internal accounts. The latter will always be `<NA>` for
 non-root container users unless the same UID happens to exist on the host.
 
 ## Notes
