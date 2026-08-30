@@ -234,12 +234,25 @@ def test_missing_artifacts_still_placeholder_when_the_direction_was_selected():
 
 
 def test_disposition_is_normalized_the_way_the_loop_normalizes_it():
-    """A zero-width character clinging to the keyword decides nothing (#722): the loop
-    strips it before dispatching, so the page must strip it before deciding which
-    directions ran — otherwise it renders the never-selected leg as an aborted loop."""
-    for disposition in ("malicious​", " malicious ", "malicious﻿"):
+    """Ordinary whitespace around the keyword decides nothing: the loop trims it before
+    dispatching, so the page must trim it before deciding which directions ran — otherwise it
+    renders the never-selected leg as an aborted loop."""
+    for disposition in (" malicious ",):
         assert [v.direction.name for v in vj.active_views("case-1", disposition)] == ["benign"]
         assert [d.name for d in directions_for(disposition)] == ["benign"]
+
+
+def test_a_zero_width_laced_disposition_is_unreadable_not_normalized():
+    """#923 (§7 round 4): a zero-width character clinging to the keyword used to decide
+    nothing (#722) because the shared reader stripped it; it now decides that the disposition
+    is UNREADABLE — never coerced into the member it resembles, matching the write gates'
+    exact-only stance. `active_views` falls back to showing every section (its own honest
+    answer to "nothing to gate on"), and `directions_for` raises rather than silently routing
+    as if the verdict were a deliberately untrained one."""
+    for disposition in ("malicious​", "malicious﻿"):
+        assert vj.active_views("case-1", disposition) == vj.VIEWS, disposition
+        with pytest.raises(ValueError, match="not a known disposition"):
+            directions_for(disposition)
 
 
 # ...and artifacts on disk override it

@@ -24,6 +24,7 @@ from defender._artifact_schema import validate_artifact, validate_report
 from defender._vocab import (
     DISPOSITION_ENUM,
     DISPOSITION_VALUES,
+    HOST_ONLY_DISPOSITION,
     normalized_disposition,
 )
 from defender.skills.invlang import vocab
@@ -84,7 +85,7 @@ def test_the_slot_order_is_stable():
     not stable across processes, and a prompt that reshuffles between runs is a diff that means
     nothing to whoever reads it."""
     assert vocab.get_enum("disposition") == (
-        "benign", "false-positive", "inconclusive", "malicious",
+        "benign", "false-positive", "inconclusive", "malicious", "unresolved",
     )
 
 
@@ -110,7 +111,9 @@ def test_every_keyword_clears_the_vocabulary_check(disposition):
     assert not any("is not a known disposition" in e for e in errors)
 
 
-@pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM - set(_PRICED)))
+@pytest.mark.parametrize(
+    "disposition", sorted(DISPOSITION_ENUM - set(_PRICED) - {HOST_ONLY_DISPOSITION}),
+)
 def test_an_ungated_keyword_draws_no_error_at_all(disposition):
     """The `== []` half the test above used to carry, kept for every keyword that is NOT
     priced. Narrowing the assertion to "no vocabulary error" for ALL FOUR would have let a gate
@@ -120,7 +123,13 @@ def test_an_ungated_keyword_draws_no_error_at_all(disposition):
     vertices and no live hypotheses, so both of its checks had nothing to refuse — which is the
     same shape #806 exists to stop `false-positive` from inheriting, sitting unremarked on the
     keyword next to it. `_check_benign_grounding` is what ended that, so a bare conclude is now
-    denied under either priced keyword and this list is the two that are not."""
+    denied under either priced keyword and this list is the two that are not.
+
+    `unresolved` (#923) also left this set, for a third reason neither `_PRICED` nor its
+    complement has a bucket for: it is unpriced AND refused, because it is the HOST's own
+    verdict and no invlang document may conclude it — see
+    `test_923_authoring_surfaces.py::test_every_authoring_surface_refuses_the_host_only_verdict`
+    for that assertion."""
     assert validate_companion(_companion(disposition), None) == []
 
 
@@ -198,11 +207,14 @@ def test_the_benign_gate_still_only_fires_on_benign():
 
 def test_the_report_write_gate_still_refuses_what_the_reader_understands():
     """The one place the normalizer must NOT be used. On write there is still an author to ask,
-    so the gate denies with retry text the model can act on; normalizing here would accept it
-    and commit a document no reader could tell from a clean one."""
+    so the gate denies with retry text the model can act on.
+
+    #923 (§7 round 4) makes the READ side agree instead of diverge: a malformed verdict is
+    never coerced, so the reader now answers exactly what the write gate does — unreadable,
+    not the member it resembles."""
     laced = f"---\ndisposition: benign{ZWSP}\n---\nbody\n"
     assert validate_report(laced) is not None
-    assert normalized_disposition(f"benign{ZWSP}") == "benign"
+    assert normalized_disposition(f"benign{ZWSP}") is None
 
 
 def test_the_investigation_write_gate_denies_an_out_of_enum_disposition():

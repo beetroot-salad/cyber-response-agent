@@ -81,29 +81,29 @@ def _every_consumers_reading(run: Path) -> dict[str, object]:
     except CaseTicketError:
         readings["ticket"] = None
     accessor = read_report(run / "report.md")
-    readings["dispatch"] = (
-        [d.name for d in directions_for(accessor.disposition_or_unknown)] or None
-    )
+    try:
+        # #923 (§7 round 4): `directions_for` now RAISES on a disposition it cannot read
+        # (previously it degraded to the same empty list an untrained MEMBER produces) — the
+        # unknown-headline placeholder `disposition_or_unknown` hands it here is exactly that
+        # case for every report this helper's callers drive with a bad disposition.
+        readings["dispatch"] = [d.name for d in directions_for(accessor.disposition_or_unknown)] or None
+    except ValueError:
+        readings["dispatch"] = None
     return readings
 
 
 # the headline: the six consumers no longer disagree on attacker-shaped input
 
-@pytest.mark.parametrize(
-    ("tag", "written"),
-    [
-        ("clean", "benign"),
-        ("trailing-zwsp", f"benign{ZWSP}"),
-        ("bom", "﻿benign"),
-        ("soft-hyphen", "be­nign"),
-    ],
-)
-def test_every_consumer_reads_the_same_disposition(tmp_path, tag, written):
+def test_every_consumer_reads_the_same_disposition(tmp_path):
     """The #722 defence now reaches all six. A disposition that RENDERS as `benign` resolves
     to `benign` for the learning loop, the ticket bridge, the eval, the tracer, the transcript
     and the direction dispatch alike — before #785 only the loop stripped, so the same run was
-    a `benign` case to it and an unreadable one to the other five."""
-    run = _run_dir(tmp_path, f"case-{tag}", _report_text(written))
+    a `benign` case to it and an unreadable one to the other five.
+
+    #923 (§7 round 4) narrows this to the CLEAN spelling: the zero-width/BOM/soft-hyphen
+    spellings that used to belong here now belong in the refused set below — see that
+    parametrization's comment."""
+    run = _run_dir(tmp_path, "case-clean", _report_text("benign"))
     assert _every_consumers_reading(run) == {
         "eval": "benign",
         "transcript": "benign",
@@ -123,6 +123,18 @@ def test_every_consumer_reads_the_same_disposition(tmp_path, tag, written):
         ("zero-width-inside-a-keyword", "beni​gn-ish"),
         ("non-str", "[benign, malicious]"),
         ("int", "123"),
+        # #923 (§7 round 4): "a malformed verdict is never coerced" MOVES these three off the
+        # read side's #722 defence and onto this refused side. Before #923 the shared reader
+        # (`_vocab.normalized_disposition`) stripped zero-width characters and answered with
+        # what a human would see, so these three read back as `benign` — a committed close no
+        # reader could tell from a clean one. On READ there is no author left to ask, so a
+        # value that only becomes a member after something strips or folds it is now answered
+        # exactly as a value that was never a member: unreadable, everywhere, like the six
+        # cases above. The WRITE gate stays exact and unaffected either way (it always refused
+        # these; see `test_the_write_gate_stays_exact_where_the_read_normalizes`).
+        ("trailing-zwsp", f"benign{ZWSP}"),
+        ("bom", "﻿benign"),
+        ("soft-hyphen", "be­nign"),
     ],
 )
 def test_every_consumer_refuses_the_same_non_disposition(tmp_path, tag, written):
@@ -222,14 +234,16 @@ def test_an_undecodable_report_costs_its_own_row(tmp_path):
 # the write gate is deliberately NOT folded in
 
 def test_the_write_gate_stays_exact_where_the_read_normalizes():
-    """The asymmetry is the design, not an oversight. On WRITE there is an author to ask: the
-    gate denies a zero-width-laced disposition with retry text and the model fixes it. On READ
-    there is not — the report may have arrived from an imported run dir or a hand edit — so
-    what it renders as is what it means. Fold them together in either direction and one of the
+    """The asymmetry is the design, not an oversight — and #923 (§7 round 4) makes both lanes
+    exact. On WRITE there is an author to ask: the gate denies a zero-width-laced disposition
+    with retry text and the model fixes it. On READ there is not — the report may have arrived
+    from an imported run dir or a hand edit — so a value that only becomes a member after
+    something strips it is answered exactly as a value that never was one: unreadable, not
+    coerced into the member it resembles. Fold them together in either direction and one of the
     two lanes gets the wrong behavior."""
     laced = _report_text(f"benign{ZWSP}")
-    assert validate_report(laced) is not None                  # write: denied, with a reason
-    assert normalized_disposition(f"benign{ZWSP}") == "benign"  # read: understood
+    assert validate_report(laced) is not None            # write: denied, with a reason
+    assert normalized_disposition(f"benign{ZWSP}") is None  # read: unreadable, never coerced
 
     clean = _report_text("benign")
     assert validate_report(clean) is None

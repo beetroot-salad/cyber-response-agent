@@ -12,12 +12,10 @@ enum there would leave invlang one import edge from a cycle. Below both is the o
 can sit.
 
 Both halves live together on purpose: a consumer that borrows the set and re-derives the
-membership test loses the zero-width strip with it. `lint_borrowed_vocabulary` catches that.
+membership test drifts from it silently. `lint_borrowed_vocabulary` catches that.
 """
 
 from __future__ import annotations
-
-from defender._text import strip_zero_width
 
 # The canonical run-disposition vocabulary.
 #
@@ -38,10 +36,25 @@ from defender._text import strip_zero_width
 # a noisy rule is the point, a cheap exit from an uninvestigated host is what the gate prevents.
 #
 # It selects NO learning direction, deliberately — see `learning/core/directions.py`.
+#
+# `unresolved` (#923) is the FIFTH member, appended LAST — the ordered tuple stays alphabetical
+# up to it, and the tool schema / refusal text are read in one round trip, so a member that did
+# not sort last would have to be INSERTED rather than appended. It is the verdict the HOST
+# records when it terminates a run without a settled finding — a gate overrule, a review that
+# could not complete, or the driver's own retry-exhaustion close — and it is never written by
+# the investigating model: `inconclusive` keeps that meaning and stays the model's own "I could
+# not settle this", now priced (`skills/invlang/validate/_gating.py`). No code path may hand a
+# model-authored close this member; see `HOST_ONLY_DISPOSITION` below and its refusal at every
+# authoring surface (the close tool, the invlang document, the ticket resolution line).
 DISPOSITION_VALUES: tuple[str, ...] = (
-    "benign", "false-positive", "inconclusive", "malicious",
+    "benign", "false-positive", "inconclusive", "malicious", "unresolved",
 )
 DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
+
+#: The member ONLY the host may commit — never a model-authored close, an invlang document's
+#: own `conclude.disposition`, or an analyst's hand-typed ticket resolution. Named once here so
+#: the three authoring surfaces that refuse it share one spelling rather than three literals.
+HOST_ONLY_DISPOSITION = "unresolved"
 
 # What a surface shows where a disposition should be and none could be read. Beside the
 # vocabulary for the same reason the normalizer is: every reader that degrades rather than
@@ -54,20 +67,28 @@ def normalized_disposition(value: object) -> str | None:
     of them. THE single answer to what a disposition value MEANS, wherever it was read from:
     report frontmatter, an invlang `conclude` block, or a ticket's resolution line.
 
-    The zero-width strip lives here and nowhere else. Both artifacts are authored by a model
-    reading attacker-influenced alert data, so a character that occupies no space must not
-    decide a gate; the value is judged on what a human would see.
+    EXACT membership, and nothing else — no zero-width strip, no confusable fold (#923, §7
+    round 4, "a malformed verdict is never coerced"). On READ there is no author left to ask,
+    so a value that only becomes a member after something strips or folds it is answered
+    exactly as a value that was never a member at all: `None`, same as `NOT_A_MEMBER`, same as
+    every reader's own "I could not read this run" path — never coerced into the member it
+    resembles and never handed downstream as a clean answer. Before this change the zero-width
+    strip lived here, and it COERCED: `malicious` with a zero-width space inside it read back
+    as `malicious`, a committed close no reader could tell from a clean one. The write gates
+    never used that coercion (each is exact and denies a laced value with retry text — an
+    author is still there to ask); this reader now agrees with them.
 
     A non-`str` value (a YAML list, an int) is rejected before the enum test rather than fed to
     it — `DISPOSITION_ENUM` is a set, so an unhashable value would raise `TypeError` out of
     whatever gate asked.
 
-    NOT applied by the write gates, deliberately. On WRITE there is an author to ask: the gate
-    denies a zero-width-laced disposition with actionable retry text. A document already on
-    disk has no author — it may have come from an imported run dir, a replayed fixture or a
-    hand edit — so there, what it renders as is what it means.
+    A WRITE-side gate that must keep failing CLOSED on a laced spelling of a priced keyword
+    (never open) does not use this function — see
+    `skills/invlang/validate/_gating.py::_rendered_disposition`, which keeps its own forgiving
+    normalizer for exactly that purpose. The two are allowed to disagree on purpose: this one
+    must never recognize a disguised value, that one must never fail to.
     """
     if not isinstance(value, str):
         return None
-    disposition = strip_zero_width(value).strip()
+    disposition = value.strip()
     return disposition if disposition in DISPOSITION_ENUM else None

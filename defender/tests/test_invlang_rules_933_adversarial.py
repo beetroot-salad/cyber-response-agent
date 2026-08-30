@@ -444,7 +444,10 @@ def test_naming_a_hypothesis_in_the_conclude_prose_is_not_a_discharge() -> None:
     """v2.18 excised "cited in the conclude block" from arm (b): `termination.rationale` is
     free text and nothing in the termination pair is a projected hypothesis reference. The
     two discharges are `--` and a `:T conclude.surviving` row, and prose naming the id is
-    neither."""
+    neither.
+
+    #923: `disposition malicious` here, not `inconclusive` — this test is about the surviving
+    table, unrelated to `inconclusive`'s own entry price, which this fixture never pays."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -461,7 +464,7 @@ l-001|1|auth-history|v-001|h-001|elastic|10m
 :T conclude
 termination.category   exhaustion
 termination.rationale  "h-002 was never reached; the interval histogram lead did not return"
-disposition            inconclusive
+disposition            malicious
 impact_verdict         none
 confidence             low
 summary                "h-002 stays open"

@@ -17,7 +17,7 @@ and the same reading again with one load-bearing edge withheld — a soundness c
 sensitivity check, which is what the two-member `holds`/`gap` finding can carry.
 
 FAIL CLOSED: a stage raising, timing out, or otherwise not completing overrides the confident
-finding to inconclusive — never a silently-committed close. It commits the SAME outcome as an
+finding to the host's own `unresolved` (#923) — never a silently-committed close. It commits the SAME outcome as an
 override the evidence produced; what separates the two is the typed `failure_kind`, set only
 when the machinery is what failed.
 """
@@ -33,6 +33,7 @@ from typing import Any
 
 from defender._env import env_int
 from defender._untrusted import wrap_fresh
+from defender._vocab import HOST_ONLY_DISPOSITION
 
 EXTRA_TURN_BOUND = 2
 
@@ -320,7 +321,7 @@ def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
     from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE
 
     return GateVerdict(
-        outcome=FORCED_INCONCLUSIVE, disposition="inconclusive",
+        outcome=FORCED_INCONCLUSIVE, disposition=HOST_ONLY_DISPOSITION,
         cause=CAUSE_REVIEW_INCOMPLETE, detail=f"{role}: {outcome.detail}",
         material=(), turns_used=turns_used, failure_kind=outcome.failure_kind,
     )
@@ -392,11 +393,11 @@ def _route(
         return _verdict(STANDS, disposition, CAUSE_STORY_SETTLED, review.review)
 
     if review.ask is None:
-        # A gap with nothing measurable behind it. Forcing inconclusive costs the run
+        # A gap with nothing measurable behind it. Forcing the host verdict costs the run
         # nothing further; spending a turn on an ask the reviewer could not name would tax
         # the investigation for a question nobody has.
         return _verdict(
-            FORCED_INCONCLUSIVE, "inconclusive", CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
+            FORCED_INCONCLUSIVE, HOST_ONLY_DISPOSITION, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
             review.review,
         )
 
@@ -407,13 +408,13 @@ def _route(
     before = state.raised_asks.get(target)
     if before is not None and mentions_now <= before:
         return _verdict(
-            FORCED_INCONCLUSIVE, "inconclusive", CAUSE_NOTHING_LEFT_TO_ASK,
+            FORCED_INCONCLUSIVE, HOST_ONLY_DISPOSITION, CAUSE_NOTHING_LEFT_TO_ASK,
             f"{target} was already asked for and the turn it spent recorded nothing new "
             f"about it — {review.review}",
         )
     if state.turns >= bounds.extra_turns:
         return _verdict(
-            FORCED_INCONCLUSIVE, "inconclusive", CAUSE_TURN_BUDGET_SPENT, review.review,
+            FORCED_INCONCLUSIVE, HOST_ONLY_DISPOSITION, CAUSE_TURN_BUDGET_SPENT, review.review,
         )
 
     state.raised_asks[target] = mentions_now

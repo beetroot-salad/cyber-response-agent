@@ -6,11 +6,16 @@ has not paid its price is refused here.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
-from defender._vocab import normalized_disposition
+import yaml
+
+from defender._text import strip_zero_width
+from defender._vocab import DISPOSITION_ENUM
 from .. import _walkers, vocab
 from ..parser import (
     is_conclude_empty_marker,
@@ -24,6 +29,26 @@ from ._diag import REFUTED_WEIGHT
 from ._refs import _HYPOTHESIS_DECLARING_BLOCKS, _known_ids, _leads
 from ._structure import _cell
 from ._state import _check_benign_authz, _check_benign_open_slots
+
+
+def _rendered_disposition(value: object) -> str | None:
+    """What `value` renders as, FORGIVINGLY — zero-width stripped, exact membership beneath
+    that. #923's write-side price dispatch: it must keep failing CLOSED on a zero-width-laced
+    spelling of a priced keyword (still owes), which is the opposite direction from
+    `defender._vocab.normalized_disposition`'s #923 change (which stops coercing on the READ
+    side, so a laced keyword no longer reads back as the clean member it resembles). The two
+    normalizers now disagree on purpose — the write side may still recognize a keyword through
+    an invisible character in order to hold it to a stricter obligation; the read side must
+    never recognize one in order to hand back a clean answer."""
+    if not isinstance(value, str):
+        return None
+    candidate = strip_zero_width(value).strip()
+    # lint-vocabulary: ok — deliberately NOT `_vocab.normalized_disposition`: that reader is
+    # exact-only after #923 (the READ side must never coerce a malformed verdict), and this
+    # WRITE-side price dispatch needs the opposite — it must keep recognizing a zero-width-laced
+    # spelling of a priced keyword so it keeps failing CLOSED on one. See this function's own
+    # docstring.
+    return candidate if candidate in DISPOSITION_ENUM else None
 
 
 
@@ -53,6 +78,45 @@ def _lead_returned_a_result(lead: FindingRecord) -> bool:
     if not isinstance(outcome, dict):
         return False
     return bool(set(outcome) - {"failure_reason"})
+
+
+def _lead_retrieval_came_back(lead: FindingRecord) -> bool:
+    """Did anything ACTUALLY come back for this lead's own RETRIEVAL — an observation the run
+    recorded (`:V`/`:E l-NNN.observations.*`) or an attribute it updated (`:R attr_updates`) —
+    as opposed to an ANALYTICAL CONCLUSION (a `:R authz`/`anchor`/`impact` resolution) the model
+    reached ABOUT it, which may or may not have been grounded in any data.
+
+    Deliberately NOT `_lead_returned_a_result`, and this is a narrower, ceiling_test-specific
+    question, not a second spelling of that one. `_lead_returned_a_result` counts EITHER an
+    outcome key OR a `resolutions` entry as a result, because for `entity_check` — the question
+    it answers — reaching any conclusion at all is "the lead tested something", which is right
+    for `entity_check` and stays unchanged there.
+
+    A `ceiling_test` receipt asks the narrower question: did the underlying RETRIEVAL produce
+    anything. A lead can resolve an authz contract to `indeterminate` from the ABSENCE of
+    telemetry alone — golden-v2sshd's `l-004` resolves `ac2` "indeterminate" with the reasoning
+    "process-exec telemetry unavailable: auditd not collected... cannot be identified from
+    available data sources", and carries no `:V`/`:E`/`:R attr_updates` of its own at all. Under
+    `_lead_returned_a_result` that resolution alone makes `l-004` read identically to a lead
+    that resolved from data it actually retrieved — which made the most common real gap shape in
+    this corpus (a query that ran, found nothing, and the model drew a conclusion from that
+    absence anyway) unanchorable by any receipt. Checked against `outcome`'s two
+    retrieval-populated keys alone (`observations`, `attribute_updates`) and never
+    `resolutions` — a CONCLUSION populates `resolutions` whether or not any data backed it, so
+    its presence answers nothing about whether the retrieval itself came back with something.
+    """
+    outcome = lead.get("outcome")
+    if not isinstance(outcome, dict):
+        return False
+    return bool(outcome.get("observations") or outcome.get("attribute_updates"))
+
+
+#: THE one FK lookup a `:L findings` reference is resolved against. `entity_check`
+#: (`_check_false_positive_gating`, below) and a `ceiling_test` receipt's `ref` (#923's
+#: redesign) both resolve a model-cited lead id here — a second, independently-written lookup
+#: is exactly the duplicated-derivation shape that redesign exists to remove.
+def _lead_by_id(companion: CompanionBody, lead_id: str) -> FindingRecord | None:
+    return next((f for f in _leads(companion) if f.get("id") == lead_id), None)
 
 
 def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
@@ -100,9 +164,7 @@ def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
         ]
     lead_id = lead_id.strip()
 
-    lead = next(
-        (f for f in _leads(companion) if f.get("id") == lead_id), None
-    )
+    lead = _lead_by_id(companion, lead_id)
     if lead is None:
         return errors + [
             f"disposition false-positive blocked: `entity_check` names {lead_id!r}, "
@@ -221,9 +283,424 @@ _FALSE_POSITIVE_PRICE = _Price(
     ),
 )
 
+def _row_renders_as_empty_marker(value: object) -> bool:
+    """Does a `ceiling_test` row render as the format's own empty marker (`none`/`n/a`) — or as
+    nothing at all? A row this is True for STATES NOTHING and is silently skipped: it is not a
+    malformed receipt, it is the format's own "no gap" spelling."""
+    return isinstance(value, str) and (not value.strip() or is_conclude_empty_marker(value))
+
+
+#: The closed states a `ceiling_test` receipt may claim (#923 §7 round 4 REPLACEMENT: the
+#: free-text "does this sentence name a source or capability" judgment — which measurably
+#: refused three-letter telemetry sources (`EDR`, `WMI`, `ETW`) while `unknown` bought a close
+#: outright — is gone, not kept alongside anything). A receipt is a pointer into this run's OWN
+#: transcript the host verifies MECHANICALLY, never a judgment of prose.
+#:
+#: Three states, because three are all today's instrumentation can tell apart WITHOUT reading
+#: the model's own words: `_lead_retrieval_came_back` (below) splits "this lead's own RETRIEVAL
+#: came back with something" from "it did not" — a resolution reached from absent data does
+#: not, by itself, count as "something came back" — and a `:L findings` row's `fail_reason`
+#: cell — checked for PRESENCE, never CONTENT — splits "errored" from "ran clean and got
+#: nothing". `access-denied`
+#: and `out-of-retention` are deliberately NOT here: nothing in this deployment's
+#: instrumentation distinguishes either of them from an ordinary failure short of parsing
+#: `fail_reason`'s free text, which is exactly the judgment call this redesign exists to
+#: delete. Add either only once a host-side signal exists that tells it apart from
+#: `query-failed` mechanically — e.g. the query tool recording its own distinct `error_class`
+#: for a permission refusal (today `circuit_breaker.error_class_for_exit` has only `infra` and
+#: `agent-fixable`), or an adapter distinguishing an explicit before-retention response from an
+#: ordinary empty one.
+CEILING_QUERY_FAILED = "query-failed"
+CEILING_QUERY_EMPTY = "query-empty"
+CEILING_NOTHING_TO_TRY = "nothing-to-try"
+CEILING_STATES: tuple[str, ...] = (
+    CEILING_QUERY_FAILED, CEILING_QUERY_EMPTY, CEILING_NOTHING_TO_TRY,
+)
+
+#: The two states that anchor to a lead THIS RUN dispatched. `nothing-to-try` is the one lane
+#: with no call to point at — a capability that does not exist at all, so nothing was
+#: dispatchable — which is why it is the only state NOT in this set.
+_LEAD_ANCHORED_STATES: tuple[str, ...] = (CEILING_QUERY_FAILED, CEILING_QUERY_EMPTY)
+
+#: The shape a `:L findings` lead id takes everywhere this format declares one — the id
+#: fragment `_tokenize._LEAD_PREFIX_RE` anchors its sub-block headers on (`l-<alphanumeric>`).
+#: A `ceiling_test` receipt's `ref` is checked against this BEFORE the FK lookup, because the
+#: lookup alone (exact membership in `:L findings`) does not constrain shape: that table's own
+#: `id` cell is unquoted free text with no shape rule anywhere in the parser, so "exact
+#: membership" is satisfied by a lead a model declared with a delimiter-shaped id just as
+#: readily as by an ordinary one.
+_LEAD_REF_RE = re.compile(r"l-[A-Za-z0-9]+")
+
+
+@dataclass(frozen=True)
+class CeilingReceipt:
+    """One parsed `ceiling_test` row. `state`/`ref`/`cap` are the STRUCTURED half — closed
+    vocabulary plus an id, mechanically checked against this run's own transcript — and the
+    only part that rides into the committed report's frontmatter (`ceiling_test_block`). `note`
+    is free text FOR THE HUMAN ANALYST: it gates NOTHING (`_check_ceiling_receipt` never reads
+    it for anything but the one injection check every model-authored report field gets) and
+    rides into the report BODY, never the frontmatter — because it gates nothing, it can never
+    strand a run on a value the write gate accepted and the close then refused."""
+
+    state: str
+    ref: str | None
+    cap: str | None
+    note: str
+    raw: str
+
+
+#: `state=... [ref=...] [cap=...] note=<free text>` — `note=` is always LAST and consumes the
+#: rest of the line, so it needs no quoting or escaping: nothing follows it for a delimiter to
+#: protect. `ref`/`state`/`cap` are `\S+` tokens compared for EXACT membership (a closed enum,
+#: an existing `:L findings` id, a real `system[.verb]`) — unlike the retired free-text
+#: predicate, nothing here needs confusable or zero-width folding: a homoglyph'd token simply
+#: fails the exact-match check it is compared against, rather than needing to be defended
+#: against passing one.
+_RECEIPT_ROW_RE = re.compile(r"^(?P<fields>(?:\S+=\S+\s+)*)note=(?P<note>.*)$")
+_RECEIPT_FIELD_RE = re.compile(r"(\S+)=(\S+)")
+_RECEIPT_FIELD_NAMES = frozenset({"ref", "state", "cap"})
+
+
+def _parse_ceiling_row(row: str) -> CeilingReceipt | None:
+    """Parse one `ceiling_test` row into a receipt, or `None` when the row is not shaped like
+    one at all — free prose, the retired format, a typo. `None` is not itself a refusal; the
+    caller decides what an unparseable row costs."""
+    m = _RECEIPT_ROW_RE.match(row.strip())
+    if not m:
+        return None
+    fields = dict(_RECEIPT_FIELD_RE.findall(m.group("fields")))
+    if not fields or set(fields) - _RECEIPT_FIELD_NAMES or "state" not in fields:
+        return None
+    return CeilingReceipt(
+        state=fields["state"], ref=fields.get("ref"), cap=fields.get("cap"),
+        note=m.group("note").strip(), raw=row,
+    )
+
+
+#: `defender/scripts/adapters/*_adapter.py` — the closed universe of `(system, verb)` pairs
+#: this codebase can dispatch through AT ALL, read COLD (no adapter imported) the same way
+#: `runtime.verb_roster`'s own audit reads it. This is the roster `nothing-to-try` is checked
+#: against, and it is closed BY CONSTRUCTION: it is code this repo owns, never a catalogue of
+#: data sources that exist in the world — enumerating those (internal applications included) is
+#: exactly what the #923 design discussion rejected as unmaintainable.
+@lru_cache(maxsize=1)
+def _known_capabilities() -> Mapping[str, frozenset[str]]:
+    from defender._git import REPO_ROOT
+    from defender.runtime.verbs import (
+        ADAPTER_SUFFIX,
+        _system_of,
+        declared_verb_names,
+        is_system_name,
+    )
+
+    adapters_dir = REPO_ROOT / "defender" / "scripts" / "adapters"
+    if not adapters_dir.is_dir():
+        return {}
+    systems = {
+        _system_of(p) for p in adapters_dir.glob("*" + ADAPTER_SUFFIX)
+        if is_system_name(_system_of(p))
+    }
+    return {s: declared_verb_names(adapters_dir, s) for s in systems}
+
+
+def _capability_exists(cap: str) -> bool:
+    """Does `cap` name a REAL `system` or `system.verb` this deployment's adapters declare?
+    `nothing-to-try` pays only when this is False."""
+    known = _known_capabilities()
+    system, sep, verb = cap.partition(".")
+    if sep:
+        return verb in known.get(system, frozenset())
+    return cap in known
+
+
+def _cap_is_identifier_shaped(cap: str) -> bool:
+    """Is `cap` actually shaped like `<system>` or `<system.verb>` — the shape its own refusal
+    text already claims — rather than arbitrary text?
+
+    `cap` is the ONE receipt field checked by ABSENCE (`not _capability_exists`, above), and a
+    negative existence check cannot constrain shape: it is satisfied by ANY string that happens
+    not to name a real capability, `</report>` and `disposition:malicious` included — measured,
+    `yaml.safe_dump` quotes some of those on the way into the frontmatter and leaves others
+    (the delimiter among them) bare, which is the dumper saving the day, not the gate. `ref` and
+    `state` need no twin of this: both are checked by PRESENCE — exact membership in this run's
+    own `:L findings` table, exact membership in `CEILING_STATES` — and presence-checking an
+    arbitrary string against a closed set already refuses everything that is not a member.
+
+    Reuses `runtime.verbs.is_system_name`/`SYSTEM_PATTERN` — the SAME alphabet a real system or
+    verb name is drawn from — rather than a second, locally-invented shape; there is no
+    `is_verb_name` to call, so the verb half is matched against the identical pattern
+    `is_system_name` checks the system half with (`runtime.verb_roster`'s own comment: "verb
+    names share this alphabet")."""
+    from defender.runtime.verbs import SYSTEM_PATTERN, is_system_name
+
+    system, sep, verb = cap.partition(".")
+    if not is_system_name(system):
+        return False
+    return not sep or bool(re.fullmatch(SYSTEM_PATTERN, verb))
+
+
+#: `_artifact_schema.REPORT_CLOSE_DELIMITER`, spelled here rather than imported (that module
+#: imports THIS package). A NOTE carrying it clears every structural check below and then
+#: breaks the judge's own report-block boundary once it rides into `report.md`'s BODY — the
+#: same "refused for a file the model cannot write" trap the retired free-text row's own check
+#: existed to avoid, so it is refused HERE, before the document lands.
+_REPORT_CLOSE_DELIMITER = "</report>"
+
+
+def ceiling_test_block(receipts: Sequence[CeilingReceipt]) -> str:
+    """@owns ceiling_test
+
+    The `ceiling_test:` frontmatter block for `receipts` — `ref`/`state`/`cap` ONLY, never
+    the `note` (the report BODY's, not the frontmatter's; see `CeilingReceipt`). THE one
+    renderer, so the gate that BOUNDS this (`_check_inconclusive_gating`) and
+    `close_tool.render_report`, which EMITS it, measure and write the same bytes. Goes through
+    PyYAML's own dumper rather than an f-string for the same reason the retired free-text
+    renderer did: `ref`/`cap` are model-cited tokens in a host-owned file."""
+    if not receipts:
+        return ""
+    rows: list[dict[str, str]] = []
+    for r in receipts:
+        row: dict[str, str] = {"state": r.state}
+        if r.ref is not None:
+            row["ref"] = r.ref
+        if r.cap is not None:
+            row["cap"] = r.cap
+        rows.append(row)
+    return yaml.safe_dump(
+        {"ceiling_test": rows},
+        allow_unicode=True, default_flow_style=False, sort_keys=False, width=10**9,
+    )
+
+
+def _check_lead_anchored_receipt(companion: CompanionBody, receipt: CeilingReceipt) -> str | None:
+    """The `query-failed`/`query-empty` half of `_check_ceiling_receipt`: `ref` has to resolve
+    to a `:L findings` lead THIS RUN dispatched whose own RETRIEVAL — not any conclusion drawn
+    about it — came back with nothing (`_lead_retrieval_came_back`), and the claimed state has
+    to match whether that lead's own row recorded a `fail_reason`."""
+    if receipt.cap is not None:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `state={receipt.state}` takes `ref=`, "
+            f"not `cap=` — a call that was actually dispatched points at the lead that "
+            f"made it"
+        )
+    if not receipt.ref:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `state={receipt.state}` needs "
+            f"`ref=<lead-id>` naming the `:L findings` row that made the attempt"
+        )
+    if not _LEAD_REF_RE.fullmatch(receipt.ref):
+        # `ref` is checked by PRESENCE — exact membership in `:L findings` — which reads as
+        # closed, but the TABLE it is exact-matched against is not: a `:L findings` row's `id`
+        # cell is unquoted free text with no shape rule of its own anywhere in this parser (a
+        # lead literally named `</report>` parses with zero warnings). So "exact membership"
+        # alone does not constrain SHAPE here, exactly the way `_capability_exists` alone did
+        # not for `cap` — a `ref` naming a lead that happens to exist AND happens to be
+        # delimiter-shaped would still strand a run. Checked against the shape this format
+        # ships everywhere a lead is declared (`l-<alnum>`, `_LEAD_PREFIX_RE`'s own id
+        # fragment), ahead of the lookup, so a hostile id cannot be planted and then cited.
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `ref={receipt.ref}` is not shaped like a "
+            f"`:L findings` lead id (`l-<alphanumeric>`)"
+        )
+    lead = _lead_by_id(companion, receipt.ref)
+    if lead is None:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `ref={receipt.ref}` is not a lead in "
+            f"`:L findings`"
+        )
+    if _lead_retrieval_came_back(lead):
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: lead {receipt.ref} actually retrieved "
+            f"something (an observation, an updated attribute) — a receipt cannot claim a "
+            f"gap for a call that came back with data. An analytical CONCLUSION about the "
+            f"lead (an authz/anchor/impact resolution) does not by itself disqualify it — "
+            f"only retrieved data does; see `_lead_retrieval_came_back`"
+        )
+    outcome = lead.get("outcome")
+    errored = isinstance(outcome, dict) and bool(outcome.get("failure_reason"))
+    if receipt.state == CEILING_QUERY_FAILED and not errored:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `state=query-failed` but lead "
+            f"{receipt.ref} records no `fail_reason` in `:L findings` — write "
+            f"`state=query-empty` for a call that ran clean and came back with nothing, "
+            f"or add the lead's `fail_reason`"
+        )
+    if receipt.state == CEILING_QUERY_EMPTY and errored:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `state=query-empty` but lead "
+            f"{receipt.ref} records a `fail_reason` in `:L findings` — write "
+            f"`state=query-failed` for a call that errored"
+        )
+    return None
+
+
+def _check_nothing_to_try_receipt(receipt: CeilingReceipt) -> str | None:
+    """The `nothing-to-try` half of `_check_ceiling_receipt`: no call was dispatchable, so
+    there is nothing to point `ref` at — `cap` has to name a capability the closed verb roster
+    genuinely does not declare."""
+    if receipt.ref is not None:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `state=nothing-to-try` takes `cap=`, not "
+            f"`ref=` — nothing was dispatched, so there is no lead to point at"
+        )
+    if not receipt.cap:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `state=nothing-to-try` needs "
+            f"`cap=<system>` or `cap=<system.verb>` naming the missing capability"
+        )
+    if not _cap_is_identifier_shaped(receipt.cap):
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `cap={receipt.cap}` is not shaped like "
+            f"`<system>` or `<system.verb>` — lowercase letters, digits and hyphens only, one "
+            f"optional `.verb` segment. `cap` is checked by ABSENCE from the closed roster, "
+            f"which cannot constrain an arbitrary string on its own; rewrite it as the "
+            f"capability's actual system[.verb] name"
+        )
+    if _capability_exists(receipt.cap):
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `cap={receipt.cap}` names a capability this "
+            f"deployment DOES provide — `nothing-to-try` is for a capability that does not "
+            f"exist at all. If the call was made and failed or came back empty, use "
+            f"`state=query-failed`/`state=query-empty` with `ref=<lead-id>` instead"
+        )
+    return None
+
+
+def _check_ceiling_receipt(companion: CompanionBody, receipt: CeilingReceipt) -> str | None:
+    """Is `receipt` CONSISTENT with what this run's OWN transcript says happened — a
+    foreign-key check and a closed-vocabulary check, never a judgment of what the note says.
+    Returns the refusal text, or `None` when the receipt PAYS."""
+    if receipt.state not in CEILING_STATES:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: `state={receipt.state}` is not one of "
+            f"{CEILING_STATES}"
+        )
+    if _REPORT_CLOSE_DELIMITER in receipt.note:
+        return (
+            f"`ceiling_test` row {receipt.raw!r}: the `note` carries the literal "
+            f"{_REPORT_CLOSE_DELIMITER!r}, which the committed report may not carry — "
+            f"rewrite the note without it"
+        )
+    if receipt.state in _LEAD_ANCHORED_STATES:
+        return _check_lead_anchored_receipt(companion, receipt)
+    return _check_nothing_to_try_receipt(receipt)
+
+
+@dataclass(frozen=True)
+class _CeilingWalk:
+    """The result of walking a `:T conclude.ceiling_test` list once: every row that PAYS, in
+    document order and deduplicated, and every row-level complaint. THE one walk — the gate
+    that prices these rows (`_check_inconclusive_gating`) and the reader that carries them into
+    the committed report (`conclude_ceiling_test_rows`) share this result, so a row the gate
+    refused can never ride into `report.md` and a row it accepted can never be silently dropped
+    on the way there."""
+
+    paying: tuple[CeilingReceipt, ...]
+    errors: tuple[str, ...]
+
+
+def _walk_ceiling_rows(companion: CompanionBody, rows: Any) -> _CeilingWalk:
+    paying: list[CeilingReceipt] = []
+    errors: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    # `isinstance(list)`, not `rows or []`: the projector always hands this key a list, but a
+    # bare `for row in rows` over a STRING would walk its characters one letter at a time.
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, str) or _row_renders_as_empty_marker(row):
+            continue
+        receipt = _parse_ceiling_row(row)
+        if receipt is None:
+            # SILENT, like the retired free-text predicate's "does not pay": a row that is not
+            # even shaped like a receipt attempt is not a fault to name, it simply states
+            # nothing this gate can price. The aggregate "no receipt pays" message below is
+            # where the guidance lives, and it fires whenever THIS row is the only one written
+            # — a receipt written beside it still clears, exactly as an ordinary non-paying
+            # sentence used to beside a paying one.
+            continue
+        identity = (
+            receipt.state, receipt.ref if receipt.ref is not None else (receipt.cap or ""),
+        )
+        if identity in seen:
+            errors.append(
+                f"`ceiling_test` row {row!r} repeats an earlier gap — each row must name a "
+                f"DISTINCT gap; repetition does not pay for a second one"
+            )
+            continue
+        seen.add(identity)
+        problem = _check_ceiling_receipt(companion, receipt)
+        if problem is not None:
+            errors.append(problem)
+            continue
+        paying.append(receipt)
+    return _CeilingWalk(paying=tuple(paying), errors=tuple(errors))
+
+
+#: The bound on the FRONTMATTER receipt block a priced `inconclusive` close may carry — the
+#: `ref`/`state`/`cap` triples alone, never the notes (which live in the report BODY and gate
+#: nothing: a size cap on ungated text is itself a gate). Charged on the RENDERED block
+#: (`ceiling_test_block`), never a raw-text estimate, for the same reason
+#: `_artifact_schema._utf8_len` measures bytes: PyYAML quotes and escapes what it emits, and a
+#: measurement that disagrees with the renderer can pass a document here that the commit then
+#: refuses anyway. Deliberately WELL under `_artifact_schema.REPORT_FRONTMATTER_MAX` (512
+#: bytes). In practice this is now far from a real limit — one receipt is a handful of short
+#: tokens — and exists as insurance against a run naming an unreasonable NUMBER of receipts
+#: rather than against any one receipt's size.
+_MAX_CEILING_FRONTMATTER_BYTES = 300
+
+
+def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
+    """`inconclusive` owes a named gap (O1, #923 §7 round 4 REPLACEMENT): at least one
+    `ceiling_test` row that is a valid RECEIPT. A row pays when it is a
+    `state=query-failed`/`state=query-empty` receipt whose `ref` resolves to a `:L findings`
+    lead THIS RUN dispatched and whose own RETRIEVAL — not any conclusion drawn about it — is
+    consistent with the claimed state (a foreign-key lookup — `_lead_by_id`, the SAME one
+    `entity_check` uses — plus a consistency check against `outcome`'s retrieval-populated
+    keys, `_lead_retrieval_came_back`), or a `state=nothing-to-try`
+    receipt whose `cap` names a capability that does not exist anywhere in this codebase's
+    closed verb roster. Rows must be DISTINCT, and the accumulated FRONTMATTER receipt text is
+    BOUNDED. Both fire at both boundaries this check is collected from (the `investigation.md`
+    write gate and the close), because the table (`_DISPOSITION_GATES`) is collected at both
+    from one definition."""
+    conclude = companion.get("conclude") or {}
+    walk = _walk_ceiling_rows(companion, conclude.get("ceiling_test"))
+    errors = [f"disposition inconclusive blocked: {e}" for e in walk.errors]
+    total_bytes = len(ceiling_test_block(walk.paying).encode("utf-8"))
+    if total_bytes > _MAX_CEILING_FRONTMATTER_BYTES:
+        errors.append(
+            f"disposition inconclusive blocked: the accumulated `ceiling_test` receipts are "
+            f"{total_bytes} bytes, over the {_MAX_CEILING_FRONTMATTER_BYTES}-byte bound — "
+            f"name fewer, more specific gaps rather than every one in full"
+        )
+    if not walk.paying:
+        errors.append(
+            "disposition inconclusive blocked: no `ceiling_test` row is a receipt that pays "
+            "— write `state=query-failed ref=<lead-id> note=<text>` or "
+            "`state=query-empty ref=<lead-id> note=<text>` naming a `:L findings` lead this "
+            "run dispatched that failed or came back empty, or `state=nothing-to-try "
+            "cap=<system[.verb]> note=<text>` naming a capability this deployment does not "
+            "provide."
+        )
+    return errors
+
+
+_INCONCLUSIVE_PRICE = _Price(
+    check=_check_inconclusive_gating,
+    rationale=(
+        "`inconclusive` says the investigating model could not settle the case, which is "
+        "worth nothing to an analyst unless the report names what specifically it could not "
+        "check — so it is reachable only from a `:T conclude` naming at least one "
+        "`ceiling_test` RECEIPT: `state=query-failed`/`state=query-empty` pointing (`ref=`) at "
+        "a `:L findings` lead this run dispatched that failed or came back empty, consistent "
+        "with that lead's own recorded outcome, or `state=nothing-to-try` naming (`cap=`) a "
+        "capability that does not exist anywhere in this deployment. Mechanically verified "
+        "against the run's own transcript — never a judgment of prose."
+    ),
+)
+
 _DISPOSITION_GATES: dict[str, _Price] = {
     "benign": _BENIGN_PRICE,
     "false-positive": _FALSE_POSITIVE_PRICE,
+    "inconclusive": _INCONCLUSIVE_PRICE,
 }
 
 
@@ -246,6 +723,26 @@ class EntryPrice:
         return bool(self.owed)
 
 
+def conclude_ceiling_test_rows(companion_text: str) -> tuple[CeilingReceipt, ...]:
+    """The `:T conclude.ceiling_test` receipts a companion wrote that this module PRICED, in
+    document order.
+
+    Public alongside `disposition_entry_price` for the same reason that one is: `report.md` is
+    written from the close's disposition ARGUMENT and never re-reads the companion, so the
+    close carries these into the committed report itself (#923's coverage channel) by calling
+    this — `ref`/`state` are the one place model-CHOSEN structure belongs in a host-rendered
+    report's frontmatter, and `note` the one place model-authored TEXT belongs in its body.
+
+    Reuses `_check_inconclusive_gating`'s OWN walk (`_walk_ceiling_rows`) rather than
+    re-deriving which rows pay, because the receipts it hands back are the receipts that ride
+    into the frontmatter, and the bound the gate charges is only a bound on what ships if the
+    two are the same set — a reader that re-derived "paying" independently could disagree with
+    the gate that already ran and carry a row into `report.md` the gate never priced."""
+    companion, _ = parse_dense_companion(companion_text)
+    conclude = companion.get("conclude") or {}
+    return _walk_ceiling_rows(companion, conclude.get("ceiling_test")).paying
+
+
 def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice:
     """What `disposition` still owes, read off an `investigation.md` — nothing owed when it
     owes nothing, and nothing owed for the keywords `_DISPOSITION_GATES` prices at nothing.
@@ -261,7 +758,9 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
     dispatches on the disposition the DOCUMENT wrote, this one on the disposition the CALLER is
     about to commit, so a row added to `_DISPOSITION_GATES` is collected at both.
 
-    `disposition` is normalized through `normalized_disposition` for the same reason the
+    `disposition` is normalized through `_rendered_disposition` — the module's own FORGIVING
+    normalizer, not `defender._vocab.normalized_disposition` (#923 makes that one exact-only,
+    since the READ side must stop coercing a malformed verdict) — for the same reason the
     write-side dispatch is: a keyword is judged on what it RENDERS as, so a zero-width
     character cannot turn a gate off. Typed `str` rather than `object` even though the
     normalizer accepts anything: an unrecognized value takes the unpriced branch, so this
@@ -275,7 +774,7 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
     contradiction checks (`_check_benign_grounding`), which are vacuous over a document with no
     vertices.
     """
-    priced = normalized_disposition(disposition)
+    priced = _rendered_disposition(disposition)
     price = _DISPOSITION_GATES.get(priced) if priced else None
     if price is None:
         return EntryPrice(owed=(), rationale="")
@@ -286,13 +785,16 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
 def _check_disposition_gating(companion: CompanionBody) -> list[str]:
     """Run the structural checks this run's disposition is priced at, and only those.
 
-    Dispatched on what the value RENDERS as. This is the ONE branch that decides whether a
-    disposition's structural checks run at all, so a zero-width character clinging to the
-    keyword would turn them all off — a gate failing open on an invisible character in
-    model-authored text. `_check_conclude_vocab` denies the laced spelling separately, and the
-    two rules stay independent on purpose: either alone would leave a hole.
+    Dispatched on what the value RENDERS as, FORGIVINGLY (`_rendered_disposition`) — this is
+    the ONE branch that decides whether a disposition's structural checks run at all, so a
+    zero-width character clinging to the keyword would turn them all off — a gate failing open
+    on an invisible character in model-authored text. `_check_conclude_vocab` denies the laced
+    spelling separately, and the two rules stay independent on purpose: either alone would
+    leave a hole. Deliberately NOT `defender._vocab.normalized_disposition` — #923 makes that
+    reader exact-only (the READ side must not coerce a malformed verdict); this WRITE-side
+    dispatch keeps its own forgiving normalizer so it still fails closed on one.
     """
-    disposition = normalized_disposition(
+    disposition = _rendered_disposition(
         (companion.get("conclude") or {}).get("disposition")
     )
     price = _DISPOSITION_GATES.get(disposition) if disposition else None
@@ -544,9 +1046,9 @@ def _check_ceiling_test_scope(companion: CompanionBody) -> list[str]:
         f"conclude: `termination.category {SEVERITY_CEILING}` with no `ceiling_test` — the "
         f"category says live hypotheses remain and their critical edges cannot be tested, so "
         f"the close owes the specific check it could not make. Add one "
-        f"`ceiling_test  \"<host> <data source> not retrieved\"` row per gap to `:T conclude` "
-        f"(repeat the key; the SKILL's §`:T conclude` has the shape), naming the source "
-        f"rather than the shape of the question. If you wrote a `:T conclude.ceiling_test "
+        f"`ceiling_test  state=query-failed ref=<lead-id> note=<text>` (or "
+        f"`state=query-empty`) row per gap to `:T conclude` (repeat the key; the SKILL's "
+        f"§`:T conclude` has the shape). If you wrote a `:T conclude.ceiling_test "
         f"[kind|subject]` sub-table, that is the RETIRED spelling from "
         f"`docs/dense-investigation-format.md` — the parser recognizes it and projects "
         f"nothing, so its rows never reach this rule; re-send them as flat rows. If nothing "

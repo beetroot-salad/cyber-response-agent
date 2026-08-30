@@ -171,7 +171,14 @@ BY_NAME = {ADVERSARIAL.name: ADVERSARIAL, BENIGN.name: BENIGN}
 #: Neither actor has a story to write from it: hunting the FN would disprove a claim the run
 #: never made, hunting the FP would re-derive the defect the run already stated. Its tuning
 #: signal belongs to the rule, not to this per-case loop.
-UNTRAINED_DISPOSITIONS: frozenset[str] = frozenset({"false-positive"})
+#:
+#: `unresolved` (#923) joins it for a different reason: it is the HOST's own verdict, recorded
+#: when a run terminates without a settled finding rather than when the model reaches one. A
+#: run the host cut short is evidence about the RUN, not about the world — neither actor has a
+#: story to write from a case nobody settled, and a broken review's own content must not be
+#: able to steer training either way (`test_a_review_broken_by_the_content_under_review_stops_
+#: training_on_that_case`).
+UNTRAINED_DISPOSITIONS: frozenset[str] = frozenset({"false-positive", "unresolved"})
 
 # INVARIANT: the union of every `dispositions` is exactly `DISPOSITION_ENUM` minus
 # `UNTRAINED_DISPOSITIONS` — a typo or an omission there silently drops a leg from BOTH the
@@ -181,18 +188,31 @@ UNTRAINED_DISPOSITIONS: frozenset[str] = frozenset({"false-positive"})
 
 def directions_for(disposition: str) -> list[Direction]:
     """The directions a disposition selects — the ONE reader of `Direction.dispositions`,
-    shared by the loop's dispatch and the transcript view so they cannot disagree. An
-    unrecognized disposition selects nothing; callers decide what that means.
+    shared by the loop's dispatch and the transcript view so they cannot disagree.
 
     It reads the disposition through the same `normalized_disposition` every consumer of a
-    completed `report.md` goes through, so the zero-width strip cannot be applied on the
-    reading side and skipped on the dispatching one.
+    completed `report.md` goes through, so the read side and the dispatching side cannot
+    disagree about what a value means.
 
     An `UNTRAINED_DISPOSITIONS` member returns early rather than falling through the filter to
     the same empty list. The filter would produce it anyway — no `Direction` names those
     keywords — but only as an ABSENCE, which reads identically to the drift bug the invariant
-    above exists to catch. Consulting the set makes "trains nothing" a stated decision."""
+    above exists to catch. Consulting the set makes "trains nothing" a stated decision.
+
+    #923 (§7 round 4): an UNRECOGNIZED disposition RAISES rather than returning the same empty
+    list an `UNTRAINED_DISPOSITIONS` member does. Before this change both answered `[]`, so
+    "this verdict trains nothing" and "I could not read this verdict" were one indistinguishable
+    fact — `directions_for(<untrained member>) == []` was true on a build where the member was
+    never added to this set at all, and true of a typo. Every caller here is downstream of a
+    read that already refused an unreadable report (`learning.core.validate.normalize_
+    disposition`, `run_common.learning_refusal_gate`), so this is defense in depth, not a new
+    failure mode on the ordinary path."""
     disp = normalized_disposition(disposition)
-    if disp is None or disp in UNTRAINED_DISPOSITIONS:
+    if disp is None:
+        raise ValueError(
+            f"{disposition!r} is not a known disposition — cannot route a training decision "
+            "for a verdict this loop cannot read"
+        )
+    if disp in UNTRAINED_DISPOSITIONS:
         return []
     return [d for d in BY_NAME.values() if disp in d.dispositions]

@@ -55,6 +55,124 @@ def test_a_shipped_document_would_survive_the_write_gate(path: Path) -> None:
     assert validate_companion(path.read_text(encoding="utf-8"), None) == []
 
 
+#: The documents that ship concluding the priced keyword, NAMED rather than filtered.
+#:
+#: A filter would make the cheap repair invisible: a document that stopped concluding
+#: `inconclusive` would simply leave the parametrization, and the test that exists to forbid
+#: that repair would go green by losing its subject. Both are named, and the census below fails
+#: in both directions — one leaving, or a sixth arriving unclassified.
+_INCONCLUSIVE_DOCS = (
+    _DEFENDER / "examples" / "example-c-cumulative-escalation.md",
+    _DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md",
+)
+
+
+def _concluded_disposition(path: Path) -> str | None:
+    body, _warnings = parse_dense_companion(path.read_text(encoding="utf-8"))
+    value = (body.get("conclude") or {}).get("disposition")
+    return value if isinstance(value, str) else None
+
+
+def _with_only_gap_row(text: str, row: str) -> str:
+    """The same document with its `:T conclude` gap rows replaced by exactly one `row`.
+
+    Inserts when the document carries none yet, which is the state on this base: the mutant is
+    then a document whose ONLY gap row is the one under test, in both directions, whether or
+    not the fixture repair has landed."""
+    kept = [ln for ln in text.splitlines(keepends=True) if not ln.startswith("ceiling_test")]
+    out: list[str] = []
+    inserted = False
+    for line in kept:
+        out.append(line)
+        if not inserted and line.rstrip("\n") == ":T conclude":
+            out.append(f"{'ceiling_test':<22} \"{row}\"\n")
+            inserted = True
+    assert inserted, "the `:T conclude` fence moved — re-anchor this walk"
+    return "".join(out)
+
+
+#: A lead-anchored receipt VALID FOR THAT SPECIFIC DOCUMENT — unlike the retired free-text
+#: predicate, a receipt's `ref` has to resolve against THIS document's own `:L findings` table,
+#: so (unlike `HOST_ONLY_ROW`/`CAPABILITY_ROW`, both document-independent) it cannot be one
+#: constant shared across an arbitrary corpus. `golden-v2sshd`'s own committed row already
+#: anchors to `l-006` (`state=query-failed`, the Zeek query the permission gate blocked);
+#: `example-c` has no lead-anchored gap in its own words at all — its real gap is the missing
+#: sandbox, which is what `CAPABILITY_ROW` alone already covers for it.
+_DOCUMENT_RECEIPT: dict[Path, str] = {
+    _DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md":
+        "state=query-failed ref=l-006 note=Zeek outbound flow data for office-ws-1 blocked by a permission gate",
+}
+
+
+@pytest.mark.parametrize("path", _INCONCLUSIVE_DOCS, ids=corpus_id)
+def test_a_shipped_inconclusive_document_names_its_gap_in_the_ceiling_test_block(
+    path: Path,
+) -> None:
+    """#923 §7 round 4's REPLACEMENT. A shipped document concluding `inconclusive` PAYS the
+    entry price at both boundaries, and what makes it pay is a RECEIPT — a pointer into this
+    document's own transcript the host verifies mechanically — never a judgment of a sentence's
+    words.
+
+    THE TWO REPAIRS THIS FORBIDS ARE THE TWO CHEAP ONES, and the shape of the test is what
+    forbids them. Re-concluding under an unpriced keyword is refused by the census assertion:
+    the documents that conclude this keyword are named, so a document leaving the set fails
+    here instead of quietly leaving a filter. Satisfying the gate with FREE TEXT is refused by
+    the mutation control: the same document, its gap rows replaced by the retired free-text
+    shape, must be REFUSED at both boundaries — that is the assertion a build that still judges
+    prose fails, and the reason this test reads the real price and never a predicate of its own.
+
+    THE PAYING REPAIR IS DOCUMENT-SPECIFIC, unlike the retired free-text predicate: a receipt's
+    `ref` has to resolve against the SAME document's own `:L findings`, so what repairs
+    `golden-v2sshd` (`ref=l-006`, `_DOCUMENT_RECEIPT`) cannot repair `example-c` at all — its
+    real gap has no lead to point at, which is exactly the `nothing-to-try` lane
+    (`CAPABILITY_ROW`) exists for. Both are driven where each applies.
+    """
+    from defender.skills.invlang.validate import disposition_entry_price
+
+    from defender.tests._spec923 import CAPABILITY_ROW, GAP_MEMBER, HOST_ONLY_ROW
+
+    concluding = {p for p in corpus_docs() if _concluded_disposition(p) == GAP_MEMBER}
+    assert concluding == set(_INCONCLUSIVE_DOCS), (
+        f"the shipped `{GAP_MEMBER}` census moved: "
+        f"{sorted(corpus_id(p) for p in concluding ^ set(_INCONCLUSIVE_DOCS))} — a document "
+        f"that stopped concluding the priced keyword satisfied the gate by re-concluding, "
+        f"which is the repair this demand exists to forbid; a new one has to be classified"
+    )
+
+    text = path.read_text(encoding="utf-8")
+    assert validate_companion(text, None) == [], (
+        f"{corpus_id(path)} concludes `{GAP_MEMBER}` and does not pay at the write gate"
+    )
+    assert disposition_entry_price(GAP_MEMBER, text).owed == (), (
+        f"{corpus_id(path)} concludes `{GAP_MEMBER}` and does not pay at the close — the gap "
+        f"it describes never reached a receipt"
+    )
+
+    host_only = _with_only_gap_row(text, HOST_ONLY_ROW)
+    assert validate_companion(host_only, None) != [], (
+        "bare free prose paid at the write gate — that is the RETIRED predicate's own shape, "
+        "which #923 §7 round 4 deletes rather than keeps alongside a receipt check"
+    )
+    assert disposition_entry_price(GAP_MEMBER, host_only).owed, (
+        "bare free prose paid at the close"
+    )
+
+    # And the refusal above is the SHAPE, not the edit: the same surgery with a row that IS a
+    # valid receipt clears both boundaries. Without this the mutation control is also satisfied
+    # by a build that refuses every edited document. `CAPABILITY_ROW` is document-independent
+    # (no `ref` to resolve) and is driven for both; the lead-anchored receipt is driven only
+    # where this document actually has one.
+    paying_rows = [CAPABILITY_ROW]
+    if path in _DOCUMENT_RECEIPT:
+        paying_rows.append(_DOCUMENT_RECEIPT[path])
+    for row in paying_rows:
+        pays = _with_only_gap_row(text, row)
+        assert validate_companion(pays, None) == [], f"{row!r} was refused at the write gate"
+        assert disposition_entry_price(GAP_MEMBER, pays).owed == (), (
+            f"{row!r} was refused at the close"
+        )
+
+
 def _example_a_fences() -> str:
     """Example A's fences, concatenated in document order — the document the run would hold
     after writing every block the example shows, which is what the gate sees.

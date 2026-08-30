@@ -98,6 +98,7 @@ confidence             medium
 impact_verdict         none
 matched_archetype      novel-dependency-with-anomalous-egress
 summary                "build-runner-07.ci is making periodic queries to a recently-registered domain via a post-install daemon in a freshly-published npm package by a single-package maintainer. Legitimate-telemetry path is refuted; malicious-C2 path is supported circumstantially but cannot be confirmed in-loop. Hand off for sandbox detonation + maintainer review."
+ceiling_test            state=nothing-to-try cap=sandbox.detonate note=confirming ?post-install-implant would require sandbox detonation or traffic-content inspection, and neither is in the runtime tool surface
 ```
 
 `disposition` is the run's closed vocabulary (`enum disposition`), the same

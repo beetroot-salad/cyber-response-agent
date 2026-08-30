@@ -313,6 +313,8 @@ class _CloseVocabulary(NamedTuple):
     challenged: str
     forced: str
     not_reviewed_cause: str
+    #: The verdicts the gate is never spent on — `close_tool.NO_REVIEW_DISPOSITIONS`.
+    unreviewed_dispositions: tuple[str, ...]
 
 
 @functools.cache
@@ -326,26 +328,35 @@ def close_vocabulary() -> _CloseVocabulary:
         CAUSE_NOT_REVIEWED,
         CHALLENGED,
         FORCED_INCONCLUSIVE,
+        NO_REVIEW_DISPOSITIONS,
         STANDS,
     )
 
-    return _CloseVocabulary(STANDS, CHALLENGED, FORCED_INCONCLUSIVE, CAUSE_NOT_REVIEWED)
+    return _CloseVocabulary(
+        STANDS, CHALLENGED, FORCED_INCONCLUSIVE, CAUSE_NOT_REVIEWED, NO_REVIEW_DISPOSITIONS,
+    )
 
-
-#: The one disposition `close_tool` commits WITHOUT a review (its bypass arm). Asked in ONE
-#: place because two questions on this page turn on it — "is any attempt worth counting?" and
-#: "does THIS attempt's verdict mean a review agreed?" — and an unreviewed attempt rendered
-#: as `stands` reads as "a review ran and the disposition held".
-UNREVIEWED_DISPOSITION = "inconclusive"
 
 _BYPASS_NOTE = (
     '<div class="empty">the gate reviews confident closes only — an '
-    "<code>inconclusive</code> disposition commits immediately</div>"
+    "<code>inconclusive</code> or <code>unresolved</code> disposition commits "
+    "immediately</div>"
 )
 
 
 def _was_reviewed(rec: dict) -> bool:
-    return rec.get("reviewed_disposition") != UNREVIEWED_DISPOSITION
+    """Did a review actually run for this attempt?
+
+    Asked in ONE place because two questions on this page turn on it — "is any attempt worth
+    counting?" and "does THIS attempt's verdict mean a review agreed?" — and an unreviewed
+    attempt rendered as `stands` reads as "a review ran and the disposition held".
+
+    #923: the set is READ FROM the close tool (`NO_REVIEW_DISPOSITIONS`, through the same
+    cached `close_vocabulary` this module already pays the lazy import for) rather than
+    respelled here — both the model's own `inconclusive` and the host's own `unresolved` skip
+    the gate, and a page that knew only the first would render a gate-forced run (which now
+    commits `unresolved`, never `inconclusive`) as REVIEWED."""
+    return rec.get("reviewed_disposition") not in close_vocabulary().unreviewed_dispositions
 
 
 def _review_records(run_dir: Path) -> list[tuple[int, dict]]:

@@ -4,11 +4,12 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._vocab import normalized_disposition
+from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION, normalized_disposition
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
 
@@ -19,6 +20,46 @@ _MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
 _SIGNATURE_FALLBACK = "unknown"
 _SUMMARY_FALLBACK = "(no rule description)"
 _CONFIDENCE_FALLBACK = "n/a"
+
+#: The bound on `CaseRecord.reason` once it leaves the process through the ticket bridge's
+#: outbound `resolution` — a field a PERSON and the judge model both read back. #923 makes
+#: `inconclusive`'s `ceiling_test` rows mandatory on every priced close (not just the two
+#: fixture documents that used to carry one), so model-authored text reaches this lane
+#: routinely rather than rarely.
+#: Held WELL under 512: `reason` does not render alone — `close.resolution`'s template
+#: (`mapping.yaml`) is `"{disposition} — {reason}"`, and the bound this demand pins is on the
+#: RENDERED resolution field on the wire, not on this input in isolation. The longest
+#: disposition (`false-positive`) plus its separator is 17 characters; 40 leaves a wide margin.
+_TICKET_REASON_MAX = 512 - 40
+
+
+def _sanitize_ticket_reason(text: str) -> str:
+    """Strip injection-shaped structure from a reason before it leaves the process, and bound
+    its length — by TRUNCATION, never substitution, so a long claim is visibly cut rather than
+    silently swapped for a host placeholder that tells nobody what was not retrieved.
+
+    Only the frontmatter delimiter is stripped, structurally: everything from the first
+    standalone `---` onward is dropped, which removes a spoofed second frontmatter block (a
+    fabricated `disposition:`/`cause:` pair) and whatever text rides after it (an injected
+    instruction, in the one case observed) in one cut — a model-authored row cannot open a
+    second delimited block in a field that already left one. The legitimate half of the row,
+    which comes BEFORE any such attempt, survives untouched; a sanitizer that instead deleted
+    or replaced the whole reason would satisfy every negative here while telling the analyst
+    and the judge model nothing about the actual gap (#923, J29).
+
+    A LINE-ANCHORED match, not `split("\n---")`: the report BODY this falls back to is
+    everything after the document's own closing fence, so a planted block can be the very
+    FIRST thing in it and then carries no preceding newline. Splitting on `"\n---"` left
+    exactly that spelling — `---\ndisposition: malicious\n---\n<instruction>` — with its
+    fence and its spoofed verdict intact on the wire."""
+    # Not parsing a document's OWN frontmatter: this text is a `reason` field's contents, never
+    # required to start with `---\n`, so `_frontmatter.split_frontmatter` does not apply — it
+    # demands a leading fence and raises without one. This looks for an ATTACKER-PLANTED
+    # delimiter anywhere in the string, a different question with a different answer.
+    cleaned = re.split(r"(?m)^---", text)[0].strip()  # lint-frontmatter: ok — not a document's own fence, see above
+    if len(cleaned) > _TICKET_REASON_MAX:
+        cleaned = cleaned[: _TICKET_REASON_MAX - 1].rstrip() + "…"
+    return cleaned
 
 
 class CaseTicketError(Exception):
@@ -125,6 +166,13 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     # where this close's own boilerplate comes back as evidence about prior closes. `cause` is
     # the host's typed sentence for the disposition and has exactly one home, the frontmatter.
     # Reports with no `cause` (anything the close gate did not write) keep the body verbatim.
+    #
+    # #923 §7 round 4's receipt redesign moved the gap CLAIM itself: `ceiling_test` in the
+    # frontmatter is now `ref`/`state`/`cap` alone — a closed vocabulary plus an id, host-
+    # verified, never free text — and the model's human-facing NOTE for each receipt is
+    # rendered into the BODY by `close_tool.render_report`. So for a priced `inconclusive`
+    # close with no `cause`, the body ALREADY carries the gap claim; no second lookup into
+    # `ceiling_test` is needed (or even meaningful — that key no longer holds prose).
     cause = str(fm.get("cause") or "")
 
     mapping = _load_mapping()
@@ -139,7 +187,7 @@ def read_case_record(run_dir: Path) -> CaseRecord:
         signature_id=signature_id,
         disposition=disposition,
         confidence=confidence,
-        reason=cause or body,
+        reason=_sanitize_ticket_reason(cause or body),
     )
 
 
@@ -234,10 +282,47 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
         return None
     if not sep:
         return None
-    head = resolution.split(sep, 1)[0].strip()
+    head, _, tail = resolution.partition(sep)
+    head = head.strip()
     # The resolution line is analyst-editable and read back by the benign judge, so decode it
     # through the shared vocabulary — same answer the report and the investigation give.
-    return normalized_disposition(head)
+    decoded = normalized_disposition(head)
+    # #923: the THIRD authoring surface the host-only verdict is refused at — the close tool's
+    # argument and the invlang document's `conclude.disposition` are the other two. This
+    # decoder made a host-owned verdict analyst-writable: before this refusal, a person typing
+    # `unresolved` into a ticket's resolution field decoded cleanly and indistinguishably from
+    # a host-forced close. Written FOR A PERSON — the field they edited, and what it may say
+    # instead — since this is the one surface whose author is neither the host nor a model.
+    #
+    # The host's OWN egress round-trips through this same function
+    # (`case_record_to_close` -> `{disposition} — {reason}`, decoded straight back by
+    # `ticket_disposition`), and its `reason` is one of the closed `REPORT_CAUSES` sentences
+    # whenever the report carries a `cause` — which every host-terminated close does. So the
+    # refusal fires only when the tail is NOT one of those sentences: the host's own resolution
+    # decodes cleanly, and a person's hand-typed tail (which cannot coincide with a
+    # closed host sentence except by deliberately copying one) is refused.
+    if decoded == HOST_ONLY_DISPOSITION:
+        from defender.runtime.close_tool import REPORT_CAUSES
+
+        # `startswith`, not equality: the host's own resolution is APPENDED to in this very
+        # module (`append_resolution_method` stamps ` [grounded: …]` onto it after the
+        # adversarial leg settles), and an analyst may add a note after the host's sentence.
+        # Under equality any such suffix made the host's own verdict undecodable — the ticket
+        # then falls out of every disposition-keyed pool through `ticket_disposition`'s
+        # degrade-to-`None`. What the refusal keys on is that the reason clause BEGINS with a
+        # closed host sentence, which a hand-typed one still cannot without copying it.
+        if not any(tail.strip().startswith(cause) for cause in REPORT_CAUSES):
+            # Derived from the vocabulary, never re-spelled: this list is exactly "the members
+            # a person MAY write", and a sixth member added at the owner has to reach the
+            # analyst being told what to write instead.
+            others = ", ".join(d for d in DISPOSITION_VALUES if d != HOST_ONLY_DISPOSITION)
+            raise CaseTicketError(
+                f"the case `resolution` field cannot record {decoded!r} — that verdict is "
+                f"written by the host, not by a person closing a ticket. Record one of "
+                f"{others} in `resolution` instead, or leave the disposition off it for the "
+                f"host to fill in."
+            )
+    return decoded
 
 
 
@@ -368,9 +453,22 @@ def ticket_event_time(ticket: Any) -> str | None:
 
 
 def ticket_disposition(ticket: Any) -> str | None:
+    """The READ side of `parse_disposition_from_resolution`, degrading rather than raising.
+
+    #923: that decoder now refuses a person's hand-typed host-only verdict (`CaseTicketError`)
+    — a refusal written for the AUTHORING surface, an analyst editing one field. This is a
+    different lane: a walk over every closed ticket a person could have edited (the benign seed
+    sampler, in particular), where one ticket's decode fault must cost that ticket and not the
+    whole pool — the same "one broken record degrades, it does not crash the walk" rule
+    `_report.read_report` applies to a malformed `report.md`. `None` here reads exactly like
+    any other undecodable resolution; the refusal itself still reaches whoever calls the
+    decoder directly to author or validate one ticket."""
     if not isinstance(ticket, dict):
         return None
-    return parse_disposition_from_resolution(ticket.get("resolution"))
+    try:
+        return parse_disposition_from_resolution(ticket.get("resolution"))
+    except CaseTicketError:
+        return None
 
 
 def ticket_reason(ticket: Any) -> str | None:

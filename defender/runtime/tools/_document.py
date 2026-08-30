@@ -121,7 +121,7 @@ def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
     window, so `fix_row` refused it and was not even offered. That left a document carrying one
     with NO legal move: the close refuses and names `fix_row`, `fix_row` says nothing is
     flagged, `append_block` refuses the same bytes, and append-only puts them out of reach. The
-    model then spends its whole retry budget before the framework force-closes `inconclusive`,
+    model then spends its whole retry budget before the framework force-closes `unresolved`,
     discarding the disposition the run actually reached.
 
     Reachable because a document valid when written can stop being valid later: a rule that

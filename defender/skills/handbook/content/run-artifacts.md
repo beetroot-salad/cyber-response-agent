@@ -51,7 +51,11 @@ writable scratch space.
   ticket bridge's egress. Frontmatter is the load-bearing part: the
   learning-loop normalizer parses it, so a run with no frontmatter is unusable.
   `disposition` is a closed enum (`benign` | `false-positive` | `inconclusive`
-  | `malicious`); schema lives in `defender/SKILL.md` §REPORT. It also carries
+  | `malicious` | `unresolved`); schema lives in `defender/SKILL.md` §REPORT.
+  `unresolved` (#923) is the HOST's own verdict — recorded when a run is cut
+  short without a settled finding (a gate overrule, a review that could not
+  complete, or the framework's own retry-exhaustion close) — never written by
+  the investigating model. It also carries
   the gate's `outcome` (`stands` | `forced-inconclusive`), a `cause` sentence
   drawn from `close_tool.REPORT_CAUSES`, and — only when the review itself
   failed — `failure_kind` (`timeout` | `error` | `unreadable`).
@@ -70,8 +74,8 @@ writable scratch space.
   (`support`, `ablation`, `composer`): a JSON metadata row per call, plus the
   role's raw framed reply. A round that ended early is marked `incomplete` on
   every role's trace rather than left reading as if it had completed. An
-  `inconclusive` close is never reviewed, so it leaves neither these nor a
-  meaningful record.
+  `inconclusive` or `unresolved` close is never reviewed, so it leaves
+  neither these nor a meaningful record.
 - **`executed_queries.jsonl`** (the queries table) + **`gather_raw/{lead_id}.lead.json`**
   (the leads table) — the two canonical tables, each written **live** during the
   run by its own generator (`scripts/gather_tools/record_query.py` and
@@ -122,7 +126,7 @@ ANALYZE in `investigation.md`). The learning loop joins across cases on
 - Start with `transcript.html` for the narrative + artifact panel.
 - `investigation.md` shows the agent's reasoning (the `:R`/`:T` blocks carry
   the assessments and the disposition).
-- **When the committed disposition is `inconclusive` but the investigation reads
+- **When the committed disposition is `unresolved` but the investigation reads
   confident**, the gate is the explanation, not the agent: check `outcome` and
   `failure_kind` in `report.md`'s frontmatter, then `review_record.*.json` for
   the `detail`. A `failure_kind` means the review broke and the run fails closed

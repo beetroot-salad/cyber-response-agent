@@ -205,7 +205,9 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     report = (run_dir / "report.md").read_text()
     m = re.search(r"^disposition:\s*(\w+)", report, re.M)
     assert m is not None
-    assert m.group(1) == "inconclusive", (
+    # #923: the gate's overrule commits `unresolved` — the host's own verdict — not
+    # `inconclusive`, which is now reserved for the model's own close.
+    assert m.group(1) == "unresolved", (
         "the drafted `malicious` reached disk past a review that found a gap"
     )
     assert CAUSE_EVIDENCE_CANNOT_DISCRIMINATE in report

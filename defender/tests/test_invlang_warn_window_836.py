@@ -54,11 +54,37 @@ from defender.tests._invlang_warn_836 import (
 TWO_WARN_DOC = PROLOGUE + attr_block(WARN_ROW, SECOND_WARN_ROW)
 
 
+def _pay_inconclusive_price(deps) -> None:
+    """#923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a
+    source or capability), unrelated to anything this module tests — the warn-severity repair
+    window. Append a paying row directly to the run's `investigation.md` bytes rather than
+    editing every fixture document in this file.
+
+    Only when the flagged-row window is already CLEAR: `_refuse_if_entry_price_is_owed` is
+    reached only past that gate in production (`close_tool.py`'s ordering), so a document this
+    module means to have refused there must stay untouched — several cases here assert the
+    document is byte-identical across a refused close."""
+    from pathlib import Path
+
+    from defender.runtime.tools import flagged_diagnostics
+
+    if flagged_diagnostics(deps):
+        return
+    path = Path(deps.run_dir) / "investigation.md"
+    existing = path.read_bytes() if path.exists() else b""
+    addition = (
+        b'\n```invlang\n:T conclude\nceiling_test  state=nothing-to-try cap=telemetry.collect note=process telemetry not retrieved\n```\n'
+    )
+    path.write_bytes(existing + addition)
+
+
 def _close(deps, disposition, *, stages=None, bounds=None):
     from defender.runtime import challenge_gate
     from defender.runtime.close_tool import close_investigation
     from defender.tests import _review_bundle
 
+    if disposition == "inconclusive":
+        _pay_inconclusive_price(deps)
     return close_investigation(
         deps, disposition,
         stages=stages if stages is not None else _review_bundle.bundle(

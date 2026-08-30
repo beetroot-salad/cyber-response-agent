@@ -490,19 +490,36 @@ confident finding. `disposition` is the closed enum:
   its name and description claim, and the one lead that tested the
   alerted entity independently came back clean. It describes the
   detector, not the world: it is not a cheaper `benign`.
-- `inconclusive` — ran out of data, escalate. Commits immediately, no
-  review — the learning loop runs the adversarial actor on these.
+- `inconclusive` — YOU ran out of data and cannot settle the case.
+  Commits immediately, no review — the learning loop runs the
+  adversarial actor on these. Now OWES an entry price: a `ceiling_test`
+  RECEIPT in `:T conclude`, pointing at a `:L findings` lead this run
+  dispatched that failed or came back empty (`ref=<lead-id>`), or naming
+  a capability this deployment does not provide at all (`cap=<system>`)
+  — the host verifies it against your own transcript, so say what you
+  could not check by pointing at the attempt, not by writing a sentence
+  about it. See `skills/invlang/SKILL.md` §`:T conclude` for the row
+  shape.
 - `malicious` — confident escalate, story confirmed.
+- `unresolved` — the HOST's own verdict, never yours. Recorded when a
+  run is cut short without a settled finding — a challenge review that
+  overruled your close, a review that could not complete, or the
+  framework's own retry-exhaustion close — and refused if you supply it
+  as an argument here. If you cannot settle the case, close
+  `inconclusive` and name the gap; do not reach for this member.
 
-Two of them carry an ENTRY PRICE, and this close reads it back out of
+THREE of them carry an ENTRY PRICE, and this close reads it back out of
 `investigation.md` before anything commits. `benign` needs the alerted
 entity recorded in `:V prologue.vertices`, every `??` slot resolved, and
 every authz contract on a live hypothesis `authorized`; `false-positive`
 needs `detection_notes` (the defect) and `entity_check` (that lead's id) in
-`:T conclude`. Write them FIRST — the close returns without committing if
-they are not there. The price is charged against the keyword you CLOSE
-under, never the one you concluded under, so concluding `inconclusive` buys
-nothing: the log still has to have paid.
+`:T conclude`; `inconclusive` needs at least one `ceiling_test` receipt
+that PAYS — mechanically verified against your own transcript, distinct
+from any other row. Write them FIRST — the close
+returns without committing if they are not there. The price is charged
+against the keyword you CLOSE under, never the one you concluded under, so
+concluding under a cheaper keyword buys nothing: the log still has to have
+paid.
 
 Every confident disposition — anything but `inconclusive` — passes a live
 challenge gate before it commits. When the gate is not satisfied yet, the call
@@ -519,11 +536,11 @@ Write `:T resolutions` rows that name the edges and resolutions they
 rest on, and the review has something to agree with.
 
 A review that cannot run fails closed: the confident disposition is
-recorded as `inconclusive`, with the reason on the report. Draft the
-disposition your evidence actually supports and close on it — do not
-pre-emptively call `inconclusive` to route around a challenge, and do
-not re-close to try for a different answer. A committed close is
-terminal either way.
+recorded as `unresolved` — the host's own verdict, never something you
+write — with the reason on the report. Draft the disposition your
+evidence actually supports and close on it — do not pre-emptively call
+`inconclusive` to route around a challenge, and do not re-close to try
+for a different answer. A committed close is terminal either way.
 
 **Write discipline.** ANALYZE (the `:R`/`:T resolutions` append to
 `investigation.md`) and the `close_investigation` call are separate

@@ -53,9 +53,11 @@ code, the investigator never occupies it, and it writes no `##` header into
   writer of `report.md`, which is not in the agent's write scope at all; the
   body is host-rendered from typed arguments, so there is nothing to compose.
   `disposition` is a closed enum: `benign` | `false-positive` |
-  `inconclusive` | `malicious`. A confident close then passes the review gate
-  (below) before anything is committed. Stop after that — `run.py` runs the
-  projector and visualizer.
+  `inconclusive` | `malicious` | `unresolved`. `unresolved` (#923) is the
+  HOST's own verdict — recorded when a run is cut short without a settled
+  finding — and refused as an argument here; the agent never writes it. A
+  confident close then passes the review gate (below) before anything is
+  committed. Stop after that — `run.py` runs the projector and visualizer.
 
 ## The close is gated
 
@@ -136,7 +138,7 @@ as Claude Code PreToolUse hooks):
 | `record_lead.claim_lead` | called in `runtime/tools_gather.py` (`_run_gather`) on gather dispatch, and in `runtime/lead_zero.py` for the harness's reserved ids | Writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises (an integrity gate, not just a shim). Returns `CLAIMED` / `ALREADY_CLAIMED` / `NOT_CLAIMED`, and only `CLAIMED` dispatches: an unclaimed lead has no row for the reuse gate to refuse next time |
 | `inject_system_skill_description.descriptor_catalog` | `runtime/tools.py` | Supplies the per-system SKILL `description:` catalog (progressive disclosure) so gather confirms relevance then reads the full SKILL |
 | `runtime/permission.py` | called before each tool | Blocks the main loop from running system CLIs directly or reading `gather_raw` to re-derive fields (positive grant enumeration — main carries no `gather_raw` shape); raises `ModelRetry` on a deny |
-| `challenge_gate.challenge_gate` | called inside `runtime/close_tool.py` on every **confident** close | The write-time review (§The close is gated). Fails closed: a stage that raises, times out or replies unreadably overrides the disposition to `inconclusive` rather than letting it commit silently |
+| `challenge_gate.challenge_gate` | called inside `runtime/close_tool.py` on every **confident** close | The write-time review (§The close is gated). Fails closed: a stage that raises, times out or replies unreadably overrides the disposition to `unresolved` (the host's own verdict) rather than letting it commit silently |
 
 If a write or read is blocked, the fix is to dispatch gather — never to find
 another path to the bytes.
