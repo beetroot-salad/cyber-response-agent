@@ -425,29 +425,50 @@ summary                "Login matched established bastion usage"
   keyword that describes the RULE rather than the alerted entity, for a
   rule that fired on a different kind of behavior than it claims — needs
   `detection_notes` and `entity_check` below; `inconclusive` needs at
-  least one `ceiling_test` row (below) naming a specific unretrieved data
-  source or an unavailable capability — a host may be named too, but
-  naming one alone never pays, rows must be distinct, and a row that
-  renders as the empty marker in any spelling does not pay. All three
-  prices are charged twice: on the write, against the keyword you
-  conclude under, and again by `close_investigation`, against the keyword
-  you close under. So concluding under a cheaper keyword buys nothing —
-  the log itself still has to have paid for the keyword the close commits.
-- `ceiling_test` — the checks you could NOT make. One row per gap, repeated.
-  Two independent rules read this table and want different things from it:
-  the severity-ceiling rule (`termination.category severity-ceiling`) wants
-  the host AND the data source —
-  `ceiling_test  "authorized_keys FIM on web-1 (auditd write events) not retrieved"` —
-  and `disposition inconclusive`'s entry price wants a specific data source
-  OR an unavailable capability, host optional —
-  `ceiling_test  "process-ancestry telemetry is not collected anywhere in this deployment"`
-  or `ceiling_test  "no detonation sandbox is available to this runtime"`. Either way,
-  name the specific source or capability, not the shape of the question —
-  "session commands not retrieved" tells a reader nothing about what is
-  still open, and "web-1 could not be fully checked" names no check anyone
-  can go make. Omit the row (or write `none`) when nothing was out of
-  reach. `ceiling_rationale` is the companion scalar: why concluding
-  anyway is sound despite those gaps.
+  least one `ceiling_test` RECEIPT (below) — a pointer the host verifies
+  against this run's own transcript, never a sentence it judges. Rows
+  must be distinct. All three prices are charged twice: on the write,
+  against the keyword you conclude under, and again by
+  `close_investigation`, against the keyword you close under. So
+  concluding under a cheaper keyword buys nothing — the log itself still
+  has to have paid for the keyword the close commits.
+- `ceiling_test` — the checks you could NOT make, as a RECEIPT the host
+  verifies mechanically. One row per gap, repeated, shaped
+  `state=<state> [ref=<lead-id>|cap=<system[.verb]>] note=<text>` —
+  `note=` is always LAST and runs to the end of the line, so it needs no
+  quoting or escaping.
+
+  Three states. `state=query-failed` and `state=query-empty` need
+  `ref=<lead-id>` naming a `:L findings` row THIS RUN dispatched that
+  came back with nothing: `query-failed` when that lead recorded a
+  `fail_reason`, `query-empty` when it did not. A `ref` that names no
+  lead, or a lead that actually returned a result (an observation, a
+  resolution), or the WRONG state for what that lead's own row says
+  happened, is refused — the receipt has to match the transcript, not
+  read good:
+
+      ceiling_test  state=query-failed ref=l-006 note=Zeek query blocked by a permission gate; no outbound flow data retrieved
+
+  `state=nothing-to-try` is the one lane with no call to point at — a
+  capability that does not exist in this deployment at all, so nothing
+  was dispatchable. It takes `cap=<system>` or `cap=<system.verb>`
+  instead of `ref=`, checked against the same closed roster your `query`
+  calls dispatch through (`skills/gather/verb-roster.md`); naming a
+  capability the deployment DOES provide is refused — that names a call
+  you should have made, or a lead you should point at instead:
+
+      ceiling_test  state=nothing-to-try cap=sandbox.detonate note=confirming ?post-install-implant would require sandbox detonation, and neither is in the runtime tool surface
+
+  `note` is free text FOR THE ANALYST reading the report — explain the
+  gap in your own words. It gates NOTHING (only `state`/`ref`/`cap` are
+  checked) and rides into the report BODY, not the frontmatter, so a long
+  note never risks the close. Two rows claiming the SAME `(state, ref)`
+  or `(state, cap)` do not pay for two gaps. Omit the row (or write
+  `none`) when nothing was out of reach. `ceiling_rationale` is the
+  companion scalar: why concluding anyway is sound despite those gaps.
+  The severity-ceiling rule (`termination.category severity-ceiling`)
+  reads this same table and wants any row present — write a receipt
+  there too.
 - `impact_verdict` / `impact_severity` — the roll-up over this run's
   `:R impact` rows (`enum conclude.impact_verdict`), and how large the
   consequence is (`enum conclude.impact_severity`). The pair is checked for

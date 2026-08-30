@@ -1,0 +1,4 @@
+{
+  "//": "Sole-producer `@owns` tags. See scripts/lint/lint_unowned_field.py.",
+  "entries": {}
+}

@@ -86,6 +86,24 @@ base: b8a63e66          # main. write-code-from-spec's gate diffs against it.
 #   EXPECT MORE. Where an invariant field below reads `unknown`, it is a finding with a
 #   named question behind it, never a null this assembly could not be bothered to fill.
 #
+# *** POST-MERGE ADDENDUM — §7 ROUND 4, PART 2 (human) — READ BEFORE TRUSTING ANY PROSE BELOW
+# ABOUT WHAT A `ceiling_test` ROW MUST CONTAIN. *** The free-text "does this row name a source
+# or an unavailable capability" predicate this whole file was written to pin — J1, the widening
+# at §7 round 4, and everything downstream of it — is RETIRED, not kept alongside a
+# replacement: measured, it refused three-letter telemetry sources (`EDR`/`WMI`/`ETW`) while
+# `ceiling_test "unknown"` bought a close outright. A `ceiling_test` row is now a RECEIPT the
+# host verifies MECHANICALLY against the run's own transcript — see the `note` on
+# `a_gap_row_pays_by_naming_a_source_or_a_capability` below for the live shape and rationale.
+# THIS FILE WAS NOT RE-DERIVED against that change: every demand, `seed_docstring`,
+# `distinguished` value and cost/tradeoff paragraph elsewhere in this graph that describes the
+# free-text predicate's own reasoning is the HISTORICAL RECORD of how §7 rounds 2-4 reached it,
+# not a current description of `_gating.py`. Only the ONE demand carrying the live note, and
+# the `discharged_by` pointers that `check_binds` would otherwise flag as orphaned, were
+# updated to keep this graph structurally valid (`check_lint`/`check_gate`/`check_binds`/
+# `check_claims` all pass). `_gating.py`, `SKILL.md` and `tests/_spec923.py` are the sources of
+# truth for the current predicate; treat any other prose here about "host and data source" or
+# "capability without a source" as archaeology.
+#
 # WHAT IS STRUCK AND MUST NOT REACH A TEST DOCSTRING OR A RATIONALE (design revision):
 #   * P4 / C9 — "the gate cannot hold a named target at force time" — REFUTED. Arms 2 and 3
 #     both force while holding `review.ask.target`; arm 2 interpolates it into `detail`. The
@@ -207,7 +225,7 @@ demands:
       - 'interacts(close_investigation->report_md)'
       - 'ceiling_test'
       - 'ceiling_test.domain.distinguished[host-and-data-source]'
-    discharged_by: test_an_inconclusive_close_naming_a_host_and_a_data_source_commits
+    discharged_by: test_an_inconclusive_close_naming_a_receipt_commits
     seed_docstring: >-
       An `inconclusive` close whose `ceiling_test` block names a host AND the data source that
       could not be reached commits: the price is payable, the report lands, and the row's text
@@ -565,7 +583,7 @@ demands:
   - id: a_gap_row_pays_by_naming_a_source_or_a_capability
     kind: domain-outcome
     form: test
-    source: "J1 resolved HUMAN at §7 round 2 (neither candidate the design offered), WIDENED HUMAN at §7 round 4 to cover an unavailable capability"
+    source: "J1 resolved HUMAN at §7 round 2 (neither candidate the design offered), WIDENED HUMAN at §7 round 4 to cover an unavailable capability, REPLACED HUMAN at §7 round 4 PART 2 (POST-MERGE) — see the note below, which supersedes this id's `seed_docstring`/`rejected` prose but not its id or its place in the graph"
     binds:
       - '_DISPOSITION_GATES.domain.distinguished[inconclusive]'
       - 'ceiling_test.domain.distinguished[host-without-data-source]'
@@ -573,10 +591,11 @@ demands:
       - 'ceiling_test.domain.distinguished[capability-without-data-source]'
       - 'interacts(decide_write->investigation_md)'
       - 'interacts(close_investigation->investigation_md)'
-    discharged_by: test_a_bare_host_row_does_not_pay_where_a_source_row_and_a_capability_row_do
+    discharged_by: test_a_bare_host_row_does_not_pay_where_a_receipt_does
     seed_docstring: >-
-      A row pays when it names an unretrieved DATA SOURCE or an unavailable CAPABILITY; a host
-      is permitted but never required. A row naming a host and neither does NOT pay — it states
+      HISTORICAL (§7 round 4 predicate, RETIRED — see `note` below for the live behavior). A row
+      pays when it names an unretrieved DATA SOURCE or an unavailable CAPABILITY; a host is
+      permitted but never required. A row naming a host and neither does NOT pay — it states
       something, so the rejected weaker predicate accepts it, and it names no check anyone can
       go make. A row naming a source and no host DOES pay: that class, no system in this
       deployment exposes the predicate, has no host to name and is the finding the issue exists
@@ -590,14 +609,34 @@ demands:
       - {nl: "`row-states-something`, M1's own words — strictly weaker; a host-only row pays it."}
       - {nl: "`row-names-host-and-data-source`, O1's words and the judge's recommendation — it refuses the deployment-wide gap, which is the finding class the issue exists to produce."}
       - {nl: "keeping the predicate at DATA SOURCE alone and relabelling the escalation fixture's missing sandbox as an unretrieved data source (§7 round 4). It forces a real case into a shape that does not fit, which is how a rule starts collecting compliant rows that mislead — and it made the fixture repair AUTHOR a claim a human had to vouch for, where the widened predicate lets it lift a sentence the document already wrote."}
+      - {nl: "keeping the §7-round-4 WIDENED free-text predicate itself (§7 round 4, PART 2 — POST-MERGE, human): measured against production alert vocabulary it refused three-letter telemetry sources (`EDR`/`WMI`/`ETW` — the filler-word strip left too few characters to clear the length floor) while `ceiling_test \"unknown\"` bought a close outright. A second free-text predicate tuned to fix those two cases is the same failure mode one iteration later — the fix is to stop judging prose at all."}
     note: >-
-      WIDENED AT §7 ROUND 4 (human). The accepted cost: `capability` is the looser of the two
-      words, and it stays falsifiable only because `host-without-data-source` remains a refused
-      input in the same test — a build that reads any sentence about a limitation as a
-      capability claim pays for `web-1 could not be fully checked` and fails there. Executed
-      against a scratch build of both predicates: the settled one passes, and the rejected
-      `_row_states_something` one leaves the bare-host row unrefused at both boundaries, in the
-      unit test and on both shipped documents.
+      §7 ROUND 4, PART 2 (human, POST-MERGE — supersedes the "WIDENED AT §7 ROUND 4" note this
+      replaces). THE FREE-TEXT PREDICATE ITSELF IS RETIRED, NOT KEPT ALONGSIDE A REPLACEMENT: a
+      `ceiling_test` row is now a RECEIPT — `state=<query-failed|query-empty|nothing-to-try>
+      [ref=<lead-id>|cap=<system[.verb]>] note=<text>` — the host verifies MECHANICALLY against
+      this run's OWN transcript, never a judgment of the row's prose. `query-failed`/
+      `query-empty` anchor to a `:L findings` lead THIS RUN dispatched (`ref=`), checked via
+      `_lead_returned_a_result` (the SAME lookup `entity_check` uses — not a second one) plus
+      consistency against that lead's own `fail_reason` presence. `nothing-to-try` is the one
+      lane with no call to point at (a capability that does not exist at all), checked
+      NEGATIVELY against the closed verb roster `defender/scripts/adapters/` ships — code this
+      repo owns, never a catalogue of what exists in the world. `note` is free text for the
+      human analyst: it gates NOTHING and rides into the report BODY, never the frontmatter, so
+      it can never strand a run. The three `ceiling_test.domain.distinguished[...]` values this
+      id still binds (`host-without-data-source` etc.) now name the CLASS of thing the retired
+      predicate scored — read them as "a row shaped like the old positive/negative", not as
+      literal row text; `HOST_ONLY_ROW`/`SOURCE_ONLY_ROW`/`CAPABILITY_ROW` in
+      `tests/_spec923.py` are the SAME constant NAMES holding NEW receipt-or-prose values,
+      restated rather than added beside. This graph's demand/id shape, and every OTHER note in
+      this file describing the retired predicate's own internal reasoning (its accepted costs,
+      its rejected alternatives, J24/J25/J28's hardenings as applied to free text), is left as
+      the historical record of how §7 round 2/3/4 reached the widened predicate — it is superseded
+      behavior, not a currently-true description of `_gating.py`. A full re-derivation of this
+      graph against the receipt design was judged out of scope for the change that retired the
+      predicate; `spec-flow:discuss-issue` is the recommended next step before any further
+      `ceiling_test` work leans on this file's prose rather than on `_gating.py`/`SKILL.md`
+      directly.
 
   - id: a_confusable_empty_marker_does_not_pay
     kind: domain-outcome

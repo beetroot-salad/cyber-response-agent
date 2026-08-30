@@ -17,7 +17,7 @@ and the same reading again with one load-bearing edge withheld — a soundness c
 sensitivity check, which is what the two-member `holds`/`gap` finding can carry.
 
 FAIL CLOSED: a stage raising, timing out, or otherwise not completing overrides the confident
-finding to inconclusive — never a silently-committed close. It commits the SAME outcome as an
+finding to the host's own `unresolved` (#923) — never a silently-committed close. It commits the SAME outcome as an
 override the evidence produced; what separates the two is the typed `failure_kind`, set only
 when the machinery is what failed.
 """
@@ -393,7 +393,7 @@ def _route(
         return _verdict(STANDS, disposition, CAUSE_STORY_SETTLED, review.review)
 
     if review.ask is None:
-        # A gap with nothing measurable behind it. Forcing inconclusive costs the run
+        # A gap with nothing measurable behind it. Forcing the host verdict costs the run
         # nothing further; spending a turn on an ask the reviewer could not name would tax
         # the investigation for a question nobody has.
         return _verdict(

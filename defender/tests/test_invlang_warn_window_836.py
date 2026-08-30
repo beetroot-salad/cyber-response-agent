@@ -73,7 +73,7 @@ def _pay_inconclusive_price(deps) -> None:
     path = Path(deps.run_dir) / "investigation.md"
     existing = path.read_bytes() if path.exists() else b""
     addition = (
-        b'\n```invlang\n:T conclude\nceiling_test  "process telemetry not retrieved"\n```\n'
+        b'\n```invlang\n:T conclude\nceiling_test  state=nothing-to-try cap=telemetry.collect note=process telemetry not retrieved\n```\n'
     )
     path.write_bytes(existing + addition)
 

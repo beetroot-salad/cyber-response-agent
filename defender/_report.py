@@ -2,8 +2,9 @@
 
 `_artifact_schema.py` owns what a well-formed report IS and enforces it on WRITE, through the
 permission gate. This module is its mirror: the single place a COMPLETED run's report becomes
-a typed value, so no consumer re-implements disposition extraction (and drops the zero-width
-strip on data an attacker influences by construction).
+a typed value, so no consumer re-implements disposition extraction — and none of them coerces
+a malformed verdict into the member it resembles (#923: `normalized_disposition` is exact,
+so a laced spelling reads back unreadable rather than clean).
 
 INTERPRETATION is centralized here; REACTION deliberately is not. The consumers split into
 two kinds:

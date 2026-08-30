@@ -762,6 +762,22 @@ jobs:
       - name: List-as-key-set gate (a render list is not a key set, #956 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_list_as_key_set.py
 
+      # The `@owns <field>` docstring tags that declare a value's SOLE PRODUCER. This repo's
+      # recurring bug is two pieces of code deriving one quantity by different means (#785's
+      # parser with six disagreeing interpreters; #932's three readers each dropping the same
+      # complement; #923's size bound charged on raw text while the renderer emitted quoted
+      # YAML, so a document that paid at the write gate was refused at the commit). The two
+      # derivations share no syntax, only meaning, so jscpd and the duplicate-helper gate are
+      # both structurally blind to them. This does NOT attempt a similarity search — that would
+      # be noisy, would need per-site exclusions, and would have missed the motivating bug. It
+      # checks only what is exact: two functions claiming the same field, a tag with no field
+      # after it, and a tag naming a field that appears nowhere else (the rename that orphaned
+      # its claim). Suppress with `# lint-owns: ok — <reason>`, where the reason must NAME THE
+      # OTHER OWNER rather than assert the case is fine — a destination is checkable, a reason
+      # is not. Discovery is the paired grep-before-you-derive rule in write-code-from-spec.
+      - name: Sole-producer gate (`@owns` tags, #923 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_unowned_field.py
+
       # A row leaving a loop in the invlang row-carrying surface by continue/break/bare
       # return with neither a ParseWarning nor a landing unconditionally on that path
       # (#876). The two roles are derived STRUCTURALLY, never from a name list: a PROJECTOR

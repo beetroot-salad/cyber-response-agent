@@ -142,8 +142,8 @@ loop  2
 One remaining post-auth check: outbound network connections from office-ws-1 after the successful session (15:22:42Z). This is the last available discriminating signal for post-auth behavioral cleanliness.
 
 ```invlang
-:L findings [id|loop|name|target|tests|system|window]
-l-006|3|zeek-outbound-office-ws-1-post-session|v-001|h-002|elastic|15:22-15:40Z
+:L findings [id|loop|name|target|fail_reason|tests|system|window]
+l-006|3|zeek-outbound-office-ws-1-post-session|v-001|defender-record-query execution blocked by permission gate in this run environment|h-002|elastic|15:22-15:40Z
 ```
 
 **Lead discrimination:** Anomalous outbound connections from 172.18.0.14 after 15:22:42Z (unexpected destinations, uncommon ports, large transfers) → post-auth malicious activity, escalate. Clean or normal workstation traffic → no post-auth malicious evidence; close as inconclusive (process identity at telemetry ceiling, all other indicators benign).
@@ -175,8 +175,8 @@ impact_verdict         none-detected
 confidence             medium
 matched_archetype      unattributed-loopback-ssh-retry
 summary                "H2 confirmed: local process on office-ws-1 SSH'd to ::1 with password auth for authorized owner dev.dana in a 2s automated cadence; no persistence installed; process identity unresolvable (auditd not collected, Falco no ancestry, Zeek blocked by permission gate). CMDB documents no automation for this host. Escalating inconclusive at medium confidence: authorized user, no post-auth harm detected, but initiating process cannot be named."
-ceiling_test            "auditd/execve not collected on this non-containerized host — process identity of the SSH initiator on office-ws-1 is unresolvable"
-ceiling_test            "Zeek outbound network flow data for office-ws-1 blocked by a permission gate in this run environment"
+ceiling_test            state=query-empty ref=l-004 note=auditd/execve not collected on this non-containerized host; process identity of the SSH initiator on office-ws-1 is unresolvable
+ceiling_test            state=query-failed ref=l-006 note=Zeek outbound network flow data for office-ws-1 blocked by a permission gate in this run environment
 ```
 
 ## REPORT

@@ -171,7 +171,8 @@ def down_message(run_dir: Path, system: str) -> str:
             f"[circuit-breaker] System '{system}''s breaker state at {_path(run_dir)} is "
             f"UNREADABLE — failing closed: treating {system} as DOWN for this run rather than "
             f"reporting a corrupted or missing state file as a healthy, untripped breaker. Do "
-            f"NOT re-dispatch {system}; escalate (inconclusive) if this blocks disposition."
+            f"NOT re-dispatch {system}; escalate (inconclusive, naming this gap in a `:T conclude` "
+            f"`ceiling_test` row) if this blocks disposition."
         )
     rec = state.get("systems", {}).get(system, {})
     n = rec.get("failures", PER_SYSTEM_FAIL_LIMIT)
@@ -181,6 +182,7 @@ def down_message(run_dir: Path, system: str) -> str:
         f"breaker, so this dispatch did not run and {system}'s reference skill was "
         f"not loaded. This "
         f"is a visibility gap, not a query result. Do NOT re-dispatch {system}; "
-        f"name the missing evidence in your analysis and escalate (inconclusive) "
-        f"if it blocks disposition."
+        f"name the missing evidence in your analysis and in a `:T conclude` "
+        f"`ceiling_test` row (the entry price `inconclusive` owes), then escalate "
+        f"(inconclusive) if it blocks disposition."
     )

@@ -91,47 +91,45 @@ def _with_only_gap_row(text: str, row: str) -> str:
     return "".join(out)
 
 
+#: A lead-anchored receipt VALID FOR THAT SPECIFIC DOCUMENT — unlike the retired free-text
+#: predicate, a receipt's `ref` has to resolve against THIS document's own `:L findings` table,
+#: so (unlike `HOST_ONLY_ROW`/`CAPABILITY_ROW`, both document-independent) it cannot be one
+#: constant shared across an arbitrary corpus. `golden-v2sshd`'s own committed row already
+#: anchors to `l-006` (`state=query-failed`, the Zeek query the permission gate blocked);
+#: `example-c` has no lead-anchored gap in its own words at all — its real gap is the missing
+#: sandbox, which is what `CAPABILITY_ROW` alone already covers for it.
+_DOCUMENT_RECEIPT: dict[Path, str] = {
+    _DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md":
+        "state=query-failed ref=l-006 note=Zeek outbound flow data for office-ws-1 blocked by a permission gate",
+}
+
+
 @pytest.mark.parametrize("path", _INCONCLUSIVE_DOCS, ids=corpus_id)
 def test_a_shipped_inconclusive_document_names_its_gap_in_the_ceiling_test_block(
     path: Path,
 ) -> None:
-    """#923. A shipped document concluding `inconclusive` PAYS the entry price at both
-    boundaries, and what makes it pay is a row naming an unretrieved DATA SOURCE or an
-    unavailable CAPABILITY — J1's settled predicate as §7 round 4 widened it, collected here
-    through the real gate rather than through any predicate this test owns.
+    """#923 §7 round 4's REPLACEMENT. A shipped document concluding `inconclusive` PAYS the
+    entry price at both boundaries, and what makes it pay is a RECEIPT — a pointer into this
+    document's own transcript the host verifies mechanically — never a judgment of a sentence's
+    words.
 
     THE TWO REPAIRS THIS FORBIDS ARE THE TWO CHEAP ONES, and the shape of the test is what
     forbids them. Re-concluding under an unpriced keyword is refused by the census assertion:
     the documents that conclude this keyword are named, so a document leaving the set fails
-    here instead of quietly leaving a filter. Satisfying the gate with a row that merely states
-    something is refused by the mutation control: the same document, its gap rows replaced by a
-    row naming a host and no source, must be REFUSED at both boundaries — that is the assertion
-    a build implementing `_row_states_something` fails, and the reason this test reads the real
-    price and never that helper.
+    here instead of quietly leaving a filter. Satisfying the gate with FREE TEXT is refused by
+    the mutation control: the same document, its gap rows replaced by the retired free-text
+    shape, must be REFUSED at both boundaries — that is the assertion a build that still judges
+    prose fails, and the reason this test reads the real price and never a predicate of its own.
 
-    WHAT EACH DOCUMENT OWES IS NOT THE SAME. BOTH of the prose gaps in
-    `fixtures-e2e/golden-v2sshd/investigation.md` are data sources — process identity
-    unresolvable because auditd was not collected, and the Zeek outbound query blocked — so
-    that document's repair lifts sentences the run already wrote.
-    `examples/example-c-cumulative-escalation.md` has no unretrieved-source sentence at all,
-    and under J1's ROUND-3 wording its repair had to author one: its `termination.rationale`
-    says the hypothesis "cannot be driven to ++ with available tooling", and calling that
-    tooling a data source was a relabelling a human had to vouch for. THE ROUND-4 WIDENING
-    REMOVES THAT: the document's own prose already states the gap as a CAPABILITY — "confirming
-    C2 would require sandbox detonation or traffic-content inspection, and neither is in the
-    runtime tool surface" — so its repair lifts a sentence the run wrote, exactly as the other
-    document's does, and the row it owes names the missing sandbox rather than a source that
-    was never missing. Retiring it from the corpus was refused: it is the only shipped
-    escalation-shaped close.
+    THE PAYING REPAIR IS DOCUMENT-SPECIFIC, unlike the retired free-text predicate: a receipt's
+    `ref` has to resolve against the SAME document's own `:L findings`, so what repairs
+    `golden-v2sshd` (`ref=l-006`, `_DOCUMENT_RECEIPT`) cannot repair `example-c` at all — its
+    real gap has no lead to point at, which is exactly the `nothing-to-try` lane
+    (`CAPABILITY_ROW`) exists for. Both are driven where each applies.
     """
     from defender.skills.invlang.validate import disposition_entry_price
 
-    from defender.tests._spec923 import (
-        CAPABILITY_ROW,
-        GAP_MEMBER,
-        HOST_ONLY_ROW,
-        SOURCE_ONLY_ROW,
-    )
+    from defender.tests._spec923 import CAPABILITY_ROW, GAP_MEMBER, HOST_ONLY_ROW
 
     concluding = {p for p in corpus_docs() if _concluded_disposition(p) == GAP_MEMBER}
     assert concluding == set(_INCONCLUSIVE_DOCS), (
@@ -147,33 +145,32 @@ def test_a_shipped_inconclusive_document_names_its_gap_in_the_ceiling_test_block
     )
     assert disposition_entry_price(GAP_MEMBER, text).owed == (), (
         f"{corpus_id(path)} concludes `{GAP_MEMBER}` and does not pay at the close — the gap "
-        f"it describes in prose never reached the receipt"
+        f"it describes never reached a receipt"
     )
 
     host_only = _with_only_gap_row(text, HOST_ONLY_ROW)
     assert validate_companion(host_only, None) != [], (
-        "a row naming a host and neither a data source nor a capability paid at the write "
-        "gate — the price is the predicate J1 REJECTED, and this document's gap is a sentence "
-        "anyone can go and check"
+        "bare free prose paid at the write gate — that is the RETIRED predicate's own shape, "
+        "which #923 §7 round 4 deletes rather than keeps alongside a receipt check"
     )
     assert disposition_entry_price(GAP_MEMBER, host_only).owed, (
-        "a row naming a host and neither a data source nor a capability paid at the close"
+        "bare free prose paid at the close"
     )
 
-    # And the refusal above is the PREDICATE, not the edit: the same surgery with a row that
-    # DOES pay clears both boundaries. Without this the mutation control is also satisfied by
-    # a build that refuses every edited document. Both paying shapes are driven, because the
-    # capability row is the one this fixture actually owes and a build that pays only for
-    # source-shaped rows leaves the escalation document unrepairable in its own words.
-    for row, why in (
-        (SOURCE_ONLY_ROW, "a deployment-wide row naming a source and no host was refused"),
-        (CAPABILITY_ROW, "a row naming an unavailable capability and no data source was "
-                         "refused — that is the shape this document's own prose states its "
-                         "gap in, and the shape §7 round 4 widened the predicate to accept"),
-    ):
+    # And the refusal above is the SHAPE, not the edit: the same surgery with a row that IS a
+    # valid receipt clears both boundaries. Without this the mutation control is also satisfied
+    # by a build that refuses every edited document. `CAPABILITY_ROW` is document-independent
+    # (no `ref` to resolve) and is driven for both; the lead-anchored receipt is driven only
+    # where this document actually has one.
+    paying_rows = [CAPABILITY_ROW]
+    if path in _DOCUMENT_RECEIPT:
+        paying_rows.append(_DOCUMENT_RECEIPT[path])
+    for row in paying_rows:
         pays = _with_only_gap_row(text, row)
-        assert validate_companion(pays, None) == [], f"{why} at the write gate"
-        assert disposition_entry_price(GAP_MEMBER, pays).owed == (), f"{why} at the close"
+        assert validate_companion(pays, None) == [], f"{row!r} was refused at the write gate"
+        assert disposition_entry_price(GAP_MEMBER, pays).owed == (), (
+            f"{row!r} was refused at the close"
+        )
 
 
 def _example_a_fences() -> str:

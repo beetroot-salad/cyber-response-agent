@@ -5,8 +5,8 @@
   ],
   "conclude": {
     "ceiling_test": [
-      "auditd/execve not collected on this non-containerized host — process identity of the SSH initiator on office-ws-1 is unresolvable",
-      "Zeek outbound network flow data for office-ws-1 blocked by a permission gate in this run environment"
+      "state=query-empty ref=l-004 note=auditd/execve not collected on this non-containerized host; process identity of the SSH initiator on office-ws-1 is unresolvable",
+      "state=query-failed ref=l-006 note=Zeek outbound network flow data for office-ws-1 blocked by a permission gate in this run environment"
     ],
     "confidence": "medium",
     "disposition": "inconclusive",
@@ -223,7 +223,9 @@
       "id": "l-006",
       "loop": 3,
       "name": "zeek-outbound-office-ws-1-post-session",
-      "outcome": {},
+      "outcome": {
+        "failure_reason": "defender-record-query execution blocked by permission gate in this run environment"
+      },
       "query_details": {
         "system": "elastic",
         "time_window": "15:22-15:40Z"

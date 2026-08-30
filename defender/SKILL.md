@@ -493,9 +493,13 @@ confident finding. `disposition` is the closed enum:
 - `inconclusive` — YOU ran out of data and cannot settle the case.
   Commits immediately, no review — the learning loop runs the
   adversarial actor on these. Now OWES an entry price: a `ceiling_test`
-  row in `:T conclude` naming a specific unretrieved data source or an
-  unavailable capability (a host may be named too, but naming one alone
-  never pays). Say what you could not check, not just that you could not.
+  RECEIPT in `:T conclude`, pointing at a `:L findings` lead this run
+  dispatched that failed or came back empty (`ref=<lead-id>`), or naming
+  a capability this deployment does not provide at all (`cap=<system>`)
+  — the host verifies it against your own transcript, so say what you
+  could not check by pointing at the attempt, not by writing a sentence
+  about it. See `skills/invlang/SKILL.md` §`:T conclude` for the row
+  shape.
 - `malicious` — confident escalate, story confirmed.
 - `unresolved` — the HOST's own verdict, never yours. Recorded when a
   run is cut short without a settled finding — a challenge review that
@@ -509,9 +513,9 @@ THREE of them carry an ENTRY PRICE, and this close reads it back out of
 entity recorded in `:V prologue.vertices`, every `??` slot resolved, and
 every authz contract on a live hypothesis `authorized`; `false-positive`
 needs `detection_notes` (the defect) and `entity_check` (that lead's id) in
-`:T conclude`; `inconclusive` needs at least one `ceiling_test` row that
-names a source or capability, distinct from any other row and not the
-format's own empty marker in any spelling. Write them FIRST — the close
+`:T conclude`; `inconclusive` needs at least one `ceiling_test` receipt
+that PAYS — mechanically verified against your own transcript, distinct
+from any other row. Write them FIRST — the close
 returns without committing if they are not there. The price is charged
 against the keyword you CLOSE under, never the one you concluded under, so
 concluding under a cheaper keyword buys nothing: the log still has to have

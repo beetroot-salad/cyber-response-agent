@@ -11,21 +11,32 @@ RED AGAINST HEAD IS THE EXPECTED STATE. No implementation exists: `unresolved` i
 `DISPOSITION_VALUES`, `_DISPOSITION_GATES` has no `inconclusive` row, and every producer still
 commits the old keyword. The fixtures below declare the DEMANDED shapes, not today's.
 
-FOUR HUMAN RESOLUTIONS ARE ENCODED HERE AND MUST NOT BE LOOSENED — a resolution applied loosely
+FIVE HUMAN RESOLUTIONS ARE ENCODED HERE AND MUST NOT BE LOOSENED — a resolution applied loosely
 is a fork silently re-opened:
 
-* **A gap row pays by naming an unretrieved DATA SOURCE *or* an unavailable CAPABILITY, and a
-  host is permitted but never required.** The design offered two predicates ("a row that states
-  something" and "a row naming host AND data source") and reconciled them nowhere; the human
-  took neither, and WIDENED the answer at §7 round 4. A row naming a host and no source does NOT
-  pay (`HOST_ONLY_ROW`); a deployment-wide row naming a source and no host DOES
-  (`SOURCE_ONLY_ROW`) — that class, *no system here exposes predicate P*, is the finding the
-  issue exists to surface and has no host to name; and a row naming a capability the run did not
-  have DOES pay (`CAPABILITY_ROW`), because the issue's own framing ("predicate P would resolve
-  this; nothing here exposes P") is capability-shaped and the shipped escalation document's real
-  gap is a sandbox it could not detonate in, not a log it could not read. The accepted cost is
-  on the record: `auditd not collected` pays without saying where, so a single-host gap can read
-  as deployment-wide.
+* **A `ceiling_test` row is a RECEIPT, not a sentence, and this is a REPLACEMENT, not an
+  addition.** §7 round 4 (a SECOND human decision, POST-PHASE, superseding the round-4 widening
+  originally pinned here): the free-text "does this row name a source or capability" predicate
+  is retired outright — no free-text lane survives beside it, because leaving one in place means
+  `ceiling_test "unknown"` still buys a close, which is the exact bug the redesign exists to
+  delete (measured against the retired predicate: `EDR not available` was REFUSED for being
+  three letters short while `unknown` PAID). A row now parses as
+  `state=<query-failed|query-empty|nothing-to-try> [ref=<lead-id>|cap=<system[.verb]>]
+  note=<text>`. `query-failed`/`query-empty` anchor to a `:L findings` lead THIS RUN dispatched
+  (`ref=`), mechanically checked against `_lead_returned_a_result` — the SAME lookup
+  `entity_check` uses — for whether the lead actually came back with something, and against
+  that lead's own `fail_reason` presence for which of the two states is honest.
+  `nothing-to-try` anchors to nothing (`cap=` instead of `ref=`): it is the one lane with no
+  call to point at, checked NEGATIVELY against the closed verb roster this codebase's own
+  `scripts/adapters/` ships — a capability the roster DOES declare refuses the row (that names
+  a call that should have been made, or a lead it should point at). `note` is free text for the
+  analyst; it gates NOTHING (only `state`/`ref`/`cap` are checked) and rides into the report
+  BODY, never the frontmatter. `HOST_ONLY_ROW` (the retired free-text shape — does not even
+  PARSE as a receipt) is the discriminating negative; `PAYING_ROW`/`SECOND_PAYING_ROW`
+  (`query-failed`/`query-empty`, distinct leads) and `CAPABILITY_ROW` (`nothing-to-try`) are the
+  paying positives; `SOURCE_ONLY_ROW` is a well-formed receipt whose `ref` names a lead that
+  ACTUALLY returned a result — refused for contradicting its own referenced lead's row, not for
+  anything its `note` says.
 * **The no-review bypass matches BOTH verdicts**, not `forced`. Keying it on `forced` would push
   every model-authored uncertain close into a live review — an unrequested change to the common
   path arriving disguised as a bug fix. `BYPASS_BY_MEMBER` is the encoding, and it is written
@@ -108,34 +119,49 @@ BYPASS_BY_MEMBER: dict[str, bool] = {
 
 # ---------------------------------------------------------------------------------------
 # `:T conclude` rows — the price predicate's input classes, one constant per class.
+#
+# #923 §7 round 4 (human, POST-PHASE): the free-text "does this sentence name a source or
+# capability" predicate this section used to pin is RETIRED, not kept alongside anything —
+# leaving it in place meant `ceiling_test "unknown"` still bought a close, which is the exact
+# bug the redesign exists to remove. A `ceiling_test` row is now a RECEIPT: a pointer into this
+# run's own transcript the host verifies mechanically (a `:L findings` lead this run actually
+# dispatched, or the closed verb roster this codebase ships), never a judgment of prose. The
+# constants below are RESTATED against that new predicate; the demand slot each fills is
+# unchanged even where the shape of the input that fills it is not.
 # ---------------------------------------------------------------------------------------
 
-#: PAYS. Names the host AND the data source, the shape every checked-in lesson teaches
-#: ("name them by host and source type in `ceiling_test`").
-PAYING_ROW = "auditd execve logs on web-1 not retrieved"
+#: PAYS as `query-failed`: `ref=l-002` resolves to a `:L findings` lead THIS RUN dispatched
+#: (`LEADS` below) whose only recorded outcome is a `fail_reason` — the mechanical
+#: FK-plus-consistency check `_check_ceiling_receipt` runs, reusing `_lead_returned_a_result`
+#: (the SAME lookup `entity_check` uses) rather than judging what the note says.
+PAYING_ROW = "state=query-failed ref=l-002 note=EDR execve logs for web-1 never came back; the collector returned HTTP 503"
 
-#: PAYS, and it is the reason the human refused host-and-source. A deployment-wide gap has no
-#: host to name: no system in this deployment exposes the predicate, so the row names the
-#: source and nothing else. Refusing this row would refuse exactly the coverage findings #923
-#: exists to produce.
-SOURCE_ONLY_ROW = "process-ancestry telemetry is not collected anywhere in this deployment"
+#: A second, DISTINCT paying receipt — a DIFFERENT lead (`l-003`, `query-empty`: it ran clean
+#: and recorded no `fail_reason`) — for the distinctness control. Two receipts naming two
+#: different `(state, ref)` pairs are two gaps, not a repeat.
+SECOND_PAYING_ROW = "state=query-empty ref=l-003 note=DNS query logs for web-1 came back with zero rows in the 30d window"
 
-#: DOES NOT PAY. Names a host and no data source — the row that pays "states something" and
-#: fails the settled predicate. THE discriminating negative of the whole O1 section: a suite
-#: that omits it passes against the weaker predicate the code would most easily implement.
+#: PAYS as `nothing-to-try`: `cap=sandbox.detonate` names a capability that does not exist
+#: ANYWHERE in this codebase's closed verb roster (`defender/scripts/adapters/` declares no
+#: `sandbox` system) — checked negatively against that roster, never a judgment of prose. It is
+#: the row §7-round-4's widening exists for: the shipped escalation document's real gap is
+#: exactly this ("confirming C2 would require sandbox detonation or traffic-content inspection,
+#: and neither is in the runtime tool surface"), and it has no lead to point at because nothing
+#: was dispatchable — the one lane `ref=` cannot reach.
+CAPABILITY_ROW = "state=nothing-to-try cap=sandbox.detonate note=no detonation sandbox is available to this runtime, so the payload was never executed"
+
+#: DOES NOT PAY. The RETIRED free-text shape: no `state=`/`ref=`/`cap=`/`note=` fields at all,
+#: so it does not even PARSE as a receipt. THE discriminating negative of the whole redesign —
+#: a suite that omits it passes against exactly the predicate #923 exists to delete, the one
+#: that read any sentence about a limitation as a claim (`ceiling_test "unknown"` bought a
+#: close under it).
 HOST_ONLY_ROW = "web-1 could not be fully checked"
 
-#: PAYS, and it is the row J1's §7-round-4 widening exists for. It names no data source at all:
-#: what the run lacked was a CAPABILITY — an execution sandbox — and the issue's own framing
-#: ("predicate P would resolve this; nothing here exposes P") is capability-shaped. The shipped
-#: escalation document's real gap is exactly this and its own prose already says so ("confirming
-#: C2 would require sandbox detonation or traffic-content inspection, and neither is in the
-#: runtime tool surface"), so relabelling it as a data source would have forced a real case into
-#: a shape that does not fit — which is how a rule starts collecting compliant rows that mislead.
-CAPABILITY_ROW = "no detonation sandbox is available to this runtime, so the payload was never executed"
-
-#: A second distinct paying row, for the distinctness control.
-SECOND_PAYING_ROW = "Zeek outbound flow records for office-ws-1 not retrieved"
+#: DOES NOT PAY: `ref=l-001` is well-formed and resolves to a REAL lead, but `l-001` actually
+#: returned a result (`LEAD_RESULT` attaches it an observation) — the mechanical consistency
+#: check refuses a receipt that contradicts what its own referenced lead's row says happened,
+#: independent of anything the note claims.
+SOURCE_ONLY_ROW = "state=query-empty ref=l-001 note=claims a gap this lead's own record contradicts"
 
 #: The format's own "nothing to say" markers. C3 probed exactly the first two.
 EMPTY_ROWS = ("none", "")
@@ -207,10 +233,18 @@ PROLOGUE = (
     "v-001|compute|database-server/internal/known-corp|db-1|os=linux\n"
     "```\n"
 )
+#: Three leads, three shapes a `ceiling_test` receipt's `ref` can point at:
+#: `l-001` returns a RESULT (`LEAD_RESULT` below attaches it an observation) — pays
+#: `false-positive`'s `entity_check` and is the control a `ceiling_test` receipt must be
+#: REFUSED for pointing at (`SOURCE_ONLY_ROW`); `l-002` records a `fail_reason` and nothing
+#: else — the `query-failed` shape; `l-003` records neither a `fail_reason` nor any result —
+#: the `query-empty` shape.
 LEADS = (
     "```invlang\n"
-    ":L findings [id|loop|name|target|tests|system|window]\n"
-    "l-001|1|sshd-auth-events-detail|v-001||elastic|30d\n"
+    ":L findings [id|loop|name|target|fail_reason|tests|system|window]\n"
+    "l-001|1|sshd-auth-events-detail|v-001|||elastic|30d\n"
+    "l-002|1|edr-execve-events-web1|v-001|EDR collector returned HTTP 503||elastic|30d\n"
+    "l-003|1|dns-query-logs-web1|v-001|||elastic|30d\n"
     "```\n"
 )
 LEAD_RESULT = (
@@ -247,7 +281,7 @@ def pays_every_price(disposition: str) -> str:
 
     Every price is paid rather than dodged: the prologue vertex carries no `??` slot (benign's),
     the conclude states a detection defect and names a lead that returned a result
-    (false-positive's), and it names a data source that was not retrieved (the new one)."""
+    (false-positive's), and it names a `ceiling_test` receipt that pays (the new one)."""
     return doc(PROLOGUE, LEADS, LEAD_RESULT, conclude(
         disposition=disposition, confidence="high",
         **{"termination.category": "data-ceiling"},
@@ -256,6 +290,8 @@ def pays_every_price(disposition: str) -> str:
         ceiling_test=(PAYING_ROW,),
     ))
 
+
+# ---------------------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------------------
 # Driving the real entry points.

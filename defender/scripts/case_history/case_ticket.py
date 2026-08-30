@@ -4,11 +4,12 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._vocab import HOST_ONLY_DISPOSITION, normalized_disposition
+from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION, normalized_disposition
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
 
@@ -19,11 +20,6 @@ _MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
 _SIGNATURE_FALLBACK = "unknown"
 _SUMMARY_FALLBACK = "(no rule description)"
 _CONFIDENCE_FALLBACK = "n/a"
-
-#: The model-authored, priced verdict — `_DISPOSITION_GATES`'s "inconclusive" row — spelled
-#: once here rather than imported from the invlang validator (a much heavier import for one
-#: string literal this module only compares against, never validates with).
-_GAP_DISPOSITION = "inconclusive"
 
 #: The bound on `CaseRecord.reason` once it leaves the process through the ticket bridge's
 #: outbound `resolution` — a field a PERSON and the judge model both read back. #923 makes
@@ -49,12 +45,18 @@ def _sanitize_ticket_reason(text: str) -> str:
     second delimited block in a field that already left one. The legitimate half of the row,
     which comes BEFORE any such attempt, survives untouched; a sanitizer that instead deleted
     or replaced the whole reason would satisfy every negative here while telling the analyst
-    and the judge model nothing about the actual gap (#923, J29)."""
+    and the judge model nothing about the actual gap (#923, J29).
+
+    A LINE-ANCHORED match, not `split("\n---")`: the report BODY this falls back to is
+    everything after the document's own closing fence, so a planted block can be the very
+    FIRST thing in it and then carries no preceding newline. Splitting on `"\n---"` left
+    exactly that spelling — `---\ndisposition: malicious\n---\n<instruction>` — with its
+    fence and its spoofed verdict intact on the wire."""
     # Not parsing a document's OWN frontmatter: this text is a `reason` field's contents, never
     # required to start with `---\n`, so `_frontmatter.split_frontmatter` does not apply — it
     # demands a leading fence and raises without one. This looks for an ATTACKER-PLANTED
     # delimiter anywhere in the string, a different question with a different answer.
-    cleaned = text.split("\n---")[0].strip()  # lint-frontmatter: ok — not a document's own fence, see above
+    cleaned = re.split(r"(?m)^---", text)[0].strip()  # lint-frontmatter: ok — not a document's own fence, see above
     if len(cleaned) > _TICKET_REASON_MAX:
         cleaned = cleaned[: _TICKET_REASON_MAX - 1].rstrip() + "…"
     return cleaned
@@ -164,21 +166,14 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     # where this close's own boilerplate comes back as evidence about prior closes. `cause` is
     # the host's typed sentence for the disposition and has exactly one home, the frontmatter.
     # Reports with no `cause` (anything the close gate did not write) keep the body verbatim.
+    #
+    # #923 §7 round 4's receipt redesign moved the gap CLAIM itself: `ceiling_test` in the
+    # frontmatter is now `ref`/`state`/`cap` alone — a closed vocabulary plus an id, host-
+    # verified, never free text — and the model's human-facing NOTE for each receipt is
+    # rendered into the BODY by `close_tool.render_report`. So for a priced `inconclusive`
+    # close with no `cause`, the body ALREADY carries the gap claim; no second lookup into
+    # `ceiling_test` is needed (or even meaningful — that key no longer holds prose).
     cause = str(fm.get("cause") or "")
-    # #923: for a `GAP_DISPOSITION` close with no `cause`, prefer the `ceiling_test` rows over
-    # the raw body when there are any. `ceiling_test` is parsed YAML — a normal frontmatter list
-    # — so a model-authored row that tries to open a second frontmatter block inside itself
-    # (a fake `---`-delimited section, an injected instruction after it) never reaches it as
-    # anything but list-item text; the raw BODY has no such guarantee (frontmatter parsing looks
-    # for the FIRST `---` line, which a hostile row can plant, absorbing the legitimate claim
-    # into `ceiling_test` and leaving `body` holding the attack's own tail). This is the gap
-    # claim's real home for a priced close, and it is the one the coverage channel is FOR.
-    if not cause and disposition == _GAP_DISPOSITION:
-        rows = fm.get("ceiling_test")
-        rows = [rows] if isinstance(rows, str) else list(rows or [])
-        rows = [r for r in rows if isinstance(r, str) and r]
-        if rows:
-            body = "; ".join(rows)
 
     mapping = _load_mapping()
     signature_id = _SIGNATURE_FALLBACK
@@ -309,8 +304,18 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
     if decoded == HOST_ONLY_DISPOSITION:
         from defender.runtime.close_tool import REPORT_CAUSES
 
-        if tail.strip() not in REPORT_CAUSES:
-            others = ", ".join(("benign", "false-positive", "inconclusive", "malicious"))
+        # `startswith`, not equality: the host's own resolution is APPENDED to in this very
+        # module (`append_resolution_method` stamps ` [grounded: …]` onto it after the
+        # adversarial leg settles), and an analyst may add a note after the host's sentence.
+        # Under equality any such suffix made the host's own verdict undecodable — the ticket
+        # then falls out of every disposition-keyed pool through `ticket_disposition`'s
+        # degrade-to-`None`. What the refusal keys on is that the reason clause BEGINS with a
+        # closed host sentence, which a hand-typed one still cannot without copying it.
+        if not any(tail.strip().startswith(cause) for cause in REPORT_CAUSES):
+            # Derived from the vocabulary, never re-spelled: this list is exactly "the members
+            # a person MAY write", and a sixth member added at the owner has to reach the
+            # analyst being told what to write instead.
+            others = ", ".join(d for d in DISPOSITION_VALUES if d != HOST_ONLY_DISPOSITION)
             raise CaseTicketError(
                 f"the case `resolution` field cannot record {decoded!r} — that verdict is "
                 f"written by the host, not by a person closing a ticket. Record one of "

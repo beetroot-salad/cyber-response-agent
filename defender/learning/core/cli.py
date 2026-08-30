@@ -16,11 +16,12 @@ Direction dispatch (by the defender's normalized disposition):
   malicious       → benign direction only      (hunt the over-escalation / FP)
   inconclusive    → both directions
   false-positive  → neither: a verdict about the RULE, not the entity
+  unresolved      → neither: the HOST's own verdict for a run cut short
 A disposition that maps to no direction is skipped.
 
 Inputs (must exist in <run_dir>):
   alert.json                 verbatim alert input
-  report.md                  YAML frontmatter with disposition ∈ {benign, false-positive, inconclusive, malicious}
+  report.md                  YAML frontmatter with disposition ∈ {benign, false-positive, inconclusive, malicious, unresolved}
   investigation.md           defender's invlang audit log
   executed_queries.jsonl     the queries table (FK lead_id) — written live by record_query.py
   gather_raw/{lead_id}.lead.json   the leads table — written live by record_lead.py

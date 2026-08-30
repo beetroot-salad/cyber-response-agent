@@ -72,7 +72,7 @@ def _pay_inconclusive_price(run) -> None:
     path = run / "investigation.md"
     path.write_bytes(
         path.read_bytes()
-        + b'\n```invlang\n:T conclude\nceiling_test  "process telemetry not retrieved"\n```\n'
+        + b'\n```invlang\n:T conclude\nceiling_test  state=nothing-to-try cap=telemetry.collect note=process telemetry not retrieved\n```\n'
     )
 
 

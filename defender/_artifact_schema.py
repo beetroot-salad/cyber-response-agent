@@ -330,7 +330,7 @@ def committed_investigation_reason(text: str) -> str | None:
     Fails OPEN on an internal validator error, and this is where it parts company with the
     write gate above. There, failing closed is free — nothing is written and the model
     re-sends. Here the same choice makes a validator BUG an unclosable run: no repair exists
-    for it, so the model retries until the framework force-closes `inconclusive` and the
+    for it, so the model retries until the framework force-closes `unresolved` and the
     disposition the run reached is discarded. `runtime.tools.committed_document_refusal`, the
     only caller, already fails open when the document cannot be READ, for exactly that reason
     (#836's H7) — a gate that failed open on unreadable bytes and closed on an unreadable
