@@ -281,7 +281,9 @@ def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: 
             system, verb, adapters(system, verb, **prepared), moved, prepared, ctx)
     else:
         payload = run(prepared, moved)
-    decision, out = applier.apply(system, verb, prepared, payload, world)
+    # `moved`, not `asked`: the row must say whether staging MOVED this call, which is
+    # the same fact `restore` un-echoes on and the ledger records `asked_params` under.
+    decision, out = applier.apply(system, verb, prepared, payload, world, moved)
     return Served(asked=asked, prepared=prepared, moved=moved, payload=payload,
                   decision=decision, out=out)
 

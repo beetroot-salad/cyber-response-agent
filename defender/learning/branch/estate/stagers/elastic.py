@@ -470,34 +470,6 @@ def declares(overlay: Any, base_pattern: str) -> bool:
     return base_pattern in table
 
 
-def decision(verb: str, params: dict, world_id: str | None, ctx: Any = None, *,
-             overlay: Any = None) -> str:
-    """Which ledger decision `redirect` on these same arguments produces.
-
-    ONE ANSWER, asked the same way `redirect` asks it, because the ledger row and the call it
-    describes must agree: a row reading `staged` against params that came back untouched is
-    "silent scenario deletion" wearing an honest label, which is the exact failure
-    `ledger.PASSTHROUGH` exists as its own decision class to make visible.
-
-    Deliberately does NOT resolve an omitted index through the config: this answers what
-    happened, and the refusal `redirect` raises on that input is the applier's to record as a
-    refused row rather than something to pre-empt here.
-    """
-    from defender.learning.branch import ledger
-
-    if world_id is None or not stages(verb):
-        return ledger.PASSTHROUGH
-    if overlay is None:
-        return ledger.STAGED
-    try:
-        base = source_pattern(verb, params, ctx)
-    except StagingError:
-        return ledger.PASSTHROUGH
-    if base is None or not declares(overlay, base):
-        return ledger.PASSTHROUGH
-    return ledger.STAGED
-
-
 def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None, *,
              overlay: Any = None) -> dict:
     """`params` pointed at `world_id`'s view of whatever corpus they already address.

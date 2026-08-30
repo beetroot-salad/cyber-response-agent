@@ -66,6 +66,7 @@ from defender import _provenance
 from defender._io import guarded_mkdir, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
@@ -1069,21 +1070,31 @@ def _launch(  # noqa: PLR0913 — see `main`
         episode_token=ns.episode_token)
 
     # THE REMAINING SEAMS ARE ANSWERED FOR HERE, at the same boundary `door` and `preflight`
-    # are resolved at — and this one can only REFUSE, because the questioner, the comparator and
-    # the review's adapter layer have no production default to fall back to yet. Left to their
-    # `None` defaults they reached `author_family`'s `invoke(...)` and `review(adapters=None)`
-    # as a bare `TypeError`, AFTER `prepare_episode` had primed an immutable episode directory
-    # that cannot be reused — so the shipped `__main__` path burned an episode id per attempt
-    # and reported it as a crash. Refused here, the operator is told which seam is missing while
-    # nothing has been spent and no episode exists.
-    unwired = [name for name, seam in
-               (("questioner", questioner), ("adapters", adapters), ("invoke", invoke))
-               if seam is None]
-    if unwired:
+    # are resolved at, and threaded inward non-`None`. Left to their `None` defaults they
+    # reached `author_family`'s `invoke(...)` and `review(adapters=None)` as a bare `TypeError`,
+    # AFTER `prepare_episode` had primed an immutable episode directory that cannot be reused —
+    # so the shipped `__main__` path burned an episode id per attempt and reported it as a crash.
+    #
+    # RESOLVED BEFORE THE CLAIM, so a deployment that cannot build them is refused while
+    # nothing has been spent and no episode directory exists. The adapter seam is the one that
+    # can answer that here: building its registry reads and parses every system the gather
+    # grant names, so a tree missing an adapter the grant declares refuses now rather than
+    # inside the review. The questioner's own model config was already asked for by the role
+    # preflight above, which sweeps every registered role including this one.
+    #
+    # `seams.model_seam` answers BOTH model calls, because the authoring fan-out and the
+    # comparator make the same call on the same role and differ only by the `agent_id` their
+    # traces partition on — see that module for why a second builder here would be a second
+    # place for them to acquire different models.
+    try:
+        author = seams.model_seam(episode_dir) if questioner is None else questioner
+        compare_with = seams.model_seam(episode_dir) if invoke is None else invoke
+        read_side = seams.adapter_seam(episode_dir) if adapters is None else adapters
+    except Exception as unbuildable:  # noqa: BLE001 — every seam's own fault class, and the answer is the same refusal
         raise LauncherRefused(
-            f"[branch] the launcher was given no {', '.join(unwired)} seam — steps 2 and 4 "
-            "drive a model and an adapter layer, and there is no production default for them "
-            "here; a caller has to supply them, and one that cannot has nothing to launch")
+            f"[branch] the launcher could not build its model and adapter seams "
+            f"({unbuildable!r}) — steps 2 and 4 drive a questioner and the estate's read side, "
+            "and an episode that cannot reach either has nothing to measure") from unbuildable
 
     # STEP 2 ONWARD IS THE PART THAT SPENDS. Everything from here to the archive runs inside the
     # teardown guard, because from the first staging append onward there are names live on the
@@ -1096,8 +1107,8 @@ def _launch(  # noqa: PLR0913 — see `main`
     try:
         return _run_episode(
             ns, source=source, episode_id=episode_id, episode_dir=episode_dir, token=token,
-            patterns=patterns, door=write_door, questioner=questioner,
-            adapters=adapters, invoke=invoke, spawn=spawn)
+            patterns=patterns, door=write_door, questioner=author,
+            adapters=read_side, invoke=compare_with, spawn=spawn)
     except SystemExit:
         aborting = True
         raise

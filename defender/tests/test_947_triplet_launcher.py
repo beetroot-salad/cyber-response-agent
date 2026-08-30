@@ -261,6 +261,64 @@ def test_947_launcher_has_no_import_or_await_of_run_investigation(tmp_path):
     assert spawn.launches, "the launcher started no child process"
 
 
+def test_947_every_injected_seam_has_a_production_value(tmp_path):
+    """Every seam the launcher injects has a value it resolves for itself, so the shipped entry
+    point can run an episode with nothing hand-supplied (O1).
+
+    THE SEAM STAYS A SEAM — all three parameters still default to `None`, which is what lets
+    every scenario in this file drive the launcher without a provider — and the launcher answers
+    for them at its own boundary, the way it already does for the write door and the role
+    preflight. Injected-with-no-production-value is not a seam but a hole: it reached
+    `author_family(invoke=None)` as a bare `TypeError` with an episode id already burned, and
+    refusing instead of crashing left the entry point still unable to launch anything.
+
+    The MODEL seam is asserted structurally and by construction rather than by driving it: a
+    real call costs money and needs a provider, and what can go wrong without one is what is
+    checked here — that the shipped role prompt exists and the agent builds from it through the
+    same builder every other stage uses. The ADAPTER seam is built for real, because building it
+    is the check: the registry reads and parses every system the gather grant names."""
+    import inspect
+
+    cli = _cli()
+    seams = T.mod("learning.branch.seams")
+    for name in ("questioner", "adapters", "invoke"):
+        assert inspect.signature(cli.main).parameters[name].default is None, (
+            f"{name} is no longer an injectable seam, so every scenario in this file would "
+            "need a provider")
+    src = (T.DEFENDER / "learning" / "branch" / "cli.py").read_text(encoding="utf-8")
+    for builder in ("seams.model_seam", "seams.adapter_seam"):
+        assert builder in src, f"the launcher never reaches {builder}"
+
+    ep = T.episode(tmp_path)
+    assert callable(seams.adapter_seam(ep)), "the review has no production adapter layer"
+    assert callable(seams.model_seam(ep)), "the questioner has no production model call"
+
+    # The agent the model seam drives, built the way `run_stage` builds it — the structural half
+    # (a role with a registered definition, a readable standing prompt, a deps class the builder
+    # accepts) with no provider call made.
+    from defender.learning._pydantic_stage import build_stage_agent
+    from defender.learning.branch.questioner import (
+        QuestionerDeps,
+        questioner_effort,
+        questioner_model,
+    )
+    from defender.learning.core.config import StageWiring
+    from defender.runtime import observe
+
+    role_prompt = T.DEFENDER / "learning" / "branch" / "questioner" / "role.md"
+    assert role_prompt.is_file(), "the questioner has no standing system prompt to be built with"
+    logger = observe.RequestLogger(tmp_path / "seam_trace.jsonl")
+    try:
+        assert build_stage_agent(
+            QuestionerDeps,
+            StageWiring(prompt_path=role_prompt, model=questioner_model(),
+                        effort=questioner_effort(), trace_name="t.jsonl", label="questioner"),
+            logger,
+        ) is not None
+    finally:
+        logger.close()
+
+
 def test_947_a_rejected_world_ends_the_episode_and_the_record_archives(tmp_path):
     """Any rejected world ends the EPISODE: no world runs, the manifest, staging record and
     review are archived, and the episode's recorded outcome is rejected — an examined no, not a

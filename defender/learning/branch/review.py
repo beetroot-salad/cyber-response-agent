@@ -268,7 +268,7 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
         # `Any`: there is no shape the seven systems share, and the half this frame can promise
         # (the canonical text) is typed and narrowed by `payload_text`.
         return Replay(payload=payload, text=recorded)
-    _decision, applied = applier.apply(system, verb, prepared, payload, world)
+    _decision, applied = applier.apply(system, verb, prepared, payload, world, asked)
     # lint-parse: ok — same seam, same reason as the arm above.
     return Replay(payload=applied, text=payload_text(applied))
 

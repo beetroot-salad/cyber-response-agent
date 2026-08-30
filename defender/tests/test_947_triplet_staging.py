@@ -562,11 +562,22 @@ def test_947_an_undeclared_pattern_passes_through_and_is_recorded_passthrough(tm
     ledger = T.mod("learning.branch.ledger")
     declared = T.mod("runtime.branch._family").parse_overlay(
         T.overlay(elastic=T.elastic_overlay(T.EVENTS_PATTERN, inject=[{"_id": "i"}])))
-    out = elastic.redirect("query", {"index": "logs-zeek.connection-*"}, TOKEN,
-                           overlay=declared)
+    asked = {"index": "logs-zeek.connection-*"}
+    out = elastic.redirect("query", dict(asked), TOKEN, overlay=declared)
     assert out["index"] == "logs-zeek.connection-*"
-    assert elastic.decision("query", {"index": "logs-zeek.connection-*"}, TOKEN,
-                            overlay=declared) == ledger.PASSTHROUGH
+
+    # AND THE ROW SAYS SO. Asked of the applier, which is the frame that names the decision the
+    # ledger writes — the earlier spelling asked a stager helper with no production caller, so
+    # the recorded half of this test's own sentence was never exercised: every one of these
+    # calls was in fact recorded `staged`, because the applier asked whether the VERB stages
+    # rather than whether THIS CALL was moved.
+    applier = T.mod("learning.branch.estate.applier").WorldApplier()
+    world = T.mod("runtime.branch._family").World(
+        world_id=TOKEN, role="B", story="s", axis="a",
+        disposition_declared="malicious", label_basis="policy-rule", overlay=declared)
+    payload = {"hits": []}
+    assert applier.apply("elastic", "query", out, payload, world, None) == (
+        ledger.PASSTHROUGH, payload)
 
 
 def test_947_an_index_less_call_still_refuses_on_a_staged_world(tmp_path):
