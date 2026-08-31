@@ -327,6 +327,24 @@ keyed on the contract id. Columns:
   both.
 - `verdict` — `authorized | unauthorized | indeterminate`.
 - `anchor_kind` — closed vocab (`enum anchor-kinds`); must match the declaring contract's `anchor_kind`.
+- `grounding?` — what KIND of thing the verdict rests on: `org-authority`
+  (an affirmative record in a system of record — an IAM policy, an
+  approved change, a tacit-knowledge registry entry) or `past-case`.
+  `telemetry-baseline` is **refused here**: a statistical pattern is what
+  the estate *has been* doing, never what it is *permitted* to do. Record
+  that as a `:R consultations` row instead (below).
+- `anchor_id?` — the specific record the verdict cites (a CR id, a policy
+  name, a registry entry id).
+- `basis?` — on `verdict: indeterminate` only: `retry` (the default, and
+  what an absent cell means — this contract has not been worked yet) or
+  `exhausted` (every anchor kind applicable to this contract's predicate
+  was actually queried this run and none answered). `exhausted` stops the
+  run being pushed back to re-work the contract and changes nothing else —
+  the verdict and its forced escalation stand. It is checked against this
+  run's own transcript: the lead named by `resolved_by` must have come back
+  with something, and its `:L findings` `system` cell must name the system
+  that answers the contract's anchor kind. Write `retry` (or nothing) when
+  there is still somewhere to look.
 - `reasoning` — short citation of the supporting fact (quoted).
 
 Disposition gating: `disposition: benign` requires every authz
@@ -335,6 +353,51 @@ row with `verdict: authorized`. `unauthorized` or `indeterminate`
 forces escalation per the contract's `on_unauth` / `on_indet`. A
 declared contract with no fulfilling row is treated as
 `indeterminate`.
+
+**`anchor_kind: tacit-knowledge` costs two rows, not one.** The registry
+is a human-authored file, so a citation has to be backed by a lookup you
+actually ran: record what `tacit-knowledge.lookup` came back with as a
+`:R consultations` row on the SAME lead first, then cite that entry's id
+as the `:R authz` row's `anchor_id`. A citation no lookup produced —
+including one another lead found, and one written beside a recorded miss
+— is refused on write.
+
+### `:R consultations` (what an anchor SAID, without deciding anything)
+
+```invlang
+:R consultations [resolved_by|anchor_kind|grounding|anchor_id|result|effective_window|reasoning]
+l-001|tacit-knowledge|org-authority|tk-ca-bundle-build-runner|"hit: entry covers uid-0 on build-runner-*.prod"|2026-03-01T00:00:00Z/2026-09-01T00:00:00Z|"one unexpired scope-matching entry"
+l-001|runtime-evidence|telemetry-baseline|tk-baseline-30d|"1500 occurrences over 30d; actor uid-0 and host build-runner-07.prod throughout"|2026-04-04T00:00:00Z/2026-05-04T00:00:00Z|"nothing adverse fell inside the window"
+```
+
+A consultation records **what an anchor answered**, not what the run
+concluded from it. The row carries no `fulfills` column and cannot
+discharge a contract — that is the point, not an omission.
+
+- `anchor_kind` — closed vocab (`enum anchor-kinds`).
+- `grounding` — `enum consultation.grounding`: `org-authority` or
+  `telemetry-baseline`. (`past-case` is excluded: grounding a baseline on
+  a past case is reasoning from resemblance.)
+- `result` — what came back, quoted. A MISS names no `anchor_id`; there is
+  no entry to name.
+- `effective_window` — `<start>/<end>`, ISO-8601 instants.
+
+Two uses, and they are different:
+
+- **A registry receipt.** The lead that dispatched a lookup records what
+  it got, which is what an `anchor_kind: tacit-knowledge` `:R authz` row's
+  `anchor_id` is checked against. The window here is the ENTRY's validity
+  span.
+- **A baseline** (`anchor_kind: runtime-evidence`, `grounding:
+  telemetry-baseline`). How often this estate does the alerted thing, over
+  what window, with what scope, and whether anything adverse fell inside
+  it. This is descriptive context for whoever reads the closed case — it
+  rides into `report.md`'s body — and it buys the close **nothing**: the
+  benign gate never reads it. Its window must end **strictly before** the
+  alerted event; a pattern that begins with the incident is the incident.
+  Do not write one as probative when the live hypothesis's own predictions
+  turn on novelty or rarity — the same evidence cannot both test for an
+  anomaly and rule it out.
 
 ### `:R impact` (the impact axis)
 

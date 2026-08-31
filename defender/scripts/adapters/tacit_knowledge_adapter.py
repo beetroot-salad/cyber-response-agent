@@ -1,0 +1,304 @@
+"""The tacit-knowledge registry: the estate's authored record of sanctioned patterns.
+
+The one system in this tree with no service behind it — the FILE is the system of record
+(`defender/skills/tacit-knowledge/registry.yaml`), and its entire safety argument is
+provenance: every entry traces to a human commit, because nothing an agent run can reach
+writes it. The commit/PR IS the sign-off, which is the role the missing human-review step in
+this pipeline would otherwise have played (#983 mechanism B).
+
+READ-ONLY END TO END, and deliberately so. This module exports no write-capable function, and
+`permission.decide_write` refuses the path for every role a run can reach. A registry populated
+from the agent's own automated closes would be the system vouching for itself.
+
+Two halves, split so the rules are testable without a `VerbContext`:
+
+  * `load_entries` — the file, validated ENTRY BY ENTRY. One malformed row is DROPPED and the
+    rest of the file loads, mirroring `defender._corpus.iter_query_templates`: a registry is a
+    curated list, and one bad row sinking every sanctioned pattern in the estate is the worse
+    failure.
+  * `find_entry` — the pure lookup, with `now` entering as a VALUE so expiry is checkable
+    without a clock to patch.
+
+`lookup` is the gather verb over the pair, resolving both the tree it reads and the moment it
+judges expiry against off the `VerbContext` it is handed.
+"""
+from __future__ import annotations
+
+import datetime as dt
+from fnmatch import fnmatchcase
+from typing import Any
+
+import sys as _sys
+from pathlib import Path as _Path
+
+if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
+    _sys.path.insert(0, _root)
+
+from pathlib import Path
+
+import yaml
+
+from defender import _yaml
+from defender._io import TEXT_READ_ERRORS, read_text_utf8
+from defender.runtime.verbs import VerbContext
+
+SYSTEM = "tacit-knowledge"
+
+#: The eight fields ONE entry carries — the seven the design names plus the `id` a `:R authz`
+#: row cites as its `anchor_id`. Closed: an entry missing any of them, or carrying a key this
+#: loader does not read, is dropped. Without `id` a citation would name a `pattern` STRING, and
+#: every edit to that string would be a silent re-identification of the sanction.
+#:
+#: Nothing here can cite a past case (`cites_past_case`, `similar_to`, `precedent`), and that
+#: omission is the mechanical half of a rejected non-obligation: "this resembles a case we
+#: resolved" cannot be recorded as a sanction at all, so precedent-by-similarity has no home
+#: even with a human's signature on it.
+ENTRY_FIELDS: tuple[str, ...] = (
+    "id", "pattern", "actor_scope", "host_scope",
+    "added_by", "added_at", "review_by", "justification",
+)
+
+#: The two fields that carry a DATE, so a `dt.date` PyYAML resolved from an unquoted scalar is
+#: normalized back to the ISO string the rest of this module compares.
+_DATE_FIELDS: tuple[str, ...] = ("added_at", "review_by")
+
+#: How far past its own `added_at` an entry may set its `review_by`. THE freshness bound, and
+#: it is enforced at load rather than trusted: a file entry does not re-verify itself on every
+#: read the way a live IAM or change-management query does, so the bound is what stands in for
+#: that re-verification. A sanction that could name its own expiry is a rubber stamp.
+#:
+#: One module-level constant so the policy knob is tunable in one place.
+TACIT_KNOWLEDGE_MAX_REVIEW_SPAN_DAYS = 180
+
+#: The fewest LITERAL characters — anything that is not a glob metacharacter — an `actor_scope`
+#: or `host_scope` may carry.
+#:
+#: The three spellings a denylist catches (empty, `*`, `all`/`any`) are not enough, because a
+#: denylist cannot tell a blanket wildcard from a legitimate scoped glob: `actor_scope: "*-0"`
+#: matches `uid-0`, `svc-0`, `root-0` and every other actor whose name ends that way, and it is
+#: none of those three spellings. Counting literal characters is the property that actually
+#: separates them — `build-runner-*.prod` is eighteen literal characters around one star, and
+#: `*-0` is nearly all star.
+#:
+#: THE LIMIT, recorded rather than papered over: this is a shape rule, not a breadth proof.
+#: `host_scope: "prod-*"` is mostly literal and still covers a fleet, and no character count
+#: can tell a fleet-wide sanction a human MEANT from one they wrote carelessly. What the rule
+#: buys is that the spellings covering EVERYTHING cannot be written at all; who may author a
+#: broad-but-legal entry is a process risk on the registry itself.
+TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS = 4
+
+#: The glob metacharacters `fnmatchcase` reads, which is what makes a character NOT literal.
+_WILDCARD_CHARS = "*?[]"
+
+#: Scope spellings that cover everything by NAME rather than by wildcard. Held beside the
+#: literal-character minimum, not instead of it: each catches what the other cannot.
+_BLANKET_SCOPES = frozenset({"*", "all", "any"})
+
+
+def registry_path(defender_dir: Path) -> Path:
+    """Where the registry lives inside a defender tree.
+
+    The per-system directory convention, so the file is a SYSTEM's data queried through a
+    gather verb rather than a vocabulary of the invlang module — and so
+    `runtime.verb_roster.model_read_surfaces`, which already enumerates `skills/*/`, sees the
+    skill beside it. Deliberately NOT `knowledge/environment/systems/{system}/`: that lane
+    holds endpoints and credentials for a live service, and this system has no service.
+    """
+    return Path(defender_dir) / "skills" / SYSTEM / "registry.yaml"
+
+
+def _literal_chars(value: str) -> int:
+    return sum(1 for ch in value if ch not in _WILDCARD_CHARS)
+
+
+def _blanket_scope_reason(field: str, value: str) -> str | None:
+    """Why this scope covers (very nearly) everything — or `None`."""
+    scoped = value.strip()
+    if not scoped:
+        return f"`{field}` is blank, which scopes the sanction to nothing and to everything"
+    if scoped.lower() in _BLANKET_SCOPES:
+        return f"`{field}` is {value!r}, a blanket scope"
+    if _literal_chars(scoped) < TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS:
+        return (
+            f"`{field}` is {value!r}, which carries fewer than "
+            f"{TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS} literal characters — a scope that is "
+            f"mostly wildcard covers a class nobody enumerated"
+        )
+    return None
+
+
+def _parse_date(value: str) -> dt.date | None:
+    try:
+        return dt.date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
+def _normalized(raw: Any) -> dict[str, str] | None:
+    """One raw YAML mapping as an entry of eight string fields, or `None` when it is not one.
+
+    A `dt.date` PyYAML resolved out of an unquoted `added_at: 2026-03-01` is folded back to its
+    ISO spelling: the file is HUMAN-EDITED, and refusing an entry for the quoting of a date
+    would drop a legitimate sanction over a formatting detail. Everything else must already be
+    a non-empty string — a list or a mapping in a field this module compares as text would
+    otherwise reach `fnmatchcase` and raise inside a verb body.
+    """
+    if not isinstance(raw, dict) or set(raw) != set(ENTRY_FIELDS):
+        return None
+    out: dict[str, str] = {}
+    for field in ENTRY_FIELDS:
+        value = raw[field]
+        if field in _DATE_FIELDS and isinstance(value, (dt.date, dt.datetime)):
+            value = value.isoformat()
+        if not isinstance(value, str) or not value.strip():
+            return None
+        out[field] = value.strip()
+    return out
+
+
+def _read_entry(raw: Any) -> tuple[dict[str, str] | None, str]:
+    """One raw YAML row as a loadable entry, or `(None, why not)`.
+
+    Both halves from ONE call so the loader cannot answer "does this load" and "what is it"
+    with two normalizations that could disagree. The refusal text is what a human editing the
+    file reads on stderr, so it names the field and the rule.
+    """
+    entry = _normalized(raw)
+    if entry is None:
+        known = set(raw) if isinstance(raw, dict) else set()
+        missing = sorted(set(ENTRY_FIELDS) - known)
+        unknown = sorted(known - set(ENTRY_FIELDS))
+        return None, (
+            f"an entry carries {sorted(known) or 'no fields'} — every one of "
+            f"{list(ENTRY_FIELDS)} is required as non-empty text and nothing else is read"
+            + (f"; missing {missing}" if missing else "")
+            + (f"; unrecognised {unknown}" if unknown else "")
+        )
+    for field in ("actor_scope", "host_scope"):
+        reason = _blanket_scope_reason(field, entry[field])
+        if reason is not None:
+            return None, f"entry {entry['id']!r}: {reason}"
+    added_at, review_by = _parse_date(entry["added_at"]), _parse_date(entry["review_by"])
+    if added_at is None or review_by is None:
+        return None, (
+            f"entry {entry['id']!r}: `added_at` and `review_by` are ISO dates "
+            f"(YYYY-MM-DD); got {entry['added_at']!r} and {entry['review_by']!r}"
+        )
+    span = (review_by - added_at).days
+    if not 0 <= span <= TACIT_KNOWLEDGE_MAX_REVIEW_SPAN_DAYS:
+        return None, (
+            f"entry {entry['id']!r}: `review_by` is {span} days past `added_at`, outside the "
+            f"0..{TACIT_KNOWLEDGE_MAX_REVIEW_SPAN_DAYS}-day policy bound — a sanction may not "
+            f"name its own expiry, because nothing re-verifies a file entry on read"
+        )
+    return entry, ""
+
+
+def load_entries(path: Path) -> list[dict[str, str]]:
+    """Every well-formed entry in the registry at `path`, in file order.
+
+    ONE entry is dropped, never the file — the argument `_corpus.iter_query_templates` makes
+    for the query catalog. Each drop is announced on stderr, because the only person who can
+    repair the row is the human who committed it.
+    """
+    try:
+        loaded = _yaml.safe_load(read_text_utf8(Path(path)))
+    except (*TEXT_READ_ERRORS, yaml.YAMLError) as e:
+        print(f"warn: tacit-knowledge registry at {path} could not be read ({e})",
+              file=_sys.stderr)
+        return []
+    rows = loaded.get("entries") if isinstance(loaded, dict) else None
+    entries: list[dict[str, str]] = []
+    for raw in rows if isinstance(rows, list) else []:
+        entry, refusal = _read_entry(raw)
+        if entry is None:
+            print(f"warn: skipping tacit-knowledge entry ({refusal})", file=_sys.stderr)
+            continue
+        entries.append(entry)
+    return entries
+
+
+def find_entry(
+    entries: list[dict[str, str]], *,
+    actor: str, host: str, pattern: str, now: dt.date,
+) -> dict[str, str] | None:
+    """The first unexpired entry whose scope COVERS this actor, host and action — or `None`.
+
+    CONTAINMENT, never similarity. `pattern` is compared for exact equality (a glob there would
+    let one entry sanction every action, which is the hole the no-wildcard rule closes on the
+    two scopes); `actor_scope` and `host_scope` are ordinary globs, already held to a literal
+    minimum at load. A near miss is a miss — `uid-00` is not `uid-0` and
+    `build-runner-07.prod.example` is not a `build-runner-*.prod` host — so resemblance to a
+    past case cannot become a hit at read time either.
+
+    Expiry is a property of the READ, not of the load: an entry that is well formed and inside
+    the review span still stops answering once its own review date passes, which is what makes
+    the freshness bound stand in for a live system's re-verification. An expired entry is
+    simply NO HIT — never a refusal, and never a stale authorization.
+    """
+    for entry in entries:
+        if entry["pattern"] != pattern:
+            continue
+        if not fnmatchcase(actor, entry["actor_scope"]):
+            continue
+        if not fnmatchcase(host, entry["host_scope"]):
+            continue
+        review_by = _parse_date(entry["review_by"])
+        if review_by is None or review_by < now:
+            continue
+        return entry
+    return None
+
+
+def _as_of_date(ctx: VerbContext) -> dt.date:
+    """The day this call is being served AS OF.
+
+    `ctx.as_of` is the branch point's moment on a branched run and `None` on an ordinary one,
+    where the call really is executing now. THE ONE ANCHOR for that optionality, resolved here
+    and handed to `find_entry` as a concrete value — `getattr` for the reason
+    `host_state_adapter._captured_at` uses it: this adapter is reachable with duck-typed
+    contexts, and an `AttributeError` inside a verb body is filed as an INFRA fault rather than
+    as the shape mismatch it is.
+    """
+    at = getattr(ctx, "as_of", None)
+    return (dt.datetime.now(dt.UTC) if at is None else at).date()
+
+
+def health_check(ctx: VerbContext) -> dict:
+    """Liveness for a system with no service: does the registry file exist, and how many
+    entries does it hold. Returns data rather than printing, like every other health check —
+    prose on stdout would leave the queries table recording an empty payload."""
+    path = registry_path(ctx.defender_dir)
+    present = path.is_file()
+    return {
+        "system": SYSTEM,
+        "connected": present,
+        "registry": str(path),
+        "entries": len(load_entries(path)) if present else 0,
+    }
+
+
+def lookup(  # lint-dup: ok — a VERB name, not a helper: `threat_intel_adapter.lookup` is a different system's verb with a different contract, and the roster/query seam addresses both as `<system>.lookup`, so the module attribute must be spelled exactly this. Same NAME-ONLY collision the baselined `health_check() x4` across these adapters already is.
+    ctx: VerbContext, *, actor: str, host: str, pattern: str,
+) -> dict:
+    """Does an authored, unexpired registry entry sanction `actor` doing `pattern` on `host`?
+
+    ONE key on the return. A `hit` boolean beside the entry would be two spellings of one fact;
+    `matched is None` already says "miss" to a reader and to a gather model looking at the
+    payload, and the whole entry is what a `:R consultations` row cites and a human reviews.
+
+    A MISS names nothing — not the entry it nearly matched, not the one that expired. An
+    almost-hit that reported its own id would be a citation waiting to be written.
+    """
+    entries = load_entries(registry_path(ctx.defender_dir))
+    return {
+        "matched": find_entry(
+            entries, actor=actor, host=host, pattern=pattern, now=_as_of_date(ctx),
+        ),
+    }
+
+
+VERBS = {
+    "health-check": health_check,
+    "lookup": lookup,
+}

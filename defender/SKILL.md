@@ -468,7 +468,10 @@ the declaration. Verdict ∈ `authorized | unauthorized | indeterminate`.
 `unauthorized` on any live-weight hypothesis's contract forces
 escalation regardless of behavioral grading; `indeterminate` is the
 right trigger to loop back to PLAN with a follow-up lead, not to fetch
-inline. See `defender/skills/invlang/SKILL.md` §Authz contract
+inline — **unless** the row carries `basis=exhausted`, which says every
+anchor kind applicable to that contract's predicate was actually queried
+and none answered. That contract is not worth another loop; it still
+escalates. See `defender/skills/invlang/SKILL.md` §Authz contract
 resolution for the column shape.
 
 If gather's summary feels thin, **re-dispatch gather** naming the

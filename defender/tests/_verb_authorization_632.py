@@ -211,6 +211,10 @@ GATHER_PAIRS: tuple[tuple[str, str], ...] = (
     ("host-state", "passwd"), ("host-state", "proc-tree"),
     ("identity", "can-access"), ("identity", "get-user"), ("identity", "list-roles"),
     ("identity", "list-users"),
+    # #983's addition to the census: the tacit-knowledge registry lookup, the one anchor kind a
+    # container-root authorization contract can reach. `r` like every pair here, and that class
+    # is the whole of mechanism B's provenance argument — no run-path verb may write the file.
+    ("tacit-knowledge", "lookup"),
     ("threat-intel", "list-indicators"), ("threat-intel", "lookup"),
     ("ticket", "list-tickets"),
 )

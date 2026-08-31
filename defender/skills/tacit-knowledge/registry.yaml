@@ -1,0 +1,33 @@
+# The tacit-knowledge registry — the estate's authored record of sanctioned patterns.
+#
+# HUMAN-EDITED ONLY. Nothing an agent run can reach writes this file: the gather verb over it
+# is read-only, and `permission.decide_write` refuses the path for every role a run holds. That
+# is the whole of the safety argument — the commit/PR that adds an entry IS the sign-off, and
+# `git log` on this file is the audit trail. A registry populated from the agent's own closes
+# would be the system vouching for itself.
+#
+# One entry per sanctioned pattern. Eight fields, all required:
+#
+#   id             the stable name a `:R authz` row cites as its `anchor_id`. Never re-use one
+#                  for a different sanction; an edit to `pattern` under a kept `id` is a silent
+#                  re-identification.
+#   pattern        the action being sanctioned, matched EXACTLY (no wildcards — a glob here
+#                  would let one entry sanction everything).
+#   actor_scope    the identity or identity glob this covers.
+#   host_scope     the host or host-group glob this covers.
+#                  Both scopes are refused at load if they are blank, `*`, `all`/`any`, or
+#                  fewer than four literal (non-wildcard) characters.
+#   added_by       who authored it. A person or a team address, not a service.
+#   added_at       ISO date, the day it was committed.
+#   review_by      ISO date, at most 180 days past `added_at` (the loader enforces the bound).
+#                  Past that date the entry stops answering — it is a MISS, not a refusal, and
+#                  the contract falls through to `indeterminate` like any other registry miss.
+#   justification  why this is sanctioned, in a sentence a reviewer can act on.
+#
+# An entry that breaks any of those rules is DROPPED with a warning on stderr; the rest of the
+# file still loads.
+#
+# Refresh an entry by editing its `added_at`/`review_by` in a fresh commit — that re-attests
+# it, which is the step a file cannot perform for itself.
+
+entries: []

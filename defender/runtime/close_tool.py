@@ -36,8 +36,10 @@ from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISP
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
 from defender.skills.invlang.validate import (
     CeilingReceipt,
+    RuntimeEvidenceReceipt,
     ceiling_test_block,
     conclude_ceiling_test_rows,
+    conclude_runtime_evidence_rows,
     disposition_entry_price,
 )
 
@@ -186,9 +188,10 @@ class CloseResult:
     failure_kind: str | None = None
 
 
-def render_report(
+def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host-chosen value
     disposition: str, *, outcome: str, cause: str, failure_kind: str | None = None,
     evidence: str | None = None, ceiling_test: tuple[CeilingReceipt, ...] = (),
+    runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = (),
 ) -> str:
     """RS12. The body is HOST-RENDERED from typed arguments — the tool accepts no
     model-supplied body.
@@ -204,19 +207,23 @@ def render_report(
     is the fifth state of that vocabulary, and an always-present key is one a count cannot
     filter on.
 
-    `ceiling_test` (#923, §7 round 4's receipt redesign) is the ONE exception to "no
-    model-supplied body", and it is model-CHOSEN structure, not model-authored prose: a priced
-    `inconclusive` close carries the receipts it just paid its entry price with into the
-    committed frontmatter as `ref`/`state`/`cap` — a closed vocabulary plus an id the host
-    already verified against this run's own `:L findings` table, never free text. It is model
-    text in a host-owned FILE, but not in a host-owned FIELD: `disposition`, `outcome` and
-    `cause` stay exactly as chosen above, and the frontmatter carries nothing the host did not
-    already check.
+    TWO companion-derived exceptions to "no model-supplied body" — `ceiling_test` (#923, §7
+    round 4's receipt redesign) and `runtime_evidence` (#983 mechanism A) — and both are
+    model-CHOSEN structure, not model-authored prose. A priced `inconclusive` close carries the
+    `ceiling_test` receipts it just paid its entry price with into the committed frontmatter as
+    `ref`/`state`/`cap` — a closed vocabulary plus an id the host already verified against this
+    run's own `:L findings` table, never free text. `runtime_evidence` carries the baseline
+    consultations the run recorded — the anchor kind, the grounding, the entry id, the owning
+    lead and a window the host PARSED and held against the alerted event — into the BODY, so a
+    human reading a closed case can see whether the alerted pattern is recognized as recurring
+    in this estate. It is model text in a host-owned FILE, but not in a host-owned FIELD:
+    `disposition`, `outcome` and `cause` stay exactly as chosen above, and the frontmatter
+    carries nothing the host did not already check.
 
-    Each receipt's `note` — the free text FOR THE HUMAN ANALYST, which gates nothing — rides
-    into the BODY instead, one line per receipt, never the frontmatter: because it gates
-    nothing it can never strand a run on a value the write gate accepted and this render then
-    refused, which a frontmatter byte cap could.
+    The free text FOR THE HUMAN ANALYST — a `ceiling_test` receipt's `note`, a baseline's
+    `result` and `reasoning` — gates nothing and rides into the BODY, one line per receipt,
+    never the frontmatter: because it gates nothing it can never strand a run on a value the
+    write gate accepted and this render then refused, which a frontmatter byte cap could.
 
     The frontmatter block is built by the gate that PRICED these receipts (`ceiling_test_block`)
     rather than interpolated here — ONE renderer for both, because the bound the price gate
@@ -240,6 +247,19 @@ def render_report(
     for receipt in ceiling_test:
         if receipt.note:
             body += f"\nceiling_test ({receipt.state}, {receipt.ref or receipt.cap}): {receipt.note}"
+    # #983 mechanism A, O3. ONE line per baseline, from the SAME receipts the projection
+    # accepted (`conclude_runtime_evidence_rows`) — never a second reading of the companion, so
+    # a row the guard refused cannot reach a reader here. Body-only for the same reason the
+    # note above is: `result` carries the occurrence count and the actor/host scope as free
+    # text (`:R consultations` gains no columns), and free text under a 512-byte frontmatter
+    # cap is a size cap acting as a gate.
+    for baseline in runtime_evidence:
+        body += (
+            f"\n{baseline.anchor_kind} ({baseline.grounding_kind}, {baseline.anchor_id}, "
+            f"{baseline.resolved_by_lead}, {baseline.window}): {baseline.result}"
+        )
+        if baseline.reasoning:
+            body += f" — {baseline.reasoning}"
     return (
         "---\n"
         f"disposition: {disposition}\n"
@@ -299,6 +319,12 @@ class _CloseFields:
     #: its entry price with — `ref`/`state`/`cap` carried into the committed report's own
     #: frontmatter, `note` into its body (see `render_report`). Empty for every other close.
     ceiling_test: tuple[CeilingReceipt, ...] = ()
+    #: #983: the `:R consultations` BASELINE rows the companion recorded, carried into the
+    #: committed report's BODY. Populated at BOTH construction sites and on every disposition,
+    #: unlike `ceiling_test` above — mechanism A's whole point is visibility on every close,
+    #: and the disposition O3 needs it on (`benign`) is the REVIEWED one, which is the site
+    #: `ceiling_test` never reaches.
+    runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = ()
 
 
 def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are already bundled
@@ -309,7 +335,8 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     any fault held until both writes have been attempted.
 
     The report is rendered from `fields.outcome`/`fields.cause`/`fields.failure_kind` and
-    NOTHING else beyond `fields.ceiling_test` (#923's one exception — see `render_report`).
+    NOTHING else beyond the two companion-derived fields, `fields.ceiling_test` and
+    `fields.runtime_evidence` (see `render_report`).
     `fields.detail` — the diagnostic, which may quote a stage — reaches the record via
     `_record_dict` and never this render call, which is what keeps review prose out of the
     judge's prompt and the ticket bridge's egress."""
@@ -326,6 +353,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     body = render_report(
         disposition, outcome=fields.outcome, cause=fields.cause,
         failure_kind=fields.failure_kind, evidence=evidence, ceiling_test=fields.ceiling_test,
+        runtime_evidence=fields.runtime_evidence,
     )
     # EVERY commit is validated — never only the ones carrying evidence. The verdict is
     # obeyed, not merely computed: a refusal returns the validator's own reason and leaves
@@ -480,6 +508,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         fields = _CloseFields(
             outcome=STANDS, cause=CAUSE_NOT_REVIEWED, detail="", material=(),
             turns_used=0, failure_kind=None, ceiling_test=ceiling_test,
+            runtime_evidence=conclude_runtime_evidence_rows(companion_text),
         )
         return _commit(deps, disposition, fields, record, validator=validator, evidence=evidence)
 
@@ -503,10 +532,15 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             failure_kind=verdict.failure_kind,
         )
 
+    # #983 mechanism A, O3. The POST-REVIEW site, which is the one every CONFIDENT close takes
+    # — `benign` among them, and that is the disposition the baseline exists to be visible on.
+    # `ceiling_test` is deliberately absent here (a reviewed close is not an `inconclusive`
+    # one); the baseline is not, because recurrence context is descriptive on every close.
     fields = _CloseFields(
         outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
         material=material, turns_used=verdict.turns_used,
         failure_kind=verdict.failure_kind,
+        runtime_evidence=conclude_runtime_evidence_rows(companion_text),
     )
     return _commit(deps, verdict.disposition, fields, record, validator=validator,
                    evidence=evidence)

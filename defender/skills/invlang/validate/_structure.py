@@ -503,6 +503,16 @@ def _check_vocab_weights(companion: CompanionBody) -> list[str]:
 
 
 def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
+    """`anchor_kind` against `vocab.ANCHOR_KINDS`, on all THREE surfaces that carry one.
+
+    The `:R consultations` arm is #983's: the walk used to cover the `:H h-NNN.authz` contract
+    and the `:R authz` row that discharges it and nothing else, which left `runtime-evidence` —
+    the one anchor kind ONLY a consultation may carry — as the enum member no rule ever read.
+    An off-vocabulary kind on the consultation bucket landed silently, and the bucket is now
+    load-bearing twice over (it carries mechanism A's baseline into `report.md` and mechanism
+    B's lookup receipt into the anchor-id cross-check), so a cell nothing checks is a cell
+    either reader can be steered by.
+    """
     errors: list[str] = []
     for h in _walkers.all_hypotheses(companion).values():
         for c in h.get("authorization_contract") or []:
@@ -521,6 +531,28 @@ def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
             row_ak, vocab.ANCHOR_KINDS,
             f"authz resolution for contract {row.get('fulfills_contract', '?')}: "
             f"anchor_kind {row_ak!r} is not known (`enum anchor-kinds`)",
+        )
+    for consult in _walkers.iter_anchor_consultations(companion):
+        # Through `_cell`, like every other read on this bucket: `_canonicalize_resolution_row`
+        # copies the cell verbatim, so a uniformly quoted document would be refused for a kind
+        # it spells correctly.
+        kind = _cell(consult, "anchor_kind")
+        where = (
+            f"lead {consult.get('resolved_by_lead', '?')}: `:R consultations` row for "
+            f"{consult.get('anchor_id') or '<no anchor_id>'}"
+        )
+        errors += _check_vocab(
+            kind, vocab.ANCHOR_KINDS,
+            f"{where}: anchor_kind {kind!r} is not known (`enum anchor-kinds`)",
+        )
+        grounding = _cell(consult, "grounding_kind")
+        errors += _check_vocab(
+            grounding, vocab.CONSULTATION_GROUNDING,
+            f"{where}: grounding {grounding!r} is not one of "
+            f"{', '.join(vocab.CONSULTATION_GROUNDING)} (`enum consultation.grounding`) — a "
+            f"consultation records what a system of record or a telemetry baseline SAYS, and "
+            f"`past-case` in particular is excluded by name: grounding a baseline on a past "
+            f"case is precedent-by-similarity, which this axis does not admit",
         )
     return errors
 
