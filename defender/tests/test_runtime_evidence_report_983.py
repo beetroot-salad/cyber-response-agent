@@ -26,18 +26,55 @@ WHAT THIS SUITE PINS, beyond the demands:
     into the judge's prompt and out through the ticket bridge (claim c12 / RF2) — a stale
     invariant there is worse than none, because the next author reads it as still true.
 
-Receipts are obtained from `conclude_runtime_evidence_rows` rather than constructed, so the
-tests do not pin the dataclass's field names — only that the projection and the render agree,
-which is the property `ceiling_test_block`'s "ONE renderer for both" comment exists to hold.
+  * `RuntimeEvidenceReceipt` is a FROZEN DATACLASS beside `CeilingReceipt`, and the tests
+    assert on its FIELDS. That is this suite's hardening pass, and it is not a style
+    preference: written against a bare pre-rendered string, every assertion in this file was a
+    substring check, and a `conclude_runtime_evidence_rows` that returned
+    `("runtime-evidence 1500 occurrences ...",)` — the fixture's own text, hardcoded — passed
+    all of them. Nothing asked whether a `:R consultations` row had been READ. Fields make
+    that question askable: `window_start`/`window_end` are `datetime`s, so the row's window
+    has to be genuinely parsed, and two rows carrying different windows cannot both come out
+    of one canned string.
+
+    The STRUCTURED half is the window (parsed), the anchor kind, grounding, id and the owning
+    lead — the cells the format itself gives columns to. `result` and `reasoning` are carried
+    VERBATIM as free text, deliberately: the occurrence count and the actor/host scope live
+    inside `result`'s prose because the design adds no columns to `:R consultations`, and
+    regex-mining a model-authored sentence for a number is the free-text judgment #923 spent a
+    round removing from `ceiling_test`. What holds them honest instead is that the render is
+    asserted to carry EACH row's own text, from a fixture whose two rows differ.
+
+Receipts are OBTAINED from `conclude_runtime_evidence_rows` rather than constructed, so the
+projection and the render are pinned to agree — the property `ceiling_test_block`'s "ONE
+renderer for both" comment exists to hold.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import datetime as dt
 import json
 
 from defender._frontmatter import split_frontmatter
 from defender.runtime import close_tool
 from defender.tests import _tacit983 as scene
+
+#: The second baseline in the two-row fixture: a different anchor id, a different window and a
+#: different count. Everything the render is asserted to carry differs between the two rows, so
+#: a renderer emitting one row's values twice — or a projection handing back one canned
+#: receipt per row — is visible.
+WINDOW_90D = "2026-02-04T00:00:00Z/2026-05-04T00:00:00Z"
+ANCHOR_90D = "tk-baseline-90d"
+RESULT_90D = "4100 occurrences over 90d; actor uid-0 and host build-runner-07.prod throughout"
+
+
+def _utc(text: str) -> dt.datetime:
+    """The moment an ISO-8601 `Z` timestamp names, as an aware UTC `datetime`.
+
+    Spelled here rather than imported from the code under test: an oracle that called the
+    parser it is checking could not disagree with it (`lint-oracle`), and the whole point of
+    asserting on `window_start` is that the receipt did a real parse."""
+    return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
 def _receipts(text: str):
@@ -50,12 +87,11 @@ def _receipts(text: str):
 
     return conclude_runtime_evidence_rows(text)
 
-#: A document carrying one qualifying baseline consultation and the discharging authz row —
-#: the shape a benign close over a container-root case actually has.
-BENIGN_DOC = scene.benign_document(
-    rows=scene.authz_block(scene.authz_row()) + "\n" + scene.consult_block(
-        scene.consultation_row()),
-)
+#: A document carrying one qualifying baseline consultation and the receipted authz pair —
+#: the shape a benign close over a container-root case actually has. It carries TWO
+#: `:R consultations` rows (the lead's recorded registry hit and the baseline) and exactly ONE
+#: of them qualifies, which is what makes "the projection selects" a claim with a witness.
+BENIGN_DOC = scene.benign_document(rows=scene.authorized_rows(baseline=True))
 
 
 def _body(report: str) -> str:
@@ -65,17 +101,68 @@ def _body(report: str) -> str:
     return body
 
 
+def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
+    """A receipt is a TYPED record of one `:R consultations` row — the owning lead, the anchor
+    id, the free-text result and reasoning, and the effective window BOTH verbatim and PARSED
+    into two `datetime`s.
+
+    Mirrors `CeilingReceipt` (`validate/_gating`) down to the split it makes: a structured half
+    that is mechanically checkable and a free-text half that is for the human analyst. The
+    parsed window is what makes the guard and the report read ONE value — mechanism A's first
+    guard has to compare the window's end against the alert's timestamp, and a second parse
+    living in the renderer is the two-derivations-of-one-quantity shape (`lint-owns`).
+
+    A FROZEN dataclass, like `CeilingReceipt`: these travel from the projection into the close
+    tool's disposition argument and out into `report.md`, and a mutable record handed across
+    three boundaries is one any of them can edit on the way."""
+    (receipt,) = _receipts(BENIGN_DOC)
+
+    assert dataclasses.is_dataclass(receipt)
+    assert type(receipt).__dataclass_params__.frozen, (
+        "the receipt is mutable — it crosses the projection, the close and the render"
+    )
+
+    assert receipt.resolved_by_lead == scene.LEAD, (
+        "the receipt does not say which lead measured the baseline, so the report's reader "
+        "cannot get from the claim back to the retrieval"
+    )
+    assert receipt.anchor_kind == "runtime-evidence"
+    assert receipt.grounding_kind == "telemetry-baseline"
+    assert receipt.anchor_id == "tk-baseline-30d"
+    assert "1500 occurrences over 30d" in receipt.result, (
+        "the occurrence count did not survive into the receipt"
+    )
+    assert "build-runner-07.prod" in receipt.result, "the scope did not survive into the receipt"
+    assert "no adverse outcome" in receipt.reasoning
+
+    assert receipt.window == scene.WINDOW_BEFORE_ALERT, (
+        "the window cell is not carried verbatim — the report shows the analyst what the row "
+        "said, not a re-rendering of it"
+    )
+    assert receipt.window_start == _utc("2026-04-04T00:00:00Z")
+    assert receipt.window_end == _utc("2026-05-04T00:00:00Z"), (
+        "the window's END is not parsed — it is the endpoint mechanism A's guard compares "
+        "against the alerted event, and a receipt that never parsed it cannot have been "
+        "produced by a check that did"
+    )
+
+
 def test_runtime_evidence_rows_project_off_the_consultation_bucket():
     """`conclude_runtime_evidence_rows` selects the `:R consultations` rows whose `anchor_kind`
     is `runtime-evidence`, in document order, and nothing else.
 
     Selection, not a filter over everything the document says: a consultation under some other
     anchor kind is a different question being answered, and a `:R authz` row is a verdict. Both
-    are excluded, so the projection cannot widen into "every model-authored row" by accident."""
-    (receipt,) = _receipts(BENIGN_DOC)
-    rendered = str(receipt)
-    assert scene.WINDOW_BEFORE_ALERT in rendered or "window" in rendered.lower(), (
-        "the receipt carries no window — the field that makes a baseline judgeable"
+    are excluded, so the projection cannot widen into "every model-authored row" by accident.
+
+    `BENIGN_DOC` is the sharp case and the reason the fixture carries two consultations: the
+    lead's `tacit-knowledge` lookup record sits in the SAME bucket, one row above the baseline,
+    and it is not a baseline. A projection selecting the bucket rather than the anchor kind
+    would carry a registry citation into `report.md`'s recurrence paragraph."""
+    receipts = _receipts(BENIGN_DOC)
+    assert [r.anchor_id for r in receipts] == ["tk-baseline-30d"], (
+        "the lead's own `tacit-knowledge` lookup record was projected as a baseline — the "
+        "selection is on the bucket, not on the anchor kind"
     )
 
     other_kind = scene.document(
@@ -87,8 +174,8 @@ def test_runtime_evidence_rows_project_off_the_consultation_bucket():
         "a consultation under another anchor kind was projected as a baseline"
     )
 
-    authz_only = scene.document(rows=scene.authz_block(scene.authz_row()))
-    assert _receipts(authz_only) == (), (
+    no_baseline = scene.document(rows=scene.authorized_rows())
+    assert [r.anchor_id for r in _receipts(no_baseline)] == [], (
         "a `:R authz` row reached the baseline channel — the projection is not selecting on "
         "the consultation bucket"
     )
@@ -102,7 +189,8 @@ def test_runtime_evidence_consultation_lands_in_report_body():
     The unit half, over `render_report` itself; the whole-close half (benign AND inconclusive,
     both `_CloseFields` construction sites) is `e2e/test_tacit_authz_e2e_983.py`."""
     receipts = _receipts(BENIGN_DOC)
-    assert receipts, "fixture control: the document carries one qualifying consultation"
+    assert len(receipts) == 1, "fixture control: the document carries one qualifying consultation"
+    (receipt,) = receipts
 
     report = close_tool.render_report(
         "benign", outcome=close_tool.STANDS, cause=close_tool.CAUSE_STORY_SETTLED,
@@ -113,8 +201,16 @@ def test_runtime_evidence_consultation_lands_in_report_body():
     assert body.count("runtime-evidence") == len(receipts), (
         "not one body line per receipt — a close with two baselines would render one of them"
     )
-    assert scene.WINDOW_BEFORE_ALERT in body, "the window did not reach the body"
-    assert "1500 occurrences" in body, "the occurrence count did not reach the body"
+    #: Asserted against the RECEIPT's own fields, not against the fixture's literals: the
+    #: property is that what the projection parsed is what the report shows. A body compared
+    #: to hand-copied constants passes for a renderer that ignores its argument and prints
+    #: them.
+    for field in (receipt.window, receipt.anchor_id, receipt.resolved_by_lead):
+        assert field in body, f"{field!r} was parsed into the receipt and never rendered"
+    assert "1500 occurrences over 30d" in body, (
+        "the occurrence count did not reach the body — `result` is the only place the design "
+        "leaves for it, since `:R consultations` gains no columns"
+    )
 
     assert "runtime-evidence" not in (frontmatter or ""), (
         "the baseline reached the FRONTMATTER — that block is under a 512-byte cap and a size "
@@ -196,25 +292,47 @@ def test_the_projection_and_the_render_read_one_set():
     """Whatever `conclude_runtime_evidence_rows` hands back is what `render_report` writes —
     the "ONE renderer for both" discipline `ceiling_test_block` already states.
 
-    Two rows, so a render that collapsed or deduplicated them is visible. A reader that
+    Two rows that DIFFER in every rendered cell — id, window, count — so three failures are
+    visible that one row or two identical rows would hide: a render that collapses or
+    deduplicates them, a render that emits the first row's values twice, and a projection
+    handing back a canned receipt per row rather than each row's own parse. A reader that
     re-derived "qualifying" independently could disagree with the projection that already ran
     and carry a row into `report.md` nothing ever selected."""
     doc = scene.document(
-        rows=scene.consult_block(scene.consultation_row())
-        + scene.consultation_row(anchor_id="tk-baseline-90d", result="4100 occurrences over 90d")
-        + "\n",
+        rows=scene.consult_block(
+            scene.consultation_row(),
+            scene.consultation_row(
+                anchor_id=ANCHOR_90D, result=RESULT_90D, window=WINDOW_90D),
+        ),
         settled=False,
     )
     receipts = _receipts(doc)
     assert len(receipts) == 2, "fixture control: two qualifying consultations"
+
+    first, second = receipts
+    assert (first.anchor_id, first.window) == ("tk-baseline-30d", scene.WINDOW_BEFORE_ALERT)
+    assert (second.anchor_id, second.window) == (ANCHOR_90D, WINDOW_90D), (
+        "the second row's own cells did not reach its receipt — the projection is not parsing "
+        "per row"
+    )
+    assert second.window_start == _utc("2026-02-04T00:00:00Z")
+    assert first.window_start != second.window_start, (
+        "both receipts carry one window — a canned value, not two parses"
+    )
 
     body = _body(close_tool.render_report(
         "inconclusive", outcome=close_tool.STANDS, cause=close_tool.CAUSE_NOT_REVIEWED,
         runtime_evidence=receipts,
     ))
     assert body.count("runtime-evidence") == 2
-    for anchor in ("tk-baseline-30d", "tk-baseline-90d"):
-        assert anchor in body, f"{anchor} was dropped on the way into the body"
+    for receipt in receipts:
+        assert receipt.anchor_id in body, (
+            f"{receipt.anchor_id} was dropped on the way into the body"
+        )
+        assert receipt.window in body, (
+            f"{receipt.anchor_id}'s window was dropped, or replaced by its sibling's"
+        )
+    assert "4100 occurrences over 90d" in body, "the second baseline's count never rendered"
 
 
 def test_close_fields_carries_the_baseline_on_every_disposition():
@@ -225,8 +343,6 @@ def test_close_fields_carries_the_baseline_on_every_disposition():
     sites and only for `inconclusive`, which is why the cited carrier never reaches a benign
     close. This asserts the field exists and is defaulted; the e2e asserts both sites actually
     populate it."""
-    import dataclasses
-
     fields = {f.name: f for f in dataclasses.fields(close_tool._CloseFields)}
     assert "runtime_evidence" in fields, (
         "`_CloseFields` has no baseline field — the projection has no way onto either close path"

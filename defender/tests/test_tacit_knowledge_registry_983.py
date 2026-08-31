@@ -29,11 +29,17 @@ design fork", fork F1), so these are the write-tests half of that call:
     `verbs.declared_verb_names` reads it cold off the AST, and a table assembled any other way
     declares nothing, which makes `ModuleVerbRegistry.__init__` raise on the grant.
   * `find_entry(entries, *, actor, host, pattern, now)` is the pure half the semantics tests
-    drive, and `lookup(ctx, ...)` the verb that wraps it. Split so the expiry and scope rules
-    are testable without a `VerbContext`, and so "now" enters as a VALUE rather than a clock
-    a test would have to patch.
+    drive, and `lookup(ctx, *, actor, host, pattern) -> {"matched": <entry>|None}` the verb
+    that wraps it. Split so the expiry and scope rules are testable without a `VerbContext`,
+    and so "now" enters as a VALUE rather than a clock a test would have to patch. ONE key on
+    the return, not a `hit` boolean beside the entry: two spellings of one fact is the
+    duplicated-derivation shape `lint-owns` watches for, and `matched is None` already says
+    "miss" to a reader and to a gather model looking at the payload.
   * `TACIT_KNOWLEDGE_MAX_REVIEW_SPAN_DAYS` — the frontier's provisional 180 (fork F2), held as
     one module-level constant so the policy knob is tunable in one place.
+  * `TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS` — the second policy knob, added by this suite's
+    hardening pass. See `test_blanket_scope_entry_is_refused` for why a denylist of spellings
+    was not enough and what replaced it.
 
 The loader DROPS one bad entry rather than refusing the file, mirroring
 `defender/_corpus.iter_query_templates`: a registry is a curated list, and one malformed row
@@ -69,18 +75,20 @@ from defender.runtime.verbs import (
     declared_verb_names,
     is_system_name,
 )
+from defender.tests import _tacit983 as scene
 
 DEFENDER = REPO_ROOT / "defender"
 ADAPTERS = DEFENDER / "scripts" / "adapters"
 
-SYSTEM = "tacit-knowledge"
+SYSTEM = scene.REGISTRY_SYSTEM
 LOOKUP = "lookup"
 
 #: The alerted actor/host/pattern the #983 case turns on — container UID 0 rewriting the CA
-#: bundle on a build-runner host. Spelled once here and in `tests/_tacit983.py`'s document.
-ACTOR = "uid-0"
-HOST = "build-runner-07.prod"
-PATTERN = "rewrite /etc/ssl/certs/ca-bundle.crt"
+#: bundle on a build-runner host. Read off the shared scene rather than respelled, so a suite
+#: cannot assert a hit against an actor the document names differently.
+ACTOR = scene.ACTOR
+HOST = scene.HOST
+PATTERN = scene.PATTERN
 
 NOW = dt.date(2026, 5, 5)
 
@@ -97,40 +105,11 @@ def registry():
     return tacit_knowledge_adapter
 
 
-def _entry(**overrides) -> dict[str, str]:
-    """One well-formed registry entry. Eight fields: the seven the design names plus the `id`
-    the `:R authz` row cites as `anchor_id` (fork F1's provisional eighth — without it a
-    citation names a `pattern` string, and every edit becomes a silent re-identification)."""
-    base = {
-        "id": "tk-ca-bundle-build-runner",
-        "pattern": PATTERN,
-        "actor_scope": ACTOR,
-        "host_scope": "build-runner-*.prod",
-        "added_by": "sre-platform@example.invalid",
-        "added_at": "2026-03-01",
-        "review_by": "2026-08-01",
-        "justification": "image build's own ca-trust step; no identity system holds UID 0",
-    }
-    base.update(overrides)
-    return base
-
-
-def _write_registry(root: Path, *entries: dict) -> Path:
-    """A registry file under a throwaway `defender_dir`, written as YAML by hand.
-
-    Hand-written rather than dumped, because the file is a HUMAN-EDITED artifact and the loader
-    has to read what a human commits — a round trip through the same dumper the loader's parser
-    feeds would be an oracle re-deriving itself (`lint-oracle`'s shape)."""
-    path = root / "skills" / SYSTEM / "registry.yaml"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["entries:"]
-    for entry in entries:
-        first = True
-        for key, value in entry.items():
-            lines.append(f"{'  - ' if first else '    '}{key}: {value!r}")
-            first = False
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
+#: The entry builder and the fixture writer live in `tests/_tacit983.py`, not here: the e2e
+#: drives the real adapter against a fixture tree and needs the same two (`lint-dup`), and the
+#: entry's id is one of the ids that module already names for the `:R authz` citation.
+_entry = scene.registry_entry
+_write_registry = scene.write_registry
 
 
 def _load(root: Path, *entries: dict):
@@ -208,25 +187,62 @@ def test_review_by_beyond_the_bound_is_refused(tmp_path):
 
 
 def test_blanket_scope_entry_is_refused(tmp_path):
-    """An entry whose `actor_scope` or `host_scope` is blank or blanket is refused at load, so
-    one overly broad entry cannot silently authorize an entire estate
+    """An entry whose `actor_scope` or `host_scope` is blank, blanket, or MOSTLY WILDCARD is
+    refused at load, so one overly broad entry cannot silently authorize an entire estate
     (demand `no_wildcard_scope`, fork F6).
 
-    Blanket = empty, `*`, or a case-insensitive `all`/`any`. A denylist misses novel spellings
-    by construction — recorded here rather than papered over: what it buys is that the three
-    spellings a human actually reaches for are refused, and what it does not buy is a proof
-    that no broad entry exists, which is a process risk on the registry itself and outside this
-    design's reach (the design doc's own residual-risk note)."""
+    Blanket is four things, and the fourth is what this suite's hardening pass added:
+
+      1. empty; 2. exactly `*`; 3. a case-insensitive `all`/`any`;
+      4. fewer than `TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS` LITERAL characters — anything
+         that is not a wildcard metacharacter.
+
+    (1)–(3) alone are a denylist of spellings, and a denylist cannot tell a blanket wildcard
+    from a legitimate scoped glob: `actor_scope: "*-0"` matches `uid-0`, `svc-0`, `root-0` and
+    every other actor whose name happens to end that way, and it sails through all three
+    arms. Counting literal characters is the property that actually separates the two — this
+    suite's own good fixture (`host_scope: "build-runner-*.prod"`, eighteen literal characters
+    around one star) is nearly all literal, and `*-0` is nearly all star.
+
+    THE LIMIT, recorded rather than papered over: this is a shape rule, not a breadth
+    proof. `host_scope: "prod-*"` is mostly literal and still covers a fleet, and no
+    character count can tell a fleet-wide sanction a human MEANT from one they wrote
+    carelessly. What the rule buys is that the spellings that cover EVERYTHING cannot be
+    written at all; who may author a broad-but-legal entry is a process risk on the registry
+    itself and outside this design's reach (the design doc's own residual-risk note).
+
+    Read off the module constant rather than restated as a number here, so tuning the policy
+    does not leave this test measuring the old one — and the two concrete cases below pin the
+    tuning range from both sides at once: raise the minimum past five and the good fixture's
+    own `actor_scope: "uid-0"` stops loading; lower it below three and `*-0` starts."""
     good = _entry()
     assert _ids(_load(tmp_path / "control", good)) == [good["id"]], "positive control"
 
-    blanket = ["", "*", "all", "ALL", "any", "Any"]
+    minimum = registry().TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS
+    assert isinstance(minimum, int)
+    assert minimum > 0
+
+    blanket = ["", "*", "all", "ALL", "any", "Any", "*-0", "**", "*.*", "*" * minimum]
     for i, value in enumerate(blanket):
         actor_wild = _entry(id=f"tk-actor-{i}", actor_scope=value)
         host_wild = _entry(id=f"tk-host-{i}", host_scope=value)
         loaded = _load(tmp_path / f"wild{i}", good, actor_wild, host_wild)
         assert _ids(loaded) == [good["id"]], (
-            f"a scope of {value!r} loaded — one entry now covers every actor or every host"
+            f"a scope of {value!r} loaded — one entry now covers every actor or every host, "
+            f"or very nearly"
+        )
+
+    for i, (field, value) in enumerate((
+        ("host_scope", "build-runner-*.prod"),
+        ("host_scope", "build-runner-0?.prod"),
+        ("actor_scope", "uid-0"),
+        ("actor_scope", "svc-build-*"),
+    )):
+        scoped = _entry(id=f"tk-scoped-{i}", **{field: value})
+        assert _ids(_load(tmp_path / f"scoped{i}", scoped)) == [scoped["id"]], (
+            f"a legitimately scoped {field} of {value!r} was refused as blanket — the rule has "
+            f"been tuned past the entries the registry is FOR, and the one anchor kind a "
+            f"container-root case can reach is unwritable"
         )
 
 
@@ -275,6 +291,70 @@ def test_expired_entry_is_not_a_hit_at_lookup(tmp_path):
     ) is None, (
         "an entry past its own `review_by` still discharged — a stale sanction authorizes "
         "forever, which is the one thing a file entry cannot be trusted to notice about itself"
+    )
+
+
+def _ctx(root: Path, tmp_path: Path, *, as_of: dt.datetime) -> VerbContext:
+    """A `VerbContext` pointing at a throwaway tree and a fixed moment.
+
+    Both are VALUES the context already carries (`defender_dir`, `as_of`), which is the whole
+    reason the verb takes one: the registry it reads and the clock expiry is judged against
+    enter through the seam rather than through a module attribute a test would have to patch
+    (`lint-monkeypatch`)."""
+    return VerbContext(
+        defender_dir=root, run_dir=tmp_path / "run", env={}, as_of=as_of,
+    )
+
+
+def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
+    """`lookup` — the VERB, not the pure helper under it — loads the registry out of the tree
+    its `VerbContext` names and answers a genuine hit, a genuine miss and an expired entry
+    (demand `registry_lookup_gather_verb`).
+
+    THE test the pure-`find_entry` ones cannot stand in for. Everything above drives
+    `find_entry` against an already-loaded list, so a `lookup` that ignored all of it — a
+    hardcoded `{"matched": {...}}`, a lookup reading a path it computed itself, a lookup that
+    forgot to apply expiry on the way out — passes every one of them. This is the only test
+    that runs the verb the gather roster actually dispatches.
+
+    The fixture entry is spelled with an id NO shipped registry carries, which is what makes
+    "off the tree it is handed" observable rather than asserted: a `lookup` resolving the
+    registry off `REPO_ROOT` (or off an import-time constant) cannot return `tk-fixture-only`,
+    and would come back with the shipped entry or with a miss.
+    """
+    root = tmp_path / "tree"
+    _write_registry(root, _entry(id="tk-fixture-only", added_at="2026-03-01",
+                                 review_by="2026-06-01"))
+    ctx = _ctx(root, tmp_path, as_of=dt.datetime(2026, 5, 5, 3, 42, 11, tzinfo=dt.UTC))
+
+    hit = registry().lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
+    assert isinstance(hit, dict)
+    assert hit["matched"] is not None, (
+        "the verb came back empty for the actor, host and pattern its own fixture entry "
+        "covers — the lookup is not reading the registry it was handed"
+    )
+    assert hit["matched"]["id"] == "tk-fixture-only", (
+        "the verb answered with something other than the entry in the tree its `VerbContext` "
+        "names — a registry resolved off an import-time path answers for the wrong estate"
+    )
+    assert set(hit["matched"]) == set(registry().ENTRY_FIELDS), (
+        "the matched entry reaching the model is not the loaded entry — the payload a human "
+        "reviews and the row a `:R consultations` cites have to be the same record"
+    )
+
+    miss = registry().lookup(ctx, actor=ACTOR, host="web-frontend-02.prod", pattern=PATTERN)
+    assert miss["matched"] is None, (
+        "a host outside every entry's `host_scope` was a hit — an unconditional-hit lookup "
+        "authorizes the whole estate through one verb call"
+    )
+
+    expired = registry().lookup(
+        _ctx(root, tmp_path, as_of=dt.datetime(2026, 7, 1, tzinfo=dt.UTC)),
+        actor=ACTOR, host=HOST, pattern=PATTERN,
+    )
+    assert expired["matched"] is None, (
+        "the entry answered past its own `review_by` — expiry is applied by `find_entry` and "
+        "the verb is not going through it"
     )
 
 
@@ -379,7 +459,13 @@ def test_no_run_path_writes_the_registry(tmp_path):
     automated closes would be the system vouching for itself, and no human-in-the-loop step
     exists anywhere between `close_investigation` and the ticket close (claim c5) to catch it.
 
-    Deliberately NOT a new sign-off step inside the run loop — the commit/PR IS the sign-off."""
+    Deliberately NOT a new sign-off step inside the run loop — the commit/PR IS the sign-off.
+
+    A NEGATIVE BY OMISSION, which is why it has a twin: nothing calls a write function here,
+    and nothing would even if the adapter grew one, so this test passes with zero code and
+    keeps passing right up until the day something does call one.
+    `test_the_adapter_module_exports_nothing_that_writes` guards the other half — that the
+    adapter has no such function to call in the first place."""
     target = registry().registry_path(DEFENDER)
     assert target.is_file(), "a negative reachability claim about a file that does not exist"
 
@@ -410,6 +496,69 @@ def test_no_run_path_writes_the_registry(tmp_path):
         investigation, "```invlang\n```\n", run_dir=run_dir, defender_dir=DEFENDER,
         policy=main_policy,
     ).allow, "positive control: main's own artifact is still writable"
+
+
+#: Verb-name and function-name stems that MUTATE. A name is the cheapest signal a reviewer
+#: reads, and the adapter that grows a `save_entry` beside `lookup` is the one where "the
+#: registry is only ever human-authored" quietly stops being true.
+_MUTATING_STEMS = (
+    "write", "save", "add", "append", "put", "post", "create", "insert", "upsert",
+    "update", "set", "delete", "remove", "drop", "edit", "patch", "sync", "commit",
+)
+
+
+def test_the_adapter_module_exports_nothing_that_writes():
+    """The tacit-knowledge adapter's own PUBLIC SURFACE carries no write-capable function, and
+    its source performs no filesystem mutation (demand `registry_never_agent_written`).
+
+    The static twin of `test_no_run_path_writes_the_registry`, and the reason both exist.
+    That test asks whether any path an agent run can reach WRITES the file, and it passes
+    today with zero code — which is correct (it is a negative-by-omission property) and is
+    also the whole of its weakness: it is satisfied by nothing calling a write function that
+    happens not to exist yet. This one asks the complementary question of the module itself,
+    so the guard survives the day someone adds `record_entry(ctx, ...)` "just for the
+    curator" and wires it to nothing.
+
+    TWO ARMS, and the second is a source scan with the limits a source scan has. Names catch
+    the ordinary case; the scan catches a write spelled through the stdlib without a telling
+    name. Neither sees a write assembled dynamically (`getattr(path, "write" + "_text")`), and
+    neither is meant to — `permission.decide_write` is the enforcement boundary and this is a
+    surface guard in front of it.
+    """
+    import inspect
+    import re
+
+    mod = registry()
+    public = [n for n in dir(mod) if not n.startswith("_")]
+    own = [
+        n for n in public
+        if callable(getattr(mod, n))
+        and getattr(getattr(mod, n), "__module__", None) == mod.__name__
+    ]
+    assert own, "the module exports no functions of its own at all — read the import list"
+
+    offenders = [n for n in own if n.split("_")[0].lower() in _MUTATING_STEMS]
+    assert offenders == [], (
+        f"the registry adapter exports {offenders} — a write-capable name on the one system "
+        f"whose entire safety argument is that every entry traces to a human commit"
+    )
+    verb_offenders = [v for v in mod.VERBS if v.split("-")[0].lower() in _MUTATING_STEMS]
+    assert verb_offenders == [], (
+        f"the roster would advertise {verb_offenders} to a lead — a mutating verb on a "
+        f"read-only system of record"
+    )
+
+    src = inspect.getsource(mod)
+    for token in (
+        ".write_text(", ".write_bytes(", ".mkdir(", ".unlink(", ".rmdir(", ".rename(",
+        ".touch(", "yaml.safe_dump", "yaml.dump", "shutil.", "os.remove", "os.replace",
+    ):
+        assert token not in src, (
+            f"the adapter's source calls {token!r} — the registry lane is a READ end to end"
+        )
+    assert not re.search(r"open\([^)]*['\"][wax]", src), (
+        "the adapter opens a file for writing or appending"
+    )
 
 
 @pytest.mark.parametrize("verb", ["health-check", LOOKUP])

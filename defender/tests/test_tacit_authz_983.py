@@ -1,10 +1,38 @@
 """#983 — authorization by convention, and the structural-vs-retriable split for `indeterminate`.
 
 The invlang half: the two new closed vocabularies, the `tacit-knowledge` anchor kind, and the
-three checks that make the new cells mean something. The registry file and its loader are
+checks that make the new cells mean something. The registry file and its loader are
 `test_tacit_knowledge_registry_983.py`; the `report.md` carrier is
 `test_runtime_evidence_report_983.py`; the outcome-level scenarios are
 `e2e/test_tacit_authz_e2e_983.py`.
+
+THE ANCHOR RECEIPT — the interface contract this suite's hardening pass added, and the one an
+implementer must build even though nothing in the original design doc spells it out.
+
+O2 says authorization-by-convention comes only from an explicit, attributable, human-authored
+record. Written as vocabulary alone that is unguarded: `verdict=authorized
+anchor_kind=tacit-knowledge grounding=org-authority anchor_id=<anything>` closes benign on a
+string the model chose, an expired entry's id and an entry nobody ever authored included.
+
+So a `tacit-knowledge` authorization is checked the way a `ceiling_test` receipt is
+(`validate/_gating._check_lead_anchored_receipt` / `_lead_by_id` /
+`_lead_retrieval_came_back`), with the same division of labour:
+
+  * the LEAD that ran `tacit-knowledge.lookup` records what came back as a `:R consultations`
+    row on its own outcome — the existing `AnchorConsultation` shape, which already carries
+    `anchor_kind`/`anchor_id`/`result` and structurally cannot discharge a contract
+    (`schema.py`, claim c2), so recording the hit buys the document nothing by itself;
+  * the `:R authz` row's `anchor_id` must EQUAL the `anchor_id` on such a row recorded by the
+    lead its OWN `resolved_by_lead` cell names. Exact match, mechanically checked.
+
+WHAT THAT DOES AND DOES NOT BUY, stated because a receipt that is read as more than it is
+becomes the next gap. The validator never touches the filesystem and never re-runs the lookup
+— exactly like `ceiling_test`, it cross-checks the DOCUMENT'S OWN recorded facts. So it
+refuses the cheap fabrications (an id out of the air, an id another lead found, an id cited
+where the lead recorded a miss) and it does NOT prove the registry really holds that entry;
+that half is the e2e's, which drives the real adapter. What it buys structurally is that
+faking an authorization now takes two coordinated rows instead of one cell, and the second row
+is a claim about a retrieval that `executed_queries.jsonl` independently records.
 
 WHERE THIS DEVIATES FROM `.spec-flow/frontiers/20-demands.md`'s PROVISIONAL READINGS — each
 found by reading the seam, not by preference:
@@ -17,23 +45,26 @@ found by reading the seam, not by preference:
     vocabulary of the invlang module. The `id` eighth field is kept.
   * **F8 (what `basis=exhausted` is checked against).** The frontier's provisional reading was
     a predicate-scoped roster of gather systems verified against the run's executed queries.
-    No anchor-kind→system mapping exists anywhere in the tree, and minting one is a second
-    closed vocabulary to drift. `basis=exhausted` is instead checked against the row's OWN
-    mandatory `resolved_by_lead` — the same `:L findings` foreign key a `ceiling_test`
-    receipt's `ref` resolves through (`_gating._lead_by_id`).
-  * **The `_lead_by_id` lookup is VACUOUS ON ITS OWN**, which the interface contract could not
-    have known: `_check_lead_refs` already refuses any `:R` row whose `resolved_by` names a
-    lead no `:L findings` row declares, and the row itself lands on the named lead's
-    `outcome`, so `_lead_returned_a_result` is true by construction. The discriminating half
-    is `_lead_retrieval_came_back` — the SAME predicate `_check_lead_anchored_receipt` uses, at
-    the opposite polarity: a lead that actually dispatched a registry query recorded an
-    observation or an attribute update; a lead that exists only as a name in a `resolved_by`
-    cell recorded neither. `test_exhausted_must_be_paid_for_in_the_transcript` is written
-    against that.
+    Two halves, and only the second is reachable from inside the document:
+      - `_lead_retrieval_came_back` — the SAME predicate `_check_lead_anchored_receipt` uses,
+        at the opposite polarity. A lead that dispatched something recorded an observation or
+        an attribute update; a lead that exists only as a name in a `resolved_by` cell recorded
+        neither. (`_lead_by_id` alone is VACUOUS: `_check_lead_refs` already refuses a
+        `resolved_by` naming an undeclared lead, and the row lands on that lead's own
+        `outcome`, so `_lead_returned_a_result` is true by construction.)
+      - the lead's own `:L findings` `system` cell, which projects to
+        `FindingRecord.query_details.system` — the document's record of WHICH system that lead
+        went to. `executed_queries.jsonl` is the authoritative table and the invlang validator
+        cannot see it (it is handed text, never a run dir), so this is the closest in-document
+        signal and it is named as such rather than silently skipped.
+    The join between them is `vocab.ANCHOR_KIND_SYSTEMS`, minted by this change and
+    deliberately PARTIAL — see `test_anchor_kind_system_mapping_is_partial_and_real` for what
+    an unmapped anchor kind falls back to and what that costs.
   * **`consultation_window_predates_alert` is NOT in the interface contract** handed to this
     suite. It is mechanism A's first stated guard in the design doc and a `form: test` demand
     in the frontier, so it is written here and flagged: an implementer working from the
-    interface contract alone will not have built it.
+    interface contract alone will not have built it. Its SCOPE is a second call this suite
+    makes and states: the guard is on `runtime-evidence` rows only.
   * **`exhausted_is_not_redispatched` has no literal carrier.** "Loop back to PLAN" is prose at
     `defender/SKILL.md:470` and nothing in the runtime reads it. The one mechanical surface
     that answers "which authz contracts is this run still expected to go work" is
@@ -73,6 +104,17 @@ def _mentioning(errors: list[str], *needles: str) -> list[str]:
     return [e for e in errors if all(n in e for n in needles)]
 
 
+def _anchor_kind_systems() -> dict[str, str]:
+    """`vocab.ANCHOR_KIND_SYSTEMS` — anchor kind → the gather system that answers it.
+
+    Read through a function rather than at module import for the same reason the registry
+    suite imports its adapter inside a call: a missing name at module scope is a COLLECTION
+    error, and pytest aborts the whole run on one, so a red spec would take every other suite
+    in the tree down with it instead of reporting its own failures beside them.
+    """
+    return vocab.ANCHOR_KIND_SYSTEMS
+
+
 def _authz_rows(companion) -> list[dict]:
     return list(_walkers.iter_authz_resolutions(companion))
 
@@ -102,13 +144,16 @@ def test_tacit_knowledge_is_a_known_anchor_kind():
 
     Both halves, because the checker walks both and the motivating case needs both: a contract
     declared under an anchor kind the enum refuses cannot be written at all, so the question it
-    asks can never be posed, let alone answered."""
+    asks can never be posed, let alone answered.
+
+    NARROW ON PURPOSE, and named for what it checks: membership plus acceptance. That the
+    accepted row also has to be BACKED is `test_authz_anchor_id_must_match_its_own_leads_recorded_hit`'s."""
     assert "tacit-knowledge" in vocab.ANCHOR_KINDS
     assert vocab.SLOTS["anchor-kinds"] is vocab.ANCHOR_KINDS, (
         "the enum CLI must answer off the same tuple the checker reads — a second copy drifts"
     )
 
-    doc = scene.document(rows=scene.authz_block(scene.authz_row()))
+    doc = scene.document(rows=scene.authorized_rows())
     assert _mentioning(_errors(doc), "anchor_kind", "tacit-knowledge") == [], (
         "a contract and a resolution both written under `tacit-knowledge` were refused"
     )
@@ -131,21 +176,74 @@ def test_the_two_new_slots_are_registered_and_closed():
     )
 
 
+def test_anchor_kind_system_mapping_is_partial_and_real():
+    """`vocab.ANCHOR_KIND_SYSTEMS` maps an anchor kind to the ONE gather system that can answer
+    it, covers the three kinds this change actually reasons about, and is honestly PARTIAL.
+
+    Minted by this change (F8): nothing in the tree joined an anchor kind to a system before,
+    which is why `basis=exhausted` as first written was satisfied by any lead that did
+    anything at all. Three properties, each a way the mapping could quietly stop meaning
+    something:
+
+      * every key is a real `ANCHOR_KINDS` member — a mapping keyed on a kind no contract can
+        declare is a row that never fires;
+      * every value is a real system name (`runtime.verbs.is_system_name`) — the check joins
+        against `:L findings`' `system` cell, and a value nothing can be written in refuses a
+        lead that queried the right place;
+      * it does NOT cover every anchor kind, and the uncovered ones are named here rather than
+        left to be discovered. `iam-policy`, `change-mgmt` and `tacit-knowledge` have one
+        obvious system each; `gpo`, `other` and the rest do not, and inventing one per member
+        is a second closed vocabulary to drift.
+
+    THE BOUNDED LIMITATION, stated because it is the price of the partiality: an unmapped
+    anchor kind falls back to the looser "this lead's retrieval came back with something"
+    check, so `basis=exhausted` on such a contract is as weak as the original check was
+    everywhere. `test_exhausted_falls_back_to_the_loose_check_on_an_unmapped_kind` pins that
+    fallback so nobody reads a passing `exhausted` on a `gpo` contract as a checked one.
+    """
+    from defender.runtime.verbs import is_system_name
+
+    mapping = _anchor_kind_systems()
+    for kind, system in (
+        ("iam-policy", "identity"),
+        ("change-mgmt", "change-mgmt"),
+        ("tacit-knowledge", "tacit-knowledge"),
+    ):
+        assert mapping.get(kind) == system, (
+            f"anchor kind {kind!r} does not map to the system that answers it"
+        )
+    assert set(mapping) <= set(vocab.ANCHOR_KINDS), (
+        "the mapping is keyed on something that is not an anchor kind — a row no contract "
+        "can ever reach"
+    )
+    assert all(is_system_name(s) for s in mapping.values()), (
+        "a mapped system is not a legal system name, so no `:L findings` `system` cell can "
+        "ever equal it and every `exhausted` claim on that kind is refused"
+    )
+    assert set(vocab.ANCHOR_KINDS) - set(mapping), (
+        "every anchor kind was given a system — the mapping was meant to cover the kinds with "
+        "an obvious answer and to say so about the rest, not to mint a system per member"
+    )
+
+
 # ---------------------------------------------------------------- demand #0: the row shapes
 
 
-def test_tacit_hit_writes_org_authority_authz_row():
-    """A scope-matching, unexpired registry entry resolves the authz contract as a `:R authz`
-    row carrying `verdict=authorized`, `anchor_kind=tacit-knowledge`,
-    `grounding_kind=org-authority`, an `anchor_id` naming the registry entry and a `fulfills`
-    naming the `ac<n>` it closes — and the validator accepts every one of those cells
+def test_tacit_knowledge_authz_row_shape():
+    """The CELLS of a discharging `:R authz` row: `verdict=authorized`,
+    `anchor_kind=tacit-knowledge`, `grounding_kind=org-authority`, an `anchor_id` naming the
+    registry entry and a `fulfills` naming the `ac<n>` it closes — parsed and accepted
     (demand `authz_row_shape`).
+
+    A ROW-SHAPE test and named for it. It says nothing about whether the citation is backed;
+    the version of this test that promised a "registry hit" and checked only a parser round
+    trip is `test_authz_anchor_id_must_match_its_own_leads_recorded_hit` now.
 
     `grounding` and `anchor_id` are UNDOCUMENTED optional columns on the `:R authz` header
     (fork F5 / claim c10): the parser canonicalizes them today, but `skills/invlang/SKILL.md`
     names neither, so a model writing the row from the SKILL cannot emit them. Asserted on the
     PARSE rather than on silence, so the test says which cells actually landed."""
-    doc = scene.document(rows=scene.authz_block(scene.authz_row()))
+    doc = scene.document(rows=scene.authorized_rows())
     assert _errors(doc) == []
 
     companion, warnings = parse_dense_companion(doc)
@@ -156,6 +254,127 @@ def test_tacit_hit_writes_org_authority_authz_row():
     assert row["grounding_kind"] == "org-authority"
     assert row["anchor_id"] == scene.ENTRY_ID
     assert row["fulfills_contract"] == "ac1"
+    assert row["resolved_by_lead"] == scene.LEAD
+
+
+def test_authz_anchor_id_must_match_its_own_leads_recorded_hit():
+    """A `tacit-knowledge` `:R authz` row's `anchor_id` has to equal an `anchor_id` the lead
+    named by its OWN `resolved_by_lead` recorded as a lookup outcome. A citation no lead
+    produced is refused, and a benign close resting on it does not commit
+    (demand `authz_anchor_id_is_receipted`, O2).
+
+    THE check this suite exists for. Three fakes, each a document that is otherwise IDENTICAL
+    to the one that works — every negative below is paired with its own corrected twin
+    asserted clean, so a refusal cannot be coming from some unrelated defect the scenario
+    dragged in.
+
+      1. an `anchor_id` no lead recorded at all — the bare fabrication;
+      2. an `anchor_id` a DIFFERENT lead recorded — the check has to be scoped to the row's
+         own lead, and a document-wide search for "is this id anywhere" passes this fake;
+      3. a row citing an id with no recorded lookup on its lead at all — the shape every
+         pre-hardening test in this file wrote, which is why it is pinned rather than assumed.
+    """
+    good = scene.benign_document(rows=scene.authorized_rows(baseline=True))
+    assert _errors(good) == [], "positive control: the cited entry is the one the lead found"
+    assert disposition_entry_price("benign", good).owed == (), (
+        "a receipted registry hit did not pay benign's entry price — O1 stays blocked"
+    )
+
+    fabricated = scene.benign_document(
+        rows=scene.authorized_rows(baseline=True, cited_id=scene.FABRICATED_ENTRY_ID))
+    errors = _errors(fabricated)
+    assert _mentioning(errors, scene.FABRICATED_ENTRY_ID), (
+        "a `:R authz` row cited a registry entry its own lead never came back with, and the "
+        "close was priced as though a human had authored the sanction"
+    )
+    assert disposition_entry_price("benign", fabricated).owed, (
+        "the fabricated citation still paid benign's entry price — the check refuses the "
+        "document at the write gate and lets the close through, which is the half of the "
+        "price that the learning loop and the ticket lane actually read"
+    )
+
+    other_leads = scene.benign_document(
+        rows=scene.authorized_rows(baseline=True, hit_by=scene.UNDISPATCHED_LEAD))
+    assert _mentioning(_errors(other_leads), scene.ENTRY_ID), (
+        f"the hit was recorded by {scene.UNDISPATCHED_LEAD} and cited by a row resolved by "
+        f"{scene.LEAD} — the check is searching the whole document rather than the row's own "
+        f"lead, so any lead's finding backs any row"
+    )
+
+    unrecorded = scene.benign_document(rows=scene.authz_block(scene.authz_row()))
+    assert _mentioning(_errors(unrecorded), scene.ENTRY_ID), (
+        "an `authorized` tacit-knowledge row whose lead recorded no lookup at all was "
+        "accepted — the id is unbacked text, which is the whole of the gap O2 names"
+    )
+
+
+def test_a_missed_lookup_cannot_be_cited_as_a_hit():
+    """A lead that recorded a MISS backs no citation: the `:R authz` row citing an entry id
+    beside its own lead's empty-handed lookup is refused (demand `authz_anchor_id_is_receipted`).
+
+    The near-miss of the check above, and the one a lenient implementation passes: the lead DID
+    dispatch the lookup, DID record a `tacit-knowledge` consultation, and the row's
+    `resolved_by_lead` DOES name it — everything matches except the one cell that says which
+    entry came back. A miss names no entry, so there is nothing for the citation to equal."""
+    missed = scene.document(
+        rows=scene.consult_block(scene.lookup_miss_row())
+        + scene.authz_block(scene.authz_row()),
+    )
+    assert _mentioning(_errors(missed), scene.ENTRY_ID), (
+        "a lookup that came back empty backed an `authorized` verdict citing an entry id — "
+        "the row was checked for the PRESENCE of a consultation rather than for the id it "
+        "carries"
+    )
+
+    honest = scene.document(
+        rows=scene.consult_block(scene.lookup_miss_row())
+        + scene.authz_block(scene.authz_row(
+            verdict="indeterminate", grounding="", anchor_id="", basis="retry")),
+        settled=False,
+    )
+    assert _errors(honest) == [], (
+        "positive control: recording the miss and resolving `indeterminate` is the legal "
+        "shape, and the check may not refuse the document that tells the truth"
+    )
+
+
+def test_a_telemetry_baseline_cannot_ground_an_authz_row():
+    """`grounding_kind: telemetry-baseline` is consultation-only: a `:R authz` row carrying it
+    is refused, whatever verdict it claims (demand `no_statistical_self_authorization`, O2).
+
+    NOT IN THE INTERFACE CONTRACT either, and the second guard this suite adds by reading the
+    design doc: `anchor_consultations[].grounding_kind ∈ {org-authority, telemetry-baseline}`
+    while `authorization_resolutions[].grounding_kind ∈ {org-authority, past-case}`
+    (`docs/investigation-language.md:92`, claim c8) — telemetry-baseline is explicitly named as
+    the one that never grounds an authorization. Unenforced, the discarded middle design
+    (raw recurrence grounding authorization directly) is a one-cell edit away from being back:
+    the model writes its density finding into a `:R authz` row instead of a `:R consultations`
+    one and the entry price is paid.
+
+    `runtime-evidence` as an authz row's `anchor_kind` is refused for the same reason and
+    checked beside it: it is the anchor kind that exists so a BASELINE has one, and a verdict
+    is not what a baseline produces."""
+    grounded_on_density = scene.document(
+        rows=scene.consult_block(scene.consultation_row())
+        + scene.authz_block(scene.authz_row(
+            anchor_kind="runtime-evidence", grounding="telemetry-baseline",
+            anchor_id="tk-baseline-30d",
+            reasoning="1500 occurrences over 30d with nothing adverse in the window")),
+    )
+    errors = _errors(grounded_on_density)
+    assert _mentioning(errors, "telemetry-baseline") or _mentioning(errors, "runtime-evidence"), (
+        "a month of quiet recurrence authorized itself by being written into the `:R authz` "
+        "bucket instead of the `:R consultations` one — the middle design this issue's own "
+        "discussion discarded, reachable by moving one row"
+    )
+    assert disposition_entry_price("benign", scene.benign_document(
+        rows=scene.consult_block(scene.consultation_row())
+        + scene.authz_block(scene.authz_row(
+            anchor_kind="runtime-evidence", grounding="telemetry-baseline",
+            anchor_id="tk-baseline-30d")),
+    )).owed, (
+        "a telemetry-grounded `:R authz` row paid benign's entry price"
+    )
 
 
 def test_baseline_consultation_row_shape():
@@ -225,22 +444,51 @@ def test_indeterminate_authz_row_carries_basis():
 
 
 def test_window_must_predate_the_alerted_event():
-    """A consultation whose `effective_window` does not end before the alerted event is refused
-    — a pattern that begins with the incident IS the incident (demand
+    """A baseline consultation whose `effective_window` does not END STRICTLY BEFORE the
+    alerted event is refused — a pattern that begins with the incident IS the incident (demand
     `consultation_window_predates_alert`).
 
     NOT IN THE INTERFACE CONTRACT this suite was handed; it is mechanism A's first stated guard
     in the design doc and a `form: test` demand in the frontier. See this module's docstring.
     The alerted moment is the `:E prologue.edges` `when` cell — the document's own record of
-    when the thing being explained happened, so the check needs nothing from `alert.json`."""
+    when the thing being explained happened, so the check needs nothing from `alert.json`.
+
+    A REAL DATETIME COMPARISON ON THE WINDOW'S END, which is what the four refused windows
+    below are for and what the first version of this test did not have. Written against the
+    window's START as a string ("does the start equal the alert's `when`"), the check admits
+    every window that matters: one that opens a second later, one that opens six months
+    earlier and closes ten weeks after the alert, one that ends on the alerted instant itself,
+    and one no parser can read. Each of those is spelled so that no substring of the alert's
+    timestamp appears in it (`WINDOW_SPANNING_THE_ALERT` most of all), so a string-matching
+    implementation cannot cheat its way past this test.
+
+    SCOPED TO THE BASELINE KIND, and that scope is load-bearing rather than incidental: the
+    `tacit-knowledge` consultation that records a registry hit carries the ENTRY's validity
+    span, which brackets the alert by construction — a sanction that expired before the alert
+    would not cover the alert. A guard applied to every `:R consultations` row refuses the one
+    row mechanism B depends on.
+    """
     ok = _consultation_doc(scene.consultation_row(window=scene.WINDOW_BEFORE_ALERT))
     assert _errors(ok) == [], "positive control: a window that closes before the alert is legal"
 
-    starts_at_the_alert = _consultation_doc(
-        scene.consultation_row(window=scene.WINDOW_STARTING_AT_ALERT))
-    assert _mentioning(_errors(starts_at_the_alert), "effective_window"), (
-        "a baseline window opening on the alerted event was accepted as context about what "
-        "preceded it — the incident vouching for itself"
+    for label, window in (
+        ("opens on the alerted event", scene.WINDOW_STARTING_AT_ALERT),
+        ("opens one second after it", scene.WINDOW_STARTING_JUST_AFTER_ALERT),
+        ("opens long before and closes long after", scene.WINDOW_SPANNING_THE_ALERT),
+        ("closes on the alerted instant", scene.WINDOW_ENDING_AT_ALERT),
+        ("cannot be parsed as a window at all", scene.WINDOW_UNPARSEABLE),
+    ):
+        doc = _consultation_doc(scene.consultation_row(window=window))
+        assert _mentioning(_errors(doc), "effective_window"), (
+            f"a baseline window that {label} ({window}) was accepted as context about what "
+            f"PRECEDED the alert — the incident vouching for itself"
+        )
+
+    hit_row = scene.document(rows=scene.authorized_rows())
+    assert _mentioning(_errors(hit_row), "effective_window") == [], (
+        "the registry-hit consultation was refused for carrying the ENTRY's validity span, "
+        "which brackets the alert on every unexpired entry — the guard is about a "
+        "`runtime-evidence` baseline and has been applied to every consultation"
     )
 
 
@@ -274,8 +522,12 @@ def test_a_single_tacit_knowledge_row_is_full_authority():
 
     The rejection is observable, and a silently added cap would re-block exactly the case
     motivating the issue: a container-root contract has no second grounding to pair with, so a
-    cap here is indistinguishable from refusing the mechanism outright."""
-    doc = scene.benign_document(rows=scene.authz_block(scene.authz_row()))
+    cap here is indistinguishable from refusing the mechanism outright.
+
+    "On its own" means one AUTHORIZATION, not one row: the lead's recorded lookup outcome rides
+    with it (see this module's docstring) and cannot discharge anything by itself, so nothing
+    here is a second grounding."""
+    doc = scene.benign_document(rows=scene.authorized_rows())
     assert _errors(doc) == []
     assert disposition_entry_price("benign", doc).owed == (), (
         "one authored registry entry did not carry its own contract — a cap was applied to a "
@@ -289,18 +541,30 @@ def test_a_single_tacit_knowledge_row_is_full_authority():
 
 def test_exhausted_must_be_paid_for_in_the_transcript():
     """`basis=exhausted` is refused unless the row's own `resolved_by_lead` names a `:L findings`
-    lead THIS RUN dispatched — verified the way a `ceiling_test` receipt's `ref` is
-    (demand `exhausted_checked_against_transcript`, fork F8).
+    lead THIS RUN dispatched AGAINST THE SYSTEM the contract's anchor kind maps to — verified
+    the way a `ceiling_test` receipt's `ref` is (demand `exhausted_checked_against_transcript`,
+    fork F8).
 
-    `l-002` is declared in `:L findings` and never dispatched: it carries no `:V`/`:E`
-    observations and no `:R attr_updates`, which is exactly the "nothing came back for this
-    lead's own retrieval" question `_lead_retrieval_came_back` answers for a ceiling receipt.
-    Existence alone cannot be the check — `_check_lead_refs` already refuses an undeclared
-    `resolved_by`, so a check that only looked the id up would refuse nothing new. See this
-    module's docstring."""
+    Three negatives, because `exhausted` is the claim "every anchor kind applicable to this
+    predicate was actually queried and none answered", and each negative is a different way to
+    make that claim for free:
+
+      * `l-002` is declared in `:L findings` and never dispatched: no observations, no
+        `:R attr_updates`, which is the "nothing came back for this lead's own retrieval"
+        question `_lead_retrieval_came_back` answers for a ceiling receipt. Existence alone
+        cannot be the check — `_check_lead_refs` already refuses an undeclared `resolved_by`.
+      * `l-001` DID come back with something, but its `:L findings` `system` cell says it went
+        to `host-state` while the contract is a `tacit-knowledge` one. This is the negative the
+        first version of this test was missing entirely: `l-001` carries an ORIENT bookkeeping
+        `:R attr_updates` row (`attrs.knowledge=full`), so "this lead did something" is true of
+        it in EVERY scenario, and a check that stops there is satisfied by a lead that never
+        went near the registry the claim is about.
+      * `retry` claims nothing about what was dispatched, so it owes no receipt at all — the
+        control that keeps the check from being "an indeterminate row needs a good lead".
+    """
     paid = scene.authz_row(
         verdict="indeterminate", basis="exhausted", grounding="", anchor_id="",
-        resolved_by="l-001",
+        resolved_by=scene.LEAD,
     )
     assert _errors(scene.document(rows=scene.authz_block(paid), settled=False)) == [], (
         "positive control: the lead that actually ran the lookup may claim `exhausted`"
@@ -308,21 +572,75 @@ def test_exhausted_must_be_paid_for_in_the_transcript():
 
     unpaid = scene.authz_row(
         verdict="indeterminate", basis="exhausted", grounding="", anchor_id="",
-        resolved_by="l-002",
+        resolved_by=scene.UNDISPATCHED_LEAD,
     )
     assert _mentioning(
         _errors(scene.document(rows=scene.authz_block(unpaid), settled=False)),
-        "exhausted", "l-002",
+        "exhausted", scene.UNDISPATCHED_LEAD,
     ), (
         "`basis=exhausted` was accepted on a lead this run never dispatched — the claim that "
         "every applicable registry was actually queried was taken on the model's word"
     )
 
+    wrong_system = scene.document(
+        rows=scene.authz_block(paid), settled=False, system="host-state",
+    )
+    assert _mentioning(_errors(wrong_system), "exhausted"), (
+        "`basis=exhausted` on a `tacit-knowledge` contract was paid for by a lead whose own "
+        "`:L findings` row says it queried host-state — an unrelated attribute update on any "
+        "lead buys the claim, which is the check being satisfied by 'the lead did something'"
+    )
+    assert _mentioning(
+        _errors(wrong_system), _anchor_kind_systems()["tacit-knowledge"],
+    ), "the refusal does not name the system the contract's anchor kind wanted queried"
+
     retry = scene.authz_row(
-        verdict="indeterminate", basis="retry", grounding="", anchor_id="", resolved_by="l-002",
+        verdict="indeterminate", basis="retry", grounding="", anchor_id="",
+        resolved_by=scene.UNDISPATCHED_LEAD,
     )
     assert _errors(scene.document(rows=scene.authz_block(retry), settled=False)) == [], (
         "`retry` claims nothing about what was dispatched, so it owes no receipt"
+    )
+
+
+def test_exhausted_falls_back_to_the_loose_check_on_an_unmapped_kind():
+    """On a contract whose anchor kind `ANCHOR_KIND_SYSTEMS` does not cover, `basis=exhausted`
+    falls back to "this lead's own retrieval came back with something" — the looser check, kept
+    deliberately and PINNED so the limitation is documented rather than discovered.
+
+    The mapping covers the three kinds with one obvious system each (see
+    `test_anchor_kind_system_mapping_is_partial_and_real`). For the rest there is no system to
+    join against, and the alternatives are both worse than the gap: refusing `exhausted`
+    outright on those kinds makes O4 unreachable for them, and inventing a system per anchor
+    kind mints a second closed vocabulary that drifts against the adapter set.
+
+    The kind is picked OFF the mapping rather than spelled here, so covering another kind
+    later moves this test onto the next uncovered one instead of leaving it asserting the
+    fallback for a kind that now has a real join."""
+    mapping = _anchor_kind_systems()
+    unmapped = next(k for k in vocab.ANCHOR_KINDS if k not in mapping)
+
+    doc = scene.document(
+        contract_anchor_kind=unmapped, system="host-state", settled=False,
+        rows=scene.authz_block(scene.authz_row(
+            verdict="indeterminate", anchor_kind=unmapped, basis="exhausted",
+            grounding="", anchor_id="", resolved_by=scene.LEAD)),
+    )
+    assert _errors(doc) == [], (
+        f"`basis=exhausted` was refused on a {unmapped!r} contract, which no system mapping "
+        f"covers — the fallback has to stay reachable or O4 is unavailable for every anchor "
+        f"kind outside the mapping"
+    )
+
+    never_dispatched = scene.document(
+        contract_anchor_kind=unmapped, system="host-state", settled=False,
+        rows=scene.authz_block(scene.authz_row(
+            verdict="indeterminate", anchor_kind=unmapped, basis="exhausted",
+            grounding="", anchor_id="", resolved_by=scene.UNDISPATCHED_LEAD)),
+    )
+    assert _mentioning(_errors(never_dispatched), "exhausted", scene.UNDISPATCHED_LEAD), (
+        "the fallback stopped checking anything at all — an unmapped anchor kind still owes "
+        "the retrieval half of the receipt"
     )
 
 
@@ -384,13 +702,58 @@ def test_exhausted_contract_is_not_looped_back():
     )
 
 
+def test_exhausted_drops_only_its_own_contract():
+    """With TWO live contracts and `basis=exhausted` on a row fulfilling ONE of them, only that
+    contract leaves the frontier; the other stays on it (demand `exhausted_is_not_redispatched`).
+
+    The discriminating half of the test above, which cannot tell "this row cleared its own
+    contract" from "this row cleared the frontier" because the scene it runs on declares one
+    contract. Clearing everything passes it and is a real defect twice over: `ac2` is a
+    `change-mgmt` question nobody asked, and dropping it removes the only mechanical surface
+    that pushes the run back to go work it (#919's whole lane), so a run stops retrieving with
+    an unanswered authorization question and nothing on disk says so.
+
+    `ac2` carries `indeterminate` with NO basis — a plain `retry`, the contract that simply has
+    not been answered yet — so the pair differs in exactly the cell under test."""
+    doc = scene.document(
+        second_contract=True, settled=False,
+        rows=scene.authz_block(
+            scene.authz_row(
+                verdict="indeterminate", fulfills="ac1", basis="exhausted",
+                grounding="", anchor_id=""),
+            scene.authz_row(
+                verdict="indeterminate", fulfills="ac2", anchor_kind="change-mgmt",
+                basis="", grounding="", anchor_id="",
+                reasoning="change-mgmt has not been queried for this window yet"),
+        ),
+    )
+    assert _errors(doc) == [], "fixture control: the two-contract document is well formed"
+
+    companion, _ = parse_dense_companion(doc)
+    assert sorted(
+        c.get("id") for _h, c, _w in outstanding_authz_contracts(companion)
+    ) == ["ac1", "ac2"], (
+        "fixture control: neither contract is discharged — both rows are `indeterminate`"
+    )
+
+    assert [c.contract_id for c in derive_frontier(companion).contracts] == ["ac2"], (
+        "one `basis=exhausted` row cleared the whole open-contracts frontier rather than its "
+        "own contract — the run stops being pushed at a `change-mgmt` question that was never "
+        "asked, on the strength of a claim about the tacit-knowledge registry"
+    )
+
+
 def test_exhausted_is_well_defined_without_the_registry():
     """With no tacit-knowledge entry in play, `basis=exhausted` still means every anchor kind
     applicable to the predicate was tried: C's meaning narrows when B is absent but does not
     become undefined (demand `exhausted_degrades_without_b`, a survival demand).
 
     The contract here is declared under `iam-policy` — an anchor kind that predates this change
-    entirely — so nothing in the check may reach for the tacit-knowledge registry."""
+    entirely — so nothing in the check may reach for the tacit-knowledge registry. The lead's
+    `system` cell is `identity`, which is what `ANCHOR_KIND_SYSTEMS` maps `iam-policy` to: the
+    join is the same one B's contracts take, which is what "narrows but stays defined" means
+    mechanically."""
+    assert _anchor_kind_systems()["iam-policy"] == "identity"
     doc = scene.document(
         contract_anchor_kind="iam-policy", system="identity",
         rows=scene.authz_block(scene.authz_row(
