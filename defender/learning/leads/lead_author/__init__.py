@@ -77,6 +77,7 @@ from ._handoff import (
     QUEUE_LOCK_FILE,
     QUEUE_LOCK_SKIP_RC,
     _DRAFT_README_NAMES,
+    _draft_contradicts_skill,
     _lift_threshold,
     _templates_by_identity,
     acquire_queue_lock,
@@ -298,7 +299,8 @@ def _prepare_handoffs(
 ) -> tuple[list, list, int | None]:
     pending_drafts_raw = deps.discover_system_drafts()
     threshold = _lift_threshold()
-    if len(pending_drafts_raw) < threshold:
+    contradicting = [d for d in pending_drafts_raw if _draft_contradicts_skill(d)]
+    if len(pending_drafts_raw) < threshold and not contradicting:
         if pending_drafts_raw:
             _log(
                 f"lift queue below threshold "
@@ -307,6 +309,12 @@ def _prepare_handoffs(
             )
         pending_drafts: list[dict] = []
     else:
+        if contradicting and len(pending_drafts_raw) < threshold:
+            _log(
+                f"lift queue below threshold (n={len(pending_drafts_raw)}, "
+                f"threshold={threshold}) but {len(contradicting)} draft(s) contradict "
+                "shipped SKILL.md content — bypassing threshold"
+            )
         pending_drafts = build_system_draft_handoffs(
             pending_drafts_raw, repo_root=deps.paths.repo_root
         )
@@ -438,6 +446,7 @@ __all__ = [
     "_done_sentinel",
     "_draft_basename",
     "_draft_candidate_segments",
+    "_draft_contradicts_skill",
     "_draft_skeleton",
     "_draft_twin",
     "_executed_query",

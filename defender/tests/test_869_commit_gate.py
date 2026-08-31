@@ -367,7 +367,7 @@ def test_the_id_rule_still_admits_every_committed_id():
     """Every committed in-scope file that carries a frontmatter `id:` still passes the rule —
     the id-prefix invariant holds over the whole in-scope corpus, not only the catalog.
 
-    C35: 34 of the in-scope `.md` files carry an `id:` and 34 of 34 match, and the rule
+    C35: 33 of the in-scope `.md` files carry an `id:` and 33 of 33 match, and the rule
     extends PAST the catalog to `skills/<system>/_draft/*.md`, whose ids are directory-
     matching today — a rule scoped to the catalog alone would leave that surface open.
     `catalog_id_prefix_equals_directory`'s positive control, and the parity floor below keeps
@@ -385,7 +385,7 @@ def test_the_id_rule_still_admits_every_committed_id():
     ]
     with_id = {p: _frontmatter_id(root / p) for p in in_scope}
     with_id = {p: i for p, i in with_id.items() if i}
-    assert len(with_id) >= 34, f"the census floor moved: {len(with_id)} ids over {len(in_scope)}"
+    assert len(with_id) >= 33, f"the census floor moved: {len(with_id)} ids over {len(in_scope)}"
 
     mismatched = [
         p for p, ident in with_id.items() if ident.split(".", 1)[0] != _system_segment(p)

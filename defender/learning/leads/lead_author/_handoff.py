@@ -15,6 +15,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import shared as _author_shared
+from defender._frontmatter import parse_frontmatter_or_none
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning._prompt import stage_user_message, structured_json_body
@@ -204,6 +205,28 @@ def build_handoff(
 
 
 _DRAFT_README_NAMES = frozenset({"README.md", "_TEMPLATE.md"})
+
+
+def _draft_contradicts_skill(draft: Path) -> bool:
+    """True only when `draft`'s frontmatter declares `contradicts_skill: true` — it asserts
+    something that disagrees with a claim already shipped in the system's SKILL.md, rather
+    than merely adding detail SKILL.md lacks (#984). Such a draft bypasses `_lift_threshold`
+    in `_prepare_handoffs`: the cost of leaving a CONTRADICTING draft queued is a knowledge
+    surface that is actively wrong, and that cost does not shrink while it waits behind
+    unrelated, merely-incomplete drafts accumulating toward the lift threshold.
+
+    Read defensively and opt-in only: a draft with no frontmatter, unparseable frontmatter,
+    or no `contradicts_skill` key at all does NOT bypass — only an explicit `true` does. That
+    keeps every draft written before this field existed on the original threshold-gated path.
+    """
+    try:
+        text = draft.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    fm = parse_frontmatter_or_none(text)
+    if not fm:
+        return False
+    return fm.get("contradicts_skill") is True
 
 
 def discover_system_drafts(

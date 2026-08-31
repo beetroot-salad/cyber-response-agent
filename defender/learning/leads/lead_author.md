@@ -44,7 +44,7 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
 
   **`executed_query` is the verbatim query that ran — the canonical record.** Some systems inline the whole query as a single positional — e.g. an ES|QL-style language puts the entire pipe in `params.arg0` with the bindings (user, source, time window) inside it — so `params` carries only that raw positional, not the named filters; read `executed_query`, not `params`.
 
-- **`pending_system_drafts`** — a JSON array, one entry per pending draft file under `defender/skills/{system}/_draft/`. The driver scans the directory on every tick; the list is empty when the queue is below the lift threshold (env `LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD`, default 5). Schema:
+- **`pending_system_drafts`** — a JSON array, one entry per pending draft file under `defender/skills/{system}/_draft/`. The driver scans the directory on every tick; the list is empty when the queue is below the lift threshold (env `LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD`, default 5) — **unless at least one queued draft's frontmatter carries `contradicts_skill: true`, in which case the whole queue surfaces regardless of depth** (#984): a draft that says SKILL.md is actively wrong should not wait behind unrelated, merely-incomplete drafts for the queue to fill. Schema:
 
   ```jsonc
   {
@@ -109,6 +109,8 @@ For each entry in `pending_system_drafts`:
 
 1. Read `draft_path` and `skill_path`. The draft is a self-describing note with `## Pattern` / `## Root cause` / `## Workaround` / `## Notes` (see `defender/skills/{system}/_draft/README.md` for the on-disk shape).
 2. Pick one action.
+
+A draft whose frontmatter carries `contradicts_skill: true` reached you *because* it disagrees with something `skill_path` currently asserts — that is exactly what got it past the lift threshold. Verify the contradiction against `skill_path` and **lift** it (folding the draft's version, not any weaker or hedged claim `skill_path` currently has) unless the draft's own claim doesn't hold up against the payload it cites, in which case **discard**. Do not **skip** a contradicting draft back into the queue: the whole reason it bypassed the threshold is that leaving `skill_path` wrong costs more than an ordinary skip does.
 
 **lift** — fold the draft's `## Pattern` + `## Workaround` into the appropriate section of `skill_path`, then `rm {draft_path}` (the repo-relative path from the handoff — `rm` it by that exact path, not a catalog-relative or bare-name form). Reach for lift when:
 

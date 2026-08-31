@@ -83,7 +83,7 @@ not the input path.
 ### when_not_to_use
 
 - **Not for runtime host attribution.** Elastic's `host.name` /
-  `falco.output_fields.container.name` is the runtime view; CMDB is
+  `falco.output_fields.container.id` is the runtime view; CMDB is
   the policy view. They can disagree — that disagreement is itself
   the signal to surface, not something to paper over.
 - **Not for identity-on-host.** Use the identity stub for "which
