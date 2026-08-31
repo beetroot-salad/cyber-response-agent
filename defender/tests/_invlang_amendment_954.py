@@ -47,6 +47,7 @@ __all__ = [
     "STRAND_FINDINGS_HEADER",
     "UNDECLARED_LEAD_PHRASE",
     "VERTICES",
+    "VERTICES_FREEFORM_CLASS",
     "VERTICES_WITH_AN_ESCAPED_PIPE_ID",
     "VERTICES_WITH_A_QUOTED_PIPE_ID",
     "attr_block",
@@ -74,6 +75,19 @@ __all__ = [
 VERTICES = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical
+v-002|identity|user/known-corp|jsmith|
+```
+"""
+
+#: The same two vertices with v-001 declared a `process`, the one type whose `class` cell the
+#: grammar leaves free (SKILL.md §Classification grammar: "image basename"). It exists for the
+#: paste round trips below, whose subject is what a `fix_row` candidate's VALUE cell may carry —
+#: an escaped `|`, leading padding — and which rewrite only the KEY. Since #986 a `class` cell
+#: on a `compute` vertex is judged against `compute.role`, so those values would earn a second,
+#: unrelated refusal on a document whose only intended fault is the refinement key.
+VERTICES_FREEFORM_CLASS = """```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|process|bash|bash[pid=4120]|
 v-002|identity|user/known-corp|jsmith|
 ```
 """

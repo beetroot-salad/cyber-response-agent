@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from .. import _walkers
+from .. import _walkers, vocab
 from .._cells import _row_cells, _row_dict, _split_cells, _split_cells_raw
 from .._types import Block, RowError
 from ..parser import (
@@ -21,7 +21,7 @@ from ..schema import (
     CompanionBody,
 )
 from ._diag import Diagnostic, Locus, _plain
-from ._structure import _cell, _check_conclude_vocab, _check_vocab_anchor_kinds, _check_vocab_edges, _check_vocab_hypotheses, _check_vocab_vertices, _check_vocab_weights
+from ._structure import _cell, _check_conclude_vocab, _check_vocab, _check_vocab_anchor_kinds, _check_vocab_edges, _check_vocab_hypotheses, _check_vocab_vertices, _check_vocab_weights
 
 
 def _swap_cell(cells: list[str], at: int, replacement: str) -> str:
@@ -404,6 +404,7 @@ def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Di
     out += _plain(_check_conclude_vocab(companion))
     out += _plain(_check_vocab_anchor_kinds(companion))
     out += _plain(_check_vocab_weights(companion))
+    out += _plain(_check_vocab_class_cells(companion))
     out += _check_attr_update_keys(proposed_text)
     return out
 
@@ -755,6 +756,90 @@ def iter_vertex_cells(
                 val,
                 _cell_state(val, open_test=is_unresolved),
             )
+
+
+#: The two catch-alls SKILL.md §Closed vocabularies gives an author whose case the catalog does
+#: not hold — `unclassified-{type}` ("type known, sub-kind unknown") and `ambiguous-{a}-or-{b}`
+#: ("genuinely indistinguishable"). Both are DELIBERATELY outside every enum, so the membership
+#: test below has to know them by name or it refuses the two spellings the skill hands out for
+#: the case it cannot enumerate. Distinct from `??`: those read as OPEN and gate the disposition,
+#: while these are settled answers saying the catalog has no fitting value.
+CATCHALL_PREFIXES: tuple[str, ...] = ("unclassified-", "ambiguous-")
+
+
+def is_catchall_slot(value: Any) -> bool:
+    """Does this already-split cell name one of the two documented catch-alls."""
+    return isinstance(value, str) and value.strip().startswith(CATCHALL_PREFIXES)
+
+
+def _vocab_cell_errors(
+    vertex_id: str, slot_key: str, value: str, where: str
+) -> list[str]:
+    """One cell against the `SLOTS` enum that closes it, with the escape hatches taken out first.
+
+    An OPEN cell (`??`, a candidate set) is not a wrong value, it is the absence of one, and
+    `_check_benign_open_slots` is what holds a run to closing it; refusing it here would refuse
+    the very spelling SKILL.md §Open questions asks for. A CATCH-ALL is a settled answer the
+    catalog does not hold. Everything else is a claim about a closed vocabulary and is tested.
+    """
+    if is_open_slot(value) or is_catchall_slot(value):
+        return []
+    return _check_vocab(
+        value, vocab.get_enum(slot_key),
+        f"vertex {vertex_id}: {where} {value.strip()!r} is not a known {slot_key} "
+        f"(`enum {slot_key}`)",
+    )
+
+
+def _check_vocab_class_cells(companion: CompanionBody) -> list[str]:
+    """A vertex's `class` tuple and its closed-vocabulary `attrs` siblings, per type (#986).
+
+    `_check_vocab_vertices` refuses an unknown `type` and `_check_vocab_edges` an unknown
+    `rel` — but nothing read INSIDE a `class` cell, and the cell is where the type's whole
+    grammar lives. A run that resolved a container's identity wrote
+    `v-005|compute|container/internal/novel|db-1|`: `container` is a `COMPUTE_KIND`, the
+    vertex's deployment form, and the first slot of a `compute` class tuple is its ROLE. The
+    write landed clean, the category confusion reached the frontier as a held fact, and every
+    lesson selector keyed on `compute.role` then matched — or missed — on a value from another
+    axis entirely.
+
+    Over `iter_vertex_cells`, which is the FOLDED document: a `:R attr_updates` row carrying
+    `key=class` or `key=attrs.kind` is how SKILL.md §Open questions says a lead closes an open
+    slot, so the refinement is the write most likely to name a value, and reading the `:V` rows
+    alone would check every cell except the one an author most often fills. Folding also means a
+    superseded value is judged by what SUPERSEDED it — which is the only reading append-only
+    allows: the earlier row is on disk forever and cannot be rewritten.
+
+    `vertex_types` supplies the type, and a cell whose id has no `:V` row is skipped for the
+    reason `frontier._node_state` skips it: `effective_vertex_state` fabricates an entry for any
+    `:R attr_updates` target and the validator admits an `e-*` there, so there is no vertex type
+    to dispatch a grammar on. `_check_attr_update_targets` is what refuses a target naming
+    nothing at all.
+    """
+    types = _walkers.vertex_types(companion)
+    errors: list[str] = []
+    for cell in iter_vertex_cells(companion, include_ident=False):
+        vertex_type = types.get(cell.vertex_id)
+        if vertex_type is None:
+            continue
+        if cell.slot == SLOT_CLASS:
+            # ZIPPED, so a cell naming FEWER slots than its type's grammar is judged on the
+            # ones it named. A short cell is its own defect (#935: `ip-only/??` says nothing
+            # about which slot it left out) and belongs to whatever rule refuses it, not to a
+            # membership test that would report the missing slots as off-vocabulary.
+            for slot_key, value in zip(
+                vocab.class_slot_keys(vertex_type), class_slots(cell.value), strict=False
+            ):
+                errors += _vocab_cell_errors(
+                    cell.vertex_id, slot_key, value, f"class slot `{slot_key.split('.')[-1]}`"
+                )
+        elif cell.slot.startswith(ATTR_PREFIX):
+            attr_key = vocab.attr_slot_key(vertex_type, cell.slot[len(ATTR_PREFIX):])
+            if attr_key is not None:
+                errors += _vocab_cell_errors(
+                    cell.vertex_id, attr_key, cell.value, f"`{cell.slot}`"
+                )
+    return errors
 
 
 def _check_benign_open_slots(companion: CompanionBody) -> list[str]:

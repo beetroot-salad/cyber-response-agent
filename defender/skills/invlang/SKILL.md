@@ -55,6 +55,15 @@ If your case genuinely doesn't fit, use `unclassified-{type}` in
 `class` (type known, sub-kind unknown) or `ambiguous-{a}-or-{b}`
 (genuinely indistinguishable).
 
+The write gate refuses a value outside the catalog — inside a `class`
+slot and in a closed-vocabulary `attrs` cell alike, whether the value
+arrives on a `:V` row or in a `:R attr_updates` refinement. `??`, a
+candidate set and the two catch-alls above are not refused. A value
+from a NEIGHBOURING slot is the common miss: `container` is a
+`compute.kind` (the deployment form, an `attrs` cell), not a
+`compute.role`, so it belongs in `attrs.kind=container` and never in
+the first slot of the tuple.
+
 ## Classification grammar
 
 The `class` cell is structured by `type`. For entities in the topology
@@ -596,7 +605,7 @@ on **v-001 (the host the process runs on)**, propose competing
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|server/internal/known-corp|app-server-01|os=linux
+v-001|compute|app-server/internal/known-corp|app-server-01|os=linux
 v-002|socket|dns-name|beacon.example.com|protocol=dns;queried_subdomain=2obsn5wmcw6lyp
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]

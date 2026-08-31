@@ -92,6 +92,7 @@ from defender.tests._invlang_amendment_954 import (
     STRAND_FINDINGS_HEADER,
     UNDECLARED_LEAD_PHRASE,
     VERTICES,
+    VERTICES_FREEFORM_CLASS,
     VERTICES_WITH_AN_ESCAPED_PIPE_ID,
     VERTICES_WITH_A_QUOTED_PIPE_ID,
     attr_block,
@@ -334,7 +335,7 @@ def test_the_surviving_lead_stays_declared_for_every_reader_that_names_it():
     while making every later block naming that lead report "undeclared lead" — and makes the
     false-positive gate answer "`entity_check` names 'l-001', which is not a lead".
     """
-    refined = REPEAT_DOC + attr_block("l-001|v-001|class|svc.config-mgmt")
+    refined = REPEAT_DOC + attr_block("l-001|v-001|class|file-server/internal/known-corp")
     diags = diagnostics(refined)
     assert [d.message for d in diags if UNDECLARED_LEAD_PHRASE in d.message] == []
     assert len([d for d in diags if REPEAT_PHRASE in d.message]) == 1
@@ -344,7 +345,7 @@ def test_the_surviving_lead_stays_declared_for_every_reader_that_names_it():
     both_in_prologue = VERTICES + findings_block(
         "l-001|1|alpha|v-001||cmdb|24h",
         "l-001|2|beta|v-001||edr|48h",
-    ) + attr_block("l-001|v-001|class|svc.config-mgmt") + CONCLUDE_FALSE_POSITIVE
+    ) + attr_block("l-001|v-001|class|file-server/internal/known-corp") + CONCLUDE_FALSE_POSITIVE
     assert entry_price("false-positive", both_in_prologue) == ()
 
     # ...and it CAN say the id is undeclared, so the assertion above is not vacuous.
@@ -358,7 +359,7 @@ def test_the_surviving_lead_stays_declared_for_every_reader_that_names_it():
     stranded = VERTICES + findings_block(
         "l-001|1|alpha|v-001||cmdb|24h|||no_match",
         "l-001|2|beta|v-001||edr|48h||screen|",
-    ) + attr_block("l-001|v-001|class|svc.config-mgmt")
+    ) + attr_block("l-001|v-001|class|file-server/internal/known-corp")
     stranded_diags = diagnostics(stranded)
     assert [d.message for d in stranded_diags if UNDECLARED_LEAD_PHRASE in d.message] == []
     assert len([d for d in stranded_diags if REPEAT_PHRASE in d.message]) == 1
@@ -747,7 +748,10 @@ def test_the_offered_unquoting_repair_actually_pastes(tmp_path):
     paste gate are two different checks over one row, and an offer that only satisfies the
     first is the exact shape F-47 was written against.
     """
-    doc = attr_doc(MID_TOKEN_QUOTE_ROW)
+    # FREEFORM-class prologue, for the reason the width round trip below records: the offer
+    # rewrites the KEY and keeps `hello`, which #986 refuses in a `compute` vertex's `class`
+    # cell — a second refusal about a value this test does not choose.
+    doc = attr_doc(MID_TOKEN_QUOTE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     d = key_warning(doc)
     deps, run = main_deps(tmp_path)
     seed_investigation(run, doc)
@@ -877,7 +881,11 @@ def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(
     """
     from pydantic_ai.exceptions import ModelRetry
 
-    doc = attr_doc(ESCAPED_PIPE_ROW)
+    # On the FREEFORM-class prologue: the offer rewrites the KEY and keeps the value, and this
+    # row's value is the subject — an escaped `|`. Since #986 a `class` cell on a `compute`
+    # vertex is judged against `compute.role`, so the offered candidate would be refused for
+    # the value on the default prologue and neither end of the parity could be observed.
+    doc = attr_doc(ESCAPED_PIPE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     candidate = key_warning(doc).fix[0]
 
     deps, run = main_deps(tmp_path)
@@ -906,7 +914,7 @@ def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(
     # The padding round trip (brief F9): the on-disk line carries TRAILING padding, the window
     # addresses it without, and a candidate carrying only LEADING padding still lands.
     on_disk = "l-001|v-001|bogus|  hello  "
-    padded_doc = attr_doc(on_disk)
+    padded_doc = attr_doc(on_disk, prologue=VERTICES_FREEFORM_CLASS)
     addressed = key_warning(padded_doc).locus.row_text
     assert addressed == "l-001|v-001|bogus|  hello", "the tokenizer already rstripped the line"
     assert on_disk in padded_doc, "...while the on-disk bytes still carry the trailing padding"
@@ -1397,7 +1405,7 @@ LEGACY_DOC = VERTICES + findings_block(
 #: about the repeat and not about the block being appended.
 REPAIRED_DOC = VERTICES + findings_block("l-001|1|alpha|v-001||cmdb|24h|timeout")
 #: A legal refinement block to append onto either.
-NEXT_BLOCK = attr_block("l-001|v-001|class|svc.config-mgmt")
+NEXT_BLOCK = attr_block("l-001|v-001|class|file-server/internal/known-corp")
 
 
 def test_a_close_block_write_is_refused_exactly_as_an_ordinary_block_append(tmp_path):
@@ -1501,15 +1509,19 @@ def test_a_legacy_document_holding_a_repeat_is_refused_at_every_write_verb(tmp_p
     deps2, run2 = main_deps(tmp_path / "co-resident")
     seed_investigation(run2, LEGACY_DOC + attr_block(warn_row))
     assert _flagged(LEGACY_DOC + attr_block(warn_row)) == [warn_row]
+    # The repair carries a legal `compute` class tuple in its VALUE cell: since #986 an
+    # off-vocabulary role is refused on its own, and the control below has to land so that the
+    # refusal above is about the repeat rather than about the value.
+    repair_row = "l-001|v-001|class|file-server/internal/known-corp"
     with pytest.raises(ModelRetry) as repair_exc:
-        _fix(deps2, warn_row, "l-001|v-001|class|svc.config-mgmt")
+        _fix(deps2, warn_row, repair_row)
     assert REPEAT_PHRASE in str(repair_exc.value)
 
     # The control: the same repair on a document without the repeat lands.
     deps3, run3 = main_deps(tmp_path / "clean")
     seed_investigation(run3, REPAIRED_DOC + attr_block(warn_row))
-    _fix(deps3, warn_row, "l-001|v-001|class|svc.config-mgmt")
-    assert "l-001|v-001|class|svc.config-mgmt" in _inv(run3)
+    _fix(deps3, warn_row, repair_row)
+    assert repair_row in _inv(run3)
 
 
 def test_a_legacy_repeat_is_refused_at_the_learning_intake(tmp_path):

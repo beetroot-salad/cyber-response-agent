@@ -135,8 +135,15 @@ IMPACT_GROUNDING: tuple[str, ...] = (
 IMPACT_SEVERITY: tuple[str, ...] = ("null", "low", "moderate", "high")
 
 
+#: `monitoring-agent` rather than `monitoring`, because the enum is now READ: until #986 armed
+#: `validate._check_vocab_class_cells` nothing tested a `class` cell against these values, and
+#: the SKILL had drifted to its own spelling — `skills/invlang/SKILL.md` §Open questions teaches
+#: `class=monitoring-agent/??/known-corp` and its `:R attr_updates` worked example refines to
+#: `monitoring-agent/internal/known-corp`. A model writes what the prompt showed it, so the
+#: prompt's spelling is the one the catalog has to hold; carrying BOTH would be the two-spellings
+#: -for-one-role the closed vocabulary exists to prevent. The corpus was moved with it.
 COMPUTE_ROLE: tuple[str, ...] = (
-    "monitoring", "web-server", "app-server", "database-server",
+    "monitoring-agent", "web-server", "app-server", "database-server",
     "mail-server", "dns-server", "dns-resolver", "domain-controller",
     "directory-server", "file-server", "bastion", "egress-host",
     "workstation", "byod", "mobile-device", "build-runner",
@@ -287,6 +294,15 @@ CLASS_GRAMMAR: dict[str, tuple[str, ...]] = {
 #: What a type absent from `CLASS_GRAMMAR` carries — SKILL.md's "all others".
 DEFAULT_CLASS_ARITY: int = 1
 
+#: The two suffixes a SINGLE-slot type's `class` cell can be spelled under in `SLOTS`, in the
+#: order they are tried. SKILL.md gives the arity-1 cell as "a single sub-kind token (prefer the
+#: corresponding `attrs.kind` enum where the type has one)", and the registry above follows the
+#: cell's own noun: `session` names its one token a CLASS (`session.class`), while `storage`,
+#: `database`, `credential` and the rest name theirs a KIND. A type with neither — `process`
+#: (image basename), `socket` (whose only enum is `socket.protocol`, an attribute), `file`,
+#: `module` — has no closed vocabulary for that cell at all, and gets none imposed on it here.
+_SINGLE_SLOT_SUFFIXES: tuple[str, ...] = ("class", "kind")
+
 assert set(CLASS_GRAMMAR).issubset(TYPES), (
     "CLASS_GRAMMAR keys must be known vertex types"
 )
@@ -311,6 +327,41 @@ def class_arity(vertex_type: str) -> int:
     """
     slots = CLASS_GRAMMAR.get(vertex_type)
     return DEFAULT_CLASS_ARITY if slots is None else len(slots)
+
+
+def class_slot_keys(vertex_type: str) -> tuple[str, ...]:
+    """Which `SLOTS` enum judges each position of a `class` cell on `vertex_type`.
+
+    `class_arity` answers HOW MANY slots the cell carries; this answers WHICH vocabulary each
+    one is drawn from, which is what `validate._check_vocab_class_cells` needs to refuse
+    `compute|container/...` — `container` is a `COMPUTE_KIND`, the vertex's deployment form,
+    and the first slot of a `compute` class tuple is its ROLE (#986).
+
+    EMPTY, not a one-slot fallback, for a type whose single token no enum closes: `process`
+    carries an image basename and `socket` a free sub-kind, so there is nothing to test them
+    against and an empty tuple is how this table says so. That is why `class_arity` is not
+    `len(...)` of this — the two questions have different answers for exactly those types.
+    """
+    grammar = CLASS_GRAMMAR.get(vertex_type)
+    if grammar is not None:
+        return grammar
+    return tuple(
+        key for suffix in _SINGLE_SLOT_SUFFIXES
+        if (key := f"{vertex_type}.{suffix}") in SLOTS
+    )[:DEFAULT_CLASS_ARITY]
+
+
+def attr_slot_key(vertex_type: str, attribute: str) -> str | None:
+    """The `SLOTS` enum an `attrs.<attribute>` cell on `vertex_type` is closed by, or `None`
+    where the pair names no closed vocabulary.
+
+    Keyed on the PAIR, never on the attribute name alone: `kind` is a closed set on `compute`
+    (`compute.kind`) and free text on a type that registers no enum for it, and the six
+    `impact.*` / `conclude.*` / `attr-pred.target` keys in `SLOTS` are not vertex attributes at
+    all — a lookup by bare name would hand a vertex the grading vocabulary of a resolution row.
+    """
+    key = f"{vertex_type}.{attribute}"
+    return key if key in SLOTS else None
 
 
 def list_slots() -> list[str]:

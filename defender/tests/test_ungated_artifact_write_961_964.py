@@ -481,7 +481,7 @@ def test_a_valid_document_can_have_an_invalid_fence_prefix():
 
     doc = (
         VERTICES
-        + amend_attr_block("l-001|v-001|class|server")
+        + amend_attr_block("l-001|v-001|class|file-server/internal/known-corp")
         + findings_block("l-001|1|probe|v-001||cmdb|n/a")
     )
 
