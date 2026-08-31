@@ -58,6 +58,14 @@ def test_compute_role_slot_off_vocab_is_refused():
     assert any("compute.role" in e or "enum compute.role" in e for e in errors), errors
 
 
+def test_compute_role_slot_off_vocab_names_the_slot_it_actually_belongs_to():
+    """The error message itself carries the fix, not a doc the author had to have pre-read:
+    `container` is a `compute.kind` value, not a `compute.role` one."""
+    doc = _vertex_doc("v-001|compute|container/internal/novel|db-1|")
+    errors = validate_companion(doc, None)
+    assert any("compute.kind" in e for e in errors), errors
+
+
 def test_compute_role_slot_valid_value_passes():
     doc = _vertex_doc("v-001|compute|web-server/internal/known-corp|web-1|")
     assert validate_companion(doc, None) == []

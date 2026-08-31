@@ -781,13 +781,26 @@ def _vocab_cell_errors(
     `_check_benign_open_slots` is what holds a run to closing it; refusing it here would refuse
     the very spelling SKILL.md §Open questions asks for. A CATCH-ALL is a settled answer the
     catalog does not hold. Everything else is a claim about a closed vocabulary and is tested.
+
+    A value that FAILS its own slot but IS a member of some OTHER slot's vocabulary names that
+    slot in the message — `container` is not a `compute.role`, but it is a `compute.kind`, and
+    the model's next move should be moving the value, not guessing at the right one from
+    `enum compute.role` alone. Computed eagerly rather than only after `_check_vocab` fails: the
+    two would otherwise re-run the same membership test to agree on when to bother, and `SLOTS`
+    is small enough that the scan costs nothing on the common, valid-value path.
     """
     if is_open_slot(value) or is_catchall_slot(value):
         return []
+    stripped = value.strip()
+    other = next(
+        (k for k, allowed in vocab.SLOTS.items() if k != slot_key and stripped in allowed),
+        None,
+    )
+    hint = f" — it is a `{other}` value, not `{slot_key}`" if other else ""
     return _check_vocab(
         value, vocab.get_enum(slot_key),
-        f"vertex {vertex_id}: {where} {value.strip()!r} is not a known {slot_key} "
-        f"(`enum {slot_key}`)",
+        f"vertex {vertex_id}: {where} {stripped!r} is not a known {slot_key} "
+        f"(`enum {slot_key}`){hint}",
     )
 
 
