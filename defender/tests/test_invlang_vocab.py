@@ -53,6 +53,14 @@ def test_list_slots_returns_sorted_strings():
         "attr-pred.target",
         "impact.dimension", "impact.verdict", "impact.grounding",
         "conclude.impact_verdict", "conclude.impact_severity",
+        # #983's two, and both are ARMED as well as registered — unlike the `conclude.impact_*`
+        # pair above, neither names a column any shipped document already writes outside its
+        # vocabulary, so there is no teaching step to land first. `authz.basis` is the
+        # structural-vs-retriable qualifier on an `indeterminate` `:R authz` row (absent reads
+        # as `retry`); `consultation.grounding` is the `:R consultations` axis, deliberately
+        # NOT the same set as `impact.grounding` or the authz one — `telemetry-baseline` is
+        # consultation-only and `past-case` is absent from all three for its own reason.
+        "authz.basis", "consultation.grounding",
     }
     assert set(slots) == expected
 
