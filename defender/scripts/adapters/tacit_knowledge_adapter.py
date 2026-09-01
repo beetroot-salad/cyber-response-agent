@@ -27,7 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 from fnmatch import fnmatchcase
-from typing import Any
+from typing import Any, NamedTuple
 
 import sys as _sys
 from pathlib import Path as _Path
@@ -218,12 +218,83 @@ def _read_entry(raw: Any) -> tuple[dict[str, str] | None, str]:
     return entry, ""
 
 
+class RegistryRead(NamedTuple):
+    """One reading of the registry file: the entries that ANSWER, in file order, and every
+    reason something in the file does not.
+
+    THE one walk, for the reason `validate/_gating._CeilingWalk` is one: the verb that serves
+    lookups and the CLI a human validates the file with read the SAME result, so a drop a human
+    is told about is exactly a drop the run will make. A second reading of "well formed" is a
+    tool that certifies a file the runtime then reads differently — which for this system means
+    telling someone their sanction is live while every lookup misses it.
+
+    `fatal` is the WHOLE-FILE refusal (unreadable, or no `entries:` list under it), which is not
+    a per-entry drop and must not be reported as one: it means nothing in the file answers.
+
+    A `NamedTuple` AND NOT A `@dataclass`, which is a constraint on this whole directory rather
+    than a preference here. An adapter module is loaded BY PATH and is not registered in
+    `sys.modules` (the estate seam, `runtime.verbs`), and `@dataclass` resolves a string
+    annotation — every annotation is one under `from __future__ import annotations` — by looking
+    its class's module up there. That lookup returns `None`, and the decorator raises at IMPORT,
+    so the adapter does not merely fail a test: it fails to load at all on that path, taking
+    every verb with it. `NamedTuple` reads `__annotations__` directly and is unaffected.
+    """
+
+    entries: tuple[dict[str, str], ...]
+    refusals: tuple[str, ...]
+    fatal: str | None = None
+
+
+def read_registry(path: Path) -> RegistryRead:
+    """The registry at `path`, entry by entry, with the reason for each drop.
+
+    PUBLIC and returning the refusals rather than printing them, because the refusal text is
+    written FOR A HUMAN — `_read_entry`'s docstring says so — and until this existed no human
+    ever saw one. It printed to stderr during an investigation run, where nobody is watching,
+    and the dropped entry then looked exactly like an entry nobody had written: the lookup
+    misses, the contract falls through to `indeterminate`, and the run escalates a case somebody
+    had already sanctioned. The diagnosis existed and had no reader.
+
+    `defender.scripts.tacit_cli` is that reader, and CI runs it.
+    """
+    try:
+        loaded = _yaml.safe_load(read_text_utf8(Path(path)))
+    except (*TEXT_READ_ERRORS, yaml.YAMLError) as e:
+        return RegistryRead((), (), f"registry at {path} could not be read ({e})")
+    rows = loaded.get("entries") if isinstance(loaded, dict) else None
+    if not isinstance(rows, list):
+        return RegistryRead((), (), (
+            f"registry at {path} declares no `entries:` list (top level is "
+            f"{type(loaded).__name__}, `entries` is {type(rows).__name__}) — no sanction in it "
+            f"will answer any lookup"
+        ))
+    entries: list[dict[str, str]] = []
+    refusals: list[str] = []
+    claimed: set[str] = set()
+    for raw in rows:
+        entry, refusal = _read_entry(raw)
+        if entry is None:
+            refusals.append(refusal)
+            continue
+        if entry["id"] in claimed:
+            refusals.append(
+                f"entry {entry['id']!r}: an EARLIER entry already claims this `id` — an id "
+                f"names ONE sanction, and a citation cannot say which of two it means; give "
+                f"this entry its own id"
+            )
+            continue
+        claimed.add(entry["id"])
+        entries.append(entry)
+    return RegistryRead(tuple(entries), tuple(refusals))
+
+
 def load_entries(path: Path) -> list[dict[str, str]]:
     """Every well-formed entry in the registry at `path`, in file order.
 
     ONE entry is dropped, never the file — the argument `_corpus.iter_query_templates` makes
     for the query catalog. Each drop is announced on stderr, because the only person who can
-    repair the row is the human who committed it.
+    repair the row is the human who committed it. (Announced there is not the same as READ
+    there: `read_registry` above is what hands those reasons to someone who can act on them.)
 
     A REPEATED `id` is one of those drops. The file's own header says an id may never be
     re-used, and until this check nothing enforced it: two entries could share one, `find_entry`
@@ -238,40 +309,16 @@ def load_entries(path: Path) -> list[dict[str, str]]:
     registry does, with nothing on stderr and `health_check` reporting `connected: true,
     entries: 0`. Every sanction in the estate stops answering and every lookup is an ordinary
     MISS, which is the one failure mode this system cannot distinguish from working.
+
+    The VERB-side surface over `read_registry`: this is what a `lookup` in flight calls, and it
+    keeps the stderr channel because that is the only one a run has.
     """
-    try:
-        loaded = _yaml.safe_load(read_text_utf8(Path(path)))
-    except (*TEXT_READ_ERRORS, yaml.YAMLError) as e:
-        print(f"warn: tacit-knowledge registry at {path} could not be read ({e})",
-              file=_sys.stderr)
-        return []
-    rows = loaded.get("entries") if isinstance(loaded, dict) else None
-    if not isinstance(rows, list):
-        print(
-            f"warn: tacit-knowledge registry at {path} declares no `entries:` list "
-            f"(top level is {type(loaded).__name__}, `entries` is {type(rows).__name__}) — "
-            f"no sanction in it will answer any lookup",
-            file=_sys.stderr,
-        )
-        return []
-    entries: list[dict[str, str]] = []
-    claimed: set[str] = set()
-    for raw in rows:
-        entry, refusal = _read_entry(raw)
-        if entry is None:
-            print(f"warn: skipping tacit-knowledge entry ({refusal})", file=_sys.stderr)
-            continue
-        if entry["id"] in claimed:
-            print(
-                f"warn: skipping tacit-knowledge entry (entry {entry['id']!r}: an EARLIER entry "
-                f"already claims this `id` — an id names ONE sanction, and a citation cannot "
-                f"say which of two it means; give this entry its own id)",
-                file=_sys.stderr,
-            )
-            continue
-        claimed.add(entry["id"])
-        entries.append(entry)
-    return entries
+    read = read_registry(path)
+    if read.fatal is not None:
+        print(f"warn: tacit-knowledge {read.fatal}", file=_sys.stderr)
+    for refusal in read.refusals:
+        print(f"warn: skipping tacit-knowledge entry ({refusal})", file=_sys.stderr)
+    return list(read.entries)
 
 
 def find_entry(

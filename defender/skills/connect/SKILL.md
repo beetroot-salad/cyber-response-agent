@@ -1,6 +1,6 @@
 ---
 name: connect
-description: Onboard one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, custom API) to this defender deployment. Interviews the maintainer, routes to an MCP or a generated-adapter integration, scaffolds the per-system knowledge the gather subagent needs, tests it, and opens a review branch. Assumes nothing is connected yet; one system per invocation.
+description: Onboard one system of record (SIEM, EDR, identity, CMDB, asset DB, threat intel, custom API) to this defender deployment. Interviews the maintainer, routes to an MCP or a generated-adapter integration, scaffolds the per-system knowledge the gather subagent needs, tests it, and opens a review branch. Assumes nothing is connected yet; one system per invocation. Also records a tacit-knowledge sanction — "we have signed off on this actor doing this on these hosts" — into the human-authored registry, via tacit.md.
 ---
 
 # Connect a system of record
@@ -11,6 +11,14 @@ connected yet: you don't rely on any existing adapter, and you bring your
 own example to copy. The end state is a system the gather subagent can
 query, the per-system knowledge it needs to route and read results, and a
 clean review branch.
+
+> **Recording a tacit-knowledge sanction? Go to `tacit.md` instead.**
+> "We've signed off on this actor doing this on these hosts" is not an
+> onboarding — the system is already connected, and its data is a
+> version-controlled file a human commits. `tacit.md` is that route: it
+> interviews for the entry, writes it, validates it and leaves a branch.
+> The workflow below is for connecting a system that is not here yet, and
+> none of its six steps apply to adding one sanction.
 
 There are two ways to reach a system, and they are **peers**, not a
 hierarchy:
@@ -47,6 +55,8 @@ are properties you verify the *shape* of, not constraints on you.
 Read the doc you need; don't duplicate it into what you scaffold.
 
 - `adapter.md` / `mcp.md` — the two build paths.
+- `tacit.md` — the separate route for recording one tacit-knowledge
+  sanction into `skills/tacit-knowledge/registry.yaml`.
 - `decisions.md` — why the skill is shaped this way (for grounding a call).
 - `defender/docs/system-skill-shape.md` — the per-system `SKILL.md` /
   `execution.md` split and its fields.
@@ -241,7 +251,12 @@ Then stop. `/ship` can open the PR.
   `skills/{system}/`, that system's `config.env`, and its seed templates
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
   `learning/`, `lessons/`, the runtime `defender/SKILL.md`, the invlang
-  skill, or another system's files.
+  skill, or another system's files. On the `tacit.md` route the lane is
+  narrower still: `skills/tacit-knowledge/registry.yaml` and nothing else.
+- **Never author a sanction.** On the `tacit.md` route you transcribe what
+  a human states and record them as its author. An entry written under
+  your name, or with a scope you inferred, is the system vouching for
+  itself — the one thing that registry's design exists to prevent.
 - **Fail loud on ambiguity.** Never silently substitute a default,
   placeholder, or guessed value for something the maintainer didn't
   confirm. Surface it and ask.

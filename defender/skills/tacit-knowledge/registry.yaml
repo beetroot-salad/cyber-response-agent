@@ -32,5 +32,34 @@
 #
 # Refresh an entry by editing its `added_at`/`review_by` in a fresh commit — that re-attests
 # it, which is the step a file cannot perform for itself.
+#
+# CHECK YOUR EDIT BEFORE YOU COMMIT IT:
+#
+#   defender/.venv/bin/python -m defender.scripts.tacit_cli check
+#
+# It prints every entry the runtime will DROP and why, and it is the same walk a live lookup
+# reads — so a clean run means the runtime reads what you wrote. Without it a mistake here is
+# invisible: a dropped entry is not refused, it simply stops answering, which looks exactly
+# like a sanction nobody ever wrote. CI runs the same command and fails the PR.
+# `... tacit_cli show` prints what is in force today.
+#
+# Or ask the connect skill to write the entry for you — `skills/connect/tacit.md` interviews
+# you for the eight fields, writes them here, runs the check and leaves a branch to review. It
+# is a transcription step, not an approval one: the commit is still the sign-off, and
+# `added_by` still names the human who is sanctioning the pattern.
+#
+# A WORKED EXAMPLE, commented out — copy it and replace every field. It is the container-root
+# case the system exists for: no identity system holds a record for UID 0, so an `iam-policy`
+# contract about it dead-ends no matter how the activity looks.
+#
+# entries:
+#   - id: tk-ca-bundle-build-runner
+#     pattern: rewrite /etc/ssl/certs/ca-bundle.crt   # matched EXACTLY — no wildcards
+#     actor_scope: uid-0                              # glob; this one names a single actor
+#     host_scope: build-runner-*.prod                 # glob; covers the build fleet
+#     added_by: sre-platform@example.invalid          # a person or team address, never a service
+#     added_at: 2026-03-01
+#     review_by: 2026-08-01                           # <= 180 days after added_at
+#     justification: the image build's own ca-trust step; no identity system holds UID 0
 
 entries: []
