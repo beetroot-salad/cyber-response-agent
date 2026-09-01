@@ -199,8 +199,8 @@ def test_the_hosts_own_forced_close_publishes_no_companion_prose(tmp_path) -> No
         )
 
 
-def test_the_close_parses_the_companion_once_and_inside_its_own_guard() -> None:
-    """Every close reads the companion through ONE parse, and that parse is the wrapped one.
+def test_this_module_parses_the_companion_once_and_inside_its_own_guard() -> None:
+    """`close_tool` reads the companion through ONE parse, and that parse is the wrapped one.
 
     `_refuse_if_entry_price_is_owed` wraps its parse deliberately — "this gate parses a file it
     did not write — an imported run dir, a replayed fixture, a hand edit. Either fault would
@@ -208,22 +208,28 @@ def test_the_close_parses_the_companion_once_and_inside_its_own_guard() -> None:
     `disposition_entry_price` short-circuits AHEAD of its own parse for any unpriced keyword, so
     on a `malicious` or `unresolved` close the report readers' parse was the FIRST one and it
     was bare — outside the guard whose whole job is to turn that fault into a refusal. An
-    `inconclusive` close parsed the same document three times over.
+    `inconclusive` close read the same document three times over inside this module alone.
+
+    SCOPED TO THIS MODULE, which is narrower than "the close parses once" and is the honest
+    claim: the two document gates a non-forced close runs first (`flagged_diagnostics` and
+    `committed_document_refusal`) hold their OWN readings behind `tools_mod`, and a source count
+    here cannot see them. What is pinned is that this module does not add a second.
 
     ASSERTED ON THE SOURCE, and stated as the limitation it is: today's tokenizer is extremely
     tolerant (a truncated header, a stray null byte and unfenced prose all parse to warnings),
-    so no text drives the traceback this guards. That makes the property structural — there is
-    one call site and it is inside the guard — and a shape assertion is the instrument that
-    matches it. The functional half is the suites either side of this one: the readers now take
-    a `CompanionBody`, so a caller that wanted to parse would have to reintroduce one.
+    so no text drives the traceback this guards. That makes the property structural — one call
+    site, inside the guard — and a shape assertion is the instrument that matches it. The
+    functional half is the suites either side of this one: the readers now take a
+    `CompanionBody`, so a caller that wanted to parse would have to reintroduce one.
     """
     import inspect
 
     source = Path(inspect.getsourcefile(close_tool)).read_text(encoding="utf-8")
     calls = source.count("parse_dense_companion(")
     assert calls == 1, (
-        f"the close makes {calls} `parse_dense_companion(` calls — one document, one parse, "
-        f"and each extra one is a full re-read of a file the guard has already vetted"
+        f"`close_tool` makes {calls} `parse_dense_companion(` calls — one document, one parse "
+        f"in this module, and each extra one is a full re-read of a file the guard has already "
+        f"vetted"
     )
 
     guard = inspect.getsource(close_tool._refuse_if_entry_price_is_owed)
@@ -590,6 +596,229 @@ def test_a_repeated_baseline_row_does_not_render_twice() -> None:
     )
     assert _errors(distinct) == [], "two DIFFERENT baselines were read as a repeat"
     assert len(_receipts(distinct)) == 2, "the dedup swallowed a distinct measurement"
+
+    # THE NARROW-KEY REGRESSION, which the first cut of this dedup shipped. `anchor_id` is
+    # OPTIONAL on `:R consultations`, so keying the identity on the row's ADDRESSING cells alone
+    # collided two genuinely different measurements — one lead, one window, no ids — and refused
+    # the second with a message that was false about it and offered no repair but inventing an
+    # id. The identity is the whole rendered line, so a repeat still collides and this does not.
+    two_measurements = scene.document(
+        rows=scene.consult_block(
+            scene.consultation_row(anchor_id="", result="1500 CA-bundle rewrites over 30d"),
+            scene.consultation_row(anchor_id="", result="12 package-index writes over 30d"),
+        ),
+        settled=False,
+    )
+    assert _errors(two_measurements) == [], (
+        "one lead measuring two different things over one window had its second measurement "
+        "refused as a repeat — `anchor_id` is optional, so the addressing cells are not an "
+        "identity"
+    )
+    assert len(_receipts(two_measurements)) == 2, "the second measurement was dropped"
+
+
+# ---------------------------------------------------------------------------------------
+# The second review pass, on the fixes above.
+# ---------------------------------------------------------------------------------------
+
+def test_every_cell_the_renderer_copies_is_checked_for_the_delimiter() -> None:
+    """The delimiter guard covers what the RENDERER writes, not the two cells that look like
+    the free-text ones.
+
+    `anchor_id` is an OPEN column on `:R consultations` — no vocabulary, no id pattern, nothing
+    between the model and the bytes — and `runtime_evidence_block` copies it into the body
+    beside `result`. Guarding `result`/`reasoning` alone left the identical permanent wedge one
+    cell to the left of the cell it closed.
+
+    The list and the renderer are asserted to agree, which is the property that survives someone
+    adding a column: a cell rendered into the body and absent from the checked list is the whole
+    bug again."""
+    from defender.skills.invlang.validate import runtime_evidence_block
+
+    poisoned = scene.document(rows=scene.consult_block(
+        scene.consultation_row(anchor_id="tk-x</report>y")), settled=False)
+    assert any("</report>" in e for e in _errors(poisoned)), (
+        "a baseline smuggling the delimiter through `anchor_id` cleared the write gate — the "
+        "guard covers two cells and the renderer copies more"
+    )
+
+    # Every checked cell really does reach the body, so the list is not padding: a value planted
+    # in each shows up in what the close would publish.
+    marked = _receipts(scene.document(rows=scene.consult_block(scene.consultation_row(
+        anchor_id="MARK-ID", result="MARK-RESULT", reasoning="MARK-REASONING")),
+        settled=False))
+    body = runtime_evidence_block(marked)
+    for mark in ("MARK-ID", "MARK-RESULT", "MARK-REASONING", scene.LEAD,
+                 scene.WINDOW_BEFORE_ALERT, "runtime-evidence", "telemetry-baseline"):
+        assert mark in body, f"{mark!r} is checked for the delimiter and never rendered"
+
+
+def test_a_forced_close_still_commits_over_a_companion_the_gate_cannot_parse(tmp_path) -> None:
+    """The framework's FORCED close is exempt from the PARSE fault, the way it is already exempt
+    from both document gates beside it.
+
+    Charging the parse unconditionally put the host's own close behind a refusal it could not
+    previously reach: retry exhaustion has no model left to repair a document with, so a
+    `ModelRetry` there ends the run with NO report.md — the dead-letter at persist those
+    exemptions exist to prevent. Exempt from the parse alone, never from the PRICE: an
+    unreadable document yields the empty body, which owes every priced keyword its whole price.
+
+    Driven at the seam rather than through a real fault, since no text this tokenizer accepts
+    actually raises — what is pinned is that the forced path takes the exempt branch."""
+    from defender.runtime import close_tool as ct
+
+    deps, run_dir = main_deps(tmp_path, GOOD)
+    exploded = {"n": 0}
+
+    def blow_up(_text):
+        exploded["n"] += 1
+        raise RuntimeError("the tokenizer fell over on an imported run dir")
+
+    original = ct.parse_dense_companion
+    # lint-monkeypatch: ok — `parse_dense_companion` reaches this module as a plain import with
+    # no injection seam, and what is under test is the branch taken when it RAISES, which no
+    # accepted input produces. The patch is undone in the `finally` below.
+    ct.parse_dense_companion = blow_up
+    try:
+        close(deps, "unresolved", forced=True)
+    finally:
+        ct.parse_dense_companion = original
+
+    assert exploded["n"] == 1, "fixture control: the fault was reached exactly once"
+    assert (run_dir / "report.md").exists(), (
+        "the host's own close was refused over a document nothing could read, so the run "
+        "dead-letters at persist with no report.md — which is worse than the close it replaced"
+    )
+    assert committed(run_dir)["disposition"] == "unresolved"
+
+
+def test_a_bracket_expression_is_not_literal_scope() -> None:
+    """A negated character class is a blanket scope, and the literal-character minimum has to
+    count it as one.
+
+    The rule's own docstring claims "the spellings covering EVERYTHING cannot be written at
+    all". `[!QQQQ]*` is five characters that match every character except `Q` — it cleared the
+    four-literal minimum and matched every actor and host in the estate.
+
+    The honest globs the rule exists to admit are asserted beside it: striking bracket
+    expressions out must not take a legitimately scoped entry with them."""
+    blanket = _entries(scene.registry_entry(
+        actor_scope="[!QQQQ]*", host_scope="[!QQQQ]*"))
+    assert blanket == [], (
+        "a negated character class loaded as a scoped sanction — it covers every actor on "
+        "every host, which is the shape the minimum exists to make unwritable"
+    )
+
+    for actor, host in ((scene.ACTOR, "build-runner-*.prod"), ("uid-[01]", "db-*.prod")):
+        ok = _entries(scene.registry_entry(actor_scope=actor, host_scope=host))
+        assert len(ok) == 1, f"a legitimately scoped entry was refused: {actor!r} / {host!r}"
+
+
+def test_a_registry_that_declares_no_entries_says_so() -> None:
+    """A registry whose top-level shape is wrong is announced, not silently read as empty.
+
+    Every per-row drop already prints to stderr, because "the only person who can repair the row
+    is the human who committed it". A one-character typo in the `entries:` key took a different
+    path: `[]` with nothing said, `health_check` reporting `connected: true, entries: 0`, and
+    every lookup an ordinary MISS — so every sanction in the estate stops answering and the one
+    signal that it happened is indistinguishable from a working empty registry.
+
+    An genuinely empty registry — which is what ships today — stays silent, because there is
+    nothing wrong with it."""
+    import tempfile
+
+    def warnings_for(body: str) -> str:
+        path = Path(tempfile.mkdtemp()).joinpath(*scene.REGISTRY_RELPATH)
+        path.parent.mkdir(parents=True)
+        path.write_text(body, encoding="utf-8")
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            assert tk.load_entries(path) == []
+        return buf.getvalue()
+
+    assert "no `entries:` list" in warnings_for("entires: []\n"), (
+        "a typo in the `entries:` key disabled every sanction in the estate in silence"
+    )
+    assert "no `entries:` list" in warnings_for("- id: tk-1\n"), (
+        "a registry committed as a top-level list read as empty in silence"
+    )
+    assert warnings_for("entries: []\n") == "", (
+        "the shipped empty registry now warns on every load — nothing is wrong with it"
+    )
+
+
+def test_an_exhausted_contract_leaves_the_frontier_however_its_id_is_quoted() -> None:
+    """The frontier's exhausted-contract drop joins on the id the way every other reader of it
+    does — through `_cell`.
+
+    `exhausted_contract_ids` keys its set on the normalized id, and the frontier tested the RAW
+    cell against it. A uniformly quoted document (`id="ac1"`) therefore spelled the contract two
+    ways, the membership test never matched, and the one contract the run had proved unanswerable
+    was the one it kept being pushed back to work — silently, since a no-op drop reports
+    nothing.
+
+    Both spellings, so the assertion is that they AGREE rather than that either works."""
+    from defender.skills.invlang.frontier import _open_contracts
+
+    for quoting, doc in (
+        ("bare", scene.document(
+            rows=scene.consult_block(scene.lookup_miss_row()) + scene.authz_block(
+                scene.authz_row(verdict="indeterminate", anchor_id="", basis="exhausted")),
+            settled=False)),
+        ("quoted", scene.document(
+            rows=scene.consult_block(scene.lookup_miss_row()) + scene.authz_block(
+                scene.authz_row(verdict="indeterminate", anchor_id="", basis="exhausted")),
+            settled=False).replace("ac1|e-001|tacit-knowledge", '"ac1"|e-001|tacit-knowledge')),
+    ):
+        body, _ = parse_dense_companion(doc)
+        open_ids = {c.contract_id for c in _open_contracts(body)}
+        for spelling in ("ac1", '"ac1"'):
+            assert spelling not in open_ids, (
+                f"the {quoting} document kept the exhausted contract on the retrieval frontier "
+                f"as {spelling!r} — the run is pushed back to re-work the one question it has "
+                f"already proved unanswerable"
+            )
+
+
+def test_the_module_constants_are_held_against_their_vocabularies() -> None:
+    """The anchor kinds and grounding this module compares cells against are asserted to BE
+    members of the vocabularies those cells are closed against.
+
+    Three gates turn on these strings matching a cell `_check_vocab_anchor_kinds` validates
+    against `vocab`'s tuples. A rename or typo there leaves all three comparing against a value
+    no document can carry: they stop firing, no test goes red, and no refusal reports it — a
+    gate that disappears rather than one that fails. The `BASIS_*` constants forty lines below
+    have carried this assert since they were minted; these are held to it now.
+
+    Asserted on the SOURCE, not on the values. Checking membership here passes today for the
+    same reason the module-level assert does, and would go on passing after someone deleted it —
+    the thing being pinned is that the module fails at IMPORT on a future rename, which is a
+    property of the assert's existence and not of today's tuples."""
+    import inspect
+
+    from defender.skills.invlang import vocab
+    from defender.skills.invlang.validate import _gating
+
+    source = inspect.getsource(_gating)
+    for constant, tuple_name in (
+        ("TACIT_KNOWLEDGE", "vocab.ANCHOR_KINDS"),
+        ("RUNTIME_EVIDENCE", "vocab.ANCHOR_KINDS"),
+        ("TELEMETRY_BASELINE", "vocab.CONSULTATION_GROUNDING"),
+    ):
+        assert f"assert {constant} in {tuple_name}" in source, (
+            f"`{constant}` re-spells a member of `{tuple_name}` with nothing holding it to "
+            f"that tuple — a rename there leaves every gate reading it comparing against a "
+            f"value no document can carry, passing vacuously with no test red"
+        )
+        assert getattr(_gating, constant) in getattr(
+            vocab, tuple_name.removeprefix("vocab.")), f"{constant} is already adrift"
+
+    assert _gating.AUTHZ_AUTHORIZED != _gating.AUTHZ_INDETERMINATE, (
+        "the two verdicts the module branches on collapsed to one value"
+    )
 
 
 # ---------------------------------------------------------------------------------------

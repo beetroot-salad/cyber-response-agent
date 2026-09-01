@@ -57,6 +57,7 @@ from . import _walkers, vocab
 from .parser import scan_fences
 from .schema import CompanionBody
 from .validate import (
+    _cell,
     auth_kind_of,
     exhausted_contract_ids,
     iter_vertex_cells,
@@ -270,7 +271,13 @@ def _open_contracts(companion: CompanionBody) -> list[OpenContract]:
         cid = c.get("id")
         if not isinstance(cid, str) or not cid:
             continue
-        if cid in exhausted:
+        # `_cell` on the LEFT of the membership test, matching how `exhausted_contract_ids`
+        # keyed the set (and how `_declarers_by_contract_id` and `_authz_contract_error` key
+        # every other join on this id). Read raw, a uniformly quoted `id="ac1"` spells `'"ac1"'`
+        # here and `ac1` there, so the one contract the run has proved unanswerable is the one
+        # that keeps coming back onto the retrieval frontier. `cid` itself stays raw — it is
+        # what the selectors and the lessons lane already address contracts by.
+        if _cell(c, "id") in exhausted:
             continue
         # `edge_ref` is anchored at the PARSE boundary — `parser._hyp_sub_authz_row` writes
         # `rec.get("edge_ref", UNOBSERVED_EDGE_REF) or UNOBSERVED_EDGE_REF`, and

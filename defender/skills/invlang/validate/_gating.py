@@ -239,6 +239,15 @@ TACIT_KNOWLEDGE = "tacit-knowledge"
 RUNTIME_EVIDENCE = "runtime-evidence"
 TELEMETRY_BASELINE = "telemetry-baseline"
 
+#: Held against the vocabularies they are spellings OF, the way `BASIS_EXHAUSTED` /
+#: `BASIS_DEFAULT` are below. Three gates in this module turn on these strings matching a cell
+#: `_check_vocab_anchor_kinds` closed against `vocab`'s tuples; a rename or a typo there would
+#: leave every one of them comparing against a value no document can carry — passing silently,
+#: which is the failure a refusal cannot report.
+assert TACIT_KNOWLEDGE in vocab.ANCHOR_KINDS
+assert RUNTIME_EVIDENCE in vocab.ANCHOR_KINDS
+assert TELEMETRY_BASELINE in vocab.CONSULTATION_GROUNDING
+
 
 def _folded_grounding(value: str) -> str:
     """A `grounding` cell folded to the one spelling the refusal below compares.
@@ -853,10 +862,12 @@ _REPORT_CLOSE_DELIMITER = "</report>"
 def _delimiter_bearing_cell(row: Any, keys: Sequence[str]) -> str | None:
     """The first of `keys` whose cell carries the report's closing delimiter, or `None`.
 
-    One helper because the trap is a property of ANY model-authored cell that rides into
-    `report.md`'s body, and the body now takes cells from two row families. Named rather than
-    inlined at each: a family added later should reach for this rather than rediscover why the
-    check exists.
+    Named rather than inlined because it answers a question about a LIST of cells and reports
+    WHICH one failed — the refusal has to name the cell the model must rewrite, and a bare `any`
+    over the list cannot. `_check_ceiling_receipt` keeps its own one-line check on purpose and
+    is not a second copy waiting to drift: it reads a parsed `CeilingReceipt.note`, a single
+    dataclass field, so there is no list of cells to walk. What the two share is the RULE, and
+    the reason it exists; the shapes they read it off are genuinely different.
     """
     return next((key for key in keys if _REPORT_CLOSE_DELIMITER in _cell(row, key)), None)
 
@@ -1285,6 +1296,23 @@ def runtime_evidence_block(receipts: Sequence[RuntimeEvidenceReceipt]) -> str:
     return out
 
 
+#: EVERY cell `runtime_evidence_block` above copies into `report.md`'s body, named beside the
+#: renderer so the two move together. The delimiter guard reads this list rather than the two
+#: cells that looked like the free-text ones: `anchor_id` is an OPEN column — no vocabulary, no
+#: id pattern, nothing between the model and the bytes — so a baseline naming
+#: `anchor_id="tk-x</report>y"` cleared the write gate, rendered a report
+#: `_artifact_schema.validate_report` then refused, and left an append-only companion whose
+#: offending row cannot be withdrawn: every retry fails identically. `anchor_kind` and
+#: `grounding_kind` are closed vocabularies and `effective_window` has to parse as a pair of
+#: instants, so they cannot carry it — they are listed anyway, because what makes the guard
+#: correct is that it covers what the renderer WRITES, not what each cell happens to be checked
+#: for somewhere else.
+_RENDERED_BASELINE_CELLS: tuple[str, ...] = (
+    "anchor_kind", "grounding_kind", "anchor_id", "resolved_by_lead",
+    "effective_window", "result", "reasoning",
+)
+
+
 @dataclass(frozen=True)
 class _BaselineWalk:
     """One walk of the `:R consultations` baseline rows: the receipts that PAY, in document
@@ -1317,7 +1345,7 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
     alerted = _alerted_moment(companion)
     receipts: list[RuntimeEvidenceReceipt] = []
     errors: list[str] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, ...]] = set()
     for row in _walkers.iter_anchor_consultations(companion):
         if _cell(row, "anchor_kind") != RUNTIME_EVIDENCE:
             continue
@@ -1330,21 +1358,28 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
         # Deduplicated the way `_walk_ceiling_rows` is, and for the same two reasons: a repeated
         # row renders a repeated line in `report.md`'s body, and it spends the body budget below
         # twice for one measurement. A re-issued block produces the pair trivially.
-        identity = (lead_id, _cell(row, "anchor_id"), window)
+        #
+        # THE WHOLE RENDERED LINE is the identity, not the row's addressing cells. `anchor_id`
+        # is OPTIONAL here, so a lead measuring two different actions over one window — legal,
+        # and the shape a fleet comparison writes — collided on `(lead, "", window)` and had its
+        # second measurement refused as a repeat, with no repair but inventing an id. Keyed on
+        # what the renderer WRITES, a genuine repeat still collides (every cell is equal) and a
+        # second measurement does not.
+        identity = tuple(_cell(row, cell) for cell in _RENDERED_BASELINE_CELLS)
         if identity in seen:
             errors.append(
-                f"{where}: repeats an earlier baseline over the same window — a second copy "
-                f"measures nothing further and renders the same line into the committed report "
-                f"twice. Write one row per measurement"
+                f"{where}: repeats an earlier baseline verbatim — a second copy measures "
+                f"nothing further and renders the same line into the committed report twice. "
+                f"Write one row per measurement"
             )
             continue
         seen.add(identity)
-        # The two cells that ride into `report.md`'s BODY as free text, held to the same rule a
+        # Every cell that rides into `report.md`'s BODY, held to the same rule a
         # `ceiling_test` `note` is (`_check_ceiling_receipt`). The write gate accepts the row,
         # the close renders it, and `_artifact_schema.validate_report` then refuses the file —
         # on an APPEND-ONLY companion whose offending row cannot be withdrawn, so every retry
         # fails identically. Refused here, where the row can still be written differently.
-        delimiter = _delimiter_bearing_cell(row, ("result", "reasoning"))
+        delimiter = _delimiter_bearing_cell(row, _RENDERED_BASELINE_CELLS)
         if delimiter is not None:
             errors.append(
                 f"{where}: `{delimiter}` carries the literal {_REPORT_CLOSE_DELIMITER!r}, which "

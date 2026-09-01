@@ -17,6 +17,7 @@ goes through tool registration at all.
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -228,9 +229,18 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     never the frontmatter. That keeps it out of the 512-byte FRONTMATTER cap, and out of it
     alone: `_artifact_schema.validate_report` also caps the WHOLE FILE and refuses a literal
     `</report>` anywhere in it, so body text can strand a run just as a frontmatter cap could —
-    on an append-only companion, permanently. Both are therefore charged at the write gate,
-    against the bytes THIS function writes: `_gating` refuses the delimiter in a baseline's
-    cells the way it already did in a `ceiling_test` note, and bounds the rendered body block.
+    on an append-only companion, permanently. Both hazards are therefore charged at the write
+    gate, against the bytes THIS function writes: `_gating` refuses the delimiter in every
+    baseline cell that rides into this body (`_RENDERED_BASELINE_CELLS`) the way it already did
+    in a `ceiling_test` note, and bounds the rendered baseline block.
+
+    THE HALF THAT IS STILL OPEN, recorded rather than implied closed. Only the BASELINE block
+    is bounded. A `ceiling_test` `note` is unbounded body text — `_MAX_CEILING_FRONTMATTER_BYTES`
+    caps the FRONTMATTER triples and nothing caps the notes, on the older argument that "a size
+    cap on ungated text is itself a gate" — and `inconclusive` is the one disposition that
+    renders both families at once. So enough note text still renders a file over
+    `_artifact_schema.REPORT_FILE_MAX`, and the baseline bound is sized to leave room for it
+    rather than to make it unreachable.
 
     The frontmatter block is built by the gate that PRICED these receipts (`ceiling_test_block`)
     rather than interpolated here — ONE renderer for both, because the bound the price gate
@@ -463,7 +473,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # The dispositions carrying a structural entry price, collected here as well as at the
     # `investigation.md` write gate. AFTER the terminal-close refusal so R4's ordering holds,
     # and before the gate so a close that owes the price never spends a review.
-    companion = _refuse_if_entry_price_is_owed(deps, disposition)
+    companion = _refuse_if_entry_price_is_owed(deps, disposition, forced=forced)
     # The check the close never had (#961). Every other write verb meets the invlang schema
     # through `permission.decide_write`; the close is the verb that PUBLISHES — report.md
     # commits against this document and the review gate parses it — so it was the one path on
@@ -613,7 +623,9 @@ def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> N
         )
 
 
-def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> CompanionBody:
+def _refuse_if_entry_price_is_owed(
+    deps: AgentDeps, disposition: str, *, forced: bool = False,
+) -> CompanionBody:
     """Collect the structural price this close's KEYWORD owes, refuse if it is unpaid, and
     hand back the PARSED `investigation.md` the price was read off.
 
@@ -623,11 +635,13 @@ def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> Compani
     report a copy of another — a document rewritten between the two calls ships rows nothing
     charged.
 
-    The BODY rather than the text, so this is the run's ONE parse of it. `disposition_entry_price`
-    short-circuits ahead of its own parse for any unpriced keyword, so a `malicious` or
-    `unresolved` close used to reach the report readers with no parse having happened yet — and
-    theirs was bare, which turned a document this gate could not read into a traceback rather
-    than the refusal the wrapping below exists to produce.
+    The BODY rather than the text, so this module parses the companion exactly once — the two
+    document gates above hold their own readings, and what is removed here is the SECOND parse
+    on this path. `disposition_entry_price` short-circuits ahead of its own parse for any
+    unpriced keyword, so a `malicious` or `unresolved` close used to reach the report readers
+    with no parse having happened yet — and theirs was bare, which turned a document this gate
+    could not read into a traceback rather than the refusal the wrapping below exists to
+    produce.
 
     `report.md` is written FROM the close's disposition argument and nothing else on that path
     reads the companion, so a price collected only at the `investigation.md` write gate is owed
@@ -640,17 +654,41 @@ def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> Compani
     because this gate parses a file it did not write — an imported run dir, a replayed fixture,
     a hand edit. Either fault would otherwise leave the close as a traceback rather than a
     refusal.
+
+    `forced` is exempt from the PARSE fault, on the terms the driver's own forced-close comment
+    sets and the two document gates above already honour: the framework's close has no model
+    left to repair a document with, so a refusal there ends the run with NO report.md and
+    dead-letters it at persist — worse than publishing a disposition off a companion nothing
+    could read. It is exempt from the parse alone, never from the PRICE: an unparseable
+    document yields the empty body, which owes every priced keyword its whole price, so a forced
+    close of a priced keyword is still refused for what it did not pay. (`unresolved`, the one
+    disposition forced today, owes nothing and commits.)
     """
     companion_text = _read_companion_text(Path(deps.run_dir) / "investigation.md")
     try:
         companion, _warnings = parse_dense_companion(companion_text)
+    except Exception as exc:
+        if not forced:
+            raise ModelRetry(
+                f"close blocked: `investigation.md` could not be parsed to check the entry "
+                f"price your disposition may owe ({type(exc).__name__}: {exc}). Repair the "
+                f"document — a close is not permitted while the gate cannot look."
+            ) from exc
+        print(
+            f"[close] forced close: `investigation.md` could not be parsed "
+            f"({type(exc).__name__}: {exc}); pricing the host's own verdict off an empty "
+            f"document rather than dead-lettering the run",
+            file=sys.stderr,
+        )
+        companion = CompanionBody()
+    try:
         price = entry_price(disposition, companion)
     except ModelRetry:
         raise
     except Exception as exc:
         raise ModelRetry(
-            f"close blocked: `investigation.md` could not be parsed to check the entry price "
-            f"your disposition may owe ({type(exc).__name__}: {exc}). Repair the document — a "
+            f"close blocked: `investigation.md` could not be priced for the entry price your "
+            f"disposition may owe ({type(exc).__name__}: {exc}). Repair the document — a "
             f"close is not permitted while the gate cannot look."
         ) from exc
     if price:

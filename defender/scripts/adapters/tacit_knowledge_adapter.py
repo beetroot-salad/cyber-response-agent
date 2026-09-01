@@ -25,6 +25,7 @@ judges expiry against off the `VerbContext` it is handed.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from fnmatch import fnmatchcase
 from typing import Any
 
@@ -90,6 +91,16 @@ TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS = 4
 #: The glob metacharacters `fnmatchcase` reads, which is what makes a character NOT literal.
 _WILDCARD_CHARS = "*?[]"
 
+#: One `fnmatch` BRACKET EXPRESSION — `[seq]` or the negated `[!seq]`, with a `]` in first
+#: position taken literally, exactly as `fnmatch.translate` reads it.
+#:
+#: Its contents are a CHARACTER SET, never literal text, and counting them as literal was the
+#: hole in the rule below: `[!QQQQ]` is five characters that match every character except `Q`,
+#: so `actor_scope: "[!QQQQ]*"` cleared the four-literal minimum and matched every actor in the
+#: estate — a blanket scope in a spelling the rule claims cannot be written at all. The whole
+#: expression counts as wildcard, which is what it is.
+_BRACKET_EXPR_RE = re.compile(r"\[!?\]?[^\]]*\]")
+
 #: Scope spellings that cover everything by NAME rather than by wildcard. Held beside the
 #: literal-character minimum, not instead of it: each catches what the other cannot.
 _BLANKET_SCOPES = frozenset({"*", "all", "any"})
@@ -108,7 +119,12 @@ def registry_path(defender_dir: Path) -> Path:
 
 
 def _literal_chars(value: str) -> int:
-    return sum(1 for ch in value if ch not in _WILDCARD_CHARS)
+    """How many characters of `value` a host or actor name has to MATCH exactly.
+
+    Bracket expressions are struck out whole before the count — see `_BRACKET_EXPR_RE` for the
+    blanket scope that reached `find_entry` while they were being counted as literal text.
+    """
+    return sum(1 for ch in _BRACKET_EXPR_RE.sub("", value) if ch not in _WILDCARD_CHARS)
 
 
 def _blanket_scope_reason(field: str, value: str) -> str | None:
@@ -215,6 +231,13 @@ def load_entries(path: Path) -> list[dict[str, str]]:
     named neither of them in particular. A citation has to identify ONE sanction — that is the
     entire reason the id exists rather than a `pattern` string — so the later row is refused
     while the first, which every existing citation already means, keeps answering.
+
+    THE FILE'S OWN SHAPE is announced too, and it is the drop that was silent. A top-level that
+    is not a mapping, or a mapping with no `entries:` list under it — a `entires:` typo, a list
+    at the root, a file emptied to `null` — reached the same `return []` a genuinely empty
+    registry does, with nothing on stderr and `health_check` reporting `connected: true,
+    entries: 0`. Every sanction in the estate stops answering and every lookup is an ordinary
+    MISS, which is the one failure mode this system cannot distinguish from working.
     """
     try:
         loaded = _yaml.safe_load(read_text_utf8(Path(path)))
@@ -223,9 +246,17 @@ def load_entries(path: Path) -> list[dict[str, str]]:
               file=_sys.stderr)
         return []
     rows = loaded.get("entries") if isinstance(loaded, dict) else None
+    if not isinstance(rows, list):
+        print(
+            f"warn: tacit-knowledge registry at {path} declares no `entries:` list "
+            f"(top level is {type(loaded).__name__}, `entries` is {type(rows).__name__}) — "
+            f"no sanction in it will answer any lookup",
+            file=_sys.stderr,
+        )
+        return []
     entries: list[dict[str, str]] = []
     claimed: set[str] = set()
-    for raw in rows if isinstance(rows, list) else []:
+    for raw in rows:
         entry, refusal = _read_entry(raw)
         if entry is None:
             print(f"warn: skipping tacit-knowledge entry ({refusal})", file=_sys.stderr)
