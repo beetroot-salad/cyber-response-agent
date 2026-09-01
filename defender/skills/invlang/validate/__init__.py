@@ -132,6 +132,7 @@ from ._structure import (
     _check_vocab,
     _check_vocab_anchor_kinds,
     _check_vocab_edges,
+    _check_vertex_participation,
     _check_vocab_hypotheses,
     _check_vocab_vertices,
     _check_vocab_weights,
@@ -285,6 +286,7 @@ def diagnose(
     found.extend(_plain(_check_lead_prediction_structure(companion)))
     found.extend(_plain(_check_impact_prediction_structure(companion)))
     found.extend(_plain(_check_impact_resolution_refs(companion)))
+    found.extend(_plain(_check_vertex_participation(companion)))
     found.extend(_check_closed_vocab(companion, proposed_text))
     # #983. The `:R authz`/`:R consultations` cells the two new mechanisms turn on, checked for
     # every document rather than only for a benign one: `_check_authz_row_grounding` is also
@@ -467,6 +469,7 @@ __all__ = [
     "_check_surface",
     "_check_tested_commitment_refs",
     "_check_tested_id_namespaces",
+    "_check_vertex_participation",
     "_check_vocab",
     "_check_vocab_anchor_kinds",
     "_check_vocab_edges",
