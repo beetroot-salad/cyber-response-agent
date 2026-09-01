@@ -53,6 +53,21 @@ def test_list_slots_returns_sorted_strings():
         "attr-pred.target",
         "impact.dimension", "impact.verdict", "impact.grounding",
         "conclude.impact_verdict", "conclude.impact_severity",
+        # #983's two, and both are ARMED as well as registered — unlike the `conclude.impact_*`
+        # pair above, neither names a column any shipped document already writes outside its
+        # vocabulary, so there is no teaching step to land first. `authz.basis` is the
+        # structural-vs-retriable qualifier on an `indeterminate` `:R authz` row (absent reads
+        # as `retry`); `consultation.grounding` is the `:R consultations` axis, deliberately
+        # NOT the same set as `impact.grounding` or the authz one — `telemetry-baseline` is
+        # consultation-only and `past-case` is absent from all three for its own reason.
+        "authz.basis", "consultation.grounding",
+        # #983's third, added in the hardening pass and armed with the other two.
+        # `consultation.lookup_outcome` is the `hit`/`miss` token a `tacit-knowledge`
+        # consultation's `result` opens with. It is a slot rather than a convention BECAUSE the
+        # anchor receipt reads a citation against it: while "a miss names no `anchor_id`" was
+        # only prose, a row saying `miss` and naming one anyway backed an authorization — the
+        # one fabrication shape SKILL.md publishes as refused.
+        "consultation.lookup_outcome",
     }
     assert set(slots) == expected
 

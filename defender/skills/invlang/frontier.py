@@ -57,7 +57,9 @@ from . import _walkers, vocab
 from .parser import scan_fences
 from .schema import CompanionBody
 from .validate import (
+    _cell,
     auth_kind_of,
+    exhausted_contract_ids,
     iter_vertex_cells,
     outstanding_authz_contracts,
 )
@@ -251,10 +253,31 @@ def _open_contracts(companion: CompanionBody) -> list[OpenContract]:
     # This walk adds only what the EDGE axis keys on and the gate has no use for: the
     # `edge_ref`, and the `rel` / `auth_kind` read off the `:E` row it names.
     edges = _edge_index(companion)
+    # #983 mechanism C. A contract whose `:R authz` row carries `basis=exhausted` is one every
+    # applicable registry was actually queried for — a receipt `_check_authz_basis` verified
+    # against the run's own transcript — so handing it back for another retrieval loop burns
+    # the budget on a question nothing in this deployment can answer. It leaves the FRONTIER
+    # and nothing else: `outstanding_authz_contracts` is untouched, so the benign gate still
+    # blocks on it and `on_indet` still escalates, which is the pair this module's own closing
+    # line ("must never be wired into that gate") asks for.
+    #
+    # PER CONTRACT, keyed on the id each row FULFILLS. A document-wide "did anything claim
+    # exhausted" would clear a `change-mgmt` question nobody asked on the strength of a claim
+    # about the tacit-knowledge registry — and dropping it removes the only mechanical surface
+    # that pushes the run back to go work it.
+    exhausted = exhausted_contract_ids(companion)
     out: list[OpenContract] = []
     for hid, c, _why in outstanding_authz_contracts(companion):
         cid = c.get("id")
         if not isinstance(cid, str) or not cid:
+            continue
+        # `_cell` on the LEFT of the membership test, matching how `exhausted_contract_ids`
+        # keyed the set (and how `_declarers_by_contract_id` and `_authz_contract_error` key
+        # every other join on this id). Read raw, a uniformly quoted `id="ac1"` spells `'"ac1"'`
+        # here and `ac1` there, so the one contract the run has proved unanswerable is the one
+        # that keeps coming back onto the retrieval frontier. `cid` itself stays raw — it is
+        # what the selectors and the lessons lane already address contracts by.
+        if _cell(c, "id") in exhausted:
             continue
         # `edge_ref` is anchored at the PARSE boundary — `parser._hyp_sub_authz_row` writes
         # `rec.get("edge_ref", UNOBSERVED_EDGE_REF) or UNOBSERVED_EDGE_REF`, and

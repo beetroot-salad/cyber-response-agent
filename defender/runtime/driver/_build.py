@@ -202,10 +202,14 @@ MAIN_DEF = AgentDefinition(
     budget_enforced=True,
 )
 
-#: The gather grant: 21 read verbs across 7 systems, plus `health-check` granted uniformly per
+#: The gather grant: 22 read verbs across 8 systems, plus `health-check` granted uniformly per
 #: system rather than per verb (the split carries no security content). `cmdb.list-roles` and
 #: `identity.list-authorized-hosts` are granted to nobody: in the registry, exercised by no
 #: template and no run.
+#:
+#: `tacit-knowledge.lookup` is granted `r` like every other pair here, and that class is
+#: load-bearing rather than incidental (#983): the registry's entire safety argument is that
+#: every entry traces to a human commit, so no run-path verb may write it.
 GATHER_PAIRS: tuple[tuple[str, str], ...] = (
     ("change-mgmt", "active-changes"), ("change-mgmt", "get-change"),
     ("change-mgmt", "list-changes"),
@@ -216,6 +220,7 @@ GATHER_PAIRS: tuple[tuple[str, str], ...] = (
     ("host-state", "passwd"), ("host-state", "proc-tree"),
     ("identity", "can-access"), ("identity", "get-user"), ("identity", "list-roles"),
     ("identity", "list-users"),
+    ("tacit-knowledge", "lookup"),
     ("threat-intel", "list-indicators"), ("threat-intel", "lookup"),
     ("ticket", "list-tickets"),
 )

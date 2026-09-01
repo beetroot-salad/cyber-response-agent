@@ -495,6 +495,26 @@ jobs:
       - name: Golden case tree (hard gate — artifacts, not code)
         run: defender/.venv/bin/python defender/evals/oracle_golden/validate_cases.py
 
+      # The tacit-knowledge registry, also artifacts and not code — and the gate is HERE
+      # because for this system the commit IS the sign-off. It is the one system of record
+      # with no service behind it: a human edits `skills/tacit-knowledge/registry.yaml` and
+      # commits, and nothing else attests the entry.
+      #
+      # The loader DROPS a malformed entry rather than refusing the file (one bad row must
+      # not sink every sanction in the estate) and prints why on stderr during an
+      # investigation run, where nobody is watching. So a typo produced exactly what an
+      # unwritten entry produces — the lookup misses, the contract falls through to
+      # `indeterminate`, the run escalates a case somebody had already sanctioned. Silent, and
+      # silent in the direction that looks like ordinary operation.
+      #
+      # Blocking rather than advisory, because the commit is the only review this file gets:
+      # a dropped entry has to fail the PR that introduced it, not an investigation weeks
+      # later. `check` reports exactly the loader's own drops (it is a second CONSUMER of that
+      # walk, never a second implementation), so a green gate here means the runtime reads
+      # every entry the author wrote.
+      - name: Tacit-knowledge registry (hard gate — the commit is the sign-off)
+        run: defender/.venv/bin/python -m defender.scripts.tacit_cli check
+
   code-smells:
     runs-on: ubuntu-latest
     timeout-minutes: 10
