@@ -67,11 +67,25 @@ def _judge_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
     )
 
 
-#: The benign judge's read-only ticket grant. The adversarial stage never reads the
-#: closed-ticket store; see `_run_judge_pydantic` for how the same definition builds with this
-#: grant EMPTIED when that stage switches its capability off.
-JUDGE_TICKET_PAIRS: tuple[tuple[str, str], ...] = (
-    ("ticket", "get-ticket"), ("ticket", "key-pattern"), ("ticket", "list-tickets"),
+def _judge_grant() -> VerbGrant:
+    """The benign judge's read-only ticket grant, projected from the verb-disposition table.
+
+    It used to be a second hand-written tuple of pairs, in this package, with the gather grant
+    a third in another one — so the only file where the whole census appeared together was a
+    test. Both roles now read the one table (#995); the adversarial stage still never reaches
+    the closed-ticket store, because `_run_judge_pydantic` replaces this grant with `DENY_ALL`
+    when it switches that capability off.
+    """
+    from defender._paths import PATHS
+    from defender.runtime.verb_dispositions import dispositions_path, grant_for, load_dispositions
+
+    return grant_for(AgentRole.JUDGE.value, load_dispositions(dispositions_path(PATHS.defender_dir)))
+
+
+#: Kept as an export for the suites that assert on the judge's censused pairs. Derived, so it
+#: cannot drift from what the definition below actually carries.
+JUDGE_TICKET_PAIRS: tuple[tuple[str, str], ...] = tuple(
+    (s, v) for s, v, _ in _judge_grant().entries
 )
 
 JUDGE_DEF = AgentDefinition(
@@ -86,10 +100,7 @@ JUDGE_DEF = AgentDefinition(
     bash_shapes=(_judge_bash_shapes,),
     deps_cls=JudgeDeps,
     deny_reason=_JUDGE_DENY_REASON,
-    verb_grant=VerbGrant(
-        role=AgentRole.JUDGE.value,
-        entries=tuple((s, v, "r") for s, v in JUDGE_TICKET_PAIRS),
-    ),
+    verb_grant=_judge_grant(),
 )
 
 

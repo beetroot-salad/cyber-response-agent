@@ -1,0 +1,94 @@
+# The verb-disposition table — who may call what, in this deployment.
+#
+# READ defender/runtime/verb_dispositions.py before editing. The short version:
+#
+#   * This file is AUTHORED. It is never generated from what is on disk, because deriving it
+#     would mean dropping an adapter file into the tree grants that adapter access.
+#   * It must be TOTAL over the systems that exist. Every (system, verb) an adapter declares
+#     needs a row here — including `health-check`. A verb with no row fails CI
+#     (scripts/lint/lint_verb_disposition_census.py), which is the whole point: before #995 a
+#     newly connected system was silently unreachable, and the refusal it produced looked
+#     like a typo rather than a missing permission.
+#   * `roles: []` means granted to nobody. That is a legal decision and requires `reason:`.
+#     Absence from this file is NOT that decision — it is an unfinished job, and the gate
+#     says so.
+#
+# ADDING A SYSTEM: `/connect` scaffolds the adapter and the skill; then a human adds its rows
+# here. That edit is deliberate and is the one shared-file edit onboarding requires — the
+# allowlist is a security property, not an accident of bookkeeping.
+#
+# There is no verb-class field: every row grants READ. A write grant needs a schema change in
+# verb_dispositions.py and the review that comes with it.
+
+dispositions:
+
+  change-mgmt:
+    active-changes: {roles: [gather]}
+    get-change: {roles: [gather]}
+    health-check: {roles: [gather]}
+    list-changes: {roles: [gather]}
+
+  cmdb:
+    get-host: {roles: [gather]}
+    health-check: {roles: [gather]}
+    list-hosts: {roles: [gather]}
+    # Declared by the adapter, exercised by no query template and no run in the history the
+    # c18 census was drawn from (#632). Note `identity.list-roles` IS granted — the two are
+    # different systems' verbs that happen to share a name, which is why every row here is
+    # keyed by the pair and never by the verb alone.
+    list-roles:
+      roles: []
+      reason: "in the registry, exercised by no template and no run (c18/#632)"
+
+  elastic:
+    alerts: {roles: [gather]}
+    esql: {roles: [gather]}
+    health-check: {roles: [gather]}
+    query: {roles: [gather]}
+
+  host-state:
+    authorized-keys: {roles: [gather]}
+    container-inspect: {roles: [gather]}
+    fim-checksum: {roles: [gather]}
+    health-check: {roles: [gather]}
+    package-list: {roles: [gather]}
+    passwd: {roles: [gather]}
+    proc-tree: {roles: [gather]}
+
+  identity:
+    can-access: {roles: [gather]}
+    get-user: {roles: [gather]}
+    health-check: {roles: [gather]}
+    list-roles: {roles: [gather]}
+    list-users: {roles: [gather]}
+    list-authorized-hosts:
+      roles: []
+      reason: "in the registry, exercised by no template and no run (c18/#632)"
+
+  tacit-knowledge:
+    health-check: {roles: [gather]}
+    # Read, like every row in this file, and here that class is the whole provenance argument
+    # rather than a default: the registry's safety case is that every entry traces to a human
+    # commit, so no run-path verb may write it (#983).
+    lookup: {roles: [gather]}
+
+  threat-intel:
+    health-check: {roles: [gather]}
+    list-indicators: {roles: [gather]}
+    lookup: {roles: [gather]}
+
+  ticket:
+    health-check: {roles: [gather]}
+    # The one pair two roles hold. Gather reads open tickets while investigating; the benign
+    # judge reads the closed-ticket store to score. Same verb, two independent reasons.
+    list-tickets: {roles: [gather, judge]}
+    # The judge's closed-ticket surface, withheld from gather on purpose: an investigation
+    # that could read how past cases were closed would be grading itself against the answer.
+    get-ticket: {roles: [judge]}
+    key-pattern: {roles: [judge]}
+    # Ungranted by OMISSION before #995 — it appeared in no grant and in no "granted to
+    # nobody" note either, so nothing recorded whether that was a decision. Recorded now as
+    # one: no template and no run exercises it, and the judge scores from `get-ticket`.
+    case-opened-at:
+      roles: []
+      reason: "no template and no run exercises it; the judge reads open-time via get-ticket"

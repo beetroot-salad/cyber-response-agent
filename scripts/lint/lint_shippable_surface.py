@@ -29,26 +29,28 @@ from _baseline import Finding, gate
 from _gitscope import git_ignored
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# The per-system carve-out is DERIVED from the resolver rather than re-typed here (#995) — see
+# `excluded_prefixes`. Importing the defender package from a lint gate is new; the alternative
+# was this file keeping its own idea of which systems exist, which is the defect being closed.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
 
 # Directories under defender/ that are allowed to contain vendor names
 # (they ARE per-vendor by design, or are not part of the shipped surface).
 EXCLUDED_PREFIXES = (
-    # Per-vendor systems skills (the v2 data-source carve-out) — vendor-named BY
-    # DESIGN. The v1 names (wazuh/host-query/stub-cmdb/stub-iam) were renamed to
-    # these; keep this list in step with the actual skills/<system>/ dirs.
-    "defender/skills/elastic/",
-    "defender/skills/cmdb/",
-    "defender/skills/identity/",
-    "defender/skills/host-state/",
-    "defender/skills/change-mgmt/",
-    "defender/skills/threat-intel/",
-    "defender/skills/ticket/",
     # Gather query templates are all per-system (+ the SCHEMA doc that documents
     # them) — the per-vendor surface, not env-agnostic code.
     "defender/skills/gather/queries/",
-    "defender/knowledge/environment/systems/",
+    # The whole per-deployment environment tree, not just its `systems/` subdirectory. It
+    # holds this deployment's config — the per-system `config.env` files and, since #995, the
+    # verb-disposition table, which names every system BECAUSE naming them is its job. Moving
+    # the grant here is what let the `driver/_build.py:elastic` baseline entry be deleted
+    # rather than relocated: the shipped runtime no longer names a vendor at all.
+    "defender/knowledge/environment/",
     "defender/fixtures/",
     # Vendored golden RUNS replayed by the e2e harness (tests/test_replay_*) —
     # captured from the v2 playground, so env-specific test data BY DESIGN, like
@@ -111,7 +113,27 @@ FORBIDDEN = [
 ]
 
 
-def _excluded(rel: str) -> bool:
+def excluded_prefixes(root: Path) -> tuple[str, ...]:
+    """`EXCLUDED_PREFIXES` plus one `defender/skills/<system>/` per system `root` DECLARES.
+
+    The per-system skill dirs used to be seven hand-written entries under a comment reading
+    "keep this list in step with the actual skills/<system>/ dirs". They were not in step:
+    eight systems existed, and `defender/skills/tacit-knowledge/` was missing. Nothing caught
+    it because that name is not a vendor word this scanner looks for, so the list had been
+    quietly wrong for as long as it had been incomplete — the same defect as #995's grant, in
+    the same shape, one file over.
+
+    Derived from the resolver rather than remembered. A system's skill dir is per-vendor BY
+    DESIGN, which is a fact about the system existing, not a fact anyone should have to
+    re-type. Nothing about permissions is decided here — this gate only says which files may
+    say "elastic" out loud.
+    """
+    return (*EXCLUDED_PREFIXES, *(
+        f"defender/skills/{system}/" for system in sorted(declared_systems(root))
+    ))
+
+
+def _excluded(rel: str, prefixes: tuple[str, ...] | None = None) -> bool:
     if rel in EXCLUDED_FILES:
         return True
     # Flat pytest modules (test_*.py / *_test.py) anywhere — fixture/scaffold code
@@ -119,7 +141,9 @@ def _excluded(rel: str) -> bool:
     name = rel.rsplit("/", 1)[-1]
     if name.startswith("test_") or name.endswith("_test.py"):
         return True
-    return any(rel.startswith(p) for p in EXCLUDED_PREFIXES)
+    return any(rel.startswith(p) for p in (
+        excluded_prefixes(REPO_ROOT) if prefixes is None else prefixes
+    ))
 
 
 def _scan() -> list[Finding]:
@@ -127,10 +151,13 @@ def _scan() -> list[Finding]:
     # Minus what git ignores — see `_gitscope`. `EXCLUDED_PREFIXES` covers what is deliberately
     # out of scope; only git covers the run artifacts a working tree accumulates but a fresh CI
     # checkout never has (66 findings here against CI's zero).
+    # Resolved ONCE: `excluded_prefixes` runs the system resolver, which shells out to git for
+    # its committed-marker half, and the corpus here is thousands of files.
+    prefixes = excluded_prefixes(REPO_ROOT)
     candidates = [
         p for p in DEFENDER.rglob("*")
         if p.is_file() and p.suffix in TEXT_SUFFIXES
-        and not _excluded(p.relative_to(REPO_ROOT).as_posix())
+        and not _excluded(p.relative_to(REPO_ROOT).as_posix(), prefixes)
     ]
     ignored = git_ignored(REPO_ROOT, candidates)
     for path in candidates:

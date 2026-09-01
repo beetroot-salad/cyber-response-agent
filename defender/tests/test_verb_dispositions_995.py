@@ -31,13 +31,13 @@ from defender.tests._dispositions995 import (
     GATHER_CENSUS,
     JUDGE_CENSUS,
     WITHHELD_CENSUS,
+    Disposition,
     DispositionError,
     census_gaps,
     dispositions_path,
     grant_for,
     load_dispositions,
     planted_tree,
-    plant_system,
     write_table,
 )
 from defender.tests._repo import HOSTILE_NAMES, plant_named_dirs, seed_repo
@@ -93,10 +93,9 @@ def test_the_gate_is_clean_on_a_table_that_decides_every_walked_verb():
         ("newsystem", "health-check"): {"roles": ["gather"]},
     })
     gaps = census_gaps(walked, load_dispositions(table))
-    assert not gaps.undecided and not gaps.phantom and not gaps.unreasoned, (
-        f"a total table must be clean, got undecided={sorted(gaps.undecided)} "
-        f"phantom={sorted(gaps.phantom)} unreasoned={sorted(gaps.unreasoned)}"
-    )
+    assert not gaps.undecided, f"undecided on a total table: {sorted(gaps.undecided)}"
+    assert not gaps.phantom, f"phantom on a total table: {sorted(gaps.phantom)}"
+    assert not gaps.unreasoned, f"unreasoned on a total table: {sorted(gaps.unreasoned)}"
 
 
 def test_a_disposition_naming_a_verb_no_adapter_declares_is_a_phantom():
@@ -135,6 +134,76 @@ def test_the_shipped_table_is_total_over_the_real_tree():
     assert not gaps.unreasoned, f"withheld with no reason: {sorted(gaps.unreasoned)}"
 
 
+def test_deleting_a_row_from_the_SHIPPED_table_is_caught():
+    """A mutation test on the real file, not a synthetic one.
+
+    Every other O1 test builds its table through `write_table`, so all of them are blind to
+    anything the shipped table can express and the helper cannot — a top-level key, a
+    smuggled attribute on the returned value, a magic marker. An adversarial implementer got
+    a fully green suite through exactly that gap: a `residue: settled` key on the real table
+    that made `census_gaps` return nothing while the shipped file was missing six verbs.
+
+    So: take the shipped table, delete one system's rows, and demand exactly that system's
+    verbs come back. The expectation is the set this test DELETED, never a re-walk."""
+    from defender.learning.leads.declared_systems import declared_systems
+
+    systems = tuple(sorted(declared_systems(REPO_ROOT)))
+    walked = _walk(DEFENDER, systems)
+    victim = "host-state"
+    deleted = {(victim, v) for v in walked[victim]}
+
+    rows = load_dispositions(dispositions_path(DEFENDER))
+    survivors = tuple(r for r in rows if r.system != victim)
+    assert len(survivors) < len(rows), "the fixture deleted nothing"
+
+    gaps = census_gaps(walked, survivors)
+    assert set(gaps.undecided) == deleted, (
+        f"deleting {victim}'s rows must report exactly its verbs as undecided; "
+        f"got {sorted(gaps.undecided)}"
+    )
+
+
+def test_the_census_is_a_function_of_the_row_values_alone():
+    """No side channel. `census_gaps` must depend on nothing but the `(system, verb, roles,
+    reason)` of each row — not on the type of the container, not on an attribute riding along
+    on it, not on a key the loader stashed somewhere.
+
+    Rebuilding every row as a plain `Disposition` in a plain tuple and demanding an identical
+    verdict is what makes that testable without enumerating the channels."""
+    from defender.learning.leads.declared_systems import declared_systems
+
+    systems = tuple(sorted(declared_systems(REPO_ROOT)))
+    walked = _walk(DEFENDER, systems)
+    rows = load_dispositions(dispositions_path(DEFENDER))
+
+    assert type(rows) is tuple, (
+        f"the loader returned {type(rows).__name__}, not a plain tuple — a subclass can carry "
+        "state that the census reads and no test can see"
+    )
+    rebuilt = tuple(
+        Disposition(system=r.system, verb=r.verb, roles=frozenset(r.roles), reason=r.reason)
+        for r in rows
+    )
+    assert census_gaps(walked, rebuilt) == census_gaps(walked, rows)
+    # And with one row dropped, the rebuilt copy must go red exactly like the original would.
+    assert census_gaps(walked, rebuilt[1:]).undecided == census_gaps(walked, rows[1:]).undecided
+
+
+def test_an_unreasoned_withholding_is_reported_by_the_census():
+    """The negative control on `unreasoned`, which every other test only ever asserts EMPTY.
+
+    Without this the field can be a hardcoded empty set: three tests assert it is empty, the
+    gate's branch that prints it is unreachable, and nothing notices. Built by constructing
+    the row directly rather than through the loader, because the loader rejects this shape —
+    which is correct, and is also why the census's own handling of it would otherwise never
+    be exercised."""
+    walked = {"x": frozenset({"y"})}
+    rows = (Disposition(system="x", verb="y", roles=frozenset(), reason="   "),)
+    gaps = census_gaps(walked, rows)
+    assert ("x", "y") in gaps.unreasoned
+    assert not gaps.undecided, "the row IS present — it is the reason that is missing"
+
+
 def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
     """The wiring, not the logic. `census_gaps` going red is worth nothing if the CI entry
     point does not propagate it — probed by running the gate as CI runs it, against a planted
@@ -157,14 +226,43 @@ def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
     assert "beta" in (proc.stdout + proc.stderr), "the failure must name the offending system"
 
 
-def test_the_lint_gate_is_clean_on_the_real_tree():
-    """Positive control on the entry point: a gate that exits nonzero unconditionally would
-    satisfy the test above."""
+def test_the_lint_gate_is_clean_on_the_real_tree_and_says_what_it_covered():
+    """Positive control on the entry point — and proof it LOOKED.
+
+    Exit 0 alone is satisfied by a gate that checks nothing, and an adversarial implementer
+    shipped exactly that: a no-arg early return reading "shipped tree covered elsewhere", so
+    the census ran only under the `--root` the red test supplies and never on the path CI
+    uses. The gate must report the size of what it covered, and that number must match the
+    tree."""
+    from defender.learning.leads.declared_systems import declared_systems
+
     gate = REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
     proc = subprocess.run(
         [sys.executable, str(gate)], capture_output=True, text=True, cwd=REPO_ROOT,
     )
     assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+    out = proc.stdout + proc.stderr
+    rows = load_dispositions(dispositions_path(DEFENDER))
+    why = ("the gate reported success without saying what it covered, so it cannot be "
+           f"distinguished from one that checked nothing: {out}")
+    assert str(len(rows)) in out, why
+    assert str(len(declared_systems(REPO_ROOT))) in out, why
+
+
+def test_the_no_arg_and_explicit_root_invocations_check_the_same_thing():
+    """The two entry paths must not diverge. CI runs the gate with no arguments; every red
+    test above runs it with `--root`. A gate whose no-arg path is a stub would pass both."""
+    gate = REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
+    bare = subprocess.run(
+        [sys.executable, str(gate)], capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    explicit = subprocess.run(
+        [sys.executable, str(gate), "--root", str(REPO_ROOT)],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert bare.returncode == explicit.returncode
+    assert bare.stdout == explicit.stdout
 
 
 def test_a_hostile_system_directory_name_does_not_blind_the_gate():
@@ -224,8 +322,17 @@ def test_every_withheld_pair_in_the_shipped_table_carries_a_reason():
         "the set of pairs granted to nobody changed; if that is intended, update "
         f"WITHHELD_CENSUS deliberately. got={sorted(withheld)}"
     )
+    # SUBSTANCE, not presence. `.strip()` truthiness is satisfied by `-`, `tbd`, `n/a` — an
+    # adversarial implementer shipped exactly those. The reason's only job is to let a
+    # reviewer judge whether the withholding still holds, which one token cannot do.
+    placeholder = {"tbd", "n/a", "na", "-", "--", "none", "todo", "x", "?", "wip"}
     for pair, row in sorted(withheld.items()):
-        assert (row.reason or "").strip(), f"{pair} is withheld with no reason"
+        reason = (row.reason or "").strip()
+        assert reason, f"{pair} is withheld with no reason"
+        assert reason.lower().rstrip(".") not in placeholder, \
+            f"{pair} is withheld with a placeholder reason {reason!r}"
+        assert len(reason.split()) >= 4, \
+            f"{pair}'s reason is too short to be reviewable: {reason!r}"
 
 
 # =========================================================================================
@@ -260,6 +367,20 @@ def test_the_grant_is_not_a_function_of_what_is_on_disk():
     planted_tree(_tmp_dir(), {"alpha": "lookup", "later": "lookup"})
     after = grant_for("gather", load_dispositions(table)).entries
     assert before == after
+
+
+@pytest.mark.parametrize("role", ["gather", "judge"])
+def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
+    """The total statement of "authored, not derived", in one line per role.
+
+    The two tests above vary a temp tree that a synthesizing implementation has no reason to
+    read — an adversarial one derived eight of gather's pairs from `PATHS.adapters_dir`, which
+    those tests never touch, and passed both. This closes it by construction: the projection
+    is a FILTER over the rows and may invent nothing. Anything synthesized, from anywhere,
+    breaks the equality."""
+    rows = load_dispositions(dispositions_path(DEFENDER))
+    assert {(s, v) for s, v, _ in grant_for(role, rows).entries} == \
+        {(r.system, r.verb) for r in rows if role in r.roles}
 
 
 # =========================================================================================
@@ -372,69 +493,172 @@ def test_a_malformed_system_name_raises():
         load_dispositions(path)
 
 
-def test_a_duplicate_pair_raises_rather_than_letting_one_row_win():
-    """YAML takes the LAST of two identical keys, silently. For a permission table that is the
-    same defect this issue is about: two rows in the file, one honoured, and a reviewer who
-    reads both. The parse must refuse rather than pick."""
-    path = _tmp()
-    path.write_text(
+#: The same duplicate, written the ways YAML allows it to be written. Parametrized rather than
+#: pinned as one string because a line-oriented duplicate check keyed on one indentation and
+#: one block style passes the single case and admits every other — an adversarial implementer
+#: shipped a regex matching exactly `write_table`'s output, and flow style, 3-space and
+#: 6-space indents all sailed through it, silently widening a reviewed withholding into a
+#: grant. The property is "the parse refuses a repeated key", not "the parse refuses this
+#: text".
+_DUPLICATE_SPELLINGS = {
+    "block-4-space": (
         "dispositions:\n"
         "  cmdb:\n"
         "    get-host: {roles: [gather]}\n"
-        "    get-host: {roles: []}\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(DispositionError) as caught:
-        load_dispositions(path)
-    assert "get-host" in str(caught.value)
-
-
-def test_a_duplicate_system_block_raises():
-    """The same collapse one level up — two `cmdb:` blocks, the second silently replacing the
-    first wholesale rather than merging."""
-    path = _tmp()
-    path.write_text(
+        "    get-host: {roles: []}\n"
+    ),
+    "block-2-space": (
+        "dispositions:\n"
+        " cmdb:\n"
+        "  get-host: {roles: [gather]}\n"
+        "  get-host: {roles: []}\n"
+    ),
+    "block-6-space": (
+        "dispositions:\n"
+        "   cmdb:\n"
+        "      get-host: {roles: [gather]}\n"
+        "      get-host: {roles: []}\n"
+    ),
+    "flow-verbs": (
+        "dispositions:\n"
+        "  cmdb: {get-host: {roles: [gather]}, get-host: {roles: []}}\n"
+    ),
+    "quoted-key": (
+        "dispositions:\n"
+        "  cmdb:\n"
+        '    "get-host": {roles: [gather]}\n'
+        "    get-host: {roles: []}\n"
+    ),
+    "duplicate-system-block": (
         "dispositions:\n"
         "  cmdb:\n    get-host: {roles: [gather]}\n"
-        "  cmdb:\n    list-hosts: {roles: [gather]}\n",
-        encoding="utf-8",
-    )
+        "  cmdb:\n    list-hosts: {roles: [gather]}\n"
+    ),
+    "duplicate-system-flow": (
+        "dispositions: {cmdb: {get-host: {roles: [gather]}}, "
+        "cmdb: {list-hosts: {roles: [gather]}}}\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("spelling", sorted(_DUPLICATE_SPELLINGS))
+def test_a_repeated_key_raises_rather_than_letting_one_row_win(spelling: str):
+    """YAML takes the LAST of two identical keys, silently. For a permission table that is the
+    same defect this issue is about: two rows in the file, one honoured, and a reviewer who
+    reads both. The parse must refuse rather than pick — however the repeat is spelled."""
+    path = _tmp()
+    path.write_text(_DUPLICATE_SPELLINGS[spelling], encoding="utf-8")
     with pytest.raises(DispositionError) as caught:
         load_dispositions(path)
     assert "cmdb" in str(caught.value)
+
+
+def test_the_duplicate_check_agrees_with_an_independent_oracle():
+    """The check, cross-examined against a differently-built answer.
+
+    A duplicate-refusing `SafeLoader` subclass is the standard way to ask PyYAML this
+    question, and it is built here from the loader's own construction hook rather than from
+    the text — a different mechanism from whatever the implementation uses, so the two cannot
+    be wrong together the way a shared primitive would be."""
+    import yaml
+
+    class _NoDupes(yaml.SafeLoader):
+        pass
+
+    def _mapping(loader, node, deep=False):  # noqa: ANN001
+        seen = set()
+        for key_node, _ in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in seen:
+                raise yaml.YAMLError(f"duplicate key {key!r}")
+            seen.add(key)
+        return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+    _NoDupes.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping,
+    )
+
+    for text in [_DUPLICATE_SPELLINGS[k] for k in sorted(_DUPLICATE_SPELLINGS)]:
+        with pytest.raises(yaml.YAMLError):
+            yaml.load(text, Loader=_NoDupes)  # noqa: S506 — a SafeLoader subclass
+        path = _tmp()
+        path.write_text(text, encoding="utf-8")
+        with pytest.raises(DispositionError):
+            load_dispositions(path)
+
+    # And the oracle agrees the SHIPPED table is clean, so the agreement above is not two
+    # things both refusing everything.
+    yaml.load(
+        dispositions_path(DEFENDER).read_text(encoding="utf-8"), Loader=_NoDupes,
+    )  # noqa: S506
 
 
 # =========================================================================================
 # O2 — a refusal names its real reason.
 # =========================================================================================
 
-def test_a_declared_verb_on_an_ungranted_system_is_denied_not_unknown():
-    """THE onboarding symptom. Before #995 this returned UNDECLARED with wording identical to
-    a typo's, sending the maintainer to look for a spelling mistake in a correct adapter."""
+def test_an_ungranted_systems_real_verb_keeps_the_unresolvable_label():
+    """The LABEL is not #995's to change, and this pins that it did not.
+
+    The first draft of this suite demanded DENIED here. That was wrong: §7 R11 read literally
+    makes a wholly ungranted system UNRESOLVABLE, RS14 records the accounting that follows
+    (no denial record, retry coaching, agent-fixable), and six demands across the 632 suite
+    reason from that split. It is agent-visible behaviour, not wording. #995's complaint is
+    that the two UNDECLARED cases were INDISTINGUISHABLE, which is a message defect and is
+    fixed as one below."""
     grant = VerbGrant(
         role="gather",
         entries=tuple((s, v, "r") for s, v in GATHER_CENSUS if s != "cmdb"),
     )
     reg = ModuleVerbRegistry(ADAPTERS, grant)
-    decision = reg.decide("cmdb", "list-hosts")
-    assert decision.outcome == "DENIED", (
-        f"a real, declared verb on an ungranted system must be DENIED, got {decision}"
-    )
+    assert reg.decide("cmdb", "list-hosts").outcome == "UNDECLARED"
 
 
 def test_the_ungranted_system_refusal_differs_from_a_typo_refusal():
-    """The discriminating half. `DENIED` on its own could be reached by denying everything;
-    what O2 demands is that the two cases be TOLD APART in what the caller sees."""
+    """THE onboarding symptom, and the demand that closes it. Before #995 these two produced
+    byte-identical text, so a correctly built adapter on a system nobody had granted read
+    exactly like a spelling mistake — and the maintainer at `/connect`'s test step went
+    looking for the typo that was not there.
+
+    Both remain UNRESOLVABLE. What must differ is what the reader is told to DO."""
     grant = VerbGrant(
         role="gather",
         entries=tuple((s, v, "r") for s, v in GATHER_CENSUS if s != "cmdb"),
     )
     reg = ModuleVerbRegistry(ADAPTERS, grant)
-    real = reg.decide("cmdb", "list-hosts")
-    typo = reg.decide("cmdb", "list-hostz")
-    assert typo.outcome == "UNDECLARED", "a name no adapter declares stays UNDECLARED"
-    assert real.refusal != typo.refusal
-    assert real.outcome != typo.outcome
+    real = reg.decide("cmdb", "list-hosts")   # declared by the adapter, granted to nobody
+    typo = reg.decide("cmdb", "list-hostz")   # declared by nothing
+
+    assert real.outcome == typo.outcome == "UNDECLARED"
+    assert real.refusal != typo.refusal, (
+        "a declared verb on an ungranted system is still reported exactly like a typo"
+    )
+    # Named, not merely different: a refusal that differs by a random token would satisfy an
+    # inequality while telling the reader nothing.
+    assert "verb-grants.yaml" in (real.refusal or ""), (
+        "the refusal for an ungranted system should point at the table that fixes it"
+    )
+    assert "verb-grants.yaml" not in (typo.refusal or ""), (
+        "a typo must not be blamed on a missing grant — that sends the reader to the wrong file"
+    )
+    # Not merely different TEXT. An adversarial implementer satisfied the inequality above by
+    # appending a single trailing space to the unchanged "unknown" wording — the maintainer
+    # still read "unknown" and still went hunting a spelling mistake.
+    assert real.refusal.strip() != typo.refusal.strip()
+    assert "unknown" not in (real.refusal or ""), (
+        "the refusal for a declared verb still calls it unknown"
+    )
+    assert "unknown" in (typo.refusal or "")
+
+
+def test_a_typo_on_a_granted_system_is_told_apart_from_a_typo_on_an_ungranted_one():
+    """The third case, which the two above do not cover between them: an unreal verb on a
+    system the grant DOES reach. It must not borrow the ungranted-system wording either."""
+    rows = load_dispositions(dispositions_path(DEFENDER))
+    reg = ModuleVerbRegistry(ADAPTERS, grant_for("gather", rows))
+    near_miss = reg.decide("cmdb", "list-hostz")
+    assert near_miss.outcome == "UNDECLARED"
+    assert "verb-grants.yaml" not in (near_miss.refusal or "")
 
 
 def test_a_withheld_verb_on_a_granted_system_is_still_denied():
@@ -468,10 +692,25 @@ def test_the_shippable_surface_scanner_excludes_every_declared_system():
     from defender.learning.leads.declared_systems import declared_systems
 
     excluded = set(mod.excluded_prefixes(REPO_ROOT))
-    for system in sorted(declared_systems(REPO_ROOT)):
+    systems = sorted(declared_systems(REPO_ROOT))
+    for system in systems:
         assert f"defender/skills/{system}/" in excluded, (
             f"{system} is a declared system whose skill dir the scanner does not exclude"
         )
+
+    # THE COMPLEMENT, which membership alone never checks. An adversarial implementer widened
+    # this to every directory under skills/, carving `gather/`, `invlang/`, `handbook/`,
+    # `judge/`, `connect/` and `advisory/` out of the vendor-token gate entirely — the largest
+    # part of the shipped surface silently stopped being scanned, and both membership tests
+    # still passed. The carve-out is for SYSTEMS; a role skill is shipped product.
+    skill_dirs = {
+        p for p in excluded
+        if p.startswith("defender/skills/") and p.count("/") == 3
+    }
+    assert skill_dirs == {f"defender/skills/{s}/" for s in systems}, (
+        f"the scanner excludes skill dirs that are not systems: "
+        f"{sorted(skill_dirs - {f'defender/skills/{s}/' for s in systems})}"
+    )
 
 
 def test_the_scanner_exclusions_track_a_planted_system():
@@ -523,6 +762,46 @@ def test_no_module_under_defender_writes_the_disposition_table():
     assert not offenders, f"a run-path module appears to write the table: {offenders}"
 
 
+def test_exercising_the_run_paths_leaves_the_table_byte_identical():
+    """The behavioural half of O4, because the census above is a text scan and text scans are
+    defeatable.
+
+    An adversarial implementer wrote to the table from a module that never spelled its name —
+    the path was assembled from two constants — and appended rows to the real file on every
+    load. The grep saw nothing. Bytes see everything: snapshot the file, run every path that
+    touches it in a real process (load, both projections, and building the two agent
+    definitions that read them at import), and compare."""
+    table = dispositions_path(DEFENDER)
+    before = table.read_bytes()
+
+    rows = load_dispositions(table)
+    grant_for("gather", rows)
+    grant_for("judge", rows)
+    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
+    from defender.runtime.driver import GATHER_DEF
+
+    ModuleVerbRegistry(ADAPTERS, GATHER_DEF.verb_grant)
+    assert JUDGE_DEF.verb_grant is not None
+
+    assert table.read_bytes() == before, "a run path rewrote the disposition table"
+
+
+def test_the_table_loads_from_a_read_only_file():
+    """Read-only by construction, not by convention. If any load path writes — a cache, a
+    normalisation, an 'autoheal' — this raises instead of silently succeeding on a tree where
+    the file happens to be writable."""
+    src = dispositions_path(DEFENDER).read_bytes()
+    ro = _tmp_dir() / "verb-grants.yaml"
+    ro.write_bytes(src)
+    ro.chmod(0o444)
+    try:
+        rows = load_dispositions(ro)
+        assert rows, "the read-only copy loaded nothing"
+        assert grant_for("gather", rows).entries
+    finally:
+        ro.chmod(0o644)
+
+
 # =========================================================================================
 # O6 — the documented onboarding path is complete.
 # =========================================================================================
@@ -535,13 +814,29 @@ def test_the_connect_skill_names_the_table_as_a_step():
 
 
 def test_the_connect_lane_permits_the_table_edit():
-    """The lane rule is a positive allowlist. Naming the step while the lane still forbids it
-    leaves the skill unable to complete the job it documents."""
+    """The lane rule is a positive allowlist: a `Write only ...` sentence, then a `Never ...`
+    sentence. The table must appear in the FIRST.
+
+    Anchored on the allowlist sentence rather than on the clause as a whole, because "the
+    filename appears somewhere in the lane rule" is satisfied by prose that forbids the edit —
+    an adversarial implementer wrote "You do not edit knowledge/environment/verb-grants.yaml"
+    into the same clause and this test passed, which is verbatim the failure its own docstring
+    warns about.
+
+    This is still a prose assertion and prose assertions are weak. What would replace it is a
+    machine-readable allowlist in the skill that a real lane checker parses; that is a bigger
+    change than #995 and is recorded here rather than pretended away."""
     text = (DEFENDER / "skills" / "connect" / "SKILL.md").read_text(encoding="utf-8")
     lane = text.split("Stay in your lane", 1)
     assert len(lane) == 2, "the lane rule moved; this test needs re-anchoring"
     clause = lane[1].split("- **", 1)[0]
-    assert "verb-grants.yaml" in clause, "the lane rule does not permit the table edit"
+
+    allow, _, forbid = clause.partition("Never ")
+    assert "verb-grants.yaml" in allow, (
+        "the table is not in the lane's `Write only ...` allowlist — naming it only in the "
+        "`Never ...` half leaves the skill forbidden from finishing the job it documents"
+    )
+    assert "verb-grants.yaml" not in forbid, "the lane both permits and forbids the table edit"
 
 
 def test_the_handbook_no_longer_claims_no_shared_file_is_edited():

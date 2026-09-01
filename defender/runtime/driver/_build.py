@@ -37,6 +37,7 @@ from ..tools import (
     register_gather_tool,
     register_tools,
 )
+from ..verb_dispositions import Disposition, dispositions_path, grant_for, load_dispositions
 from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
@@ -202,35 +203,34 @@ MAIN_DEF = AgentDefinition(
     budget_enforced=True,
 )
 
-#: The gather grant: 22 read verbs across 8 systems, plus `health-check` granted uniformly per
-#: system rather than per verb (the split carries no security content). `cmdb.list-roles` and
-#: `identity.list-authorized-hosts` are granted to nobody: in the registry, exercised by no
-#: template and no run.
+#: The gather grant, projected from the verb-disposition table (#995). It used to be a tuple
+#: of pairs written here, which made this a shared file every new system had to edit while
+#: `/connect`'s lane rules forbade touching it — so a connected system was silently
+#: unreachable. The table is still AUTHORED, not derived from the adapters on disk; what moved
+#: is only where a human writes it. See `runtime/verb_dispositions.py` for why that
+#: distinction is the entire design.
 #:
-#: `tacit-knowledge.lookup` is granted `r` like every other pair here, and that class is
-#: load-bearing rather than incidental (#983): the registry's entire safety argument is that
-#: every entry traces to a human commit, so no run-path verb may write it.
-GATHER_PAIRS: tuple[tuple[str, str], ...] = (
-    ("change-mgmt", "active-changes"), ("change-mgmt", "get-change"),
-    ("change-mgmt", "list-changes"),
-    ("cmdb", "get-host"), ("cmdb", "list-hosts"),
-    ("elastic", "alerts"), ("elastic", "esql"), ("elastic", "query"),
-    ("host-state", "authorized-keys"), ("host-state", "container-inspect"),
-    ("host-state", "fim-checksum"), ("host-state", "package-list"),
-    ("host-state", "passwd"), ("host-state", "proc-tree"),
-    ("identity", "can-access"), ("identity", "get-user"), ("identity", "list-roles"),
-    ("identity", "list-users"),
-    ("tacit-knowledge", "lookup"),
-    ("threat-intel", "list-indicators"), ("threat-intel", "lookup"),
-    ("ticket", "list-tickets"),
+#: Read at import, and a missing or malformed table raises here rather than yielding an empty
+#: grant. That is deliberate: an empty grant reports every verb as unknown, which is this
+#: issue's own symptom applied to the whole product.
+def _dispositions() -> tuple[Disposition, ...]:
+    from defender._paths import PATHS
+
+    return load_dispositions(dispositions_path(PATHS.defender_dir))
+
+
+#: The gather grant's non-`health-check` pairs, kept as a module export because
+#: `tests/_verb_authorization_632.py` compares it against an independently written census.
+#: DERIVED now rather than authored here — which is what turns that comparison from two hand
+#: copies agreeing with each other into a real check on the shipped table.
+GATHER_PAIRS: tuple[tuple[str, str], ...] = tuple(
+    (s, v) for s, v, _ in grant_for(AgentRole.GATHER.value, _dispositions()).entries
+    if v != "health-check"
 )
 
 
 def _gather_verb_grant() -> VerbGrant:
-    systems = sorted({s for s, _ in GATHER_PAIRS})
-    entries = tuple((s, v, "r") for s, v in GATHER_PAIRS)
-    entries += tuple((s, "health-check", "r") for s in systems)
-    return VerbGrant(role=AgentRole.GATHER.value, entries=entries)
+    return grant_for(AgentRole.GATHER.value, _dispositions())
 
 
 GATHER_DEF = AgentDefinition(

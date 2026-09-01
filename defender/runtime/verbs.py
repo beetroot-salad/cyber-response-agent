@@ -414,7 +414,20 @@ class VerbRegistry:
         verdict on a system whose adapter cannot even be imported is still reached, without
         importing it. A verb name outside what the system REALLY declares (a case or whitespace
         near-miss) is UNDECLARED even when the grant otherwise reaches the system; DENIED is
-        reserved for a real, withheld verb."""
+        reserved for a real, withheld verb.
+
+        The LABELS are unchanged by #995 and deliberately so. A wholly ungranted system stays
+        UNDECLARED (§7 R11 read literally, and RS14's accounting: no denial record, retry
+        coaching, agent-fixable) — that split is cited as load-bearing across the whole 632
+        suite, and it carries agent-visible retry semantics, not just wording.
+
+        What #995 changes is only the MESSAGE, because the two UNDECLARED cases had identical
+        text. A freshly connected system — adapter correct, verbs declared, simply absent from
+        the disposition table — read exactly like a typo, so the maintainer at `/connect`'s
+        test step was sent hunting a spelling mistake in code that was fine. The refusal now
+        says which of the two it is. It still names no verb the caller did not already name,
+        so R11's actual rule — a refusal never widens into the adapter's verb set — is intact.
+        """
         if not self.grant.allows(system, verb):
             if system in self.grant.systems:
                 cold = self._cold_verb_names(system)
@@ -430,10 +443,28 @@ class VerbRegistry:
                         DENIED, None,
                         f"{system}.{verb} is not granted to role {self.grant.role!r}.",
                     )
+                return VerbDecision(
+                    UNDECLARED, None,
+                    f"unresolvable: {system}.{verb} — role {self.grant.role!r} reaches "
+                    f"{system!r}, but no verb of that name is declared there.",
+                )
+            # The grant reaches this system NOWHERE. Whether the verb is real decides which of
+            # two very different jobs the reader has, so the cold read is worth one AST parse
+            # on a path that has already failed. Cold, never an import: an ungranted system's
+            # adapter must not be executed to explain why it is ungranted.
+            cold = self._cold_verb_names(system)
+            declared_here = cold is not None and verb in cold
             return VerbDecision(
                 UNDECLARED, None,
-                f"unresolvable: {system}.{verb} (unknown, or role {self.grant.role!r} holds "
-                "no grant reaching it).",
+                (
+                    f"unresolvable: {system}.{verb} — the verb is declared, but role "
+                    f"{self.grant.role!r} holds no grant reaching the {system!r} system at "
+                    f"all. If {system!r} was just connected, it needs rows in the "
+                    "verb-disposition table (knowledge/environment/verb-grants.yaml)."
+                ) if declared_here else (
+                    f"unresolvable: {system}.{verb} (unknown, or role {self.grant.role!r} "
+                    "holds no grant reaching it)."
+                ),
             )
         try:
             verbs = self.verbs(system)
