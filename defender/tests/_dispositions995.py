@@ -101,7 +101,7 @@ __all__ = [
 #
 # These three tuples are transcribed from the grants as they stood BEFORE #995 moved them
 # out of code (`driver/_build.py:GATHER_PAIRS` plus its per-system health-check, and
-# `learning/pipeline/judge/engine_pydantic.py:JUDGE_TICKET_PAIRS`), so the suite can assert
+# the judge's inline `JUDGE_TICKET_PAIRS` tuple, since retired), so the suite can assert
 # that moving the table to config changed WHO MAY CALL WHAT not at all. Held as literals for
 # the same reason `_verb_authorization_632.py` holds its copy: an expected value re-derived
 # from the file under test cannot disagree with it.

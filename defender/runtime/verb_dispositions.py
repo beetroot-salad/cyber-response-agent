@@ -182,11 +182,13 @@ def load_dispositions(path: Path) -> tuple[Disposition, ...]:
         if not isinstance(verbs, Mapping) or not verbs:
             raise DispositionError(f"{path}: system {system!r} carries no verb rows")
         for verb_name, body in sorted(verbs.items(), key=lambda kv: str(kv[0])):
-            rows.append(_row(path, system, verb_name, body))
+            rows.append(_disposition_row(path, system, verb_name, body))
     return tuple(rows)
 
 
-def _row(path: Path, system: str, verb_name: object, body: object) -> Disposition:
+def _disposition_row(
+    path: Path, system: str, verb_name: object, body: object
+) -> Disposition:
     where = f"{path}: {system}.{verb_name}"
     if not isinstance(verb_name, str) or not verb_name:
         raise DispositionError(f"{where} is not a verb name")
@@ -230,10 +232,13 @@ def grant_for(role: str, dispositions: tuple[Disposition, ...]) -> VerbGrant:
     keeping a dropped-in adapter from granting itself, and it is why this function takes the
     parsed rows rather than a path it could be tempted to walk beside.
 
-    An unknown role name yields an empty grant rather than raising, because that is what a
-    role holding no entries legitimately looks like (the adversarial judge stage runs with its
-    grant emptied on purpose). `load_dispositions` is where a role TYPO is caught, at the one
-    place that can tell a typo from an absence.
+    A role no row names yields an empty grant, because this is a filter and nothing matched —
+    not a fallback, and not a judgement that the role should hold nothing. A MISSPELLED role is
+    caught earlier, by `load_dispositions`, the only place that can tell a typo from a role
+    that legitimately appears in no row.
+
+    Do NOT read that empty return as the mechanism behind the adversarial judge's empty grant:
+    that stage is handed `DENY_ALL` explicitly by `_run_judge_pydantic` and never reaches here.
     """
     entries = tuple(
         (d.system, d.verb, READ_CLASS)

@@ -82,12 +82,6 @@ def _judge_grant() -> VerbGrant:
     return grant_for(AgentRole.JUDGE.value, load_dispositions(dispositions_path(PATHS.defender_dir)))
 
 
-#: Kept as an export for the suites that assert on the judge's censused pairs. Derived, so it
-#: cannot drift from what the definition below actually carries.
-JUDGE_TICKET_PAIRS: tuple[tuple[str, str], ...] = tuple(
-    (s, v) for s, v, _ in _judge_grant().entries
-)
-
 JUDGE_DEF = AgentDefinition(
     role=AgentRole.JUDGE,
     model=judge_model,

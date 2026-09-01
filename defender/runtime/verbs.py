@@ -489,8 +489,8 @@ class ModuleVerbRegistry(VerbRegistry):
         super().__init__(grant)
         self.adapters_dir = Path(adapters_dir)
         # One cold read+parse per SYSTEM, not per grant entry: `declared_verb_names` re-reads
-        # and re-parses the adapter every call, and the shipped gather grant names 28 entries
-        # across 7 systems.
+        # and re-parses the adapter every call, and the shipped gather grant names 30 entries
+        # across 8 systems.
         declared = {s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries}
         offenders = [(s, v) for s, v, _ in grant.entries if v not in declared[s]]
         if offenders:
