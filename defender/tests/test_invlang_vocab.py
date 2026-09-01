@@ -61,6 +61,13 @@ def test_list_slots_returns_sorted_strings():
         # NOT the same set as `impact.grounding` or the authz one — `telemetry-baseline` is
         # consultation-only and `past-case` is absent from all three for its own reason.
         "authz.basis", "consultation.grounding",
+        # #983's third, added in the hardening pass and armed with the other two.
+        # `consultation.lookup_outcome` is the `hit`/`miss` token a `tacit-knowledge`
+        # consultation's `result` opens with. It is a slot rather than a convention BECAUSE the
+        # anchor receipt reads a citation against it: while "a miss names no `anchor_id`" was
+        # only prose, a row saying `miss` and naming one anyway backed an authorization — the
+        # one fabrication shape SKILL.md publishes as refused.
+        "consultation.lookup_outcome",
     }
     assert set(slots) == expected
 

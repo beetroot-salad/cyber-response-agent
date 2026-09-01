@@ -10,7 +10,8 @@
 #
 #   id             the stable name a `:R authz` row cites as its `anchor_id`. Never re-use one
 #                  for a different sanction; an edit to `pattern` under a kept `id` is a silent
-#                  re-identification.
+#                  re-identification. Enforced: a second entry claiming an `id` an earlier one
+#                  already claims is DROPPED, since a citation could not say which it means.
 #   pattern        the action being sanctioned, matched EXACTLY (no wildcards — a glob here
 #                  would let one entry sanction everything).
 #   actor_scope    the identity or identity glob this covers.
@@ -18,7 +19,9 @@
 #                  Both scopes are refused at load if they are blank, `*`, `all`/`any`, or
 #                  fewer than four literal (non-wildcard) characters.
 #   added_by       who authored it. A person or a team address, not a service.
-#   added_at       ISO date, the day it was committed.
+#   added_at       ISO date, the day it was committed. An entry does not answer BEFORE this
+#                  date either — post-dating both dates together would otherwise buy unlimited
+#                  validity from today inside a legal 180-day span.
 #   review_by      ISO date, at most 180 days past `added_at` (the loader enforces the bound).
 #                  Past that date the entry stops answering — it is a MISS, not a refusal, and
 #                  the contract falls through to `indeterminate` like any other registry miss.

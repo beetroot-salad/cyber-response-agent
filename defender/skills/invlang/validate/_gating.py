@@ -240,18 +240,103 @@ RUNTIME_EVIDENCE = "runtime-evidence"
 TELEMETRY_BASELINE = "telemetry-baseline"
 
 
-def _recorded_lookup_ids(companion: CompanionBody, lead_id: str) -> set[str]:
-    """Every registry entry id `lead_id` RECORDED as a `tacit-knowledge` lookup outcome.
+def _folded_grounding(value: str) -> str:
+    """A `grounding` cell folded to the one spelling the refusal below compares.
 
-    A MISS names no entry (`anchor_id` is empty and the parser drops an empty cell), so this
-    set is exactly "the entries this lead came back holding" without minting a hit/miss
-    vocabulary the format does not otherwise have.
+    Case and separator only — lowercased, with underscores and whitespace read as the hyphen
+    this format's vocabularies are written with. Not a normalizer that could turn one vocabulary
+    member into another: every value here is hyphen-separated lowercase already, so the fold is
+    the identity on anything correctly written and collapses exactly the near-misses of it.
+
+    Deliberately NOT `strip_zero_width`'s job or a general normalizer's: this folds a cell for
+    ONE exact-match refusal, and a fold applied to a cell some other check reads for its VALUE
+    would launder the difference it is reading.
+    """
+    return re.sub(r"[\s_]+", "-", value.strip().lower())
+
+
+#: The two `:R authz` verdicts the rules in this module branch on. `authorized` is the one the
+#: benign gate demands and therefore the one a fabricated citation is worth writing;
+#: `indeterminate` is the one the `basis` qualifier is defined on. `unauthorized` is named by
+#: neither and needs no constant.
+AUTHZ_AUTHORIZED = "authorized"
+AUTHZ_INDETERMINATE = "indeterminate"
+
+
+def _lookup_outcome(row: Any) -> str:
+    """The `hit`/`miss` token a `tacit-knowledge` consultation's `result` opens with, or `""`
+    when it opens with neither.
+
+    The first token, delimited by a colon, and nothing further about the sentence: what follows
+    is the analyst-facing detail (`hit: entry covers uid-0 on build-runner-*.prod`) and stays
+    free text. Lowercased, because this is a vocabulary a human types.
+    """
+    head, sep, _rest = _cell(row, "result").partition(":")
+    token = head.strip().lower()
+    return token if sep and token in vocab.TACIT_LOOKUP_OUTCOMES else ""
+
+
+def _check_tacit_lookup_outcomes(companion: CompanionBody) -> list[str]:
+    """A `tacit-knowledge` `:R consultations` row says HIT or MISS, and its `anchor_id` agrees.
+
+    The receipt below reads "this lead came back holding this entry" off the presence of an
+    `anchor_id`. That reading was only as good as a CONVENTION — SKILL.md's "a MISS names no
+    `anchor_id`" — and a convention is not something the presence of a cell enforces: a row
+    whose `result` said `miss` and whose `anchor_id` named an entry anyway backed a citation,
+    which is precisely the fabrication shape the mechanism publishes as refused.
+
+    So the outcome becomes a value the validator can READ, and the two cells are held against
+    each other. A `hit` with no id names nothing for a citation to equal; a `miss` with one is
+    the row contradicting itself, and it is the cheaper of the two lies.
+    """
+    errors: list[str] = []
+    for row in _walkers.iter_anchor_consultations(companion):
+        if _cell(row, "anchor_kind") != TACIT_KNOWLEDGE:
+            continue
+        where = (
+            f"lead {_cell(row, 'resolved_by_lead') or '?'}: `:R consultations` "
+            f"`{TACIT_KNOWLEDGE}` row"
+        )
+        outcome = _lookup_outcome(row)
+        cited = _cell(row, "anchor_id")
+        if not outcome:
+            errors.append(
+                f"{where}: `result` {_cell(row, 'result')!r} does not open with "
+                f"`{'`/`'.join(vocab.TACIT_LOOKUP_OUTCOMES)}` — a registry lookup came back "
+                f"with an entry or it did not (`enum consultation.lookup_outcome`), and an "
+                f"authorization citing this row is checked against WHICH. Write "
+                f"`result=\"hit: <what the entry covers>\"` or "
+                f"`result=\"miss: <what nothing covered>\"`"
+            )
+        elif outcome == "hit" and not cited:
+            errors.append(
+                f"{where}: `result` records a hit and the row names no `anchor_id` — a hit came "
+                f"back holding an entry, and its id is what a `:R authz` row cites. Name the "
+                f"entry, or record the lookup as a miss"
+            )
+        elif outcome == "miss" and cited:
+            errors.append(
+                f"{where}: `result` records a miss and the row names `anchor_id` {cited!r} — a "
+                f"lookup that came back empty has no entry to name, and an id written beside a "
+                f"recorded miss is a citation waiting to be written. Drop the `anchor_id`, or "
+                f"record the outcome as a hit if the entry really came back"
+            )
+    return errors
+
+
+def _recorded_lookup_ids(companion: CompanionBody, lead_id: str) -> set[str]:
+    """Every registry entry id `lead_id` RECORDED as a `tacit-knowledge` lookup HIT.
+
+    Keyed on the outcome the row states, not on the presence of an `anchor_id`: the two are
+    held to agree by `_check_tacit_lookup_outcomes` above, and reading the id alone made a
+    recorded MISS that carried one back a citation.
     """
     return {
         _cell(row, "anchor_id")
         for row in _walkers.iter_anchor_consultations(companion)
         if _cell(row, "anchor_kind") == TACIT_KNOWLEDGE
         and _cell(row, "resolved_by_lead") == lead_id
+        and _lookup_outcome(row) == "hit"
         and _cell(row, "anchor_id")
     }
 
@@ -277,9 +362,27 @@ def _authz_row_grounding_error(companion: CompanionBody, row: Any) -> str | None
         it buys structurally is that faking an authorization takes two coordinated rows instead
         of one cell, and the second is a claim about a retrieval `executed_queries.jsonl`
         independently records.
+
+    AND THE CELL THAT IS NOT THERE. `anchor_id` is an optional column, so the receipt above was
+    reachable only by rows that chose to write one — omitting it cost the whole check and
+    nothing else demanded it, which made "two coordinated rows" a price payable in zero rows.
+    A `tacit-knowledge` row now owes the citation, and the baseline refusal reads a FOLDED cell:
+    written as `cell == "telemetry-baseline"` it was a refusal `telemetry_baseline` and
+    `TELEMETRY-BASELINE` walked straight past, which is the argument `_check_authz_basis` makes
+    for `basis` applied to the cell O2 actually turns on.
+
+    WHY FOLDING AND NOT A CLOSED VOCABULARY, since a membership test is the stronger instrument
+    and `:R consultations`' half of this axis gets one (`vocab.CONSULTATION_GROUNDING`). The
+    v2.10 delta note gives the authorization half `{org-authority, past-case}`, and the shipped
+    corpus does not write it that way — `grounding=iam-policy-binding` beside
+    `anchor_kind=iam-policy` is the ordinary shape, naming the specific record type rather than
+    the axis. Closing the cell against the documented pair would refuse valid committed
+    documents to catch a spelling. The cell that IS closed here is `anchor_kind`
+    (`_check_closed_vocab`), and it is the one that says which registry answered; `grounding` is
+    a sub-label beneath it. So: fold the one value this axis forbids, and leave the label open.
     """
     where = f"`:R authz` row for contract {_cell(row, 'fulfills_contract') or '?'}"
-    if _cell(row, "grounding_kind") == TELEMETRY_BASELINE:
+    if _folded_grounding(_cell(row, "grounding_kind")) == TELEMETRY_BASELINE:
         return (
             f"{where}: `grounding {TELEMETRY_BASELINE}` — a telemetry baseline is what the "
             f"estate HAS been doing, not what it is permitted to do, so it grounds a "
@@ -299,9 +402,22 @@ def _authz_row_grounding_error(companion: CompanionBody, row: Any) -> str | None
     if _cell(row, "anchor_kind") != TACIT_KNOWLEDGE:
         return None
     cited = _cell(row, "anchor_id")
-    if not cited:
-        return None
     lead_id = _cell(row, "resolved_by_lead")
+    if not cited:
+        # Owed by an AUTHORIZED row and by that verdict alone. `indeterminate` is what a lead
+        # writes when the lookup came back empty, and there is then no entry for it to name —
+        # demanding one there would refuse the honest shape and leave `authorized` (the verdict
+        # that actually turns the benign gate) as the only reachable one.
+        if _cell(row, "verdict") != AUTHZ_AUTHORIZED:
+            return None
+        return (
+            f"{where}: `verdict {AUTHZ_AUTHORIZED}` on an `anchor_kind {TACIT_KNOWLEDGE}` row "
+            f"that names no `anchor_id`. The registry is a human-authored file, so the verdict "
+            f"is only as good as the entry behind it — and an optional column left blank is the "
+            f"whole receipt skipped, not a receipt paid. Cite the entry id lead "
+            f"{lead_id or '<none>'} recorded coming back with (its own `:R consultations` "
+            f"`result=\"hit: ...\"` row), or resolve `indeterminate`"
+        )
     recorded = _recorded_lookup_ids(companion, lead_id)
     if cited in recorded:
         return None
@@ -310,10 +426,10 @@ def _authz_row_grounding_error(companion: CompanionBody, row: Any) -> str | None
         f"recorded coming back with. An `{TACIT_KNOWLEDGE}` authorization is only as good as "
         f"the lookup behind it, so the lead named by `resolved_by` has to have recorded the "
         f"matching entry as its own `:R consultations` outcome first (`anchor_kind "
-        f"{TACIT_KNOWLEDGE}`, `anchor_id {cited}`). That lead recorded "
-        f"{sorted(recorded) or 'no entry at all'} — a lookup that came back empty records no "
-        f"`anchor_id`, and there is then nothing for a citation to equal; resolve "
-        f"`indeterminate` instead"
+        f"{TACIT_KNOWLEDGE}`, `anchor_id {cited}`, `result=\"hit: ...\"`). That lead recorded "
+        f"{sorted(recorded) or 'no entry at all'} — a lookup that came back empty records "
+        f"`result=\"miss: ...\"` and no `anchor_id`, and there is then nothing for a citation "
+        f"to equal; resolve `indeterminate` instead"
     )
 
 
@@ -452,11 +568,18 @@ def exhausted_contract_ids(companion: CompanionBody) -> frozenset[str]:
 
     Says nothing about whether the claim was PAID — `_check_authz_basis` is what refuses an
     unbacked one, at the write gate, before any document reaches the frontier.
+
+    Scoped to the verdict the qualifier is DEFINED on, matching that check: `basis` answers "is
+    this unsettled contract worth another retrieval loop", and a settled one is not unsettled.
+    Read off the row alone, an `exhausted` written beside `unauthorized` would drop a contract
+    off the frontier on a verdict the cell was never meant to qualify.
     """
     return frozenset(
         cid
         for row in _walkers.iter_authz_resolutions(companion)
-        if _cell(row, "basis") == BASIS_EXHAUSTED and (cid := _cell(row, "fulfills_contract"))
+        if _cell(row, "basis") == BASIS_EXHAUSTED
+        and _cell(row, "verdict") == AUTHZ_INDETERMINATE
+        and (cid := _cell(row, "fulfills_contract"))
     )
 
 
@@ -468,6 +591,12 @@ def _check_authz_basis(companion: CompanionBody) -> list[str]:
     that reads the cell is a membership test, so a misspelling would be the cheapest way to
     claim `exhausted` without paying for it — `basis=exhausetd` matches neither member, takes
     no receipt check, and still is not `retry` to any reader that pattern-matched the string.
+
+    And the cell is refused OUTSIDE the verdict it is defined on. SKILL.md gives `basis` to
+    `verdict: indeterminate` alone, and nothing read the verdict: `unauthorized basis=exhausted`
+    dropped its contract off the retrieval frontier on a verdict the qualifier never applied to,
+    while `authorized basis=exhausted` was charged a receipt check about retrieval loops on a
+    row that had discharged its contract — an error with no repair the spec explains.
     """
     errors: list[str] = []
     for row in _walkers.iter_authz_resolutions(companion):
@@ -475,6 +604,15 @@ def _check_authz_basis(companion: CompanionBody) -> list[str]:
         if not basis:
             continue
         where = f"`:R authz` row for contract {_cell(row, 'fulfills_contract') or '?'}"
+        verdict = _cell(row, "verdict")
+        if verdict != AUTHZ_INDETERMINATE:
+            errors.append(
+                f"{where}: `basis={basis}` on `verdict {verdict or '<none>'}` — the cell says "
+                f"whether an UNSETTLED contract is worth another retrieval loop, so it is "
+                f"defined on `verdict {AUTHZ_INDETERMINATE}` and on nothing else. A settled "
+                f"verdict has no loop left to price; drop the cell"
+            )
+            continue
         # Through `_check_vocab`, the module's own membership checker, rather than a local
         # `not in`: one normalizer per closed vocabulary is what keeps this arm and the `enum`
         # CLI answering the same question about the same tuple.
@@ -710,6 +848,17 @@ def _cap_is_identifier_shaped(cap: str) -> bool:
 #: same "refused for a file the model cannot write" trap the retired free-text row's own check
 #: existed to avoid, so it is refused HERE, before the document lands.
 _REPORT_CLOSE_DELIMITER = "</report>"
+
+
+def _delimiter_bearing_cell(row: Any, keys: Sequence[str]) -> str | None:
+    """The first of `keys` whose cell carries the report's closing delimiter, or `None`.
+
+    One helper because the trap is a property of ANY model-authored cell that rides into
+    `report.md`'s body, and the body now takes cells from two row families. Named rather than
+    inlined at each: a family added later should reach for this rather than rediscover why the
+    check exists.
+    """
+    return next((key for key in keys if _REPORT_CLOSE_DELIMITER in _cell(row, key)), None)
 
 
 def ceiling_test_block(receipts: Sequence[CeilingReceipt]) -> str:
@@ -988,7 +1137,7 @@ class EntryPrice:
         return bool(self.owed)
 
 
-def conclude_ceiling_test_rows(companion_text: str) -> tuple[CeilingReceipt, ...]:
+def conclude_ceiling_test_rows(companion: CompanionBody) -> tuple[CeilingReceipt, ...]:
     """The `:T conclude.ceiling_test` receipts a companion wrote that this module PRICED, in
     document order.
 
@@ -1002,8 +1151,14 @@ def conclude_ceiling_test_rows(companion_text: str) -> tuple[CeilingReceipt, ...
     re-deriving which rows pay, because the receipts it hands back are the receipts that ride
     into the frontmatter, and the bound the gate charges is only a bound on what ships if the
     two are the same set — a reader that re-derived "paying" independently could disagree with
-    the gate that already ran and carry a row into `report.md` the gate never priced."""
-    companion, _ = parse_dense_companion(companion_text)
+    the gate that already ran and carry a row into `report.md` the gate never priced.
+
+    Takes the PARSED companion, not the text. Every caller reaches this having already priced
+    the same document, so re-parsing here was a second full parse of bytes in hand — and, on a
+    close path where the price gate short-circuits before parsing (any unpriced keyword), it was
+    an UNGUARDED one: `_refuse_if_entry_price_is_owed` wraps its parse precisely because this
+    gate reads a file it did not write, and a fault there must be a refusal rather than a
+    traceback. Handing the body in leaves exactly one parse, inside that guard."""
     conclude = companion.get("conclude") or {}
     return _walk_ceiling_rows(companion, conclude.get("ceiling_test")).paying
 
@@ -1090,6 +1245,46 @@ def _alerted_moment(companion: CompanionBody) -> dt.datetime | None:
     return min(moments) if moments else None
 
 
+#: The bound on the `report.md` BODY text a run's baseline consultations may render, charged on
+#: the rendered block for the reason `_MAX_CEILING_FRONTMATTER_BYTES` is charged on
+#: `ceiling_test_block`: a measurement that disagrees with the renderer can pass a document here
+#: that the commit then refuses anyway.
+#:
+#: A bound the BODY needed and did not have. `render_report`'s own docstring argued that body
+#: text "can never strand a run on a value the write gate accepted and this render then
+#: refused, which a frontmatter byte cap could" — but `_artifact_schema.REPORT_FILE_MAX` caps
+#: the WHOLE FILE at 8192 bytes, not the frontmatter, so a dozen verbose consultations the
+#: invlang write gate accepted (its own file cap is 65536) rendered a report the close refused
+#: permanently. Sized well under that file cap, with the frontmatter, the ceiling notes and the
+#: close's own sentence all still to fit beside it.
+_MAX_RUNTIME_EVIDENCE_BODY_BYTES = 2048
+
+
+def runtime_evidence_block(receipts: Sequence[RuntimeEvidenceReceipt]) -> str:
+    """@owns runtime_evidence
+
+    The `report.md` BODY lines for `receipts` — one per baseline, each naming the grounding, the
+    entry, the owning lead and the window the host parsed, then the model's own free text.
+
+    THE one renderer, so the gate that BOUNDS this text and `close_tool.render_report`, which
+    EMITS it, measure and write the same bytes. Rendered here rather than in the close for the
+    reason `ceiling_test_block` is: a bound the price gate charges is only a bound on what ships
+    if it measures the bytes this function writes.
+
+    Leading newline per line, and none when there are no receipts, so the caller appends this to
+    a body it has already opened.
+    """
+    out = ""
+    for r in receipts:
+        out += (
+            f"\n{r.anchor_kind} ({r.grounding_kind}, {r.anchor_id}, {r.resolved_by_lead}, "
+            f"{r.window}): {r.result}"
+        )
+        if r.reasoning:
+            out += f" — {r.reasoning}"
+    return out
+
+
 @dataclass(frozen=True)
 class _BaselineWalk:
     """One walk of the `:R consultations` baseline rows: the receipts that PAY, in document
@@ -1122,6 +1317,7 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
     alerted = _alerted_moment(companion)
     receipts: list[RuntimeEvidenceReceipt] = []
     errors: list[str] = []
+    seen: set[tuple[str, str, str]] = set()
     for row in _walkers.iter_anchor_consultations(companion):
         if _cell(row, "anchor_kind") != RUNTIME_EVIDENCE:
             continue
@@ -1131,6 +1327,32 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
             f"lead {lead_id or '?'}: `:R consultations` baseline "
             f"{_cell(row, 'anchor_id') or '<no anchor_id>'}"
         )
+        # Deduplicated the way `_walk_ceiling_rows` is, and for the same two reasons: a repeated
+        # row renders a repeated line in `report.md`'s body, and it spends the body budget below
+        # twice for one measurement. A re-issued block produces the pair trivially.
+        identity = (lead_id, _cell(row, "anchor_id"), window)
+        if identity in seen:
+            errors.append(
+                f"{where}: repeats an earlier baseline over the same window — a second copy "
+                f"measures nothing further and renders the same line into the committed report "
+                f"twice. Write one row per measurement"
+            )
+            continue
+        seen.add(identity)
+        # The two cells that ride into `report.md`'s BODY as free text, held to the same rule a
+        # `ceiling_test` `note` is (`_check_ceiling_receipt`). The write gate accepts the row,
+        # the close renders it, and `_artifact_schema.validate_report` then refuses the file —
+        # on an APPEND-ONLY companion whose offending row cannot be withdrawn, so every retry
+        # fails identically. Refused here, where the row can still be written differently.
+        delimiter = _delimiter_bearing_cell(row, ("result", "reasoning"))
+        if delimiter is not None:
+            errors.append(
+                f"{where}: `{delimiter}` carries the literal {_REPORT_CLOSE_DELIMITER!r}, which "
+                f"the committed report may not carry — this text rides into `report.md`'s body, "
+                f"and a close that renders it is refused with no way left to repair the row. "
+                f"Rewrite the cell without it"
+            )
+            continue
         parsed = _parse_window(window)
         if parsed is None:
             errors.append(
@@ -1162,7 +1384,23 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
                 f"which endpoint the guard below holds against the alert"
             )
             continue
-        if alerted is not None and receipt.window_end >= alerted:
+        # FAILS CLOSED on a document that cannot place its own alert, which is the same
+        # direction `_parse_window` fails in and for the same reason. Written as `alerted is not
+        # None and ...` the guard was OFF for every document whose prologue carried no edge, or
+        # whose every edge's `when` was unparseable — a `??` in one cell, and "a pattern that
+        # begins with the incident is the incident" stopped being enforced at all. Nothing
+        # requires a prologue EDGE (`_check_benign_grounding` asks only for a vertex), so that
+        # was not an exotic document.
+        if alerted is None:
+            errors.append(
+                f"{where}: this document records no parseable `when` on any "
+                f"`:E prologue.edges` row, so the baseline cannot be shown to PRECEDE the "
+                f"alerted event — which is the whole of what makes it context rather than the "
+                f"incident describing itself. Record the alerted edge's timestamp, or drop the "
+                f"`{RUNTIME_EVIDENCE}` consultation"
+            )
+            continue
+        if receipt.window_end >= alerted:
             errors.append(
                 f"{where}: `effective_window` {window!r} does not end before the alerted event "
                 f"at {alerted.isoformat()} — a `{RUNTIME_EVIDENCE}` consultation is evidence "
@@ -1172,6 +1410,14 @@ def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
             )
             continue
         receipts.append(receipt)
+    body_bytes = len(runtime_evidence_block(tuple(receipts)).encode("utf-8"))
+    if body_bytes > _MAX_RUNTIME_EVIDENCE_BODY_BYTES:
+        errors.append(
+            f"the accumulated `{RUNTIME_EVIDENCE}` consultations render "
+            f"{body_bytes} bytes of `report.md` body, over the "
+            f"{_MAX_RUNTIME_EVIDENCE_BODY_BYTES}-byte bound — state the recurrence and its "
+            f"scope, not every occurrence in full"
+        )
     return _BaselineWalk(receipts=tuple(receipts), errors=tuple(errors))
 
 
@@ -1181,7 +1427,7 @@ def _check_runtime_evidence_windows(companion: CompanionBody) -> list[str]:
     return list(_walk_runtime_evidence_rows(companion).errors)
 
 
-def conclude_runtime_evidence_rows(companion_text: str) -> tuple[RuntimeEvidenceReceipt, ...]:
+def conclude_runtime_evidence_rows(companion: CompanionBody) -> tuple[RuntimeEvidenceReceipt, ...]:
     """The `:R consultations` BASELINE receipts a companion wrote that this module ACCEPTED, in
     document order (#983 mechanism A, O3).
 
@@ -1192,8 +1438,11 @@ def conclude_runtime_evidence_rows(companion_text: str) -> tuple[RuntimeEvidence
     Reuses the guard's OWN walk rather than re-deriving which rows qualify — a reader that
     re-derived "qualifying" independently could disagree with the check that already ran and
     carry a row into `report.md` nothing ever selected.
+
+    Takes the PARSED companion for the reason `conclude_ceiling_test_rows` does: the close
+    already has one, and a parse out here is both a repeat and — on the paths the price gate
+    short-circuits — an unguarded one.
     """
-    companion, _ = parse_dense_companion(companion_text)
     return _walk_runtime_evidence_rows(companion).receipts
 
 
@@ -1227,12 +1476,26 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
     so nothing written owes everything, and `benign` demands a prologue vertex beneath its
     contradiction checks (`_check_benign_grounding`), which are vacuous over a document with no
     vertices.
+
+    The TEXT surface over `entry_price`, kept because most callers hold a document rather than a
+    parse. The close holds both and takes the other one — see there for why one parse per close
+    is not merely a saving.
+    """
+    return entry_price(disposition, parse_dense_companion(companion_text)[0])
+
+
+def entry_price(disposition: str, companion: CompanionBody) -> EntryPrice:
+    """`disposition_entry_price` over an already-PARSED companion — the same table, the same
+    dispatch, no second reading of the same bytes.
+
+    Split out for the close, which parses the document once at its price gate and then hands
+    that one body to every reader downstream of it. The text surface above stays the one most
+    callers want.
     """
     priced = _rendered_disposition(disposition)
     price = _DISPOSITION_GATES.get(priced) if priced else None
     if price is None:
         return EntryPrice(owed=(), rationale="")
-    companion, _ = parse_dense_companion(companion_text)
     return EntryPrice(owed=tuple(price.check(companion)), rationale=price.rationale)
 
 

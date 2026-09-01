@@ -159,9 +159,12 @@ def lookup_hit_row(
     exactly the property the anchor-receipt check needs: the `:R authz` row still has to be
     written, and it is now checkable against something the same lead already recorded.
 
-    A MISS records no `anchor_id` (there is no entry to name), which is why the check can read
-    "this lead recorded a hit on THIS entry" off the id alone without minting a hit/miss
-    vocabulary nothing else in the format has.
+    A MISS records no `anchor_id` — there is no entry to name — and it SAYS SO, in the `hit:`/
+    `miss:` token its `result` opens with (`enum consultation.lookup_outcome`). Reading the
+    outcome off the id's presence alone was the first cut, and it made "a miss names no
+    `anchor_id`" a convention rather than a rule: a row saying `miss` and naming an entry anyway
+    backed a citation, which is the one fabrication shape `SKILL.md` publishes as refused. The
+    receipt now reads the outcome, and the two cells are held against each other.
     """
     return consultation_row(
         anchor_kind="tacit-knowledge", grounding="org-authority", anchor_id=anchor_id,

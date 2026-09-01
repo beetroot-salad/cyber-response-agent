@@ -82,10 +82,15 @@ def _receipts(text: str):
 
     Imported inside the call rather than at module scope so the two tests that ask nothing of
     this function — the docstring invariant and the `_CloseFields` shape — report their own
-    failure instead of being masked by one module-level ImportError."""
+    failure instead of being masked by one module-level ImportError.
+
+    The reader takes a PARSED companion (the close holds one by the time it reaches this, and a
+    second parse out here was also an unguarded one on the close paths that reach it without
+    pricing anything). These suites hold text, so the parse is here."""
+    from defender.skills.invlang.parser import parse_dense_companion
     from defender.skills.invlang.validate._gating import conclude_runtime_evidence_rows
 
-    return conclude_runtime_evidence_rows(text)
+    return conclude_runtime_evidence_rows(parse_dense_companion(text)[0])
 
 #: A document carrying one qualifying baseline consultation and the receipted authz pair —
 #: the shape a benign close over a container-root case actually has. It carries TWO

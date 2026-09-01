@@ -200,6 +200,7 @@ from ._gating import (
     _check_hypothesis_persistence,
     _check_runtime_evidence_windows,
     _check_screen_structure,
+    _check_tacit_lookup_outcomes,
     _lead_returned_a_result,
     _row_states_something,
     _weight_text,
@@ -207,7 +208,9 @@ from ._gating import (
     conclude_ceiling_test_rows,
     conclude_runtime_evidence_rows,
     disposition_entry_price,
+    entry_price,
     exhausted_contract_ids,
+    runtime_evidence_block,
 )
 from ._closure import (
     _Commitment,
@@ -288,15 +291,22 @@ def diagnose(
     # collected by `_check_benign_gating`, because a price owed at the write gate alone is not
     # owed at the close — and the close is the artifact the learning loop and the ticket lane
     # read. The other two are write-gate-only: neither moves a disposition's price.
-    found.extend(_plain(_check_authz_row_grounding(companion)))
+    grounding = _check_authz_row_grounding(companion)
+    found.extend(_plain(grounding))
     found.extend(_plain(_check_authz_basis(companion)))
+    found.extend(_plain(_check_tacit_lookup_outcomes(companion)))
     found.extend(_plain(_check_runtime_evidence_windows(companion)))
     found.extend(_plain(_check_screen_structure(companion)))
     # Bound, not recomputed: `_check_authz_contract_closure` defers to this gate's OUTPUT on
     # any contract it is already refusing, and running it twice per write is the single most
     # expensive thing in the pass.
     gated = _check_disposition_gating(companion)
-    found.extend(_plain(gated))
+    # Collected at both boundaries, REPORTED once. `_check_benign_gating` re-runs the grounding
+    # check above (deliberately — see the comment there), and the two produce byte-identical
+    # strings, so a benign document handed the model the same wall of text twice on every
+    # refused write. The double COLLECTION is the point and stays; the double PRINT is not.
+    already = set(grounding)
+    found.extend(_plain([e for e in gated if e not in already]))
     found.extend(_plain(_check_ceiling_test_scope(companion)))
     found.extend(_plain(_check_hypothesis_persistence(companion)))
     # The three closure gates, together and last: they are one sentence over three namespaces
@@ -451,6 +461,7 @@ __all__ = [
     "_check_prediction_refs",
     "_check_refutation_scope",
     "_check_runtime_evidence_windows",
+    "_check_tacit_lookup_outcomes",
     "_check_screen_structure",
     "_check_strong_move_provenance",
     "_check_surface",
@@ -522,6 +533,8 @@ __all__ = [
     "dataclass",
     "diagnose",
     "disposition_entry_price",
+    "entry_price",
+    "runtime_evidence_block",
     "effective_vertex_state",
     "exhausted_contract_ids",
     "field",

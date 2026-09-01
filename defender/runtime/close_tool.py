@@ -34,13 +34,16 @@ from defender._untrusted import wrap_fresh
 # test in `_close_investigation_async`, the ordered tuple for the argument schema below.
 from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
+from defender.skills.invlang.parser import parse_dense_companion
+from defender.skills.invlang.schema import CompanionBody
 from defender.skills.invlang.validate import (
     CeilingReceipt,
     RuntimeEvidenceReceipt,
     ceiling_test_block,
     conclude_ceiling_test_rows,
     conclude_runtime_evidence_rows,
-    disposition_entry_price,
+    entry_price,
+    runtime_evidence_block,
 )
 
 from . import challenge_gate
@@ -222,8 +225,12 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
 
     The free text FOR THE HUMAN ANALYST — a `ceiling_test` receipt's `note`, a baseline's
     `result` and `reasoning` — gates nothing and rides into the BODY, one line per receipt,
-    never the frontmatter: because it gates nothing it can never strand a run on a value the
-    write gate accepted and this render then refused, which a frontmatter byte cap could.
+    never the frontmatter. That keeps it out of the 512-byte FRONTMATTER cap, and out of it
+    alone: `_artifact_schema.validate_report` also caps the WHOLE FILE and refuses a literal
+    `</report>` anywhere in it, so body text can strand a run just as a frontmatter cap could —
+    on an append-only companion, permanently. Both are therefore charged at the write gate,
+    against the bytes THIS function writes: `_gating` refuses the delimiter in a baseline's
+    cells the way it already did in a `ceiling_test` note, and bounds the rendered body block.
 
     The frontmatter block is built by the gate that PRICED these receipts (`ceiling_test_block`)
     rather than interpolated here — ONE renderer for both, because the bound the price gate
@@ -252,14 +259,9 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     # a row the guard refused cannot reach a reader here. Body-only for the same reason the
     # note above is: `result` carries the occurrence count and the actor/host scope as free
     # text (`:R consultations` gains no columns), and free text under a 512-byte frontmatter
-    # cap is a size cap acting as a gate.
-    for baseline in runtime_evidence:
-        body += (
-            f"\n{baseline.anchor_kind} ({baseline.grounding_kind}, {baseline.anchor_id}, "
-            f"{baseline.resolved_by_lead}, {baseline.window}): {baseline.result}"
-        )
-        if baseline.reasoning:
-            body += f" — {baseline.reasoning}"
+    # cap is a size cap acting as a gate. Through the OWNER's renderer, so the byte bound that
+    # gate charges is a bound on the bytes written here.
+    body += runtime_evidence_block(runtime_evidence)
     return (
         "---\n"
         f"disposition: {disposition}\n"
@@ -461,7 +463,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # The dispositions carrying a structural entry price, collected here as well as at the
     # `investigation.md` write gate. AFTER the terminal-close refusal so R4's ordering holds,
     # and before the gate so a close that owes the price never spends a review.
-    companion_text = _refuse_if_entry_price_is_owed(deps, disposition)
+    companion = _refuse_if_entry_price_is_owed(deps, disposition)
     # The check the close never had (#961). Every other write verb meets the invlang schema
     # through `permission.decide_write`; the close is the verb that PUBLISHES — report.md
     # commits against this document and the review gate parses it — so it was the one path on
@@ -501,14 +503,20 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         }
         # #923: `inconclusive` carries the gap claim it just paid its entry price with into
         # the committed report — the one place model text belongs on this path. `unresolved`
-        # is the host's own verdict and carries no companion-derived evidence.
-        ceiling_test = (
-            conclude_ceiling_test_rows(companion_text) if disposition == "inconclusive" else ()
-        )
+        # is the host's own verdict and carries NEITHER companion-derived field, the baseline
+        # included: a forced close skips the document gate (retry exhaustion has no model left
+        # to repair with), so publishing model free text there would put text through no
+        # structural check into the one artifact no model can be asked to fix — and text the
+        # report schema then refused would fail the forced close on a MISSING report.md, which
+        # is the dead-letter that exemption exists to prevent.
+        model_authored = disposition == "inconclusive"
         fields = _CloseFields(
             outcome=STANDS, cause=CAUSE_NOT_REVIEWED, detail="", material=(),
-            turns_used=0, failure_kind=None, ceiling_test=ceiling_test,
-            runtime_evidence=conclude_runtime_evidence_rows(companion_text),
+            turns_used=0, failure_kind=None,
+            ceiling_test=conclude_ceiling_test_rows(companion) if model_authored else (),
+            runtime_evidence=(
+                conclude_runtime_evidence_rows(companion) if model_authored else ()
+            ),
         )
         return _commit(deps, disposition, fields, record, validator=validator, evidence=evidence)
 
@@ -540,7 +548,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
         material=material, turns_used=verdict.turns_used,
         failure_kind=verdict.failure_kind,
-        runtime_evidence=conclude_runtime_evidence_rows(companion_text),
+        runtime_evidence=conclude_runtime_evidence_rows(companion),
     )
     return _commit(deps, verdict.disposition, fields, record, validator=validator,
                    evidence=evidence)
@@ -605,14 +613,21 @@ def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> N
         )
 
 
-def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> str:
+def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> CompanionBody:
     """Collect the structural price this close's KEYWORD owes, refuse if it is unpaid, and
-    hand back the `investigation.md` text the price was read off.
+    hand back the PARSED `investigation.md` the price was read off.
 
-    Returning the TEXT is what keeps #923's coverage channel honest: the `ceiling_test` rows
-    the close carries into `report.md` must be the rows this gate just priced. Re-reading the
-    file at the commit made the bound a bound on one snapshot and the report a copy of
-    another — a document rewritten between the two calls ships rows nothing charged.
+    Returning the parsed document is what keeps #923's coverage channel honest: the
+    `ceiling_test` rows the close carries into `report.md` must be the rows this gate just
+    priced. Re-reading the file at the commit made the bound a bound on one snapshot and the
+    report a copy of another — a document rewritten between the two calls ships rows nothing
+    charged.
+
+    The BODY rather than the text, so this is the run's ONE parse of it. `disposition_entry_price`
+    short-circuits ahead of its own parse for any unpriced keyword, so a `malicious` or
+    `unresolved` close used to reach the report readers with no parse having happened yet — and
+    theirs was bare, which turned a document this gate could not read into a traceback rather
+    than the refusal the wrapping below exists to produce.
 
     `report.md` is written FROM the close's disposition argument and nothing else on that path
     reads the companion, so a price collected only at the `investigation.md` write gate is owed
@@ -628,7 +643,8 @@ def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> str:
     """
     companion_text = _read_companion_text(Path(deps.run_dir) / "investigation.md")
     try:
-        price = disposition_entry_price(disposition, companion_text)
+        companion, _warnings = parse_dense_companion(companion_text)
+        price = entry_price(disposition, companion)
     except ModelRetry:
         raise
     except Exception as exc:
@@ -642,7 +658,7 @@ def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> str:
         # PER VERTEX, so a real log can owe dozens, and space-joined that is a wall. The write
         # gate already hands the model the same diagnostics one per line.
         raise ModelRetry("close blocked: " + price.rationale + "\n" + "\n".join(price.owed))
-    return companion_text
+    return companion
 
 
 def _read_companion_text(path: Path) -> str:

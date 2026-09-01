@@ -142,14 +142,22 @@ def _normalized(raw: Any) -> dict[str, str] | None:
     would drop a legitimate sanction over a formatting detail. Everything else must already be
     a non-empty string — a list or a mapping in a field this module compares as text would
     otherwise reach `fnmatchcase` and raise inside a verb body.
+
+    The fold goes through `.date()` FIRST, which is the whole of what makes it work. PyYAML also
+    resolves an unquoted `2026-03-01 00:00:00` — a legal timestamp a human plausibly commits —
+    to a `dt.datetime`, whose `isoformat()` is `'2026-03-01T00:00:00'`, and
+    `dt.date.fromisoformat` does not read that. So the branch that exists to SAVE these entries
+    dropped exactly the ones it was reached for, and the sanction silently stopped answering.
+    One `isinstance(value, dt.date)` covers both: `dt.datetime` is a `dt.date` subclass, which
+    is also why naming it beside `dt.date` in a tuple never selected anything on its own.
     """
     if not isinstance(raw, dict) or set(raw) != set(ENTRY_FIELDS):
         return None
     out: dict[str, str] = {}
     for field in ENTRY_FIELDS:
         value = raw[field]
-        if field in _DATE_FIELDS and isinstance(value, (dt.date, dt.datetime)):
-            value = value.isoformat()
+        if field in _DATE_FIELDS and isinstance(value, dt.date):
+            value = (value.date() if isinstance(value, dt.datetime) else value).isoformat()
         if not isinstance(value, str) or not value.strip():
             return None
         out[field] = value.strip()
@@ -200,6 +208,13 @@ def load_entries(path: Path) -> list[dict[str, str]]:
     ONE entry is dropped, never the file — the argument `_corpus.iter_query_templates` makes
     for the query catalog. Each drop is announced on stderr, because the only person who can
     repair the row is the human who committed it.
+
+    A REPEATED `id` is one of those drops. The file's own header says an id may never be
+    re-used, and until this check nothing enforced it: two entries could share one, `find_entry`
+    would answer with whichever came first in file order, and a `:R authz` row citing that id
+    named neither of them in particular. A citation has to identify ONE sanction — that is the
+    entire reason the id exists rather than a `pattern` string — so the later row is refused
+    while the first, which every existing citation already means, keeps answering.
     """
     try:
         loaded = _yaml.safe_load(read_text_utf8(Path(path)))
@@ -209,11 +224,21 @@ def load_entries(path: Path) -> list[dict[str, str]]:
         return []
     rows = loaded.get("entries") if isinstance(loaded, dict) else None
     entries: list[dict[str, str]] = []
+    claimed: set[str] = set()
     for raw in rows if isinstance(rows, list) else []:
         entry, refusal = _read_entry(raw)
         if entry is None:
             print(f"warn: skipping tacit-knowledge entry ({refusal})", file=_sys.stderr)
             continue
+        if entry["id"] in claimed:
+            print(
+                f"warn: skipping tacit-knowledge entry (entry {entry['id']!r}: an EARLIER entry "
+                f"already claims this `id` — an id names ONE sanction, and a citation cannot "
+                f"say which of two it means; give this entry its own id)",
+                file=_sys.stderr,
+            )
+            continue
+        claimed.add(entry["id"])
         entries.append(entry)
     return entries
 
@@ -231,10 +256,18 @@ def find_entry(
     `build-runner-07.prod.example` is not a `build-runner-*.prod` host — so resemblance to a
     past case cannot become a hit at read time either.
 
-    Expiry is a property of the READ, not of the load: an entry that is well formed and inside
-    the review span still stops answering once its own review date passes, which is what makes
-    the freshness bound stand in for a live system's re-verification. An expired entry is
-    simply NO HIT — never a refusal, and never a stale authorization.
+    Validity is a property of the READ, not of the load, and it has BOTH ends. An entry that is
+    well formed and inside the review span still stops answering once its own review date
+    passes, which is what makes the freshness bound stand in for a live system's
+    re-verification — and it does not START answering before the day it says it was added.
+
+    The second half is what makes the first mean anything. `_read_entry` bounds the SPAN between
+    the two dates, so an entry cannot name its own expiry; checking only `review_by` on the way
+    out left that bound satisfiable by moving both dates forward together, which buys effectively
+    unlimited validity from today with a legal 151-day span. A sanction dated into the future has
+    not been authored yet as far as this read is concerned.
+
+    Either way it is simply NO HIT — never a refusal, and never a stale authorization.
     """
     for entry in entries:
         if entry["pattern"] != pattern:
@@ -243,8 +276,10 @@ def find_entry(
             continue
         if not fnmatchcase(host, entry["host_scope"]):
             continue
-        review_by = _parse_date(entry["review_by"])
-        if review_by is None or review_by < now:
+        added_at, review_by = _parse_date(entry["added_at"]), _parse_date(entry["review_by"])
+        if added_at is None or review_by is None:
+            continue
+        if not added_at <= now <= review_by:
             continue
         return entry
     return None

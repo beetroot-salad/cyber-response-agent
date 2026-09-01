@@ -329,12 +329,18 @@ keyed on the contract id. Columns:
 - `anchor_kind` — closed vocab (`enum anchor-kinds`); must match the declaring contract's `anchor_kind`.
 - `grounding?` — what KIND of thing the verdict rests on: `org-authority`
   (an affirmative record in a system of record — an IAM policy, an
-  approved change, a tacit-knowledge registry entry) or `past-case`.
+  approved change, a tacit-knowledge registry entry), a more specific
+  label for the same (`iam-policy-binding`), or `past-case`.
   `telemetry-baseline` is **refused here**: a statistical pattern is what
   the estate *has been* doing, never what it is *permitted* to do. Record
-  that as a `:R consultations` row instead (below).
+  that as a `:R consultations` row instead (below). The refusal reads the
+  cell case- and separator-folded, so `telemetry_baseline` is refused too.
 - `anchor_id?` — the specific record the verdict cites (a CR id, a policy
-  name, a registry entry id).
+  name, a registry entry id). **Required on a `verdict: authorized` row
+  whose `anchor_kind` is `tacit-knowledge`**: the citation is the receipt,
+  so leaving the column out is the receipt skipped, not a receipt paid. An
+  `indeterminate` row owes none — a lookup that came back empty has no
+  entry to name.
 - `basis?` — on `verdict: indeterminate` only: `retry` (the default, and
   what an absent cell means — this contract has not been worked yet) or
   `exhausted` (every anchor kind applicable to this contract's predicate
@@ -360,7 +366,20 @@ actually ran: record what `tacit-knowledge.lookup` came back with as a
 `:R consultations` row on the SAME lead first, then cite that entry's id
 as the `:R authz` row's `anchor_id`. A citation no lookup produced —
 including one another lead found, and one written beside a recorded miss
-— is refused on write.
+— is refused on write. Declare the two optional columns you need:
+
+```invlang
+:R consultations [resolved_by|anchor_kind|grounding|anchor_id|result|effective_window|reasoning]
+l-001|tacit-knowledge|org-authority|tk-ca-bundle-build-runner|"hit: entry covers uid-0 on build-runner-*.prod"|2026-03-01T00:00:00Z/2026-09-01T00:00:00Z|"one unexpired scope-matching entry"
+
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|grounding|anchor_id|reasoning]
+l-001|e-001|ac1|authorized|tacit-knowledge|org-authority|tk-ca-bundle-build-runner|"registry entry covers uid-0 on build-runner hosts"
+```
+
+The lookup came back empty? Then there is no second row to write:
+record the `miss:` and resolve the contract `indeterminate` with no
+`anchor_id`, adding `basis: exhausted` only if every registry that could
+answer this predicate was actually queried this run.
 
 ### `:R consultations` (what an anchor SAID, without deciding anything)
 
@@ -378,9 +397,15 @@ discharge a contract — that is the point, not an omission.
 - `grounding` — `enum consultation.grounding`: `org-authority` or
   `telemetry-baseline`. (`past-case` is excluded: grounding a baseline on
   a past case is reasoning from resemblance.)
-- `result` — what came back, quoted. A MISS names no `anchor_id`; there is
-  no entry to name.
-- `effective_window` — `<start>/<end>`, ISO-8601 instants.
+- `result` — what came back, quoted. On an `anchor_kind: tacit-knowledge`
+  row it **opens with `hit:` or `miss:`** (`enum
+  consultation.lookup_outcome`) and the rest is yours: a lookup came back
+  with an entry or it did not, and the authorization citing this row is
+  checked against which. A MISS names no `anchor_id` — there is no entry
+  to name, and an id written beside one is refused.
+- `effective_window` — `<start>/<end>`, ISO-8601 instants. Required on a
+  `runtime-evidence` baseline (see below); on a registry receipt it is the
+  ENTRY's validity span.
 
 Two uses, and they are different:
 
@@ -395,6 +420,11 @@ Two uses, and they are different:
   rides into `report.md`'s body — and it buys the close **nothing**: the
   benign gate never reads it. Its window must end **strictly before** the
   alerted event; a pattern that begins with the incident is the incident.
+  That comparison needs the alerted moment, so a document with no
+  parseable `when` on any `:E prologue.edges` row cannot carry a baseline
+  at all. Because `result` and `reasoning` are published verbatim, they
+  may not contain `</report>`, and the accumulated baselines are bounded —
+  state the recurrence and its scope, not every occurrence.
   Do not write one as probative when the live hypothesis's own predictions
   turn on novelty or rarity — the same evidence cannot both test for an
   anomaly and rule it out.

@@ -107,6 +107,18 @@ AUTHZ_INDET_BASIS: tuple[str, ...] = ("retry", "exhausted")
 #: statistical pattern is context, never a verdict (`_check_authz_row_grounding`).
 CONSULTATION_GROUNDING: tuple[str, ...] = ("org-authority", "telemetry-baseline")
 
+#: How a `tacit-knowledge` `:R consultations` row records WHAT THE LOOKUP CAME BACK WITH, as the
+#: first token of its `result` cell (`hit: ...` / `miss: ...`).
+#:
+#: A RULE rather than the convention it started as. The anchor receipt reads "this lead came
+#: back holding this entry" off the presence of an `anchor_id`, and the convention that a miss
+#: names none is not something the presence of a cell can enforce — a `result` saying `miss` and
+#: an `anchor_id` beside it is a document contradicting itself, and it was accepted. Closing it
+#: needs the outcome to be a value the validator can read, and the cheapest such value is the
+#: one the format already writes: `lookup` returns `matched: entry | None`, so the row's own
+#: first token is a two-member vocabulary and not free text.
+TACIT_LOOKUP_OUTCOMES: tuple[str, ...] = ("hit", "miss")
+
 #: Anchor kind → the ONE gather system that can answer it. PARTIAL on purpose (#983 fork F8).
 #:
 #: Minted so `basis=exhausted` can be checked against WHICH system a lead actually went to —
@@ -290,6 +302,7 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "auth-kinds": AUTH_KINDS,
     "authz.basis": AUTHZ_INDET_BASIS,
     "consultation.grounding": CONSULTATION_GROUNDING,
+    "consultation.lookup_outcome": TACIT_LOOKUP_OUTCOMES,
     "impact.dimension": IMPACT_DIMENSION,
     "impact.verdict": IMPACT_VERDICT,
     "impact.grounding": IMPACT_GROUNDING,
