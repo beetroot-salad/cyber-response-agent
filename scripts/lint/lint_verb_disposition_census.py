@@ -43,6 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from defender._paths import adapters_under  # noqa: E402
 from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
 from defender.runtime.verb_dispositions import (  # noqa: E402
@@ -51,12 +52,39 @@ from defender.runtime.verb_dispositions import (  # noqa: E402
     dispositions_path,
     load_dispositions,
 )
-from defender.runtime.verbs import declared_verb_names  # noqa: E402
+from defender.runtime.verbs import _adapter_path, declared_verb_names  # noqa: E402
 
 
 def _walk(defender_dir: Path, systems: frozenset[str]) -> dict[str, frozenset[str]]:
-    adapters = defender_dir / "scripts" / "adapters"
+    adapters = adapters_under(defender_dir)
     return {s: declared_verb_names(adapters, s) for s in sorted(systems)}
+
+
+def _unreadable_adapters(
+    defender_dir: Path, walked: dict[str, frozenset[str]]
+) -> tuple[str, ...]:
+    """Systems that HAVE an adapter the walk read no verb out of — the gate's fail-open hole.
+
+    `declared_verb_names` answers `frozenset()` both for "no adapter" and for "an adapter this
+    reader cannot see into": a source that does not read or parse, or a `VERBS` that is not a
+    top-level dict LITERAL (`VERBS: dict[str, Verb] = {...}` is an `AnnAssign` and declares
+    nothing to it, and neither does a table assembled in a loop). That polarity is right for
+    `ModuleVerbRegistry`, where an unreadable table refuses every grant; it is exactly
+    backwards here, where an empty walk yields no `undecided` and the gate prints "clean ...
+    with no residue" over a system nobody has decided anything about — #995's own defect
+    wearing this gate's clothes. So an adapter that exists and declares nothing is exit 2: the
+    census over it was never taken.
+
+    Adapter PRESENCE is what separates the two, which is why this is not simply "walked to an
+    empty set". An MCP-path system is declared by its committed `execution.md` marker and has
+    no adapter module by design (`skills/connect/mcp.md`); it is out of this census's reach
+    either way, and failing on it would block a legitimate integration.
+    """
+    adapters = adapters_under(defender_dir)
+    return tuple(
+        s for s in sorted(walked)
+        if not walked[s] and _adapter_path(adapters, s) is not None
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -80,7 +108,21 @@ def main(argv: list[str]) -> int:
         print(f"lint_verb_disposition_census: {e}", file=sys.stderr)
         return 2
 
-    gaps = census_gaps(_walk(defender_dir, systems), rows)
+    walked = _walk(defender_dir, systems)
+    blind = _unreadable_adapters(defender_dir, walked)
+    if blind:
+        print(
+            f"lint_verb_disposition_census: {list(blind)} have an adapter the cold verb "
+            "reader saw no verb in, so no census over them was taken and their absence from "
+            "the table means nothing. The adapter does not parse, or declares `VERBS` as "
+            "something other than a top-level dict literal — an annotated assignment "
+            "(`VERBS: dict[str, Verb] = {...}`) or a table built in a loop declares nothing "
+            "to the reader. Fix the adapter.",
+            file=sys.stderr,
+        )
+        return 2
+
+    gaps = census_gaps(walked, rows)
     if not gaps:
         print(
             f"lint_verb_disposition_census: clean — {len(rows)} dispositions cover "

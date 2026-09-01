@@ -10,6 +10,7 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -203,6 +204,25 @@ MAIN_DEF = AgentDefinition(
     budget_enforced=True,
 )
 
+
+@lru_cache(maxsize=1)
+def _dispositions() -> tuple[Disposition, ...]:
+    """The shipped verb-disposition table, read ONCE for this process.
+
+    Read at import, and a missing or malformed table raises here rather than yielding an empty
+    grant. That is deliberate: an empty grant reports every verb as unknown, which is this
+    issue's own symptom applied to the whole product.
+
+    Cached because three module-scope readers want the same rows — `GATHER_PAIRS`,
+    `_gather_verb_grant`, and the judge's own projection — and each uncached call is a file
+    read plus two full YAML passes (the duplicate-key compose, then the load) over a file that
+    cannot change under a running process.
+    """
+    from defender._paths import PATHS
+
+    return load_dispositions(dispositions_path(PATHS.defender_dir))
+
+
 #: The gather grant, projected from the verb-disposition table (#995). It used to be a tuple
 #: of pairs written here, which made this a shared file every new system had to edit while
 #: `/connect`'s lane rules forbade touching it — so a connected system was silently
@@ -210,19 +230,11 @@ MAIN_DEF = AgentDefinition(
 #: is only where a human writes it. See `runtime/verb_dispositions.py` for why that
 #: distinction is the entire design.
 #:
-#: Read at import, and a missing or malformed table raises here rather than yielding an empty
-#: grant. That is deliberate: an empty grant reports every verb as unknown, which is this
-#: issue's own symptom applied to the whole product.
-def _dispositions() -> tuple[Disposition, ...]:
-    from defender._paths import PATHS
-
-    return load_dispositions(dispositions_path(PATHS.defender_dir))
-
-
-#: The gather grant's non-`health-check` pairs, kept as a module export because
-#: `tests/_verb_authorization_632.py` compares it against an independently written census.
-#: DERIVED now rather than authored here — which is what turns that comparison from two hand
-#: copies agreeing with each other into a real check on the shipped table.
+#: `GATHER_PAIRS` is the grant's non-`health-check` half, kept as a module export for the same
+#: reason it always was — it is the driver's published name for the census. It has no reader
+#: in the tree today: `tests/_verb_authorization_632.py` holds its OWN independently written
+#: copy and `test_verb_grant_632` compares that copy against `GATHER_DEF.verb_grant`, which is
+#: the check that matters now that this side is derived rather than authored.
 GATHER_PAIRS: tuple[tuple[str, str], ...] = tuple(
     (s, v) for s, v, _ in grant_for(AgentRole.GATHER.value, _dispositions()).entries
     if v != "health-check"

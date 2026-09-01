@@ -491,7 +491,13 @@ class ModuleVerbRegistry(VerbRegistry):
         # One cold read+parse per SYSTEM, not per grant entry: `declared_verb_names` re-reads
         # and re-parses the adapter every call, and the shipped gather grant names 30 entries
         # across 8 systems.
+        # …and that dict is KEPT as the cold cache rather than thrown away: since #995
+        # `decide` also cold-reads on the refusal path for a system the grant does not reach
+        # at all, which a model looping on one ungranted name would otherwise pay a fresh
+        # read+parse for on every call. An adapters tree does not change under a live
+        # registry — `verbs()` memoizes the loaded module on the same assumption.
         declared = {s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries}
+        self._cold: dict[str, frozenset[str]] = dict(declared)
         offenders = [(s, v) for s, v, _ in grant.entries if v not in declared[s]]
         if offenders:
             named = ", ".join(f"{s}.{v}" for s, v in offenders)
@@ -519,7 +525,11 @@ class ModuleVerbRegistry(VerbRegistry):
         ))
 
     def _cold_verb_names(self, system: str) -> frozenset[str] | None:
-        return declared_verb_names(self.adapters_dir, system)
+        cached = self._cold.get(system)
+        if cached is None:
+            cached = declared_verb_names(self.adapters_dir, system)
+            self._cold[system] = cached
+        return cached
 
     def verbs(self, system: str) -> Mapping[str, Verb]:
         path = _adapter_path(self.adapters_dir, system)

@@ -19,31 +19,66 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
     """
     try:
         root = yaml.compose(text)
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError):
         # Unparseable is not this function's verdict to give — the caller's own `safe_load`
         # raises on it with the parser's message, which says far more than "duplicates: none".
+        # `RecursionError` for the same reason: `safe_load` below translates it into a
+        # `YAMLError`, and a document too deep to compose must reach the caller as that, not as
+        # an interpreter error escaping a helper that promises never to raise.
         return ()
 
     found: list[str] = []
-
-    def walk(node: Any, path: str) -> None:
+    # Iterative, with an identity-keyed visited set. Recursion here has two ways to blow the
+    # stack that `compose` itself survives: a deeply nested document, and an anchor that
+    # contains its own alias (`a: &x {b: *x}`), which PyYAML composes into a CYCLIC node graph
+    # because it registers the anchor before filling the node in. `safe_load` handles both;
+    # this must too, or it turns a caller's typed refusal into a `RecursionError`.
+    stack: list[tuple[Any, str]] = [(root, "")]
+    seen_nodes: set[int] = set()
+    while stack:
+        node, path = stack.pop()
+        if id(node) in seen_nodes:
+            continue
+        seen_nodes.add(id(node))
         if isinstance(node, yaml.MappingNode):
-            seen: set[str] = set()
+            keys: set[Any] = set()
             for key_node, value_node in node.value:
-                key = getattr(key_node, "value", None)
-                if not isinstance(key, str):
-                    continue
-                here = f"{path}.{key}" if path else key
-                if key in seen:
+                label = key_node.value if isinstance(key_node, yaml.ScalarNode) else "?"
+                here = f"{path}.{label}" if path else str(label)
+                key = _resolved_key(key_node)
+                if key in keys:
                     found.append(here)
-                seen.add(key)
-                walk(value_node, here)
+                keys.add(key)
+                stack.append((value_node, here))
         elif isinstance(node, yaml.SequenceNode):
             for i, child in enumerate(node.value):
-                walk(child, f"{path}[{i}]")
-
-    walk(root, "")
+                stack.append((child, f"{path}[{i}]"))
     return tuple(found)
+
+
+def _resolved_key(key_node: Any) -> Any:
+    """A mapping key's identity AFTER tag resolution, which is the identity `safe_load` uses.
+
+    Comparing the raw scalar text is wrong in both directions, and this function's whole job
+    is the direction that loses data: `yes:` and `true:` are different text and the SAME key
+    (PyYAML 1.1 booleans, and `1:`/`true:` collapse too because Python dicts hash them
+    together), so a document carrying both silently keeps one row — precisely the collapse
+    this module exists to report. The other direction is a false alarm: `1:` and `"1":` are
+    the same text under different tags and are two real, distinct keys.
+
+    The identity is therefore the CONSTRUCTED value and nothing else, because a Python dict is
+    what `safe_load` builds and its key identity is the one that decides which row survives.
+    """
+    if not isinstance(key_node, yaml.ScalarNode):
+        # A collection key: unhashable once constructed, and no document this is used on has
+        # one. An identity that at least never collides with a scalar's.
+        return (key_node.tag, id(key_node))
+    try:
+        value = yaml.constructor.SafeConstructor().construct_object(key_node)
+        hash(value)
+    except Exception:  # noqa: BLE001 — an unconstructable key falls back to its raw text
+        return (key_node.tag, key_node.value)
+    return value
 
 
 def safe_load(text: str) -> Any:

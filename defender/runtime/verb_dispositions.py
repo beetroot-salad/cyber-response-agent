@@ -49,10 +49,15 @@ from defender.runtime.agent_role import AgentRole
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import is_system_name
 
+#: The table's home BELOW a defender tree, and the one place its filename is spelled.
+#: `DISPOSITIONS_REL` and `dispositions_path` both derive from it rather than repeating the
+#: components — two spellings of one path is exactly the drift this module is about.
+_REL_TO_DEFENDER = Path("knowledge") / "environment" / "verb-grants.yaml"
+
 #: Repo-relative home of the table. In the environment tree, not the runtime package: it is
 #: per-deployment data, and `lint_shippable_surface` already treats that tree as the place
 #: vendor names legitimately live.
-DISPOSITIONS_REL = "defender/knowledge/environment/verb-grants.yaml"
+DISPOSITIONS_REL = f"defender/{_REL_TO_DEFENDER.as_posix()}"
 
 #: The roles a row may name. Sourced from `AgentRole` rather than respelled, so a role that is
 #: renamed cannot leave a table silently granting to a name nothing answers to.
@@ -116,7 +121,7 @@ def dispositions_path(defender_dir: Path) -> Path:
     `_paths.adapters_under` does: the lint gate resolves the table of a repo it was pointed
     at, which is not the tree this process is running from.
     """
-    return Path(defender_dir) / "knowledge" / "environment" / "verb-grants.yaml"
+    return Path(defender_dir) / _REL_TO_DEFENDER
 
 
 def _systems_block(path: Path) -> Mapping[object, object]:
@@ -159,7 +164,27 @@ def _systems_block(path: Path) -> Mapping[object, object]:
             "which is the silent-mute failure this file exists to prevent. Grant nothing by "
             "writing rows with `roles: []` and a reason."
         )
+    _reject_unread_keys(f"verb-disposition table at {path}", data, ("dispositions",))
     return systems
+
+
+def _reject_unread_keys(
+    where: str, mapping: Mapping[object, object], known: tuple[str, ...]
+) -> None:
+    """Refuse a mapping carrying a key nothing here reads.
+
+    A key the loader ignores is a statement a reviewer WILL read and the runtime will not
+    honour — the same two-statements-one-honoured defect as a duplicate key, one level up. An
+    adversarial implementer of #995 hid a `residue: settled` top-level key in the shipped table
+    to mute the census; a `class: rw` on a row, or a misspelled `resaon:` leaving a withholding
+    unexplained while looking explained, are the same shape inside a row.
+    """
+    unknown = sorted(str(k) for k in mapping if k not in known)
+    if unknown:
+        raise DispositionError(
+            f"{where} carries key(s) {unknown} that nothing reads — the key(s) read here are "
+            f"{list(known)}"
+        )
 
 
 def load_dispositions(path: Path) -> tuple[Disposition, ...]:
@@ -194,6 +219,10 @@ def _disposition_row(
         raise DispositionError(f"{where} is not a verb name")
     if not isinstance(body, Mapping):
         raise DispositionError(f"{where} must be a mapping with a `roles:` key")
+
+    # `roles` and `reason` are the whole row schema; adding a third is a change to this module
+    # (see the module docstring on why that friction is the point).
+    _reject_unread_keys(where, body, ("roles", "reason"))
 
     # An ABSENT `roles` is an unfinished row, not a withholding. Defaulting it to `[]` would
     # make a half-written table withhold silently — the same class as everything else here.

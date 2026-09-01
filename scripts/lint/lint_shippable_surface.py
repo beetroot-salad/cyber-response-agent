@@ -36,6 +36,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
+from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
+
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
 
@@ -133,7 +135,10 @@ def excluded_prefixes(root: Path) -> tuple[str, ...]:
     ))
 
 
-def _excluded(rel: str, prefixes: tuple[str, ...] | None = None) -> bool:
+def _excluded(rel: str, prefixes: tuple[str, ...]) -> bool:
+    """`prefixes` is REQUIRED, not defaulted to a fresh `excluded_prefixes(REPO_ROOT)`:
+    resolving them shells out to git, and this is called once per file in a corpus of
+    thousands. The one caller resolves them once and threads them in."""
     if rel in EXCLUDED_FILES:
         return True
     # Flat pytest modules (test_*.py / *_test.py) anywhere — fixture/scaffold code
@@ -141,9 +146,7 @@ def _excluded(rel: str, prefixes: tuple[str, ...] | None = None) -> bool:
     name = rel.rsplit("/", 1)[-1]
     if name.startswith("test_") or name.endswith("_test.py"):
         return True
-    return any(rel.startswith(p) for p in (
-        excluded_prefixes(REPO_ROOT) if prefixes is None else prefixes
-    ))
+    return any(rel.startswith(p) for p in prefixes)
 
 
 def _scan() -> list[Finding]:
@@ -202,10 +205,16 @@ def main(argv: list[str]) -> int:
     # A file inside the scan scope that could not be read or parsed never entered the corpus,
     # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
     # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    # `LeadAuthorError` for the same reason, since #995: the per-system carve-out is resolved
+    # rather than typed, so an unresolvable systems roster means the scan would run with the
+    # WRONG exclusions — over-reporting at best, and never a clean verdict anyone should trust.
     try:
         findings = _scan()
     except ScanBlind as exc:
         print(f"lint_shippable_surface: {exc}", file=sys.stderr)
+        return 2
+    except LeadAuthorError as exc:
+        print(f"lint_shippable_surface: cannot resolve systems: {exc}", file=sys.stderr)
         return 2
     print("Suppress legitimate references with `# lint-shippable: ok — <reason>` on the line.")
     print("Per-vendor systems skills are excluded by directory (see EXCLUDED_PREFIXES).")
