@@ -1,6 +1,6 @@
 ---
 name: write-code-from-spec
-description: "Turn a settled design and its pre-written test spec into shipped, CI-green code. Work in an isolated worktree, read the issue/design and the committed tests, implement real code until the suite passes locally, ship a PR that closes the issue, then watch CI and repair failures until green — honestly (fix the cause, never weaken a test or a gate) and within a bounded repair loop that hands a stuck run back to a human with the PR and session linked. Also looses an adversarial implementer against the spec in parallel, so non-discriminating tests surface before merge. Use after write-tests has committed and pushed the spec; it is write-tests' mirror — write-tests pins intent as tests, write-code-from-spec makes the code match."
+description: "Turn a settled design and its pre-written test spec into shipped, CI-green code. Work in an isolated worktree, read the issue/design and the committed tests, implement real code until the suite passes locally, ship a PR that closes the issue, then watch CI and repair failures until green — honestly (fix the cause, never weaken a test or a gate) and within a bounded repair loop that hands a stuck run back to a human with the PR and session linked. Also looses two adversaries in parallel — one that never sees the code and attacks the tests (can green be reached while betraying intent), one that sees only the code and attacks its own docstrings and comments (does it do what it says) — so non-discriminating tests and dishonest prose both surface before merge. Use after write-tests has committed and pushed the spec; it is write-tests' mirror — write-tests pins intent as tests, write-code-from-spec makes the code match."
 argument-hint: "[issue # or design doc path]"
 effort: medium
 ---
@@ -43,11 +43,22 @@ The prose says why; the tests say what. Where they disagree, the committed tests
 
 So before writing, list the mechanisms the design names, and for each one you do not use, make it a **declared deviation**: the property the original carried, why the replacement carries it too, and who now owns its lifetime and its read side. If you cannot write those three, you have not picked a mechanism — you have picked a shape. If you think the design's choice is wrong, that is a fork to surface (§3), never a quiet substitution.
 
-## 2. Loose the adversary
+## 2. Loose the adversaries
 
-The suite you are about to satisfy claims to discriminate — that green cannot be reached by code that betrays the intent. The adversary is the empirical check on that claim, run while you implement. Once §1's gates pass and **before you write any code**, spawn one **Opus subagent** on `references/adversary.md` (sibling of this file). Its dispatch is a pointer, not a payload: the charge path, a fresh worktree detached at the spec ref (`git worktree add --detach ../wt-issue-<n>-adversary <spec-ref>` — detached, because the spec branch is already checked out here; it must fork from the same ignorance you did and never see your code), the profile path, the spec_graph path, the issue number, and the attack deck path (`.claude/spec-flow-attacks.md`). Its game: green `gate.test` with code that violates a stated intent; every exploit that works is a non-discriminating test, named before it can hide a real bug.
+Two of them, and they are mirrors: one never sees your code and attacks the **tests**, the other sees nothing but your code and attacks its **prose**. Neither can see what the other does, and they answer different questions — is the suite tight enough that green means intent, and is the code honest about what it does. Both are samplers; neither certifies anything.
+
+**The spec adversary — now, before you write any code.** The suite you are about to satisfy claims to discriminate. This is the empirical check on that claim, run while you implement. Once §1's gates pass, spawn one **Opus subagent** on `references/adversary.md` (sibling of this file). Its dispatch is a pointer, not a payload: the charge path, a fresh worktree detached at the spec ref (`git worktree add --detach ../wt-issue-<n>-adversary <spec-ref>` — detached, because the spec branch is already checked out here; it must fork from the same ignorance you did and never see your code), the profile path, the spec_graph path, the issue number, and the attack deck path (`.claude/spec-flow-attacks.md`). Its game: green `gate.test` with code that violates a stated intent; every exploit that works is a non-discriminating test, named before it can hide a real bug.
 
 Collect it before you ship (§4). Its findings are **spec defects**, routed like §1's graph findings — post them to the issue thread, and the merge-gate human decides per hole: kick back to write-tests to tighten, or accept with the record. Never a reason to edit the suite yourself, and never a repair task. If it is still running at your ship point, ship and record that the adversarial pass ran incomplete; if it found nothing, record that too — no findings is a sample, not a certificate.
+
+**The claims adversary — later, at the end of §3, because it needs code to read.** It takes the docstrings and comments your change added as testable assertions and tries to falsify them: harvest a claim that counts or forbids something, construct the case it says cannot exist, run it. Spawn one **Sonnet subagent** on `references/claims-adversary.md` — cheaper by design, because that work is mechanical where the spec adversary's is inventive. Dispatch is again a pointer: the charge path, its own worktree detached at the pushed head (`git worktree add --detach ../wt-issue-<n>-claims HEAD`), the profile path, the issue number, and the diff range. It runs while you watch CI (§5), so it costs you no wall-clock.
+
+Its findings route differently from the spec adversary's, because they are about the code you are shipping rather than the spec you were given, and **either half can be the one that is wrong**:
+
+- *The code is wrong* — a bug in this PR. Fix it under §3's rules, **with a test that fails without the fix**; a repair with no test is what this pipeline exists to prevent. If the honest fix is out of this change's scope, it is a spec question (§3), not something to leave silent.
+- *The claim is wrong* — the code is right and the sentence overstates it. Correct the sentence. This is a real fix and must be treated as one: a pass that only ever demanded code changes would teach authors to write vaguer comments, and the comments are what give this pass anything to attack.
+
+Bound it the way §5 bounds repair — take the cheap and certain ones, route the rest to the issue thread with the human. If it is still running at your ship point, ship and record that it ran incomplete. Should the §5 repair loop change a file it reported on, re-check that one finding before you call it settled.
 
 ## 3. Implement to green — locally, against the whole gate
 
@@ -65,13 +76,15 @@ Then mirror the *rest* of CI locally **before shipping**. CI is almost always mo
 
 Fix the cause, not the test. If making the code honest genuinely requires a test to change — the spec had a bug, or a fork was never actually resolved — stop and kick it back to the human as a spec question; shipping code that passes a quietly-loosened test defeats the whole pipeline.
 
+**Now spawn the claims adversary (§2).** The code exists and the gate is green, which is everything it needs; push first so it can fork from the same commit CI is about to run. It reads while you watch CI, so it is free wall-clock rather than a step in the critical path.
+
 ## 4. Ship
 
 Ship the change — see the `ship` skill for the branch/commit/push/open-PR mechanics. This branch's ancestry is pinned by the spec_graph `base:` field: do **not** apply `ship`'s default rebase-before-push rule. If the repository requires an up-to-date branch, stop for a human rather than rewriting the spec branch beneath its recorded base. By step 0 you are already on the spec's branch inside the worktree, so this is a push-and-open, not a fresh branch. Three additions specific to this phase:
 
 - **Link the issue** in the PR body (`Closes #<n>`) so the merge closes it.
 - **Declare the mechanism deviations** (§1) in the PR body — the design's choice, yours, and what carries the property the design picked its choice for — so the merge-gate human weighs each substitution instead of discovering it. None is a legitimate answer; silence is not.
-- **Carry the adversary's verdict** in the PR body — each hole with its violated clause, or that it ran clean at its bound (or incomplete) — so the merge-gate human weighs the spec's tightness alongside the code.
+- **Carry both adversaries' verdicts** in the PR body, under their own headings and never merged into one — they answer different questions and a human weighing the merge needs them apart. `## Spec adversary`: each hole with its violated clause, or that it ran clean at its bound (or incomplete), so the spec's tightness is weighed alongside the code. `## Claims adversary`: each falsified claim quoted with its location, which half you fixed (the code, or the sentence), and anything you routed to the human instead — plus its attempts ledger, because a claim that resisted is the only positive evidence either pass produces. "No findings" from either is a sample, not a certificate, and says so.
 - **Report the PR number** as part of the outcome — on failure as well as success, so a PR that opened but never greened stays linked and `claude --resume`-able.
 
 ## 5. Watch CI and repair — bounded, honest
