@@ -97,12 +97,18 @@ l-001|1|cmdb-lookup|v-001||cmdb|n/a
 WARN_ROW = "l-001|v-001|owner|svc.config-mgmt"
 #: A SECOND, textually distinct warn-family row, on the other declared vertex.
 SECOND_WARN_ROW = "l-001|v-002|dept|finance"
-#: What `WARN_ROW` becomes under the validator's own first `use:` alternative for it, with the
-#: VALUE cell moved onto the `compute` class grammar. The offer rewrites the KEY and keeps the
-#: value; #986 armed the class-slot vocabulary, so a repair that keeps `svc.config-mgmt` in a
-#: `class` cell is now refused a second time — for the value rather than the key — and the
-#: repaired document never lands. The `attrs.<name>` alternative below is the route that keeps
-#: an arbitrary value, and it is asserted beside this one.
+#: A legal `class` repair of `WARN_ROW` — HAND-WRITTEN, not the validator's own offer, which is
+#: the difference #986 made and the reason this comment is longer than the constant.
+#:
+#: The offer rewrites the KEY and keeps the author's VALUE, and since #986 a `class` cell on a
+#: `compute` vertex is judged against `compute.role` — so `svc.config-mgmt` under `class` is
+#: refused for the value, the `class` route is WITHHELD, and `REPAIRED_ROW_ATTRS` below is the
+#: only alternative the validator now prints (asserted in
+#: `test_gate_refusal_names_the_flagged_rows_and_their_use_alternatives`). The tests here that
+#: feed this row exercise `fix_row`'s own mechanics — the window, the multiplicity rule, the
+#: append-only comparison — on a row that lands; the "the model pastes exactly the bytes it was
+#: handed" property belongs to the offers, and `test_class_vocab_986` is where every offered
+#: route is put back through the validator.
 REPAIRED_ROW = "l-001|v-001|class|file-server/internal/known-corp"
 #: The other legal repair — the `attrs.<name>` spelling. Keeps the VALUE cell verbatim.
 REPAIRED_ROW_ATTRS = "l-001|v-001|attrs.owner|svc.config-mgmt"

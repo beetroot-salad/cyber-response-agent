@@ -526,7 +526,7 @@ def test_suggestion_splits_back_to_the_declared_column_count():
     This trigger is unattested in the corpus (C18), so D6 does not stand alone — D7 carries
     the weight.
     """
-    doc = attr_doc(ESCAPED_PIPE_ROW)
+    doc = attr_doc(ESCAPED_PIPE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     d = key_warning(doc)
     assert d.fix, "both candidates survive this row; withholding here loses a working repair"
     for candidate in d.fix:
@@ -597,7 +597,7 @@ def test_suggestion_differs_from_the_authors_row_in_the_key_cell_only():
     strips every cell it emits, so today's rejoin normalises the padding away (C17) — writing
     this as a regression over base behaviour would be wrong.
     """
-    padded = key_warning(attr_doc(PADDED_ROW))
+    padded = key_warning(attr_doc(PADDED_ROW, prologue=VERTICES_FREEFORM_CLASS))
     assert padded.locus.row_text == PADDED_ROW
     assert padded.fix[0] == "l-001| v-001 |class|hello"
     assert padded.fix[1] == "l-001| v-001 |attrs.bogus|hello"
@@ -635,7 +635,7 @@ def test_quoted_pipe_cells_round_trip_unchanged():
     """
     for value in ('"curl|bash"', 'cmd="curl|bash"'):
         row = f"l-001|v-001|bogus|{value}"
-        d = key_warning(attr_doc(row))
+        d = key_warning(attr_doc(row, prologue=VERTICES_FREEFORM_CLASS))
         assert d.locus.row_text == row
         assert d.fix == (f"l-001|v-001|class|{value}", f"l-001|v-001|attrs.bogus|{value}")
         for candidate in d.fix:
@@ -667,7 +667,9 @@ def test_suggestion_preserves_leading_but_not_trailing_padding_in_the_value_cell
     tokenizer strips each line, so `locus.row_text` for `…|bogus|  hello  ` is
     `…|bogus|  hello` (J7) and no rebuild can preserve trailing padding.
     """
-    d = key_warning(attr_doc("l-001|v-001|bogus|  hello  "))
+    d = key_warning(
+        attr_doc("l-001|v-001|bogus|  hello  ", prologue=VERTICES_FREEFORM_CLASS)
+    )
     assert d.locus.row_text == "l-001|v-001|bogus|  hello"
     assert d.fix[0] == "l-001|v-001|class|  hello"
     assert d.fix[1] == "l-001|v-001|attrs.bogus|  hello"
@@ -683,7 +685,9 @@ def test_even_length_trailing_backslash_run_re_splits_to_the_declared_width():
     reachable: the escape eats the delimiter, the row splits to three under a four-column
     header, and it is refused as a shape error before the key check runs at all (J8).
     """
-    d = key_warning(attr_doc(r"l-001|v-001|bogus\\|hello"))
+    d = key_warning(
+        attr_doc(r"l-001|v-001|bogus\\|hello", prologue=VERTICES_FREEFORM_CLASS)
+    )
     assert d.fix == (r"l-001|v-001|class|hello", r"l-001|v-001|attrs.bogus\\|hello")
     for candidate in d.fix:
         assert len(cells(candidate)) == 4
@@ -713,7 +717,7 @@ def test_a_quoted_legal_keyword_is_repaired_by_unquoting_it():
     declaring that vertex carries them too — so teaching the key check to unquote would put it
     at odds with the target match one column to its left.
     """
-    doc = attr_doc(MID_TOKEN_QUOTE_ROW)
+    doc = attr_doc(MID_TOKEN_QUOTE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     d = key_warning(doc)
     assert "'\"class\"'" in d.message, "the quoted keyword is still an illegal key"
     assert d.fix == ("l-001|v-001|class|hello",)
@@ -735,7 +739,9 @@ def test_an_empty_key_is_not_repaired_into_an_empty_attribute_name():
     effect of a quote. The `class` route is unaffected and is offered alone — nothing is
     silently dropped, because for an empty name there is no second route to drop.
     """
-    d = key_warning(attr_doc('l-001|v-001|""|hello'))
+    d = key_warning(
+        attr_doc('l-001|v-001|""|hello', prologue=VERTICES_FREEFORM_CLASS)
+    )
     assert d.fix == ("l-001|v-001|class|hello",)
     assert not any(c.endswith("attrs.|hello") for c in d.fix)
 
@@ -1064,7 +1070,7 @@ def test_a_rebuilt_row_that_moves_bytes_between_cells_is_withheld():
     padding the tokenizer would have stripped anyway and is not allowed to move a byte across
     a boundary.
     """
-    d = key_warning(attr_doc(BYTES_MOVE_ROW))
+    d = key_warning(attr_doc(BYTES_MOVE_ROW, prologue=VERTICES_FREEFORM_CLASS))
     assert d.fix == ()
     assert d.locus is not None
     assert d.locus.row_text == BYTES_MOVE_ROW
@@ -1073,7 +1079,7 @@ def test_a_rebuilt_row_that_moves_bytes_between_cells_is_withheld():
     # The complementary condition: an escaped pipe the rebuild does NOT have to re-escape —
     # one cell to the RIGHT of `key` — is still offered, so the guard is not "withhold on any
     # backslash".
-    offered = key_warning(attr_doc(ESCAPED_PIPE_ROW))
+    offered = key_warning(attr_doc(ESCAPED_PIPE_ROW, prologue=VERTICES_FREEFORM_CLASS))
     assert offered.fix == (
         r"l-001|v-001|class|curl\|bash",
         r"l-001|v-001|attrs.bogus|curl\|bash",
@@ -1116,7 +1122,8 @@ def test_the_repaired_cell_is_the_one_the_record_read():
     closes.
     """
     d = key_warning(attr_doc("l-001|class|v-001|bogus|hello",
-                             header="[resolved_by|key|target|key|value]"))
+                             header="[resolved_by|key|target|key|value]",
+                             prologue=VERTICES_FREEFORM_CLASS))
     assert d.fix == (
         "l-001|class|v-001|class|hello",
         "l-001|class|v-001|attrs.bogus|hello",

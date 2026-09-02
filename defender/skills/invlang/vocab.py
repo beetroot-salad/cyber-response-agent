@@ -359,9 +359,49 @@ def attr_slot_key(vertex_type: str, attribute: str) -> str | None:
     (`compute.kind`) and free text on a type that registers no enum for it, and the six
     `impact.*` / `conclude.*` / `attr-pred.target` keys in `SLOTS` are not vertex attributes at
     all — a lookup by bare name would hand a vertex the grading vocabulary of a resolution row.
+
+    A `CLASS_GRAMMAR` POSITION is not an attribute either, and is excluded for the same reason.
+    `compute.role` / `compute.zone` / `compute.provenance` (and `identity.*`, `application.*`)
+    close a slash-slot of the `class` cell; SKILL.md registers no `attrs.role` and no
+    `attrs.zone`, so an author writing `role=primary` (a database primary) or
+    `zone=us-east-1a` (a cloud AZ) means a free attribute that happens to share a word with a
+    class slot — and closing it against the class enum refuses an honest write while advising a
+    vocabulary that answers a different question. The arity-1 types are NOT excluded: SKILL.md
+    §Classification grammar says the single token IS "the corresponding `attrs.kind` enum where
+    the type has one", so `storage`'s `attrs.kind` and its `class` cell are one vocabulary by
+    construction, and `compute.kind` / `socket.protocol` are attribute enums to begin with.
     """
     key = f"{vertex_type}.{attribute}"
-    return key if key in SLOTS else None
+    if key not in SLOTS or key in CLASS_GRAMMAR.get(vertex_type, ()):
+        return None
+    return key
+
+
+def vertex_slots_holding(value: str, *, other_than: str) -> tuple[str, ...]:
+    """Every VERTEX slot other than `other_than` whose enum holds `value` — same type first.
+
+    Here rather than in `validate`, for the reason `class_slot_keys` and `attr_slot_key` are:
+    this is a membership question about THIS module's registry, and a reader that walks `SLOTS`
+    itself is a second interpreter of the catalog that drifts the moment a key is added.
+
+    VERTEX slots only — a key whose head is a `TYPES` member. `SLOTS` also registers
+    `disposition`, `types`, `relations`, `anchor-kinds`, `auth-kinds` and the `impact.*` /
+    `conclude.*` / `attr-pred.target` grading vocabularies, and none of them can ever close a
+    cell on a vertex: pointing an author at `enum relations` because `created` happens to be a
+    relation, when the cell under their cursor is a `storage.kind`, is worse than no hint at all.
+
+    SAME TYPE FIRST because the category confusion this serves (#986) is confusion between two
+    axes of ONE type — `container` is a `compute.kind` written into `compute.role`. A cross-type
+    hit is still reported when nothing on the type matches, because it names the OTHER move an
+    author has: "`proxy` is a `network-device.kind`" says the vertex is the wrong type, not the
+    cell.
+    """
+    head = f"{other_than.split('.')[0]}."
+    hits = [
+        key for key, allowed in SLOTS.items()
+        if key != other_than and key.split(".")[0] in TYPES and value in allowed
+    ]
+    return tuple(sorted(hits, key=lambda k: not k.startswith(head)))
 
 
 def list_slots() -> list[str]:

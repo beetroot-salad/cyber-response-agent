@@ -54,9 +54,15 @@ from defender.skills.invlang.validate import diagnose, validate_companion  # noq
 # order. The `:V` block is the same migration from the other side: #836 refuses a refinement
 # naming a vertex no `:V` declares, and an undeclared target would be a SECOND fault in a
 # fixture whose whole job is to carry one.
+#
+# `v-003` is a `process`, the one type whose `class` cell no enum closes ("image basename").
+# Since #986 the `class` route is withheld when the author's VALUE cell would not stand in a
+# `class` cell of the target's type, and `svc.config-mgmt` is no `compute.role` — so on a
+# `compute` target these tests would be asserting the vocabulary rule instead of the two
+# corrections they were written for.
 _BAD_ATTR_KEY = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-003|compute|workstation/internal/known-corp|office-ws-1|
+v-003|process|bash|bash[pid=4120]|
 
 :L findings [id|loop|name|target|tests|system|window]
 l-003|1|cmdb-lookup-office-ws-1|v-001||cmdb|n/a
@@ -486,9 +492,11 @@ def test_the_registered_roster_is_what_the_toolset_grants():
 
 # #825 — the correction follows the block's DECLARED header, not a convention
 
+#: `v-003` is a `process` for the reason `_BAD_ATTR_KEY` records: both corrections have to be
+#: offered for their column order to be observable at all.
 _TRANSPOSED = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-003|compute|workstation/internal/known-corp|office-ws-1|
+v-003|process|bash|bash[pid=4120]|
 
 :L findings [id|loop|name|target|tests|system|window]
 l-003|1|cmdb-lookup|v-001||cmdb|n/a

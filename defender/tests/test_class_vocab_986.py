@@ -13,13 +13,15 @@ The real-world instance: a run resolved a container's identity and wrote
 confusion. `defender/tests/_golden_invlang/turnN-A.investigation.md` carried the identical
 defect independently (`v-004|compute|container/??/??|...`), now fixed alongside this suite.
 
-RED AGAINST HEAD IS THE EXPECTED STATE for every test below except the ones proving the
-non-obligations (process stays freeform; the six `impact.*`/`attr-pred.target` SLOTS keys are
-not vertex-attrs cells). No implementation exists yet.
+The check is `validate._check_vocab_class_cells`, and the tests below are its contract: the
+positives that must be refused, the escape hatches (`??`, a candidate set, the two documented
+catch-alls) that must pass through unchecked, and the non-obligations (process stays freeform;
+a `CLASS_GRAMMAR` position is not an `attrs` vocabulary; the six `impact.*`/`attr-pred.target`
+SLOTS keys are not vertex-attrs cells at all).
 """
 from __future__ import annotations
 
-from defender.skills.invlang.validate import validate_companion
+from defender.skills.invlang.validate import diagnose, validate_companion
 
 
 def _companion(*blocks: str) -> str:
@@ -248,6 +250,217 @@ def test_986_e2e_realistic_investigation_flags_the_reported_defect():
     )
     errors = validate_companion(doc, None)
     assert any("compute.role" in e for e in errors), (
-        "the real reported defect (v-005's class cell) must be refused",
-        errors,
+        f"the real reported defect (v-005's class cell) must be refused; got {errors}"
     )
+
+
+# ---------------------------------------------------------------------------
+# the boundaries a membership check has to stop at, or it refuses honest writes
+# ---------------------------------------------------------------------------
+
+
+def test_a_class_grammar_position_is_not_an_attrs_vocabulary():
+    """`compute.role` closes the FIRST SLASH-SLOT of a `compute` class cell, not an
+    `attrs.role`. SKILL.md registers no `attrs.role` and no `attrs.zone`, so an author writing
+    a database's `role=primary` or a cloud AZ's `zone=us-east-1a` means a free attribute that
+    happens to share a word with a class slot — closing it against the class enum refuses an
+    honest write and advises a vocabulary that answers a different question."""
+    for attrs in ("role=primary", "zone=us-east-1a", "provenance=vendor-supplied"):
+        doc = _vertex_doc(f"v-001|compute|web-server/internal/known-corp|db-1|{attrs}")
+        assert validate_companion(doc, None) == [], attrs
+
+    # ...and the arity-1 types keep theirs, because SKILL.md says the single class token IS
+    # "the corresponding `attrs.kind` enum where the type has one".
+    doc = _vertex_doc("v-001|storage|secrets|vault-1|kind=imaginary")
+    assert any("storage.kind" in e for e in validate_companion(doc, None))
+
+
+def test_a_quoted_value_is_judged_as_the_value_it_quotes():
+    """A quote PROTECTS a delimiter in this format and is kept by `_split_cells`, so the same
+    value arrives bare from a `:V` attrs cell and quoted from a `:R attr_updates` value cell.
+    Judging the raw bytes makes one vocabulary answer two ways about one value."""
+    assert validate_companion(
+        _vertex_doc('v-001|compute|web-server/internal/known-corp|db-1|kind="container"'),
+        None,
+    ) == []
+    assert validate_companion(
+        _refine_doc(
+            "v-001|compute|web-server/internal/known-corp|db-1|",
+            'l-001|v-001|attrs.kind|"container"',
+        ),
+        None,
+    ) == []
+    assert validate_companion(
+        _refine_doc(
+            "v-001|compute|??/??/??|db-1|",
+            'l-001|v-001|class|"web-server/internal/known-corp"',
+        ),
+        None,
+    ) == []
+
+
+def test_a_vertex_re_declared_under_a_second_type_has_no_grammar_to_dispatch_on():
+    """`_walkers.vertex_types` is FIRST-DECLARATION-WINS while `effective_vertex_state` folds a
+    LATER row's class over an open one, so pairing the two judges the second row's cell by the
+    first row's type — `interactive` refused as a `compute.role`, a refusal about a cell nobody
+    wrote. One type or no check.
+
+    That is a rule about the FOLDED walk only. Each `:V` ROW still carries its own `type` cell
+    and is judged by it (`_declared_row_errors`), which is why both rows here have to be
+    individually legal for this to come back empty — and why the re-declaration is not a way to
+    smuggle an off-vocabulary class past the gate."""
+    doc = _companion(
+        ":V prologue.vertices [id|type|class|ident|attrs?]",
+        "v-001|compute|??/??/??|x|",
+        "",
+        ":L findings [id|loop|name|target|tests|system|window]",
+        "l-001|1|lookup|v-001||cmdb|n/a",
+        "",
+        ":V l-001.observations.vertices [id|type|class|ident|attrs?]",
+        "v-001|session|interactive|x|",
+    )
+    assert validate_companion(doc, None) == []
+
+
+def test_the_cross_slot_hint_names_a_slot_on_this_vertexs_own_type():
+    """The hint is for the category confusion #986 is about — two axes of ONE type. Taking the
+    first hit in `SLOTS` order instead points an `application` vertex at `compute.role`, a slot
+    no cell on that vertex can ever hold."""
+    errors = validate_companion(
+        _vertex_doc("v-001|application|unknown/corp-tenant|acme|"), None
+    )
+    assert any("application.trust" in e for e in errors), errors
+    assert not any("compute.role" in e for e in errors), errors
+
+
+def test_the_offered_class_repair_is_withheld_when_this_check_would_refuse_it():
+    """The illegal-key repair rewrites the KEY and keeps the author's VALUE, so on a `compute`
+    vertex the `class` route turns `owner|svc.config-mgmt` into `class|svc.config-mgmt` — which
+    this check refuses. An offer the validator's own gate rejects is the F-47 shape: the model
+    pastes the bytes it was handed and is refused for a cell it did not choose."""
+    doc = _companion(
+        ":V prologue.vertices [id|type|class|ident|attrs?]",
+        "v-001|compute|web-server/internal/known-corp|host|",
+        "",
+        ":L findings [id|loop|name|target|tests|system|window]",
+        "l-001|1|cmdb-lookup|v-001||cmdb|n/a",
+        "",
+        ":R attr_updates [resolved_by|target|key|value]",
+        "l-001|v-001|owner|svc.config-mgmt",
+    )
+    offers = [c for d in diagnose(doc, None) for c in d.fix]
+    assert offers, "withholding every route leaves the flagged row with no repair at all"
+    for candidate in offers:
+        repaired = doc.replace("l-001|v-001|owner|svc.config-mgmt", candidate)
+        assert validate_companion(repaired, None) == [], candidate
+
+    # ...and the control: on a type whose class cell no enum closes, the `class` route stands.
+    freeform = doc.replace(
+        "v-001|compute|web-server/internal/known-corp|host|",
+        "v-001|process|bash|bash[pid=1]|",
+    )
+    assert any(
+        c == "l-001|v-001|class|svc.config-mgmt"
+        for d in diagnose(freeform, None) for c in d.fix
+    ), "the route is withheld for the VALUE, never for the key"
+
+
+def test_every_offered_repair_route_lands_clean_not_only_the_class_one():
+    """The `attrs.<name>` route keeps the author's VALUE exactly as the `class` route does, and
+    `attr_slot_key` closes `compute.kind` — so `kind|imaginary` was offered
+    `attrs.kind|imaginary` as its ONLY repair and the paste earned this check's refusal. Same
+    defect, one route over: a route is offered only when the document it produces stands.
+
+    Withholding EVERY route is the honest answer here — no repair keeps `imaginary` on a
+    `compute` vertex — and the message has to say so for each route it withheld, or the author
+    reads a sentence naming `class` and `attrs.<name>` as legal beside no `use:` line at all.
+    """
+    doc = _companion(
+        ":V prologue.vertices [id|type|class|ident|attrs?]",
+        "v-001|compute|web-server/internal/known-corp|host|",
+        "",
+        ":L findings [id|loop|name|target|tests|system|window]",
+        "l-001|1|cmdb-lookup|v-001||cmdb|n/a",
+        "",
+        ":R attr_updates [resolved_by|target|key|value]",
+        "l-001|v-001|kind|imaginary",
+    )
+    flagged = [d for d in diagnose(doc, None) if d.locus and d.fix is not None]
+    assert flagged, "the illegal key still has to be flagged"
+    for d in flagged:
+        for candidate in d.fix:
+            repaired = doc.replace("l-001|v-001|kind|imaginary", candidate)
+            assert validate_companion(repaired, None) == [], candidate
+    message = " ".join(d.message for d in flagged)
+    assert "no `class` alternative is offered here" in message, message
+    assert "no `attrs.kind` alternative is offered here" in message, message
+
+    # ...and the complement: an `attrs.<name>` naming NO closed vocabulary carries any value,
+    # so that route stands where the `class` one does not.
+    other = doc.replace("l-001|v-001|kind|imaginary", "l-001|v-001|owner|imaginary")
+    assert any(
+        c == "l-001|v-001|attrs.owner|imaginary"
+        for d in diagnose(other, None) for c in d.fix
+    )
+
+
+def test_a_withheld_route_is_explained_only_where_it_was_a_candidate():
+    """A quoted LEGAL key has exactly one route — the key the author quoted. A `class` refusal
+    printed beside `"ident"` explains withholding something that was never going to be offered,
+    and reads as the validator refusing the repair it just printed."""
+    doc = _companion(
+        ":V prologue.vertices [id|type|class|ident|attrs?]",
+        "v-001|compute|web-server/internal/known-corp|host|",
+        "",
+        ":L findings [id|loop|name|target|tests|system|window]",
+        "l-001|1|cmdb-lookup|v-001||cmdb|n/a",
+        "",
+        ":R attr_updates [resolved_by|target|key|value]",
+        'l-001|v-001|"ident"|svc.config-mgmt',
+    )
+    flagged = [d for d in diagnose(doc, None) if d.locus and d.locus.row_text.endswith(
+        'l-001|v-001|"ident"|svc.config-mgmt'
+    )]
+    assert flagged
+    for d in flagged:
+        assert d.fix == ("l-001|v-001|ident|svc.config-mgmt",), d.fix
+        assert "alternative is offered here" not in d.message, d.message
+
+
+def test_a_later_declaration_the_fold_discards_is_still_checked():
+    """`_seed_vertex_state` upgrades a held class only from BLANK or OPEN, so a concrete cell
+    written over a concrete one is dropped by the fold — and a check reading only the fold never
+    sees the row the model just wrote. It is on disk forever under append-only, and it is #986's
+    own shape: a lead's observations block re-declaring an already-classified host."""
+    doc = _companion(
+        ":V prologue.vertices [id|type|class|ident|attrs?]",
+        "v-001|compute|web-server/internal/known-corp|host|",
+        "",
+        ":L findings [id|loop|name|target|tests|system|window]",
+        "l-001|1|container-identification|v-001||host-state|n/a",
+        "",
+        ":V l-001.observations.vertices [id|type|class|ident|attrs?]",
+        "v-001|compute|container/internal/novel|host|",
+    )
+    errors = validate_companion(doc, None)
+    assert any("compute.role" in e for e in errors), errors
+    # ...and exactly once: the declared-row walk and the folded walk both reach a cell the fold
+    # DOES take, and one defect must not print as two.
+    once = _vertex_doc("v-001|compute|container/internal/novel|db-1|")
+    assert len(validate_companion(once, None)) == 1, validate_companion(once, None)
+
+
+def test_the_cross_slot_hint_never_names_a_catalog_no_vertex_cell_is_drawn_from():
+    """`vocab.SLOTS` also registers `types`, `relations`, `disposition`, the `impact.*` grading
+    keys and `attr-pred.target`. `created` is a RELATION, so a hint scanning the whole registry
+    told a `storage` author their class token "is a `relations` value" — advice about a catalog
+    no cell on a vertex is ever drawn from, which the hint's own rationale calls worse than no
+    hint at all."""
+    errors = validate_companion(_vertex_doc("v-001|storage|created|s-1|"), None)
+    assert any("storage.kind" in e for e in errors), errors
+    assert not any("relations" in e for e in errors), errors
+
+    # ...and the complement: a real cross-TYPE vertex slot is still named, because it tells the
+    # author the vertex may be the wrong type rather than the cell the wrong value.
+    cross = validate_companion(_vertex_doc("v-001|database|file|db-1|"), None)
+    assert any("storage.kind" in e for e in cross), cross

@@ -960,19 +960,30 @@ gate. This is also the upstream cause of the wide refutation rows: more
 predictions per hypothesis means a wider `refutes` scope means a longer
 De Morgan expansion.
 
-**Open: two current-spec rules were deferred because the spec
+**Closed: two current-spec rules were deferred because the spec
 contradicted its own worked examples.** Don't enforce one until its spec
-is reconciled, or it'll false-positive on valid current writes. One is
-still open; the second shipped in #933 and is struck below:
+is reconciled, or it'll false-positive on valid current writes. Both are
+now closed — the first in #986, the second in #933 — and both are struck
+below:
 
-- **Per-type class-slot grammar.** `skills/invlang/SKILL.md` §Classification
-  grammar defines slash-tuples per type with slot enums in `vocab.py`, but
-  its §Open-questions worked example uses `class=monitoring-agent/…` while
-  `COMPUTE_ROLE` only has `monitoring` (no `monitoring-agent`). A strict
-  per-slot check would reject the spec's own example. *Fix:* reconcile the
-  role enum vs the examples (add `monitoring-agent`, or correct the
-  examples to `monitoring`), settle the `??` / `{a,b,c}` / `unclassified-*`
-  / `ambiguous-*-or-*` escape grammar, then implement + enforce.
+- ~~**Per-type class-slot grammar.**~~ **Closed.** The spec contradiction
+  (`skills/invlang/SKILL.md` §Classification grammar defines slash-tuples
+  per type with slot enums in `vocab.py`, but its §Open-questions worked
+  example used `class=monitoring-agent/…` while `COMPUTE_ROLE` held only
+  `monitoring`) was decided in #986 the way the fix note below asked:
+  the ENUM moved to the SKILL's spelling (`monitoring-agent`, the corpus
+  carried with it), because a model writes what the prompt showed it. The
+  escape grammar settled as `??` and `{a,b,c}` reading OPEN and passing
+  unchecked, and `unclassified-*` / `ambiguous-*-or-*` passing as settled
+  answers the catalog does not hold (`validate.CATCHALL_PREFIXES`). The
+  check is `validate._check_vocab_class_cells`, over the folded document,
+  on a `:V` `class` cell, its closed-vocabulary `attrs` siblings, and a
+  `:R attr_updates` refinement of either.
+
+  What that still does NOT cover, deliberately: `:H parent_class`, which
+  §Classification grammar documents as following the same grammar
+  dispatched on `parent_type`. No test demanded it and #986 did not arm
+  it; it is the obvious next increment, not a hole the decision closed.
 - ~~**Sibling-fork uniqueness.**~~ **Closed.** The spec contradiction
   (§Sibling-fork uniqueness demanded a topological difference on
   `parent_type`/`parent_class`/`attached_to`/`rel` while the
@@ -995,9 +1006,9 @@ still open; the second shipped in #933 and is struck below:
   classifications any more, and nothing should: a shared concrete parent
   class with divergent predictions is a legal fork.
 
-Both were spec-owner decisions, not validator bugs. The class-slot one
-stays file-and-hold here until the canonical SKILL is internally
-consistent; it is now the only one left open.
+Both were spec-owner decisions, not validator bugs, and both were
+settled by reconciling the canonical SKILL first and enforcing second.
+Nothing on this list is still open.
 
 **Open, from #933 (rules 13–18 above).** Four, restated here so they are
 findable without reading the rule entries:
