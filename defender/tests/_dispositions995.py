@@ -92,6 +92,7 @@ __all__ = [
     "DispositionError",
     "DispositionWarning",
     "GATHER_CENSUS",
+    "CORRELATION_CENSUS",
     "JUDGE_CENSUS",
     "WITHHELD_CENSUS",
     "census_gaps",
@@ -146,6 +147,14 @@ GATHER_CENSUS: frozenset[tuple[str, str]] = frozenset(
 #: rather than deleted: what it enumerates is "the verbs one role holds alone", and the next
 #: role to hold a private surface should find the shape here rather than invent it.
 JUDGE_CENSUS: frozenset[tuple[str, str]] = frozenset()
+
+#: The turn-zero correlation lead's grant, transcribed from the `VerbGrant` literal
+#: `lead_zero/_spec.py` held before #999 moved it into the table. Two pairs on one system is
+#: the whole safety case for a lead the harness dispatches on its own, and the move must
+#: change it by nothing.
+CORRELATION_CENSUS: frozenset[tuple[str, str]] = frozenset((
+    ("elastic", "alerts"), ("elastic", "health-check"),
+))
 
 #: Declared by an adapter and granted to NOBODY. Each needs a written reason in the table;
 #: `ticket.case-opened-at` is the one the old code never named at all — it was ungranted by
