@@ -485,7 +485,7 @@ def test_the_grant_is_not_a_function_of_what_is_on_disk():
     assert before == after
 
 
-@pytest.mark.parametrize("role", ["gather", "judge"])
+@pytest.mark.parametrize("role", ["gather", "judge", "lead-zero-correlation"])
 def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
     """The total statement of "authored, not derived", in one line per role.
 
@@ -530,10 +530,13 @@ def test_the_shipped_definitions_carry_the_projected_grants():
     gates, which a literal cannot satisfy."""
     from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
     from defender.runtime.driver import GATHER_DEF
+    from defender.runtime.lead_zero import CORRELATION_GRANT
 
     rows = load_dispositions(dispositions_path(DEFENDER))
     assert set(GATHER_DEF.verb_grant.entries) == set(grant_for("gather", rows).entries)
     assert set(JUDGE_DEF.verb_grant.entries) == set(grant_for("judge", rows).entries)
+    # The third grant the table projects (#999): the turn-zero correlation lead's.
+    assert set(CORRELATION_GRANT.entries) == set(grant_for("lead-zero-correlation", rows).entries)
 
 
 def test_every_projected_pair_survives_registry_construction():

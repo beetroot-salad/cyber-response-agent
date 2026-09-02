@@ -32,6 +32,17 @@ class AgentRole(Enum):
     QUESTIONER = "questioner"
 
 
+#: The turn-zero correlation lead's name in the verb-disposition table (#999). NOT an enum
+#: member, on the rule the ablation lens follows above: the lead is bound from `GATHER_DEF`,
+#: so gather's compiled policy, trace file and wire-log id are its own, and what separates it
+#: is only a NARROWER projection of the same table — a key here would be a second compiled
+#: policy over the same grant. What the lead does need is a name a table row can carry, so a
+#: withholding can be written against it and a projection asked for by it. Published from
+#: this leaf because `verb_dispositions` and `lead_zero` both read it and neither may import
+#: the other to agree on the spelling.
+CORRELATION_GRANT_HOLDER = "lead-zero-correlation"
+
+
 #: The `agent_id` namespaces the run's ONE wire log (`llm_requests.jsonl`) is partitioned by:
 #: bare `main`, `gather:{lead_id}` per gather subagent, `review:{lens}` per review stage.
 #: Published HERE — the leaf that already owns agent identity — because the writers live in
