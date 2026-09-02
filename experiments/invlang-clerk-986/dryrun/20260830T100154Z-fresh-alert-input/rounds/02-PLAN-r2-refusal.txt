@@ -1,0 +1,10 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - parse error: (unknown file): :L findings row 0: row has 8 cells but 7 expected for [id|loop|name|target|tests|system|window] (check for unescaped `|` inside an attrs/value cell) | row='l-001|1|falco-sudo-events|v-001||h-001,h-002|elastic|alert-window'
+  - parse error: (unknown file): :L findings row 1: row has 8 cells but 7 expected for [id|loop|name|target|tests|system|window] (check for unescaped `|` inside an attrs/value cell) | row='l-002|1|cmdb-host-classification|v-001||h-001|cmdb|n/a'
+  - parse error: (unknown file): :L findings row 2: row has 8 cells but 7 expected for [id|loop|name|target|tests|system|window] (check for unescaped `|` inside an attrs/value cell) | row='l-003|1|change-window-check|v-001||ac1|change-mgmt|2026-08-30T09:59:51Z'
+  - undeclared lead 'l-001': referenced by a `:R` / `:T` row or a lead sub-block, but no `:L findings` row declares it. Declare it in a `:L findings` block and re-send — that holds for a HARNESS-RESERVED id whose declaring row is not on the page too: the harness reserves the id so you do not attach new work to it, and writing the row it is missing is not reusing it
+  - undeclared lead 'l-002': referenced by a `:R` / `:T` row or a lead sub-block, but no `:L findings` row declares it. Declare it in a `:L findings` block and re-send — that holds for a HARNESS-RESERVED id whose declaring row is not on the page too: the harness reserves the id so you do not attach new work to it, and writing the row it is missing is not reusing it
+  - undeclared lead 'l-003': referenced by a `:R` / `:T` row or a lead sub-block, but no `:L findings` row declares it. Declare it in a `:L findings` block and re-send — that holds for a HARNESS-RESERVED id whose declaring row is not on the page too: the harness reserves the id so you do not attach new work to it, and writing the row it is missing is not reusing it
+
+Re-send the block with those rows corrected.

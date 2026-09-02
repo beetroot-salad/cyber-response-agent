@@ -1,0 +1,4 @@
+GAPS:
+- prose references authz contract "ac2" (verdict indeterminate), but no `ac2` was ever declared under any `:H h-NNN.authz` in the document — only ac1 exists, already resolved `unauthorized` by l-003; no `:R authz` row can be written for an undeclared contract
+- prose's ticket-system finding (l-007, empty system) produces no attribute update, vertex, or edge to compile — no `??` slot or open commitment closes on it
+- prose's escalation intent ("authorization gap forces escalation") is stated without a disposition or conclude step — no row can record it outside `## REPORT`

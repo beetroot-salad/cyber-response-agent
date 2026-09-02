@@ -1,0 +1,22 @@
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-002|identity|??/??|root|knowledge=partial
+
+:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-002|executed|v-002|v-001|2026-08-30T09:54:51.724Z|runtime-audit:falco|cmd="sudo -u postgres psql -v ON_ERROR_STOP=1 --host=localhost --dbname=app";count=3;window=2026-08-30T09:54:51.724Z-2026-08-30T09:54:51.725Z
+
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-002|ident|root
+l-001|v-002|class|user/known-corp
+l-002|v-001|class|??/??/novel
+
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-003|proposed|ac1|unauthorized|change-mgmt|"no active change window, training exercise, or SOC drill documented for soc-playground"
+```
+
+GAPS:
+- prose identifies container `e5b0213bd690` as the execution context but assigns no vertex id — needs a `:V` (compute/container) from MAIN before it can be recorded
+- prose says commands "strongly favor h-001" but h-001's p1 (prior sudo baseline) is explicitly unresolved, so no `:T resolutions` row can honestly cite p1/p2 — belief movement deferred until the baseline question is answered
+- prose's open questions (a) root sudo baseline, (b) IAM authorization of root sudo (referred to as "ac2" but no such contract is declared in the document), (c) container identity — none carry lead ids; PLAN must mint those
+- no `:T close` written: prose does not state loop 1 is complete
+- ac1 was resolved `unauthorized`, which forces escalation per `on_unauth` unless the premise is shown not to apply — that determination is still open

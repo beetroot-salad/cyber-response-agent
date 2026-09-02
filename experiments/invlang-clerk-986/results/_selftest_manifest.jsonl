@@ -1,0 +1,3 @@
+{"run_id":"20260830T100154Z-fresh-alert-input","arm":"A","fixture":"F1-off-hours-sudo","label":"benign","clerk_model":"","exit":0}
+{"run_id":"b986-t8","arm":"A","fixture":"F1-off-hours-sudo","label":"benign","clerk_model":"","exit":0}
+{"run_id":"turnN-A","arm":"A","fixture":"F2-authorized-keys","label":"malicious","clerk_model":"","exit":0}

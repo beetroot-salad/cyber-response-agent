@@ -1,0 +1,5 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - parse error: (unknown file): :L findings row 0: row has 7 cells but the header requires 8 for [id|loop|name|target|mode|tests|system|window] — only a `?` column may be omitted (an unbalanced `"` inside a cell merges the cells after it: quote the whole cell, or escape the quote as `\"`) | row='l-001|1|falco-sudo-direct-query|||falco|n/a'
+
+Re-send the block with those rows corrected.

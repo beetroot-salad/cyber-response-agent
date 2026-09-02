@@ -1,0 +1,5 @@
+disposition: malicious
+confidence: high
+source: by construction — attack run playground-v2/attacks/runs/persistence-authorized-keys-729-6e4c6264
+  (scenario persistence-authorized-keys, root on canary-1, 2026-07-28T16:12:34Z) precedes the
+  alert (2026-07-28T16:16:53Z) by four minutes. Prior run turnN-A closed malicious.

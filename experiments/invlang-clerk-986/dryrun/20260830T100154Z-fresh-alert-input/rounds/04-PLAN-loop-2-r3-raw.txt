@@ -1,0 +1,10 @@
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-004|2|container-identity-resolution|soc-playground|ac1;h-001,h-002|runtime-audit|n/a
+l-005|2|sudo-postgres-baseline-check|soc-playground|h-001,h-002|elastic|n/a
+l-006|2|container-identification|soc-playground|h-001|runtime-audit|n/a
+```
+
+GAPS:
+- The prose asserts l-004 resolves authz contract ac2, but ac2 is not declared anywhere in the document so far (only ac1 exists, under h-001). The row therefore tests the declared ac1 instead; the ac2 resolution premise itself is ungrounded.
+- The prose notes the ac1 contract was resolved unauthorized in loop 1, but the document shows no `:R authz` row for that resolution yet.

@@ -1,0 +1,110 @@
+{
+  "alert_id": "7d45e42b1b577e258c02e6a7be3a8cd1fccd9bdb1e1cc0780027b956c44c8949",
+  "alert_timestamp": "2026-07-28T16:16:53.172Z",
+  "rule": {
+    "id": "v2-falco-authorized-keys-modification",
+    "name": "v2 Falco: authorized_keys modification",
+    "type": "query",
+    "severity": "high",
+    "risk_score": 73,
+    "tags": [
+      "v2",
+      "falco",
+      "persistence",
+      "ssh"
+    ],
+    "description": "Falco rule 'Adding ssh keys to authorized_keys' fired \u2014 a write to a user's ~/.ssh/authorized_keys inside a container. Persistence-class signal; triage answers who initiated the write and whether the change is part of an approved key-rotation event.",
+    "language": "kuery",
+    "query": "falco.rule: \"Adding ssh keys to authorized_keys\""
+  },
+  "reason": "event on soc-playground created high alert v2 Falco: authorized_keys modification.",
+  "host": {
+    "hostname": "soc-playground",
+    "os": {
+      "kernel": "6.8.0-71-generic",
+      "codename": "noble",
+      "name": "Ubuntu",
+      "family": "debian",
+      "type": "linux",
+      "version": "24.04.3 LTS (Noble Numbat)",
+      "platform": "ubuntu"
+    },
+    "ip": [
+      "178.104.17.107",
+      "2a01:4f8:1c18:555a::1",
+      "fe80::9000:9ff:fe51:bbf5",
+      "172.17.0.1",
+      "172.18.0.1",
+      "fe80::410:4fff:fee4:70b8",
+      "fe80::7c9f:c8ff:fe3b:4265",
+      "fe80::8441:45ff:febc:a25d",
+      "fe80::f060:9cff:fe2e:8b4f",
+      "fe80::c42:7bff:fefc:a584",
+      "fe80::48fe:bbff:fec7:9af8",
+      "fe80::1c43:80ff:feef:6113",
+      "fe80::7431:6fff:fe70:b9d2",
+      "fe80::d835:6dff:fef3:2cf5",
+      "fe80::f8d8:aeff:fe31:61df",
+      "fe80::90bd:20ff:fea4:a89",
+      "fe80::4c3b:adff:fe3c:6101",
+      "fe80::c4bb:87ff:fe7f:d0bc",
+      "fe80::c87a:caff:fe78:a2a6",
+      "fe80::54d2:26ff:fe31:c193",
+      "fe80::f017:c1ff:fe69:aaac",
+      "fe80::1831:f9ff:fe19:343f",
+      "fe80::74c0:6eff:fe0e:8712",
+      "fe80::3c2b:feff:fe77:ef73",
+      "fe80::5c24:6dff:feee:e59",
+      "fe80::dc11:f4ff:fec2:4887",
+      "fe80::c03a:31ff:fe7e:2613",
+      "fe80::98db:76ff:fe44:2333",
+      "fe80::a88c:eaff:fea1:6b85",
+      "fe80::1ccc:b2ff:feb8:e12"
+    ],
+    "containerized": false,
+    "name": "soc-playground",
+    "id": "53433647c31443da999f4f4d5326d980",
+    "mac": [
+      "06-10-4F-E4-70-B8",
+      "0E-42-7B-FC-A5-84",
+      "1A-31-F9-19-34-3F",
+      "1E-43-80-EF-61-13",
+      "1E-CC-B2-B8-0E-12",
+      "36-B1-CA-23-2E-8D",
+      "3E-2B-FE-77-EF-73",
+      "4A-FE-BB-C7-9A-F8",
+      "4E-3B-AD-3C-61-01",
+      "56-D2-26-31-C1-93",
+      "5E-24-6D-EE-0E-59",
+      "76-31-6F-70-B9-D2",
+      "76-C0-6E-0E-87-12",
+      "7E-9F-C8-3B-42-65",
+      "86-41-45-BC-A2-5D",
+      "92-00-09-51-BB-F5",
+      "92-BD-20-A4-0A-89",
+      "9A-DB-76-44-23-33",
+      "AA-8C-EA-A1-6B-85",
+      "C2-3A-31-7E-26-13",
+      "C6-BB-87-7F-D0-BC",
+      "CA-7A-CA-78-A2-A6",
+      "DA-35-6D-F3-2C-F5",
+      "DE-11-F4-C2-48-87",
+      "F2-17-C1-69-AA-AC",
+      "F2-60-9C-2E-8B-4F",
+      "FA-D8-AE-31-61-DF"
+    ],
+    "architecture": "x86_64"
+  },
+  "user": {
+    "name": null
+  },
+  "ancestor_events": [
+    {
+      "id": "AZ-pf1zgSr4B7DH3Zx68",
+      "type": "event",
+      "index": ".ds-logs-falco.alerts-default-2026.06.29-000007",
+      "depth": 0
+    }
+  ],
+  "signal_index": ".internal.alerts-security.alerts-default-*"
+}
