@@ -669,6 +669,16 @@ jobs:
       - name: Shared-oracle gate (a test may not re-run the code's own git query, #869 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_shared_oracle.py
 
+      # Every verb an adapter declares must have a row in the verb-disposition table —
+      # granted to a role, or granted to nobody WITH a written reason (#995). The grant is
+      # still authored, never derived from what is on disk; what this gate derives is the
+      # obligation to decide, so a newly connected system can be ungranted on the record but
+      # never by accident. NOT baseline-ratcheted, deliberately: a baseline here would be a
+      # list of systems permitted to stay silently unreachable, which is the defect wearing
+      # the fix's clothes.
+      - name: Verb-disposition census (no system silently ungranted, #995 — not ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_verb_disposition_census.py
+
       # A parameter re-defaulted in-body via `x = x if x is not None else DEFAULT`
       # to a named/called fallback: an Optional immediately made non-None, with the
       # default knowledge duplicated across call sites (and prone to drift). Anchor

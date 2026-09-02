@@ -190,6 +190,27 @@ the verb does not declare as a model-bindable param is a FAIL, and so is a
 verb from the query body. Do **not** build a catalog from API docs — the
 offline lead-author mints the rest from real runs.
 
+`defender/knowledge/environment/verb-grants.yaml` — **adapter path only:
+one row per verb the adapter declares, `health-check` included.** This is
+the one shared file a new adapter-backed system requires, and skipping it
+is why step 5 below would otherwise fail in a way that looks like a bug in
+your adapter: an ungranted system's verbs are refused, and the refusal says
+the system is not reachable at all. **On the MCP path, write nothing here**
+— an MCP-reached system declares no verbs to the registry, and a row naming
+one is residue the same CI gate fails on (`phantom`).
+
+Grant to `gather` the verbs an investigation should be able to call. A verb
+you are deliberately leaving unreachable gets `roles: []` **and a written
+reason** — that is a real decision and the file is where it is recorded.
+Nothing may be left out: CI (`lint_verb_disposition_census.py`) fails on a
+declared verb with no row.
+
+The allowlist is deliberate, not bookkeeping. It is authored so that
+dropping an adapter into the tree grants it nothing — a system is not
+reachable until a human says which of its verbs may be called. Do not
+"simplify" it by deriving it from the adapters on disk; that is the one
+change the design exists to prevent.
+
 ### 5. Test
 
 For the generated-adapter path, the human review checkpoint in
@@ -248,7 +269,8 @@ Then stop. `/ship` can open the PR.
   *names*, and the transport reads the value from the run's scrubbed
   `ctx.env` — the skill never sees a value.
 - **Stay in your lane.** Write only the `{system}_adapter.py` adapter,
-  `skills/{system}/`, that system's `config.env`, and its seed templates
+  `skills/{system}/`, that system's `config.env`, its seed templates, and
+  its rows in `knowledge/environment/verb-grants.yaml`
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
   `learning/`, `lessons/`, the runtime `defender/SKILL.md`, the invlang
   skill, or another system's files. On the `tacit.md` route the lane is
