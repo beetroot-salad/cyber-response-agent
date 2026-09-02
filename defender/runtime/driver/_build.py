@@ -222,12 +222,15 @@ def _gather_verb_grant() -> VerbGrant:
 #: copy and `test_verb_grant_632` compares that copy against `GATHER_DEF.verb_grant`, which is
 #: the check that matters now that this side is derived rather than authored.
 #:
-#: Sliced off `_gather_verb_grant` rather than projected a second time, so the projection this
-#: module performs is spelled exactly once. `HEALTH_CHECK` is imported rather than respelled
-#: for the same reason `KNOWN_ROLES` reads `AgentRole`: the table's module owns that token, and
-#: a second copy of it here is one that can drift.
+#: Sliced off the ONE projection this module performs — `_gather_verb_grant()` is called once
+#: and both this and `GATHER_DEF` read that value, rather than each calling it and building a
+#: second `VerbGrant` over the same rows. `HEALTH_CHECK` is imported rather than respelled for
+#: the same reason `KNOWN_ROLES` reads `AgentRole`: the table's module owns that token, and a
+#: second copy of it here is one that can drift.
+_GATHER_GRANT = _gather_verb_grant()
+
 GATHER_PAIRS: tuple[tuple[str, str], ...] = tuple(
-    (s, v) for s, v, _ in _gather_verb_grant().entries if v != HEALTH_CHECK
+    (s, v) for s, v, _ in _GATHER_GRANT.entries if v != HEALTH_CHECK
 )
 
 
@@ -241,7 +244,7 @@ GATHER_DEF = AgentDefinition(
     deps_cls=GatherDeps,
     deny_reason=permission.GATHER_FALLTHROUGH_DENY_REASON,
     budget_enforced=True,
-    verb_grant=_gather_verb_grant(),
+    verb_grant=_GATHER_GRANT,
 )
 
 

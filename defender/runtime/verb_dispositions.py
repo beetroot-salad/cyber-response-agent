@@ -266,7 +266,16 @@ def load_dispositions(path: Path) -> tuple[Disposition, ...]:
     for system, verbs in sorted(systems.items(), key=lambda kv: str(kv[0])):
         if not isinstance(system, str) or not is_system_name(system):
             raise DispositionError(f"{path}: {system!r} is not a well-formed system name")
-        if not isinstance(verbs, Mapping) or not verbs:
+        # The shape mistake said APART from the empty one, for the reason `_systems_block`
+        # separates them at the level above: "carries no verb rows" sends the author looking
+        # for rows to add, which is the wrong job when the rows are there and the container
+        # around them is a list.
+        if verbs is not None and not isinstance(verbs, Mapping):
+            raise DispositionError(
+                f"{path}: system {system!r} carries {type(verbs).__name__}, not a mapping of "
+                "verb name to row"
+            )
+        if not verbs:
             raise DispositionError(f"{path}: system {system!r} carries no verb rows")
         for verb_name, body in sorted(verbs.items(), key=lambda kv: str(kv[0])):
             rows.append(_disposition_row(path, system, verb_name, body))
@@ -306,8 +315,10 @@ def _warn_unhealth_checkable(path: Path, rows: tuple[Disposition, ...]) -> None:
         warnings.warn(
             f"{path}: system {system!r} grants gather no {HEALTH_CHECK!r}. Gather can query "
             f"it and cannot check whether it is up, so `/connect`'s test step and the "
-            f"runtime's nothing-to-try paths have nothing to probe it with. Grant "
-            f"{system}.{HEALTH_CHECK} to gather, or withhold {system!r} from gather entirely.",
+            f"runtime's nothing-to-try paths have nothing to probe it with. If its adapter "
+            f"declares {HEALTH_CHECK!r}, grant {system}.{HEALTH_CHECK} to gather; if it "
+            f"declares none, withhold {system!r} from gather entirely — a row for a verb no "
+            f"adapter declares is residue the census reports as a phantom.",
             DispositionWarning,
             stacklevel=2,
         )

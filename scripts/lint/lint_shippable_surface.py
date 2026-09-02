@@ -37,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
+from defender.runtime.verb_dispositions import DISPOSITIONS_REL  # noqa: E402
 
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
@@ -47,12 +48,13 @@ EXCLUDED_PREFIXES = (
     # Gather query templates are all per-system (+ the SCHEMA doc that documents
     # them) — the per-vendor surface, not env-agnostic code.
     "defender/skills/gather/queries/",
-    # The whole per-deployment environment tree, not just its `systems/` subdirectory. It
-    # holds this deployment's config — the per-system `config.env` files and, since #995, the
-    # verb-disposition table, which names every system BECAUSE naming them is its job. Moving
-    # the grant here is what let the `driver/_build.py:elastic` baseline entry be deleted
-    # rather than relocated: the shipped runtime no longer names a vendor at all.
-    "defender/knowledge/environment/",
+    # This deployment's per-system config. Kept at `systems/` rather than widened to the whole
+    # `environment/` tree: the verb-disposition table that landed beside it in #995 is carved
+    # out BY NAME below, so an env-agnostic file that lands in that tree later (a README, a
+    # schema doc) keeps being scanned instead of inheriting a directory-wide exemption nobody
+    # revisits. Moving the grant here is what let the `driver/_build.py:elastic` baseline
+    # entry be deleted rather than relocated: the shipped runtime no longer names a vendor.
+    "defender/knowledge/environment/systems/",
     "defender/fixtures/",
     # Vendored golden RUNS replayed by the e2e harness (tests/test_replay_*) —
     # captured from the v2 playground, so env-specific test data BY DESIGN, like
@@ -85,6 +87,11 @@ EXCLUDED_PREFIXES = (
 )
 
 EXCLUDED_FILES = {
+    # The verb-disposition table (#995) — per-deployment data that names every system BECAUSE
+    # naming them is its job. Spelled from `DISPOSITIONS_REL` rather than re-typed, for the
+    # reason `excluded_prefixes` derives the skill dirs: this gate keeping its own idea of
+    # where that file lives is the drift the table exists to close.
+    DISPOSITIONS_REL,
     "defender/CLAUDE.md",              # internal structure doc
     "defender/learning/actor-settings.json",  # settings file
     "defender/uv.lock",

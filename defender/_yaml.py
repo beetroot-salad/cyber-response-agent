@@ -58,8 +58,10 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
             # `<<:` EXPANDED FIRST, for the reason the docstring gives: while a merge is still
             # a `<<` pair of its own, the keys it contributes are invisible to the scan below,
             # so an explicit key silently shadowing a merged one reads as no repeat at all.
-            # `_artifact_schema._has_duplicate_top_level_key` flattens for the same reason —
-            # the two answers to "what would `safe_load` collapse here" must not diverge.
+            # `duplicate_top_level_key` below flattens for the same reason, and
+            # `_artifact_schema._has_duplicate_top_level_key` delegates to it rather than
+            # deciding again — the two answers to "what would `safe_load` collapse here" must
+            # not diverge, so there is only one.
             # Failure is not this function's verdict to give: an unmergeable `<<` reaches the
             # caller through its own `safe_load`, with the parser's message.
             with contextlib.suppress(yaml.YAMLError, RecursionError):
@@ -76,7 +78,45 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
         elif isinstance(node, yaml.SequenceNode):
             for i, child in enumerate(node.value):
                 stack.append((child, f"{path}[{i}]"))
-    return tuple(found)
+    # DEDUPLICATED, because the contract in the docstring is a key SET — "every mapping key
+    # that appears more than once" — and the loop above appends once per surplus occurrence,
+    # so `a:` written three times reported `('a', 'a')` and the caller's refusal listed one
+    # path twice. `dict.fromkeys` keeps first-seen order.
+    return tuple(dict.fromkeys(found))
+
+
+def duplicate_top_level_key(text: str) -> bool:
+    """True iff `text`'s TOP-LEVEL mapping declares the same key twice.
+
+    The same question as `duplicate_key_paths` asked of one level only, and it shares that
+    function's key identity (`_resolved_key`) and its merge handling rather than re-deciding
+    either: the frontmatter gate and the permission table must not end up with two answers to
+    "what would `safe_load` collapse here" (defender/CLAUDE.md — one home for a helper).
+
+    Top-level ONLY, deliberately: `_artifact_schema` reads a top-level `disposition:` and a
+    nested one is "missing" there rather than a repeat, so widening this to the nested scan
+    would deny a document the gate is supposed to admit.
+
+    Returns False on any parse trouble, for `duplicate_key_paths`' reason: the caller has
+    already parsed this text once, so trouble here means no reliable signal rather than a
+    verdict.
+    """
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except (yaml.YAMLError, RecursionError):
+        return False
+    if not isinstance(root, yaml.MappingNode):
+        return False
+    constructor = yaml.constructor.SafeConstructor()
+    with contextlib.suppress(yaml.YAMLError, RecursionError):
+        constructor.flatten_mapping(root)  # `<<:` merges become real top-level pairs
+    seen: set[Any] = set()
+    for key_node, _value_node in root.value:
+        key = _resolved_key(key_node, constructor)
+        if key in seen:
+            return True
+        seen.add(key)
+    return False
 
 
 def _resolved_key(key_node: Any, constructor: Any) -> Any:

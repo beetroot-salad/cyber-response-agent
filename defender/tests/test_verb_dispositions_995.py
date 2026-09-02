@@ -682,6 +682,25 @@ def test_a_repeated_key_raises_rather_than_letting_one_row_win(spelling: str):
     assert "cmdb" in str(caught.value)
 
 
+def test_a_key_written_three_times_is_named_once():
+    """`duplicate_key_paths` promises a set of repeated KEYS, and `_systems_block` renders it
+    into the refusal verbatim. One entry per surplus occurrence makes a key written three
+    times read as two separate defects in a message a human is meant to act on."""
+    path = _tmp()
+    path.write_text(
+        "dispositions:\n"
+        "  cmdb:\n"
+        "    get-host: {roles: [gather]}\n"
+        "    get-host: {roles: [judge]}\n"
+        "    get-host: {roles: [gather]}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(DispositionError) as caught:
+        load_dispositions(path)
+    assert str(caught.value).count("cmdb.get-host") == 1, \
+        f"the repeated pair must be named once, got {caught.value}"
+
+
 def test_the_duplicate_check_agrees_with_an_independent_oracle():
     """The check, cross-examined against a differently-built answer.
 
@@ -695,6 +714,15 @@ def test_the_duplicate_check_agrees_with_an_independent_oracle():
         pass
 
     def _mapping(loader, node, deep=False):  # noqa: ANN001
+        # FLATTENED FIRST, exactly as `SafeConstructor.construct_mapping` does below. Without
+        # it the oracle agrees with the implementation on `merge-key-shadowed` for the WRONG
+        # reason: `<<` is an unregistered tag on `SafeConstructor`, so `construct_object`
+        # raises `ConstructorError` ("could not determine a constructor for the tag
+        # ...:merge") before any key is compared — a `YAMLError`, which `pytest.raises`
+        # accepts. The one spelling this oracle exists to cross-examine was the one it never
+        # examined, and a `duplicate_key_paths` with no merge handling at all would still have
+        # passed this half of the test.
+        loader.flatten_mapping(node)
         seen = set()
         for key_node, _ in node.value:
             key = loader.construct_object(key_node, deep=deep)
@@ -708,7 +736,11 @@ def test_the_duplicate_check_agrees_with_an_independent_oracle():
     )
 
     for text in [_DUPLICATE_SPELLINGS[k] for k in sorted(_DUPLICATE_SPELLINGS)]:
-        with pytest.raises(yaml.YAMLError):
+        # `match=`, not a bare `YAMLError`: the oracle must refuse for the reason it exists to
+        # give. A bare catch is satisfied by the tag error an unflattened `<<` raises before
+        # any key is compared, which is how the merge spelling passed while being the one
+        # spelling neither side examined.
+        with pytest.raises(yaml.YAMLError, match="duplicate key"):
             yaml.load(text, Loader=_NoDupes)  # noqa: S506 — a SafeLoader subclass
         path = _tmp()
         path.write_text(text, encoding="utf-8")
