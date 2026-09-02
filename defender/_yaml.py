@@ -18,7 +18,11 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
     permission table) or a warning (a corpus document).
     """
     try:
-        root = yaml.compose(text)
+        # `SafeLoader` explicitly: `compose` defaults to the full `Loader`, and while composing
+        # constructs nothing, this module's whole contract with its callers is that untrusted
+        # text only ever meets the safe loader — a default that has to be argued about is one
+        # a later edit gets wrong.
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
     except (yaml.YAMLError, RecursionError):
         # Unparseable is not this function's verdict to give — the caller's own `safe_load`
         # raises on it with the parser's message, which says far more than "duplicates: none".

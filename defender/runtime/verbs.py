@@ -387,6 +387,14 @@ class VerbRegistry:
     answer verbs()/decide()?") cannot tell a real grant apart from a duck-typed stand-in that
     answers GRANTED to everything."""
 
+    #: Where THIS registry's grant is authored, or `None` when it is a code literal that no
+    #: data edit can widen. Read only by `decide`'s ungranted-system refusal, which since #995
+    #: tells the reader where to go — and a pointer is worse than silence when it names a file
+    #: that cannot fix the refusal. `lead_zero`'s narrowed correlation registry is exactly that
+    #: case: its grant is `_spec.CORRELATION_GRANT`, a tuple in Python, so it inherits `None`
+    #: and the refusal stops at what is true of every grant.
+    grant_home: str | None = None
+
     def __init__(self, grant: VerbGrant):
         if not isinstance(grant, VerbGrant):
             raise GrantError(
@@ -454,17 +462,25 @@ class VerbRegistry:
             # adapter must not be executed to explain why it is ungranted.
             cold = self._cold_verb_names(system)
             declared_here = cold is not None and verb in cold
+            if not declared_here:
+                return VerbDecision(
+                    UNDECLARED, None,
+                    f"unresolvable: {system}.{verb} (unknown, or role "
+                    f"{self.grant.role!r} holds no grant reaching it).",
+                )
+            # Where to go next, only when there IS somewhere: `grant_home` is `None` for a
+            # registry whose grant is a code literal, and naming the disposition table at one
+            # of those sends the reader to edit a file that cannot widen it — the same
+            # wrong-file symptom #995 set out to remove, one registry over.
+            fix = (
+                f" If {system!r} was just connected, it needs rows in the verb-disposition "
+                f"table ({self.grant_home})."
+            ) if self.grant_home is not None else ""
             return VerbDecision(
                 UNDECLARED, None,
-                (
-                    f"unresolvable: {system}.{verb} — the verb is declared, but role "
-                    f"{self.grant.role!r} holds no grant reaching the {system!r} system at "
-                    f"all. If {system!r} was just connected, it needs rows in the "
-                    "verb-disposition table (knowledge/environment/verb-grants.yaml)."
-                ) if declared_here else (
-                    f"unresolvable: {system}.{verb} (unknown, or role {self.grant.role!r} "
-                    "holds no grant reaching it)."
-                ),
+                f"unresolvable: {system}.{verb} — the verb is declared, but role "
+                f"{self.grant.role!r} holds no grant reaching the {system!r} system at "
+                f"all.{fix}",
             )
         try:
             verbs = self.verbs(system)
@@ -496,9 +512,21 @@ class ModuleVerbRegistry(VerbRegistry):
         # at all, which a model looping on one ungranted name would otherwise pay a fresh
         # read+parse for on every call. An adapters tree does not change under a live
         # registry — `verbs()` memoizes the loaded module on the same assumption.
-        declared = {s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries}
-        self._cold: dict[str, frozenset[str]] = dict(declared)
-        offenders = [(s, v) for s, v, _ in grant.entries if v not in declared[s]]
+        self._cold: dict[str, frozenset[str]] = {
+            s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries
+        }
+        # THE registry that resolves a real adapters tree, which is the deployment shape the
+        # disposition table governs — every production grant reaching this constructor is one
+        # the table projects — so a refusal from here may name the table as where to fix an
+        # ungranted system. A registry over a grant written in Python (`lead_zero`'s narrowed
+        # correlation registry) subclasses `VerbRegistry` directly and keeps the `None`.
+        #
+        # Imported HERE, not at module scope: `verb_dispositions` imports this module for
+        # `is_system_name`, so the edge may only run one way at import time.
+        from .verb_dispositions import DISPOSITIONS_REL
+
+        self.grant_home = DISPOSITIONS_REL
+        offenders = [(s, v) for s, v, _ in grant.entries if v not in self._cold[s]]
         if offenders:
             named = ", ".join(f"{s}.{v}" for s, v in offenders)
             raise GrantError(
@@ -525,11 +553,19 @@ class ModuleVerbRegistry(VerbRegistry):
         ))
 
     def _cold_verb_names(self, system: str) -> frozenset[str] | None:
-        cached = self._cold.get(system)
-        if cached is None:
-            cached = declared_verb_names(self.adapters_dir, system)
-            self._cold[system] = cached
-        return cached
+        if system in self._cold:
+            return self._cold[system]
+        names = declared_verb_names(self.adapters_dir, system)
+        # Only a WELL-FORMED name is remembered. Since #995 `decide` cold-reads on the refusal
+        # path for a system the grant reaches nowhere, and `system` there is unbounded model
+        # text straight off the `query` tool's arguments — so caching every name asked about
+        # lets a model grow this dict without limit, keyed on strings it chose. A name outside
+        # `is_system_name` cannot resolve to an adapter under any tree, so `declared_verb_names`
+        # answers `frozenset()` for it without touching the filesystem: there is nothing to
+        # save by remembering it.
+        if is_system_name(system):
+            self._cold[system] = names
+        return names
 
     def verbs(self, system: str) -> Mapping[str, Verb]:
         path = _adapter_path(self.adapters_dir, system)

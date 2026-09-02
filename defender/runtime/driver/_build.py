@@ -10,7 +10,6 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +37,7 @@ from ..tools import (
     register_gather_tool,
     register_tools,
 )
-from ..verb_dispositions import Disposition, dispositions_path, grant_for, load_dispositions
+from ..verb_dispositions import grant_for, shipped_dispositions
 from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
@@ -205,24 +204,6 @@ MAIN_DEF = AgentDefinition(
 )
 
 
-@lru_cache(maxsize=1)
-def _dispositions() -> tuple[Disposition, ...]:
-    """The shipped verb-disposition table, read ONCE for this process.
-
-    Read at import, and a missing or malformed table raises here rather than yielding an empty
-    grant. That is deliberate: an empty grant reports every verb as unknown, which is this
-    issue's own symptom applied to the whole product.
-
-    Cached because three module-scope readers want the same rows — `GATHER_PAIRS`,
-    `_gather_verb_grant`, and the judge's own projection — and each uncached call is a file
-    read plus two full YAML passes (the duplicate-key compose, then the load) over a file that
-    cannot change under a running process.
-    """
-    from defender._paths import PATHS
-
-    return load_dispositions(dispositions_path(PATHS.defender_dir))
-
-
 #: The gather grant, projected from the verb-disposition table (#995). It used to be a tuple
 #: of pairs written here, which made this a shared file every new system had to edit while
 #: `/connect`'s lane rules forbade touching it — so a connected system was silently
@@ -236,13 +217,13 @@ def _dispositions() -> tuple[Disposition, ...]:
 #: copy and `test_verb_grant_632` compares that copy against `GATHER_DEF.verb_grant`, which is
 #: the check that matters now that this side is derived rather than authored.
 GATHER_PAIRS: tuple[tuple[str, str], ...] = tuple(
-    (s, v) for s, v, _ in grant_for(AgentRole.GATHER.value, _dispositions()).entries
+    (s, v) for s, v, _ in grant_for(AgentRole.GATHER.value, shipped_dispositions()).entries
     if v != "health-check"
 )
 
 
 def _gather_verb_grant() -> VerbGrant:
-    return grant_for(AgentRole.GATHER.value, _dispositions())
+    return grant_for(AgentRole.GATHER.value, shipped_dispositions())
 
 
 GATHER_DEF = AgentDefinition(

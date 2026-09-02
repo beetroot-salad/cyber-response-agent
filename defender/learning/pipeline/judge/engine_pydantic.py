@@ -75,11 +75,14 @@ def _judge_grant() -> VerbGrant:
     test. Both roles now read the one table (#995); the adversarial stage still never reaches
     the closed-ticket store, because `_run_judge_pydantic` replaces this grant with `DENY_ALL`
     when it switches that capability off.
-    """
-    from defender._paths import PATHS
-    from defender.runtime.verb_dispositions import dispositions_path, grant_for, load_dispositions
 
-    return grant_for(AgentRole.JUDGE.value, load_dispositions(dispositions_path(PATHS.defender_dir)))
+    `shipped_dispositions`, not a `load_dispositions` of its own: the driver's gather
+    projection reads the same rows at the same startup, and a second load here is a second
+    read of a file both halves must agree about — one table, one loader.
+    """
+    from defender.runtime.verb_dispositions import grant_for, shipped_dispositions
+
+    return grant_for(AgentRole.JUDGE.value, shipped_dispositions())
 
 
 JUDGE_DEF = AgentDefinition(

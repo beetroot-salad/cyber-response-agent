@@ -40,6 +40,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -122,6 +123,29 @@ def dispositions_path(defender_dir: Path) -> Path:
     at, which is not the tree this process is running from.
     """
     return Path(defender_dir) / _REL_TO_DEFENDER
+
+
+@lru_cache(maxsize=1)
+def shipped_dispositions() -> tuple[Disposition, ...]:
+    """The table of the tree THIS process runs from, read and validated once.
+
+    The one cached reader, and it lives here rather than beside either projection: gather's
+    grant is built in `runtime/driver/_build.py` and the judge's in
+    `learning/pipeline/judge/engine_pydantic.py`, and a cache owned by one of those packages
+    is a cache the other cannot reach — so the file gets read and parsed twice at startup and
+    the two halves can disagree about which bytes they read. Two roles projecting from one
+    table is the whole point of #995; one loader is the same argument one level down.
+
+    Read at import by both callers, and a missing or malformed table raises here rather than
+    yielding an empty grant. That is deliberate: an empty grant reports every verb as unknown,
+    which is this issue's own symptom applied to the whole product.
+
+    `PATHS` is imported lazily because resolving it walks git for the repo root, and this
+    module is imported while the runtime assembles its agent definitions.
+    """
+    from defender._paths import PATHS
+
+    return load_dispositions(dispositions_path(PATHS.defender_dir))
 
 
 def _systems_block(path: Path) -> Mapping[object, object]:
@@ -215,8 +239,13 @@ def _disposition_row(
     path: Path, system: str, verb_name: object, body: object
 ) -> Disposition:
     where = f"{path}: {system}.{verb_name}"
-    if not isinstance(verb_name, str) or not verb_name:
-        raise DispositionError(f"{where} is not a verb name")
+    # `is_system_name`, on the VERB too: `verbs.SYSTEM_PATTERN` is documented as spelling both
+    # ("the tree declares no verb outside it and has no separate verb pattern"), and shape is
+    # checked here rather than left to `ModuleVerbRegistry` because the registry is not the
+    # only consumer of a projected grant — a row this loader admits reaches the refusal text
+    # and the generated roster whether or not anything cross-checks it against an adapter.
+    if not isinstance(verb_name, str) or not is_system_name(verb_name):
+        raise DispositionError(f"{where}: {verb_name!r} is not a well-formed verb name")
     if not isinstance(body, Mapping):
         raise DispositionError(f"{where} must be a mapping with a `roles:` key")
 
@@ -313,4 +342,5 @@ __all__ = [
     "dispositions_path",
     "grant_for",
     "load_dispositions",
+    "shipped_dispositions",
 ]

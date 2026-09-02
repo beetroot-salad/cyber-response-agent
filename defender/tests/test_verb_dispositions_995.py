@@ -680,15 +680,30 @@ def test_an_unknown_system_entirely_is_still_undeclared():
 # M7 — the lint scanner's per-system exclusions are derived, not remembered.
 # =========================================================================================
 
+def _lint_shippable_surface():
+    """The lint module, imported off `scripts/lint/` without leaving that dir on `sys.path`.
+
+    Removed BY VALUE, never `pop(0)`: the module itself inserts the repo root at index 0 when
+    it is not already there, so on any tree where the two spellings differ (a symlinked
+    checkout, an import mode that does not prepend the rootdir) a positional pop drops the
+    repo root and leaves `scripts/lint/` on the path for the rest of the session — where its
+    `_baseline` / `_gitscope` / `_astlib` shadow anything later-imported by those names.
+    """
+    lint_dir = str(REPO_ROOT / "scripts" / "lint")
+    sys.path.insert(0, lint_dir)
+    try:
+        import lint_shippable_surface as mod
+    finally:
+        if lint_dir in sys.path:
+            sys.path.remove(lint_dir)
+    return mod
+
+
 def test_the_shippable_surface_scanner_excludes_every_declared_system():
     """The adjacent instance of the same defect: a hand-kept list of `skills/<system>/` dirs
     that is already stale (seven entries, eight systems) and fails silently because the
     missing name is not a vendor word."""
-    sys.path.insert(0, str(REPO_ROOT / "scripts" / "lint"))
-    try:
-        import lint_shippable_surface as mod
-    finally:
-        sys.path.pop(0)
+    mod = _lint_shippable_surface()
     from defender.learning.leads.declared_systems import declared_systems
 
     excluded = set(mod.excluded_prefixes(REPO_ROOT))
@@ -717,12 +732,7 @@ def test_the_scanner_exclusions_track_a_planted_system():
     """Derived, not merely correct today. A system planted in a synthetic tree must be
     excluded there — which a hand-written tuple cannot do."""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
-    sys.path.insert(0, str(REPO_ROOT / "scripts" / "lint"))
-    try:
-        import lint_shippable_surface as mod
-    finally:
-        sys.path.pop(0)
-    assert "defender/skills/alpha/" in set(mod.excluded_prefixes(repo))
+    assert "defender/skills/alpha/" in set(_lint_shippable_surface().excluded_prefixes(repo))
 
 
 # =========================================================================================
