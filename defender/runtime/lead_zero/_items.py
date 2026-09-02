@@ -28,7 +28,9 @@ from defender.hooks.budget_enforcer import (
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
-from defender.runtime.verbs import VerbContext
+from defender.runtime.verb_dispositions import DISPOSITIONS_REL
+from defender.runtime.verb_grant import VerbGrant
+from defender.runtime.verbs import VerbContext, VerbRegistry
 from ._spec import ALERT_ID_FIELD, BUILDING_BLOCK_FIELD, CORRELATION_GRANT, CORRELATION_REQUEST_LIMIT, CORRELATION_SYSTEM, CORRELATION_TEMPLATE, GROUP_ID_FIELD, HARNESS_PROVENANCE, ITEM1_GOAL, ITEM1_SYSTEM, ITEM1_WHAT_TO_SUMMARIZE, L0, L3, SHORTFALL, STATUS_EMPTY, STATUS_FAILED, STATUS_RESOLVED, STATUS_TRUNCATED
 from ._capture import _CallLedger, _budget_account, _budget_gate, _build_deps, _last_row_seq, _sanitize
 from ._render import _render_doc, _sort_chrono, _unavailable
@@ -36,6 +38,37 @@ from ._capture import _declare_l_finding
 
 
 _DS_RE = re.compile(r"^\.ds-(?P<name>.+)-[^-]+-\d{4}\.\d{2}\.\d{2}-\d+$")
+
+
+class _NarrowedRegistry(VerbRegistry):
+    """Item 3's registry: the production registry's verb RESOLUTION under the correlation
+    lead's own, narrower grant — so `esql` (never `confine_index`'d) is denied at the grant
+    check rather than reaching a transport.
+
+    A thin re-grant wrapper, at module scope so a test can build one over a planted table
+    (#999): the grant it is handed is `correlation_grant(rows)`, and the production dispatch
+    hands it `CORRELATION_GRANT`, the same projection over the shipped rows.
+
+    `grant_home` names the table for the same reason `ModuleVerbRegistry` does: since #999
+    the grant here is the table's projection too, so a refusal that points at the file points
+    at the one place that can widen or withdraw it. Before, this grant was a literal in
+    Python and the pointer was rightly withheld.
+    """
+
+    grant_home = DISPOSITIONS_REL
+
+    def __init__(self, inner: VerbRegistry, grant: VerbGrant):
+        super().__init__(grant)
+        self._inner = inner
+
+    def systems(self):
+        return self._inner.systems()
+
+    def verbs(self, system):
+        return self._inner.verbs(system)
+
+    def _cold_verb_names(self, system):
+        return self._inner._cold_verb_names(system)
 
 
 def _map_backing_index(index: str) -> str:
@@ -369,25 +402,14 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     from ..tools import GatherDeps
     from ..tools_gather import GatherRequest, _run_gather
 
-    # A thin re-grant wrapper: same verb resolution, a narrower grant object — so `esql` (never
-    # `confine_index`'d) is denied at the grant check rather than reaching a transport.
-    from ..verbs import VerbRegistry
+    # `prepare_correlation_lead` gated on this BEFORE claiming the row, so a dispatch reached
+    # with the table withholding the lead is a caller that skipped the synchronous half. Not
+    # a fault worth a raise — the same answer that half gives: nothing to dispatch.
+    system = CORRELATION_SYSTEM
+    if system is None:
+        return None
 
-    class _Narrowed(VerbRegistry):
-        def __init__(self, inner):
-            super().__init__(CORRELATION_GRANT)
-            self._inner = inner
-
-        def systems(self):
-            return self._inner.systems()
-
-        def verbs(self, system):
-            return self._inner.verbs(system)
-
-        def _cold_verb_names(self, system):
-            return self._inner._cold_verb_names(system)
-
-    registry = _Narrowed(verbs)
+    registry = _NarrowedRegistry(verbs, CORRELATION_GRANT)
 
     # The SAME spelling `_run_gather` derives for the agent id it hands `gather_factory` and
     # `stamp_terminator`. Spelled as a literal here, the session this frame opens and the one
@@ -443,7 +465,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
     )
 
-    request = GatherRequest(L3, CORRELATION_SYSTEM, goal, tuple(what_to_summarize))
+    request = GatherRequest(L3, system, goal, tuple(what_to_summarize))
     try:
         return await _run_gather(
             gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, CORRELATION_GRANT,

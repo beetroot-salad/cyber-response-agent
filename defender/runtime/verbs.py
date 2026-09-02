@@ -388,11 +388,12 @@ class VerbRegistry:
     answers GRANTED to everything."""
 
     #: Where THIS registry's grant is authored, or `None` when it is a code literal that no
-    #: data edit can widen. Read only by `decide`'s ungranted-system refusal, which since #995
-    #: tells the reader where to go — and a pointer is worse than silence when it names a file
-    #: that cannot fix the refusal. `lead_zero`'s narrowed correlation registry is exactly that
-    #: case: its grant is `_spec.CORRELATION_GRANT`, a tuple in Python, so it inherits `None`
-    #: and the refusal stops at what is true of every grant.
+    #: data edit can widen. Read by `decide`'s DENIED and ungranted-system refusals, which
+    #: since #995 tell the reader where to go — and a pointer is worse than silence when it
+    #: names a file that cannot fix the refusal, so the two registries over `DENY_ALL`
+    #: (`_scaffold_rules`, the skill-description hook) keep the `None`. Every grant a model
+    #: calls through is the table's projection since #999 closed the last literal
+    #: (`lead_zero`'s correlation grant), and each such registry sets this itself.
     grant_home: str | None = None
 
     def __init__(self, grant: VerbGrant):
@@ -447,9 +448,16 @@ class VerbRegistry:
                     except KeyError:
                         real = False
                 if real:
+                    # The same pointer the ungranted-system branch renders, for the same
+                    # reason: a withheld verb on a reached system is a row in the table
+                    # (`roles:` without this role), and that row is where the decision lives.
+                    withheld = (
+                        f" Withheld in the verb-disposition table ({self.grant_home})."
+                    ) if self.grant_home is not None else ""
                     return VerbDecision(
                         DENIED, None,
-                        f"{system}.{verb} is not granted to role {self.grant.role!r}.",
+                        f"{system}.{verb} is not granted to role {self.grant.role!r}."
+                        f"{withheld}",
                     )
                 return VerbDecision(
                     UNDECLARED, None,
@@ -518,9 +526,9 @@ class ModuleVerbRegistry(VerbRegistry):
         # THE registry that resolves a real adapters tree, which is the deployment shape the
         # disposition table governs — every grant reaching this constructor that a model ever
         # calls through is one the table projects — so a refusal from here may name the table
-        # as where to fix an ungranted system. A registry over a grant written in Python
-        # (`lead_zero`'s narrowed correlation registry) subclasses `VerbRegistry` directly and
-        # keeps the `None`.
+        # as where to fix an ungranted system. `lead_zero`'s narrowed correlation registry
+        # subclasses `VerbRegistry` directly and sets the pointer itself: its grant is the
+        # table's projection too, since #999.
         #
         # NOT universal, and the exception is worth knowing: `_scaffold_rules` and
         # `hooks/inject_system_skill_description` construct this class over the `DENY_ALL`
