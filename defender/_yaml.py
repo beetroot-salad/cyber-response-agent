@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import yaml
@@ -13,6 +14,11 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
     file, a reviewer reads both, and the loader honours one. `safe_load` cannot see it because
     the collapse happens while the node tree is being constructed, so this walks the node tree
     from `compose`, which is the last representation where both keys still exist.
+
+    A `<<:` MERGE counts as writing its keys here, because `safe_load` expands one into the
+    mapping before building it: a merged key that an explicit key shadows is a real last-wins
+    collapse, and the merged half leaves no trace in the loaded document. Reporting it is the
+    same rule, not an extra one — two statements in the file, one honoured.
 
     Returns paths rather than raising, so each caller decides whether a repeat is fatal (a
     permission table) or a warning (a corpus document).
@@ -49,6 +55,15 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
             continue
         seen_nodes.add(id(node))
         if isinstance(node, yaml.MappingNode):
+            # `<<:` EXPANDED FIRST, for the reason the docstring gives: while a merge is still
+            # a `<<` pair of its own, the keys it contributes are invisible to the scan below,
+            # so an explicit key silently shadowing a merged one reads as no repeat at all.
+            # `_artifact_schema._has_duplicate_top_level_key` flattens for the same reason —
+            # the two answers to "what would `safe_load` collapse here" must not diverge.
+            # Failure is not this function's verdict to give: an unmergeable `<<` reaches the
+            # caller through its own `safe_load`, with the parser's message.
+            with contextlib.suppress(yaml.YAMLError, RecursionError):
+                constructor.flatten_mapping(node)
             keys: set[Any] = set()
             for key_node, value_node in node.value:
                 label = key_node.value if isinstance(key_node, yaml.ScalarNode) else "?"

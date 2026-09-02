@@ -164,8 +164,10 @@ def shipped_dispositions() -> tuple[Disposition, ...]:
     yielding an empty grant. That is deliberate: an empty grant reports every verb as unknown,
     which is this issue's own symptom applied to the whole product.
 
-    `PATHS` is imported lazily because resolving it walks git for the repo root, and this
-    module is imported while the runtime assembles its agent definitions.
+    `PATHS` is imported lazily to keep this module's import edge one-way: `defender._paths`
+    pulls in `defender._git`, and this module is imported by the runtime while it assembles
+    its agent definitions. Resolving `PATHS` itself is cheap and runs no git — it is
+    `DefenderPaths(REPO_ROOT)` off `__file__`.
     """
     from defender._paths import PATHS
 
@@ -204,6 +206,12 @@ def _systems_block(path: Path) -> Mapping[object, object]:
         raise DispositionError(
             f"verb-disposition table at {path} must be a mapping with a `dispositions:` key"
         )
+    # BEFORE the shape and emptiness checks below: an unread top-level key is a statement a
+    # reviewer will read and the loader will not honour, and it is the more actionable
+    # diagnosis of the two. A table carrying both (`residue: settled` beside an empty
+    # `dispositions:`) reported only "declares no dispositions", which sends the author
+    # looking for missing rows rather than at the key that does nothing.
+    _reject_unread_keys(f"verb-disposition table at {path}", data, ("dispositions",))
     systems = data.get("dispositions")
     if systems is not None and not isinstance(systems, Mapping):
         # Said apart from the empty case below: a `dispositions:` that is a LIST is a shape
@@ -219,7 +227,6 @@ def _systems_block(path: Path) -> Mapping[object, object]:
             "which is the silent-mute failure this file exists to prevent. Grant nothing by "
             "writing rows with `roles: []` and a reason."
         )
-    _reject_unread_keys(f"verb-disposition table at {path}", data, ("dispositions",))
     return systems
 
 

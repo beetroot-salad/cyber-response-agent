@@ -654,6 +654,19 @@ _DUPLICATE_SPELLINGS = {
         "dispositions: {cmdb: {get-host: {roles: [gather]}}, "
         "cmdb: {list-hosts: {roles: [gather]}}}\n"
     ),
+    # The spelling a node-tree scan misses unless it expands merges first. `<<` is resolved
+    # while the mapping is CONSTRUCTED, so before flattening the two `get-host` keys sit in
+    # different nodes and neither looks repeated — while `safe_load` merges them and keeps the
+    # explicit one. Same silent collapse as every spelling above, reached the one way a reader
+    # of the composed tree cannot see without asking for the merge to be applied.
+    "merge-key-shadowed": (
+        "dispositions:\n"
+        "  change-mgmt: &d\n"
+        "    get-host: {roles: [gather]}\n"
+        "  cmdb:\n"
+        "    <<: *d\n"
+        "    get-host: {roles: [judge]}\n"
+    ),
 }
 
 
