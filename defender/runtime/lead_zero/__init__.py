@@ -45,6 +45,7 @@ from defender.hooks.budget_enforcer import (
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
+from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime.verbs import VerbContext
 from ._spec import (
@@ -74,7 +75,8 @@ from ._spec import (
     UNAVAILABLE,
     _ANY_RUN_TAG,
     _FENCE_RUN,
-    _sole_system,
+    correlation_grant,
+    correlation_system,
 )
 from ._capture import (
     LeadZeroResult,
@@ -112,6 +114,7 @@ from ._items import (
 
 def prepare_correlation_lead(
     run_dir: Path, alert: dict, ancestor_block: str, status: str,
+    *, system: str | None = CORRELATION_SYSTEM,
 ) -> tuple[str, list[str]] | None:
     """The SYNCHRONOUS half of item 3: gate on the resolution status (dispatches on RESOLVED
     and TRUNCATED, never on FAILED/EMPTY), build the harness-authored contract, and claim
@@ -122,8 +125,16 @@ def prepare_correlation_lead(
     dispatch away for yielding no host/user/source-ip, which would exclude every alert source
     carrying its entities outside those three fields.
 
+    `system` is the dispatch target the table's projection determines (`CORRELATION_SYSTEM`),
+    and `None` means the verb-disposition table WITHHELD the lead's query verb (#999). That
+    gate sits FIRST, before the contract and before `claim_lead`: a lead that will never run
+    must not own a row in the leads table. The parameter exists so a test can state the
+    withholding without planting a table into the process-wide cache.
+
     `ancestor_block` is item 1's rendered block as `LeadZeroResult.text` carries it — already
     sanitized, elided and wrapped — so the lead reads the same bytes MAIN reads at ORIENT."""
+    if system is None:
+        return None
     if status not in (STATUS_RESOLVED, STATUS_TRUNCATED):
         return None
     contract = _correlation_contract(alert, ancestor_block)
@@ -139,7 +150,7 @@ def prepare_correlation_lead(
         # written at all — either way this frame owns nothing, so it dispatches nothing and
         # touches the id no further.
         return None
-    _declare_l_finding(run_dir, L3, "correlation lead", CORRELATION_SYSTEM)
+    _declare_l_finding(run_dir, L3, "correlation lead", system)
     return goal, what
 
 
@@ -153,7 +164,10 @@ def _render_section(body: str) -> str:
     return wrap_fresh(body, "untrusted")
 
 
-def render_orient_section(result: LeadZeroResult, run_dir: Path | None = None) -> str:
+def render_orient_section(
+    result: LeadZeroResult, run_dir: Path | None = None,
+    *, correlation_system: str | None = CORRELATION_SYSTEM,
+) -> str:
     """The ORIENT-time section text: the trusted heading (naming the reserved ids MAIN must not
     reuse) followed by item 1's whole untrusted frame, unmodified.
 
@@ -177,7 +191,13 @@ def render_orient_section(result: LeadZeroResult, run_dir: Path | None = None) -
 
     `L3` gets no such line: it is dispatched AFTER this renders and conditionally, so an absent
     row there is the ordinary case and not a fault. Its citation is covered by the validator's
-    own refusal, which names the harness-reserved case in its repair text."""
+    own refusal, which names the harness-reserved case in its repair text.
+
+    `correlation_system` is the ONE case where `L3`'s absence is not the ordinary one and is
+    said: `None` means the verb-disposition table withheld the lead's query verb (#999), so
+    the lead was never claimed and never will be, and the heading names the table rather than
+    leaving "if any" to explain it. The parameter mirrors `prepare_correlation_lead`'s, for
+    the same reason."""
     heading = (
         f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
         f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
@@ -188,6 +208,12 @@ def render_orient_section(result: LeadZeroResult, run_dir: Path | None = None) -
             f". NOTE: {L0}'s declaring `:L findings` row is NOT in investigation.md — the "
             f"harness could not write it. If you cite {L0}, declare it yourself in a `:L "
             f"findings` block first; that is not reuse"
+        )
+    if correlation_system is None:
+        heading += (
+            f". NOTE: {L3} was NOT dispatched on this run — the verb-disposition table "
+            f"({DISPOSITIONS_REL}) withholds the correlation lead's query verb, so no "
+            "correlation was run and none is coming"
         )
     return heading + ")\n\n" + result.text
 
@@ -349,12 +375,13 @@ __all__ = [
     "_rows_for",
     "_run_sync",
     "_sanitize",
-    "_sole_system",
     "_sort_chrono",
     "_unavailable",
     "asyncio",
     "circuit_breaker",
     "claim_lead",
+    "correlation_grant",
+    "correlation_system",
     "dataclass",
     "dispatch_correlation",
     "json",

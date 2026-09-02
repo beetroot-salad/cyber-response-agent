@@ -109,7 +109,7 @@ def test_a_withholding_from_every_holder_is_honoured_by_the_correlation_registry
     from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 
     tree = planted_tree(tmp_path, {"alpha": "lookup"})
-    adapters = adapters_under(tree)
+    adapters = adapters_under(tree / "defender")
 
     # Positive control: granted to both, the narrowed registry grants it.
     granted = load_dispositions(_table(tmp_path / "ok", {
@@ -167,7 +167,8 @@ def test_the_lead_may_not_hold_a_pair_gather_does_not(tmp_path):
             ("alpha", "lookup"): {"roles": [HOLDER]}, ("alpha", "health-check"): BOTH,
         }))
     message = str(caught.value)
-    assert "alpha.lookup" in message and "gather" in message, message
+    assert "alpha.lookup" in message, message
+    assert "gather" in message, message
 
 
 def test_a_holder_spanning_two_systems_is_refused_at_load(tmp_path):
@@ -184,7 +185,8 @@ def test_a_holder_spanning_two_systems_is_refused_at_load(tmp_path):
             ("beta", "lookup"): BOTH, ("beta", "health-check"): BOTH,
         }))
     message = str(caught.value)
-    assert "alpha" in message and "beta" in message, message
+    assert "alpha" in message, message
+    assert "beta" in message, message
 
 
 # =========================================================================================
@@ -192,7 +194,7 @@ def test_a_holder_spanning_two_systems_is_refused_at_load(tmp_path):
 # =========================================================================================
 
 def test_a_grant_with_no_query_verb_has_no_dispatch_target():
-    """`correlation_system` replaces `_sole_system`, which RAISED on an empty grant — the one
+    """`correlation_system` replaces the sole-system helper, which RAISED on an empty grant — the one
     behaviour that made 'skip, do not die' impossible. Health-check alone is not a dispatch
     target either: the lead would spend its budget discovering nothing is runnable."""
     from defender.runtime.lead_zero._spec import correlation_system
@@ -227,5 +229,6 @@ def test_the_orient_heading_says_the_lead_was_withheld():
 
     result = LeadZeroResult(text="", status="resolved")
     withheld = render_orient_section(result, None, correlation_system=None)
-    assert L3 in withheld and DISPOSITIONS_REL in withheld, withheld
+    assert L3 in withheld, withheld
+    assert DISPOSITIONS_REL in withheld, withheld
     assert DISPOSITIONS_REL not in render_orient_section(result, None, correlation_system="alpha")

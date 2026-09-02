@@ -9,6 +9,12 @@
 #     (scripts/lint/lint_verb_disposition_census.py), which is the whole point: before #995 a
 #     newly connected system was silently unreachable, and the refusal it produced looked
 #     like a typo rather than a missing permission.
+#   * `roles:` names GRANT HOLDERS: `gather`, `judge`, and `lead-zero-correlation` — the
+#     turn-zero correlation lead, a gather subagent the harness dispatches before MAIN's first
+#     turn under gather's policy and a NARROWER grant. It is the one holder that is not a
+#     role. The loader refuses a pair only it holds (it may never reach past gather) and
+#     rows for it on a second system (it is dispatched against exactly one). Withhold a pair
+#     from it and the lead is skipped, and ORIENT says why; the run goes on.
 #   * `roles: []` means granted to nobody. That is a legal decision and requires `reason:`.
 #     Absence from this file is NOT that decision — it is an unfinished job, and the gate
 #     says so.
@@ -47,9 +53,12 @@ dispositions:
       reason: "in the registry, exercised by no template and no run (c18/#632)"
 
   elastic:
-    alerts: {roles: [gather]}
+    # The two pairs the turn-zero correlation lead holds (#999), and the ONLY two: that is the
+    # whole safety case for a lead the harness dispatches on its own. It used to be a
+    # `VerbGrant` literal in `runtime/lead_zero/_spec.py` that no row here could withdraw.
+    alerts: {roles: [gather, lead-zero-correlation]}
     esql: {roles: [gather]}
-    health-check: {roles: [gather]}
+    health-check: {roles: [gather, lead-zero-correlation]}
     query: {roles: [gather]}
 
   host-state:
