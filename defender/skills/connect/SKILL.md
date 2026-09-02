@@ -190,11 +190,14 @@ the verb does not declare as a model-bindable param is a FAIL, and so is a
 verb from the query body. Do **not** build a catalog from API docs — the
 offline lead-author mints the rest from real runs.
 
-`defender/knowledge/environment/verb-grants.yaml` — **one row per verb the
-adapter declares, `health-check` included.** This is the one shared file a
-new system requires, and skipping it is why step 5 below would otherwise
-fail in a way that looks like a bug in your adapter: an ungranted system's
-verbs are refused, and the refusal says the system is not reachable at all.
+`defender/knowledge/environment/verb-grants.yaml` — **adapter path only:
+one row per verb the adapter declares, `health-check` included.** This is
+the one shared file a new adapter-backed system requires, and skipping it
+is why step 5 below would otherwise fail in a way that looks like a bug in
+your adapter: an ungranted system's verbs are refused, and the refusal says
+the system is not reachable at all. **On the MCP path, write nothing here**
+— an MCP-reached system declares no verbs to the registry, and a row naming
+one is residue the same CI gate fails on (`phantom`).
 
 Grant to `gather` the verbs an investigation should be able to call. A verb
 you are deliberately leaving unreachable gets `roles: []` **and a written

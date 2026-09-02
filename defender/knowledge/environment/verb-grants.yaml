@@ -12,12 +12,12 @@
 #   * `roles: []` means granted to nobody. That is a legal decision and requires `reason:`.
 #     Absence from this file is NOT that decision — it is an unfinished job, and the gate
 #     says so.
-#   * ONE joint rule, on `health-check`: a system gather can reach at all must grant gather
-#     `health-check` too. Withholding gather from the whole system is fine; leaving it able to
-#     query a system it cannot health-check is not, because `/connect` step 5 and the
-#     runtime's nothing-to-try paths both assume it. Before #995 the code appended
-#     health-check for every system the grant reached, so this was unwritable rather than
-#     merely unwritten; the census gate now fails it.
+#   * `health-check` carries the one joint rule, and it WARNS rather than fails: a system
+#     gather can query but not health-check leaves `/connect`'s test step and the runtime's
+#     nothing-to-try paths with nothing to probe it with. Withholding the whole system from
+#     gather is fine; granting it a verb without a health-check prints a warning on every
+#     load. Not a CI gate on purpose — this file is per-deployment, and the operator editing
+#     their own copy is the only one who can author the mistake and never runs our CI.
 #
 # ADDING A SYSTEM: `/connect` scaffolds the adapter and the skill; then a human adds its rows
 # here. That edit is deliberate and is the one shared-file edit onboarding requires — the

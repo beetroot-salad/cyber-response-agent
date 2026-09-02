@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
 
-from defender._paths import PATHS
+from defender._paths import PATHS, adapters_under
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry, declared_verb_names
 from defender.tests._dispositions995 import (
@@ -33,6 +34,7 @@ from defender.tests._dispositions995 import (
     WITHHELD_CENSUS,
     Disposition,
     DispositionError,
+    DispositionWarning,
     census_gaps,
     dispositions_path,
     grant_for,
@@ -44,7 +46,7 @@ from defender.tests._repo import HOSTILE_NAMES, plant_named_dirs, seed_repo
 
 REPO_ROOT = PATHS.repo_root
 DEFENDER = PATHS.defender_dir
-ADAPTERS = DEFENDER / "scripts" / "adapters"
+ADAPTERS = PATHS.adapters_dir
 
 #: A minimal well-formed row, for tests whose subject is some OTHER row's malformation.
 OK = {"roles": ["gather"]}
@@ -56,8 +58,7 @@ def _walk(defender_dir: Path, systems: tuple[str, ...]) -> dict[str, frozenset[s
     Handed the system names explicitly rather than resolved, so a test states which systems
     it planted and the assertion is against that statement.
     """
-    adapters = defender_dir / "scripts" / "adapters"
-    return {s: declared_verb_names(adapters, s) for s in systems}
+    return {s: declared_verb_names(adapters_under(defender_dir), s) for s in systems}
 
 
 # =========================================================================================
@@ -204,56 +205,55 @@ def test_an_unreasoned_withholding_is_reported_by_the_census():
     assert not gaps.undecided, "the row IS present — it is the reason that is missing"
 
 
-def test_a_system_gather_reaches_but_cannot_health_check_is_reported():
+def test_a_system_gather_reaches_but_cannot_health_check_warns_on_load():
     """The invariant the move from code to table made merely UNWRITTEN rather than impossible.
 
     Before #995 the gather grant was built as `entries += ((s, "health-check", "r") for s in
     systems)` — health-check was appended for every system the grant reached, so "gather can
-    reach this system but not health-check it" was a state no author could express. It is now
-    an ordinary row, and `roles: []` on it loads clean, censuses clean, and breaks `/connect`
-    step 5 and the runtime's nothing-to-try paths.
+    query this system but not health-check it" was a state no author could express.
 
-    Asserted against a table that is otherwise complete, so nothing else can carry the
-    failure: both verbs are walked and both are decided."""
-    walked = {"alpha": frozenset({"lookup", "health-check"})}
-    rows = load_dispositions(write_table(_tmp(), {
+    A WARNING on load, not a CI finding. This file is per-deployment data: the operator who
+    edits their own copy is the only person who can author this mistake, and is the one person
+    a gate over our repo never reaches. Warning where the table is READ covers every one of
+    them."""
+    table = write_table(_tmp(), {
         ("alpha", "lookup"): OK,
         ("alpha", "health-check"): {"roles": [], "reason": "not needed here"},
-    }))
-    gaps = census_gaps(walked, rows)
-    assert ("alpha", "health-check") in gaps.health_withheld, (
-        "gather holds a verb on 'alpha' and cannot health-check it — that must be residue, "
-        f"got {gaps}"
-    )
-    assert not gaps.undecided, "every walked verb has a row"
-    assert not gaps.phantom, "every row names a walked verb"
-    assert not gaps.unreasoned, "the withholding carries a reason — that is not the finding"
+    })
+    with pytest.warns(DispositionWarning) as caught:
+        rows = load_dispositions(table)
+    assert any("alpha" in str(w.message) for w in caught), \
+        f"the warning must name the system, got {[str(w.message) for w in caught]}"
+    assert rows, "the table still LOADS — a withheld health-check is not a reason to refuse it"
 
 
-def test_a_system_gather_does_not_reach_at_all_is_not_reported():
+def test_a_system_gather_does_not_reach_at_all_does_not_warn():
     """The negative control, and the reason the rule is not "every system grants health-check".
 
-    A system withheld from gather entirely is a legal, reviewed decision; demanding a
-    health-check grant on it would turn the rule into a demand that gather reach everything.
-    The rule is conditional on gather already holding something there."""
-    walked = {"alpha": frozenset({"lookup", "health-check"})}
-    rows = load_dispositions(write_table(_tmp(), {
+    A system withheld from gather entirely is a legal, reviewed decision; warning on it would
+    turn the rule into a complaint that gather does not reach everything."""
+    table = write_table(_tmp(), {
         ("alpha", "lookup"): {"roles": [], "reason": "withheld on purpose"},
         ("alpha", "health-check"): {"roles": [], "reason": "withheld with it"},
-    }))
-    assert not census_gaps(walked, rows).health_withheld
+    })
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DispositionWarning)
+        load_dispositions(table)
 
 
-def test_the_shipped_table_lets_gather_health_check_every_system_it_reaches():
+def test_the_shipped_table_loads_without_a_health_check_warning():
     """The real table against the rule. This is the state the code rule used to guarantee."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    reached = {r.system for r in rows if "gather" in r.roles}
-    checkable = {r.system for r in rows if "gather" in r.roles and r.verb == "health-check"}
-    assert reached == checkable, f"gather cannot health-check {sorted(reached - checkable)}"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DispositionWarning)
+        load_dispositions(dispositions_path(DEFENDER))
 
 
-def test_the_lint_gate_is_red_when_gather_cannot_health_check_a_system():
-    """The wiring for the rule above, probed the way CI runs the gate."""
+def test_the_census_gate_says_nothing_about_health_check():
+    """The rule's ABSENCE from the repo-time gate, pinned.
+
+    A table gather cannot health-check is a warning at every load and NOT a CI finding — the
+    gate walks a tree, so it only ever runs here, which is where the mistake cannot be made.
+    Re-adding it there would make the shipped repo the only place the rule is enforced."""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
     write_table(
         repo / "defender" / "knowledge" / "environment" / "verb-grants.yaml",
@@ -268,11 +268,10 @@ def test_the_lint_gate_is_red_when_gather_cannot_health_check_a_system():
         [sys.executable, str(gate), "--root", str(repo)],
         capture_output=True, text=True, cwd=REPO_ROOT,
     )
-    assert proc.returncode == 1, (
-        "a table gather cannot health-check 'alpha' through must be a finding, not a clean "
-        f"run\nstdout={proc.stdout}\nstderr={proc.stderr}"
+    assert proc.returncode == 0, (
+        "the census gate must stay silent on a withheld health-check — that rule lives in the "
+        f"loader now\nstdout={proc.stdout}\nstderr={proc.stderr}"
     )
-    assert "alpha" in (proc.stdout + proc.stderr), "the failure must name the offending system"
 
 
 def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
@@ -340,15 +339,37 @@ def test_a_hostile_system_directory_name_does_not_blind_the_gate():
     """A name a filesystem accepts and a naive reader mangles must not silently drop a system
     from the walk — the #869/#908 class. These names are not well-formed system names, so the
     correct behaviour is that they declare nothing; what is forbidden is CRASHING, or
-    swallowing the well-formed system planted beside them."""
+    swallowing the well-formed system planted beside them.
+
+    Asserted on the RESOLVER and then on the GATE. The resolver half alone leaves the claim
+    in the test's own name unmade: a gate that crashed, or that dropped `alpha` on its way
+    from the resolver to the census, would still pass a test that only ever called
+    `declared_systems`."""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
     plant_named_dirs(repo / "defender" / "skills", HOSTILE_NAMES)
+    write_table(
+        repo / "defender" / "knowledge" / "environment" / "verb-grants.yaml",
+        {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
+    )
     seed_repo(repo, add="-A", message="hostile")
     from defender.learning.leads.declared_systems import declared_systems
 
     resolved = declared_systems(repo)
     assert "alpha" in resolved, "a well-formed system beside hostile names must survive"
     assert not (set(HOSTILE_NAMES) & resolved)
+
+    gate = REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
+    proc = subprocess.run(
+        [sys.executable, str(gate), "--root", str(repo)],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert proc.returncode == 0, (
+        "the hostile names declare nothing, so a table total over `alpha` is total — the "
+        f"gate must be clean, not red or crashed\nstdout={proc.stdout}\nstderr={proc.stderr}"
+    )
+    assert "1 system" in proc.stdout, (
+        f"the gate covered a system count that is not just `alpha`: {proc.stdout}"
+    )
 
 
 # =========================================================================================

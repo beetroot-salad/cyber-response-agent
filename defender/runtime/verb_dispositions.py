@@ -38,6 +38,7 @@ module, which is the friction that decision deserves.
 """
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
@@ -69,7 +70,8 @@ KNOWN_ROLES: frozenset[str] = frozenset({AgentRole.GATHER.value, AgentRole.JUDGE
 READ_CLASS = "r"
 
 #: The verb every adapter declares and `/connect` step 5 tests a new system with. Spelled here
-#: because `census_gaps` has a rule about it that no other verb has — see `health_withheld`.
+#: because `load_dispositions` has a rule about it that no other verb has — see
+#: `_warn_unhealth_checkable`.
 HEALTH_CHECK = "health-check"
 
 
@@ -80,6 +82,18 @@ class DispositionError(Exception):
     withholding — because every one of them has the same correct handling at startup: stop.
     A table that half-loaded is the deny-all-by-accident state #995 exists to make
     unreachable, so there is no partial-success path to distinguish.
+    """
+
+
+class DispositionWarning(UserWarning):
+    """A table that loads, and that a human should look at anyway.
+
+    Separate from `DispositionError` because the two have different correct handlings, and the
+    distinction is the whole reason this is not a raise: every refusal in this module is a
+    condition under which no grant can be trusted, so startup must stop. A withheld
+    health-check is not that. The permissions it describes are coherent and the runtime built
+    from them is sound — it is the OPERATOR's intent that is likely wrong, and stopping a
+    deployment over a likely-wrong intent trades a broken health check for a dead product.
     """
 
 
@@ -106,21 +120,23 @@ class Disposition:
 class CensusGaps:
     """Residue between the walked census and the table, in both directions.
 
-    Four fields rather than one list of findings: they have different remedies. `undecided`
+    Three fields rather than one list of findings: they have different remedies. `undecided`
     means a human must decide something; `phantom` means a row outlived its verb; `unreasoned`
-    means a decision was made without saying why; `health_withheld` means a decision was made
-    that is individually well-formed and jointly incoherent.
+    means a decision was made without saying why.
+
+    A withheld health-check is deliberately NOT here. This whole census is a repo-time
+    comparison — it needs the walked tree, so only CI ever runs it — and the table is
+    per-deployment data. An operator editing their own copy never reaches this code, so a rule
+    living here would be enforced exactly where it is least needed. `load_dispositions` warns
+    about it instead, on every load, everywhere.
     """
 
     undecided: tuple[tuple[str, str], ...] = ()
     phantom: tuple[tuple[str, str], ...] = ()
     unreasoned: tuple[tuple[str, str], ...] = ()
-    health_withheld: tuple[tuple[str, str], ...] = ()
 
     def __bool__(self) -> bool:
-        return bool(
-            self.undecided or self.phantom or self.unreasoned or self.health_withheld
-        )
+        return bool(self.undecided or self.phantom or self.unreasoned)
 
 
 def dispositions_path(defender_dir: Path) -> Path:
@@ -189,7 +205,14 @@ def _systems_block(path: Path) -> Mapping[object, object]:
             f"verb-disposition table at {path} must be a mapping with a `dispositions:` key"
         )
     systems = data.get("dispositions")
-    if not isinstance(systems, Mapping) or not systems:
+    if systems is not None and not isinstance(systems, Mapping):
+        # Said apart from the empty case below: a `dispositions:` that is a LIST is a shape
+        # mistake, and "declares no dispositions" sends the author looking for missing rows.
+        raise DispositionError(
+            f"verb-disposition table at {path} has a `dispositions:` that is "
+            f"{type(systems).__name__}, not a mapping of system to verb rows"
+        )
+    if not systems:
         raise DispositionError(
             f"verb-disposition table at {path} declares no dispositions. An empty table is "
             "not a deny-all — it is indistinguishable from a table that failed to load, "
@@ -240,7 +263,47 @@ def load_dispositions(path: Path) -> tuple[Disposition, ...]:
             raise DispositionError(f"{path}: system {system!r} carries no verb rows")
         for verb_name, body in sorted(verbs.items(), key=lambda kv: str(kv[0])):
             rows.append(_disposition_row(path, system, verb_name, body))
-    return tuple(rows)
+    out = tuple(rows)
+    _warn_unhealth_checkable(path, out)
+    return out
+
+
+def _warn_unhealth_checkable(path: Path, rows: tuple[Disposition, ...]) -> None:
+    """Warn where gather can query a system and cannot health-check it.
+
+    A WARNING, and loaded rather than linted, for two reasons that pull the same way.
+
+    LOADED, not linted, because this file is per-deployment data. A CI gate over the repo's own
+    copy says nothing about the table an operator edits, and that operator is the only person
+    who can author this mistake — so a repo-time check would run exactly where it is not
+    needed and be silent where it is. Every load reaches here: the runtime's, the lint gate's,
+    a deployment's.
+
+    A WARNING, not a raise, because the state is recoverable and refusing it is not. `/connect`
+    step 5's health check and the runtime's nothing-to-try paths degrade; nothing becomes
+    unsafe, and no grant becomes untrustworthy. Every raise in this module is a table no grant
+    can be built from, which is why they stop startup. Stopping a deployment over a
+    health-check an operator may have withheld on purpose would trade a degraded probe for a
+    dead product.
+
+    Reads the ROWS ONLY, never the tree. The loader's standing property is that it touches no
+    filesystem beyond `path` (a walk here would put "what is on disk" back into the answer),
+    so this cannot tell "the author withheld health-check" from "the adapter declares none".
+    Both are worth the same sentence — gather reaches this system and cannot health-check it —
+    so the message states that and does not guess which.
+    """
+    gather = AgentRole.GATHER.value
+    reached = {d.system for d in rows if gather in d.roles}
+    checkable = {d.system for d in rows if gather in d.roles and d.verb == HEALTH_CHECK}
+    for system in sorted(reached - checkable):
+        warnings.warn(
+            f"{path}: system {system!r} grants gather no {HEALTH_CHECK!r}. Gather can query "
+            f"it and cannot check whether it is up, so `/connect`'s test step and the "
+            f"runtime's nothing-to-try paths have nothing to probe it with. Grant "
+            f"{system}.{HEALTH_CHECK} to gather, or withhold {system!r} from gather entirely.",
+            DispositionWarning,
+            stacklevel=2,
+        )
 
 
 def _disposition_row(
@@ -340,43 +403,27 @@ def census_gaps(
     for a verb no adapter declares any more, which would otherwise surface much later as a
     startup failure when the registry cross-checks the grant.
 
-    `health_withheld` is the one rule here about a SPECIFIC verb, and it is here because moving
-    the grant out of code deleted the thing that used to enforce it. The old projection read
-    `entries += tuple((s, "health-check", "r") for s in systems)` — health-check was appended
-    for every system gather reached, so "gather reaches this system and cannot health-check it"
-    was not a state an author could write down. As an ordinary row it loads clean, reads clean,
-    and breaks `/connect` step 5 and the runtime's nothing-to-try paths. Restored as a check
-    rather than as a code rule on purpose: the header's promise is that this file is the whole
-    answer, so the rule must fail an author's edit, not silently repair it.
-
-    GATHER only, though every role could carry the rule. Gather is the role that runs health
-    checks; the judge holds three ticket verbs and no health-check on that system today, and a
-    rule spanning both roles would fail the shipped table on a pair nothing has argued for.
-    Conditional on gather ALREADY reaching the system, so a system withheld from gather
-    entirely stays a legal decision rather than becoming a demand that gather reach everything.
     """
     decided = {d.pair for d in dispositions}
     declared = {(system, verb) for system, verbs in walked.items() for verb in verbs}
-    gather = AgentRole.GATHER.value
-    reached = {d.system for d in dispositions if gather in d.roles}
-    checkable = {d.system for d in dispositions
-                 if gather in d.roles and d.verb == HEALTH_CHECK}
     return CensusGaps(
         undecided=tuple(sorted(declared - decided)),
         phantom=tuple(sorted(decided - declared)),
         unreasoned=tuple(sorted(
             d.pair for d in dispositions if not d.roles and not (d.reason or "").strip()
         )),
-        health_withheld=tuple(sorted((s, HEALTH_CHECK) for s in reached - checkable)),
     )
 
 
 __all__ = [
     "DISPOSITIONS_REL",
+    "HEALTH_CHECK",
     "KNOWN_ROLES",
+    "READ_CLASS",
     "CensusGaps",
     "Disposition",
     "DispositionError",
+    "DispositionWarning",
     "census_gaps",
     "dispositions_path",
     "grant_for",

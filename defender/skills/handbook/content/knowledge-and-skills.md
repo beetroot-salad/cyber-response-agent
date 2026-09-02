@@ -49,9 +49,11 @@ the integration, and open a review branch, one system per invocation. For
 how it works, read that skill (`skills/connect/SKILL.md`, rationale in
 `decisions.md`); the handbook doesn't restate it.
 
-Adding a system is files dropped into the per-system locations plus
-**exactly one shared edit**: its verbs need rows in the verb-disposition
-table (`knowledge/environment/verb-grants.yaml`). Nothing else — no loop
+Adding an adapter-backed system is files dropped into the per-system
+locations plus **exactly one shared edit**: its verbs need rows in the
+verb-disposition table (`knowledge/environment/verb-grants.yaml`). An
+MCP-reached system declares no verbs to the registry and takes no rows, so
+for it the claim still holds outright. Nothing else either way — no loop
 change, no gather-subagent change, no signature catalog,
 permissions-per-signature, or archetype directory to fill in (those are
 `soc-agent/` concepts; see `content/design.md`).

@@ -39,6 +39,10 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
     # this must too, or it turns a caller's typed refusal into a `RecursionError`.
     stack: list[tuple[Any, str]] = [(root, "")]
     seen_nodes: set[int] = set()
+    # ONE constructor for the whole walk. `_resolved_key` needs a `SafeConstructor` to answer
+    # what `safe_load` would build for a key, and minting a fresh one per key both allocates
+    # per key and throws away the memo table PyYAML keeps on it.
+    constructor = yaml.constructor.SafeConstructor()
     while stack:
         node, path = stack.pop()
         if id(node) in seen_nodes:
@@ -49,7 +53,7 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
             for key_node, value_node in node.value:
                 label = key_node.value if isinstance(key_node, yaml.ScalarNode) else "?"
                 here = f"{path}.{label}" if path else str(label)
-                key = _resolved_key(key_node)
+                key = _resolved_key(key_node, constructor)
                 if key in keys:
                     found.append(here)
                 keys.add(key)
@@ -60,7 +64,7 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
     return tuple(found)
 
 
-def _resolved_key(key_node: Any) -> Any:
+def _resolved_key(key_node: Any, constructor: Any) -> Any:
     """A mapping key's identity AFTER tag resolution, which is the identity `safe_load` uses.
 
     Comparing the raw scalar text is wrong in both directions, and this function's whole job
@@ -78,7 +82,7 @@ def _resolved_key(key_node: Any) -> Any:
         # one. An identity that at least never collides with a scalar's.
         return (key_node.tag, id(key_node))
     try:
-        value = yaml.constructor.SafeConstructor().construct_object(key_node)
+        value = constructor.construct_object(key_node)
         hash(value)
     except Exception:  # noqa: BLE001 — an unconstructable key falls back to its raw text
         return (key_node.tag, key_node.value)

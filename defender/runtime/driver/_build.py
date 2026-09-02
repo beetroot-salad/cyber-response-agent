@@ -37,7 +37,7 @@ from ..tools import (
     register_gather_tool,
     register_tools,
 )
-from ..verb_dispositions import grant_for, shipped_dispositions
+from ..verb_dispositions import HEALTH_CHECK, grant_for, shipped_dispositions
 from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
@@ -204,26 +204,31 @@ MAIN_DEF = AgentDefinition(
 )
 
 
-#: The gather grant, projected from the verb-disposition table (#995). It used to be a tuple
-#: of pairs written here, which made this a shared file every new system had to edit while
-#: `/connect`'s lane rules forbade touching it — so a connected system was silently
-#: unreachable. The table is still AUTHORED, not derived from the adapters on disk; what moved
-#: is only where a human writes it. See `runtime/verb_dispositions.py` for why that
-#: distinction is the entire design.
-#:
-#: `GATHER_PAIRS` is the grant's non-`health-check` half, kept as a module export for the same
-#: reason it always was — it is the driver's published name for the census. It has no reader
-#: in the tree today: `tests/_verb_authorization_632.py` holds its OWN independently written
+def _gather_verb_grant() -> VerbGrant:
+    """The gather grant, projected from the verb-disposition table (#995).
+
+    It used to be a tuple of pairs written here, which made this a shared file every new
+    system had to edit while `/connect`'s lane rules forbade touching it — so a connected
+    system was silently unreachable. The table is still AUTHORED, not derived from the
+    adapters on disk; what moved is only where a human writes it. See
+    `runtime/verb_dispositions.py` for why that distinction is the entire design.
+    """
+    return grant_for(AgentRole.GATHER.value, shipped_dispositions())
+
+
+#: The grant's non-`health-check` half, kept as a module export for the same reason it always
+#: was — it is the driver's published name for the census. Its only reader is `driver/__init__`,
+#: which re-exports it: `tests/_verb_authorization_632.py` holds its OWN independently written
 #: copy and `test_verb_grant_632` compares that copy against `GATHER_DEF.verb_grant`, which is
 #: the check that matters now that this side is derived rather than authored.
+#:
+#: Sliced off `_gather_verb_grant` rather than projected a second time, so the projection this
+#: module performs is spelled exactly once. `HEALTH_CHECK` is imported rather than respelled
+#: for the same reason `KNOWN_ROLES` reads `AgentRole`: the table's module owns that token, and
+#: a second copy of it here is one that can drift.
 GATHER_PAIRS: tuple[tuple[str, str], ...] = tuple(
-    (s, v) for s, v, _ in grant_for(AgentRole.GATHER.value, shipped_dispositions()).entries
-    if v != "health-check"
+    (s, v) for s, v, _ in _gather_verb_grant().entries if v != HEALTH_CHECK
 )
-
-
-def _gather_verb_grant() -> VerbGrant:
-    return grant_for(AgentRole.GATHER.value, shipped_dispositions())
 
 
 GATHER_DEF = AgentDefinition(

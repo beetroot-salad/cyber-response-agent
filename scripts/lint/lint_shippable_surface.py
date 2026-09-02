@@ -217,7 +217,7 @@ def main(argv: list[str]) -> int:
         print(f"lint_shippable_surface: cannot resolve systems: {exc}", file=sys.stderr)
         return 2
     print("Suppress legitimate references with `# lint-shippable: ok — <reason>` on the line.")
-    print("Per-vendor systems skills are excluded by directory (see EXCLUDED_PREFIXES).")
+    print("Per-vendor systems skills are excluded by directory (see excluded_prefixes).")
     return gate(
         findings, BASELINE_PATH, argv,
         label="lint_shippable_surface", header=HEADER,

@@ -41,10 +41,11 @@ shape at the gate, and #869 shipped three misreads behind it).
 """
 from __future__ import annotations
 
-import textwrap
+import json
 from pathlib import Path
 from typing import Any
 
+from defender._paths import adapters_under
 from defender.tests._repo import seed_repo
 
 try:
@@ -52,6 +53,7 @@ try:
         CensusGaps,
         Disposition,
         DispositionError,
+        DispositionWarning,
         census_gaps,
         dispositions_path,
         grant_for,
@@ -63,6 +65,10 @@ except ImportError:  # pragma: no cover — the pre-implementation path
         """Placeholder so `pytest.raises(DispositionError)` is expressible before the real
         exception exists. Nothing raises it, so every such test fails rather than passing
         vacuously on a stub that happens to raise."""
+
+    class DispositionWarning(UserWarning):  # type: ignore[no-redef]
+        """Placeholder, for the same reason: `pytest.warns(DispositionWarning)` must be
+        expressible, and nothing emits it, so the test fails rather than passing vacuously."""
 
     def _not_yet_written(symbol: str):
         def _stub(*_a: Any, **_k: Any):
@@ -84,6 +90,7 @@ __all__ = [
     "CensusGaps",
     "Disposition",
     "DispositionError",
+    "DispositionWarning",
     "GATHER_CENSUS",
     "JUDGE_CENSUS",
     "WITHHELD_CENSUS",
@@ -92,6 +99,7 @@ __all__ = [
     "grant_for",
     "load_dispositions",
     "plant_system",
+    "planted_tree",
     "write_table",
 ]
 
@@ -182,7 +190,7 @@ def plant_system(defender_dir: Path, system: str, verb_name: str = "lookup") -> 
     would still exercise the gate but would not resemble what `/connect` actually produces,
     and a fixture that plants only a marker declares nothing until it is committed.
     """
-    adapters = defender_dir / "scripts" / "adapters"
+    adapters = adapters_under(defender_dir)
     adapters.mkdir(parents=True, exist_ok=True)
     (adapters / f"{system.replace('-', '_')}_adapter.py").write_text(
         _STUB_ADAPTER.format(name=verb_name, body=verb_name.replace("-", "_")),
@@ -219,7 +227,10 @@ def write_table(path: Path, rows: dict[tuple[str, str], dict[str, Any]]) -> Path
                 )
                 parts.append(f"roles: {rendered}")
             if "reason" in body:
-                parts.append(f'reason: "{body["reason"]}"')
+                # Rendered through a JSON dump, which is a valid YAML double-quoted scalar:
+                # a reason holding a `"` or a `\\` must reach the loader as the test wrote it,
+                # not as whatever the raw interpolation happened to make parseable.
+                parts.append(f"reason: {json.dumps(body['reason'])}")
             lines.append(f"    {verb_name}: {{{', '.join(parts)}}}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -236,8 +247,3 @@ def planted_tree(tmp_path: Path, systems: dict[str, str]) -> Path:
         plant_system(defender_dir, system, verb_name)
     seed_repo(repo)
     return repo
-
-
-def table_text(body: str) -> str:
-    """Dedent a literal table written inline in a test."""
-    return textwrap.dedent(body)

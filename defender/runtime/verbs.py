@@ -516,10 +516,16 @@ class ModuleVerbRegistry(VerbRegistry):
             s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries
         }
         # THE registry that resolves a real adapters tree, which is the deployment shape the
-        # disposition table governs — every production grant reaching this constructor is one
-        # the table projects — so a refusal from here may name the table as where to fix an
-        # ungranted system. A registry over a grant written in Python (`lead_zero`'s narrowed
-        # correlation registry) subclasses `VerbRegistry` directly and keeps the `None`.
+        # disposition table governs — every grant reaching this constructor that a model ever
+        # calls through is one the table projects — so a refusal from here may name the table
+        # as where to fix an ungranted system. A registry over a grant written in Python
+        # (`lead_zero`'s narrowed correlation registry) subclasses `VerbRegistry` directly and
+        # keeps the `None`.
+        #
+        # NOT universal, and the exception is worth knowing: `_scaffold_rules` and
+        # `hooks/inject_system_skill_description` construct this class over the `DENY_ALL`
+        # literal. Neither calls `decide`, so neither can render the pointer — but a third
+        # such caller that did would be told to edit a file that cannot widen its grant.
         #
         # Imported HERE, not at module scope: `verb_dispositions` imports this module for
         # `is_system_name`, so the edge may only run one way at import time.
@@ -555,16 +561,19 @@ class ModuleVerbRegistry(VerbRegistry):
     def _cold_verb_names(self, system: str) -> frozenset[str] | None:
         if system in self._cold:
             return self._cold[system]
+        # Only a name that RESOLVES TO AN ADAPTER is remembered, which is what bounds this
+        # dict by the tree. Since #995 `decide` cold-reads on the refusal path for a system
+        # the grant reaches nowhere, and `system` there is unbounded model text straight off
+        # the `query` tool's arguments — so remembering every name asked about lets a model
+        # grow the dict without limit, keyed on strings it chose. Well-formedness is NOT that
+        # bound: `is_system_name` admits every lowercase-alphanumeric string up to
+        # `SYSTEM_MAX_LEN`, so a model looping on `sys0`, `sys1`, … grows it just as freely.
+        # Adapter presence is the bound, and it costs nothing: a name that resolves to no
+        # adapter reads no file, so there is no parse to save by caching its empty answer.
+        if _adapter_path(self.adapters_dir, system) is None:
+            return frozenset()
         names = declared_verb_names(self.adapters_dir, system)
-        # Only a WELL-FORMED name is remembered. Since #995 `decide` cold-reads on the refusal
-        # path for a system the grant reaches nowhere, and `system` there is unbounded model
-        # text straight off the `query` tool's arguments — so caching every name asked about
-        # lets a model grow this dict without limit, keyed on strings it chose. A name outside
-        # `is_system_name` cannot resolve to an adapter under any tree, so `declared_verb_names`
-        # answers `frozenset()` for it without touching the filesystem: there is nothing to
-        # save by remembering it.
-        if is_system_name(system):
-            self._cold[system] = names
+        self._cold[system] = names
         return names
 
     def verbs(self, system: str) -> Mapping[str, Verb]:
