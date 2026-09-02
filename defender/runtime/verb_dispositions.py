@@ -68,6 +68,10 @@ KNOWN_ROLES: frozenset[str] = frozenset({AgentRole.GATHER.value, AgentRole.JUDGE
 #: field in the file.
 READ_CLASS = "r"
 
+#: The verb every adapter declares and `/connect` step 5 tests a new system with. Spelled here
+#: because `census_gaps` has a rule about it that no other verb has — see `health_withheld`.
+HEALTH_CHECK = "health-check"
+
 
 class DispositionError(Exception):
     """Raised for any table this module will not stand behind.
@@ -102,17 +106,21 @@ class Disposition:
 class CensusGaps:
     """Residue between the walked census and the table, in both directions.
 
-    Three fields rather than one list of findings: they have different remedies. `undecided`
+    Four fields rather than one list of findings: they have different remedies. `undecided`
     means a human must decide something; `phantom` means a row outlived its verb; `unreasoned`
-    means a decision was made without saying why.
+    means a decision was made without saying why; `health_withheld` means a decision was made
+    that is individually well-formed and jointly incoherent.
     """
 
     undecided: tuple[tuple[str, str], ...] = ()
     phantom: tuple[tuple[str, str], ...] = ()
     unreasoned: tuple[tuple[str, str], ...] = ()
+    health_withheld: tuple[tuple[str, str], ...] = ()
 
     def __bool__(self) -> bool:
-        return bool(self.undecided or self.phantom or self.unreasoned)
+        return bool(
+            self.undecided or self.phantom or self.unreasoned or self.health_withheld
+        )
 
 
 def dispositions_path(defender_dir: Path) -> Path:
@@ -290,14 +298,25 @@ def grant_for(role: str, dispositions: tuple[Disposition, ...]) -> VerbGrant:
     keeping a dropped-in adapter from granting itself, and it is why this function takes the
     parsed rows rather than a path it could be tempted to walk beside.
 
-    A role no row names yields an empty grant, because this is a filter and nothing matched —
-    not a fallback, and not a judgement that the role should hold nothing. A MISSPELLED role is
-    caught earlier, by `load_dispositions`, the only place that can tell a typo from a role
-    that legitimately appears in no row.
+    A KNOWN role no row names yields an empty grant, because this is a filter and nothing
+    matched — not a fallback, and not a judgement that the role should hold nothing.
 
-    Do NOT read that empty return as the mechanism behind the adversarial judge's empty grant:
+    An UNKNOWN role raises. `load_dispositions` refuses a typo written in the table; it cannot
+    see the role the projection is asked for, and those are different typos in different files.
+    Returning the filter's honest empty answer for one is the deny-all-by-accident state this
+    module exists to make unreachable: every verb then decides UNDECLARED with "this role holds
+    no grant reaching it", which is #995's original symptom reached from a one-character slip at
+    a call site. The membership set is in scope here; nothing is bought by not checking it.
+
+    Do NOT read the empty return as the mechanism behind the adversarial judge's empty grant:
     that stage is handed `DENY_ALL` explicitly by `_run_judge_pydantic` and never reaches here.
     """
+    if role not in KNOWN_ROLES:
+        raise DispositionError(
+            f"{role!r} is not a role ({sorted(KNOWN_ROLES)}). A projection for an unknown role "
+            "would be an empty grant, which every reader downstream cannot tell apart from a "
+            "deliberate withholding."
+        )
     entries = tuple(
         (d.system, d.verb, READ_CLASS)
         for d in dispositions
@@ -320,15 +339,35 @@ def census_gaps(
     and the table ignores, which today means silently ungranted. `phantom` is its mirror: a row
     for a verb no adapter declares any more, which would otherwise surface much later as a
     startup failure when the registry cross-checks the grant.
+
+    `health_withheld` is the one rule here about a SPECIFIC verb, and it is here because moving
+    the grant out of code deleted the thing that used to enforce it. The old projection read
+    `entries += tuple((s, "health-check", "r") for s in systems)` — health-check was appended
+    for every system gather reached, so "gather reaches this system and cannot health-check it"
+    was not a state an author could write down. As an ordinary row it loads clean, reads clean,
+    and breaks `/connect` step 5 and the runtime's nothing-to-try paths. Restored as a check
+    rather than as a code rule on purpose: the header's promise is that this file is the whole
+    answer, so the rule must fail an author's edit, not silently repair it.
+
+    GATHER only, though every role could carry the rule. Gather is the role that runs health
+    checks; the judge holds three ticket verbs and no health-check on that system today, and a
+    rule spanning both roles would fail the shipped table on a pair nothing has argued for.
+    Conditional on gather ALREADY reaching the system, so a system withheld from gather
+    entirely stays a legal decision rather than becoming a demand that gather reach everything.
     """
     decided = {d.pair for d in dispositions}
     declared = {(system, verb) for system, verbs in walked.items() for verb in verbs}
+    gather = AgentRole.GATHER.value
+    reached = {d.system for d in dispositions if gather in d.roles}
+    checkable = {d.system for d in dispositions
+                 if gather in d.roles and d.verb == HEALTH_CHECK}
     return CensusGaps(
         undecided=tuple(sorted(declared - decided)),
         phantom=tuple(sorted(decided - declared)),
         unreasoned=tuple(sorted(
             d.pair for d in dispositions if not d.roles and not (d.reason or "").strip()
         )),
+        health_withheld=tuple(sorted((s, HEALTH_CHECK) for s in reached - checkable)),
     )
 
 

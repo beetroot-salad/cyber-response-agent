@@ -143,9 +143,18 @@ def main(argv: list[str]) -> int:
         )
     for system, verb in gaps.unreasoned:
         print(f"{system}.{verb}: granted to nobody with no reason given.")
+    for system, verb in gaps.health_withheld:
+        print(
+            f"{system}.{verb}: gather holds a verb on {system!r} and cannot health-check it. "
+            "That pair used to be unrepresentable — the grant appended health-check for every "
+            "system it reached — and `/connect` step 5 plus the runtime's nothing-to-try "
+            f"paths still assume it. Grant it to gather, or withhold {system!r} from gather "
+            "entirely."
+        )
     print(
         f"lint_verb_disposition_census: {len(gaps.undecided)} undecided, "
-        f"{len(gaps.phantom)} phantom, {len(gaps.unreasoned)} unreasoned."
+        f"{len(gaps.phantom)} phantom, {len(gaps.unreasoned)} unreasoned, "
+        f"{len(gaps.health_withheld)} unhealth-checkable."
     )
     return 1
 

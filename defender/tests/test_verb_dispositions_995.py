@@ -204,6 +204,77 @@ def test_an_unreasoned_withholding_is_reported_by_the_census():
     assert not gaps.undecided, "the row IS present — it is the reason that is missing"
 
 
+def test_a_system_gather_reaches_but_cannot_health_check_is_reported():
+    """The invariant the move from code to table made merely UNWRITTEN rather than impossible.
+
+    Before #995 the gather grant was built as `entries += ((s, "health-check", "r") for s in
+    systems)` — health-check was appended for every system the grant reached, so "gather can
+    reach this system but not health-check it" was a state no author could express. It is now
+    an ordinary row, and `roles: []` on it loads clean, censuses clean, and breaks `/connect`
+    step 5 and the runtime's nothing-to-try paths.
+
+    Asserted against a table that is otherwise complete, so nothing else can carry the
+    failure: both verbs are walked and both are decided."""
+    walked = {"alpha": frozenset({"lookup", "health-check"})}
+    rows = load_dispositions(write_table(_tmp(), {
+        ("alpha", "lookup"): OK,
+        ("alpha", "health-check"): {"roles": [], "reason": "not needed here"},
+    }))
+    gaps = census_gaps(walked, rows)
+    assert ("alpha", "health-check") in gaps.health_withheld, (
+        "gather holds a verb on 'alpha' and cannot health-check it — that must be residue, "
+        f"got {gaps}"
+    )
+    assert not gaps.undecided, "every walked verb has a row"
+    assert not gaps.phantom, "every row names a walked verb"
+    assert not gaps.unreasoned, "the withholding carries a reason — that is not the finding"
+
+
+def test_a_system_gather_does_not_reach_at_all_is_not_reported():
+    """The negative control, and the reason the rule is not "every system grants health-check".
+
+    A system withheld from gather entirely is a legal, reviewed decision; demanding a
+    health-check grant on it would turn the rule into a demand that gather reach everything.
+    The rule is conditional on gather already holding something there."""
+    walked = {"alpha": frozenset({"lookup", "health-check"})}
+    rows = load_dispositions(write_table(_tmp(), {
+        ("alpha", "lookup"): {"roles": [], "reason": "withheld on purpose"},
+        ("alpha", "health-check"): {"roles": [], "reason": "withheld with it"},
+    }))
+    assert not census_gaps(walked, rows).health_withheld
+
+
+def test_the_shipped_table_lets_gather_health_check_every_system_it_reaches():
+    """The real table against the rule. This is the state the code rule used to guarantee."""
+    rows = load_dispositions(dispositions_path(DEFENDER))
+    reached = {r.system for r in rows if "gather" in r.roles}
+    checkable = {r.system for r in rows if "gather" in r.roles and r.verb == "health-check"}
+    assert reached == checkable, f"gather cannot health-check {sorted(reached - checkable)}"
+
+
+def test_the_lint_gate_is_red_when_gather_cannot_health_check_a_system():
+    """The wiring for the rule above, probed the way CI runs the gate."""
+    repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
+    write_table(
+        repo / "defender" / "knowledge" / "environment" / "verb-grants.yaml",
+        {
+            ("alpha", "lookup"): OK,
+            ("alpha", "health-check"): {"roles": [], "reason": "not needed here"},
+        },
+    )
+    seed_repo(repo, add="-A", message="table")
+    gate = REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
+    proc = subprocess.run(
+        [sys.executable, str(gate), "--root", str(repo)],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert proc.returncode == 1, (
+        "a table gather cannot health-check 'alpha' through must be a finding, not a clean "
+        f"run\nstdout={proc.stdout}\nstderr={proc.stderr}"
+    )
+    assert "alpha" in (proc.stdout + proc.stderr), "the failure must name the offending system"
+
+
 def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
     """The wiring, not the logic. `census_gaps` going red is worth nothing if the CI entry
     point does not propagate it — probed by running the gate as CI runs it, against a planted
@@ -355,6 +426,30 @@ def test_planting_an_adapter_grants_it_nothing():
             f"role {role!r} was granted something on a system the table never mentions: "
             f"{sorted(p for p in granted if p[0] == 'intruder')}"
         )
+
+
+def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
+    """A misspelled role at a CALL SITE is the deny-all-by-accident state, one level up.
+
+    `load_dispositions` already refuses a typo'd role written in the TABLE. It cannot see the
+    role the projection is ASKED for, and an empty grant is indistinguishable at every reader
+    from a deliberate withholding: every verb then decides UNDECLARED with "this role holds no
+    grant reaching it", which is #995's original symptom applied product-wide."""
+    rows = load_dispositions(dispositions_path(DEFENDER))
+    with pytest.raises(DispositionError) as caught:
+        grant_for("gathr", rows)
+    assert "gathr" in str(caught.value), "the refusal must name the role it was handed"
+
+
+def test_a_known_role_no_row_names_still_projects_an_empty_grant():
+    """The other half, and the reason the guard is membership rather than emptiness.
+
+    A role that legitimately appears in no row is a filter matching nothing, not an error —
+    the distinction `grant_for`'s docstring draws. Only an unknown NAME is the typo."""
+    rows = load_dispositions(write_table(_tmp(), {
+        ("alpha", "lookup"): OK, ("alpha", "health-check"): OK,
+    }))
+    assert grant_for("judge", rows) == VerbGrant(role="judge", entries=())
 
 
 def test_the_grant_is_not_a_function_of_what_is_on_disk():
