@@ -1,0 +1,6 @@
+disposition: benign
+confidence: high
+source: by construction — the three sudo'd psql commands in the alert window are lines 49–63
+  of playground-v2/hosts/db/role-start.sh (the db-1 container's startup script), run when the
+  container was (re)started at 2026-08-30T09:54Z. Prior nine runs: 5 inconclusive, 2 benign,
+  2 malicious.

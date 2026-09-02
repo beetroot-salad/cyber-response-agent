@@ -1,0 +1,5 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - lead l-003: resolution of h-001 to '--' cites no prediction or refutation id — a strong (++/--) move must name the `p*`/`ap*`/`r*` it turned on, in the `[<lead> <ids> <severity> ⟂ <edges>]` head
+
+Re-send the block with those rows corrected.

@@ -1,0 +1,7 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - disposition inconclusive blocked: `ceiling_test` row 'state=nothing-to-try cap=change-mgmt note=No further change-management authority exists to consult beyond the empty ticket system; IAM does not govern container-internal OS root': `cap=change-mgmt` names a capability this deployment DOES provide — `nothing-to-try` is for a capability that does not exist at all. If the call was made and failed or came back empty, use `state=query-failed`/`state=query-empty` with `ref=<lead-id>` instead
+  - disposition inconclusive blocked: `ceiling_test` row 'state=nothing-to-try cap=change-mgmt note=No further change-management authority exists to consult beyond the empty ticket system; IAM does not govern container-internal OS root' repeats an earlier gap — each row must name a DISTINCT gap; repetition does not pay for a second one
+  - disposition inconclusive blocked: `ceiling_test` row 'state=nothing-to-try cap=iam-policy note=IAM policy does not govern container-internal OS root, so no authority anchor can be checked' repeats an earlier gap — each row must name a DISTINCT gap; repetition does not pay for a second one
+
+Re-send the block with those rows corrected.

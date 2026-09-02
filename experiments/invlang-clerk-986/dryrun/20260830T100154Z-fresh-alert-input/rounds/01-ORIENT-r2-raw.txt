@@ -1,0 +1,8 @@
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|falco-sudo-direct-query|||falco|n/a
+```
+
+GAPS:
+- The triage questions (which identity drove the burst; whether this is a training/lab environment; whether there was an authorizing change window) are open questions posed without lead ids, so no `:L` rows could be written for them.
+- The ancestor-resolution lead (l-000) returning 0 of 1 documents is already reflected in the existing document; no new row is warranted.

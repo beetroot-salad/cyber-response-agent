@@ -1,0 +1,5 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - :T close blocked: loop 2 has no committed finding — cannot close an empty/drafted loop
+
+Re-send the block with those rows corrected.

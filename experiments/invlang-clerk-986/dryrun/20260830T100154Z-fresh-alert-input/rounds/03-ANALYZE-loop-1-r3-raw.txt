@@ -1,0 +1,25 @@
+```invlang
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-002|attrs.user|root
+```
+
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-004|1|cmdb-soc-playground-classify|soc-playground||cmdb|n/a
+l-005|1|change-window-soc-playground|soc-playground||change-mgmt|n/a
+```
+
+```invlang
+:R attr_updates [resolved_by|target|key|value]
+l-004|soc-playground|class|??/??/novel
+```
+
+```invlang
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-005|proposed|ac1|unauthorized|change-mgmt|"no active change window, training exercise, or SOC drill documented for soc-playground"
+```
+
+GAPS:
+- soc-playground is refined via `:R attr_updates` but no `:V` vertex declares it in the document so far — noted as a gap because the prose asserts the host is unregistered in CMDB, yet no prologue vertex exists for it.
+- h-001 versus h-002 grading is discussed but no explicit belief movement ("null → ++" etc.) is stated in the prose — left unrecorded.
+- The open questions raised (prior sudo baseline, IAM authorization ac2, and container e5b0213bd690 identity) have no lead ids assigned in the prose — not recorded as rows.

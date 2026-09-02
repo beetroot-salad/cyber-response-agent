@@ -1,0 +1,35 @@
+```invlang
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?routine-soc-training|v-001|runs_on|compute|bastion/internal/known-corp||null|active
+h-002|?unauthorized-sudo-burst|v-001|runs_on|compute|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"identity has established sudo baseline on soc-playground with similar command patterns"
+p2|proposed_parent|"event falls within scheduled training window or change management approval"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"identity has no prior sudo baseline on this host, or commands deviate from known patterns"
+p2|proposed_parent|"no change/training window covers Sunday 09:59 UTC"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|change-mgmt|"active change or training window covers 2026-08-30T09:59:51Z"|escalate|escalate
+
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|falco-sudo-events|v-001||h-001,h-002|elastic|alert-window
+l-002|1|cmdb-host-classification|v-001||h-001|cmdb|n/a
+l-003|1|change-window-check|v-001||ac1|change-mgmt|2026-08-30T09:59:51Z
+
+:L l-001.lead_preds [id|if|read_as|advance_to]
+lp1|"user matches known training identity with sudo baseline"|"routine training"|CONCLUDE
+lp2|"unknown user or anomalous commands"|"unauthorized access"|HYPOTHESIZE
+
+:L l-002.lead_preds [id|if|read_as|advance_to]
+lp1|"host class is training/lab environment"|"training environment"|CONCLUDE
+lp2|"host class is production or undefined"|"production exposure"|HYPOTHESIZE
+
+:L l-003.lead_preds [id|if|read_as|advance_to]
+lp1|"active change/training window exists"|"authorized activity"|CONCLUDE
+lp2|"no active window"|"unauthorized activity"|HYPOTHESIZE
+```
+
+GAPS: none

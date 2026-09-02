@@ -1,0 +1,6 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - disposition benign blocked: no `:V prologue.vertices` row — benign says the alerted activity was accounted for, so the log has to name the entity the alert was about. An `investigation.md` that records no vertex records no investigation; conclude `inconclusive` instead.
+  - disposition benign blocked: authz contract ac1 on live hypothesis h-001 resolved 'unauthorized', not 'authorized' — benign requires every contract authorized
+
+Re-send the block with those rows corrected.

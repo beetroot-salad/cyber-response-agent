@@ -1,0 +1,11 @@
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-004|2|container-root-identity|soc-playground|ac2|falco|n/a
+l-005|2|sudo-baseline|soc-playground|h-001,h-002|siem|n/a
+l-006|2|container-identify|soc-playground|h-001|falco|n/a
+```
+
+GAPS:
+- prose does not yet name a lead id for closing the `??` on the container-root identity slot — left ungrounded.
+- ac2 is referenced by l-004 but no `:H h-*.authz` declares it yet — that declaration is missing and will need to be added before l-004 can test it.
+- prose poses identity-resolution as a relevant lesson but does not attach it to a new hypothesis or lead id — not compiled as a row.

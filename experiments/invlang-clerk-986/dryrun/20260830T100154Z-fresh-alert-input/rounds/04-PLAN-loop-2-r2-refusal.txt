@@ -1,0 +1,5 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - lead l-004: `:L findings` tests commitment 'ac2', which none of the hypotheses it tests declares (h-001, h-002) — a `p*`/`ap*` is declared by `:H h-NNN.preds` / `.attr_preds`, an `r*` by `.refuts` and an `ac*` by `.authz` (declared: ac1, p1, p2, p3)
+
+Re-send the block with those rows corrected.

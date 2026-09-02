@@ -1,0 +1,21 @@
+```invlang
+:T conclude
+termination.category   exhaustion-escalation
+disposition            inconclusive
+impact_verdict         none
+impact_severity        null
+confidence             low
+summary                "Behavioral case settled as routine (h-001 ++); authorization for container-internal root sudo remains unresolved — no authority anchor, no change window. Escalating."
+```
+
+```invlang
+:T conclude.deferred_authz [contract_ref|rationale]
+h-001.ac2|"no authority anchor exists — IAM does not govern container-internal OS root; denied / indeterminate"
+```
+
+```invlang
+:T conclude.deferred_authz [contract_ref|rationale]
+none
+```
+
+GAPS: none

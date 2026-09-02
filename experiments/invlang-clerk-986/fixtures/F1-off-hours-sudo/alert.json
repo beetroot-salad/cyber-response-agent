@@ -1,0 +1,46 @@
+{
+  "alert_id": "e9064a67d66174eaa0213cc85a123f5f59823b3c39efa8b6cf4b7144b2be8086",
+  "alert_timestamp": "2026-08-30T09:59:51.646Z",
+  "rule": {
+    "id": "v2-off-hours-sudo",
+    "name": "v2 sudo activity burst",
+    "type": "threshold",
+    "severity": "medium",
+    "risk_score": 47,
+    "tags": [
+      "v2",
+      "falco",
+      "privilege-escalation",
+      "sudo"
+    ],
+    "description": "Three or more Falco sudo-execution events on a single host within 10 minutes. Concentrated sudo bursts are unusual under steady-state baseline and capture two patterns of interest: legitimate oncall response (svc identities + sre.* taking corrective action) and interactive attacker activity post-shell. Rule fires regardless of hour; the off-hours-vs-work-hours distinction is left to investigation analysis via the alert @timestamp. Triage answers which identity drove the burst, what change-mgmt window was active (if any), and whether the host is currently in an incident state.",
+    "language": "kuery",
+    "query": "falco.rule: \"Sudo execution\""
+  },
+  "reason": "event on soc-playground created medium alert v2 sudo activity burst.",
+  "host": {
+    "name": "soc-playground"
+  },
+  "user": {
+    "name": null
+  },
+  "ancestor_events": [
+    {
+      "id": "7a09d061-f5e8-57d6-8434-68c055b7d1d6",
+      "type": "event",
+      "index": "logs-falco.alerts-*",
+      "depth": 0
+    }
+  ],
+  "signal_index": ".internal.alerts-security.alerts-default-*",
+  "threshold_result": {
+    "count": 3,
+    "from": "2026-08-30T09:54:51.724Z",
+    "terms": [
+      {
+        "field": "host.name",
+        "value": "soc-playground"
+      }
+    ]
+  }
+}

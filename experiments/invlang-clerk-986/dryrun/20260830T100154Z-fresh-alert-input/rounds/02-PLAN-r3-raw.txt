@@ -1,0 +1,39 @@
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|falco-sudo-events|v-001|h-001,h-002|elastic|alert-window
+l-002|1|cmdb-host-classification|v-001|h-001|cmdb|n/a
+l-003|1|change-window-check|v-001|ac1|change-mgmt|2026-08-30T09:59:51Z
+```
+
+```invlang
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?routine-training-activity|v-001|authenticated_as|identity|??/??||null|active
+h-002|?unauthorized-sudo-escalation|v-001|authenticated_as|identity|??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"identity has established sudo baseline on soc-playground with command shapes matching the alert"
+p2|proposed_parent|"activity occurs during scheduled training window or matches known training cadence"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"identity has no prior sudo baseline on soc-playground, or commands are anomalous for this host"
+p2|proposed_parent|"Sunday timing is outside any authorized training window"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|change-mgmt|"active change or training window covers 2026-08-30T09:59:51Z on soc-playground"|escalate|escalate
+```
+
+```invlang
+:L l-001.lead_preds [id|if|read_as|advance_to]
+lp1|"user and commands match known training baseline"|"routine training activity"|CONCLUDE
+lp2|"user unknown or commands anomalous for training"|"potential unauthorized escalation"|HYPOTHESIZE
+
+:L l-002.lead_preds [id|if|read_as|advance_to]
+lp1|"soc-playground is classified as training/lab environment"|"supports training hypothesis"|HYPOTHESIZE
+lp2|"soc-playground is production or unknown classification"|"refutes training premise"|HYPOTHESIZE
+
+:L l-003.lead_preds [id|if|read_as|advance_to]
+lp1|"active change/training window covers the alert time"|"authorized activity window"|CONCLUDE
+lp2|"no active window covers this time"|"unauthorized timing"|HYPOTHESIZE
+```
+
+GAPS: none
