@@ -129,7 +129,7 @@ def clerk_trace(run_dir: Path) -> dict:
     p = run_dir / "clerk_trace.jsonl"
     if not p.exists():
         return {"clerk_calls": 0}
-    rows = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
     return {
         "clerk_calls": len(rows),
         "clerk_rounds": sum(int(r.get("rounds", 1)) for r in rows),
@@ -246,7 +246,7 @@ def summarize(rows: list[dict]) -> str:
 
 
 def cmd_score(args: argparse.Namespace) -> int:
-    entries = [json.loads(l) for l in Path(args.manifest).read_text().splitlines() if l.strip()]
+    entries = [json.loads(line) for line in Path(args.manifest).read_text().splitlines() if line.strip()]
     if args.only:
         entries = [e for e in entries if e["run_id"] in set(args.only)]
     rows = [score_run(e) for e in entries]
@@ -321,7 +321,7 @@ def _parse_verdict(text: str) -> dict:
 
 
 def cmd_judge(args: argparse.Namespace) -> int:
-    entries = [json.loads(l) for l in Path(args.manifest).read_text().splitlines() if l.strip()]
+    entries = [json.loads(line) for line in Path(args.manifest).read_text().splitlines() if line.strip()]
     left, right = args.arms
     a = [e["run_id"] for e in entries if e["fixture"] == args.fixture and e["arm"] == left]
     c = [e["run_id"] for e in entries if e["fixture"] == args.fixture and e["arm"] == right]
