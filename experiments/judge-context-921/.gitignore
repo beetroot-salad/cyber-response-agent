@@ -1,0 +1,4 @@
+# Model traces and raw replies from the questioner runs: reproducible from family.yaml + inputs.json, and large.
+family/*/wire_logs/
+family/*/*.reply.txt
+__pycache__/
