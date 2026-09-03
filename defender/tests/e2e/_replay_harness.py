@@ -431,10 +431,15 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
             "beside it is silently discarded — assert over the source run's own handle instead")
 
 
-def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
+def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per INJECTION
+        # SEAM, and one `if … is not None` pass-through per seam. #996's `clerk=` is the
+        # ninth and tips the branch count to 11; the branches are a flat list of
+        # independent seam forwards, not nested logic, and collapsing them into a loop
+        # would erase the one line the clerk docstring below names as the implementer's
+        # target (`seams["clerk"] = clerk if clerk is not None else …`).
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
-        toolset=None, resume=None):
+        toolset=None, resume=None, clerk=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -505,6 +510,27 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     model-visible text are identical to today's. Passed through only when supplied. RED until
     `run_investigation` accepts it.
 
+    `clerk` is the NINTH injection seam (#996, mechanism 5): the CLERK role's one model call,
+    a callable handed the rendered turn and returning the reply text — the same shape a review
+    stage takes, one layer over. Handed straight to `run_investigation(clerk=…)`.
+
+    IT MIRRORS `review_stages=` AND NOT `store_factory=`, and that choice was the human's at
+    the §7 seam (`70-resolutions.md` HD-1) rather than an implementation taste: the two
+    candidate seams behave OPPOSITELY here — `review_stages` is ALWAYS defaulted to a bundle
+    that answers without a provider (below), while `store_factory` is left `None` — and if the
+    clerk seam took the second shape, every existing replay scenario would start making live
+    provider calls the moment `record` is registered. So once `record` is MAIN's document verb
+    the default belongs here, unconditionally, the way `review_stages`' does:
+    `run_investigation(clerk=None)` builds the LIVE caller and that is production's path, not
+    a replay's.
+
+    Passed through only when supplied, for now — `run_investigation` does not accept it at
+    `7fa49f04`, and defaulting it here would replace 221 unrelated scenarios' honest results
+    with one `TypeError`. RED until `run_investigation` accepts it, exactly as `bounds` and
+    `toolset` above are; the demand that the DEFAULT is unconditional is driven by
+    `test_996_a_replay_that_records_with_no_injected_clerk_never_reaches_a_live_call`, which
+    can only go green once this line is `seams["clerk"] = clerk if clerk is not None else …`.
+
     `resume` is NOT an injection seam — it is #920's turn-N branch, a runtime parameter
     (`branch.BranchSpec`) naming the run and the message this one continues from. It rides here
     because a resumed run is still a driven replay in every other respect, and the alternative
@@ -541,6 +567,8 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         seams["bounds"] = bounds
     if toolset is not None:
         seams["toolset"] = toolset
+    if clerk is not None:
+        seams["clerk"] = clerk
     if resume is not None:
         seams["resume"] = resume
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
