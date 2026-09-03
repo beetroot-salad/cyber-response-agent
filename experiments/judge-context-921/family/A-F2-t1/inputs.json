@@ -1,0 +1,23 @@
+{
+  "as_of": "2026-09-01 12:13:22+00:00",
+  "fences_at": 5,
+  "leads_held": [
+    "l-000",
+    "l-001",
+    "l-002",
+    "l-003",
+    "l-004",
+    "l-005",
+    "l-00c"
+  ],
+  "harness_corrections": [
+    "world id 'approved-cr' -> 'approved_cr'",
+    "world id 'training-sandbox' -> 'training_sandbox'"
+  ],
+  "captured_patterns": [
+    ".ds-logs-falco.alerts-default-2026.06.29-000007",
+    ".internal.alerts-security.alerts-default-*",
+    "logs-*",
+    "logs-falco.alerts-*"
+  ]
+}
