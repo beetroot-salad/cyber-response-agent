@@ -6,10 +6,17 @@ fixture's artifacts (the arm-independent PROPOSED rendering, so it can verify an
 finding against bytes rather than guess). It never sees which arm produced the reply.
 """
 from __future__ import annotations
-import argparse, json, os, re, subprocess, sys
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
 from pathlib import Path
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, "/workspace"); sys.path.insert(0, str(HERE / "variants")); sys.path.insert(0, str(HERE))
+sys.path.insert(0, "/workspace")
+sys.path.insert(0, str(HERE / "variants"))
+sys.path.insert(0, str(HERE))
 import contexts  # noqa: E402
 from checks import run_checks  # noqa: E402
 
@@ -75,7 +82,9 @@ def parse_grade(text: str) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm"); ap.add_argument("--fixture"); ap.add_argument("--trial", type=int)
+    ap.add_argument("--arm")
+    ap.add_argument("--fixture")
+    ap.add_argument("--trial", type=int)
     ap.add_argument("--all", action="store_true", help="grade every trial dir without a grade.json")
     ap.add_argument("--effort", default="xhigh")
     ap.add_argument("--force", action="store_true")

@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """One judge call: --arm {current,proposed} --fixture <name> --trial N → runs/<arm>/<fixture>/t<N>/."""
 from __future__ import annotations
-import argparse, json, re, sys, time
+import argparse
+import json
+import re
+import sys
+import time
 from pathlib import Path
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, "/workspace"); sys.path.insert(0, str(HERE / "variants"))
+sys.path.insert(0, "/workspace")
+sys.path.insert(0, str(HERE / "variants"))
 import contexts  # noqa: E402
 from defender.learning._pydantic_stage import run_stage  # noqa: E402
 from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402

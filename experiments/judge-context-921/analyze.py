@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Aggregate grades per (arm, fixture). Rank by per-occurrence mean; n shown as support."""
 from __future__ import annotations
-import json, sys
+import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 HERE = Path(__file__).resolve().parent

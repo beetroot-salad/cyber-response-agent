@@ -4,10 +4,13 @@ Regex hits per reference finding (frozen 2026-09-02 before scale-up), and per-po
 grounding: does each artifact the judge cites exist in the fixture?
 """
 from __future__ import annotations
-import json, re, sys
+import json
+import re
+import sys
 from pathlib import Path
 import yaml
-sys.path.insert(0, "/workspace"); sys.path.insert(0, str(Path(__file__).resolve().parent / "variants"))
+sys.path.insert(0, "/workspace")
+sys.path.insert(0, str(Path(__file__).resolve().parent / "variants"))
 import contexts  # noqa: E402
 
 PATTERNS = {
@@ -128,7 +131,8 @@ def run_checks(reply_path: Path, run_dir: Path) -> dict:
            "n_findings": len(doc.get("findings") or []), "findings": []}
     for i, f in enumerate(doc.get("findings") or []):
         if not isinstance(f, dict):
-            out["findings"].append({"index": i, "malformed": True}); continue
+            out["findings"].append({"index": i, "malformed": True})
+            continue
         text = _text(f).lower()
         hits = {ref: sorted({pat for pat in pats if re.search(pat, text)}) for ref, pats in PATTERNS.items()}
         pointers = [str(p) for p in (f.get("evidence") or [])]

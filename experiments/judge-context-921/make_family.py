@@ -7,7 +7,8 @@ discriminator and the worlds, not an episode. Leads are filtered to those HELD a
 point (`_frontier.leads_at`), which is what the design says the questioner is shown.
 """
 from __future__ import annotations
-import json, sys
+import json
+import sys
 from pathlib import Path
 sys.path.insert(0, "/workspace")
 from defender.learning.branch import cli as launcher
@@ -39,7 +40,7 @@ def main() -> int:
     held = _frontier.leads_at(store, sid, N, SOURCE)
     store.close()
     all_leads = launcher._joined_leads(SOURCE, joined)
-    leads = [l for l in all_leads if l.get("lead_id") in held]
+    leads = [lead for lead in all_leads if lead.get("lead_id") in held]
     print(f"as_of={as_of} fences_at={fences} leads_held={sorted(held)} of {len(all_leads)}")
     (EP / "inputs.json").write_text(json.dumps({
         "as_of": str(as_of), "fences_at": fences, "leads_held": sorted(held)}, indent=2))
@@ -72,29 +73,39 @@ def main() -> int:
     # ids (identity gate refuses '-'), overlay.elastic authored as a list (schema wants a
     # mapping keyed by base pattern). Captured patterns come from the source's own query table.
     import re as _re
-    rows = [json.loads(l) for l in (SOURCE / "executed_queries.jsonl").read_text().splitlines() if l.strip()]
+    lines = (SOURCE / "executed_queries.jsonl").read_text().splitlines()
+    rows = [json.loads(line) for line in lines if line.strip()]
     pats = set()
     for r in rows:
-        p = r.get("params") or {}; q = p.get("query") or ""
+        p = r.get("params") or {}
+        q = p.get("query") or ""
         m = _re.search(r"FROM\s+([^\s|]+)", q) if isinstance(q, str) else None
-        if m: pats.add(m.group(1))
-        if isinstance(p.get("index"), str): pats.add(p["index"])
+        if m:
+            pats.add(m.group(1))
+        if isinstance(p.get("index"), str):
+            pats.add(p["index"])
     corrections = []
     for w in doc["worlds"]:
         if "-" in w["world_id"]:
-            new = w["world_id"].replace("-", "_"); corrections.append(f"world id {w['world_id']!r} -> {new!r}"); w["world_id"] = new
-        ov = w.get("overlay") or {}; el = ov.get("elastic")
+            new = w["world_id"].replace("-", "_")
+            corrections.append(f"world id {w['world_id']!r} -> {new!r}")
+            w["world_id"] = new
+        ov = w.get("overlay") or {}
+        el = ov.get("elastic")
         if isinstance(el, list):
-            m = {}
+            mapping = {}
             for entry in el:
                 pat = entry.get("base_pattern") or entry.get("pattern")
-                m[pat] = {"inject": [e.get("document", e) for e in entry.get("inject", [])], "exclude": entry.get("exclude")}
-            ov["elastic"] = m; corrections.append(f"world {w['world_id']}: overlay.elastic list->mapping")
+                mapping[pat] = {"inject": [e.get("document", e) for e in entry.get("inject", [])], "exclude": entry.get("exclude")}
+            ov["elastic"] = mapping
+            corrections.append(f"world {w['world_id']}: overlay.elastic list->mapping")
         w["overlay"] = ov
     family = parse_family(doc, captured_patterns=tuple(sorted(pats)))
     check_identities(family)
     path = write_family(EP, doc)
-    inp = json.loads((EP / "inputs.json").read_text()); inp["harness_corrections"] = corrections; inp["captured_patterns"] = sorted(pats)
+    inp = json.loads((EP / "inputs.json").read_text())
+    inp["harness_corrections"] = corrections
+    inp["captured_patterns"] = sorted(pats)
     (EP / "inputs.json").write_text(json.dumps(inp, indent=2))
     print(f"wrote {path}")
     print("discriminator:", json.dumps(family.discriminator, indent=2))

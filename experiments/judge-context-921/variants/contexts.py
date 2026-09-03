@@ -14,7 +14,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, "/workspace")
-from defender.learning.lead_repository import joined  # noqa: E402
 from defender.skills.invlang import parser as invparser  # noqa: E402
 
 RUNS_BASE = Path("/workspace/.defender-runs")
