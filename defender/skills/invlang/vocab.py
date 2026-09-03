@@ -370,7 +370,15 @@ def attr_slot_key(vertex_type: str, attribute: str) -> str | None:
     §Classification grammar says the single token IS "the corresponding `attrs.kind` enum where
     the type has one", so `storage`'s `attrs.kind` and its `class` cell are one vocabulary by
     construction, and `compute.kind` / `socket.protocol` are attribute enums to begin with.
+
+    The head has to BE a vertex type, and `vertex_slots_holding` filters the same way. The pair
+    is built from the row's own `type` cell, which `_check_vocab_vertices` refuses but does not
+    stop the walk on — so without this, `v-001|impact|x|y|dimension=bogus` reached
+    `impact.dimension` and earned a second refusal quoting the grading vocabulary of a
+    resolution row, which is exactly what keying on the pair exists to prevent.
     """
+    if vertex_type not in TYPES:
+        return None
     key = f"{vertex_type}.{attribute}"
     if key not in SLOTS or key in CLASS_GRAMMAR.get(vertex_type, ()):
         return None
