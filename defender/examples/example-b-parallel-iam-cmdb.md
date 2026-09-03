@@ -9,7 +9,7 @@ SSH auth-success on `app-host-12.prod` from `mon-poller-04.sre` using account `m
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|monitoring/internal/known-corp|mon-poller-04.sre|kind=vm;ip=10.20.5.41
+v-001|compute|monitoring-agent/internal/known-corp|mon-poller-04.sre|kind=vm;ip=10.20.5.41
 v-002|compute|app-server/internal/known-corp|app-host-12.prod|kind=vm;ip=10.20.7.118
 v-003|identity|service-account/known-corp|metrics-shipper|
 

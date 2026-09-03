@@ -198,8 +198,15 @@ IMPACT_GROUNDING: tuple[str, ...] = (
 IMPACT_SEVERITY: tuple[str, ...] = ("null", "low", "moderate", "high")
 
 
+#: `monitoring-agent` rather than `monitoring`, because the enum is now READ: until #986 armed
+#: `validate._check_vocab_class_cells` nothing tested a `class` cell against these values, and
+#: the SKILL had drifted to its own spelling — `skills/invlang/SKILL.md` §Open questions teaches
+#: `class=monitoring-agent/??/known-corp` and its `:R attr_updates` worked example refines to
+#: `monitoring-agent/internal/known-corp`. A model writes what the prompt showed it, so the
+#: prompt's spelling is the one the catalog has to hold; carrying BOTH would be the two-spellings
+#: -for-one-role the closed vocabulary exists to prevent. The corpus was moved with it.
 COMPUTE_ROLE: tuple[str, ...] = (
-    "monitoring", "web-server", "app-server", "database-server",
+    "monitoring-agent", "web-server", "app-server", "database-server",
     "mail-server", "dns-server", "dns-resolver", "domain-controller",
     "directory-server", "file-server", "bastion", "egress-host",
     "workstation", "byod", "mobile-device", "build-runner",
@@ -353,6 +360,15 @@ CLASS_GRAMMAR: dict[str, tuple[str, ...]] = {
 #: What a type absent from `CLASS_GRAMMAR` carries — SKILL.md's "all others".
 DEFAULT_CLASS_ARITY: int = 1
 
+#: The two suffixes a SINGLE-slot type's `class` cell can be spelled under in `SLOTS`, in the
+#: order they are tried. SKILL.md gives the arity-1 cell as "a single sub-kind token (prefer the
+#: corresponding `attrs.kind` enum where the type has one)", and the registry above follows the
+#: cell's own noun: `session` names its one token a CLASS (`session.class`), while `storage`,
+#: `database`, `credential` and the rest name theirs a KIND. A type with neither — `process`
+#: (image basename), `socket` (whose only enum is `socket.protocol`, an attribute), `file`,
+#: `module` — has no closed vocabulary for that cell at all, and gets none imposed on it here.
+_SINGLE_SLOT_SUFFIXES: tuple[str, ...] = ("class", "kind")
+
 assert set(CLASS_GRAMMAR).issubset(TYPES), (
     "CLASS_GRAMMAR keys must be known vertex types"
 )
@@ -377,6 +393,89 @@ def class_arity(vertex_type: str) -> int:
     """
     slots = CLASS_GRAMMAR.get(vertex_type)
     return DEFAULT_CLASS_ARITY if slots is None else len(slots)
+
+
+def class_slot_keys(vertex_type: str) -> tuple[str, ...]:
+    """Which `SLOTS` enum judges each position of a `class` cell on `vertex_type`.
+
+    `class_arity` answers HOW MANY slots the cell carries; this answers WHICH vocabulary each
+    one is drawn from, which is what `validate._check_vocab_class_cells` needs to refuse
+    `compute|container/...` — `container` is a `COMPUTE_KIND`, the vertex's deployment form,
+    and the first slot of a `compute` class tuple is its ROLE (#986).
+
+    EMPTY, not a one-slot fallback, for a type whose single token no enum closes: `process`
+    carries an image basename and `socket` a free sub-kind, so there is nothing to test them
+    against and an empty tuple is how this table says so. That is why `class_arity` is not
+    `len(...)` of this — the two questions have different answers for exactly those types.
+    """
+    grammar = CLASS_GRAMMAR.get(vertex_type)
+    if grammar is not None:
+        return grammar
+    return tuple(
+        key for suffix in _SINGLE_SLOT_SUFFIXES
+        if (key := f"{vertex_type}.{suffix}") in SLOTS
+    )[:DEFAULT_CLASS_ARITY]
+
+
+def attr_slot_key(vertex_type: str, attribute: str) -> str | None:
+    """The `SLOTS` enum an `attrs.<attribute>` cell on `vertex_type` is closed by, or `None`
+    where the pair names no closed vocabulary.
+
+    Keyed on the PAIR, never on the attribute name alone: `kind` is a closed set on `compute`
+    (`compute.kind`) and free text on a type that registers no enum for it, and the six
+    `impact.*` / `conclude.*` / `attr-pred.target` keys in `SLOTS` are not vertex attributes at
+    all — a lookup by bare name would hand a vertex the grading vocabulary of a resolution row.
+
+    A `CLASS_GRAMMAR` POSITION is not an attribute either, and is excluded for the same reason.
+    `compute.role` / `compute.zone` / `compute.provenance` (and `identity.*`, `application.*`)
+    close a slash-slot of the `class` cell; SKILL.md registers no `attrs.role` and no
+    `attrs.zone`, so an author writing `role=primary` (a database primary) or
+    `zone=us-east-1a` (a cloud AZ) means a free attribute that happens to share a word with a
+    class slot — and closing it against the class enum refuses an honest write while advising a
+    vocabulary that answers a different question. The arity-1 types are NOT excluded: SKILL.md
+    §Classification grammar says the single token IS "the corresponding `attrs.kind` enum where
+    the type has one", so `storage`'s `attrs.kind` and its `class` cell are one vocabulary by
+    construction, and `compute.kind` / `socket.protocol` are attribute enums to begin with.
+
+    The head has to BE a vertex type, and `vertex_slots_holding` filters the same way. The pair
+    is built from the row's own `type` cell, which `_check_vocab_vertices` refuses but does not
+    stop the walk on — so without this, `v-001|impact|x|y|dimension=bogus` reached
+    `impact.dimension` and earned a second refusal quoting the grading vocabulary of a
+    resolution row, which is exactly what keying on the pair exists to prevent.
+    """
+    if vertex_type not in TYPES:
+        return None
+    key = f"{vertex_type}.{attribute}"
+    if key not in SLOTS or key in CLASS_GRAMMAR.get(vertex_type, ()):
+        return None
+    return key
+
+
+def vertex_slots_holding(value: str, *, other_than: str) -> tuple[str, ...]:
+    """Every VERTEX slot other than `other_than` whose enum holds `value` — same type first.
+
+    Here rather than in `validate`, for the reason `class_slot_keys` and `attr_slot_key` are:
+    this is a membership question about THIS module's registry, and a reader that walks `SLOTS`
+    itself is a second interpreter of the catalog that drifts the moment a key is added.
+
+    VERTEX slots only — a key whose head is a `TYPES` member. `SLOTS` also registers
+    `disposition`, `types`, `relations`, `anchor-kinds`, `auth-kinds` and the `impact.*` /
+    `conclude.*` / `attr-pred.target` grading vocabularies, and none of them can ever close a
+    cell on a vertex: pointing an author at `enum relations` because `created` happens to be a
+    relation, when the cell under their cursor is a `storage.kind`, is worse than no hint at all.
+
+    SAME TYPE FIRST because the category confusion this serves (#986) is confusion between two
+    axes of ONE type — `container` is a `compute.kind` written into `compute.role`. A cross-type
+    hit is still reported when nothing on the type matches, because it names the OTHER move an
+    author has: "`proxy` is a `network-device.kind`" says the vertex is the wrong type, not the
+    cell.
+    """
+    head = f"{other_than.split('.')[0]}."
+    hits = [
+        key for key, allowed in SLOTS.items()
+        if key != other_than and key.split(".")[0] in TYPES and value in allowed
+    ]
+    return tuple(sorted(hits, key=lambda k: not k.startswith(head)))
 
 
 def list_slots() -> list[str]:

@@ -561,7 +561,13 @@ def test_gate_refusal_names_the_flagged_rows_and_their_use_alternatives(tmp_path
     fix alternative (claim p5), and PR-1 executed it: the row prints byte-identical and the
     "message already embeds the row" suppression NEVER fires for this family (pr1e,
     REFUTED). M4's one intended workflow is the model copying that row back as `old_row`, so
-    a refusal that named the defect without the row would make the verb unusable."""
+    a refusal that named the defect without the row would make the verb unusable.
+
+    ONE `use:` line here, not two: `PROLOGUE` declares v-001 a `compute` vertex, and since #986
+    a `class` cell is judged against `compute.role` — `svc.config-mgmt` is not one, so the
+    `class` route would hand the model a paste its own gate refuses and is withheld with the
+    reason named in the message. The route that survives is the one that can carry the author's
+    value, which is the whole point of offering more than one."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime.tools import _tool_append_block
@@ -577,8 +583,9 @@ def test_gate_refusal_names_the_flagged_rows_and_their_use_alternatives(tmp_path
     for exc in (append_exc, close_exc):
         text = str(exc.value)
         assert f"row: {WARN_ROW}" in text
-        assert "use: l-001|v-001|class|svc.config-mgmt" in text
-        assert "l-001|v-001|attrs.owner|svc.config-mgmt" in text
+        assert "use: l-001|v-001|attrs.owner|svc.config-mgmt" in text
+        assert "use: l-001|v-001|class|svc.config-mgmt" not in text
+        assert "no `class` alternative is offered here" in text
 
 
 def test_gate_refusal_names_every_flagged_row_when_multiple(tmp_path):

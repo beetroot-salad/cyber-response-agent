@@ -562,7 +562,7 @@ def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path
     )
     source_doc = (
         VERTICES
-        + attr_block("l-001|v-001|class|server")
+        + attr_block("l-001|v-001|class|file-server/internal/known-corp")
         + findings_block("l-001|1|probe|v-001||cmdb|n/a")
     )
     assert [d for d in diagnose(source_doc, None) if d.severity != "warning"] == [], (

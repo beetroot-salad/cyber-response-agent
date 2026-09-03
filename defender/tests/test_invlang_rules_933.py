@@ -20,7 +20,7 @@ from defender.skills.invlang.validate import _SIBLING_FORK_TAG, validate_compani
 
 _PROLOGUE = """\
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|monitoring/internal/known-corp|172.18.0.15|
+v-001|compute|monitoring-agent/internal/known-corp|172.18.0.15|
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
 e-001|attempted_auth|v-001|v-001|2026-05-05T03:42:11Z|siem-event:siem|
@@ -185,9 +185,9 @@ _FORK_IDENTICAL = _FORK_DISTINCT.replace(
 
 #: The same claims on hypotheses hung on DIFFERENT vertices. Not siblings, so not a fork.
 _SAME_CLAIMS_ON_TWO_ANCHORS = _PROLOGUE.replace(
-    "v-001|compute|monitoring/internal/known-corp|172.18.0.15|",
-    "v-001|compute|monitoring/internal/known-corp|172.18.0.15|\n"
-    "v-002|compute|monitoring/internal/known-corp|172.18.0.16|",
+    "v-001|compute|monitoring-agent/internal/known-corp|172.18.0.15|",
+    "v-001|compute|monitoring-agent/internal/known-corp|172.18.0.15|\n"
+    "v-002|compute|monitoring-agent/internal/known-corp|172.18.0.16|",
 ) + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?credential-guessing|v-002|runs_on|process|??/??/??||null|active

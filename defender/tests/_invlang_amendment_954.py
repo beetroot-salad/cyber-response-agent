@@ -47,6 +47,7 @@ __all__ = [
     "STRAND_FINDINGS_HEADER",
     "UNDECLARED_LEAD_PHRASE",
     "VERTICES",
+    "VERTICES_FREEFORM_CLASS",
     "VERTICES_WITH_AN_ESCAPED_PIPE_ID",
     "VERTICES_WITH_A_QUOTED_PIPE_ID",
     "attr_block",
@@ -78,15 +79,39 @@ v-002|identity|user/known-corp|jsmith|
 ```
 """
 
+#: The same two vertices with v-001 declared a `process`, the one type whose `class` cell the
+#: grammar leaves free (SKILL.md §Classification grammar: "image basename"). It exists for the
+#: paste round trips below, whose subject is what a `fix_row` candidate's VALUE cell may carry —
+#: an escaped `|`, leading padding — and which rewrite only the KEY. Since #986 a `class` cell
+#: on a `compute` vertex is judged against `compute.role`, so those values would earn a second,
+#: unrelated refusal on a document whose only intended fault is the refinement key.
+#:
+#: The same reason covers the OFFER side, which is why most of the rebuild tests take this
+#: prologue: `_illegal_key_diagnostic` withholds the `class` candidate whose value that check
+#: would refuse, so on a `compute` target a test asserting both candidates' bytes would be
+#: asserting the vocabulary rule instead of the rebuild it was written for.
+VERTICES_FREEFORM_CLASS = """```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|process|bash|bash[pid=4120]|
+v-002|identity|user/known-corp|jsmith|
+```
+"""
+
 #: The same prologue, plus a vertex whose id is a QUOTED cell carrying a `|`. It exists so
 #: D8's discriminating row can stand a pipe-bearing cell to the LEFT of its key cell without
 #: drawing a second, error-severity diagnostic (`refines '"v-001|v-002"', which no :V or :E
 #: block declares`) that would refuse the document out from under the warn-family assertion.
 #: EXECUTED at base: the refinement row below draws the warn diagnostic and nothing else.
+#:
+#: The pipe-bearing vertex is a `process` for the reason `VERTICES_FREEFORM_CLASS` exists: it
+#: is the TARGET of the refinement whose candidates are asserted, the offer's `class` route
+#: keeps the author's value cell, and on a `compute` target #986's class-slot grammar refuses
+#: that value and the route is withheld — a second, unrelated subject in a test about where the
+#: row's BYTES land.
 VERTICES_WITH_A_QUOTED_PIPE_ID = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical
-"v-001|v-002"|compute|bastion/internal/known-corp|bastion-09.corp|kind=physical
+"v-001|v-002"|process|bash|bash[pid=4121]|
 ```
 """
 
@@ -96,11 +121,13 @@ v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical
 #: target reads as `bastion|01` and the vertex declared here is the one it refines.
 #: EXECUTED at base (J16): the refinement row below draws the warn diagnostic and nothing else,
 #: and both offered candidates come back CORRUPTED — `bastion|01`, five cells under a
-#: four-column header.
+#: four-column header. The pipe-bearing vertex is a `process` for the reason given on
+#: `VERTICES_WITH_A_QUOTED_PIPE_ID` above — it is the refinement's target, and a `compute` one
+#: would withhold the `class` candidate this test asserts the bytes of.
 VERTICES_WITH_AN_ESCAPED_PIPE_ID = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical
-bastion\\|01|compute|bastion/internal/known-corp|bastion-09.corp|kind=physical
+bastion\\|01|process|bash|bash[pid=4122]|
 ```
 """
 
