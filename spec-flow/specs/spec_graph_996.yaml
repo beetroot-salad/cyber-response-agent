@@ -32,6 +32,15 @@ actor_waivers:
                         # imports visualize_data/visualize_messages for the OTHER cost-by-model
                         # helpers (gather, review) and is unaffected by the clerk reader sitting
                         # unused beside them (the accepted gap noted above)
+  # Re-run at the #1004 merge (`spec-graph actors --base 7817e386`, origin/main's tip before the
+  # merge, so the census scopes to what THIS branch adds on top of main rather than main's own
+  # unrelated commits since 7fa49f04). Four more drivers surfaced, all transitively importing
+  # `agent_role` alone (AgentRole.CLERK's home) through the same role-agnostic registries as
+  # above — spot-checked by import, zero clerk-specific code needed in any of them.
+  - validate_cases     # defender/evals/oracle_golden/validate_cases.py
+  - workspace_map       # defender/scripts/workspace_map.py
+  - tacit_cli            # defender/scripts/tacit_cli.py — #983, unrelated to the clerk
+  - ticket_adapter        # defender/scripts/adapters/ticket_adapter.py
 
 # ===========================================================================================
 # READ THIS FIRST
