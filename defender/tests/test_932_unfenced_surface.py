@@ -21,7 +21,7 @@ from defender.skills.invlang.validate import validate_companion
 
 _PROLOGUE_ROWS = """\
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|monitoring/internal/known-corp|172.18.0.15|
+v-001|compute|monitoring-agent/internal/known-corp|172.18.0.15|
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
 e-001|attempted_auth|v-001|v-001|2026-05-05T03:42:11Z|siem-event:siem|

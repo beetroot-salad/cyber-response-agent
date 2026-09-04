@@ -78,7 +78,7 @@ l-001|1|cmdb-source-lookup|v-001|h-001,h-002|cmdb|n/a
 l-002|1|auth-failure-cadence|v-001|h-001,h-002|siem|24h
 
 :R attr_updates [resolved_by|target|key|value]
-l-001|v-001|class|monitoring/internal/known-corp
+l-001|v-001|class|monitoring-agent/internal/known-corp
 l-001|v-001|attrs.knowledge|full
 
 :T resolutions
@@ -127,7 +127,7 @@ def test_the_benign_gate_is_live_on_that_document() -> None:
     rather than the check never running.
     """
     control = _BENIGN_CLOSE_OVER_OPEN_PARENTS.replace(
-        "l-001|v-001|class|monitoring/internal/known-corp\n", ""
+        "l-001|v-001|class|monitoring-agent/internal/known-corp\n", ""
     )
     blocked = _blocked(validate_companion(control, None))
     assert len(blocked) == 1
@@ -160,7 +160,7 @@ def _fork_doc(h1_claim: str, h2_claim: str, *, anchor2: str = "v-001", tail: str
         "```invlang\n"
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
         "v-001|compute|ip-only/??/??|172.18.0.15|knowledge=partial\n"
-        "v-002|compute|server/internal/known-corp|canary-1|os=linux\n"
+        "v-002|compute|app-server/internal/known-corp|canary-1|os=linux\n"
         "\n"
         ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
         "e-001|attempted_auth|v-001|v-002|2026-05-05T03:47:12Z|siem-event:siem|outcome=failed\n"

@@ -1,0 +1,9 @@
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|??/??/??|soc-playground|knowledge=partial;alert_window=2026-08-30T09:59:51Z
+```
+
+GAPS:
+- driving identity for the sudo burst is unknown (user.name null in alert) — no identity vertex declared yet; ORIENT prose poses the question but no id exists
+- rule-claim test ("groups by host only, no logic defect") is asserted in prose but invlang has no ORIENT-phase row for detection notes — carry it forward to REPORT's detection_notes/entity_check
+- sudo-execution events themselves (3+ within 10 min) are not yet grounded edges — no event details (timestamps, outcome) supplied in prose; expect :E rows from the SIEM query lead

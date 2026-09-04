@@ -1,0 +1,4 @@
+```
+```
+GAPS:
+- REPORT header present but the prose contains no conclusion content — no `:T conclude` fields (termination.category, disposition, impact_verdict, confidence, summary) were stated, so nothing could be compiled.

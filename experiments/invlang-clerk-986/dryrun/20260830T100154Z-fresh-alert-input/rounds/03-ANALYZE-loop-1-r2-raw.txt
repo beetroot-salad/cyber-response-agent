@@ -1,0 +1,40 @@
+```invlang
+:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-005|authenticated_as|v-001|v-002|2026-08-30T09:54:51.724Z|siem-event:falco|user=root
+
+:R attr_updates [resolved_by|target|key|value]
+l-001|e-002|attrs.user|root
+l-001|e-003|attrs.user|root
+l-001|e-004|attrs.user|root
+
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-003|e-002|ac1|unauthorized|change-mgmt|"no active change window, training exercise, or SOC drill documented for soc-playground"
+```
+
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-004|1|host-classify-cmdb|soc-playground|h-001|cmdb|n/a
+l-005|1|container-identify|e5b0213bd690|h-001|??|n/a
+
+:R attr_updates [resolved_by|target|key|value]
+l-004|soc-playground|class|??/??/novel
+
+:H l-005.new_hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-003|?automated-db-health-check|e5b0213bd690|runs_on|process|??||null|active
+```
+
+```invlang
+:T resolutions
+h-001  null → ++    [l-001 p1,p2,p3 severe ⟂ e-002 :: all three are script-style DB admin commands in a sub-ms burst, favoring routine automated activity]
+h-002  null → --    [l-001 p1,p2,p3 severe ⟂ e-002 :: burst shape and command shape refute adversary novelty]
+```
+
+```invlang
+:T close
+loop  1
+```
+
+GAPS:
+- ac2 ("whether IAM authorizes root for sudo here") was posed in prose but is not yet declared in any `:H authz` block, and no lead id was attached to it — left out.
+- The container e5b0213bd690 has no declared `:V`/`:E` vertex; l-005 tests h-001 only, and the proposal h-003 is grounded in the prose naming the container and the automated-health-check reading.
+- Zone and role for soc-playground remain `??` — prose explicitly leaves them open.

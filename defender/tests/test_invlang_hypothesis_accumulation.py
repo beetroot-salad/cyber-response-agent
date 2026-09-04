@@ -309,10 +309,10 @@ def test_a_second_observations_block_adds_to_a_lead_rather_than_replacing():
         "l-001|1|process-ancestry|v-001|h-001|elastic|±10m\n"
         "\n"
         ":V l-001.observations.vertices [id|type|class|ident|attrs?]\n"
-        "v-100|compute|server/internal/known-corp|host-a|\n"
+        "v-100|compute|app-server/internal/known-corp|host-a|\n"
         "\n"
         ":V l-001.observations.vertices [id|type|class|ident|attrs?]\n"
-        "v-101|compute|server/internal/known-corp|host-b|\n"
+        "v-101|compute|app-server/internal/known-corp|host-b|\n"
     ))
     assert warnings == []
     lead = next(f for f in body["findings"] if f["id"] == "l-001")
@@ -323,10 +323,10 @@ def test_a_second_observations_block_adds_to_a_lead_rather_than_replacing():
 def test_a_second_prologue_vertices_block_adds_rather_than_replacing():
     body, warnings = parse_dense_companion(_doc(
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|compute|server/internal/known-corp|host-a|\n"
+        "v-001|compute|app-server/internal/known-corp|host-a|\n"
         "\n"
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-002|compute|server/internal/known-corp|host-b|\n"
+        "v-002|compute|app-server/internal/known-corp|host-b|\n"
     ))
     assert warnings == []
     assert [v["id"] for v in body["prologue"]["vertices"]] == ["v-001", "v-002"]

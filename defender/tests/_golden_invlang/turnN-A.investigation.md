@@ -62,7 +62,7 @@ l-004|1|co-occurring-falco-events|v-001|h-001|elastic|±10m
 Dispatching four parallel leads: Falco event details, CMDB lookup, change-mgmt check, and co-occurring Falco events.
 ```invlang
 :V l-001.observations.vertices [id|type|class|ident|attrs?]
-v-004|compute|container/??/??|1df4bcd65ee4|container.id=1df4bcd65ee4
+v-004|compute|??/??/??|1df4bcd65ee4|container.id=1df4bcd65ee4;kind=container
 v-005|identity|user/anonymous|root|uid=0;loginuid=-1
 
 :E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]

@@ -1,0 +1,9 @@
+```invlang
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+```
+
+GAPS:
+- prose resolves ac2 as `indeterminate` (IAM has no scope over container-internal root, UID 0) but names no lead as `resolved_by`; a `:R authz` row requires a single `resolved_by` — MAIN must attribute it (e.g. l-004 or a new lead) before it can be compiled
+- prose proposes "one remaining check — whether the ticket system carries standing authorization for soc-playground" but gives it no `l-NNN` id; it needs a PLAN `:L findings` row, not an ANALYZE row
+- h-001 `++` and h-002 `--` are restatements of grades already committed (l-005); no new movement rows written
+- soc-playground remains `class=??/??/novel` (unregistered in CMDB/IAM) — no new evidence this call to close it

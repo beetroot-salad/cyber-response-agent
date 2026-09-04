@@ -387,6 +387,14 @@ class VerbRegistry:
     answer verbs()/decide()?") cannot tell a real grant apart from a duck-typed stand-in that
     answers GRANTED to everything."""
 
+    #: Where THIS registry's grant is authored, or `None` when it is a code literal that no
+    #: data edit can widen. Read only by `decide`'s ungranted-system refusal, which since #995
+    #: tells the reader where to go — and a pointer is worse than silence when it names a file
+    #: that cannot fix the refusal. `lead_zero`'s narrowed correlation registry is exactly that
+    #: case: its grant is `_spec.CORRELATION_GRANT`, a tuple in Python, so it inherits `None`
+    #: and the refusal stops at what is true of every grant.
+    grant_home: str | None = None
+
     def __init__(self, grant: VerbGrant):
         if not isinstance(grant, VerbGrant):
             raise GrantError(
@@ -414,7 +422,20 @@ class VerbRegistry:
         verdict on a system whose adapter cannot even be imported is still reached, without
         importing it. A verb name outside what the system REALLY declares (a case or whitespace
         near-miss) is UNDECLARED even when the grant otherwise reaches the system; DENIED is
-        reserved for a real, withheld verb."""
+        reserved for a real, withheld verb.
+
+        The LABELS are unchanged by #995 and deliberately so. A wholly ungranted system stays
+        UNDECLARED (§7 R11 read literally, and RS14's accounting: no denial record, retry
+        coaching, agent-fixable) — that split is cited as load-bearing across the whole 632
+        suite, and it carries agent-visible retry semantics, not just wording.
+
+        What #995 changes is only the MESSAGE, because the two UNDECLARED cases had identical
+        text. A freshly connected system — adapter correct, verbs declared, simply absent from
+        the disposition table — read exactly like a typo, so the maintainer at `/connect`'s
+        test step was sent hunting a spelling mistake in code that was fine. The refusal now
+        says which of the two it is. It still names no verb the caller did not already name,
+        so R11's actual rule — a refusal never widens into the adapter's verb set — is intact.
+        """
         if not self.grant.allows(system, verb):
             if system in self.grant.systems:
                 cold = self._cold_verb_names(system)
@@ -430,10 +451,36 @@ class VerbRegistry:
                         DENIED, None,
                         f"{system}.{verb} is not granted to role {self.grant.role!r}.",
                     )
+                return VerbDecision(
+                    UNDECLARED, None,
+                    f"unresolvable: {system}.{verb} — role {self.grant.role!r} reaches "
+                    f"{system!r}, but no verb of that name is declared there.",
+                )
+            # The grant reaches this system NOWHERE. Whether the verb is real decides which of
+            # two very different jobs the reader has, so the cold read is worth one AST parse
+            # on a path that has already failed. Cold, never an import: an ungranted system's
+            # adapter must not be executed to explain why it is ungranted.
+            cold = self._cold_verb_names(system)
+            declared_here = cold is not None and verb in cold
+            if not declared_here:
+                return VerbDecision(
+                    UNDECLARED, None,
+                    f"unresolvable: {system}.{verb} (unknown, or role "
+                    f"{self.grant.role!r} holds no grant reaching it).",
+                )
+            # Where to go next, only when there IS somewhere: `grant_home` is `None` for a
+            # registry whose grant is a code literal, and naming the disposition table at one
+            # of those sends the reader to edit a file that cannot widen it — the same
+            # wrong-file symptom #995 set out to remove, one registry over.
+            fix = (
+                f" If {system!r} was just connected, it needs rows in the verb-disposition "
+                f"table ({self.grant_home})."
+            ) if self.grant_home is not None else ""
             return VerbDecision(
                 UNDECLARED, None,
-                f"unresolvable: {system}.{verb} (unknown, or role {self.grant.role!r} holds "
-                "no grant reaching it).",
+                f"unresolvable: {system}.{verb} — the verb is declared, but role "
+                f"{self.grant.role!r} holds no grant reaching the {system!r} system at "
+                f"all.{fix}",
             )
         try:
             verbs = self.verbs(system)
@@ -458,10 +505,34 @@ class ModuleVerbRegistry(VerbRegistry):
         super().__init__(grant)
         self.adapters_dir = Path(adapters_dir)
         # One cold read+parse per SYSTEM, not per grant entry: `declared_verb_names` re-reads
-        # and re-parses the adapter every call, and the shipped gather grant names 28 entries
-        # across 7 systems.
-        declared = {s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries}
-        offenders = [(s, v) for s, v, _ in grant.entries if v not in declared[s]]
+        # and re-parses the adapter every call, and the shipped gather grant names 30 entries
+        # across 8 systems.
+        # …and that dict is KEPT as the cold cache rather than thrown away: since #995
+        # `decide` also cold-reads on the refusal path for a system the grant does not reach
+        # at all, which a model looping on one ungranted name would otherwise pay a fresh
+        # read+parse for on every call. An adapters tree does not change under a live
+        # registry — `verbs()` memoizes the loaded module on the same assumption.
+        self._cold: dict[str, frozenset[str]] = {
+            s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries
+        }
+        # THE registry that resolves a real adapters tree, which is the deployment shape the
+        # disposition table governs — every grant reaching this constructor that a model ever
+        # calls through is one the table projects — so a refusal from here may name the table
+        # as where to fix an ungranted system. A registry over a grant written in Python
+        # (`lead_zero`'s narrowed correlation registry) subclasses `VerbRegistry` directly and
+        # keeps the `None`.
+        #
+        # NOT universal, and the exception is worth knowing: `_scaffold_rules` and
+        # `hooks/inject_system_skill_description` construct this class over the `DENY_ALL`
+        # literal. Neither calls `decide`, so neither can render the pointer — but a third
+        # such caller that did would be told to edit a file that cannot widen its grant.
+        #
+        # Imported HERE, not at module scope: `verb_dispositions` imports this module for
+        # `is_system_name`, so the edge may only run one way at import time.
+        from .verb_dispositions import DISPOSITIONS_REL
+
+        self.grant_home = DISPOSITIONS_REL
+        offenders = [(s, v) for s, v, _ in grant.entries if v not in self._cold[s]]
         if offenders:
             named = ", ".join(f"{s}.{v}" for s, v in offenders)
             raise GrantError(
@@ -488,7 +559,22 @@ class ModuleVerbRegistry(VerbRegistry):
         ))
 
     def _cold_verb_names(self, system: str) -> frozenset[str] | None:
-        return declared_verb_names(self.adapters_dir, system)
+        if system in self._cold:
+            return self._cold[system]
+        # Only a name that RESOLVES TO AN ADAPTER is remembered, which is what bounds this
+        # dict by the tree. Since #995 `decide` cold-reads on the refusal path for a system
+        # the grant reaches nowhere, and `system` there is unbounded model text straight off
+        # the `query` tool's arguments — so remembering every name asked about lets a model
+        # grow the dict without limit, keyed on strings it chose. Well-formedness is NOT that
+        # bound: `is_system_name` admits every lowercase-alphanumeric string up to
+        # `SYSTEM_MAX_LEN`, so a model looping on `sys0`, `sys1`, … grows it just as freely.
+        # Adapter presence is the bound, and it costs nothing: a name that resolves to no
+        # adapter reads no file, so there is no parse to save by caching its empty answer.
+        if _adapter_path(self.adapters_dir, system) is None:
+            return frozenset()
+        names = declared_verb_names(self.adapters_dir, system)
+        self._cold[system] = names
+        return names
 
     def verbs(self, system: str) -> Mapping[str, Verb]:
         path = _adapter_path(self.adapters_dir, system)

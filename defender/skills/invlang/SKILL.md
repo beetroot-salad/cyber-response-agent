@@ -696,7 +696,7 @@ on **v-001 (the host the process runs on)**, propose competing
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|server/internal/known-corp|app-server-01|os=linux
+v-001|compute|app-server/internal/known-corp|app-server-01|os=linux
 v-002|socket|dns-name|beacon.example.com|protocol=dns;queried_subdomain=2obsn5wmcw6lyp
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]

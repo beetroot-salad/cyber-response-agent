@@ -1,0 +1,5 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - lead l-004: `:L findings` tests 'ac1;h-001', which is in no id namespace this format declares — write a hypothesis (`h-001`, `h-001-002`), a commitment the tested hypotheses declare (`p1`/`ap1`/`r1`/`ac1`), or the qualified form `h-001.ac1`
+
+Re-send the block with those rows corrected.

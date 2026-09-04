@@ -1,0 +1,5 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - disposition inconclusive blocked: no `ceiling_test` row is a receipt that pays — write `state=query-failed ref=<lead-id> note=<text>` or `state=query-empty ref=<lead-id> note=<text>` naming a `:L findings` lead this run dispatched that failed or came back empty, or `state=nothing-to-try cap=<system[.verb]> note=<text>` naming a capability this deployment does not provide.
+
+Re-send the block with those rows corrected.

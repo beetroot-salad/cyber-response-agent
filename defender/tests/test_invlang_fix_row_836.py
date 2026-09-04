@@ -237,7 +237,11 @@ def test_fix_row_when_one_flagged_row_is_a_prefix_of_another(tmp_path):
     seed_investigation(run, PROLOGUE + attr_block(short_row, long_row))
     assert flagged_rows(_inv(run)) == (short_row, long_row)
 
-    _fix(deps, short_row, "l-001|v-001|class|svc")
+    # The repair's VALUE cell is a legal `compute` class tuple: the prefix relation under test
+    # is between the two FLAGGED rows, and since #986 a `class` refinement carrying an
+    # off-vocabulary role is refused for the value, which would refuse this write before the
+    # multiplicity rule was ever reached.
+    _fix(deps, short_row, "l-001|v-001|class|file-server/internal/known-corp")
 
     assert flagged_rows(_inv(run)) == (long_row,), "the prefix repair took the longer row too"
     assert long_row in _inv(run)

@@ -648,7 +648,7 @@ v-002|compute|unknown/internal/known-corp|target-host|
 e-001|attempted_auth|v-001|v-002|2026-05-07T00:00:00Z|siem-event:wazuh|outcome=failed
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?monitoring-probe|v-001|attempted_auth|compute|monitoring/internal/known-corp||null|active
+h-001|?monitoring-probe|v-001|attempted_auth|compute|monitoring-agent/internal/known-corp||null|active
 
 :H h-001.preds [id|subject|claim]
 p1|proposed_parent|"source is documented monitoring infra"

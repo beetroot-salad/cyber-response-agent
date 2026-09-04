@@ -1,0 +1,9 @@
+```invlang
+:L findings [id|loop|name|target|mode?|tests|system|window]
+l-007|3|ticket-system-context-lookup|v-001||h-001|ticket-system|n/a
+```
+
+GAPS:
+- prose names "ac2 (indeterminate)" but no `ac2` contract exists in the document so far — only `ac1` on h-001 was declared; no row can be written for it
+- l-007's gather summary (ticket system entirely empty — no tickets, service requests, or authorizations for soc-playground) is ANALYZE-phase result material, but the prose under `## PLAN (loop 3)` draws no conclusion from it: no new evidence movement for h-001 (already `++`), and ac1's verdict is already `unauthorized`, so nothing new to compile
+- prose poses the open question of standing authorization in the ticket system but attaches no id to any resolution it would license

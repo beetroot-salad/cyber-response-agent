@@ -22,9 +22,8 @@ from __future__ import annotations
 
 import sys
 
-import yaml
-
 from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender._yaml import duplicate_top_level_key
 # Imported to be USED, not re-exported: other readers of the vocabulary import `_vocab`
 # directly. The normalizer is deliberately NOT imported — this module holds the WRITE gate,
 # and on write the value is tested exactly (see `validate_report`).
@@ -74,39 +73,16 @@ def _has_duplicate_top_level_key(raw: str) -> bool:
     parsed once via `split_frontmatter`, so trouble here means no reliable duplicate signal and
     the other checks stand.
 
-    Duplicates are judged on the CONSTRUCTED key — what `safe_load` would put in the mapping —
-    not on the raw scalar node text. The node text is the wrong equality: it FALSE-POSITIVES
-    (`1:` and `"1":` are distinct keys, one int and one str, but share `key_node.value` `"1"`)
-    and FALSE-NEGATIVES (`1:` / `0x1:`, `yes:` / `true:` construct to the same key from
-    different text). ONE `SafeLoader` — the class `split_frontmatter` parses under — both
-    composes and constructs, so the two readings of "the same key" cannot diverge. That
-    includes `flatten_mapping`: `safe_load` expands a `<<:` merge INTO the mapping before
-    building it, so a merge-injected key is a real last-wins entry that skipping the flatten
-    would hide. A key that cannot be constructed or compared (an untabled tag, an unhashable
-    list/mapping key, an out-of-range implicit timestamp — all of which `safe_load` would
-    reject upstream anyway) is skipped rather than raised out of this blocking gate."""
-    loader = yaml.SafeLoader(raw)
-    try:
-        try:
-            node = loader.get_single_node()
-            if not isinstance(node, yaml.MappingNode):
-                return False
-            loader.flatten_mapping(node)  # `<<:` merges become real top-level pairs
-        except (yaml.YAMLError, RecursionError):
-            return False
-        seen: set[object] = set()
-        for key_node, _value_node in node.value:
-            try:
-                key = loader.construct_object(key_node, deep=True)
-                duplicate = key in seen
-            except (yaml.YAMLError, RecursionError, TypeError, ValueError):
-                continue  # unconstructible / unhashable — no reliable signal for THIS key
-            if duplicate:
-                return True
-            seen.add(key)
-        return False
-    finally:
-        loader.dispose()
+    DELEGATED to `_yaml.duplicate_top_level_key` rather than scanned here. The node walk, the
+    `<<:` flatten and the constructed-key identity this needs are the same three decisions
+    `_yaml.duplicate_key_paths` makes for the verb-disposition table, and two spellings of
+    "what would `safe_load` collapse here" is exactly the drift both exist to report. See that
+    module for why the identity is the CONSTRUCTED key (`1:` and `"1":` are two keys sharing
+    one node text; `yes:` and `true:` are one key spelled two ways) and why a merge is
+    expanded first (`safe_load` folds one in before building the mapping, so a merged key an
+    explicit key shadows is a real last-wins entry).
+    """
+    return duplicate_top_level_key(raw)
 
 
 def encodable_or_reason(proposed_text: str, artifact: str) -> str | None:

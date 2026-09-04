@@ -379,3 +379,22 @@ def test_an_orphan_this_write_adds_is_still_refused_against_a_baseline():
     errors = validate_companion(_ORPHAN_DOC, _OPENING)
     assert len(errors) == 1, errors
     assert "v-010" in errors[0]
+
+
+def test_a_whole_document_written_as_one_fence_keeps_its_prologue_exemption():
+    """The document's FIRST fence is its opening whatever else it carries: a document written
+    all at once — the shipped examples, and the one-fence `_companion` fixtures the invlang
+    tests are built on — declares its graph and reports on it in the same breath, with no
+    earlier write for the prologue to be trailing. Costs the rule nothing a run can reach: the
+    first fence of a live investigation is the harness's, written before main's first turn.
+    The lead's own orphan in that same fence is still refused, which is what keeps the
+    carve-out from standing the rule down."""
+    one_fence = _fence(
+        _prologue(),
+        _findings("l-001"),
+        _obs_vertices("l-001", _ORPHAN_VERTEX),
+    )
+    errors = validate_companion(one_fence, None)
+    assert len(errors) == 1, errors
+    assert "v-010" in errors[0]
+    assert "v-001" not in errors[0]
