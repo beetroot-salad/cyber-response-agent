@@ -10,7 +10,8 @@ families above it in this list:
   * `_predictions` — append-only history, weight moves and their provenance, and whether
                 a hypothesis' predictions were settled.
   * `_structure` — the shape of a prediction row, and the closed vocabularies.
-  * `_state`  — attribute updates, the effective vertex state they build, and open slots.
+  * `_state`  — attribute updates, the effective vertex state they build, open slots,
+                and whether a declared vertex is ever connected to anything.
   * `_gating` — what a disposition costs: benign grounding, false-positive gating, the
                 screen, and the severity ceiling.
   * `_closure` — the three closure gates, which are one sentence over three namespaces.
@@ -161,6 +162,7 @@ from ._state import (
     _check_benign_authz,
     _check_benign_open_slots,
     _check_closed_vocab,
+    _check_vertex_participation,
     _check_vocab_class_cells,
     _declarers_by_contract_id,
     _illegal_key_diagnostic,
@@ -288,6 +290,9 @@ def diagnose(
     found.extend(_plain(_check_lead_prediction_structure(companion)))
     found.extend(_plain(_check_impact_prediction_structure(companion)))
     found.extend(_plain(_check_impact_resolution_refs(companion)))
+    found.extend(_plain(
+        _check_vertex_participation(proposed_text, companion, current_companion)
+    ))
     found.extend(_check_closed_vocab(companion, proposed_text))
     # #983. The `:R authz`/`:R consultations` cells the two new mechanisms turn on, checked for
     # every document rather than only for a benign one: `_check_authz_row_grounding` is also
@@ -471,6 +476,7 @@ __all__ = [
     "_check_surface",
     "_check_tested_commitment_refs",
     "_check_tested_id_namespaces",
+    "_check_vertex_participation",
     "_check_vocab",
     "_check_vocab_anchor_kinds",
     "_check_vocab_class_cells",

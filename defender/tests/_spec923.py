@@ -247,10 +247,16 @@ LEADS = (
     "l-003|1|dns-query-logs-web1|v-001|||elastic|30d\n"
     "```\n"
 )
+#: The identity is EDGED to `PROLOGUE`'s `v-001`, not just declared: #993 refuses a
+#: lead-declared vertex no `:E` row ever names, and a bare identity row with no edge is
+#: exactly the shape that rule exists to catch.
 LEAD_RESULT = (
     "```invlang\n"
     ":V l-001.observations.vertices [id|type|class|ident|attrs?]\n"
     "v-011|identity|user/known-corp|svc.config-mgmt|\n"
+    "\n"
+    ":E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+    "e-001|attempted_auth|v-011|v-001||siem-event:elastic|\n"
     "```\n"
 )
 DETECTION_NOTES = '"Groups by host, so the actor the rule names is never tested."'
