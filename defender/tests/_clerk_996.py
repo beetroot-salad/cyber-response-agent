@@ -87,7 +87,6 @@ from pydantic_ai.messages import (  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.tests._invlang_warn_836 import (  # noqa: E402
-    CLEAN_BLOCK,
     CONCLUDE_BENIGN,
     PROLOGUE,
     REPAIRED_ROW_ATTRS,
@@ -173,9 +172,16 @@ def sym(dotted: str, name: str):
 # the documents
 # ---------------------------------------------------------------------------------------
 
-#: A clean `:R attr_updates` block over `PROLOGUE`'s declared vertex. EXECUTED against the real
-#: `diagnose` by the #836 suite: zero diagnostics.
-CLEAN_ROWS = CLEAN_BLOCK
+#: A clean `:R attr_updates` block over `PROLOGUE`'s declared vertex. `attr_block
+#: (REPAIRED_ROW_ATTRS)`, NOT `_invlang_warn_836.CLEAN_BLOCK` (which is `attr_block
+#: (REPAIRED_ROW)`, a `key=class` row) — this module's own positive-control assertions check
+#: for the substring `"attrs.owner"`, which `REPAIRED_ROW_ATTRS` ("l-001|v-001|attrs.owner|
+#: svc.config-mgmt") carries and `REPAIRED_ROW` does not. A #996-local constant rather than
+#: repointing `CLEAN_BLOCK` itself, so `test_invlang_warn_window_836.py`'s 13 sites (which DO
+#: mean the `key=class` row) are untouched. EXECUTED against the real `diagnose`: zero
+#: diagnostics, same as `CLEAN_BLOCK` — `REPAIRED_ROW_ATTRS` is `WARN_ROW`'s own legal repair,
+#: not a different document shape.
+CLEAN_ROWS = attr_block(REPAIRED_ROW_ATTRS)
 
 #: The warn-family block: a refinement key outside `class` / `attrs.*` / `ident`. EXECUTED by
 #: the #836 suite as exactly one warn diagnostic, which is what opens the repair window.

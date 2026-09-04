@@ -85,8 +85,15 @@ def test_996_the_clerk_definition_grants_nothing() -> None:
     line that can be edited open.
 
     POSITIVE CONTROL on the same address under the complementary condition: MAIN's definition,
-    compiled through the identical call, DOES yield read roots and bash programs — so an empty
-    policy here is the definition and not a broken compiler."""
+    compiled through the identical call, DOES yield bash programs — so an empty policy here is
+    the definition and not a broken compiler.
+
+    Not `read_roots` (PROBED: MAIN's own compiled `read_roots` is `()` too, unconditionally —
+    `resolve_roots` sets it from `scope.add_dirs`, and MAIN is never bound with a non-default
+    `RunScope`, in this test or in production; MAIN's actual read access is `read_allow`, a
+    regex allowlist, an entirely different field). `bash_allow` is the one MAIN-only surface
+    among the four the negative checks that a bare-default-scope compile still lands non-empty
+    for MAIN, which is what makes the clerk's empty one mean something."""
     compile_policy_for = C.sym("runtime.permission", "compile_policy_for")
     MAIN_DEF = C.sym("agents", "MAIN_DEF")
     clerk_def = _clerk_def()
@@ -99,7 +106,7 @@ def test_996_the_clerk_definition_grants_nothing() -> None:
     assert not policy.read_roots
 
     control = compile_policy_for(MAIN_DEF, run_dir=DEFENDER, defender_dir=DEFENDER)
-    assert control.read_roots, (
+    assert control.bash_allow, (
         "MAIN's compiled policy is empty too, so the clerk's empty one proves nothing"
     )
 

@@ -1446,14 +1446,22 @@ def test_996_a_same_block_id_collision_refuses_the_whole_append(tmp_path: Path) 
     PROBED at this base: the collision is diagnosed at ERROR severity and the append raises
     with "No changes were made" — not warn-and-land. It is the clerk's most likely structural
     slip that the round loop must retry rather than commit half of, so the assertion is that
-    the document is untouched, not merely that a diagnostic exists."""
+    the document is untouched, not merely that a diagnostic exists.
+
+    Driven with its own prose rather than `C.PROSE` (`record_run`'s default): `C.PROSE` itself
+    contains "jsmith" ("The bastion host authenticated jsmith..."), the exact identifier
+    `C.ID_COLLISION_ROWS`'s second, colliding row also carries — asserting BOTH "MAIN's prose
+    landed" and "jsmith is absent" against the same default prose could never be satisfied by
+    any implementation. A prose that never mentions the collision's identifiers keeps both
+    checks independent: one about MAIN's OWN bytes, one about the refused block's."""
     run_dir = C.new_run_dir(tmp_path)
     C.seed(run_dir, "## ANALYZE (loop 1)\n\n")
     clerk = C.ScriptedClerk(C.clerk_reply(C.ID_COLLISION_ROWS))
-    C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
+    prose = "The bastion host logged a configuration change at 15:27Z."
+    C.record_run(tmp_path, run_dir=run_dir, prose=[prose], clerk=clerk)
 
     doc = C.document(run_dir)
-    assert C.PROSE in doc, "MAIN's own prose did not land either — step 1 was refused"
+    assert prose in doc, "MAIN's own prose did not land either — step 1 was refused"
     assert "v-001" not in doc, (
         "the colliding block's FIRST row landed; the whole append must be refused and nothing "
         "may reach disk"

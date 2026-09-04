@@ -300,8 +300,21 @@ def test_996_visualize_messages_buckets_the_clerk_namespace(tmp_path: Path) -> N
     messages = list(read_jsonl_rows(RunPaths(run_dir).wire_log))
     by_model = vd.clerk_cost_by_model(run_dir, messages)
     assert by_model, "the cost reader buckets no clerk spend at all"
+    # Priced off the wire log's OWN logged `usage` dict for the clerk row, not off `USAGE`
+    # (the raw, un-netted dict handed to `_response()`): `observe.RequestLogger` nets cache
+    # tokens out of `input_tokens` before the row is ever written (a request whose usage
+    # carries cache_read/cache_write terms logs `input_tokens` as NEW tokens only), and
+    # `clerk_cost_by_model` prices exactly that logged row — the same reader `gather_cost_by_
+    # model`/`review_cost_by_model` already share. Comparing against a second, independently
+    # reconstructed dict is the shared-oracle shape this codebase's own lint gate names: an
+    # oracle that re-derives the answer some way other than the code under test runs cannot
+    # disagree with a bug in that code — it can only disagree with a correct implementation.
+    clerk_rows = [
+        m for m in messages if m.get("agent_id") == "clerk:0" and m.get("kind") == "response"
+    ]
+    assert len(clerk_rows) == 1, f"expected exactly one logged clerk response row: {clerk_rows}"
     assert pytest.approx(sum(by_model.values())) == usage_cost(
-        C.CLERK_PROVIDER_MODEL, USAGE)
+        C.CLERK_PROVIDER_MODEL, clerk_rows[0]["usage"])
 
     main_only = vd.deduped_main_records(messages)
     assert all(rec.get("agent_id", "main") == "main" for rec in main_only), (
