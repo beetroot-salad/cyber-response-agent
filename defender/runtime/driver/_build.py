@@ -100,6 +100,7 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     cache_key: str | None = None,
     toolset: Any = None,
     toon_encoder: Any = None,
+    clerk: Any = None,
 ) -> Agent[Any, str]:
     model_name = defn.model()
     built = make_model(model_name, defn.effort)
@@ -161,7 +162,7 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     # (this call's `register_tools`, plus `build_agent`'s gather and close tools) shares this
     # ONE toolset object, so binding once here covers all of them whatever the order.
     toon_gate.bind_native_toolset(agent._function_toolset)  # noqa: SLF001 — the identity IS the contract; see toon_gate.py
-    register_tools(agent, defn.tools, verbs)
+    register_tools(agent, defn.tools, verbs, clerk)
     return agent
 
 
@@ -453,6 +454,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     bounds: challenge_gate.Bounds,
     correlation_task: Any = None,
     toolset: Any = None,
+    clerk: Any = None,
 ) -> Agent[AgentDeps, str]:
     # The bounds arrive RESOLVED, non-`Optional`. Re-coalescing here would give the gate's ONE
     # bounds object a default at four depths, and the entry point could then resolve one value
@@ -487,6 +489,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         session_id=session_id,
         store=store,
         toolset=toolset,
+        clerk=clerk,
     )
 
     # agent_id → the gather session opened for it. Keyed by agent_id and not "the last one
@@ -551,5 +554,5 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (the UNBOUND bundle: no run dir here, so `stage()` raises UnboundReviewStage and the gate fails the close closed)
     )
     if main_defn.tools.close:
-        register_close_tool(agent, stages=stages, bounds=bounds)
+        register_close_tool(agent, stages=stages, bounds=bounds, clerk=clerk)
     return agent

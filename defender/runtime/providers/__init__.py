@@ -21,6 +21,8 @@ FIREWORKS = OpenAICompatProvider(
         "kimi-k2.6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k2p6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k3": "accounts/fireworks/models/kimi-k3",
+        # The clerk's model (#996).
+        "glm-5p3-flash": "accounts/fireworks/models/glm-5p3-flash",
     },
     main_effort="low",
     gather_effort="none",

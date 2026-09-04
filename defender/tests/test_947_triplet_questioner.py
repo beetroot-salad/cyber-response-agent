@@ -44,19 +44,19 @@ def test_947_questioner_role_and_definition_are_registered():
     assert set(AGENTS.keys()) == set(AgentRole)
 
 
-def test_947_every_hand_maintained_role_census_counts_eleven():
-    """Every hand-maintained role census agrees the roster is eleven — the two hardcoded counts
-    and BOTH enumerations, including the compiled-policy sweep whose omission is silent rather
-    than red."""
+def test_947_every_hand_maintained_role_census_counts_twelve():
+    """Every hand-maintained role census agrees the roster is twelve (#996 minted the clerk as
+    the twelfth) — the two hardcoded counts and BOTH enumerations, including the compiled-policy
+    sweep whose omission is silent rather than red."""
     AgentRole = T.sym("runtime.agent_role", "AgentRole")
     AGENTS = T.sym("agents", "AGENTS")
-    assert len(AgentRole) == 11
-    assert len(AGENTS) == 11
+    assert len(AgentRole) == 12
+    assert len(AGENTS) == 12
     src = (T.DEFENDER / "tests" / "test_bind_sole_seam_551.py").read_text(encoding="utf-8")
-    assert "== 11" in src, "the bind-case count still reads ten"
+    assert "== 12" in src, "the bind-case count still reads eleven"
     assert "QUESTIONER_DEF" in src, "the bind-case enumeration was not moved"
     grant = (T.DEFENDER / "tests" / "test_grant_gate_575.py").read_text(encoding="utf-8")
-    assert "len(AGENTS) == 11" in grant, "the grant gate's hardcoded count was not moved"
+    assert "len(AGENTS) == 12" in grant, "the grant gate's hardcoded count was not moved"
     assert '"questioner"' in grant, "_all_policies never compiles the questioner's policy"
 
 

@@ -350,6 +350,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_override: str | None = None,
     toolset: Any = None,
     resume: Any = None,
+    clerk: Any = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
     # Lead-0's OWN registry seam: a scenario that injected no `verbs=` at all must not have
@@ -398,6 +399,21 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         logger.close()
         raise
 
+    # #996: the clerk, mirroring the review bundle immediately above — same frame, same reason
+    # (the run dir, `defender_dir` and the run's own logger at once). `clerk` here is the RAW
+    # seam (`run_investigation(clerk=…)`): `None` unless a caller injected one, in which case
+    # `make_clerk_caller` wraps it; a production run with none builds and wraps the live caller,
+    # threading this run's own `make_model` through so it reaches the clerk's model too.
+    from .. import clerk as clerk_mod
+
+    try:
+        clerk_caller = clerk_mod.make_clerk_caller(
+            run_dir, defender_dir, logger, raw=clerk, make_model=make_model, limits=limits,
+        )
+    except BaseException:
+        logger.close()
+        raise
+
     case_id = uuid.uuid4().hex
     # R12's fifth DI seam, and a resume derives its own store and outranks it — the default and
     # the precedence both live in `_resolve_store_factory`, which is where the `lint-default`
@@ -406,6 +422,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     store = None
     try:
         store = factory(case_id, run_dir)
+        # #996, D6: attached on the HANDLE the store factory returned — NEVER inside
+        # `_default_store_factory` itself — so a resumed or replay-injected run gets stamped
+        # too. Set unconditionally and before any session opens on this handle: `append` reads
+        # `store.document_reader` on every call from here on.
+        store.document_reader = session_store.document_reader_for(run_dir)
         # A resume JOINS a case rather than minting one: the store the factory hands back is
         # the SOURCE run's, and the prefix rows live in it. So the pointer is written from the
         # STORE's own case id rather than from the uuid minted above — on a fresh run they are
@@ -502,7 +523,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
         store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
-        correlation_task=correlation_task, toolset=toolset,
+        correlation_task=correlation_task, toolset=toolset, clerk=clerk_caller,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),

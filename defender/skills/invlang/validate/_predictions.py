@@ -93,9 +93,8 @@ def _check_append_only(
             elif new_idx[rid] != core:
                 errors.append(
                     f"append-only violation: committed {label} {rid} was "
-                    f"mutated in place ({core} → {new_idx[rid]}) — refine via a "
-                    f"new :R attr_updates / observation row, never by rewriting "
-                    f"the original declaration"
+                    f"mutated in place ({core} → {new_idx[rid]}) — record the refinement as a "
+                    f"new observation, never by rewriting the original declaration"
                 )
     return errors
 

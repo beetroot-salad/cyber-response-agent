@@ -234,7 +234,7 @@ def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
     )
 
 
-def _tool_append_block(deps: AgentDeps, text: str) -> str:
+def _tool_append_block(deps: AgentDeps, text: str, *, verb: str = "append_block") -> str:
     """Append to `investigation.md` — main's only write.
 
     No path: the run has one model-authored transcript and this is its writer, the way
@@ -244,7 +244,11 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     the artifact never had.
 
     Faces the identical gate the other two verbs do — same `decide_write`, same content schema,
-    same RS15 post-close refusal — on the resulting full document."""
+    same RS15 post-close refusal — on the resulting full document.
+
+    `verb` (D11, #996): the flagged-write refusal names the CALLER's verb, never a hardcoded
+    one — `record` passes `"record"`; the internal writer's own direct callers (the #836 suite,
+    other write-granting roles) keep the default, `"append_block"`."""
     p = _investigation_path(deps)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
@@ -257,7 +261,7 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     # choices are grandfathering — which dead-letters the run at persist — or a wedged document.
     flagged = flagged_diagnostics(deps)
     if flagged:
-        raise ModelRetry(flagged_write_refusal("append_block", flagged))
+        raise ModelRetry(flagged_write_refusal(verb, flagged))
     read_decision = permission.decide_read(
         p, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy
     )

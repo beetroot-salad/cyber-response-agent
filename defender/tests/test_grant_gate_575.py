@@ -55,6 +55,7 @@ from defender._paths import PATHS  # noqa: E402
 from defender.agents import (  # noqa: E402
     ACTOR_DEF,
     AGENTS,
+    CLERK_DEF,
     COMPOSER_DEF,
     CORPUS_AUTHOR_DEF,
     GATHER_DEF,
@@ -205,6 +206,10 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
         # compiled policy of its exists whether or not this dict looks at it. Its expected
         # shape is the empty one — the whole posture of the role is that it grants nothing.
         "questioner": compile_policy_for(QUESTIONER_DEF, run_dir=env.run, defender_dir=env.dfn),
+        # #996's clerk, here for the same reason: registered in AGENTS, so a compiled policy
+        # of it exists whether or not this dict looks at it. Its expected shape is the empty
+        # one — a zero-grant text-in/text-out role.
+        "clerk": compile_policy_for(CLERK_DEF, run_dir=env.run, defender_dir=env.dfn),
     }
 
 
@@ -436,8 +441,10 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     # calls, so roles and calls have not matched here since #796. This counts registered
     # roles, so a deliberately added or retired role moves it; what the test checks is the
     # table property below. #947 added the eleventh, QUESTIONER — one more deny-all role, and
-    # (like SUPPORT) one claimed by more calls than it has keys.
-    assert len(AGENTS) == 11
+    # (like SUPPORT) one claimed by more calls than it has keys. #996 added the twelfth,
+    # CLERK — another zero-grant role, with a key of its own (an enum key names a trace
+    # file, so a shared key would share SUPPORT's).
+    assert len(AGENTS) == 12
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
     assert "corpus_author" in pols
     for name, pol in pols.items():

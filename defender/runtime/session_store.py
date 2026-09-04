@@ -28,7 +28,10 @@ from pydantic_ai.messages import (
 
 from defender._io import guarded_mkdir, write_guarded
 
-SCHEMA_VERSION = 2
+#: 2 -> 3 (#996, D6): `document_state` lands. No migration, no fallback reader — the store's
+#: existing policy for every schema bump (C27) — so runs recorded before the port are not
+#: branchable after it (D16, an examined and accepted loss).
+SCHEMA_VERSION = 3
 PAYLOAD_ENSURE_ASCII = True
 ROLES = ("send", "analysis", "actor")
 POINTER_FILENAME = "session_store_pointer.json"
@@ -153,6 +156,17 @@ CREATE TABLE IF NOT EXISTS session_head_log (
     to_message_id INTEGER NOT NULL REFERENCES message(id),
     attached_to_message_id INTEGER REFERENCES message(id),
     reason TEXT NOT NULL
+) STRICT;
+
+-- document_state (#996, D6): the investigation document's state, stamped on every MAIN
+-- request row at `append` time — replacing a transcript walk that replayed tool ARGUMENTS in
+-- place of state nobody recorded. Two integers and no document content (S5): this store gains
+-- no replay surface. `fence_count` is the branch/resume TRUNCATION AUTHORITY; `byte_len` is a
+-- recorded diagnostic no gate reads.
+CREATE TABLE IF NOT EXISTS document_state (
+    message_id INTEGER PRIMARY KEY REFERENCES message(id),
+    byte_len INTEGER NOT NULL,
+    fence_count INTEGER NOT NULL
 ) STRICT;
 
 -- gather_boundary — the danger-lens surface, scoped to each session's PATH from its
@@ -309,6 +323,13 @@ class StoreHandle:
     connection: sqlite3.Connection
     case_id: str
     pending_stamps: dict = field(default_factory=dict, repr=False, compare=False)
+    #: #996, D6: the document's `(byte_len, fence_count)` reader — a post-construction mutable
+    #: field, set by the driver's `_open_store` on the handle the STORE FACTORY returned (never
+    #: inside the default factory itself), so an injected factory's handle gets stamped too.
+    #: `None` on a handle nobody attached one to (`open_store_for_read`, most direct test
+    #: construction), which `append` reads as "nothing to stamp" rather than a fault — the
+    #: accepted cost is a caller that forgets to attach one gets a silently unstamped store.
+    document_reader: Any = field(default=None, repr=False, compare=False)
 
     def new_session(self, agent_id: str) -> str:
         session_id = uuid.uuid4().hex
@@ -379,6 +400,11 @@ class StoreHandle:
             return []
         _validate_batch_shape(messages, seq=seq, duration_ms=duration_ms)
 
+        # #996, D6: read the document's state BEFORE the transaction opens — one read, shared
+        # by every row this batch inserts (one document, one moment), and outside `BEGIN
+        # IMMEDIATE` so the read itself cannot contend with the write lock it is about to take.
+        stamp = self.document_reader() if self.document_reader is not None else None
+
         conn = self.connection
         conn.execute("BEGIN IMMEDIATE")
         committed = False
@@ -396,6 +422,17 @@ class StoreHandle:
                     duration_ms=duration_ms, wire_sha=wire_sha,
                 )
                 ids.append(pid)
+                # #996, D6: every `kind='request'` row of the `main` session gets the stamp —
+                # never a response row, and never another agent's. `isinstance(m, ModelRequest)`
+                # is the same test `_insert_message` used to derive `kind` for THIS row, so the
+                # two cannot disagree about which rows are requests.
+                if stamp is not None and agent_id == "main" and isinstance(m, ModelRequest):
+                    byte_len, fence_count = stamp
+                    conn.execute(
+                        "INSERT INTO document_state (message_id, byte_len, fence_count) "
+                        "VALUES (?, ?, ?)",
+                        (pid, byte_len, fence_count),
+                    )
             _move_head(conn, session_id, prev_head=prev_head, new_head=ids[-1],
                       attached_to=first_parent, reason=reason)
             conn.execute("COMMIT")
@@ -772,6 +809,70 @@ def path_row_ids(store: Any, session_id: str) -> list[int]:
     ids = _walk_parents(conn, head)
     ids.reverse()
     return ids
+
+
+@dataclass(frozen=True)
+class DocumentState:
+    """One `document_state` row's payload — the shape `document_state_at` answers with."""
+
+    byte_len: int
+    fence_count: int
+
+
+def document_reader_for(run_dir: Path) -> Any:
+    """The `StoreHandle.document_reader` the production driver attaches: `investigation.md`'s
+    current `(byte_len, fence_count)` at `run_dir`, read fresh on every call.
+
+    FAIL-OPEN to `(0, 0)` for a missing or fence-less document — the value the branch/resume
+    seed already treats as legitimate, with no special case: `scan_fences` never raises,
+    answering zero fences for the empty string and for header-only text, and this constructor
+    touches no filesystem itself (the read happens lazily, inside the returned callable, once
+    per `append`)."""
+    from defender._run_paths import RunPaths
+    from defender.skills.invlang.parser import scan_fences
+
+    def read() -> tuple[int, int]:
+        path = RunPaths(Path(run_dir)).investigation
+        if not path.is_file():
+            return (0, 0)
+        text = path.read_text(encoding="utf-8")
+        return (len(text.encode("utf-8")), len(scan_fences(text).bodies))
+
+    return read
+
+
+def document_state_at(store: Any, session_id: str, branch_message_id: int) -> DocumentState:
+    """The stamp on the LATEST stamped request row on `session_id`'s own PATH at or before
+    `branch_message_id` — a response row resolves to the request that precedes it, the same
+    prefix `hydrate(role="send")` keeps.
+
+    REFUSES (`BranchError`) a message id that is not on this session's own path: the guard is
+    session id plus id-ordering with no run identity, so a foreign id in a shared store would
+    otherwise resolve silently to another run's document — the caller gets a plausible state
+    for the wrong run, seeds a sibling from it, and every downstream comparison is against a
+    document that run never held. A path with no stamped request raises for the same reason:
+    silent is the whole problem, on both failures."""
+    from .branch._spec import BranchError
+
+    path = path_row_ids(store, session_id)
+    if branch_message_id not in path:
+        raise BranchError(
+            f"message {branch_message_id} is not on session {session_id!r}'s own path, so it "
+            "has no document state — the id has to be one this session's own path actually "
+            "holds"
+        )
+    candidates = path[: path.index(branch_message_id) + 1]
+    conn = store.connection
+    for mid in reversed(candidates):
+        row = conn.execute(
+            "SELECT byte_len, fence_count FROM document_state WHERE message_id = ?", (mid,),
+        ).fetchone()
+        if row is not None:
+            return DocumentState(byte_len=row[0], fence_count=row[1])
+    raise BranchError(
+        f"no message at or before {branch_message_id} on session {session_id!r}'s path "
+        "carries a document stamp"
+    )
 
 
 # the log readers

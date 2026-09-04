@@ -1277,7 +1277,8 @@ def _fence_count(source: Path, branch_message_id: int, *,
     for the same reason `branch_point_clock` falls back to the moment its evidence stopped: an
     imported or replayed run has no session to say when, and its whole document is the prefix.
     """
-    from defender.runtime.branch import BranchSpec, fence_count_at, source_session
+    from defender.runtime import session_store as session_store_mod
+    from defender.runtime.branch import BranchSpec, source_session
     from defender.skills.invlang.parser import scan_fences
 
     path = RunPaths(source).investigation
@@ -1285,16 +1286,17 @@ def _fence_count(source: Path, branch_message_id: int, *,
         return 0
     document = path.read_text(encoding="utf-8")
     # `bodies` is the fence content; the complement (`orphaned_headers`) is not dropped
-    # silently — it is what `fence_count_at` is asked for instead whenever a session exists,
-    # and this arm is only reached for a run that carries none.
-    total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a COUNT of fences, not a read of their content; the orphan complement is not addressable by an index into `bodies` and `fence_count_at` below is what answers when a session can say  # noqa: E501
+    # silently — it is what the document's own stamp is asked for instead whenever a session
+    # exists, and this arm is only reached for a run that carries none.
+    total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a COUNT of fences, not a read of their content; the orphan complement is not addressable by an index into `bodies` and `document_state_at` below is what answers when a session can say  # noqa: E501
     store = _source_store(source)
     if store is None:
         return total
     try:
         spec = BranchSpec(source_run_dir=Path(source), branch_message_id=branch_message_id,
                           continuation_prompt=continuation_prompt, as_of=as_of)
-        return fence_count_at(store, source_session(store, spec), branch_message_id, document)
+        return session_store_mod.document_state_at(
+            store, source_session(store, spec), branch_message_id).fence_count
     finally:
         store.close()
 

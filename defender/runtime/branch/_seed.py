@@ -35,8 +35,9 @@ from defender._io import (
 )
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
 
+from .. import session_store
 from ._spec import BranchError, BranchSpec
-from ._frontier import _LEAD_DIRS, fence_count_at, leads_at, source_session
+from ._frontier import _LEAD_DIRS, leads_at, source_session
 from ._frontier import _lead_of
 
 
@@ -150,7 +151,9 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     # document, the same reading a missing one already got.
     source_text, _ = read_guarded(RunPaths(Path(spec.source_run_dir)).investigation)
     text = source_text if source_text is not None else ""
-    fences = fence_count_at(store, source_session(store, spec), spec.branch_message_id, text)
+    # #996, D6: the stamp is the truncation authority — no transcript walk.
+    fences = session_store.document_state_at(
+        store, source_session(store, spec), spec.branch_message_id).fence_count
     bounds = scan_fences(text).spans
     if fences > len(bounds):
         # `validate` refuses a SNAPPED frontier, so the count is in range by the time this

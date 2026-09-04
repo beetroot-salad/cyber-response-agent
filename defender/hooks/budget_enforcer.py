@@ -10,7 +10,7 @@ from pathlib import Path
 from defender._clock import parse_iso_utc
 from defender._io import write_atomic
 from defender.hooks._run_dir import read_json_locked, update_json_locked
-from defender.runtime.agent_role import AgentRole
+from defender.runtime.agent_role import RETIRED_DOCUMENT_VERBS, AgentRole
 
 DEFAULT_LIMITS = {
     "max_tool_calls": 200,
@@ -33,15 +33,16 @@ BUDGET_EXEMPT_TOOLS = frozenset({"close_investigation"})
 
 BUDGET_REFUSAL_MESSAGE = (
     "Budget stop: the {tool} tool is now PERMANENTLY withdrawn for the rest of this "
-    "run (the {limb} cap is reached and will not reset). Appending to investigation.md — "
-    "append_block — repairing a flagged row — fix_row — and closing the investigation are "
-    "still available. "
+    "run (the {limb} cap is reached and will not reset). `record` — MAIN's document verb — "
+    "and closing the investigation are still available. "
     "Do not retry this tool; close the investigation now and record your report from "
     "the evidence you already have."
 )
-# `fix_row` is named because the survivor set would otherwise be WRONG whenever a repair
-# window is open: both `append_block` and the close are refused while a row is flagged, so a
-# message offering only those two sends the model to a close it will be refused.
+# `record` is named because it is the survivor that stays true whether or not a repair window
+# is open — #996, D14 retires the two verbs this message used to name (`append_block`,
+# `fix_row`) from MAIN's roster entirely, so naming them here would send a budget-stopped
+# model to calls that cannot succeed, at the moment it has the least budget left to discover
+# that (O1's own sharpest failing condition).
 
 
 class BudgetKill(Exception):
@@ -256,14 +257,14 @@ def tail_exhausted(state: dict, limits: dict) -> bool:
 
 #: Main's own bookkeeping verbs: reading and recording cost budget but are never REFUSED for
 #: it, or a run that hits the cap could no longer write down what it already found.
-#: `append_block` is main's only writer, so omitting it would leave the transcript
-#: budget-refusable mid-investigation. `write_file`/`edit_file` stay listed because the tier is
-#: keyed on a name, not a grant, and a stale name here is inert. `fix_row` is here for the same
-#: reason as `append_block`: while a row is flagged BOTH the append and the close are refused,
-#: so a repair verb at `core` tier would be permanently withdrawn at the cap and leave the run
-#: with nothing that can reopen either.
+#: `record` is main's only document verb (#996, D14) — O10 requires it never be refused for
+#: budget, or a run past the cap loses everything it found after. `append_block`/`fix_row`
+#: stay listed too: the table is keyed on a NAME, not a grant, so a stale name here is inert
+#: (the policy this module already documents) — and a run replaying calls recorded BEFORE the
+#: port still meets this table, so those names must keep answering `tail` for the replay to
+#: meter rather than refuse them. `write_file`/`edit_file` stay for the same reason.
 #: METERED, not exempt — a model looping on repairs is still stoppable at `tail_exhausted`.
-_MAIN_TAIL_TOOLS = ("read_file", "append_block", "fix_row", "write_file", "edit_file")
+_MAIN_TAIL_TOOLS = ("read_file", "record", *RETIRED_DOCUMENT_VERBS, "write_file", "edit_file")
 
 
 def tier(tool_name: str, role: AgentRole) -> str:

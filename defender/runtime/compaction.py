@@ -246,6 +246,11 @@ def _smaller(rewritten: list[Message], original: list[Message]) -> bool:
 
 
 def apply_writes(current: str, response: Message) -> str:
+    """Dead code (no production caller — `scripts/testing/compaction_dryrun.py` is its one
+    invocation) and deliberately left that way (#996, D12): under the port MAIN's document
+    verb is `record`, and `record` calls carry PROSE, not rows — the clerk's rows are never in
+    the transcript, so a `record` call here replays as nothing. `append_block`/`fix_row`
+    transcripts (recorded before the port) still rebuild, unchanged."""
     for part in response.get("parts", []):
         if part.get("part_kind") != "tool-call":
             continue

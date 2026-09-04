@@ -224,12 +224,17 @@ from ._closure import (
 )
 
 
-def diagnose(
+def structural_diagnostics(
     proposed_text: str, current_text: str | None = None
 ) -> list[Diagnostic]:
-    """The validator proper. Failures arrive as `Diagnostic`s so a caller that wants to point
-    at the offending row can. `validate_companion` is the string surface over this and is what
-    nearly everything calls."""
+    """The half of `diagnose` a #996 clerk round can clear from the grammar and the document
+    alone: surface, append-only, parse, and every reference/structure/vocab check ahead of the
+    disposition-priced tail. OWNS `diagnose`'s no-companion early return — with no parseable
+    companion the judgment half is asked about a document it never sees, so it answers empty
+    and this half carries whatever `diagnose` found up to that point.
+
+    Kept as a literal split of `diagnose`'s own body (not a re-derivation) so the two stay a
+    byte-identical partition of it by construction; `diagnose` below is their concatenation."""
     proposed_text = _normalize_newlines(proposed_text)
     if current_text is not None:
         current_text = _normalize_newlines(current_text)
@@ -281,6 +286,24 @@ def diagnose(
     found.extend(_plain(_check_impact_resolution_refs(companion)))
     found.extend(_check_closed_vocab(companion, proposed_text))
     found.extend(_plain(_check_screen_structure(companion)))
+    return found
+
+
+def judgment_diagnostics(
+    proposed_text: str, current_text: str | None = None  # noqa: ARG001 — same inputs as `diagnose`/`structural_diagnostics`, by contract (#996)
+) -> list[Diagnostic]:
+    """`diagnose`'s tail: the checks whose repair needs a fact only MAIN can state (the
+    disposition's structural price, the ceiling test, hypothesis persistence, the three closure
+    gates). Answers EMPTY for a document with no parseable companion — the structural half owns
+    that early return, so the tail is never asked about a document it never sees.
+
+    `current_text` is accepted (never read) only to keep the same call shape `diagnose` and
+    `structural_diagnostics` take — none of these seven checks reads a baseline."""
+    proposed_text = _normalize_newlines(proposed_text)
+    companion, _warnings = parse_dense_companion(proposed_text)
+    if not companion:
+        return []
+    found: list[Diagnostic] = []
     # Bound, not recomputed: `_check_authz_contract_closure` defers to this gate's OUTPUT on
     # any contract it is already refusing, and running it twice per write is the single most
     # expensive thing in the pass.
@@ -296,6 +319,21 @@ def diagnose(
     found.extend(_plain(_check_prediction_closure(companion)))
     found.extend(_plain(_check_loop_close(companion)))
     return found
+
+
+def diagnose(
+    proposed_text: str, current_text: str | None = None
+) -> list[Diagnostic]:
+    """The validator proper. Failures arrive as `Diagnostic`s so a caller that wants to point
+    at the offending row can. `validate_companion` is the string surface over this and is what
+    nearly everything calls.
+
+    Byte-identical to `structural_diagnostics(...) + judgment_diagnostics(...)` (#996's own
+    parity demand) — kept as the concatenation so every existing caller gets exactly what it
+    got before the split, while `record` is the one caller that asks the two halves apart."""
+    return structural_diagnostics(proposed_text, current_text) + judgment_diagnostics(
+        proposed_text, current_text
+    )
 
 
 def warn_diagnostics(text: str) -> tuple[Diagnostic, ...]:
@@ -508,6 +546,8 @@ __all__ = [
     "dataclass",
     "diagnose",
     "disposition_entry_price",
+    "judgment_diagnostics",
+    "structural_diagnostics",
     "effective_vertex_state",
     "field",
     "has_open_slot",

@@ -167,15 +167,15 @@ def _closure_refusal(
     """
     if blank_rationale:
         return (
-            f"conclude: {subject} is deferred with an empty rationale — a "
-            f"`:T conclude.{table}` row records WHY the commitment could not be settled, and a "
-            f"blank cell records nothing while still discharging it. Write the reason, or "
+            f"conclude: {subject} is deferred with an empty rationale — the `:T conclude.{table}` "
+            f"deferral records WHY the commitment could not be settled, and a blank cell "
+            f"records nothing while still discharging it. State the reason in prose, or "
             f"{resolve}."
         )
     return (
         f"conclude: {subject} is declared and then abandoned — nothing settles it and no "
-        f"`:T conclude.{table}` row defers it. Either {resolve}, or add a "
-        f"`:T conclude.{table}` row `{ref}|\"<why it could not be settled>\"`; a commitment "
+        f"`:T conclude.{table}` deferral names it. Either {resolve}, or state in prose why "
+        f"{ref} could not be settled, so it is deferred rather than dropped; a commitment "
         f"made and then dropped reads like one that was never made."
     )
 

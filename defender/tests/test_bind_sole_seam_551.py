@@ -117,6 +117,7 @@ from defender.runtime.review_roles import (  # noqa: E402
     ComposerDeps,
     SupportDeps,
 )
+from defender.runtime.clerk import ClerkDeps  # noqa: E402
 from defender.runtime.tools import AgentDeps, GatherDeps, _tool_write_file  # noqa: E402
 
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
@@ -134,6 +135,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
 )
 from defender.agents import (  # noqa: E402
     ACTOR_DEF,
+    CLERK_DEF,
     CORPUS_AUTHOR_DEF,
     GATHER_DEF,
     JUDGE_DEF,
@@ -588,18 +590,20 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
          LeadAuthorDeps),
         (bind(SUPPORT_DEF, tmp_path), SupportDeps),
         (bind(COMPOSER_DEF, tmp_path), ComposerDeps),
+        (bind(CLERK_DEF, tmp_path), ClerkDeps),
     ]
-    # 11 roles total: the 9 bindable ones above + two that bind does NOT build, both
+    # 12 roles total: the 10 bindable ones above + two that bind does NOT build, both
     # asserted below — CORPUS_AUTHOR (for_run-only, the #556 carve-out) and #947's QUESTIONER,
     # whose deps type carries no run scope at all (QuestionerDeps has zero fields, so it cannot
     # be an AgentDeps), which is why bind refuses it by name rather than minting a policy for a
     # role that has nowhere to use one.
     # #796's surviving review roles bind with a bare `tmp_path` and nothing else — no
     # scope, no defender_dir — which IS the assertion about them: a role that needed either
-    # would be a role holding a grant, and the whole posture is that they hold none.
+    # would be a role holding a grant, and the whole posture is that they hold none. #996's
+    # CLERK binds the same ordinary way and lands here.
     # DISCRIMINATION was a third such role and is retired; the count moved with it, which is
     # what this assertion is for.
-    assert len({role for role in AgentRole}) == 11
+    assert len({role for role in AgentRole}) == 12
     for deps, expected in cases:
         assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
     with pytest.raises((ValueError, TypeError)):

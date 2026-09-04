@@ -11,7 +11,11 @@ from defender._run_paths import GATE_METADATA_KEY, WIRE_LOG, RunPaths
 # `review_roles` pulls `runtime.tools` and with it the whole in-process runtime (pydantic-ai
 # included), and `learning/frontend/build.py` imports this package at module scope for the
 # page CSS alone. Same rule `visualize_runtime.close_vocabulary` states for `close_tool`.
-from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
+from defender.runtime.agent_role import (
+    CLERK_AGENT_ID_PREFIX,
+    GATHER_AGENT_ID_PREFIX,
+    REVIEW_AGENT_ID_PREFIX,
+)
 from defender.scripts.pricing import usage_cost
 from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
@@ -192,6 +196,10 @@ def _iter_review_responses(run_dir: Path, messages: list[dict] | None):
     return _iter_agent_responses(run_dir, messages, REVIEW_AGENT_ID_PREFIX)
 
 
+def _iter_clerk_responses(run_dir: Path, messages: list[dict] | None):
+    return _iter_agent_responses(run_dir, messages, CLERK_AGENT_ID_PREFIX)
+
+
 def _gather_phase_for(dispatch_phase: str | None, phase_order: list[str]) -> str | None:
     if dispatch_phase and phase_verb(dispatch_phase) == "GATHER":
         return dispatch_phase
@@ -298,6 +306,15 @@ def review_cost_by_model(
     own pinned default (`review_roles.DEFAULT_REVIEW_MODEL`), so this is usually a row of its
     own — and correctly merges with main's when an operator points both at one model."""
     return _cost_by(_iter_review_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw))
+
+
+def clerk_cost_by_model(
+    run_dir: Path, messages: list[dict] | None = None
+) -> dict[str, float]:
+    """#996, O5: the clerk's spend, bucketed by model — beside gather's and the review's, the
+    same shape and for the same reason: a paid model call inside a tool the operator never
+    sees dispatch must land somewhere a per-run cost view reads."""
+    return _cost_by(_iter_clerk_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw))
 
 
 def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[dict]:

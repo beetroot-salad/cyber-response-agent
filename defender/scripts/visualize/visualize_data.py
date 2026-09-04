@@ -157,16 +157,19 @@ class _PhaseTagger:
             return
         name = blk.get("name")
         if name not in (
-            "Write", "Edit", "write_file", "edit_file", "append_block", "fix_row",
+            # `append_block`/`fix_row` are the retired names (#996, D14) — kept in this
+            # NAME-KEYED table so an old run's transcript still renders; `record` is MAIN's
+            # only document verb now.
+            "Write", "Edit", "write_file", "edit_file", "append_block", "fix_row", "record",
         ):
             return
         tu_id = blk.get("id") or ""
         if tu_id and tu_id in self.consumed_tool_use_ids:
             return
         inp = blk.get("input", {}) or {}
-        # `append_block` and `fix_row` are bound to investigation.md and carry no path, so the
-        # path filter below cannot speak for them — the name already did.
-        if name not in ("append_block", "fix_row"):
+        # `append_block`/`fix_row`/`record` are bound to investigation.md and carry no path, so
+        # the path filter below cannot speak for them — the name already did.
+        if name not in ("append_block", "fix_row", "record"):
             fp = str(inp.get("file_path") or inp.get("path") or "")
             if not fp.endswith("investigation.md"):
                 return
@@ -396,6 +399,7 @@ def phase_wall_times(
 from defender.scripts.visualize.visualize_messages import (  # noqa: F401
     LEGACY_WIRE_LOG,
     build_transcript,
+    clerk_cost_by_model,
     deduped_main_records,
     gather_calls_by_phase,
     gather_cost_by_model,

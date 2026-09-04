@@ -123,9 +123,10 @@ from ._document import (
     flagged_write_refusal,
     repairable_diagnostics,
 )
+from ._clerk import _tool_record  # #996 — see runtime/clerk.py
 
 
-def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
+def register_tools(agent, tools: ToolSet, verbs: Any = None, clerk: Any = None) -> None:
 
     if tools.bash:
         @agent.tool
@@ -177,55 +178,34 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
             return _tool_edit_file(ctx.deps, path, old_string, new_string)
 
     if tools.append:
-        _register_investigation_verbs(agent)
+        # #996, D14: `record` is MAIN's only document verb — `append_block`/`fix_row` leave
+        # MAIN's roster. Only MAIN carries `append=True` today, so this branch always takes
+        # the `record` arm; the two internal writers stay reachable directly (the #836 suite,
+        # any future write-granting role) through `_tool_append_block`/`_tool_fix_row` — this
+        # only changes what gets REGISTERED as a callable tool.
+        _register_record_verb(agent, clerk)
 
     _register_deferred_tools(agent, tools, verbs)
 
 
-def _register_investigation_verbs(agent) -> None:
-    """The two verbs bound to `investigation.md` — the append and the repair.
+def _register_record_verb(agent, clerk: Any) -> None:
+    """#996, D14. `record` replaces `append_block`/`fix_row` for MAIN: MAIN authors prose only
+    and the clerk (`tools/_clerk.py`) compiles it into rows, repairing a warn-accepted block and
+    retrying a structural refusal inside the same call.
 
-    One grant, one registration site: `fix_row` rides `append=True` rather than minting a
-    capability bit, so an agent that may grow the transcript may also repair a row it landed
-    in it. Split out of `register_tools` to keep that function under the complexity gate."""
-    # `sequential=True`: two `ToolCallPart`s in ONE model response otherwise run concurrently,
-    # and against the real write primitive that is a genuine LOST UPDATE — both calls read the
-    # same pre-image, one change reaches disk, and both report success. A `fix_row` paired with
-    # an `append_block` could discard the repair while telling the model it landed, leaving a
-    # window that looks shut and is not.
+    `sequential=True` for the same lost-update reason `append_block`/`fix_row` carried: `record`
+    itself performs up to two writes (the prose, then the clerk's rows) against the one shared
+    `investigation.md`, and two `ToolCallPart`s in one model response would otherwise run as
+    concurrent tasks over the same pre-image."""
     @agent.tool(sequential=True)
-    async def append_block(ctx: RunContext[AgentDeps], text: str) -> str:
-        """Append to investigation.md, the invlang work log — no path and no anchor,
-        because the run has one transcript and it only ever grows. Send ONE invlang
-        block per call. The resulting full document is validated (invlang); if it is
-        refused, nothing is written and the file still does not contain your text. A
-        WARNING is different: the block DID land, and the flagged row blocks the next
-        write until you repair it with fix_row. To record a disposition use
-        close_investigation, the report's only writer."""
-        return _tool_append_block(ctx.deps, text)
-
-    @agent.tool(prepare=_prepare_fix_row, sequential=True)
-    async def fix_row(ctx: RunContext[AgentDeps], old_row: str, new_row: str) -> str:
-        """Repair ONE flagged row of investigation.md in place — offered only while a
-        row is flagged. `old_row` must be a currently-flagged row, copied exactly as the
-        warning printed it; it is matched as a whole line, never as a substring, and
-        never outside the flagged set. `new_row` replaces it and must be a single row of
-        the same block with the same columns; an EMPTY `new_row` deletes the line. This
-        is not a general editor: nothing else in the document is reachable through it."""
-        return _tool_fix_row(ctx.deps, old_row, new_row)
-
-
-async def _prepare_fix_row(ctx: RunContext[AgentDeps], tool_def: Any) -> Any:
-    """Offer `fix_row` only while the repair window is open.
-
-    ERGONOMICS, not a control. The offer is computed once per model REQUEST, so a model that
-    saw the definition on an earlier turn can still emit the call after the window closed;
-    `_tool_fix_row` re-derives and refuses. The security property rests on that body.
-
-    Offered on the REPAIR set, which the body also gates on: a document whose only defect is
-    error-severity has no warn window, and offering on that would hide the verb in exactly the
-    case the close is about to demand it."""
-    return tool_def if repairable_diagnostics(ctx.deps) else None
+    async def record(ctx: RunContext[AgentDeps], text: str) -> str:
+        """Record prose into investigation.md — state what you learned or decided, in your
+        own words, naming your own ids (v-NNN, e-NNN, h-NNN, l-NNN) so later prose can refer
+        back to them. A clerk compiles this into the structured record; you never author a
+        row yourself. The receipt names which ids landed, any GAPS the clerk could not ground
+        in your prose, and any facts still owed before a disposition can close — read those,
+        they are what your next record answers."""
+        return await _tool_record(ctx.deps, text, clerk)
 
 
 def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
@@ -338,14 +318,13 @@ __all__ = [
     "_opened_operands",
     "_opens_untrusted_read",
     "_overflow_filter_hint",
-    "_prepare_fix_row",
     "_probe_is_file",
     "_probe_read_text",
     "_read_char_cap",
     "_record_lesson_load",
     "_record_shim_failure",
     "_register_deferred_tools",
-    "_register_investigation_verbs",
+    "_register_record_verb",
     "_resolve_operand",
     "_resolved",
     "_shim_exit_code",

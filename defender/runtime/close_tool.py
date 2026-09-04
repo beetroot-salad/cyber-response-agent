@@ -34,12 +34,38 @@ from defender._untrusted import wrap_fresh
 # test in `_close_investigation_async`, the ordered tuple for the argument schema below.
 from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
+from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import (
     CeilingReceipt,
     ceiling_test_block,
     conclude_ceiling_test_rows,
     disposition_entry_price,
 )
+
+#: D3/O4 (#996): the wording MAIN's refusal carries when a MODEL close finds no `:T conclude`
+#: block. D15-conformant — it names the header MAIN writes prose under (a locus), never a row
+#: or a verb MAIN's roster does not hold.
+_NO_CONCLUDE_REFUSAL = (
+    "close blocked: record your REPORT prose under a `## REPORT` header — disposition "
+    "rationale, ceiling, detection notes, entity check — then close."
+)
+
+
+def _refuse_if_no_conclude(companion_text: str) -> None:
+    """D3: no MODEL close commits without a `:T conclude` block, over ANY disposition — the
+    price table prices only three keywords (`benign`/`false-positive`/`inconclusive`) and the
+    structure gate calls a conclude-less document publishable, so `malicious` owed nothing
+    before this gate existed and its own conclusion could be recorded with nothing in the
+    companion stating it.
+
+    Sits AFTER the entry price and BEFORE the structure gate (P15): each refusal a close earns
+    is then the most specific one the document has earned, and the structure gate — which runs
+    rules conditioned on the disposition the DOCUMENT declares — never gets to answer a missing
+    conclude with a complaint about a keyword the document does not carry."""
+    companion, _warnings = parse_dense_companion(companion_text)
+    conclude = (companion.get("conclude") if companion else None) or {}
+    if not conclude:
+        raise ModelRetry(_NO_CONCLUDE_REFUSAL)
 
 from . import challenge_gate
 from . import tools as tools_mod
@@ -365,7 +391,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
 async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams, all injected
     deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds,
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
-    forced: bool = False,
+    forced: bool = False, clerk: Any = None,
 ) -> CloseResult:
     """`forced` distinguishes the FRAMEWORK's close from the model's. Only the driver's
     retry-exhaustion limb sets it, and it buys exemption from the two document gates below —
@@ -394,6 +420,8 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # no reader can tell from a clean one — and this gate's value is what the report frontmatter
     # is written FROM, so normalizing here launders the injected character past the very gate
     # that exists to deny it.
+    if not forced:
+        _refuse_if_pending_prose(clerk)
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
         # Rendered from the ORDERED TUPLE, never `sorted(DISPOSITION_ENUM)`: this refusal and
         # the tool schema are read in the SAME round trip, so a fifth member appended out of
@@ -434,6 +462,14 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # `investigation.md` write gate. AFTER the terminal-close refusal so R4's ordering holds,
     # and before the gate so a close that owes the price never spends a review.
     companion_text = _refuse_if_entry_price_is_owed(deps, disposition)
+    # D3/O4 (#996): no MODEL close commits without a `:T conclude` block, over any
+    # disposition — `malicious` owed nothing at the price gate above and the structure gate
+    # below calls a conclude-less document publishable, so without this the run's own
+    # headline conclusion could be recorded with nothing in the companion stating it. `forced`
+    # is exempt with the other two document gates, for their own reason: retry exhaustion has
+    # no model left to repair with.
+    if not forced:
+        _refuse_if_no_conclude(companion_text)
     # The check the close never had (#961). Every other write verb meets the invlang schema
     # through `permission.decide_write`; the close is the verb that PUBLISHES — report.md
     # commits against this document and the review gate parses it — so it was the one path on
@@ -515,6 +551,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
 def close_investigation(  # noqa: PLR0913 — the close's own seams, all injected
     deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds | None = None,
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
+    clerk: Any = None,
 ) -> CloseResult:
     """The SYNC host-level close, and one of the TWO boundaries where the gate's bounds are
     resolved (`run_investigation` is the other). Everything inward of these two takes a
@@ -525,15 +562,39 @@ def close_investigation(  # noqa: PLR0913 — the close's own seams, all injecte
     resolved = bounds if bounds is not None else challenge_gate.default_bounds()
     return asyncio.run(_close_investigation_async(
         deps, disposition, stages=stages, bounds=resolved, evidence=evidence,
-        validator=validator,
+        validator=validator, clerk=clerk,
     ))
 
 
 async def _tool_close_investigation(
     deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds,
+    clerk: Any = None,
 ) -> str:
-    result = await _close_investigation_async(deps, disposition, stages=stages, bounds=bounds)
+    result = await _close_investigation_async(
+        deps, disposition, stages=stages, bounds=bounds, clerk=clerk,
+    )
     return result.message
+
+
+def _refuse_if_pending_prose(clerk: Any) -> None:
+    """#996: a MODEL close is refused while the clerk's `pending` queue is non-empty — the one
+    loss no receipt can undo. The prose is in `investigation.md`, the rows it was meant to
+    become were never compiled, and closing now means nothing will ever compile them.
+
+    `clerk is None` is not "pending is empty" — it is "this call carries no clerk at all" (a
+    direct test call, or a run built before #996's seam existed), and there is nothing here to
+    check. The FORCED close stays exempt, for its own reason: retry exhaustion has no model
+    left to compile the queue with, and refusing it would dead-letter the run at persist for a
+    missing report.md instead."""
+    pending = list(getattr(clerk, "pending", None) or ())
+    if not pending:
+        return
+    lines = [f"- {prose[:200]!r}" for prose, _held_block, _owed in pending]
+    raise ModelRetry(
+        "close blocked: prose is still pending compilation and has not become rows yet — "
+        "closing now would lose it permanently. Call `record` again (with no new prose, or "
+        "with an answer to what it needs) so it compiles, then close.\n" + "\n".join(lines)
+    )
 
 
 def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> None:
@@ -664,7 +725,9 @@ def _read_companion_text(path: Path) -> str:
 DispositionArg = Annotated[str, Field(json_schema_extra={"enum": list(DISPOSITION_VALUES)})]
 
 
-def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) -> None:
+def register_close_tool(
+    agent, *, stages: Any, bounds: challenge_gate.Bounds, clerk: Any = None,
+) -> None:
     """MAIN's composition root ONLY — never called for any other role's agent build, and
     only when that root's effective `ToolSet.close` is on."""
 
@@ -690,7 +753,9 @@ def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) ->
         write_file/edit_file cannot reach it. A confident disposition passes a live challenge
         gate before it commits; if the gate is not satisfied yet, this call returns without
         committing and the investigation continues for another ANALYZE/GATHER turn."""
-        return await _tool_close_investigation(ctx.deps, disposition, stages=stages, bounds=bounds)
+        return await _tool_close_investigation(
+            ctx.deps, disposition, stages=stages, bounds=bounds, clerk=clerk,
+        )
 
 
 __all__ = [

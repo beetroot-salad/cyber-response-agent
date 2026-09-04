@@ -268,8 +268,10 @@ def _turn_from_record(rec: dict, old_run_dir: str | None, new_run_dir: str | Non
 
 
 #: The verbs BOUND to investigation.md, which therefore carry no path to filter on — the name
-#: is the whole predicate. `append_block` has been one since #810 and `fix_row` since #836.
-_PATHLESS_INVESTIGATION_WRITES = ("append_block", "fix_row")
+#: is the whole predicate. `append_block` has been one since #810 and `fix_row` since #836;
+#: `record` replaces both for MAIN (#996, D14) — kept alongside them (not instead of) so a
+#: historical trace recorded before the port still has its write sites found.
+_PATHLESS_INVESTIGATION_WRITES = ("record", "append_block", "fix_row")
 
 
 def _is_investigation_write(name: str, args: Mapping[str, Any]) -> bool:
@@ -328,7 +330,9 @@ def _retarget_writes_as_appends(turns: list[Turn]) -> list[Turn]:
             "`write_file` there to re-split, not an anchored fragment"
         )
     for (t_i, c_i), chunk in zip(sites, _split_at_fences(target, len(sites)), strict=True):
-        turns[t_i].tool_calls[c_i] = ("append_block", {"text": chunk})
+        # #996, D14: `record` is MAIN's only document verb now — re-split as `record` calls,
+        # not `append_block`, so a golden replay drives MAIN through the roster it actually has.
+        turns[t_i].tool_calls[c_i] = ("record", {"text": chunk})
     return turns
 
 
@@ -429,6 +433,16 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
         raise ValueError(
             "drive(resume=…) derives its store from the spec's source run, so a store_factory= "
             "beside it is silently discarded — assert over the source run's own handle instead")
+
+
+async def _default_scripted_clerk(_request: Any) -> str:
+    """The harness's own default clerk (#996) — mirrors `_review_bundle.stage()`'s bare
+    callable exactly: it ignores the turn and answers with nothing to compile. A scenario that
+    wants the clerk driven scripts its own `ScriptedClerk` (`tests/_clerk_996.py`) and passes
+    it as `clerk=`; this default exists only so the other 220-odd scenarios, which write to
+    the investigation without caring what the clerk does with it, keep compiling without a
+    provider."""
+    return ""
 
 
 def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per INJECTION
@@ -567,8 +581,11 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
         seams["bounds"] = bounds
     if toolset is not None:
         seams["toolset"] = toolset
-    if clerk is not None:
-        seams["clerk"] = clerk
+    # #996: mirrors `review_stages` above, unconditionally — a scripted clerk answering with
+    # nothing to commit, the same layer and shape as the review bundle's own default, so a
+    # replay that never injected one still compiles without a provider. Only a PRODUCTION
+    # `run_investigation` called with no clerk at all builds the live caller.
+    seams["clerk"] = clerk if clerk is not None else _default_scripted_clerk
     if resume is not None:
         seams["resume"] = resume
     seams["box"] = box if box is not None else box_mod.unboxed_executor(

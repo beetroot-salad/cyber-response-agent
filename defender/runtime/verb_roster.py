@@ -191,7 +191,11 @@ def _bare_offenders(
 def _grant_for_surface(
     path: Path, grants: Mapping[str, VerbGrant],
 ) -> VerbGrant:
-    if path.name == _ROSTER_FILENAME:
+    # #996: a ROLE's own prompt (`skills/{role}/SKILL.md` — e.g. the clerk's) is scored
+    # against that role's own grant, exactly like its generated roster; a SYSTEM's SKILL.md
+    # (elastic, cmdb, …) is never a key of `grants`, so it still falls through to the
+    # gather default unchanged.
+    if path.name in (_ROSTER_FILENAME, "SKILL.md"):
         role = path.parent.name
         if role in grants:
             return grants[role]

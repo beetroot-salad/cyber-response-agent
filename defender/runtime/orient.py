@@ -171,9 +171,10 @@ def orientation(
     except Exception as e:  # noqa: BLE001
         sections.append(f"## invlang catalog\n_(unavailable: {e!r} — run `defender-invlang enum`)_")
 
-    grammar = _invlang_grammar(defender_dir)
-    if grammar:
-        sections.append(grammar)
+    # #996 (D14/O1): MAIN's orientation no longer inlines the row grammar — MAIN authors prose
+    # only and never sees block syntax. `_invlang_grammar` is kept as a function (the clerk's
+    # own reader, `tools/_clerk.py`); the catalog above still ships, because naming a vertex
+    # type or a disposition is not writing a row.
 
     lessons = _build_lessons_section(env, sig)
     if lessons:

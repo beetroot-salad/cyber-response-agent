@@ -445,8 +445,8 @@ def _check_attr_update_keys(
                                 f"this write, to {previous!r} and then to "
                                 f"{rec.get('value') or ''!r}; only the LAST value is recorded and "
                                 f"{previous!r} is discarded with nothing said. Give this write one "
-                                f"row per slot and re-send it whole — refining the same slot again "
-                                f"in a LATER `append_block` is the documented `??` -> candidate "
+                                f"row per slot and record it whole — refining the same slot again "
+                                f"in a LATER record is the documented `??` -> candidate "
                                 f"set -> concrete value progression and stays legal"
                             ),
                             locus=Locus(block=ATTR_UPDATES_LOCUS, row_text=row),
@@ -1078,14 +1078,14 @@ def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
         if cell.slot == SLOT_CLASS:
             errors.append(
                 f"disposition benign blocked: vertex {cell.vertex_id} still has an "
-                f"unresolved class ({cell.value!r}) — resolve via "
-                f":R attr_updates or escalate"
+                f"unresolved class ({cell.value!r}) — state what {cell.vertex_id}'s class is, "
+                f"in prose, or escalate"
             )
         elif cell.slot.startswith(ATTR_PREFIX):
             errors.append(
                 f"disposition benign blocked: vertex {cell.vertex_id} attribute "
                 f"{cell.slot[len(ATTR_PREFIX):]!r} is still unresolved ({cell.value!r}) — "
-                f"resolve via :R attr_updates or escalate"
+                f"state that attribute's value, in prose, or escalate"
             )
         # No `else`. The two arms above are the two slot kinds `include_ident=False` yields
         # today, but the walk is SHARED and takes a knob — a bare `else` would render an

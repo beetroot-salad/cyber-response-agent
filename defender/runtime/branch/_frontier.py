@@ -21,7 +21,6 @@ without writing anything. Split out of `branch.py` at 1197 lines.
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -39,109 +38,6 @@ from defender._run_paths import RunPaths, artifact_dir
 from .. import session_store
 from ._spec import BranchError, BranchSpec
 
-
-def fence_count_at(
-    store: Any, session_id: str, branch_message_id: int, document: str,
-) -> int:
-    """How many invlang fences the document held at `branch_message_id`.
-
-    `frontier_at` indexes the DOCUMENT's own ````invlang` blocks, so this has to answer in that
-    unit or it silently addresses the wrong state. THREE things break the tempting shortcut of
-    counting `append_block` calls, all of them live, and all of them under-count — the silent
-    direction, because `FrontierAt.snapped` fires only when a caller asks PAST the end, so an
-    under-count branches the sibling at a frontier the run had already moved past and reports
-    nothing wrong.
-
-    - ONE CALL, SEVERAL FENCES. The text is one string and may carry any number of blocks. The
-      e2e harness's own `_split_at_fences` cuts a golden into fewer chunks than it has fences
-      whenever the two numbers disagree, which is not a test artifact — nothing asks a model
-      for one block per call either.
-    - ONE TURN, SEVERAL CALLS. `tools.py` sets `sequential=True`, which orders two calls inside
-      one response rather than preventing them, and nothing sets `parallel_tool_calls=False`.
-      This is also why the `actor` projection cannot answer it: `session_store._tool_name`
-      publishes every DISTINCT tool a message names, comma-joined, so it cannot say "twice".
-    - NOT EVERY FENCE CAME FROM AN APPEND. `lead_zero` writes lead-0's declaring `:L findings`
-      block into `investigation.md` itself, before the model's first turn, so a count derived
-      from the session alone is short by that block on EVERY real run — and a seed sliced by
-      it would drop the model's last landed fence.
-
-    So the document is the unit and the session says only WHEN. The blocks no append accounts
-    for (`total - overall`) are what was already on disk when the model started writing, and
-    they are present at every branch point; the appends carry the rest, attributed to the
-    message that returned them.
-
-    THE TOOL RETURN is what makes a call count, and the CALL carries the text, so the two
-    halves join on `tool_call_id`. The return is the half that agrees with the prefix —
-    `hydrate(role="send")` truncates a trailing response whose tool call is unresolved — so a
-    fence counts exactly when the prefix carries the write that landed it.
-
-    THE CLAMP IS WHAT KEEPS `snapped` MEANINGFUL. A document holding FEWER fences than the
-    appends say were written is a document that was truncated or rewritten, and there the
-    unaccounted-for term is negative; clamped at 0, the running count can still run past
-    `total` and `frontier_at` reports the disagreement instead of quietly answering from a
-    state neither half describes.
-    """
-    from defender.skills.invlang.parser import scan_fences
-
-    ids = session_store.path_row_ids(store, session_id)
-    messages = session_store.hydrate(store, session_id, role="analysis")
-    pending: dict[str, str] = {}
-    through = overall = 0
-    for row_id, message in zip(ids, messages, strict=True):
-        for part in getattr(message, "parts", []):
-            if getattr(part, "tool_name", None) != "append_block":
-                continue
-            if isinstance(part, ToolCallPart):
-                pending[part.tool_call_id] = _appended_text(part)
-            elif isinstance(part, RetryPromptPart):
-                # A REFUSAL LANDS NOTHING, and it is not a return. `_tool_append_block` turns
-                # all five of its refusals into `ModelRetry`, which the framework records as a
-                # `RetryPromptPart` — so the call's text would otherwise sit in `pending`
-                # forever, and a provider that reuses a `tool_call_id` after a refusal would
-                # have the next return pop the refused text instead of its own.
-                pending.pop(part.tool_call_id, None)
-            elif isinstance(part, ToolReturnPart):
-                landed = len(scan_fences(pending.pop(part.tool_call_id, "")).bodies)
-                overall += landed
-                through += landed if row_id <= branch_message_id else 0
-    return max(0, len(scan_fences(document).bodies) - overall) + through
-
-
-def _appended_text(part: Any) -> str:
-    """The `text` an `append_block` call carries, however the framework spelled its args.
-
-    `ToolCallPart.args` is a dict on the ordinary path and a JSON STRING when the provider
-    hands back unparsed arguments — both shapes reach the store, and a reader that knew only
-    the first would score every one of the other's calls as zero fences. Anything else is
-    read as no text rather than raised on: this counts what landed, and a call whose args
-    cannot be read is one whose fences cannot be attributed either way.
-    """
-    return _call_args(part).get("text", "")
-
-
-def _call_args(part: Any) -> dict:
-    """A `ToolCallPart`'s arguments as a dict, however the framework spelled them.
-
-    `args` is a dict on the ordinary path and a JSON STRING when the provider hands back
-    unparsed arguments — both shapes reach the store, and a reader that knew only the first
-    would silently score every one of the other's calls as carrying nothing. Anything else
-    reads as no arguments rather than raising: this caller COUNTS what landed, and a call whose
-    args cannot be read is one whose effect cannot be attributed either way.
-
-    A FENCE-COUNTING reader, and only that. `leads_at` walks the same shapes for a lead id and
-    goes through `session_store._lead_id_from_args` instead — the store's own extractor, which
-    the `gather_boundary` view answers with, and which resolves a duplicate JSON key
-    first-wins where a bare `loads` takes the last. Two rules over one hostile-text boundary is
-    a divergence nothing can see, so the id question has exactly one answer and this function
-    is not it.
-    """
-    args = getattr(part, "args", None)
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except ValueError:
-            return {}
-    return args if isinstance(args, dict) else {}
 
 
 def main_session(store: Any) -> str:
@@ -325,9 +221,12 @@ def frontier_at_branch(store: Any, spec: BranchSpec):
     # A run that authored no document reads as the empty frontier, which is what `validate`
     # refuses on — the same answer `frontier_at` gives a fence-less document.
     document = text if text is not None else ""
-    return frontier_at(
-        document,
-        fence_count_at(store, source_session(store, spec), spec.branch_message_id, document))
+    # #996, D6: the STAMP is the truncation authority now — no transcript walk. Deleted
+    # `fence_count_at` replayed tool arguments in place of state nobody recorded; this reads
+    # what `StoreHandle.append` recorded on the branch row itself.
+    stamp = session_store.document_state_at(
+        store, source_session(store, spec), spec.branch_message_id)
+    return frontier_at(document, stamp.fence_count)
 
 
 #: The tool whose call/return pair is the only join from a message id to a run's evidence.

@@ -9,6 +9,7 @@ from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
 from defender.learning.pipeline.oracle_engine import ORACLE_DEF
 from defender.runtime.agent_definition import AgentDefinition, build_registry
 from defender.runtime.agent_role import AgentRole
+from defender.runtime.clerk import CLERK_DEF
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 from defender.runtime.review_roles import COMPOSER_DEF, SUPPORT_DEF
 
@@ -19,12 +20,13 @@ from defender.runtime.review_roles import COMPOSER_DEF, SUPPORT_DEF
 # shape one turn further out: one definition, three authoring calls and the comparator's.
 AGENTS: dict[AgentRole, AgentDefinition] = build_registry(
     (MAIN_DEF, GATHER_DEF, JUDGE_DEF, ACTOR_DEF, ORACLE_DEF, VERIFY_DEF, LEAD_AUTHOR_DEF,
-     CORPUS_AUTHOR_DEF, SUPPORT_DEF, COMPOSER_DEF, QUESTIONER_DEF)
+     CORPUS_AUTHOR_DEF, SUPPORT_DEF, COMPOSER_DEF, QUESTIONER_DEF, CLERK_DEF)
 )
 
 __all__ = [
     "ACTOR_DEF",
     "AGENTS",
+    "CLERK_DEF",
     "COMPOSER_DEF",
     "CORPUS_AUTHOR_DEF",
     "GATHER_DEF",
