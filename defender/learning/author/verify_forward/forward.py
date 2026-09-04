@@ -41,6 +41,13 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
 
 
 def expected_disposition(direction: str, recorded: str) -> str:
+    if not isinstance(direction, str) or not isinstance(recorded, str):
+        raise ValueError(
+            f"expected_disposition(direction, recorded) needs two strings, got "
+            f"{type(direction).__name__!r}, {type(recorded).__name__!r} — a family row "
+            "carries no resolved (direction, recorded-disposition) pair at all (J12 exempts "
+            "it from the forward check upstream, at queued_ids)"
+        )
     if direction == "benign":
         return "benign"
     return recorded

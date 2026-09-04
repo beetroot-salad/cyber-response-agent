@@ -62,6 +62,33 @@ HOST_ONLY_DISPOSITION = "unresolved"
 UNKNOWN_DISPOSITION = "?"
 
 
+#: The family judge's outcome vocabulary (#921 D1). Three of the five are the family's
+#: `verdict_word` when the episode is `gradable`; the other two — `discard` and
+#: `corpus-contradiction` — ARE the `verdict_word` when they apply, so this is one enum, not
+#: a `gradable`/degenerate split. Lives here, beside the disposition enum, because THREE
+#: schemas have to agree on it: the twelve-key finding row's `judge_outcome`, the family
+#: record's `verdict_word`, and the findings channel's `_gate_family` partition.
+JUDGE_OUTCOME_VALUES: tuple[str, ...] = (
+    "caught", "corpus-contradiction", "discard", "survived", "undecidable",
+)
+JUDGE_OUTCOME_ENUM = frozenset(JUDGE_OUTCOME_VALUES)
+
+
+def normalized_judge_outcome(value: object) -> str | None:
+    """A judge outcome as it RENDERS — a `JUDGE_OUTCOME_ENUM` member — or `None`.
+
+    Case-insensitive and whitespace-trimmed (the reply's own YAML is a model's, and the
+    queue row's `judge_outcome` is copied from it by more than one writer), but never a
+    fuzzy fold onto a near-miss: `normalized_disposition`'s own rule applies here too — a
+    value that only becomes a member after something guesses at it is answered exactly as
+    one that was never a member at all.
+    """
+    if not isinstance(value, str):
+        return None
+    outcome = value.strip().casefold()
+    return outcome if outcome in JUDGE_OUTCOME_ENUM else None
+
+
 def normalized_disposition(value: object) -> str | None:
     """A disposition as it RENDERS — a `DISPOSITION_ENUM` member — or `None` when it is not one
     of them. THE single answer to what a disposition value MEANS, wherever it was read from:

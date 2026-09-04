@@ -1001,7 +1001,7 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(  # noqa: PLR0913 — the launcher's inputs plus its five injection seams
+def main(  # noqa: PLR0913 — the launcher's inputs plus its six injection seams
     argv: list[str],
     *,
     spawn: Callable[..., int] | None = None,
@@ -1010,6 +1010,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its five injection sea
     adapters: Any = None,
     invoke: Any = None,
     preflight: Callable[[str | None], int] | None = None,
+    judge: Any = None,
 ) -> int:
     """Launch one episode, reporting a refusal as a REFUSAL rather than as a crash.
 
@@ -1039,7 +1040,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its five injection sea
 
     try:
         return _launch(argv, spawn=spawn, door=door, questioner=questioner,
-                       adapters=adapters, invoke=invoke, preflight=preflight)
+                       adapters=adapters, invoke=invoke, preflight=preflight, judge=judge)
     except (branch.BranchError, LedgerError, EstateError, FamilyError,
             staging_mod.StagingRefused, ReviewError,
             session_store.StoreError, sqlite3.Error) as refusal:
@@ -1048,7 +1049,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its five injection sea
 
 def _launch(  # noqa: PLR0913 — see `main`
     argv: list[str], *, spawn: Any, door: Any, questioner: Any, adapters: Any, invoke: Any,
-    preflight: Callable[[str | None], int] | None,
+    preflight: Callable[[str | None], int] | None, judge: Any = None,
 ) -> int:
     from defender.run import preflight_role_models
 
@@ -1108,7 +1109,7 @@ def _launch(  # noqa: PLR0913 — see `main`
         return _run_episode(
             ns, source=source, episode_id=episode_id, episode_dir=episode_dir, token=token,
             patterns=patterns, door=write_door, questioner=author,
-            adapters=read_side, invoke=compare_with, spawn=spawn)
+            adapters=read_side, invoke=compare_with, spawn=spawn, judge=judge)
     except SystemExit:
         aborting = True
         raise
@@ -1157,6 +1158,7 @@ def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path, token: str,
     patterns: Sequence[str], door: Any, questioner: Any, adapters: Any, invoke: Any, spawn: Any,
+    judge: Any = None,
 ) -> int:
     """Steps 2 to 6, inside the teardown guard."""
     family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
@@ -1209,6 +1211,19 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         print(f"[branch] world {label} exited {exits[label]}", file=sys.stderr)
     print(f"[branch] episode {episode_id}: outcome={report['outcome']} "
           f"({len(report['scrub_verified'])}/{len(labels)} verified)", file=sys.stderr)
+    # J10: the judge runs at the TAIL of the step runner, after the archive step and before the
+    # return — never in `_launch`'s post-teardown path, which is production-dead on this route.
+    # A judge failure is NON-FATAL to the episode (F-5): the launcher's own exit status stays
+    # about the LAUNCH, never about the grade, so a malformed reply or an unreachable model does
+    # not turn an otherwise-clean episode into a `LauncherRefused`.
+    from defender.learning import judge as judge_mod
+    from defender.run_common import resolve_runs_base
+
+    try:
+        judge_mod.grade_episode(episode_dir, judge=judge, runs_base=resolve_runs_base())
+    except judge_mod.JudgeRefused as judge_failed:
+        print(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
+              "episode itself is otherwise unaffected", file=sys.stderr)
     # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
     # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
     # launch that did exactly what it was asked and found the results not comparable, which is a

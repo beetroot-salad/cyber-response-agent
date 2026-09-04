@@ -78,12 +78,24 @@ class ArchiveRefused(ValueError):
     """
 
 
+#: The judge's directory-of-summaries role's name, both in a sibling's run dir and archived.
+GATHER_SUMMARIES_DIRNAME = "gather_summaries"
+#: The judge's two single-file additions' archived names — the same as their run-dir names.
+LESSONS_LOADED_NAME = "lessons_loaded.jsonl"
+ALERT_NAME = "alert.json"
+
+
 def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
-    """The four single-file roles, as `(source, archived name)`.
+    """The six single-file roles, as `(source, archived name)`.
 
     Spelled once, in the order the archived-world row declares them, because two readers of
     this list exist — the screen and the copy — and a name in one and not the other is an
     artifact that is checked and not copied, or copied and not checked.
+
+    D7 (#921) adds the last two: `lessons_loaded.jsonl` and `alert.json`, the two of the
+    judge's three new inputs that are single files. `gather_summaries/` is the third and is a
+    DIRECTORY, so it takes the per-entry-screened walk beside `stage_tables`' own two tables
+    rather than a slot in this tuple — see `_gather_summaries_source`/`archive_episode`.
     """
     paths = RunPaths(run_dir)
     return (
@@ -92,7 +104,14 @@ def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
         (paths.provenance, "provenance.json"),
         # The SIDECAR beside the run dir, not a path inside it (G17).
         (verdict_path(run_dir), SCRUB_VERDICT_NAME),
+        (run_dir / LESSONS_LOADED_NAME, LESSONS_LOADED_NAME),
+        (run_dir / ALERT_NAME, ALERT_NAME),
     )
+
+
+def _gather_summaries_source(run_dir: Path) -> Path:
+    """The sibling's own directory of per-lead gather summaries, D7's directory-shaped input."""
+    return run_dir / GATHER_SUMMARIES_DIRNAME
 
 
 def _screen(source: Path, *, world: str, is_dir: bool = False) -> bool:
@@ -118,6 +137,20 @@ def _screen(source: Path, *, world: str, is_dir: bool = False) -> bool:
     return False
 
 
+def _refuse_non_artifact_entries(refused: list[Path]):
+    """`copytree`'s ignore hook for `gather_summaries/`, mirroring
+    `lead_repository._refuse_non_artifacts`: drop and record every entry, at any depth, that is
+    not a regular file or a real directory — never abort the whole tree over one dangling link.
+    """
+    def _ignore(directory: str, names: list[str]) -> set[str]:
+        here = Path(directory)
+        dropped = {n for n in names
+                   if not (artifact_file(here / n) or artifact_dir(here / n))}
+        refused.extend(here / n for n in sorted(dropped))
+        return dropped
+    return _ignore
+
+
 def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     """Every source that will be copied for one world, or the refusal — nothing copied yet.
 
@@ -131,6 +164,7 @@ def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     paths = RunPaths(run_dir)
     _screen(paths.executed_queries, world=world)
     _screen(paths.gather_raw, world=world, is_dir=True)
+    _screen(_gather_summaries_source(run_dir), world=world, is_dir=True)
     return present
 
 
@@ -178,6 +212,16 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         # returns what it dropped, so the drop is said out loud instead of read later as a
         # payload the run never wrote.
         refused = stage_tables(run_dir, world_dir)
+        # `gather_summaries/`, D7's directory-shaped input, through the SAME per-entry-screened
+        # walk as `gather_raw` — a non-artifact entry at any depth is refused and reported, and
+        # the rest of the directory (and the rest of the world) still archives.
+        summaries_src = _gather_summaries_source(run_dir)
+        if artifact_dir(summaries_src):
+            summaries_refused: list[Path] = []
+            shutil.copytree(  # lint-tree-read-follows-link: ok — root screened by `_screen` above, entries preserved
+                summaries_src, world_dir / GATHER_SUMMARIES_DIRNAME, symlinks=True,
+                ignore=_refuse_non_artifact_entries(summaries_refused), dirs_exist_ok=True)
+            refused = [*refused, *summaries_refused]
         if refused:
             print(f"[archive] world {world}: {len(refused)} non-artifact entr"
                   f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "

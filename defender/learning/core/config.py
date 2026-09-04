@@ -249,6 +249,11 @@ QUEUEABLE_FINDING_TYPES = {
     "lead-quality",
     "analyze-discipline",
     "observability",
+    # #921's fourth mechanical bucket: a resolution moved past the branch's fence and the
+    # verdict still disagreed with the declared disposition. Reachable only by the family
+    # judge's own appender (`learning/judge/enqueue.py`) — the old pipeline judge's
+    # `persist.append_findings` never produces it.
+    "decision-discipline",
 }
 ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES = {"detection-confirmed"}
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES

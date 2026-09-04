@@ -136,7 +136,7 @@ def build_user_prompt(
 
 def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
     from defender.learning.author import curator_engine
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
+    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK, skips_forward_check
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     stage_salt = uuid.uuid4().hex
@@ -159,8 +159,11 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             check=FINDINGS_CHECK,
             runs_dir=cfg.runs_dir,
             pending=cfg.channel.file,
+            # J12: a family row's id never enters the queued set the model may forward_check —
+            # its ground truth is the family record, not a source_refs.yaml under runs_dir.
             queued_ids=frozenset(
-                str(f["run_id"]) for f in findings if f.get("run_id")
+                str(f["run_id"]) for f in findings
+                if f.get("run_id") and not skips_forward_check(f)
             ),
         ),
         log=_log,
@@ -253,11 +256,37 @@ def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool
     return disposition == "benign"
 
 
+#: D6/O2: `judge_outcome` values that are SKIPPED (consumed, never authored) rather than held.
+#: `survived` is the one word `_gate_family` admits for authoring; `discard` and
+#: `corpus-contradiction` never reach the queue at all (M5 refuses them at the appender), so
+#: this partition never sees them.
+_FAMILY_SKIP_OUTCOMES = frozenset({"caught", "undecidable"})
+
+
+def _gate_family(entry: dict) -> dict | None:
+    """D6/O2: the family partition inside `_gate_findings`'s one gate.
+
+    A `direction: family` row's ground truth is `disposition_declared` on the family record —
+    already resolved into `judge_outcome` by the judge's own mechanical pass — so this
+    partition never reads `source_refs.yaml` at all. `survived` is admitted for authoring
+    (returns `None`, and the caller lets the row fall through to `to_author` the same way an
+    admitted adversarial row does); `caught`/`undecidable` are consumed WITHOUT authoring,
+    terminally rather than held — a word that will never change must not sit in the queue
+    forever (a hold is forever; a skip is terminal, and the two read differently in the
+    drain's own report)."""
+    if entry.get("judge_outcome") in _FAMILY_SKIP_OUTCOMES:
+        rec = dict(entry)
+        rec["consumed_category"] = "consumed_family_skip"
+        return rec
+    return None
+
+
 def _gate_findings(
     batch: list[dict], cfg: AuthorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """The findings direction's pre-author policy: idempotency against the corpus, then
-    the `source_refs.yaml` ground truth a finding needs before it can become a lesson.
+    """The findings direction's pre-author policy: idempotency against the corpus, then EITHER
+    the family partition (D6) for a `direction: family` row OR the `source_refs.yaml` ground
+    truth an adversarial/benign finding needs before it can become a lesson.
 
     `to_author` is derived HERE by subtraction, so both directions return the same 3-tuple
     even though the policies are not one policy parameterised."""
@@ -270,6 +299,17 @@ def _gate_findings(
             rec = dict(entry)
             rec["consumed_category"] = "consumed_idempotent"
             consumed_idempotent.append(rec)
+            continue
+        if entry["direction"] == "family":
+            # P6's blast radius still applies to a malformed family row: the WRITER is what is
+            # supposed to refuse a row lacking `run_id` before it ever reaches this gate
+            # (J12), not this partition — indexing it here (never using the value) is what
+            # keeps that property true rather than silently routing a row the appender should
+            # have refused.
+            entry["run_id"]  # noqa: B018 — see comment above
+            skipped = _gate_family(entry)
+            if skipped is not None:
+                consumed_idempotent.append(skipped)
             continue
         disp = disposition_for(cfg, entry["run_id"])
         direction = entry["direction"]
