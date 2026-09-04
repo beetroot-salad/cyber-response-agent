@@ -3,6 +3,12 @@
 One family of `validate.py`'s rules, split out at 4038 lines. This is the only family
 that DERIVES a value the rest of the system reads — `effective_vertex_state` — rather
 than only answering yes or no about the text.
+
+It also owns `_check_vertex_participation`, which asks `_refs`' question backwards — not
+whether a cited id resolves but whether a DECLARED one is ever cited. It lives here rather
+than beside the shape rules because deciding it needs this module's open-slot vocabulary:
+an edge endpoint left honestly `??` connects, a phantom `v-` id does not, and nothing but
+`is_unresolved` tells the two apart.
 """
 from __future__ import annotations
 
@@ -14,6 +20,8 @@ from .. import _walkers
 from .._cells import _row_cells, _row_dict, _split_cells, _split_cells_raw
 from .._types import Block, RowError
 from ..parser import (
+    _LEAD_PREFIX_RE,
+    _vertex_record,
     iter_fence_blocks,
 )
 from ..schema import (
@@ -21,6 +29,7 @@ from ..schema import (
     CompanionBody,
 )
 from ._diag import Diagnostic, Locus, _plain
+from ._refs import _lead_prefix, _leads
 from ._structure import _cell, _check_conclude_vocab, _check_vocab_anchor_kinds, _check_vocab_edges, _check_vocab_hypotheses, _check_vocab_vertices, _check_vocab_weights
 
 
@@ -535,6 +544,222 @@ def has_open_slot(classification: Any) -> bool:
     if not isinstance(classification, str):
         return False
     return any(is_open_slot(slot) for slot in class_slots(classification))
+
+
+#: The two lead sub-blocks that record what a lead FOUND. A document carrying one of these
+#: has stopped opening its graph and started reporting on it — see `_opening_prologue_ids`.
+#: Spelled out rather than sliced out of `parser._LEAD_SUBBLOCKS`: that table says of itself
+#: that it is PROSE ONLY and steers nothing, so a rule derived from it would be enforcing a
+#: list nobody maintains against the projector.
+_OBSERVATION_SUBBLOCKS = ("observations.vertices", "observations.edges")
+
+
+def _records_an_observation(block: Block) -> bool:
+    m = _LEAD_PREFIX_RE.match(block.name)
+    return m is not None and m.group("sub") in _OBSERVATION_SUBBLOCKS
+
+
+def _opening_prologue_ids(proposed_text: str) -> set[str]:
+    """The vertex ids the OPENING prologue declares — `:V prologue.vertices` blocks written
+    while the document is still opening its graph rather than reporting on it.
+
+    Read off the fence stream rather than off `companion["prologue"]["vertices"]`, and that is
+    the whole point of the function. The projection folds EVERY prologue block into that one
+    list wherever it sat: `parser/_project.py` extends rather than assigns, because append-only
+    makes "a second `:V prologue.vertices`" the only legal way to add one. An exemption keyed
+    on the block NAME is therefore defeated by renaming a header — the identical orphan row,
+    moved into a `:V prologue.vertices` fence appended beside the lead's own report, inherits
+    an exemption written for the graph's OPENING and the rule below never sees it.
+
+    THE BOUNDARY IS THE FIRST RECORDED OBSERVATION, not the first `:L findings` block, and
+    that distinction is measured rather than reasoned: `lead_zero` writes lead-0's declaring
+    `:L findings` row into `investigation.md` BEFORE main's first turn, so in every real run
+    the ORIENT prologue already lands after a `:L findings` block. What separates opening from
+    reporting is a lead saying what it FOUND.
+
+    BY FENCE, for the reason `_check_attr_update_keys` states at length: `append_block` sends
+    one fence per call, so the fence is the atomic write. A block-level boundary is evaded by
+    ordering — the same write puts its `:V prologue.vertices` block above its
+    `:V l-001.observations.vertices` block and the prologue reads as "written first". A model
+    that wants the exemption anyway must now spend a whole earlier write on a prologue-only
+    fence, before the run has recorded a single observation, and can never do it again after.
+    """
+    ids: set[str] = set()
+    for fence_blocks in iter_fence_blocks(proposed_text):
+        if any(_records_an_observation(b) for b in fence_blocks):
+            break
+        for block in fence_blocks:
+            if block.tag != "V" or block.name != "prologue.vertices":
+                continue
+            for row in block.rows:
+                try:
+                    rec = _vertex_record(block, row)
+                except RowError:
+                    continue  # already a parse warning; not this check's business
+                ids.add(rec["id"])
+    return ids
+
+
+def _vertex_declarations(companion: CompanionBody) -> list[tuple[str, str]]:
+    """Every vertex DECLARATION as `(declaring site, vertex id)`, in document order.
+
+    `_walkers.all_vertices` flattens the two declaring sites away on purpose — its callers
+    want the graph, not who wrote it. This rule wants both: the site names the block the
+    refusal tells the author to repair, and it is half the key the baseline comparison uses,
+    since one id declared by two leads with neither ever edged is two defects.
+    """
+    out: list[tuple[str, str]] = [
+        ("prologue", v["id"])
+        for v in (companion.get("prologue") or {}).get("vertices") or []
+        if isinstance(v, dict) and isinstance(v.get("id"), str) and v["id"]
+    ]
+    for lead in _leads(companion):
+        lid = lead.get("id", "?")
+        obs = (lead.get("outcome") or {}).get("observations") or {}
+        out.extend(
+            (lid, v["id"])
+            for v in obs.get("vertices") or []
+            if isinstance(v, dict) and isinstance(v.get("id"), str) and v["id"]
+        )
+    return out
+
+
+def _edge_participants(companion: CompanionBody) -> set[str]:
+    """Every vertex id some `:E` row CONNECTS — which is not every id one mentions.
+
+    The rule below is discharged by an edge, so what counts as an edge is the whole of its
+    strength. Two rows name a vertex without connecting it, and both are cheaper to write
+    than the observation being asked for:
+
+      * `e-001|spawned|v-010|v-999`, whose target no `:V` block declares. Nothing else in the
+        validator refuses that — `_check_attr_update_targets` demands a declared target of an
+        `:R` row and of no other surface — so a phantom endpoint would be the CHEAPEST way
+        past a refusal whose whole purpose is to stop a fact being dressed as a graph object.
+        It does not stop at the validator either: `frontier._edge_index` and the review
+        projector both read an endpoint as a real object and would carry the invention.
+      * `e-001|spawned|v-010|v-010`, a self-edge, which says nothing about how the vertex
+        reaches the rest of the graph.
+
+    An endpoint left OPEN does connect, and is the reason this cannot simply demand that both
+    ends resolve. `??` and `{a, b}` are §Open questions' honest spelling of "observed, not yet
+    identified" — the edge IS a recorded event, the slot is tracked to the close by the gates
+    that read it, and `_golden_invlang/turnN-A` ships three such rows. A phantom `v-` id
+    carries no such obligation, which is exactly what separates the two.
+    """
+    declared = {
+        v.get("id") for v in _walkers.all_vertices(companion)
+        if isinstance(v.get("id"), str)
+    }
+    participants: set[str] = set()
+    for e in _walkers.all_edges(companion):
+        src, tgt = e.get("source_vertex"), e.get("target_vertex")
+        if not isinstance(src, str) or not isinstance(tgt, str) or src == tgt:
+            continue
+        for near, far in ((src, tgt), (tgt, src)):
+            if near and (far in declared or is_unresolved(far)):
+                participants.add(near)
+    return participants
+
+
+def _participation_repair(site: str) -> str:
+    """The three repairs, written ONCE per refused write rather than once per offending row.
+
+    `diagnose` learned this the expensive way three families over: a benign document handed
+    the model the same wall of text twice on every refused write, and the fix was to collect
+    both copies and print one. A lead filing five process vertices in one block would get five
+    copies of this paragraph — the same defect, an order of magnitude larger.
+    """
+    block = "prologue.edges" if site == "prologue" else f"{site}.observations.edges"
+    return (
+        " A vertex is declared because something was observed to DO something or to have "
+        "something done to it, and the `:E` row IS that observation: write it (the relation "
+        "actually seen — `contained_in`, `spawned`, `executed`, whichever fits) into "
+        f"`:E {block}`. If the relation is not yet known, say THAT: a `:H` row whose "
+        "`attached_to` names the vertex records the claim without committing an observation, "
+        "and discharges this too. If there is neither an observation nor a claim, this is "
+        "not a graph object — do not declare the vertex; carry the fact as an attribute on "
+        "the vertex it was read off, or as an `:R attr_updates` row. Do NOT infer an edge "
+        "from a text field (a `cmdline` attribute, say) the detector never recorded as an "
+        "event of its own, and do NOT point one at an id no `:V` block declares: both reach "
+        "below the resolution of what the detector actually observed."
+    )
+
+
+def _check_vertex_participation(
+    proposed_text: str,
+    companion: CompanionBody,
+    current_companion: CompanionBody | None,
+) -> list[str]:
+    """Every vertex this write DECLARES must be named by some `:E` row's `src` or `tgt`, or
+    be the `attached_to` of some hypothesis — anywhere in the document, not necessarily the
+    declaring lead's own block.
+
+    `SKILL.md`'s `### :R observations and learned facts` already forbids the inverse mistake
+    ("don't create vertices just for facts"): a fact about an EXISTING object goes on
+    `:R attr_updates`, not a new `:V` row. Nothing enforced the mirror half, and the real
+    instance (#993) declared `v-004|process|psql|psql[pid=??]|user=postgres` and
+    `v-006|process|postgres|...` and wrote no edge naming either — the action the alert was
+    about existing only as an orphan vertex and a text cell.
+
+    A HYPOTHESIS ANCHOR discharges it, and leaving that out made the rule unsatisfiable for
+    the shape the language exists to carry. A lead that finds an entity and can only
+    HYPOTHESIZE how it connects has exactly one honest record: declare the vertex, attach an
+    `:H` row to it. `_check_hypothesis_refs` requires that `attached_to` resolve to a
+    declared vertex, so refusing the declaration while demanding it closes both exits at
+    once — the model can only write the committed edge it does not have, which is the
+    inference this rule's own message forbids. `proposed_edge` still does not count on its
+    own: it names a proposed PARENT's type and class, never an id, so it says nothing about
+    which declared vertex is spoken for.
+
+    EXEMPT: any id the OPENING prologue declares (`_opening_prologue_ids`, which is where the
+    position rather than the block name is argued). The prologue legitimately opens the graph
+    before its edges are known, and a lead re-declaring a prologue id inherits the exemption —
+    the same first-declaration-wins rule `_walkers.vertex_types` documents and relies on.
+
+    NOT participation: an `:R attr_updates` target. That surface records a fact about an
+    object already known to exist; it is not an event connecting two vertices, and counting it
+    would re-admit exactly the fact-as-vertex the rule exists to refuse.
+
+    **Scoped to what THIS write introduces**, the same subtraction `_check_surface` runs and
+    for the same reason. `investigation.md` is append-only: a committed `:V` row can never be
+    removed and `fix_row` reaches only flagged `attr_updates` rows, so a document-global
+    reading refuses every later write of any run that already carries an orphan — and worse,
+    refuses runs that are already FINISHED. `committed_investigation_reason` re-validates a
+    committed document as its own baseline at the learning loop's persist gate and dead-letters
+    the run on any error; `seed_investigation` does the same to a fence prefix before branching
+    or resuming. Both pass the document as both halves precisely so that a rule keyed on what a
+    write introduces stands down, and both said so before this rule existed. Baseline-keyed,
+    the write gate is unchanged (a `:V` row is new exactly once, at the write that appends it)
+    while neither of those two can be made to fail by bytes no repair can reach.
+
+    ONE diagnostic per offending `(site, vertex)` pair, matching `_check_vocab_vertices`'
+    per-row shape: a vertex id repeated across two leads with neither ever edged is two
+    separate defects. The REPAIR is printed once, on the first — see `_participation_repair`.
+    """
+    exempt = _opening_prologue_ids(proposed_text)
+    spoken_for = _edge_participants(companion) | {
+        h["anchor"] for h in _walkers.all_hypotheses(companion).values()
+        if isinstance(h.get("anchor"), str) and h["anchor"]
+    }
+    committed = (
+        set(_vertex_declarations(current_companion))
+        if current_companion is not None else set()
+    )
+    errors: list[str] = []
+    for site, vid in _vertex_declarations(companion):
+        if vid in exempt or vid in spoken_for or (site, vid) in committed:
+            continue
+        where = (
+            "`:V prologue.vertices`" if site == "prologue"
+            else f"`:V {site}.observations.vertices`"
+        )
+        prefix = "" if site == "prologue" else _lead_prefix(site)
+        errors.append(
+            f"{prefix}{where} row {vid!r} — no `:E` row anywhere in the document names it "
+            f"as `src` or `tgt`, and no `:H` row is attached to it."
+            + (_participation_repair(site) if not errors else "")
+        )
+    return errors
 
 
 def _seed_vertex_state(

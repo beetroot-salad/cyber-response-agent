@@ -287,13 +287,15 @@ l-001|v-003|class|bastion/internal/known-corp
 
 Adding `:V`/`:E` changes the observed graph. `:R attr_updates` records
 facts learned about existing graph objects — don't create vertices
-just for facts. The mirror rule holds too: a lead that declares a
-vertex says what it did or what was done to it, so write the `:E`
-row in the same block. A fact about an entity that already exists is
-an attribute or an `:R attr_updates` row, not a new vertex — a
-vertex declared with no edge naming it anywhere in the document is
-refused on write. This is also the surface for closing `??` slots
-(`key=class` for class refinements; `key=ident` to sharpen the
+just for facts. The mirror rule holds too: a lead declares a vertex
+because it observed what the entity did or what was done to it, and
+the `:E` row IS that observation, so write it. A vertex the run
+declares and never connects is refused on write; an `:E` row in any
+lead's block clears it, and so does a `:H` row `attached_to` it,
+which is how you record an entity whose relation you can only
+hypothesize. The opening prologue is exempt — it opens the graph
+before its edges are known. This is also the surface for closing `??`
+slots (`key=class` for class refinements; `key=ident` to sharpen the
 identifier; `key=attrs.<name>` for attribute refinements) — see
 §Open questions. Those three are the ONLY legal keys; any other key
 is flagged, and the flagged row blocks the next write until you repair
