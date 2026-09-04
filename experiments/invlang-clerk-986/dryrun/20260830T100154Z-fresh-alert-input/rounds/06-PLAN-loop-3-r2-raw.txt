@@ -1,0 +1,6 @@
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-007|3|ticket-standing-auth-check|soc-playground||ticket-system|n/a
+```
+
+GAPS: none

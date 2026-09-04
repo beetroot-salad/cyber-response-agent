@@ -1,0 +1,151 @@
+{
+  "base_story": "On 2026-08-30, the threshold alert counted three Falco `Sudo execution` events on `soc-playground`, beginning at 09:54:51.724Z and triggering at 09:59:51.646Z. By the branch point, the investigation had resolved the alert reference, requested the underlying Falco actor/parent/command details, checked CMDB for the host, and checked change management for authorization. The direct CMDB lookup returned 404, while the broader host-list query succeeded; the active-change query for 09:54Z returned empty and the broader change-list response was minimal. Both the legitimate-training and adversary-privilege-escalation hypotheses remained active, with no resolved actor, command classification, or authorization finding.\n",
+  "discriminator": {
+    "predicate": "Across the three Falco `Sudo execution` events backing this alert, are the sudo command lines limited to read-only diagnostics, or do they include account persistence and credential-file access?",
+    "holding_system": "elastic",
+    "envelope": {
+      "system": "elastic",
+      "verb": "esql",
+      "params": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-08-30T09:54:51.724Z\"\n    AND @timestamp <= \"2026-08-30T09:59:51.646Z\"\n    AND host.name == \"soc-playground\"\n    AND falco.rule == \"Sudo execution\"\n| KEEP @timestamp,\n       falco.output_fields.user.name,\n       falco.output_fields.proc.name,\n       falco.output_fields.proc.pname,\n       falco.output_fields.proc.cmdline,\n       falco.output_fields.container.id\n| SORT @timestamp ASC\n| LIMIT 10\n"
+      }
+    }
+  },
+  "worlds": [
+    {
+      "disposition_declared": "inconclusive",
+      "story": "On 2026-08-30, the threshold alert counted three Falco `Sudo execution` events on `soc-playground`, beginning at 09:54:51.724Z and triggering at 09:59:51.646Z. By the branch point, the investigation had resolved the alert reference, requested the underlying Falco actor/parent/command details, checked CMDB for the host, and checked change management for authorization. The direct CMDB lookup returned 404, while the broader host-list query succeeded; the active-change query for 09:54Z returned empty and the broader change-list response was minimal. Both the legitimate-training and adversary-privilege-escalation hypotheses remained active, with no resolved actor, command classification, or authorization finding.\n",
+      "world_id": "a",
+      "role": "A",
+      "axis": null,
+      "overlay": {}
+    },
+    {
+      "world_id": "readonly-diagnostics",
+      "axis": "The three sudo command lines are read-only Falco diagnostics, while actor, timestamps, process ancestry, container context, and burst count are held fixed.",
+      "overlay": {
+        "patches": {},
+        "elastic": [
+          {
+            "base_pattern": "logs-falco.alerts-*",
+            "exclude": {
+              "predicate": "@timestamp >= \"2026-08-30T09:50:00Z\" AND @timestamp < \"2026-08-30T10:05:00Z\" AND host.name == \"soc-playground\" AND falco.rule == \"Sudo execution\""
+            },
+            "inject": [
+              {
+                "_id": "7a09d061-f5e8-57d6-8434-68c055b7d1d6",
+                "document": {
+                  "@timestamp": "2026-08-30T09:54:51.724Z",
+                  "host.name": "soc-playground",
+                  "falco.rule": "Sudo execution",
+                  "falco.output_fields.user.name": "sre.oncall",
+                  "falco.output_fields.proc.name": "sudo",
+                  "falco.output_fields.proc.pname": "bash",
+                  "falco.output_fields.proc.cmdline": "sudo systemctl status falco",
+                  "falco.output_fields.container.id": null
+                }
+              },
+              {
+                "_id": "readonly-diagnostics-2",
+                "document": {
+                  "@timestamp": "2026-08-30T09:56:18.412Z",
+                  "host.name": "soc-playground",
+                  "falco.rule": "Sudo execution",
+                  "falco.output_fields.user.name": "sre.oncall",
+                  "falco.output_fields.proc.name": "sudo",
+                  "falco.output_fields.proc.pname": "bash",
+                  "falco.output_fields.proc.cmdline": "sudo journalctl -u falco --since \"-15m\"",
+                  "falco.output_fields.container.id": null
+                }
+              },
+              {
+                "_id": "readonly-diagnostics-3",
+                "document": {
+                  "@timestamp": "2026-08-30T09:58:42.903Z",
+                  "host.name": "soc-playground",
+                  "falco.rule": "Sudo execution",
+                  "falco.output_fields.user.name": "sre.oncall",
+                  "falco.output_fields.proc.name": "sudo",
+                  "falco.output_fields.proc.pname": "bash",
+                  "falco.output_fields.proc.cmdline": "sudo cat /etc/falco/falco.yaml",
+                  "falco.output_fields.container.id": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "story": "In this world the burst is the same shape as the capture \u2014 three `Sudo execution` events on `soc-playground` from 09:54:51Z to 09:58:42Z, same `sre.oncall` actor, same `bash -> sudo` ancestry, no container, and the threshold still fires at 09:59:51Z \u2014 but the three command lines are ordinary read-only Falco health checks: `systemctl status falco`, `journalctl -u falco --since \"-15m\"`, and `cat /etc/falco/falco.yaml`. Nothing creates or modifies an account, touches `/etc/shadow` or other credential material, downloads tooling, or opens a shell. The empty change window and CMDB 404 remain hygiene/visibility gaps, but read-only status/log/config inspection by the on-call SRE on a host literally named `soc-playground` fits the legitimate-training/oncall hypothesis and refutes the persistence/collection hypothesis; a competent investigator should clear this as benign activity while noting the missing ticket/CMDB record.\n",
+      "disposition_declared": "benign",
+      "label_basis": "judgment",
+      "role": "B"
+    },
+    {
+      "world_id": "persistence-collection",
+      "axis": "The three sudo command lines perform account persistence and credential-file access (useradd a new account, set its password, read /etc/shadow) while actor, timestamps, process ancestry, container context, and burst count remain unchanged.\n",
+      "overlay": {
+        "patches": {},
+        "elastic": [
+          {
+            "base_pattern": "logs-falco.alerts-*",
+            "exclude": {
+              "predicate": "@timestamp >= \"2026-08-30T09:50:00Z\" AND @timestamp < \"2026-08-30T10:05:00Z\" AND host.name == \"soc-playground\" AND falco.rule == \"Sudo execution\""
+            },
+            "inject": [
+              {
+                "_id": "7a09d061-f5e8-57d6-8434-68c055b7d1d6",
+                "document": {
+                  "@timestamp": "2026-08-30T09:54:51.724Z",
+                  "host.name": "soc-playground",
+                  "falco.rule": "Sudo execution",
+                  "falco.output_fields.user.name": "sre.oncall",
+                  "falco.output_fields.proc.name": "sudo",
+                  "falco.output_fields.proc.pname": "bash",
+                  "falco.output_fields.proc.cmdline": "sudo useradd -m -s /bin/bash opsbackup",
+                  "falco.output_fields.container.id": null
+                }
+              },
+              {
+                "_id": "persistence-collection-2",
+                "document": {
+                  "@timestamp": "2026-08-30T09:56:18.412Z",
+                  "host.name": "soc-playground",
+                  "falco.rule": "Sudo execution",
+                  "falco.output_fields.user.name": "sre.oncall",
+                  "falco.output_fields.proc.name": "sudo",
+                  "falco.output_fields.proc.pname": "bash",
+                  "falco.output_fields.proc.cmdline": "sudo passwd opsbackup",
+                  "falco.output_fields.container.id": null
+                }
+              },
+              {
+                "_id": "persistence-collection-3",
+                "document": {
+                  "@timestamp": "2026-08-30T09:58:42.903Z",
+                  "host.name": "soc-playground",
+                  "falco.rule": "Sudo execution",
+                  "falco.output_fields.user.name": "sre.oncall",
+                  "falco.output_fields.proc.name": "sudo",
+                  "falco.output_fields.proc.pname": "bash",
+                  "falco.output_fields.proc.cmdline": "sudo cat /etc/shadow",
+                  "falco.output_fields.container.id": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "story": "In this world the same three-event sudo burst on soc-playground \u2014 same actor identity\n`sre.oncall`, same bash parentage, same timestamps between 09:54:51Z and 09:58:42Z, same\nnon-containerized context \u2014 is not diagnostic work but a short, ordered intrusion sequence.\nThe three commands the Falco events actually carry are `sudo useradd -m -s /bin/bash\nopsbackup`, `sudo passwd opsbackup`, and `sudo cat /etc/shadow`: first creating a new local\ninteractive account with a home directory and login shell, then setting a password on it,\nthen reading the host's credential file. The name \"opsbackup\" is chosen to blend with the\nkind of utility account a defender might wave through on a host named soc-playground.\n\nEverything else the investigation saw before the branch point still holds: the direct CMDB\nlookup 404s, the host only appears in the broad list, no change ticket or maintenance or\ntraining window covers the host at 09:54Z, and the active-change query is empty. So when\nthe defender reruns the Falco ES|QL query, the benign-reading hypothesis (\"sudo commands\nconsistent with training or diagnostics\") is directly refuted by the very command\nclassification its own refutation clause names \u2014 `useradd`, `passwd`, `cat /etc/shadow`\nare literally listed there as suspicious \u2014 and the adversary hypothesis's prediction of\npersistence plus collection is met exactly. With no change or training authorization to\nexplain the activity, the identity `sre.oncall` reading as an on-call SRE does not rescue\nthe benign case: these are not commands an SRE debugging Falco runs, and the sequence \u2014\ncreate account, set password, dump shadow \u2014 is the canonical post-access persistence and\ncredential-access pattern. A competent investigator should conclude the burst is malicious\naccount-persistence / credential-access activity and escalate, not file it as training\nnoise.\n",
+      "disposition_declared": "malicious",
+      "label_basis": "judgment",
+      "role": "C"
+    }
+  ],
+  "episode_id": "20260830t100154z-fresh-alert-input-n32",
+  "source_run_dir": "/workspace/.defender-runs/20260830T100154Z-fresh-alert-input",
+  "source_run_id": "20260830T100154Z-fresh-alert-input",
+  "branch_message_id": 32,
+  "fences_at": 4,
+  "as_of": "2026-08-30T10:03:19Z",
+  "continuation_prompt": "Continue the investigation from where it stands. Dispatch whatever leads the frontier warrants, then close."
+}

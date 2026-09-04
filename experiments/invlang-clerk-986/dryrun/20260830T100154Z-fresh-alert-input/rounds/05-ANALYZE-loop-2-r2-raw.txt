@@ -1,0 +1,18 @@
+```invlang
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-003|proposed|ac1|unauthorized|change-mgmt|"no approved change window covers this sudo activity"
+
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-002|proposed|ac2|indeterminate|iam-policy|"IAM does not govern container-internal OS root; no authority anchor exists"
+```
+
+```invlang
+:T resolutions
+h-002  null → --    [l-002 p1,p2,p3 severe ⟂ e-002,e-003,e-004 :: 50-event baseline; exact same three commands; indistinguishable burst; host is training lab]
+h-001  null → ++    [l-002 p1,p2,p3 severe ⟂ e-002,e-003,e-004 :: baseline confirms all behavioral predictions]
+```
+
+GAPS:
+- Prose states a remaining undefined check — whether the ticket system carries standing authorization or incident context for soc-playground — but MAIN has not yet given it a lead id; no `:L` row written.
+- Prose describes host `soc-playground` as unregistered in CMDB and IAM, but the prose introduced no new `:V`/`:E` rows for this observation; attribute updates would be needed but were not explicitly stated by MAIN.
+- No `:T close` written: the validator refused it because loop 2 has no committed finding yet; prose gives grades and authz resolutions but no new observation/finding rows for loop 2, so the loop cannot be closed.

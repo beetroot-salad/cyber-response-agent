@@ -12,12 +12,17 @@ follows intent" — which is not what it means when the tests were written after
 agent, from the same assumptions.
 
 ```
-issue ──▶ discuss-issue ──▶ write-tests ──▶ write-code-from-spec ──▶ finalize ──▶ merge
-                 │                │                                     │
-            human seam:      human seam:                           human gate:
-        decomposition +    material forks                         approve merge
-          data model          only
+                          ┌─▶ write-tests ──▶ write-code-from-spec ─┐
+issue ──▶ discuss-issue ──┤                                        ├─▶ finalize ──▶ merge
+                          └─▶ write-code-with-no-spec ──────────────┘
+                              (small deltas only)
 ```
+
+The bottom lane skips the demand ledger and spec-coverage graph — `write-code-with-no-spec` writes
+the tests directly against `discuss-issue`'s design doc, checks them with the same kind of
+adversarial pass, and implements. It's for a delta small enough that write-tests' decomposition and
+material-fork triage would be pure overhead; anything with more than one entry point, or a fork that
+implies a different data model, belongs in the top lane instead.
 
 Human judgment enters three times, and the **first one is the one that matters**: before any doc
 compiles, `discuss-issue` puts the decomposition and the data model to a person — the decisions
@@ -37,6 +42,7 @@ only what their judgment is uniquely worth — nothing in between gets to guess.
 | `/spec-flow:discuss-issue` | Explains the issue in plain terms, checks it against the real code, surfaces the open questions — and when work heads to implementation, closes by posting the intent+design doc: typed obligations and mechanisms, with probed claims about existing reality. |
 | `/spec-flow:write-tests` | Turns the intent+design doc into the executable spec: situations from the doc's language, mechanics from executed probes, forks to the human — bound through the spec-coverage graph and gate rules into a suite a null-stub run proves can fail. Ships a **tests + spec_graph diff** and a handoff note. |
 | `/spec-flow:write-code-from-spec` | Reads the committed spec, writes real code until it passes, ships a PR, watches CI, repairs to green. Never edits a test to make it pass. |
+| `/spec-flow:write-code-with-no-spec` | Fast lane for a small bug fix or feature: skips the ledger and graph, writes the tests directly against `discuss-issue`'s design doc as a discrete commit, runs an adversarial pass against them alongside the honest implementation, and ships. Kicks back to `write-tests` if the delta turns out to need decomposition. |
 | `/spec-flow:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |
 | `/spec-flow:handoff` | Writes the terse note that lets a cold session resume the work. |

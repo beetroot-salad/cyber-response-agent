@@ -1,0 +1,6 @@
+investigation.md failed invlang validation. No changes were made — the file on disk is unchanged and does not contain your text.
+
+  - :R attr_updates refines 'v-002', which no `:V` or `:E` block declares — declare it before refining it (declared: ['e-002', 'e-003', 'e-004'])
+  - :R attr_updates refines 'soc-playground', which no `:V` or `:E` block declares — declare it before refining it (declared: ['e-002', 'e-003', 'e-004'])
+
+Re-send the block with those rows corrected.

@@ -1,0 +1,28 @@
+```invlang
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?routine-sudo-training|v-001|initiated_by|identity|??||null|active
+h-002|?anomalous-sudo-burst|v-001|initiated_by|identity|??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"identity has an established sudo baseline on soc-playground"
+p2|proposed_parent|"commands match routine lab/training tooling use"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"identity has no prior sudo baseline on this host"
+p2|proposed_parent|"burst falls outside any approved change or training window"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|proposed|change-mgmt|"approved change or training window covers the sudo burst at 2026-08-30T09:54Z"|escalate|escalate
+
+:L findings [id|loop|name|target|mode?|tests|system|window]
+l-001|1|siem-falco-sudo-events|v-001||h-001,h-002|elastic|alert-window
+l-002|1|cmdb-host-lookup|v-001||h-001|cmdb|n/a
+l-003|1|change-window-lookup|v-001||h-001|change-mgmt|n/a
+```
+
+GAPS:
+- l-001/l-002/l-003 gather summaries returned results (root-executed psql burst, host absent from CMDB, zero change windows) but this call's phase is PLAN — no `:R`/`:T resolutions` rows written; they await ANALYZE prose.
+- h-001/h-002 topology (rel, parent_type, parent_class) is not stated in the prose; recorded `initiated_by`/`identity`/`??` as the closest reading of "who the identity is" — confirm or correct.
+- ac1's `on_unauth`/`on_indet` outcomes are not specified in the prose; defaulted to `escalate|escalate`.
+- v-001's class remains `??/??/??`; l-002 found no CMDB record but no `:R attr_updates` resolution is written yet (no ANALYZE prose).
+- Prose poses open questions (which identity, prior sudo baseline, training window) without ids beyond the l-001/l-002/l-003 leads already named; no additional lead ids minted.

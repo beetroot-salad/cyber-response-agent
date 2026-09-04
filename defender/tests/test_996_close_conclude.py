@@ -255,39 +255,29 @@ def test_996_a_model_close_is_refused_while_pending_is_non_empty(tmp_path: Path)
 
 
 # ---------------------------------------------------------------------------------------
-# KNOWN RED BY DESIGN — owed for `main`'s shape, unrunnable at `7fa49f04`
+# RE-SITED AT THE #1004 MERGE — was KNOWN RED BY DESIGN at `7fa49f04`, owed for `main`'s shape
 # ---------------------------------------------------------------------------------------
 
 
 def test_996_the_conclude_gate_still_runs_when_the_price_helper_takes_forced(
     tmp_path: Path,
 ) -> None:
-    """KNOWN RED ON `main` BY DESIGN — carried, marked, and not corrected here.
+    """Re-sited at the #1004 merge of `origin/main` (was KNOWN RED at `7fa49f04` by design,
+    carried until the rebase).
 
-    On `main` the entry-price helper gains a `forced=` parameter and raises internally rather
-    than returning for the caller to inspect, which MOVES mechanism 2's insertion point: the
-    conclude gate is specified as sitting immediately after a call the design describes as
-    return-and-inspect, and there is no such call there any more. What a framework-forced close
-    observes at that point is unstated.
+    On `main` the entry-price helper gained a `forced=` parameter and now returns the PARSED
+    companion (not raw text) rather than raising internally, which moved mechanism 2's
+    insertion point. `close_tool._close_investigation_async` was re-sited to call
+    `companion = _refuse_if_entry_price_is_owed(deps, disposition, forced=forced)` and then
+    `if not forced: _refuse_if_no_conclude(companion)` immediately after — `_refuse_if_no_
+    conclude` itself was changed to take the already-parsed companion `_refuse_if_entry_price_
+    is_owed` now returns, rather than re-parsing the raw text a second time (the same "parse
+    the companion exactly once" property that function's own docstring names as the point of
+    returning it).
 
-    The base is `7fa49f04` by the human's decision on the record, taken over re-basing. This
-    test pins the property that must survive the signature change — the conclude gate runs for
-    a MODEL close and is exempt for a FORCED one, whatever shape the price helper takes — and
-    the helper's signature is asserted so the rebase meets a failing test at the moment the
-    parameter appears rather than a silently relocated gate.
-
-    Whoever rebases runs this FIRST, and fixes it by re-siting the gate — never by relaxing
-    either arm below."""
-    import inspect
-
-    from defender.runtime.close_tool import _refuse_if_entry_price_is_owed
-
-    params = inspect.signature(_refuse_if_entry_price_is_owed).parameters
-    assert "forced" not in params, (
-        "the price helper now takes `forced=`, so mechanism 2's insertion point has moved and "
-        "the conclude gate's position must be re-derived — this is the known-red demand"
-    )
-
+    This test now pins the RESULT rather than tripwiring on the helper's signature: the
+    conclude gate still runs for a MODEL close and is still exempt for a FORCED one, whatever
+    shape the price helper takes."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, CONCLUDE_LESS)
     with pytest.raises(ModelRetry):

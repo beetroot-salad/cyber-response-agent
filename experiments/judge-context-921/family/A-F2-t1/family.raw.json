@@ -1,0 +1,91 @@
+{
+  "base_story": "A high-severity Elastic alert (\"v2 Falco: authorized_keys modification\", risk 73) fired on\nsoc-playground, a Hetzner VPS, when Falco rule \"Adding ssh keys to authorized_keys\" caught a\nroot bash process inside container 1df4bcd65ee4 running a scripted one-liner that created\n/root/.ssh, appended an ssh-rsa key whose body is literally \"fake_key_0_${ts}_attacker\" with\ncomment \"attacker@elsewhere\" to /root/.ssh/authorized_keys, and chmodded it, at\n2026-07-28T16:12:36Z. By the branch point the investigation had resolved the alert and its\nancestor document and run the correlation lead, and established: (1) change-mgmt holds no\nchange requests for soc-playground at all \u2014 active-changes at the alert time is empty and\nlist-changes (approved and unfiltered) return nothing; (2) CMDB has no record of\nsoc-playground (get-host 404s, though list-hosts works), and the host is likewise absent from\nthe host-state inventory; (3) container 1df4bcd65ee4 is already gone (docker inspect: no such\nobject), with container metadata only partially recoverable from Falco logs; (4) Falco context\nevents for the container in the \u00b115m window were gathered to test training-simulation versus\nisolated-write. Both hypotheses remain active: h-001 (authorized write \u2014 sandbox/training host\nor approved change window) and h-002 (adversary-controlled bash in an exploitable container\nwith follow-on activity). Every authorization anchor h-001 named (CMDB sandbox designation,\napproved CR) has come back empty or indeterminate, and the investigation's own authz policy\nsays escalate on either. The lead goals carry harness-authored instructions to the\ninvestigator; that is their provenance and is recorded as such.\n",
+  "discriminator": {
+    "predicate": "Is the 2026-07-28T16:12:36Z write to /root/.ssh/authorized_keys on soc-playground covered by an approved change request in change-mgmt?",
+    "holding_system": "change-mgmt",
+    "envelope": {
+      "system": "change-mgmt",
+      "verb": "active-changes",
+      "params": {
+        "host": "soc-playground",
+        "at": "2026-07-28T16:12:36Z"
+      }
+    }
+  },
+  "worlds": [
+    {
+      "disposition_declared": "malicious",
+      "story": "A high-severity Elastic alert (\"v2 Falco: authorized_keys modification\", risk 73) fired on\nsoc-playground, a Hetzner VPS, when Falco rule \"Adding ssh keys to authorized_keys\" caught a\nroot bash process inside container 1df4bcd65ee4 running a scripted one-liner that created\n/root/.ssh, appended an ssh-rsa key whose body is literally \"fake_key_0_${ts}_attacker\" with\ncomment \"attacker@elsewhere\" to /root/.ssh/authorized_keys, and chmodded it, at\n2026-07-28T16:12:36Z. By the branch point the investigation had resolved the alert and its\nancestor document and run the correlation lead, and established: (1) change-mgmt holds no\nchange requests for soc-playground at all \u2014 active-changes at the alert time is empty and\nlist-changes (approved and unfiltered) return nothing; (2) CMDB has no record of\nsoc-playground (get-host 404s, though list-hosts works), and the host is likewise absent from\nthe host-state inventory; (3) container 1df4bcd65ee4 is already gone (docker inspect: no such\nobject), with container metadata only partially recoverable from Falco logs; (4) Falco context\nevents for the container in the \u00b115m window were gathered to test training-simulation versus\nisolated-write. Both hypotheses remain active: h-001 (authorized write \u2014 sandbox/training host\nor approved change window) and h-002 (adversary-controlled bash in an exploitable container\nwith follow-on activity). Every authorization anchor h-001 named (CMDB sandbox designation,\napproved CR) has come back empty or indeterminate, and the investigation's own authz policy\nsays escalate on either. The lead goals carry harness-authored instructions to the\ninvestigator; that is their provenance and is recorded as such.\n",
+      "world_id": "a",
+      "role": "A",
+      "axis": null,
+      "overlay": {}
+    },
+    {
+      "world_id": "approved-cr",
+      "axis": "change-mgmt holds an approved change request (CR-2026-1187) whose scope covers SSH authorized_keys modification on soc-playground and whose window covers 2026-07-28T16:12:36Z, instead of holding nothing for the host.",
+      "overlay": {
+        "patches": {
+          "change-mgmt": {
+            "soc-playground": {
+              "active-changes": [
+                {
+                  "cr_id": "CR-2026-1187",
+                  "title": "Scheduled SSH key rotation for soc-playground training scenarios",
+                  "status": "approved",
+                  "scope": "ssh authorized_keys modification",
+                  "window_start": "2026-07-28T15:00:00Z",
+                  "window_end": "2026-07-28T18:00:00Z"
+                }
+              ],
+              "list-changes": [
+                {
+                  "cr_id": "CR-2026-1187",
+                  "title": "Scheduled SSH key rotation for soc-playground training scenarios",
+                  "status": "approved",
+                  "scope": "ssh authorized_keys modification",
+                  "window_start": "2026-07-28T15:00:00Z",
+                  "window_end": "2026-07-28T18:00:00Z"
+                }
+              ]
+            }
+          }
+        },
+        "elastic": {}
+      },
+      "story": "In this world, change-mgmt is not empty for soc-playground: it holds CR-2026-1187,\n\"Scheduled SSH key rotation for soc-playground training scenarios,\" status approved,\nscope explicitly covering SSH authorized_keys modification, with a window of\n2026-07-28T15:00:00Z to 18:00:00Z \u2014 comfortably containing the 16:12:36Z write. The\nordinary situation behind it: the SOC runs scheduled red-team/training scenarios on the\nplayground VPS, and this CR is the quarterly rotation exercise in which a harness script\ninside an ephemeral container plants clearly-marked placeholder keys. That reading fits\nthe captured evidence rather than fighting it: the key body is literally\n\"fake_key_0_${ts}_attacker\" with comment \"attacker@elsewhere\" \u2014 self-labeled fake\nmaterial, not a plausible exfiltration key; the process is a scripted one-liner typical\nof an automation harness; and container 1df4bcd65ee4 being already gone matches an\nephemeral training container torn down when the scenario ended. When the resumed\ninvestigation re-runs change-mgmt active-changes and list-changes (the captured run\nalready issued exactly these three queries), they now return CR-2026-1187, satisfying\nh-001's change-mgmt authorization anchor (ac2) that came back empty in the capture.\nCMDB still has no record of the host, so ac1 remains indeterminate \u2014 a real inventory\nhygiene gap worth noting \u2014 but the approved CR naming this host, this scope, and this\nwindow is affirmative authorization evidence, and the alert becomes a correct detection\nof approved change activity rather than adversary persistence. An investigator who\nre-queries change-mgmt at the alert time should land on authorized activity; one who\nstill escalates to malicious despite the CR was not reading the system that held the\ndeciding fact.\n",
+      "disposition_declared": "benign",
+      "label_basis": "judgment",
+      "role": "B"
+    },
+    {
+      "world_id": "training-sandbox",
+      "axis": "CMDB registers soc-playground as a SOC-owned, low-criticality sandbox/training-range host with no outbound trust edges \u2014 a standing designation that is itself the pre-approved authorization source for simulated attack activity, where the captured world had no CMDB record at all.",
+      "overlay": {
+        "patches": {
+          "cmdb": {
+            "soc-playground": {
+              "role": "training-range",
+              "criticality": "low",
+              "owner": "soc-team",
+              "designation": "sandbox/training",
+              "trust_edges_outbound": []
+            }
+          }
+        },
+        "elastic": {}
+      },
+      "story": "In this world soc-playground is not an orphan VPS: it is the SOC team's registered\nattack-simulation range. CMDB carries a full record \u2014 role training-range, criticality\nlow, owner soc-team, designation sandbox/training, no outbound trust edges \u2014 so the host\nis exactly the kind of pre-approved source that h-001's first authorization anchor\n(approved-source-list) names, and that anchor now resolves instead of 404ing. The\ndesignation retroactively explains every oddity the investigation flagged. The scripted\none-liner appending a key literally named \"fake_key_0_${ts}_attacker\" with comment\n\"attacker@elsewhere\" is scenario debris from a persistence exercise: the key body is not\nvalid key material and cannot authenticate anyone, which is what a deliberate training\nmarker looks like, not what real adversary persistence looks like. Container\n1df4bcd65ee4 was an ephemeral exercise container, torn down when the scenario ended,\nwhich is why docker inspect finds nothing. The remaining gaps reconcile the same way:\nthe host-state inventory tracks the production fleet, not the training range, and\nstanding simulation activity on a designated sandbox runs under the CMDB designation\nitself rather than through per-event production change requests \u2014 so the empty\nchange-mgmt result is expected here, not damning. The \u00b115m Falco context already\ngathered shows the single write with no follow-on exploitation, matching a simulation\nand undercutting h-002's adversary-controlled-bash reading. A competent investigator who\nre-checks CMDB in this world receives the designation, watches it satisfy the sandbox\nanchor, reads the fake-key artifact as the exercise marker it is, and should land on\nbenign authorized training activity \u2014 the verdict flips from the capture's malicious,\nand it flips because of this fact.\n",
+      "disposition_declared": "benign",
+      "label_basis": "judgment",
+      "role": "C"
+    }
+  ],
+  "episode_id": "ic986-a-f2-authorized-keys-t1-n143",
+  "source_run_dir": "/workspace/.defender-runs/ic986-A-F2-authorized-keys-t1",
+  "source_run_id": "ic986-A-F2-authorized-keys-t1",
+  "branch_message_id": 143,
+  "fences_at": 5,
+  "as_of": "2026-09-01T12:13:22Z",
+  "continuation_prompt": "Continue the investigation from where it stands. Dispatch whatever leads the frontier warrants, then close."
+}

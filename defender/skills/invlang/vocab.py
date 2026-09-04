@@ -77,7 +77,70 @@ ANCHOR_KINDS: tuple[str, ...] = (
     "iam-policy", "gpo", "cap-rule", "change-mgmt",
     "data-classification-policy", "k8s-policy", "federation-policy",
     "endpoint-policy", "approved-source-list", "runtime-evidence",
+    "tacit-knowledge",
     "other",
+)
+
+#: `:R authz`' `basis` cell on an `indeterminate` verdict (#983 mechanism C) — WHY the question
+#: is unsettled, which is the one thing that separates a contract worth another retrieval loop
+#: from one no registry in this deployment can ever answer.
+#:
+#: `retry` is the DEFAULT and what an absent cell reads as: another registry or lead for this
+#: contract has not been tried yet, or none exists yet but one could be added. `exhausted` says
+#: every anchor kind applicable to this contract's predicate was actually queried this run and
+#: none answered — a claim about DISPATCH, so it is checked against the run's own transcript
+#: (`validate/_gating._check_authz_basis`) the way a `ceiling_test` receipt's `ref` is.
+#:
+#: The pair moves the retrieval FRONTIER and nothing else: `verdict: indeterminate` and its
+#: forced `on_indet` escalation are untouched by either value.
+AUTHZ_INDET_BASIS: tuple[str, ...] = ("retry", "exhausted")
+
+#: `:R consultations`' `grounding` cell. `docs/investigation-language.md`'s v2.10 delta note
+#: splits the axis in two — `authorization_resolutions[].grounding_kind ∈ {org-authority,
+#: past-case}` against `anchor_consultations[].grounding_kind ∈ {org-authority,
+#: telemetry-baseline}` — and this is the consultation half, closed here so the split is
+#: enforced rather than documented.
+#:
+#: `past-case` is absent DELIBERATELY, not by oversight: a baseline consultation grounded on a
+#: past case is precedent-by-similarity, the non-obligation #983's own discussion examined and
+#: rejected. `telemetry-baseline` is the mirror omission on the authorization side — a
+#: statistical pattern is context, never a verdict (`_check_authz_row_grounding`).
+CONSULTATION_GROUNDING: tuple[str, ...] = ("org-authority", "telemetry-baseline")
+
+#: How a `tacit-knowledge` `:R consultations` row records WHAT THE LOOKUP CAME BACK WITH, as the
+#: first token of its `result` cell (`hit: ...` / `miss: ...`).
+#:
+#: A RULE rather than the convention it started as. The anchor receipt reads "this lead came
+#: back holding this entry" off the presence of an `anchor_id`, and the convention that a miss
+#: names none is not something the presence of a cell can enforce — a `result` saying `miss` and
+#: an `anchor_id` beside it is a document contradicting itself, and it was accepted. Closing it
+#: needs the outcome to be a value the validator can read, and the cheapest such value is the
+#: one the format already writes: `lookup` returns `matched: entry | None`, so the row's own
+#: first token is a two-member vocabulary and not free text.
+TACIT_LOOKUP_OUTCOMES: tuple[str, ...] = ("hit", "miss")
+
+#: Anchor kind → the ONE gather system that can answer it. PARTIAL on purpose (#983 fork F8).
+#:
+#: Minted so `basis=exhausted` can be checked against WHICH system a lead actually went to —
+#: the lead's own `:L findings` `system` cell, which projects to
+#: `FindingRecord.query_details.system`. Without the join, "this lead came back with something"
+#: is satisfied by a lead that never went near the registry the claim is about (an ORIENT
+#: bookkeeping `:R attr_updates` row is enough).
+#:
+#: Three kinds have one obvious system each and are mapped. The rest — `gpo`, `cap-rule`,
+#: `other` and the others — do not, and inventing a system per member would mint a second closed
+#: vocabulary to drift against the adapter set. An unmapped kind falls back to the looser
+#: retrieval-came-back check; `validate/_gating._check_authz_basis` states what that costs.
+ANCHOR_KIND_SYSTEMS: dict[str, str] = {
+    "iam-policy": "identity",
+    "change-mgmt": "change-mgmt",
+    "tacit-knowledge": "tacit-knowledge",
+}
+
+assert set(ANCHOR_KIND_SYSTEMS) < set(ANCHOR_KINDS), (
+    "ANCHOR_KIND_SYSTEMS must be keyed on real anchor kinds, and must stay PARTIAL — a "
+    "mapping covering every kind is a system-per-member vocabulary, which is what the "
+    "fallback exists to avoid"
 )
 
 AUTH_KINDS: tuple[str, ...] = (
@@ -244,6 +307,9 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "relations": RELATIONS,
     "anchor-kinds": ANCHOR_KINDS,
     "auth-kinds": AUTH_KINDS,
+    "authz.basis": AUTHZ_INDET_BASIS,
+    "consultation.grounding": CONSULTATION_GROUNDING,
+    "consultation.lookup_outcome": TACIT_LOOKUP_OUTCOMES,
     "impact.dimension": IMPACT_DIMENSION,
     "impact.verdict": IMPACT_VERDICT,
     "impact.grounding": IMPACT_GROUNDING,
@@ -370,7 +436,15 @@ def attr_slot_key(vertex_type: str, attribute: str) -> str | None:
     §Classification grammar says the single token IS "the corresponding `attrs.kind` enum where
     the type has one", so `storage`'s `attrs.kind` and its `class` cell are one vocabulary by
     construction, and `compute.kind` / `socket.protocol` are attribute enums to begin with.
+
+    The head has to BE a vertex type, and `vertex_slots_holding` filters the same way. The pair
+    is built from the row's own `type` cell, which `_check_vocab_vertices` refuses but does not
+    stop the walk on — so without this, `v-001|impact|x|y|dimension=bogus` reached
+    `impact.dimension` and earned a second refusal quoting the grading vocabulary of a
+    resolution row, which is exactly what keying on the pair exists to prevent.
     """
+    if vertex_type not in TYPES:
+        return None
     key = f"{vertex_type}.{attribute}"
     if key not in SLOTS or key in CLASS_GRAMMAR.get(vertex_type, ()):
         return None

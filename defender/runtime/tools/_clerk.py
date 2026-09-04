@@ -45,6 +45,13 @@ _BLOCK_HEADER_RE = re.compile(r"^:[A-Za-z]\s+([\w.]+)")
 _REFERENCE_ONLY_BLOCK = "attr_updates"
 _GAPS_MARK = "GAPS:"
 _PHASE_RE = re.compile(r"^##\s+(\S.*)$", re.MULTILINE)
+#: The runtime loop's own closed phase vocabulary (`SKILL.md`: ORIENT -> PLAN -> GATHER ->
+#: ANALYZE -> REPORT). `_current_phase` matches a `## ` line's FIRST token against this set —
+#: not every `## ` line in the document is a phase transition. The harness seeds a
+#: `## lead-0 (l-000) — harness-authored, declared before the investigation begins` heading
+#: before MAIN's first turn (#964); a bare `## ` scan reads "lead-0" as the phase in force and
+#: S6 drops a `:T conclude` block that has done nothing wrong.
+_PHASE_NAMES = frozenset({"ORIENT", "PLAN", "GATHER", "ANALYZE", "REPORT"})
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _GAP_MAX_CHARS = 400
 _REFUSAL_TRUNC = 600
@@ -78,14 +85,22 @@ def _extract_ids(rows_text: str) -> list[str]:
 
 
 def _current_phase(document: str) -> str:
-    """The phase in force — the document's own LAST `## ` heading — never the calling prose's
-    own header (HD-3): read once at the START of `record`, before this call's own prose has
-    landed, so a phase word the model's OWN just-appended prose happens to carry never counts
-    as the document moving there."""
-    matches = _PHASE_RE.findall(document)
-    if not matches:
-        return ""
-    return matches[-1].strip().split()[0] if matches[-1].strip() else ""
+    """The phase in force — the document's own LAST recognized-phase `## ` heading — never the
+    calling prose's own header (HD-3): read once at the START of `record`, before this call's
+    own prose has landed, so a phase word the model's OWN just-appended prose happens to carry
+    never counts as the document moving there.
+
+    Only a `## ` line whose first token is in `_PHASE_NAMES` counts — a `## ` heading that
+    isn't one of the loop's five names (the harness's lead-0 declaration, say) is not a phase
+    transition and must not be read as one."""
+    for line in reversed(_PHASE_RE.findall(document)):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        token = stripped.split()[0].upper()
+        if token in _PHASE_NAMES:
+            return token
+    return ""
 
 
 def _screen_conclude_fences(text: str, phase: str) -> str:

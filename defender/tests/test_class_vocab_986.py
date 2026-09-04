@@ -303,12 +303,13 @@ def test_a_vertex_re_declared_under_a_second_type_has_no_grammar_to_dispatch_on(
     """`_walkers.vertex_types` is FIRST-DECLARATION-WINS while `effective_vertex_state` folds a
     LATER row's class over an open one, so pairing the two judges the second row's cell by the
     first row's type — `interactive` refused as a `compute.role`, a refusal about a cell nobody
-    wrote. One type or no check.
+    wrote. A cell one declared type CAN hold is not refused.
 
     That is a rule about the FOLDED walk only. Each `:V` ROW still carries its own `type` cell
     and is judged by it (`_declared_row_errors`), which is why both rows here have to be
     individually legal for this to come back empty — and why the re-declaration is not a way to
-    smuggle an off-vocabulary class past the gate."""
+    smuggle an off-vocabulary class past the gate (the refinement half of that claim is
+    `test_a_re_declaration_does_not_smuggle_a_refinement_past_the_check`)."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|??/??/??|x|",
@@ -464,3 +465,70 @@ def test_the_cross_slot_hint_never_names_a_catalog_no_vertex_cell_is_drawn_from(
     # author the vertex may be the wrong type rather than the cell the wrong value.
     cross = validate_companion(_vertex_doc("v-001|database|file|db-1|"), None)
     assert any("storage.kind" in e for e in cross), cross
+
+
+def test_a_re_declaration_does_not_smuggle_a_refinement_past_the_check():
+    """A `:R attr_updates` refinement is the write this check exists for, and skipping every
+    re-declared id handed it a bypass: declare `v-001` once `compute` and once `session` — a
+    shape the validator accepts silently (#919 follow-up) — and the `container/internal/novel`
+    class refinement was judged by neither grammar.
+
+    `container` is not a `compute.role` AND not a `session.class`, so it is wrong under every
+    reading the document offers, which is the verdict the ambiguity still leaves available."""
+    doc = _companion(
+        ":V prologue.vertices [id|type|class|ident|attrs?]",
+        "v-001|compute|??/??/??|x|",
+        "",
+        ":L findings [id|loop|name|target|tests|system|window]",
+        "l-001|1|lookup|v-001||cmdb|n/a",
+        "",
+        ":V l-001.observations.vertices [id|type|class|ident|attrs?]",
+        "v-001|session|??|x|",
+        "",
+        ":R attr_updates [resolved_by|target|key|value]",
+        "l-001|v-001|class|container/internal/novel",
+    )
+    errors = validate_companion(doc, None)
+    assert any("compute.role" in e for e in errors), errors
+
+    # ...and the complement, which is what keeps this from refusing a cell nobody wrote: a
+    # value ONE of the declared types holds stands. `interactive` is no `compute.role`, but it
+    # is the `session.class` the second declaration names.
+    stands = doc.replace(
+        "l-001|v-001|class|container/internal/novel", "l-001|v-001|class|interactive"
+    )
+    assert validate_companion(stands, None) == [], validate_companion(stands, None)
+
+
+def test_an_attrs_name_one_declared_type_leaves_free_is_not_refused():
+    """The `attrs` half of the same rule. `attrs.kind` is closed on `compute` and free on
+    `session` (SKILL.md registers no `session.kind`), so a re-declared vertex carrying
+    `kind=imaginary` has a reading that holds it and the check must not refuse it — refusing
+    would be the "a refusal about a cell nobody wrote" failure one column over."""
+    doc = _companion(
+        ":V prologue.vertices [id|type|class|ident|attrs?]",
+        "v-001|compute|??/??/??|x|",
+        "",
+        ":L findings [id|loop|name|target|tests|system|window]",
+        "l-001|1|lookup|v-001||cmdb|n/a",
+        "",
+        ":V l-001.observations.vertices [id|type|class|ident|attrs?]",
+        "v-001|session|??|x|",
+        "",
+        ":R attr_updates [resolved_by|target|key|value]",
+        "l-001|v-001|attrs.kind|imaginary",
+    )
+    assert validate_companion(doc, None) == []
+
+
+def test_a_non_vertex_type_never_reaches_a_grading_vocabulary():
+    """`vocab.SLOTS` also registers `impact.*`, `conclude.*` and `attr-pred.target` — the
+    grading vocabularies of a resolution row. `attr_slot_key` keys on the PAIR to keep those
+    off a vertex, but the pair is built from the row's own `type` cell, which
+    `_check_vocab_vertices` refuses without stopping the walk — so `v-001|impact|…` used to
+    earn a SECOND refusal quoting `enum impact.dimension` at a vertex."""
+    errors = validate_companion(
+        _vertex_doc("v-001|impact|x|y|dimension=bogus"), None
+    )
+    assert any("is not a known vertex type" in e for e in errors), errors
+    assert not any("impact.dimension" in e for e in errors), errors

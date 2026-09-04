@@ -129,6 +129,15 @@ l-001|e-001|authorization_resolutions|<append :R authz row referencing this edge
 
 When `attr_updates` targets an edge to add a new authorization resolution (per §Edge authorization in the spec), emit a separate `:R authz` row whose `edge` column points to the targeted edge; the `:R attr_updates` row carries `value=<see :R authz row>` as a pointer.
 
+**Headers above are the format's full column set; a writer's header is a subset of it.** The parser is header-driven, so a block declares the columns it fills and no others — `skills/invlang/SKILL.md` teaches shorter headers for both `:R` families, and a column absent from a teaching header is not a column the format lost. What the writer may leave out, though, is not decided by the `?` marker alone: two `#983` rules make optional columns *conditionally required*, and the validator enforces them rather than the marker.
+
+| Column | Optional in general | Required when |
+|---|---|---|
+| `:R consultations` `effective_window?` | yes | `anchor_kind: runtime-evidence` — a baseline that cannot be placed in time cannot be shown to predate the alert, which is the whole of what makes it context (mechanism A) |
+| `:R authz` `anchor_id?` | yes | `anchor_kind: tacit-knowledge` **and** `verdict: authorized` — the citation IS the receipt, and an omitted column is the receipt skipped rather than paid (mechanism B) |
+
+Two further cells are constrained by family, so a value legal on one `:R` row is refused on the other. `grounding` is a *closed* vocabulary on `:R consultations` (`{org-authority, telemetry-baseline}`) and an *open* label on `:R authz`, where the corpus writes the specific record type (`iam-policy-binding`) rather than the axis — there, only `telemetry-baseline` is refused, read case- and separator-folded so a near-spelling is refused with it. And a `tacit-knowledge` consultation's `result` opens with `hit:` or `miss:` (`miss` names no `anchor_id`; `hit` must).
+
 ### `:T` — proof trace (one line per state change)
 
 For hypothesis weight transitions:

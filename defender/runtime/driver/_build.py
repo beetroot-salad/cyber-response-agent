@@ -37,6 +37,7 @@ from ..tools import (
     register_gather_tool,
     register_tools,
 )
+from ..verb_dispositions import HEALTH_CHECK, grant_for, shipped_dispositions
 from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
@@ -208,30 +209,35 @@ MAIN_DEF = AgentDefinition(
     budget_enforced=True,
 )
 
-#: The gather grant: 21 read verbs across 7 systems, plus `health-check` granted uniformly per
-#: system rather than per verb (the split carries no security content). `cmdb.list-roles` and
-#: `identity.list-authorized-hosts` are granted to nobody: in the registry, exercised by no
-#: template and no run.
-GATHER_PAIRS: tuple[tuple[str, str], ...] = (
-    ("change-mgmt", "active-changes"), ("change-mgmt", "get-change"),
-    ("change-mgmt", "list-changes"),
-    ("cmdb", "get-host"), ("cmdb", "list-hosts"),
-    ("elastic", "alerts"), ("elastic", "esql"), ("elastic", "query"),
-    ("host-state", "authorized-keys"), ("host-state", "container-inspect"),
-    ("host-state", "fim-checksum"), ("host-state", "package-list"),
-    ("host-state", "passwd"), ("host-state", "proc-tree"),
-    ("identity", "can-access"), ("identity", "get-user"), ("identity", "list-roles"),
-    ("identity", "list-users"),
-    ("threat-intel", "list-indicators"), ("threat-intel", "lookup"),
-    ("ticket", "list-tickets"),
-)
-
 
 def _gather_verb_grant() -> VerbGrant:
-    systems = sorted({s for s, _ in GATHER_PAIRS})
-    entries = tuple((s, v, "r") for s, v in GATHER_PAIRS)
-    entries += tuple((s, "health-check", "r") for s in systems)
-    return VerbGrant(role=AgentRole.GATHER.value, entries=entries)
+    """The gather grant, projected from the verb-disposition table (#995).
+
+    It used to be a tuple of pairs written here, which made this a shared file every new
+    system had to edit while `/connect`'s lane rules forbade touching it — so a connected
+    system was silently unreachable. The table is still AUTHORED, not derived from the
+    adapters on disk; what moved is only where a human writes it. See
+    `runtime/verb_dispositions.py` for why that distinction is the entire design.
+    """
+    return grant_for(AgentRole.GATHER.value, shipped_dispositions())
+
+
+#: The grant's non-`health-check` half, kept as a module export for the same reason it always
+#: was — it is the driver's published name for the census. Its only reader is `driver/__init__`,
+#: which re-exports it: `tests/_verb_authorization_632.py` holds its OWN independently written
+#: copy and `test_verb_grant_632` compares that copy against `GATHER_DEF.verb_grant`, which is
+#: the check that matters now that this side is derived rather than authored.
+#:
+#: Sliced off the ONE projection this module performs — `_gather_verb_grant()` is called once
+#: and both this and `GATHER_DEF` read that value, rather than each calling it and building a
+#: second `VerbGrant` over the same rows. `HEALTH_CHECK` is imported rather than respelled for
+#: the same reason `KNOWN_ROLES` reads `AgentRole`: the table's module owns that token, and a
+#: second copy of it here is one that can drift.
+_GATHER_GRANT = _gather_verb_grant()
+
+GATHER_PAIRS: tuple[tuple[str, str], ...] = tuple(
+    (s, v) for s, v, _ in _GATHER_GRANT.entries if v != HEALTH_CHECK
+)
 
 
 GATHER_DEF = AgentDefinition(
@@ -244,7 +250,7 @@ GATHER_DEF = AgentDefinition(
     deps_cls=GatherDeps,
     deny_reason=permission.GATHER_FALLTHROUGH_DENY_REASON,
     budget_enforced=True,
-    verb_grant=_gather_verb_grant(),
+    verb_grant=_GATHER_GRANT,
 )
 
 

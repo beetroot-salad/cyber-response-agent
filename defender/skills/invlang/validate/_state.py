@@ -3,10 +3,16 @@
 One family of `validate.py`'s rules, split out at 4038 lines. This is the only family
 that DERIVES a value the rest of the system reads — `effective_vertex_state` — rather
 than only answering yes or no about the text.
+
+It also owns `_check_vertex_participation`, which asks `_refs`' question backwards — not
+whether a cited id resolves but whether a DECLARED one is ever cited. It lives here rather
+than beside the shape rules because deciding it needs this module's open-slot vocabulary:
+an edge endpoint left honestly `??` connects, a phantom `v-` id does not, and nothing but
+`is_unresolved` tells the two apart.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +20,8 @@ from .. import _walkers, vocab
 from .._cells import _row_cells, _row_dict, _split_cells, _split_cells_raw, _unquote
 from .._types import Block, RowError
 from ..parser import (
+    _LEAD_PREFIX_RE,
+    _vertex_record,
     iter_fence_blocks,
 )
 from ..schema import (
@@ -21,6 +29,7 @@ from ..schema import (
     CompanionBody,
 )
 from ._diag import Diagnostic, Locus, _plain
+from ._refs import _lead_prefix, _leads
 from ._structure import _cell, _check_conclude_vocab, _check_vocab, _check_vocab_anchor_kinds, _check_vocab_edges, _check_vocab_hypotheses, _check_vocab_vertices, _check_vocab_weights
 
 
@@ -151,8 +160,74 @@ def _candidate_refusal(
     return None
 
 
+@dataclass(frozen=True)
+class _DeclaredTypes:
+    """Every `:V`-declared id mapped to EVERY type its rows give it, in declaration order.
+
+    A NAMED VALUE rather than the `dict[str, tuple[str, ...]]` it wraps, because this mapping
+    travels through six signatures — `_check_vocab_class_cells` and the whole repair-offer
+    chain down to `_route_refusal` — and every one of them asks it the same two questions:
+    what types is this id declared under, and can a value stand under any of them. As a bare
+    dict the second question is a rule each caller restates, and `_route_refusal` DID restate
+    it, with an `all(...)` comprehension standing beside the folded walk's identical loop —
+    two spellings of the one thing this family cannot afford two answers to, since the offer
+    and the gate disagreeing about a value is the F-47 shape (`_repair_routes`).
+
+    ALL the types rather than `_walkers.vertex_types`' first-wins string, because the readers
+    below have to be able to say "this id has no ONE grammar" — see `_check_vocab_class_cells`.
+    ORDERED and deduped rather than a set, because when a value is off-vocabulary under every
+    reading the message has to name ONE of them, and the prologue is the declaring site: an
+    order-of-iteration answer would make the refusal text depend on set hashing.
+    """
+
+    by_id: Mapping[str, tuple[str, ...]]
+
+    @classmethod
+    def of(cls, companion: CompanionBody) -> _DeclaredTypes:
+        """Folded from the `:V` rows — ONCE, at `_check_closed_vocab`'s boundary."""
+        declared: dict[str, dict[str, None]] = {}
+        for v in _walkers.all_vertices(companion):
+            vid = v.get("id")
+            if isinstance(vid, str) and vid:
+                declared.setdefault(vid, {})[v.get("type") or ""] = None
+        return cls({vid: tuple(types) for vid, types in declared.items()})
+
+    def types_of(self, vertex_id: str) -> tuple[str, ...]:
+        """Declared types, first declaration first — EMPTY for an id no `:V` row declares.
+
+        Empty and missing are ONE answer on purpose: both mean there is no grammar to
+        dispatch on, and every caller turns that into "nothing to refuse here". Handing back
+        `None` for one of them would make each reader spell that equivalence itself.
+        """
+        return self.by_id.get(vertex_id) or ()
+
+    def refusal_under_every_type(
+        self, vertex_id: str, judge: Callable[[str], list[str]]
+    ) -> list[str]:
+        """`judge`'s verdict on one cell, taken under EVERY type the id is declared with —
+        returned only when NO declared type can hold the value, empty otherwise.
+
+        ONE type is the ordinary case and this is then just `judge(that type)`. A re-declared
+        id has no single grammar (`_walkers.vertex_types` is FIRST-DECLARATION-WINS while
+        `effective_vertex_state` folds a LATER row's class over an open one), and picking
+        either fold refuses a cell nobody wrote — `v-001|session|interactive` read as a
+        `compute.role`.
+
+        But SKIPPING such an id, which is what this replaced, made the re-declaration a way to
+        smuggle the very write #986 is about past this check: a `:R attr_updates` row refining
+        `class` to `container/internal/novel` on an id declared once `compute` and once
+        `session` was judged by neither. A value NO declared type can hold is wrong under every
+        reading of the document, which is the one verdict the ambiguity still leaves available.
+
+        The message is the FIRST declaring type's, for the reason the fold keeps the order:
+        the prologue declares, a later block re-observes.
+        """
+        per_type = [judge(vertex_type) for vertex_type in self.types_of(vertex_id)]
+        return per_type[0] if per_type and all(per_type) else []
+
+
 def _route_refusal(
-    declared: dict[str, set[str]], rec: dict[str, str], key: str
+    declared: _DeclaredTypes, rec: dict[str, str], key: str
 ) -> str | None:
     """Why a refinement under THIS key, carrying THIS row's value, cannot be OFFERED, or `None`.
 
@@ -172,35 +247,44 @@ def _route_refusal(
     (`_class_cell_errors`, `_vocab_cell_errors`), so the offer and the gate cannot drift into
     disagreeing about one value.
 
-    `None` wherever there is no single declared type to dispatch a grammar on — an undeclared
-    target, or one re-declared under two types — because a route cannot be proven wrong against
-    a grammar nobody named, and `None` for `ident` and for an `attrs.<name>` naming no closed
-    vocabulary, which are the routes that legally carry an arbitrary value.
+    `None` for an undeclared target, because a route cannot be proven wrong against a grammar
+    nobody named, and `None` for `ident` and for an `attrs.<name>` naming no closed vocabulary,
+    which are the routes that legally carry an arbitrary value. A target re-declared under two
+    types is withheld only when the value stands under NEITHER — literally the same call
+    `_DeclaredTypes.refusal_under_every_type` the landed cell goes through, so the offer and
+    the gate answer one way about one value.
 
     The reason is CARRIED into the message rather than dropped: a withheld `use:` line beside a
     sentence that just named the key as legal reads as the validator forgetting itself, and the
-    author's next move is to write that row by hand — which is the row this withheld.
+    author's next move is to write that row by hand — which is the row this withheld. The
+    enums it cites are the REAL slot keys `defender-invlang enum` answers on; a glob
+    (`enum compute.*`) is not a slot and exits non-zero on the one lookup the sentence is
+    telling the author to make.
     """
     target = rec.get("target") or ""
-    vertex_type = _sole_vertex_type(declared, target)
-    if vertex_type is None:
+    types = declared.types_of(target)
+    if not types:
         return None
     value = rec.get("value") or ""
+    vertex_type = types[0]
     if key == SLOT_CLASS:
-        if not _class_cell_errors(target or "?", vertex_type, value):
+        if not declared.refusal_under_every_type(
+            target, lambda t: _class_cell_errors(target or "?", t, value)
+        ):
             return None
+        slot_keys = vocab.class_slot_keys(vertex_type)
         judged = (
-            f"a `class` cell is judged against the `{vertex_type}` slot grammar "
-            f"(`enum {vertex_type}.*`)"
+            f"a `class` cell is judged per slot against the `{vertex_type}` grammar "
+            f"({', '.join(f'`enum {s}`' for s in slot_keys)})"
         )
     elif key.startswith(ATTR_PREFIX):
-        slot_key = vocab.attr_slot_key(vertex_type, key[len(ATTR_PREFIX):])
-        if slot_key is None or not _vocab_cell_errors(
-            target or "?", slot_key, value, f"`{key}`"
+        if not declared.refusal_under_every_type(
+            target, lambda t: _attr_route_errors(target or "?", t, key, value)
         ):
             return None
         judged = (
-            f"an `{key}` cell on a `{vertex_type}` vertex is judged against `enum {slot_key}`"
+            f"an `{key}` cell on a `{vertex_type}` vertex is judged against "
+            f"`enum {vocab.attr_slot_key(vertex_type, key[len(ATTR_PREFIX):])}`"
         )
     else:
         return None
@@ -212,7 +296,7 @@ def _route_refusal(
 
 def _repair_routes(
     raw_cells: list[str], at: int, basis: str, *, quoted_legal: bool,
-    declared: dict[str, set[str]], rec: dict[str, str],
+    declared: _DeclaredTypes, rec: dict[str, str],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """The `use:` alternatives offered for one illegal refinement key — key cell swapped in
     place — and the reason each withheld route was withheld.
@@ -254,7 +338,7 @@ def _repair_routes(
 
 def _illegal_key_diagnostic(
     block: Block, row: str, cols: list[str], rec: dict[str, str], key: str,
-    declared: dict[str, set[str]],
+    declared: _DeclaredTypes,
 ) -> Diagnostic:
     """The warn-severity diagnostic for one `:R attr_updates` row whose `key` cell names
     neither `class`, `ident` nor an `attrs.<name>`. Split out of `_check_attr_update_keys`
@@ -367,7 +451,7 @@ def _illegal_key_diagnostic(
 
 
 def _check_attr_update_keys(
-    proposed_text: str, declared: dict[str, set[str]]
+    proposed_text: str, declared: _DeclaredTypes
 ) -> list[Diagnostic]:
     """`:R attr_updates` refinement rows — the KEY, and the value that key promises to carry
     — checked over the ROWS rather than the folded records.
@@ -511,7 +595,7 @@ def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Di
     # The declaring types, resolved ONCE at this boundary and threaded into both readers: the
     # class-cell check dispatches a grammar on them, and the repair offer needs them to know
     # whether the route it is about to hand over would survive that same check.
-    declared = _declared_vertex_types(companion)
+    declared = _DeclaredTypes.of(companion)
     out += _plain(_check_vocab_class_cells(companion, declared))
     out += _check_attr_update_keys(proposed_text, declared)
     return out
@@ -644,6 +728,229 @@ def has_open_slot(classification: Any) -> bool:
     if not isinstance(classification, str):
         return False
     return any(is_open_slot(slot) for slot in class_slots(classification))
+
+
+#: The two lead sub-blocks that record what a lead FOUND. A document carrying one of these
+#: has stopped opening its graph and started reporting on it — see `_opening_prologue_ids`.
+#: Spelled out rather than sliced out of `parser._LEAD_SUBBLOCKS`: that table says of itself
+#: that it is PROSE ONLY and steers nothing, so a rule derived from it would be enforcing a
+#: list nobody maintains against the projector.
+_OBSERVATION_SUBBLOCKS = ("observations.vertices", "observations.edges")
+
+
+def _records_an_observation(block: Block) -> bool:
+    m = _LEAD_PREFIX_RE.match(block.name)
+    return m is not None and m.group("sub") in _OBSERVATION_SUBBLOCKS
+
+
+def _opening_prologue_ids(proposed_text: str) -> set[str]:
+    """The vertex ids the OPENING prologue declares — `:V prologue.vertices` blocks written
+    while the document is still opening its graph rather than reporting on it.
+
+    Read off the fence stream rather than off `companion["prologue"]["vertices"]`, and that is
+    the whole point of the function. The projection folds EVERY prologue block into that one
+    list wherever it sat: `parser/_project.py` extends rather than assigns, because append-only
+    makes "a second `:V prologue.vertices`" the only legal way to add one. An exemption keyed
+    on the block NAME is therefore defeated by renaming a header — the identical orphan row,
+    moved into a `:V prologue.vertices` fence appended beside the lead's own report, inherits
+    an exemption written for the graph's OPENING and the rule below never sees it.
+
+    THE BOUNDARY IS THE FIRST RECORDED OBSERVATION, not the first `:L findings` block, and
+    that distinction is measured rather than reasoned: `lead_zero` writes lead-0's declaring
+    `:L findings` row into `investigation.md` BEFORE main's first turn, so in every real run
+    the ORIENT prologue already lands after a `:L findings` block. What separates opening from
+    reporting is a lead saying what it FOUND.
+
+    BY FENCE, for the reason `_check_attr_update_keys` states at length: `append_block` sends
+    one fence per call, so the fence is the atomic write. A block-level boundary is evaded by
+    ordering — the same write puts its `:V prologue.vertices` block above its
+    `:V l-001.observations.vertices` block and the prologue reads as "written first". A model
+    that wants the exemption anyway must now spend a whole earlier write on a prologue-only
+    fence, before the run has recorded a single observation, and can never do it again after.
+
+    EXCEPT THE DOCUMENT'S FIRST FENCE, which is its opening whatever else it carries. A
+    document written all at once — the shipped examples, and every hand-built fixture that
+    reaches `validate_companion` as one ```invlang block — declares its graph and reports on it
+    in the same breath, and there is no earlier write for its prologue to be trailing. The
+    carve-out costs the rule nothing a run can reach: the first fence of a live investigation
+    is the harness's, written before main's first turn, so a model never owns one.
+    """
+    ids: set[str] = set()
+    for nth, fence_blocks in enumerate(iter_fence_blocks(proposed_text)):
+        if nth and any(_records_an_observation(b) for b in fence_blocks):
+            break
+        for block in fence_blocks:
+            if block.tag != "V" or block.name != "prologue.vertices":
+                continue
+            for row in block.rows:
+                try:
+                    rec = _vertex_record(block, row)
+                except RowError:
+                    continue  # already a parse warning; not this check's business
+                ids.add(rec["id"])
+    return ids
+
+
+def _vertex_declarations(companion: CompanionBody) -> list[tuple[str, str]]:
+    """Every vertex DECLARATION as `(declaring site, vertex id)`, in document order.
+
+    `_walkers.all_vertices` flattens the two declaring sites away on purpose — its callers
+    want the graph, not who wrote it. This rule wants both: the site names the block the
+    refusal tells the author to repair, and it is half the key the baseline comparison uses,
+    since one id declared by two leads with neither ever edged is two defects.
+    """
+    out: list[tuple[str, str]] = [
+        ("prologue", v["id"])
+        for v in (companion.get("prologue") or {}).get("vertices") or []
+        if isinstance(v, dict) and isinstance(v.get("id"), str) and v["id"]
+    ]
+    for lead in _leads(companion):
+        lid = lead.get("id", "?")
+        obs = (lead.get("outcome") or {}).get("observations") or {}
+        out.extend(
+            (lid, v["id"])
+            for v in obs.get("vertices") or []
+            if isinstance(v, dict) and isinstance(v.get("id"), str) and v["id"]
+        )
+    return out
+
+
+def _edge_participants(companion: CompanionBody) -> set[str]:
+    """Every vertex id some `:E` row CONNECTS — which is not every id one mentions.
+
+    The rule below is discharged by an edge, so what counts as an edge is the whole of its
+    strength. Two rows name a vertex without connecting it, and both are cheaper to write
+    than the observation being asked for:
+
+      * `e-001|spawned|v-010|v-999`, whose target no `:V` block declares. Nothing else in the
+        validator refuses that — `_check_attr_update_targets` demands a declared target of an
+        `:R` row and of no other surface — so a phantom endpoint would be the CHEAPEST way
+        past a refusal whose whole purpose is to stop a fact being dressed as a graph object.
+        It does not stop at the validator either: `frontier._edge_index` and the review
+        projector both read an endpoint as a real object and would carry the invention.
+      * `e-001|spawned|v-010|v-010`, a self-edge, which says nothing about how the vertex
+        reaches the rest of the graph.
+
+    An endpoint left OPEN does connect, and is the reason this cannot simply demand that both
+    ends resolve. `??` and `{a, b}` are §Open questions' honest spelling of "observed, not yet
+    identified" — the edge IS a recorded event, the slot is tracked to the close by the gates
+    that read it, and `_golden_invlang/turnN-A` ships three such rows. A phantom `v-` id
+    carries no such obligation, which is exactly what separates the two.
+    """
+    declared = {
+        v.get("id") for v in _walkers.all_vertices(companion)
+        if isinstance(v.get("id"), str)
+    }
+    participants: set[str] = set()
+    for e in _walkers.all_edges(companion):
+        src, tgt = e.get("source_vertex"), e.get("target_vertex")
+        if not isinstance(src, str) or not isinstance(tgt, str) or src == tgt:
+            continue
+        for near, far in ((src, tgt), (tgt, src)):
+            if near and (far in declared or is_unresolved(far)):
+                participants.add(near)
+    return participants
+
+
+def _participation_repair(site: str) -> str:
+    """The three repairs, written ONCE per refused write rather than once per offending row.
+
+    `diagnose` learned this the expensive way three families over: a benign document handed
+    the model the same wall of text twice on every refused write, and the fix was to collect
+    both copies and print one. A lead filing five process vertices in one block would get five
+    copies of this paragraph — the same defect, an order of magnitude larger.
+    """
+    block = "prologue.edges" if site == "prologue" else f"{site}.observations.edges"
+    return (
+        " A vertex is declared because something was observed to DO something or to have "
+        "something done to it, and the `:E` row IS that observation: write it (the relation "
+        "actually seen — `contained_in`, `spawned`, `executed`, whichever fits) into "
+        f"`:E {block}`. If the relation is not yet known, say THAT: a `:H` row whose "
+        "`attached_to` names the vertex records the claim without committing an observation, "
+        "and discharges this too. If there is neither an observation nor a claim, this is "
+        "not a graph object — do not declare the vertex; carry the fact as an attribute on "
+        "the vertex it was read off, or as an `:R attr_updates` row. Do NOT infer an edge "
+        "from a text field (a `cmdline` attribute, say) the detector never recorded as an "
+        "event of its own, and do NOT point one at an id no `:V` block declares: both reach "
+        "below the resolution of what the detector actually observed."
+    )
+
+
+def _check_vertex_participation(
+    proposed_text: str,
+    companion: CompanionBody,
+    current_companion: CompanionBody | None,
+) -> list[str]:
+    """Every vertex this write DECLARES must be named by some `:E` row's `src` or `tgt`, or
+    be the `attached_to` of some hypothesis — anywhere in the document, not necessarily the
+    declaring lead's own block.
+
+    `SKILL.md`'s `### :R observations and learned facts` already forbids the inverse mistake
+    ("don't create vertices just for facts"): a fact about an EXISTING object goes on
+    `:R attr_updates`, not a new `:V` row. Nothing enforced the mirror half, and the real
+    instance (#993) declared `v-004|process|psql|psql[pid=??]|user=postgres` and
+    `v-006|process|postgres|...` and wrote no edge naming either — the action the alert was
+    about existing only as an orphan vertex and a text cell.
+
+    A HYPOTHESIS ANCHOR discharges it, and leaving that out made the rule unsatisfiable for
+    the shape the language exists to carry. A lead that finds an entity and can only
+    HYPOTHESIZE how it connects has exactly one honest record: declare the vertex, attach an
+    `:H` row to it. `_check_hypothesis_refs` requires that `attached_to` resolve to a
+    declared vertex, so refusing the declaration while demanding it closes both exits at
+    once — the model can only write the committed edge it does not have, which is the
+    inference this rule's own message forbids. `proposed_edge` still does not count on its
+    own: it names a proposed PARENT's type and class, never an id, so it says nothing about
+    which declared vertex is spoken for.
+
+    EXEMPT: any id the OPENING prologue declares (`_opening_prologue_ids`, which is where the
+    position rather than the block name is argued). The prologue legitimately opens the graph
+    before its edges are known, and a lead re-declaring a prologue id inherits the exemption —
+    the same first-declaration-wins rule `_walkers.vertex_types` documents and relies on.
+
+    NOT participation: an `:R attr_updates` target. That surface records a fact about an
+    object already known to exist; it is not an event connecting two vertices, and counting it
+    would re-admit exactly the fact-as-vertex the rule exists to refuse.
+
+    **Scoped to what THIS write introduces**, the same subtraction `_check_surface` runs and
+    for the same reason. `investigation.md` is append-only: a committed `:V` row can never be
+    removed and `fix_row` reaches only flagged `attr_updates` rows, so a document-global
+    reading refuses every later write of any run that already carries an orphan — and worse,
+    refuses runs that are already FINISHED. `committed_investigation_reason` re-validates a
+    committed document as its own baseline at the learning loop's persist gate and dead-letters
+    the run on any error; `seed_investigation` does the same to a fence prefix before branching
+    or resuming. Both pass the document as both halves precisely so that a rule keyed on what a
+    write introduces stands down, and both said so before this rule existed. Baseline-keyed,
+    the write gate is unchanged (a `:V` row is new exactly once, at the write that appends it)
+    while neither of those two can be made to fail by bytes no repair can reach.
+
+    ONE diagnostic per offending `(site, vertex)` pair, matching `_check_vocab_vertices`'
+    per-row shape: a vertex id repeated across two leads with neither ever edged is two
+    separate defects. The REPAIR is printed once, on the first — see `_participation_repair`.
+    """
+    exempt = _opening_prologue_ids(proposed_text)
+    spoken_for = _edge_participants(companion) | {
+        h["anchor"] for h in _walkers.all_hypotheses(companion).values()
+        if isinstance(h.get("anchor"), str) and h["anchor"]
+    }
+    committed = (
+        set(_vertex_declarations(current_companion))
+        if current_companion is not None else set()
+    )
+    errors: list[str] = []
+    for site, vid in _vertex_declarations(companion):
+        if vid in exempt or vid in spoken_for or (site, vid) in committed:
+            continue
+        where = (
+            "`:V prologue.vertices`" if site == "prologue"
+            else f"`:V {site}.observations.vertices`"
+        )
+        prefix = "" if site == "prologue" else _lead_prefix(site)
+        errors.append(
+            f"{prefix}{where} row {vid!r} — no `:E` row anywhere in the document names it "
+            f"as `src` or `tgt`, and no `:H` row is attached to it."
+            + (_participation_repair(site) if not errors else "")
+        )
+    return errors
 
 
 def _seed_vertex_state(
@@ -922,6 +1229,22 @@ def _vocab_cell_errors(
     return [f"{errors[0]} — it is a `{other[0]}` value, not `{slot_key}`"]
 
 
+def _attr_route_errors(
+    vertex_id: str, vertex_type: str, key: str, value: str
+) -> list[str]:
+    """One `attrs.<name>` REFINEMENT KEY carrying `value`, against the enum that closes the
+    pair — empty where the pair names no closed vocabulary, which is the legal case.
+
+    The `attrs` half of what `_class_cell_errors` is for the `class` half: both the offer
+    (`_route_refusal`) and the landed cell (`_folded_cell_errors`) ask through here, so a
+    route the validator hands over and a row the validator then judges cannot disagree.
+    """
+    slot_key = vocab.attr_slot_key(vertex_type, key[len(ATTR_PREFIX):])
+    if slot_key is None:
+        return []
+    return _vocab_cell_errors(vertex_id, slot_key, value, f"`{key}`")
+
+
 def _class_cell_errors(vertex_id: str, vertex_type: str, value: str) -> list[str]:
     """A WHOLE `class` cell against its type's grammar — the one home for the per-slot zip.
 
@@ -952,24 +1275,21 @@ def _class_cell_errors(vertex_id: str, vertex_type: str, value: str) -> list[str
     return errors
 
 
-def _declared_vertex_types(companion: CompanionBody) -> dict[str, set[str]]:
-    """Every `:V`-declared id mapped to the SET of types its rows give it.
+def _folded_cell_errors(
+    declared: _DeclaredTypes, cell: VertexCell
+) -> list[str]:
+    """One folded `class` or `attrs.<name>` cell against its vertex's grammar.
 
-    A set rather than `_walkers.vertex_types`' first-wins string, because both readers below
-    have to be able to say "this id has no ONE grammar" — see `_check_vocab_class_cells`.
+    Split from `_check_vocab_class_cells`'s loop so the per-type judgement is ONE expression
+    `_DeclaredTypes.refusal_under_every_type` can run once per declared type, rather than a
+    branch the caller would have to re-enter per type.
     """
-    declared: dict[str, set[str]] = {}
-    for v in _walkers.all_vertices(companion):
-        vid = v.get("id")
-        if isinstance(vid, str) and vid:
-            declared.setdefault(vid, set()).add(v.get("type") or "")
-    return declared
+    def judge(vertex_type: str) -> list[str]:
+        if cell.slot == SLOT_CLASS:
+            return _class_cell_errors(cell.vertex_id, vertex_type, cell.value)
+        return _attr_route_errors(cell.vertex_id, vertex_type, cell.slot, cell.value)
 
-
-def _sole_vertex_type(declared: dict[str, set[str]], vertex_id: str) -> str | None:
-    """The one type this id is declared under, or `None` where there is not exactly one."""
-    types = declared.get(vertex_id, set())
-    return next(iter(types)) if len(types) == 1 else None
+    return declared.refusal_under_every_type(cell.vertex_id, judge)
 
 
 def _declared_row_errors(companion: CompanionBody) -> list[str]:
@@ -983,9 +1303,9 @@ def _declared_row_errors(companion: CompanionBody) -> list[str]:
     sees the second. It is on disk forever under append-only, it is the write the model just
     made, and it is the exact category confusion #986 is about.
 
-    Judged ROW-WISE, which is also why this needs no `_sole_vertex_type`: a row carries its own
-    `type` cell, so there is no pairing of two folds to disagree — the ambiguity that forces the
-    folded walk to skip a re-declared id does not exist here.
+    Judged ROW-WISE, which is also why this needs no `_DeclaredTypes`: a row carries its
+    own `type` cell, so there is no pairing of two folds to disagree — the ambiguity that
+    makes the folded walk judge a re-declared id under all of its types does not exist here.
     """
     errors: list[str] = []
     for v in _walkers.all_vertices(companion):
@@ -997,16 +1317,14 @@ def _declared_row_errors(companion: CompanionBody) -> list[str]:
             continue
         errors += _class_cell_errors(vid, vertex_type, _cell_text(v.get("classification")))
         for name, raw in (v.get("attributes") or {}).items():
-            attr_key = vocab.attr_slot_key(vertex_type, name)
-            if attr_key is not None:
-                errors += _vocab_cell_errors(
-                    vid, attr_key, _cell_text(raw), f"`{ATTR_PREFIX}{name}`"
-                )
+            errors += _attr_route_errors(
+                vid, vertex_type, f"{ATTR_PREFIX}{name}", _cell_text(raw)
+            )
     return errors
 
 
 def _check_vocab_class_cells(
-    companion: CompanionBody, declared: dict[str, set[str]]
+    companion: CompanionBody, declared: _DeclaredTypes
 ) -> list[str]:
     """A vertex's `class` tuple and its closed-vocabulary `attrs` siblings, per type (#986).
 
@@ -1038,28 +1356,21 @@ def _check_vocab_class_cells(
     type to dispatch a grammar on. `_check_attr_update_targets` is what refuses a target naming
     nothing at all.
 
-    A vertex whose `:V` rows disagree on `type` is skipped too, and NOT read through
-    `_walkers.vertex_types`, whose own docstring forbids exactly this pairing: it is
+    A vertex whose `:V` rows disagree on `type` is judged under ALL of them and refused only
+    where NONE can hold the value (`_DeclaredTypes.refusal_under_every_type`), and is NOT read
+    through `_walkers.vertex_types`, whose own docstring forbids exactly this pairing: it is
     FIRST-DECLARATION-WINS while `effective_vertex_state` folds a LATER row's class over an open
     one, so the two answer about different rows the moment a document re-declares an id under a
     second type — which the validator accepts silently (#919 follow-up). Pairing them judges
     `v-001|session|interactive` by the `compute` grammar of the row above it and refuses
-    `interactive` as a `compute.role`, a refusal about a cell nobody wrote. One type or no
-    check; reconciling the two folds is what would make it more than that.
+    `interactive` as a `compute.role`, a refusal about a cell nobody wrote. Skipping the id
+    outright was the other extreme and the worse one: it made a second declaration a way to
+    smuggle a `:R attr_updates` refinement — the write this check exists for — past it.
     """
     errors: list[str] = _declared_row_errors(companion)
     for cell in iter_vertex_cells(companion, include_ident=False):
-        vertex_type = _sole_vertex_type(declared, cell.vertex_id)
-        if vertex_type is None:
-            continue
-        if cell.slot == SLOT_CLASS:
-            errors += _class_cell_errors(cell.vertex_id, vertex_type, cell.value)
-        elif cell.slot.startswith(ATTR_PREFIX):
-            attr_key = vocab.attr_slot_key(vertex_type, cell.slot[len(ATTR_PREFIX):])
-            if attr_key is not None:
-                errors += _vocab_cell_errors(
-                    cell.vertex_id, attr_key, cell.value, f"`{cell.slot}`"
-                )
+        if cell.slot == SLOT_CLASS or cell.slot.startswith(ATTR_PREFIX):
+            errors += _folded_cell_errors(declared, cell)
     # One message per (vertex, slot, value), in first-seen order: a cell the declared-row walk
     # and the folded walk both judge is ONE defect, and a refusal printed twice reads as two.
     return list(dict.fromkeys(errors))

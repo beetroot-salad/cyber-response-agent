@@ -1,0 +1,36 @@
+## lead-0 (l-000) — harness-authored, declared before the investigation begins: harness-authored, carried through unchanged
+## ORIENT: rounds=1 committed=True gaps=3 prose_chars=1021 rows_chars=154
+    gap: driving identity for the sudo burst is unknown (user.name null in alert) — no identity vertex declared yet; ORIENT prose poses the question but no id exists
+    gap: rule-claim test ("groups by host only, no logic defect") is asserted in prose but invlang has no ORIENT-phase row for detection notes — carry it forward to REPORT's detection_notes/entity_check
+    gap: sudo-execution events themselves (3+ within 10 min) are not yet grounded edges — no event details (timestamps, outcome) supplied in prose; expect :E rows from the SIEM query lead
+## PLAN: rounds=1 committed=True gaps=5 prose_chars=924 rows_chars=1069
+    gap: l-001/l-002/l-003 gather summaries returned results (root-executed psql burst, host absent from CMDB, zero change windows) but this call's phase is PLAN — no `:R`/`:T resolutions` rows written; they await ANALYZE prose.
+    gap: h-001/h-002 topology (rel, parent_type, parent_class) is not stated in the prose; recorded `initiated_by`/`identity`/`??` as the closest reading of "who the identity is" — confirm or correct.
+    gap: ac1's `on_unauth`/`on_indet` outcomes are not specified in the prose; defaulted to `escalate|escalate`.
+    gap: v-001's class remains `??/??/??`; l-002 found no CMDB record but no `:R attr_updates` resolution is written yet (no ANALYZE prose).
+    gap: Prose poses open questions (which identity, prior sudo baseline, training window) without ids beyond the l-001/l-002/l-003 leads already named; no additional lead ids minted.
+## ANALYZE (loop 1): rounds=1 committed=True gaps=5 prose_chars=1942 rows_chars=733
+    gap: prose identifies container `e5b0213bd690` as the execution context but assigns no vertex id — needs a `:V` (compute/container) from MAIN before it can be recorded
+    gap: prose says commands "strongly favor h-001" but h-001's p1 (prior sudo baseline) is explicitly unresolved, so no `:T resolutions` row can honestly cite p1/p2 — belief movement deferred until the baseline question is answered
+    gap: prose's open questions (a) root sudo baseline, (b) IAM authorization of root sudo (referred to as "ac2" but no such contract is declared in the document), (c) container identity — none carry lead ids; PLAN must mint those
+    gap: no `:T close` written: prose does not state loop 1 is complete
+    gap: ac1 was resolved `unauthorized`, which forces escalation per `on_unauth` unless the premise is shown not to apply — that determination is still open
+## PLAN (loop 2): rounds=1 committed=True gaps=3 prose_chars=1131 rows_chars=1237
+    gap: prose says l-004 "resolves authz contract ac2", but no `ac2` was ever declared in any `:H h-NNN.authz` block — only ac1 exists. No `:R authz` row was written for it; MAIN must declare or renumber the contract.
+    gap: h-002 is graded `--` on p1's refutation; its p2 ("burst falls outside any approved change or training window") has no direct test result cited beyond the ac1 unauthorized — confirm this is the intended severity, or supply a prediction-specific refutation.
+    gap: v-003's zone slot left `??` — summaries name the image and stack but never state network zone.
+## ANALYZE (loop 2): rounds=1 committed=True gaps=4 prose_chars=1780 rows_chars=81
+    gap: prose resolves ac2 as `indeterminate` (IAM has no scope over container-internal root, UID 0) but names no lead as `resolved_by`; a `:R authz` row requires a single `resolved_by` — MAIN must attribute it (e.g. l-004 or a new lead) before it can be compiled
+    gap: prose proposes "one remaining check — whether the ticket system carries standing authorization for soc-playground" but gives it no `l-NNN` id; it needs a PLAN `:L findings` row, not an ANALYZE row
+    gap: h-001 `++` and h-002 `--` are restatements of grades already committed (l-005); no new movement rows written
+    gap: soc-playground remains `class=??/??/novel` (unregistered in CMDB/IAM) — no new evidence this call to close it
+## PLAN (loop 3): rounds=1 committed=True gaps=3 prose_chars=646 rows_chars=142
+    gap: prose names "ac2 (indeterminate)" but no `ac2` contract exists in the document so far — only `ac1` on h-001 was declared; no row can be written for it
+    gap: l-007's gather summary (ticket system entirely empty — no tickets, service requests, or authorizations for soc-playground) is ANALYZE-phase result material, but the prose under `## PLAN (loop 3)` draws no conclusion from it: no new evidence movement for h-001 (already `++`), and ac1's verdict is already `unauthorized`, so nothing new to compile
+    gap: prose poses the open question of standing authorization in the ticket system but attaches no id to any resolution it would license
+## ANALYZE (loop 3): rounds=1 committed=True gaps=3 prose_chars=1075 rows_chars=0
+    gap: prose references authz contract "ac2" (verdict indeterminate), but no `ac2` was ever declared under any `:H h-NNN.authz` in the document — only ac1 exists, already resolved `unauthorized` by l-003; no `:R authz` row can be written for an undeclared contract
+    gap: prose's ticket-system finding (l-007, empty system) produces no attribute update, vertex, or edge to compile — no `??` slot or open commitment closes on it
+    gap: prose's escalation intent ("authorization gap forces escalation") is stated without a disposition or conclude step — no row can record it outside `## REPORT`
+## REPORT: rounds=1 committed=True gaps=1 prose_chars=9 rows_chars=0
+    gap: REPORT header present but the prose contains no conclusion content — no `:T conclude` fields (termination.category, disposition, impact_verdict, confidence, summary) were stated, so nothing could be compiled.

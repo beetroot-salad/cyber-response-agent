@@ -49,10 +49,20 @@ the integration, and open a review branch, one system per invocation. For
 how it works, read that skill (`skills/connect/SKILL.md`, rationale in
 `decisions.md`); the handbook doesn't restate it.
 
-Adding a system needs no edit to the loop, the gather subagent, or any
-shared file — it's just files dropped into the per-system locations. There
-is no signature catalog, permissions-per-signature, or archetype directory
-to fill in (those are `soc-agent/` concepts; see `content/design.md`).
+Adding an adapter-backed system is files dropped into the per-system
+locations plus **exactly one shared edit**: its verbs need rows in the
+verb-disposition table (`knowledge/environment/verb-grants.yaml`). An
+MCP-reached system declares no verbs to the registry and takes no rows, so
+for it the claim still holds outright. Nothing else either way — no loop
+change, no gather-subagent change, no signature catalog,
+permissions-per-signature, or archetype directory to fill in (those are
+`soc-agent/` concepts; see `content/design.md`).
+
+That one edit is deliberate and is not bookkeeping. The table is the
+authored answer to which verbs a role may call, and it is authored
+precisely so that dropping an adapter into the tree grants it nothing. A
+system with no rows is connected and unreachable — CI refuses that state
+rather than shipping it, so the edit cannot be forgotten, only made.
 
 ## Lessons
 

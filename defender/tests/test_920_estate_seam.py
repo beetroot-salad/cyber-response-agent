@@ -109,8 +109,8 @@ GATHER_GRANT = driver.GATHER_DEF.verb_grant
 #: What the shipped grant covers today. Asserted rather than derived, so a grant that SHRINKS
 #: — a system quietly dropped out of the estate — fails here instead of making the structural
 #: sweep below cover less and still pass.
-GRANTED_ENTRIES = 28
-GRANTED_SYSTEMS = 7
+GRANTED_ENTRIES = 30
+GRANTED_SYSTEMS = 8
 
 
 # the fake estate: a real adapters directory, with verb bodies that count
@@ -318,9 +318,10 @@ def world_registry(
 # 1. structural coverage: every granted verb, and no route to a bare body
 
 
-def test_the_shipped_grant_still_spans_seven_systems():
+def test_the_shipped_grant_still_spans_every_system():
     """    The estate's coverage claim is only as wide as the grant it is measured over, so the
-    grant's own shape is pinned first — 28 entries across 7 systems. Without this arm a grant
+    grant's own shape is pinned first — 30 entries across 8 systems (#983 added
+    `tacit-knowledge`, and its `health-check` with it). Without this arm a grant
     that lost a system would make every sweep below cover one system less and stay green."""
     assert len(GATHER_GRANT.entries) == GRANTED_ENTRIES
     assert len(GATHER_GRANT.systems) == GRANTED_SYSTEMS

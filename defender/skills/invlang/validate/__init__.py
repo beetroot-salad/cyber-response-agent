@@ -10,7 +10,8 @@ families above it in this list:
   * `_predictions` — append-only history, weight moves and their provenance, and whether
                 a hypothesis' predictions were settled.
   * `_structure` — the shape of a prediction row, and the closed vocabularies.
-  * `_state`  — attribute updates, the effective vertex state they build, and open slots.
+  * `_state`  — attribute updates, the effective vertex state they build, open slots,
+                and whether a declared vertex is ever connected to anything.
   * `_gating` — what a disposition costs: benign grounding, false-positive gating, the
                 screen, and the severity ceiling.
   * `_closure` — the three closure gates, which are one sentence over three namespaces.
@@ -161,6 +162,7 @@ from ._state import (
     _check_benign_authz,
     _check_benign_open_slots,
     _check_closed_vocab,
+    _check_vertex_participation,
     _check_vocab_class_cells,
     _declarers_by_contract_id,
     _illegal_key_diagnostic,
@@ -192,19 +194,28 @@ from ._gating import (
     CEILING_QUERY_FAILED,
     CEILING_STATES,
     CeilingReceipt,
+    RuntimeEvidenceReceipt,
+    _check_authz_basis,
+    _check_authz_row_grounding,
     _check_benign_gating,
     _check_benign_grounding,
     _check_ceiling_test_scope,
     _check_disposition_gating,
     _check_false_positive_gating,
     _check_hypothesis_persistence,
+    _check_runtime_evidence_windows,
     _check_screen_structure,
+    _check_tacit_lookup_outcomes,
     _lead_returned_a_result,
     _row_states_something,
     _weight_text,
     ceiling_test_block,
     conclude_ceiling_test_rows,
+    conclude_runtime_evidence_rows,
     disposition_entry_price,
+    entry_price,
+    exhausted_contract_ids,
+    runtime_evidence_block,
 )
 from ._closure import (
     _Commitment,
@@ -284,7 +295,24 @@ def structural_diagnostics(
     found.extend(_plain(_check_lead_prediction_structure(companion)))
     found.extend(_plain(_check_impact_prediction_structure(companion)))
     found.extend(_plain(_check_impact_resolution_refs(companion)))
+    found.extend(_plain(
+        _check_vertex_participation(proposed_text, companion, current_companion)
+    ))
     found.extend(_check_closed_vocab(companion, proposed_text))
+    # #983's `:R authz` grounding check is JUDGMENT, not structural, on #996's own split (D7):
+    # it needs a fact only MAIN can state (whether the row's own authorization holds), so a
+    # clerk retrying it from the grammar and the document alone would loop on a refusal it can
+    # never clear by itself — the exact shape D7's judgment/structural partition exists to stop.
+    # `main`'s own single `diagnose()` computes it here, early, purely for a DEDUP ordering
+    # reason (`_check_benign_gating` re-runs the same check and the two must not print the same
+    # line twice) that has nothing to do with clerk-retry semantics; #996's split keeps that
+    # dedup but moves both the computation and the report into `judgment_diagnostics` below,
+    # where the retry-vs-stop distinction actually lives. `_check_authz_basis` and the two
+    # write-gate-only checks after it stay here — they price OPEN AUTHZ/CONSULTATION SLOTS,
+    # not a row's grounding, and are clearable the same way any other structural fact is.
+    found.extend(_plain(_check_authz_basis(companion)))
+    found.extend(_plain(_check_tacit_lookup_outcomes(companion)))
+    found.extend(_plain(_check_runtime_evidence_windows(companion)))
     found.extend(_plain(_check_screen_structure(companion)))
     return found
 
@@ -304,11 +332,26 @@ def judgment_diagnostics(
     if not companion:
         return []
     found: list[Diagnostic] = []
+    # #983's `:R authz` row-grounding check lives HERE, not in `structural_diagnostics` — #996's
+    # split moves it off the clean-suffix ordering `main`'s own single `diagnose()` uses (see
+    # `structural_diagnostics`'s own comment for why): it needs a fact only MAIN can state, so a
+    # clerk retrying it from the grammar and the document alone would loop on a refusal it can
+    # never clear by itself. Checked for every document rather than only for a benign one — a
+    # price owed at the write gate alone is not owed at the close, and the close is the artifact
+    # the learning loop and the ticket lane read.
+    grounding = _check_authz_row_grounding(companion)
+    found.extend(_plain(grounding))
     # Bound, not recomputed: `_check_authz_contract_closure` defers to this gate's OUTPUT on
     # any contract it is already refusing, and running it twice per write is the single most
     # expensive thing in the pass.
     gated = _check_disposition_gating(companion)
-    found.extend(_plain(gated))
+    # Collected at both boundaries, REPORTED once. `_check_benign_gating`, reached through
+    # `gated` above, re-runs the grounding check too (deliberately — see the comment above) and
+    # produces byte-identical diagnostic strings, so a benign document handed the model the same
+    # wall of text twice on every refused write. The double COLLECTION is the point and stays;
+    # the double PRINT is not.
+    already = set(grounding)
+    found.extend(_plain([e for e in gated if e not in already]))
     found.extend(_plain(_check_ceiling_test_scope(companion)))
     found.extend(_plain(_check_hypothesis_persistence(companion)))
     # The three closure gates, together and last: they are one sentence over three namespaces
@@ -401,6 +444,7 @@ __all__ = [
     "OPEN_MARKER",
     "ParseWarning",
     "REFUTED_WEIGHT",
+    "RuntimeEvidenceReceipt",
     "RowError",
     "SCREEN_MATCH",
     "SCREEN_MODE",
@@ -450,8 +494,10 @@ __all__ = [
     "_check_attr_update_keys",
     "_check_attr_update_targets",
     "_check_attribute_prediction_structure",
+    "_check_authz_basis",
     "_check_authz_contract_closure",
     "_check_authz_contract_ids",
+    "_check_authz_row_grounding",
     "_check_benign_authz",
     "_check_benign_gating",
     "_check_benign_grounding",
@@ -475,11 +521,14 @@ __all__ = [
     "_check_prediction_id_namespace",
     "_check_prediction_refs",
     "_check_refutation_scope",
+    "_check_runtime_evidence_windows",
+    "_check_tacit_lookup_outcomes",
     "_check_screen_structure",
     "_check_strong_move_provenance",
     "_check_surface",
     "_check_tested_commitment_refs",
     "_check_tested_id_namespaces",
+    "_check_vertex_participation",
     "_check_vocab",
     "_check_vocab_anchor_kinds",
     "_check_vocab_class_cells",
@@ -543,12 +592,16 @@ __all__ = [
     "ceiling_test_block",
     "class_slots",
     "conclude_ceiling_test_rows",
+    "conclude_runtime_evidence_rows",
     "dataclass",
     "diagnose",
     "disposition_entry_price",
+    "entry_price",
     "judgment_diagnostics",
+    "runtime_evidence_block",
     "structural_diagnostics",
     "effective_vertex_state",
+    "exhausted_contract_ids",
     "field",
     "has_open_slot",
     "is_catchall_slot",

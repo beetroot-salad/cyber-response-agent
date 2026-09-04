@@ -238,6 +238,11 @@ class AuthzResolution(ResolutionRow, total=False):
     edge: str
     fulfills_contract: str
     cites_past_case: str
+    #: #983 mechanism C. On an `indeterminate` verdict, WHY the question is unsettled:
+    #: `vocab.AUTHZ_INDET_BASIS`, defaulting to `retry` when the cell is absent. `exhausted`
+    #: takes the contract off the retrieval frontier and changes nothing else — not the
+    #: verdict, not the forced `on_indet` escalation.
+    basis: str
 
 
 class AnchorConsultation(ResolutionRow, total=False):

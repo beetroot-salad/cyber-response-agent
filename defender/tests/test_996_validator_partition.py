@@ -117,30 +117,26 @@ def test_996_a_judgment_line_is_never_in_the_structural_half() -> None:
 
 
 # ---------------------------------------------------------------------------------------
-# KNOWN RED BY DESIGN — owed for `main`'s shape, unrunnable at `7fa49f04`
+# RE-SITED AT THE #1004 MERGE — was KNOWN RED BY DESIGN at `7fa49f04`, owed for `main`'s shape
 # ---------------------------------------------------------------------------------------
 
 
 def test_996_the_judgment_partition_survives_mains_grounding_dedup() -> None:
-    """KNOWN RED ON `main` BY DESIGN — carried, marked, and not corrected here.
+    """Re-sited at the #1004 merge of `origin/main` (was KNOWN RED at `7fa49f04` by design,
+    carried until the rebase).
 
-    At `7fa49f04` this demand goes green as soon as the split lands: the tail is a clean suffix
-    on this base, which is why its sibling parity demand passes here at all. It is RED the
-    moment the port reaches `main`, and it is written now so the rebase meets a failing test
-    rather than a silent behaviour change.
+    On `main`, `_check_authz_row_grounding` sat inside `diagnose`'s single body at a position
+    that landed in `structural_diagnostics` when the #996 split first cut that body in two — a
+    dedup ordering `main`'s own single function needed (its sibling, `_check_benign_gating`,
+    re-runs the same check and the two must not print the same line twice), unrelated to the
+    clerk-retry semantics the structural/judgment split is actually about. Grounding needs a
+    fact only MAIN can state, so a clerk retrying it from the grammar and the document alone
+    would loop on a refusal it can never clear by itself — the exact refusal D7 exists to stop.
 
-    On `main` the validator emits the authz row-grounding check inside the STRUCTURAL region
-    and then emits the gating result filtered against the grounding it already reported, so the
-    judgment tail is not a clean suffix there and the byte-identical concatenation cannot hold
-    as written. Worse than the parity failure: grounding lines are POSITIONALLY structural yet
-    need a fact only MAIN can state, so the clerk would retry them every round — the exact
-    refusal D7 exists to stop.
-
-    The base is `7fa49f04` by the human's decision on the record, taken over re-basing, so this
-    is carried rather than absorbed. Whoever rebases runs this demand FIRST, and fixes it by
-    moving the grounding family into the judgment half and preserving the dedup — never by
-    weakening the parity assertion below, which would hide the defect the base choice
-    accepted."""
+    `_check_authz_row_grounding`'s computation and its report both moved into
+    `judgment_diagnostics`, which still dedupes `_check_disposition_gating`'s output against it
+    (`_check_benign_gating` re-runs the same check deliberately) — the same property, now
+    entirely within the one function that owns it."""
     doc = C.OPEN_SLOT_PROLOGUE + C.JUDGMENT_ONLY_ROWS
     structural = [str(d) for d in _structural(doc, C.OPEN_SLOT_PROLOGUE)]
     judgment = [str(d) for d in _judgment(doc, C.OPEN_SLOT_PROLOGUE)]

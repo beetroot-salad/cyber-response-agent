@@ -1,0 +1,21 @@
+{
+  "as_of": "2026-08-30 10:03:19+00:00",
+  "fences_at": 4,
+  "leads_held": [
+    "l-000",
+    "l-001",
+    "l-002",
+    "l-003"
+  ],
+  "harness_corrections": [
+    "world id 'readonly-diagnostics' \u2192 'readonly_diagnostics' (identity gate refuses '-')",
+    "world readonly_diagnostics: overlay.elastic list\u2192mapping keyed by base_pattern; inject entries unwrapped from {_id,document}",
+    "world id 'persistence-collection' \u2192 'persistence_collection' (identity gate refuses '-')",
+    "world persistence_collection: overlay.elastic list\u2192mapping keyed by base_pattern; inject entries unwrapped from {_id,document}"
+  ],
+  "captured_patterns": [
+    ".internal.alerts-security.alerts-default-*",
+    "logs-falco.alerts-*"
+  ],
+  "note": "questioner saw joined leads (query rows without payload text or summaries), alert, frontier at fences_at; its discriminator (read-only vs persistence sudo command lines) is answered by the captured l-001 payload, and worlds B/C contradict that payload (actor sre.oncall, bash parent, no container). Recorded as a questioner-input finding; not repaired."
+}

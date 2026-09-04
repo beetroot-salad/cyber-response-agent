@@ -1,4 +1,4 @@
-<!-- GENERATED verb-roster role=gather digest=93e1006fa29ca7dcdf345e5a739230a1386843d6d94ce183c94470e8dc713ab4 -->
+<!-- GENERATED verb-roster role=gather digest=f4f55642505805cab38be83988fd85162bcbcac83e8c6441540506b06f174162 -->
 ## change-mgmt
 
 - `change-mgmt.active-changes`
@@ -36,6 +36,11 @@
 - `identity.health-check`
 - `identity.list-roles`
 - `identity.list-users`
+
+## tacit-knowledge
+
+- `tacit-knowledge.health-check`
+- `tacit-knowledge.lookup`
 
 ## threat-intel
 
