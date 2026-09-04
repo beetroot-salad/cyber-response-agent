@@ -77,14 +77,6 @@ def _extract_ids(rows_text: str) -> list[str]:
     return sorted(ids)
 
 
-def _phase_header(prose: str) -> str:
-    for line in prose.splitlines():
-        line = line.strip()
-        if line:
-            return line[:200]
-    return ""
-
-
 def _current_phase(document: str) -> str:
     """The phase in force — the document's own LAST `## ` heading — never the calling prose's
     own header (HD-3): read once at the START of `record`, before this call's own prose has
@@ -338,9 +330,17 @@ async def _tool_record(  # noqa: C901, PLR0912, PLR0915 — one state machine (d
     defender_dir = deps.defender_dir
     grammar_catalog = _grammar_and_catalog(defender_dir)
 
+    # Read BEFORE this call's own append attempt (HD-3): the phase in force is the document's
+    # own LAST `## ` heading as it stood when this call began, never MAIN's just-supplied
+    # prose — the same value S6's guard is keyed on below, so the trace records the phase the
+    # guard actually used rather than re-deriving a different one after the fact.
+    document_before = read_text_utf8(inv_path) if inv_path.is_file() else ""
+    phase_at_call = _current_phase(document_before)
+    budget = _Budget()
+
     caller.record_n += 1
     trace: dict = {
-        "n": caller.record_n, "phase_header": _phase_header(text),
+        "n": caller.record_n, "phase_header": phase_at_call,
         "repair_rounds": 0, "rounds": 0, "refusals": [], "stopped_on_judgment": False,
         "held": False, "gaps": [], "prose_chars": len(text), "rows_chars": 0,
         "committed": False, "pending": 0, "ids": [],
@@ -372,10 +372,6 @@ async def _tool_record(  # noqa: C901, PLR0912, PLR0915 — one state machine (d
                 f"{PENDING_CAP}: {dropped[:200]!r}"
             )
         return finish(sections, committed=False, held=False, stopped=False)
-
-    document_before = read_text_utf8(inv_path) if inv_path.is_file() else ""
-    phase_at_call = _current_phase(document_before)
-    budget = _Budget()
 
     # ---------------------------------------------------------------------------------
     # step 0: repair round, only if the window is already open when this call begins
@@ -413,6 +409,13 @@ async def _tool_record(  # noqa: C901, PLR0912, PLR0915 — one state machine (d
     try:
         prose_receipt = _tool_append_block(deps, screened_text, verb="record")
     except ModelRetry as e:
+        # Cluster L: a trace row per CALL, early exits included, round fields zero — a refusal
+        # on MAIN's own bytes never reaches the round loop, but it is still one `record` call,
+        # and skipping the row here would make the trace undercount the run's `record` calls
+        # (O2's prompt-level half loses its denominator on exactly the calls that never asked
+        # the clerk anything).
+        trace["pending"] = len(caller.pending)
+        _append_trace(run_dir, trace)
         # A refusal reaches MAIN unchanged UNLESS nothing can ever repair it: the document
         # already carried a committed error outside the repair verb's `:R attr_updates`-only
         # scope before this call even began — append-only puts it permanently out of reach,
@@ -441,6 +444,7 @@ async def _tool_record(  # noqa: C901, PLR0912, PLR0915 — one state machine (d
     ids: list[str] = []
     rows_text = ""
     gaps: list[str] = []
+    post_accept_repair_note: str | None = None
 
     while budget.left > 0:
         if not caller.allowed():
@@ -471,11 +475,33 @@ async def _tool_record(  # noqa: C901, PLR0912, PLR0915 — one state machine (d
         try:
             _tool_append_block(deps, rows_text, verb="record")
             committed = True
-            if flagged_diagnostics(deps):
+            # Design flow 3: "Clean accept -> done; `pending` cleared." The clerk had the
+            # WHOLE backlog in its prompt this round (`_round_prompt` renders `caller.pending`
+            # verbatim) and every chance to fold each entry's resolution into the rows it just
+            # committed — an accept that lands is the backlog getting a fresh look, not a
+            # promise every entry was actually resolved. Without this, a single early pend
+            # locks the run out of ever closing again: `close_investigation` refuses while
+            # `pending` is non-empty, and nothing else ever empties it.
+            caller.pending.clear()
+            flagged_before = flagged_diagnostics(deps)
+            if flagged_before:
                 closed2, fix_refusal2 = await _repair_loop(
                     deps, caller, budget, text, grammar_catalog)
-                if not closed2 and fix_refusal2:
-                    trace["refusals"].append(fix_refusal2[:_REFUSAL_TRUNC])
+                if closed2:
+                    # D9 section (0): a repair round that ran and closed the window is
+                    # reported the same as any other repair round — silence here would make
+                    # a warn-accepted block's post-accept repair the ONE repair episode the
+                    # receipt never names.
+                    post_accept_repair_note = (
+                        f"record: repaired {len(flagged_before)} flagged row(s)"
+                    )
+                else:
+                    if fix_refusal2:
+                        trace["refusals"].append(fix_refusal2[:_REFUSAL_TRUNC])
+                    post_accept_repair_note = (
+                        f"record: {len(flagged_diagnostics(deps))} row(s) still flagged "
+                        f"after {budget.repair_rounds} round(s)"
+                    )
             break
         except ModelRetry as e:
             refusal_text = str(e)
@@ -514,6 +540,8 @@ async def _tool_record(  # noqa: C901, PLR0912, PLR0915 — one state machine (d
     trace["rows_chars"] = len(rows_text)
 
     sections = [prose_receipt]
+    if post_accept_repair_note is not None:
+        sections.append(post_accept_repair_note)
     if gave_up:
         sections.append(
             f"{OUTCOME_GIVEUP}{CLERK_ROUND_BUDGET} clerk rounds — {last_refusal}\n\n"
