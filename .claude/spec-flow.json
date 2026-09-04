@@ -2,7 +2,7 @@
   "project": "defender — an LLM SOC-analyst agent (python, pytest, uv)",
   "gate": {
     "ciConfig": ".github/workflows/ci.yml",
-    "test": "cd defender && uv run pytest tests/ -m \"not llm and not live\"",
+    "test": "cd defender && uv run pytest tests/ -m \"not live and not gate\"",
     "checks": [
       "defender/.venv/bin/ruff check . --select E,F --ignore E402,E501",
       "defender/.venv/bin/ruff check defender",
@@ -75,7 +75,8 @@
           "defender/learning/core/persist.py::_append_observations",
           "defender/learning/core/persist.py::append_pitfalls",
           "defender/learning/author/drain.py::retire",
-          "defender/learning/author/drain.py::_record_stuck"
+          "defender/learning/author/drain.py::_record_stuck",
+          "defender/evals/harness.py::materialize"
         ],
         "readers": [
           "defender/learning/author/drain.py::_tick",
@@ -256,7 +257,8 @@
           "defender/learning/branch/review.py::review",
           "defender/learning/branch/archive.py::archive_episode",
           "defender/learning/branch/cli.py::_record_episode_outcome",
-          "defender/learning/branch/cli.py::_write_family_stamp"
+          "defender/learning/branch/cli.py::_write_family_stamp",
+          "defender/runtime/observe.py::RequestLogger"
         ],
         "readers": [
           "defender/learning/branch/ledger.py::base_file",
