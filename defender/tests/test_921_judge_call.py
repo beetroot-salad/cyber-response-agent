@@ -530,7 +530,6 @@ def test_921_a_timed_out_draw_and_a_raising_draw_are_the_same_class_and_both_lea
 
     timeout = J.FakeJudge(default=reply, fault=J.Fault(raise_after=1))
     _grade(tmp_path, ep, timeout, draws=2)
-    (ep / "judge.yaml").unlink()
 
     transport = J.FakeJudge(default=reply, fault=J.Fault(fail_on=("judge:b:1",)))
     ep2 = _episode(tmp_path / "transport")

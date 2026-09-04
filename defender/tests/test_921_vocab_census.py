@@ -63,14 +63,28 @@ def test_921_judge_outcome_enum_and_its_normalizer_ship_in_defender_vocab(tmp_pa
     assert callable(vocab.normalized_judge_outcome)
 
     gate = load_lint_gate("lint_borrowed_vocabulary")
-    tree = tmp_path / "synthetic" / "defender" / "learning" / "judge"
+    synthetic = tmp_path / "synthetic"
+    defender_dir = synthetic / "defender"
+    tree = defender_dir / "learning" / "judge"
     tree.mkdir(parents=True, exist_ok=True)
+    # `gate._scan(root)` builds its corpus ONLY from files under `root` (arming is a
+    # whole-corpus property, deliberately, so a scenario can show both arming and disarming
+    # without touching the real tree) — so the file that ARMS `JUDGE_OUTCOME_ENUM` has to be
+    # IN this synthetic tree too, not just real `defender/_vocab.py`. This is a trimmed copy of
+    # its actual shape: the owned vocabulary plus a function testing membership on it beside it.
+    (defender_dir / "_vocab.py").write_text(
+        "JUDGE_OUTCOME_ENUM = frozenset(\n"
+        "    {'caught', 'corpus-contradiction', 'discard', 'survived', 'undecidable'})\n"
+        "\n"
+        "\n"
+        "def normalized_judge_outcome(value):\n"
+        "    return value if value in JUDGE_OUTCOME_ENUM else None\n", encoding="utf-8")
     (tree / "borrowed.py").write_text(
         "from defender._vocab import JUDGE_OUTCOME_ENUM\n"
         "\n"
         "def route(word):\n"
         "    return word in JUDGE_OUTCOME_ENUM\n", encoding="utf-8")
-    borrowed = {str(f) for f in gate._scan(tmp_path / "synthetic")}
+    borrowed = {str(f) for f in gate._scan(synthetic)}
     assert any("borrowed.py" in name for name in borrowed), (
         "the normalizer does not arm the gate, so nothing stops a second membership test")
 

@@ -270,6 +270,12 @@ def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(
     family_mod = _family()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
+    # `decision-discipline` needs `verdict != declared` (J4's own compare); `accepted_episode`
+    # drives both `report.md`'s disposition and the manifest's `disposition_declared` off the
+    # same value, so the mismatch this test's own bucket needs is written explicitly here, the
+    # same one-line idiom `test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline`
+    # already uses.
+    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
     base = ep / "served" / "base.jsonl"
 
     base.unlink()
@@ -358,8 +364,12 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     assert all("RunUnprocessable" in str(r) or "did not complete" in str(r) or "failed" in str(r)
                for r in reasons)
 
-    # A world with ZERO completed draws still gets its mechanical bucket.
+    # A world with ZERO completed draws still gets its mechanical bucket. A doctored world
+    # (the `staged_row` on H) with `verdict == declared` buckets `None` by design (agreement is
+    # the non-failure case) — the mismatch this assertion needs is written explicitly, same as
+    # `test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline`.
     dead = J.accepted_episode(tmp_path / "dead", ledgers={"b": [J.staged_row("b")], "c": []})
+    (dead / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
     judge_mod.grade_episode(dead, judge=J.FakeJudge(fault=J.Fault(raise_after=0)),
                             runs_base=tmp_path / "dead" / "defender-runs", draws=2)
     dead_rows = J.world_rows(J.judge_record(dead))

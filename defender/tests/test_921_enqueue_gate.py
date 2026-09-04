@@ -237,6 +237,11 @@ def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
     """
     for word in ("discard", "corpus-contradiction"):
         ep = J.accepted_episode(tmp_path / word, ledgers={"b": [J.staged_row("b")], "c": []})
+        # `accepted_episode` drives `report.md`'s disposition and the manifest's
+        # `disposition_declared` off the same value by default, so a doctored world (the
+        # `staged_row` on H) buckets `None` on agreement — write the mismatch this assertion
+        # needs explicitly, the standard idiom other bucket tests already use.
+        (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
         J.mod("learning.judge").grade_episode(
             ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(episode_outcome=word))),
             runs_base=tmp_path / word / "defender-runs", draws=1)
@@ -588,6 +593,9 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
     import yaml
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    # See the sibling test above: the doctored world's `verdict` must differ from its
+    # `declared` disposition for its bucket to be non-`None`.
+    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
     review = yaml.safe_load((ep / "review.yaml").read_text(encoding="utf-8"))
     review["episode"]["control_drift_keys"] = [
         json.dumps(["elastic", "esql", {"query": f"FROM {J.EVENTS_PATTERN} | LIMIT 5"}])]

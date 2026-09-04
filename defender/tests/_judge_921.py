@@ -565,9 +565,14 @@ class FakeSibling:
                         "path": "defender/lessons/L1.md"}) + "\n", encoding="utf-8")
         (run_dir / "alert.json").write_text(
             json.dumps({"alert_id": ALERT_ID, "rule": {"id": ALERT_ID}}), encoding="utf-8")
-        rows = self.ledgers.get(label)
-        if rows is not None:
-            write_ledger(self.episode_dir, label, rows)
+        # A real sibling that queried nothing still leaves its own (empty) served ledger behind
+        # — `Ledger` has exactly one writer per world file, and this is what a quiet world's own
+        # ledger looks like. Writing NOTHING here (as opposed to writing zero rows) is a
+        # different, ungradable state under J5's tier rule (absent input, not an empty one), so
+        # a scenario that wants THAT state names it by constructing its own `FakeSibling` with
+        # `ledgers={label: None}` is not representable — every launch this fake drives leaves a
+        # served ledger, empty or not, the same as a real completed sibling does.
+        write_ledger(self.episode_dir, label, self.ledgers.get(label) or [])
         return self.exits.get(label, 0)
 
     @property
