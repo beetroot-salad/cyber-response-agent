@@ -65,7 +65,11 @@ class AgentDefinition:
 
     role: AgentRole
     model: Callable[[], str]
-    effort: str | None
+    #: A literal for every role but the clerk (#996, D4), which reads its effort off the
+    #: environment at CALL time the same way it reads its model — `Callable[[], str]`, same
+    #: shape as `model` above, resolved once by its own caller (`ClerkCaller.call`) before the
+    #: value reaches anything that expects a plain string.
+    effort: str | Callable[[], str] | None
     tools: ToolSet = ToolSet()
     corpus_dirs: tuple[str, ...] = ()
     bash_shapes: tuple[Callable[[ResolvedRoots], tuple[Grant, ...]], ...] = ()

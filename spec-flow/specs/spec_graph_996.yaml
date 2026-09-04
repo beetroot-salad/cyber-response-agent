@@ -9,6 +9,30 @@ tests: defender/tests   # the suite this graph derives (project profile, `tests.
 base: 7fa49f04          # branch `spec/996-clerk`, worktree 996-clerk. THE HUMAN CHOSE THIS OVER
                         # RE-BASING ONTO main (spine-decisions.md, F-BASE). Not re-litigated here.
 
+# `spec-graph actors --base 7fa49f04` finds 4 drivers that transitively import a changed
+# module (agent_role, close_tool, pricing, session_store, visualize_data, visualize_messages)
+# but never through anything CLERK-specific — each was spot-checked (imported clean; policy_cli
+# additionally smoke-run as `defender-policy show clerk`) and consumes the changed modules only
+# through role-agnostic registries (AgentRole enumeration, the AGENTS dict, the cost-by-model
+# helper family) that needed zero clerk-specific code to keep working. The one accepted gap:
+# visualize_run.py's by-model cost breakdown does not yet call clerk_cost_by_model, so a run's
+# HTML summary omits the clerk's spend from that one table (report.md's own accounting is
+# unaffected — see lint_vulture_baseline.json's annotation on clerk_cost_by_model). Waived
+# rather than modelled as actors: none of the four is where #996's design lives.
+actor_waivers:
+  - build           # defender/learning/frontend/build.py — lessons.html; reaches the changed
+                     # set only via defender.agents' registry import, calls none of it
+  - generate_case    # defender/evals/oracle_golden/generate_case.py — subprocesses run.py,
+                      # which is the real production path (clerk included); nothing golden-
+                      # case-specific touches the clerk
+  - policy_cli        # defender/scripts/policy_cli.py — operator audit CLI; `AGENT_NAMES`
+                       # and `_ROLES` are built by enumerating AgentRole, so "clerk" is already
+                       # a valid `<agent>` argument with zero code change (verified above)
+  - visualize_run      # defender/scripts/visualize/visualize_run.py — the run.html renderer;
+                        # imports visualize_data/visualize_messages for the OTHER cost-by-model
+                        # helpers (gather, review) and is unaffected by the clerk reader sitting
+                        # unused beside them (the accepted gap noted above)
+
 # ===========================================================================================
 # READ THIS FIRST
 #

@@ -192,6 +192,11 @@ def _example_a_fences() -> str:
     return "\n".join(fences)
 
 
+@pytest.mark.skip(
+    reason="#996 D14: SKILL.md's Example A was ported to prose-only record() language — MAIN "
+    "no longer authors invlang fences at all, so the worked example no longer carries any to "
+    "validate. defender/skills/clerk/SKILL.md is the clerk's own reference now."
+)
 def test_example_a_accumulates_clean() -> None:
     """The flagship example, and the only one inlined into every ORIENT rather than loaded on
     demand — so it is the example the model imitates whether it reads the others or not."""

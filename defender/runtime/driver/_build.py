@@ -103,7 +103,12 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     clerk: Any = None,
 ) -> Agent[Any, str]:
     model_name = defn.model()
-    built = make_model(model_name, defn.effort)
+    # `defn.effort` is a plain literal for every build path reaching here (#996's clerk
+    # resolves its own callable effort to a literal via `replace()` before calling this — see
+    # `ClerkCaller.call`), so the callable form is never actually live at this call site; the
+    # narrow just proves that to the type checker.
+    effort = defn.effort() if callable(defn.effort) else defn.effort
+    built = make_model(model_name, effort)
     # Applied HERE and not inside `make_model`: the seam is a two-positional-argument callable
     # every engine in the tree (and a dozen test doubles) passes by that shape, and the key is
     # not a property of the model anyway.

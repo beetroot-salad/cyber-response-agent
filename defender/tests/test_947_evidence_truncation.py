@@ -437,7 +437,7 @@ def test_a_refused_dispatch_does_not_land_for_whoever_reuses_its_call_id(tmp_pat
     it, and keeping the two paths separate is the review regression beside this test.
 
     `_tool_gather`'s refusals arrive as `ModelRetry`, which the framework records as a
-    `RetryPromptPart` — the same shape `fence_count_at` already drops without counting. The
+    `RetryPromptPart` — the same shape `fence_count_at` already drops without counting. The  # lint-stale-ref: ok — historical: names the #996-deleted transcript-walk helper this scenario's property outlived
     fixture reuses the id deliberately: a provider that re-mints one after a refusal is what
     makes the stale entry reachable at all."""
     store, run_dir, session_id, _path_ids = legal_source(
@@ -461,7 +461,7 @@ def test_a_dispatch_counts_however_the_provider_spelled_its_arguments(tmp_path, 
     """    `ToolCallPart.args` is a dict on the ordinary path and a JSON STRING when the provider
     hands back unparsed arguments; both name the same lead.
 
-    Both shapes reach the store — `_appended_text` reads the same two for `append_block` and
+    Both shapes reach the store — `_appended_text` reads the same two for `append_block` and  # lint-stale-ref: ok — historical: names the #996-deleted transcript-walk helper this scenario's property outlived
     documents why — and a reader that knew only the dict would score every one of the other's
     dispatches as accounting for no lead. Which fails SAFE for the lead set (unaccounted leads
     are kept) and therefore silently: the sibling inherits the source's later leads, conclusions

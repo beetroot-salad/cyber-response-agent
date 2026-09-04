@@ -599,7 +599,7 @@ def branchable_investigation() -> str:
     go stale silently the day that vocabulary moves. Measured: block 1 of the golden holds 2
     open slots and 7 held facts.
 
-    ONE fence, because the seeded session lands one `append_block` and `fence_count_at` scores
+    ONE fence, because the seeded session lands one `append_block` and `fence_count_at` scores  # lint-stale-ref: ok — historical: names the #996-deleted transcript-walk helper this fixture's stamping property outlived
     the branch point at 1. A document with more would make the branch point's fence index run
     short of the total — legal, but it would mean the questioner is shown a prefix while
     `validate` judges the same prefix, and a fixture whose two halves agree is the one that
@@ -672,6 +672,10 @@ def seed_source_session(base: Path, src: Path) -> None:
 
     store = ss.open_store(case_id=SOURCE_CASE_ID, runs_base=base)
     try:
+        # #996, D6: `investigation.md` is already on disk (the caller writes it before this
+        # runs) — attach the reader so every request row this seeding appends gets a real
+        # document stamp, the way a production run's own store does.
+        store.document_reader = ss.document_reader_for(src)
         ss.write_case_pointer(src, case_id=SOURCE_CASE_ID, store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")

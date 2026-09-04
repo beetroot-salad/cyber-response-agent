@@ -188,11 +188,12 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
                                           defender_dir=DEFENDER, policy=policy).allow
 
     # #810: the forge used to be driven as `write_file` at budget.json, refused by the write
-    # allowlist. MAIN no longer HAS a verb that takes a write path — `append_block` is bound to
-    # investigation.md in the handler — so the model cannot NAME budget.json through the tool
-    # surface at all. The gate assertions above still pin the allowlist for every caller that
-    # can; what the driven leg now exercises is the one path the model has left, bash redirect,
-    # which the reader lane refuses. Unnameable plus refused, rather than nameable and refused.
+    # allowlist. MAIN no longer HAS a verb that takes a write path — `record` (#996, D14; was
+    # `append_block`) is bound to investigation.md in the handler — so the model cannot NAME
+    # budget.json through the tool surface at all. The gate assertions above still pin the
+    # allowlist for every caller that can; what the driven leg now exercises is the one path
+    # the model has left, bash redirect, which the reader lane refuses. Unnameable plus
+    # refused, rather than nameable and refused.
     assert MAIN_DEF.tools.write is False, (
         "MAIN holds a path-taking writer again — budget.json is nameable from the model"
     )
@@ -208,7 +209,7 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
     result, _ = drive_agent(
         MAIN_DEF, run_dir,
         [[("bash", {"command": "echo '{\"tool_calls\": 0}' > budget.json"})],
-         [("append_block", {"text": ""})]],
+         [("record", {"text": ""})]],
         limits=limits, enforce=True,
     )
     on_disk = json.loads((run_dir / "budget.json").read_text())
@@ -241,13 +242,14 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
                                        defender_dir=DEFENDER, policy=policy)
     assert not decision.allow, "report.md is no longer model-writable after R1"
 
-    # The driven half, on MAIN's post-#810 surface: `append_block` lands investigation.md, and
-    # report.md has no verb to reach it with — the model cannot supply a write path at all, so
-    # the second leg is no longer a refused call but an unmakeable one. The gate assertions
-    # above keep pinning the allow-list itself for every caller that CAN name a path.
+    # The driven half, on MAIN's post-#996 surface: `record` (was `append_block`) lands
+    # investigation.md, and report.md has no verb to reach it with — the model cannot supply a
+    # write path at all, so the second leg is no longer a refused call but an unmakeable one.
+    # The gate assertions above keep pinning the allow-list itself for every caller that CAN
+    # name a path.
     open_budget(run_dir, "r")
     drive_agent(MAIN_DEF, run_dir,
-                [[("append_block", {"text": inv_text})]],
+                [[("record", {"text": inv_text})]],
                 limits=DEFAULT_LIMITS, enforce=True)
     assert (run_dir / "investigation.md").read_text() == inv_text
     assert not (run_dir / "report.md").exists(), "report.md must not commit from the main loop"

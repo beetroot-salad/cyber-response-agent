@@ -129,7 +129,7 @@ demands:
   - {id: questioner_input_set, kind: shape, form: test, discharged_by: test_947_questioner_reads_joined_leads_alert_and_frontier_at_n, binds: ["interacts(questioner->captured_payload).payload"]}
   - {id: questioner_prompt_location, kind: seam, form: clause, outcome: {nl: "The questioner's prompt files live under learning/branch/questioner/ and not under the pipeline/ tree #922 deletes."}, binds: [questioner]}
   - {id: questioner_role_registered, kind: seam, form: test, discharged_by: test_947_questioner_role_and_definition_are_registered, binds: [AgentRole, AGENTS, QUESTIONER_DEF]}
-  - {id: role_count_moves_to_eleven, kind: coherence, form: test, discharged_by: test_947_every_hand_maintained_role_census_counts_eleven, binds: [AgentRole, AGENTS]}
+  - {id: role_count_moves_to_eleven, kind: coherence, form: test, discharged_by: test_947_every_hand_maintained_role_census_counts_twelve, binds: [AgentRole, AGENTS]}
   - {id: questioner_denies_everything, kind: negative, form: test, discharged_by: test_947_questioner_definition_grants_no_tool_and_no_verb, binds: [QUESTIONER_DEF]}
   - {id: questioner_deps_carry_only_role, kind: shape, form: test, discharged_by: test_947_questioner_deps_subtype_is_frozen_and_carries_only_role, binds: [QUESTIONER_DEF]}
   - {id: three_calls_one_role_key, kind: uniqueness, form: test, discharged_by: test_947_three_questioner_calls_share_a_role_and_differ_by_agent_id, binds: ["agent_trace.identity", QUESTIONER_DEF]}

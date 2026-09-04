@@ -278,16 +278,18 @@ def _legal_source(tmp_path, *, investigation: str | None, queries: str | None = 
     ss = store_mod()
     store, run_dir, session_id, _ = _source_run(tmp_path)
     # The call carries the DOCUMENT as its `text`, which is what a real `append_block` that
-    # authored this file would have sent. `fence_count_at` reads the appended text, so a
-    # placeholder here would land a document the store says holds no fences — a fixture
-    # asserting a convention (one fence per append) that nothing in the runtime enforces.
+    # authored this file would have sent. The document lands on disk and the reader is
+    # attached BEFORE the two store appends below (#996, D6) — every stamp they write reads
+    # the same already-final `investigation.md`, which is exactly right for this fixture's
+    # shape: one `append_block` turn authors the whole document in one call.
+    if investigation is not None:
+        (run_dir / "investigation.md").write_text(investigation, encoding="utf-8")
+    store.document_reader = ss.document_reader_for(run_dir)
     store.append(session_id, [tool_call_response("append_block",
                                                  {"text": investigation or ""},
                                                  tool_call_id="ab1")], agent_id="main")
     store.append(session_id, [tool_return_request("append_block", "ok", tool_call_id="ab1")],
                  agent_id="main")
-    if investigation is not None:
-        (run_dir / "investigation.md").write_text(investigation, encoding="utf-8")
     if queries is not None:
         (run_dir / "executed_queries.jsonl").write_text(
             '{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "esql", '
@@ -296,25 +298,33 @@ def _legal_source(tmp_path, *, investigation: str | None, queries: str | None = 
     return store, run_dir, ss.path_row_ids(store, session_id)
 
 
-def _append_document(store, session_id, text, chunks):
+def _append_document(store, run_dir, session_id, text, chunks):
     """Author `text` through `chunks` `append_block` turns, cut on fence boundaries.
 
     The document a run ends with is the concatenation of what its appends sent, and a fixture
     that writes one text to disk while sending another asserts a mapping neither half has.
     Cut on fence starts so every running concatenation is a valid prefix document — and NOT
-    one fence per chunk, because that is the convention nothing enforces and the reason
-    `fence_count_at` counts blocks rather than calls.
+    one fence per chunk, because that is the convention nothing enforces.
+
+    WRITES `run_dir/investigation.md` INCREMENTALLY, one piece at a time, and attaches the
+    real document reader before the first append (#996, D6) — every stamp this fixture lands
+    is therefore the document exactly as a real running append would have left it at that
+    point, which is what a branch cut at an intermediate return row needs to be honest about.
 
     Returns `(chunks, return_row_ids)`.
     """
     import re
     ss = store_mod()
+    store.document_reader = ss.document_reader_for(run_dir)
     starts = [m.start() for m in re.finditer(r"(?m)^```invlang", text)]
     picks = ([0] + [starts[round(i * len(starts) / chunks)] for i in range(1, chunks)]
              + [len(text)])
     pieces = [text[a:b] for a, b in zip(picks, picks[1:], strict=False)]
     returns = []
+    written = ""
     for i, piece in enumerate(pieces):
+        written += piece
+        (run_dir / "investigation.md").write_text(written, encoding="utf-8")
         store.append(session_id, [tool_call_response("append_block", {"text": piece},
                                                      tool_call_id=f"doc-{i}")], agent_id="main")
         store.append(session_id, [tool_return_request("append_block", "ok",
@@ -334,14 +344,23 @@ def _fence_turns(store, session_id, batches):
     A batch of 2 is ONE `ModelResponse` carrying two `ToolCallPart`s and ONE `ModelRequest`
     carrying both returns — the shape the framework produces when a turn calls the fence verb
     twice, which `tools.py`'s `sequential=True` orders and does not prevent. Returns the row id
-    of each turn's RETURN message, in order."""
+    of each turn's RETURN message, in order.
+
+    STAMPS a RUNNING fence count as it goes (#996, D6) — `byte_len` fixed at 0 (a diagnostic
+    no gate reads) and `fence_count` the cumulative width — deliberately DECOUPLED from
+    whatever real bytes a caller separately writes to `investigation.md`: these callers want
+    the stamp to name a specific fence count for the seed-cut logic to slice by, independent of
+    the real (often unrelated, e.g. GOLDEN's) document the fixture puts on disk."""
     from pydantic_ai.messages import (
         ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart,
     )
     ss = store_mod()
+    running = [0]
+    store.document_reader = lambda: (0, running[0])
     returns = []
     for turn, width in enumerate(batches):
         ids = [f"ab-{turn}-{i}" for i in range(width)]
+        running[0] += width
         store.append(session_id, [ModelResponse(parts=[
             ToolCallPart(tool_name="append_block", args={"text": _one_fence(i)},
                          tool_call_id=i)
@@ -356,25 +375,23 @@ def _fence_turns(store, session_id, batches):
 def test_a_turn_that_batches_two_appends_counts_two_fences(tmp_path):
     """    A turn carrying two `append_block` calls lands two fences and is counted as two.
 
-    The `actor` projection cannot say "twice": `session_store._tool_name` publishes every
-    DISTINCT tool a message names, comma-joined, so a count taken from it reads one batched
-    turn as one fence. That under-count is the SILENT direction — `FrontierAt.snapped` fires
-    only when a caller asks PAST the document's end — so the branch was admitted at a frontier
-    the run had already moved past, with `validate` reporting nothing wrong. Nothing forbids
-    the turn: `tools.py` sets `sequential=True`, which orders two calls inside one response
-    rather than preventing them, and nothing sets `parallel_tool_calls=False`.
+    #996, D6 SUPERSEDES the mechanism this test originally probed (`fence_count_at`'s replay of  # lint-stale-ref: ok — historical: names the #996-deleted transcript-walk helper this test's property outlived
+    tool-call arguments, deleted with the transcript walk) but not the PROPERTY: the stamp
+    still has to count a batched turn's SECOND fence, not silently drop it — the same failure
+    shape, reached through `StoreHandle.append`'s own stamping instead. A batch of 2 is still
+    ONE `ModelResponse` carrying two `ToolCallPart`s and ONE `ModelRequest` carrying both
+    returns, and it still stamps ONE row (one `kind='request'` row per turn) — so the read
+    below is of THAT row's stamp, not a re-derivation from the calls.
 
     Asserted against the DOCUMENT's own fence count, not against a literal, so the two halves
     of the mapping are pinned to each other rather than to a number this test chose."""
-    # provenance: `fence_count_at`'s contract — "a caller holding a message index maps it to a
-    # fence itself" (`frontier_at`); `session_store._tool_name`'s distinct-name join.
-    branch = branch_mod()
+    ss = store_mod()
     store, run_dir, session_id, _ = _source_run(tmp_path)
     returns = _fence_turns(store, session_id, [1, 2])
     document = "\n\n".join(_one_fence(f"ab-{t}-{i}") for t, i in ((0, 0), (1, 0), (1, 1)))
     (run_dir / "investigation.md").write_text(document, encoding="utf-8")
 
-    counted = branch.fence_count_at(store, session_id, returns[-1], document)
+    counted = ss.document_state_at(store, session_id, returns[-1]).fence_count
 
     assert counted == 3, (
         f"the batched turn's second fence was dropped: {counted} counted against 3 landed")
@@ -401,7 +418,7 @@ def test_a_resumed_run_inherits_the_document_its_history_claims(tmp_path):
     branch = branch_mod()
     document = GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
     store, run_dir, session_id, _ = _source_run(tmp_path)
-    pieces, returns = _append_document(store, session_id, document, 3)
+    pieces, returns = _append_document(store, run_dir, session_id, document, 3)
     landed = sum(piece.count("```invlang") for piece in pieces[:2])
     (run_dir / "investigation.md").write_text(document, encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text(
@@ -443,7 +460,7 @@ def test_a_resumed_run_inherits_the_evidence_its_prefix_names(tmp_path):
     branch = branch_mod()
     document = GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
     store, run_dir, session_id, _ = _source_run(tmp_path)
-    _pieces, returns = _append_document(store, session_id, document, 3)
+    _pieces, returns = _append_document(store, run_dir, session_id, document, 3)
     (run_dir / "investigation.md").write_text(document, encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text(
         '{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "esql", '
@@ -680,7 +697,7 @@ def test_the_frontier_is_read_at_the_branch_point_not_at_the_end_of_the_run(tmp_
 def test_a_message_that_is_not_on_mains_path_is_refused(tmp_path):
     """    An id past the source run's tip is refused rather than read as "every fence".
 
-    `fence_count_at` scores rows with `row_id <= branch_message_id`, so a number no row of
+    `fence_count_at` scores rows with `row_id <= branch_message_id`, so a number no row of  # lint-stale-ref: ok — historical: names the #996-deleted transcript-walk helper; document_state_at kept the same refusal property
     MAIN's path carries silently reads as the WHOLE document — and `fork` walks parents from
     whatever id it is handed, so the fault surfaces far away (or not at all) instead of here."""
     branch = branch_mod()

@@ -60,7 +60,8 @@ GOLDEN = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md"
 #: parallel dispatch that `sequential=True` would take away). `write_file`/`edit_file` are not
 #: MAIN's — `MAIN_DEF.tools` carries `write=False` — so they are checked over a write-granting
 #: `ToolSet` by `test_every_write_role_writer_is_sequential` below rather than here.
-WRITERS = ("append_block", "fix_row", "close_investigation")
+#: #996, D14: `record` replaces both `append_block` and `fix_row` — MAIN's only document verb.
+WRITERS = ("record", "close_investigation")
 
 #: The writers a role gets from `ToolSet(write=True)` — CORPUS_AUTHOR and LEAD_AUTHOR grant these,
 #: and MAIN does not, so `main_tools` structurally cannot see them. `edit_file` is the sharper of

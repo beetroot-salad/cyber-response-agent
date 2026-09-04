@@ -62,7 +62,7 @@ def test_replay_golden_v2sshd(tmp_path):
     # #810: investigation.md is landed by `append_block`, main's only writer. Onto an empty
     # run dir the append IS the create, which is why the golden still reconstructs whole.
     replay = ReplayFn([
-        Turn(tool_calls=[("append_block", {"text": inv_text})]),
+        Turn(tool_calls=[("record", {"text": inv_text})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="Investigation complete."),
     ])
@@ -193,7 +193,7 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     inv_text = (GOLDEN_AB3 / "investigation.md").read_text()
 
     replay = ReplayFn([
-        Turn(tool_calls=[("append_block", {"text": inv_text})]),
+        Turn(tool_calls=[("record", {"text": inv_text})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "malicious"})]),
         Turn(text="Investigation complete."),
     ])
@@ -268,7 +268,7 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
 
     before = {p.name for p in run_dir.parent.iterdir()}
     replay = ReplayFn([
-        Turn(tool_calls=[("append_block", {"text": "+ probe\n"})]),
+        Turn(tool_calls=[("record", {"text": "+ probe\n"})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="done"),
     ])

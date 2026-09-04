@@ -68,7 +68,7 @@ _SYSTEMS = ("elastic", "cmdb")
 #: this set against the tree, so a seventh authored directory fails here rather than silently
 #: making every prose copy wrong. Two of these are agent system prompts (`gather/SKILL.md`,
 #: `invlang/SKILL.md`), which is the whole of #772.
-_AUTHORED_SURFACES = ("advisory", "connect", "gather", "handbook", "invlang", "judge")
+_AUTHORED_SURFACES = ("advisory", "clerk", "connect", "gather", "handbook", "invlang", "judge")
 
 
 def _tree(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS) -> Path:

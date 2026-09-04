@@ -289,10 +289,12 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
     # #774/R1: report.md left the model's write allow-list — the golden's own disposition
     # (inconclusive) commits straight through the close tool with no gate work, so no
     # review_stages injection is needed here either.
-    # #810: investigation.md is landed by `append_block` — onto a run dir the builder seeded
-    # without it, so the append is the create and the golden still reconstructs whole.
+    # #996, D14: investigation.md is landed by `record` (was `append_block`) — onto a run dir
+    # the builder seeded without it, so the append is the create and the golden still
+    # reconstructs whole. The harness's own default scripted clerk answers "nothing to
+    # commit", so MAIN's prose lands byte-identical to the golden.
     replay = ReplayFn([
-        Turn(tool_calls=[("append_block", {"text": inv_text})]),
+        Turn(tool_calls=[("record", {"text": inv_text})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="Done."),
     ])

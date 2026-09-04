@@ -192,9 +192,9 @@ def _grant_for_surface(
     path: Path, grants: Mapping[str, VerbGrant],
 ) -> VerbGrant:
     # #996: a ROLE's own prompt (`skills/{role}/SKILL.md` — e.g. the clerk's) is scored
-    # against that role's own grant, exactly like its generated roster; a SYSTEM's SKILL.md
-    # (elastic, cmdb, …) is never a key of `grants`, so it still falls through to the
-    # gather default unchanged.
+    # against that role's own grant, exactly like its generated roster; a per-system SKILL.md
+    # is never a key of `grants` (a system name, not a role), so it still falls through to
+    # the gather default unchanged.
     if path.name in (_ROSTER_FILENAME, "SKILL.md"):
         role = path.parent.name
         if role in grants:

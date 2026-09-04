@@ -140,8 +140,8 @@ def test_invlang_deny_bounces_then_recovers(tmp_path):
     inv = run_dir / "investigation.md"
 
     main = ReplayFn([
-        Turn(tool_calls=[("append_block", {"text": "```yaml\nfoo: bar\n```\n"})]),
-        Turn(tool_calls=[("append_block", {"text": good})]),
+        Turn(tool_calls=[("record", {"text": "```yaml\nfoo: bar\n```\n"})]),
+        Turn(tool_calls=[("record", {"text": good})]),
         Turn(text="done"),
     ])
     drive(run_dir, run_id=run_id, main=main)

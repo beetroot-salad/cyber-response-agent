@@ -28,6 +28,7 @@ import pytest
 
 from defender.tests._invlang_warn_836 import (
     CLEAN_BLOCK,
+    CONCLUDE_BENIGN,
     PROLOGUE,
     REPAIRED_ROW,
     SECOND_WARN_ROW,
@@ -203,11 +204,16 @@ def test_prepare_read_before_investigation_md_exists(tmp_path):
     assert not (run / "investigation.md").exists()
     offered = offered_tool_names(deps)
 
-    assert "append_block" in offered, "the observation channel is empty — nothing was offered"
+    # #996, D14: `record` replaces `append_block` on MAIN's roster.
+    assert "record" in offered, "the observation channel is empty — nothing was offered"
     assert "fix_row" not in offered
 
+    # #996, D14: the "complementary condition" this test's docstring describes (the repair
+    # verb offered once the window opens) no longer applies to MAIN at all — fix_row is
+    # retired from its roster; `record` is offered unconditionally, window open or not.
     seed_investigation(run, WARN_DOC)
-    assert "fix_row" in offered_tool_names(deps)
+    assert "record" in offered_tool_names(deps)
+    assert "fix_row" not in offered_tool_names(deps)
 
 
 def test_warn_diagnostics_over_empty_investigation_md(tmp_path):
@@ -239,9 +245,16 @@ def test_every_gate_flags_the_same_row_set(tmp_path):
     for exc in (append_exc, close_exc):
         assert WARN_ROW in str(exc.value)
         assert SECOND_WARN_ROW in str(exc.value)
-    assert "fix_row" in offered_tool_names(deps)
+    # #996, D14: MAIN is never offered `fix_row` directly any more (the repair round runs
+    # inside `record`) — `record` is what stays offered, window open or not.
+    assert "record" in offered_tool_names(deps)
 
 
+@pytest.mark.skip(
+    reason="#996 D14: fix_row is retired from MAIN's roster entirely (no `prepare=` offer "
+    "exists for it any more — the repair round runs inside record()), so this test's whole "
+    "premise (the offer and the body's guard can disagree) no longer has a surface to probe."
+)
 def test_offer_and_body_disagree_about_the_window(tmp_path):
     """Being OFFERED the tool is never evidence the window is still open.
 
@@ -439,6 +452,14 @@ def test_the_accept_path_derives_its_warning_after_the_gate_returned_none(tmp_pa
     assert "refinement key" in result, "the rendered warning itself never reached the model"
 
 
+@pytest.mark.skip(
+    reason="#996 D14/D15: MAIN is never offered fix_row and never sees `fix_row(` in a "
+    "receipt any more (record's own receipt filters the internal writer's raw return down to "
+    "what D15 permits) — the correspondence this test pins (instruction <-> offer) has no "
+    "surface left on MAIN's side to probe. _tool_append_block's own return still names "
+    "fix_row for its DIRECT callers (D11), covered by "
+    "test_996_direct_append_block_callers_still_see_append_block."
+)
 def test_repair_instruction_names_a_verb_the_model_can_actually_call(tmp_path):
     """The refusal's repair instruction and `prepare=`'s offer are keyed off the SAME
     derivation, so whenever a message instructs repair the verb is simultaneously offered.
@@ -547,8 +568,11 @@ def test_close_gate_precedes_the_review_spend(tmp_path):
     assert stages.calls == [], "a doomed close spent a review"
 
     # ...control: with the window closed, the same call DOES drive the gate's stages.
+    # #996, D3: a model close now also owes a `:T conclude` block (unrelated to this test's
+    # own window/review mechanics) — appended here so the control reaches the review stage
+    # this test is actually about, rather than being refused one gate earlier by D3.
     deps2, run2 = main_deps(tmp_path / "control")
-    seed_investigation(run2, PROLOGUE + attr_block(REPAIRED_ROW))
+    seed_investigation(run2, PROLOGUE + attr_block(REPAIRED_ROW) + CONCLUDE_BENIGN)
     stages2 = recording_stages("holds")
     _close(deps2, "benign", stages=stages2.bundle())
     assert stages2.calls, "the recording bundle cannot see a review at all"
@@ -844,7 +868,10 @@ def test_review_challenge_answered_by_a_warn_landing_block(tmp_path):
     from defender.tests import _review_bundle
 
     deps, run = main_deps(tmp_path)
-    seed_investigation(run, PROLOGUE)
+    # #996, D3: a model close now also owes a `:T conclude` block, unrelated to this test's own
+    # window/review mechanics — seeded once, up front, so all three closes below reach the
+    # gates this test is actually about rather than being refused a gate earlier by D3.
+    seed_investigation(run, PROLOGUE + CONCLUDE_BENIGN)
 
     # The composer's `ask` is an OBJECT — `{target, prose}` (`review/reply.py:173-176`) —
     # not a list of targets. A list is refused as `Unreadable` before any routing happens,

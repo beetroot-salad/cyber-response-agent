@@ -115,7 +115,7 @@ def legal_source(
     is the CALL one row before it.
 
     The `append_block` call carries the DOCUMENT as its `text`, which is what a real append
-    that authored this file would have sent: `fence_count_at` reads the appended text, so a
+    that authored this file would have sent: `fence_count_at` reads the appended text, so a  # lint-stale-ref: ok — historical: names the #996-deleted transcript-walk helper this fixture's stamping property outlived
     placeholder there would land a document the store says holds no fences.
 
     `investigation=None` writes no document (the empty-frontier fixture) and `queries=None`
@@ -127,6 +127,15 @@ def legal_source(
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
     (run_dir / "alert.json").write_text(ALERT_DOC, encoding="utf-8")
+    # #996, D6: the document lands on disk BEFORE any store append, and the reader is attached
+    # before them too — every row this fixture appends gets stamped from the same, already-
+    # final `investigation.md`, which is exactly right for this fixture's shape: ONE
+    # `append_block` turn authors the whole document in one call, so every stamp on its path
+    # (including the ones before that call's own return) answers with the same fence count the
+    # old transcript walk would have replayed for them.
+    if investigation is not None:
+        (run_dir / "investigation.md").write_text(investigation, encoding="utf-8")
+    store.document_reader = ss.document_reader_for(run_dir)
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request("investigate the alert"), *complete_pair()],
                  agent_id="main")
@@ -134,8 +143,6 @@ def legal_source(
                                                  tool_call_id="ab1")], agent_id="main")
     store.append(session_id, [tool_return_request("append_block", "ok", tool_call_id="ab1")],
                  agent_id="main")
-    if investigation is not None:
-        (run_dir / "investigation.md").write_text(investigation, encoding="utf-8")
     if queries is not None:
         (run_dir / "executed_queries.jsonl").write_text(queries, encoding="utf-8")
     return store, run_dir, session_id, ss.path_row_ids(store, session_id)

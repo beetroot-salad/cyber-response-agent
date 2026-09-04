@@ -447,16 +447,19 @@ def test_a_fresh_store_stamps_schema_version_2(tmp_path):
     ss = store_mod()
     base = runs_base(tmp_path)
 
-    assert ss.SCHEMA_VERSION == 2, "the bump this change ships"
+    # #996 bumped this again (2 -> 3, document_state) on top of #754's own 1 -> 2 — read the
+    # live constant rather than a literal so this test states "the fresh store's own version"
+    # and stays true across a later bump instead of pinning #754's value forever.
     store = ss.open_store(case_id="case-fresh", runs_base=base)
     session_id = store.new_session(agent_id="main")
     linear_turns(store, session_id, 1)
-    assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert store.connection.execute(
+        "PRAGMA user_version").fetchone()[0] == ss.SCHEMA_VERSION
     assert ss.hydrate(store, session_id, role="analysis"), "the fresh file reads normally"
     store.close()
 
     shape = file_shape(store.path)
-    assert shape["user_version"] == 2
+    assert shape["user_version"] == ss.SCHEMA_VERSION
     assert "session_head_log" in shape["objects"], shape["objects"]
     assert "head_message_id" in shape["session_columns"], shape["session_columns"]
 

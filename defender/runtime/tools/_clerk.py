@@ -326,7 +326,13 @@ def _flagged_section(deps: AgentDeps) -> str:
     return "FLAGGED: `record` is blocked while investigation.md carries a flagged row:\n\n" + diag_lines
 
 
-async def _tool_record(deps: AgentDeps, text: str, caller: Any) -> str:
+async def _tool_record(  # noqa: C901, PLR0912, PLR0915 — one state machine (design v2 flow 1:
+    # repair round, prose append, the D7 round loop, S6's guard, the pending queue, the
+    # receipt) whose steps share too much live state (the shared clerk-call budget, the
+    # document snapshot, the trace row being built) to split without threading a dozen
+    # parameters between fragments that only ever run once, in this order, for this call
+    deps: AgentDeps, text: str, caller: Any,
+) -> str:
     run_dir = deps.run_dir
     inv_path = _investigation_path(deps)
     defender_dir = deps.defender_dir
@@ -509,7 +515,6 @@ async def _tool_record(deps: AgentDeps, text: str, caller: Any) -> str:
 
     sections = [prose_receipt]
     if gave_up:
-        dropped = ""
         sections.append(
             f"{OUTCOME_GIVEUP}{CLERK_ROUND_BUDGET} clerk rounds — {last_refusal}\n\n"
             f"{last_block}"

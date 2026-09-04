@@ -104,7 +104,7 @@ def _source_run(tmp_path, sink, *, docs):
         answer=answer_hits(docs), stores=sink,
         store_factory=store_factory(tmp_path, sink=sink),
         main_turns=[
-            *[Turn(tool_calls=[("append_block", {"text": chunk})])
+            *[Turn(tool_calls=[("record", {"text": chunk})])
               for chunk in _split_at_fences(
                   (GOLDEN / "investigation.md").read_text(encoding="utf-8"), FENCES)],
             Turn(text="Holding here; the evidence is in hand and nothing is settled."),
@@ -226,11 +226,15 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
     source = _source_run(tmp_path, sink, docs=NO_DOCS)
     spec, _prefix_ids = _spec(source, sink[0])
     inherited = (source.run_dir / "investigation.md").read_text(encoding="utf-8")
-    # `FENCES` counts the model's own `append_block` TURNS; the document also carries the
-    # harness-authored lead-0 block in front of them, so the file's own count is the baseline
-    # to compare against rather than that constant.
+    # `FENCES` counts the model's own `record` TURNS; the document also carries the
+    # harness-authored lead-0 block in front of them — offset by ONE dropped fence, though,
+    # not added: the golden's own `:T conclude` block lands under `## ANALYZE (loop 3)`
+    # (authored before #996 existed), and S6 (#996, D14/HD-3) now drops a conclude fence
+    # landing anywhere but `## REPORT` — the guard working as designed against a fixture whose
+    # shape predates it. `landed` is therefore lead-0's fence plus SIX of the golden's seven,
+    # not seven.
     landed = inherited.count("```invlang")
-    assert landed > FENCES, (
+    assert landed == FENCES, (
         f"the SOURCE run did not author its document ({source.summary_dict}); nothing below "
         "is about inheriting one")
 
@@ -242,7 +246,7 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
         "```invlang\n:L findings [id|loop|name|target|tests|system|window]\n"
         "l-007|3|sibling-probe|v-001|h-002|elastic|15:22-15:40Z\n```")
     _resume(spec, sibling_dir, main=ReplayFn([
-        Turn(tool_calls=[("append_block", {"text": own_fence})]),
+        Turn(tool_calls=[("record", {"text": own_fence})]),
         Turn(text="Resumed and stopping."),
     ]))
 

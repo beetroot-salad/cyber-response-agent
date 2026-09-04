@@ -388,7 +388,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     )
 
 
-async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams, all injected
+async def _close_investigation_async(  # noqa: PLR0913, C901 — the close's own seams, all injected, plus #996's pending-queue and conclude gates joining the existing document-gate chain
     deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds,
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
     forced: bool = False, clerk: Any = None,
@@ -420,8 +420,6 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # no reader can tell from a clean one — and this gate's value is what the report frontmatter
     # is written FROM, so normalizing here launders the injected character past the very gate
     # that exists to deny it.
-    if not forced:
-        _refuse_if_pending_prose(clerk)
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
         # Rendered from the ORDERED TUPLE, never `sorted(DISPOSITION_ENUM)`: this refusal and
         # the tool schema are read in the SAME round trip, so a fifth member appended out of
@@ -431,6 +429,10 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             f"disposition must be exactly one of {list(DISPOSITION_VALUES)} (got "
             f"{disposition!r}) — a typed enum, not free text"
         )
+    # #996: a MODEL close is refused while the clerk's pending queue is non-empty — see
+    # `_refuse_if_pending_prose`'s own docstring for why the forced close stays exempt.
+    if not forced:
+        _refuse_if_pending_prose(clerk)
     _refuse_if_host_only_verdict_misused(disposition, forced=forced)
     # R4: a COMMITTED close is terminal, and the refusal comes BEFORE the gate so a second
     # attempt cannot spend the review either. Without it a confident `malicious` can be

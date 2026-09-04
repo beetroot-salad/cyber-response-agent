@@ -333,7 +333,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     return run, truncated_by, exit_reason
 
 
-async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
+async def run_investigation(  # noqa: PLR0913, C901, PLR0915 — a composition root: every parameter is a
     *,
     alert_path: Path,
     run_dir: Path,

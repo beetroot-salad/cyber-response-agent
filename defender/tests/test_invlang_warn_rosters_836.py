@@ -96,9 +96,10 @@ def _registered_names(defn) -> set[str]:
 
 # A5 — which agents are offered the repair verb
 
-def test_exactly_one_agent_definition_is_offered_fix_row():
-    """A5: `fix_row` rides `append=True` — no new capability bit, matching N4's posture of
-    not widening the write surface — and exactly ONE definition in the tree grants it.
+def test_exactly_one_agent_definition_is_offered_record():
+    """A5, superseded by #996 D14: `record` (not `fix_row`/`append_block` any more) rides
+    `append=True` — no new capability bit, matching N4's posture of not widening the write
+    surface — and exactly ONE definition in the tree grants it.
 
     Probe PR-12 censused it so the test is written against a census rather than a guess: nine
     non-test `ToolSet(` sites, and only `driver.py:298` (MAIN_DEF) sets `append=True` (claim
@@ -117,15 +118,15 @@ def test_exactly_one_agent_definition_is_offered_fix_row():
     assert granting == {AgentRole.MAIN}
 
     main_names = _registered_names(AGENTS[AgentRole.MAIN])
-    assert "fix_row" in main_names
-    assert "append_block" in main_names
+    assert "record" in main_names
+    assert "fix_row" not in main_names, "fix_row is retired from MAIN's roster (#996, D14)"
+    assert "append_block" not in main_names, "append_block is retired from MAIN's roster (#996, D14)"
 
     ungranted = replace(
         AGENTS[AgentRole.MAIN], tools=replace(AGENTS[AgentRole.MAIN].tools, append=False)
     )
     without_append = _registered_names(ungranted)
-    assert "fix_row" not in without_append, "fix_row registers without the append grant"
-    assert "append_block" not in without_append
+    assert "record" not in without_append, "record registers without the append grant"
     assert "read_file" in without_append, "the whole roster vanished — a vacuous comparison"
 
 
@@ -219,12 +220,13 @@ def test_repair_verb_under_budget_pressure(tmp_path):
 
 
 def test_budget_stop_message_while_flagged(tmp_path):
-    """`BUDGET_REFUSAL_MESSAGE` names the survivor set the model still has — and with a
-    repair window open, today's set is the WRONG one.
+    """`BUDGET_REFUSAL_MESSAGE` names the survivor set the model still has.
 
-    It names `append_block` and closing as what is still available. Both are refused while a
-    row is flagged (M5), so the model is told to close and then refused the close: a dead end
-    manufactured by the message itself. The message must name `fix_row`.
+    Superseded by #996 (D14/D15): MAIN's repair round now runs INSIDE `record` rather than as
+    a separate `fix_row` tool call, so the dead-end this test used to probe (told to close,
+    then refused the close, while a window is open) cannot arise from the message naming the
+    wrong verb — `record` is the one survivor, window open or not, and D15 forbids naming
+    `fix_row`/`append_block` to MAIN at all (verbs its roster no longer holds).
 
     Asserted through `refusal_message`, the function that actually formats it for the model,
     with a real tripped state — not on the template constant alone."""
@@ -234,8 +236,9 @@ def test_budget_stop_message_while_flagged(tmp_path):
     text = refusal_message({"tool_calls": 99, "started_monotonic": None}, "gather", limits)
 
     assert "gather" in text, "the message is not about the refused tool at all"
-    assert "append_block" in text
-    assert "fix_row" in text, "the model is told the wrong survivor set while a window is open"
+    assert "record" in text, "the model is not told its one surviving document verb"
+    assert "append_block" not in text, "D15: the message names a verb MAIN's roster lacks"
+    assert "fix_row" not in text, "D15: the message names a verb MAIN's roster lacks"
 
 
 # the remaining by-name rosters
@@ -298,6 +301,15 @@ def test_visualize_data_tags_fix_row_to_its_phase():
     ) == ["ORIENT the alert"]
 
 
+@pytest.mark.skip(
+    reason="#996 D14 retired fix_row (and append_block) from MAIN's registered @agent.tool "
+    "roster entirely -- record replaces both, and its repair round runs as an internal "
+    "function call, never a second model-issued tool call. vulture correctly stopped "
+    "flagging 'fix_row' as an unused-but-registered symbol because it is no longer "
+    "registered at all, so the baseline entry this test pins is gone by design, not by "
+    "omission -- see lint_vulture_baseline.json's own diff (2 dropped) and "
+    "test_invlang_fix_row_836.py's _996_RETIRED_REASON for the sibling retirement."
+)
 def test_vulture_baseline_already_carries_the_fix_row_entry():
     """Brief F12: `scripts/lint/lint_vulture_baseline.json` is IN-REPO and its lint is
     CI-BLOCKING. Named for the property asserted, not the defect it forbids: a new
@@ -330,6 +342,13 @@ def test_vulture_baseline_already_carries_the_fix_row_entry():
 
 # A7 — the four model-facing prose sites
 
+@pytest.mark.skip(
+    reason="#996 D14/D15 retired MAIN's fix_row roster entry and rewrote SKILL.md's ANALYZE "
+    "section to prose-only record() language — this test's exact-wording probes (naming "
+    "`fix_row` to MAIN, the specific #810-era paragraph shape) test a surface the port "
+    "deliberately removed. test_996_the_shipped_main_skill_is_prose_only and "
+    "test_996_no_main_facing_text_instructs_row_syntax_or_a_lost_verb are its successors."
+)
 def test_model_facing_prose_updated_at_all_four_sites(tmp_path):
     """A7: FOUR model-facing sites, where M7 named one.
 
@@ -417,7 +436,8 @@ def test_main_is_not_regranted_write_file_or_edit_file():
     names = _registered_names(MAIN_DEF)
     assert "write_file" not in names
     assert "edit_file" not in names
-    assert {"append_block", "fix_row", "read_file", "bash"} <= names
+    # #996, D14: `record` replaces both `append_block` and `fix_row`.
+    assert {"record", "read_file", "bash"} <= names
 
 
 def test_write_file_not_granted_to_main(tmp_path):
@@ -435,8 +455,10 @@ def test_write_file_not_granted_to_main(tmp_path):
 
     assert "write_file" not in offered
     assert "edit_file" not in offered
-    assert "append_block" in offered
-    assert "fix_row" in offered
+    # #996, D14: `record` replaces both `append_block` and `fix_row` — MAIN is never offered
+    # `fix_row` directly any more, window open or not; the repair round runs inside `record`.
+    assert "record" in offered
+    assert "fix_row" not in offered
 
 
 def test_bash_grant_cannot_construct_a_write_reaching_investigation_md(tmp_path):

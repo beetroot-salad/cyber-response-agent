@@ -18,7 +18,6 @@ is actually threaded.
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
@@ -159,7 +158,9 @@ class ClerkCaller:
         from .review_roles import bind_review_role
 
         build = self.build if self.build is not None else build_agent_core
-        defn = replace(CLERK_DEF, effort=CLERK_DEF.effort())
+        effort_value = CLERK_DEF.effort() if callable(CLERK_DEF.effort) else CLERK_DEF.effort
+        defn = replace(CLERK_DEF, effort=effort_value)
+        assert defn.deps_cls is not None, "CLERK_DEF declares no deps_cls"
         kwargs: dict[str, Any] = {}
         if self.make_model is not None:
             kwargs["make_model"] = self.make_model

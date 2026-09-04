@@ -561,7 +561,7 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
         Turn(tool_calls=[("bash", {"command": "echo one"})]),
         Turn(tool_calls=[("bash", {"command": "echo two"})]),
         Turn(tool_calls=[("bash", {"command": "echo three"})]),
-        Turn(tool_calls=[("append_block", {"text": inv_text})]),
+        Turn(tool_calls=[("record", {"text": inv_text})]),
         Turn(text="Investigation complete."),
     ])
     summary = drive(run_dir, run_id="e2e", main=replay,
@@ -595,7 +595,7 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
         rd = materialize(tmp_path / name, GOLDEN)
         rep = rd / "investigation.md"
         replay = ReplayFn([*script,
-                           Turn(tool_calls=[("append_block", {"text": inv_text})]),
+                           Turn(tool_calls=[("record", {"text": inv_text})]),
                            Turn(text="done")])
         drive(rd, run_id=name, main=replay,
               gather=ReplayFn([Turn(text="summary")]), verbs=verbs, limits=limits)
@@ -636,11 +636,13 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
     is about now target investigation.md (still tail-tier, still model-writable across more
     than one call).
 
-    #810 made both of them `append_block`. The scenario needs the artifact built over MORE
-    THAN ONE CALL and the tail exhausted after them; it never needed the second call to be a
-    splice, and a splice is no longer expressible — the document is append-only and its verb
-    has no anchor. Two appends, and the contract is the same one: whatever completed before
-    the kill is still on disk."""
+    #810 made both of them `append_block`; #996/D14 retired that verb from MAIN's roster in
+    favor of `record`, which the clerk compiles into the same append-only document — the
+    scenario's shape (built over MORE THAN ONE CALL, tail exhausted after them) is unchanged,
+    so both writes below are `record` now. It never needed the second call to be a splice, and
+    a splice is no longer expressible — the document is append-only and its verb has no
+    anchor. Two writes, and the contract is the same one: whatever completed before the kill
+    is still on disk."""
     run_dir = materialize(tmp_path, GOLDEN)
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
@@ -648,8 +650,8 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
     expected = inv_text + addendum_block
 
     replay = ReplayFn([
-        Turn(tool_calls=[("append_block", {"text": inv_text})]),
-        Turn(tool_calls=[("append_block", {"text": addendum_block})]),
+        Turn(tool_calls=[("record", {"text": inv_text})]),
+        Turn(tool_calls=[("record", {"text": addendum_block})]),
         *tail_turns(run_dir, 15),
         Turn(text="never reached"),
     ])

@@ -104,6 +104,17 @@ def _registered_tools():
 
 # the seam
 
+_996_RETIRED_REASON = (
+    "#996 D14 retired fix_row/append_block from MAIN's registered roster (record replaces "
+    "both, and its repair round runs as an internal function call rather than a second "
+    "model-issued tool call) -- this test drives a surface MAIN no longer has. Its "
+    "repair/lost-update mechanics live on unchanged inside _tool_fix_row/_tool_append_block, "
+    "still exercised by record()'s own repair path (test_996_record_flow.py, "
+    "test_996_document_stamp.py)."
+)
+
+
+@pytest.mark.skip(reason=_996_RETIRED_REASON)
 def test_fix_row_takes_old_row_and_new_row_only(tmp_path):
     """M4's signature: two string arguments, no path and no free-form anchor.
 
@@ -790,6 +801,7 @@ def test_append_block_size_bound_unchanged_by_fix_row(tmp_path):
 
 # SEC2 / SEC3 — who may call it, and when
 
+@pytest.mark.skip(reason=_996_RETIRED_REASON)
 def test_fix_row_is_offered_only_while_the_window_is_open(tmp_path):
     """`prepare=` hides the verb when nothing is flagged — the ergonomics half of M4.
 
@@ -881,6 +893,7 @@ def test_fix_row_refused_once_the_close_committed(tmp_path):
 
 # H6 — two write calls in one model response
 
+@pytest.mark.skip(reason=_996_RETIRED_REASON)
 def test_write_verbs_execute_sequentially_within_one_response(tmp_path):
     """H6: the write verbs execute SEQUENTIALLY within one model response.
 
@@ -925,6 +938,7 @@ def test_write_verbs_execute_sequentially_within_one_response(tmp_path):
     assert text.index(first.strip()) < text.index(second.strip())
 
 
+@pytest.mark.skip(reason=_996_RETIRED_REASON)
 def test_a_repair_and_an_append_in_one_response_both_persist(tmp_path):
     """H6's own worked case: a `fix_row` and an `append_block` emitted in ONE model response
     both persist.

@@ -95,6 +95,18 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = No
     from dataclasses import replace as _replace
     if enforce is not None:
         defn = _replace(defn, budget_enforced=enforce)
+    # #996: MAIN's writer is `record`, which needs a clerk seam or its body has nothing to
+    # call — a trivial one that answers "nothing to commit" is enough for this probe, which is
+    # about the budget/accounting hooks around the call, not what the clerk compiles.
+    from defender.runtime.clerk import ClerkCaller
+
+    async def _no_op_clerk(_prompt: str) -> str:
+        return ""
+
+    clerk = ClerkCaller(
+        run_dir=run_dir, defender_dir=DEFENDER, logger=logger, instructions="probe",
+        raw=_no_op_clerk,
+    )
     agent: Agent = driver.build_agent_core(
         defn,
         deps_type=defn.deps_cls,
@@ -103,6 +115,7 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = No
         agent_id=agent_id,
         make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
         limits=limits,
+        clerk=clerk,
     )
     from defender import run_common
     from defender.runtime import box as box_mod
@@ -449,16 +462,17 @@ def test_tier_table_over_the_real_census(tmp_path):
     run that hits the cap can no longer write down what it already knows."""
     main_names = _registered_names(MAIN_DEF)
     gather_names = _registered_names(GATHER_DEF)
-    assert {"read_file", "append_block", "fix_row", "bash", "gather"} <= main_names
+    # #996, D14: `record` replaces both `append_block` and `fix_row` on MAIN's roster.
+    assert {"read_file", "record", "bash", "gather"} <= main_names
     assert not {"write_file", "edit_file"} & main_names, "the general write lane left MAIN"
     assert {"read_file", "bash", "template_search", "query"} <= gather_names
 
-    # #836 moved the SUBJECT again, the same way #810 did: while a row is flagged BOTH the
-    # append and the close are refused, so a `fix_row` left at core tier would be permanently
-    # withdrawn at the cap with nothing left that can reopen either. It is METERED, not
-    # exempt — `BUDGET_EXEMPT_TOOLS` still holds only the close.
+    # #996, D14: `record` inherits the obligation `append_block`/`fix_row` carried — while a
+    # row is flagged BOTH the append and the close are refused, so `record` at core tier would
+    # be permanently withdrawn at the cap with nothing left that can reopen either. It is
+    # METERED, not exempt — `BUDGET_EXEMPT_TOOLS` still holds only the close.
     assert {n for n in main_names if tier(n, AgentRole.MAIN) == "tail"} == \
-        {"read_file", "append_block", "fix_row"}
+        {"read_file", "record"}
     assert all(tier(n, AgentRole.GATHER) == "core" for n in gather_names)
     assert tier("gather", AgentRole.MAIN) == "core"
 
@@ -471,11 +485,11 @@ def test_tier_table_over_the_real_census(tmp_path):
     # standing, and it makes the identical point (a tail-tier write survives a tripped pool).
     inv = run_dir / "investigation.md"
     script = [[("bash", {"command": "echo hi"})],
-              [("append_block", {"text": "+ tail-tier append\n"})]]
+              [("record", {"text": "+ tail-tier record\n"})]]
     result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True)
     text = str(result.all_messages())
     assert "BUDGET" in text.upper(), "the core-tier bash was not refused on a tripped pool"
-    assert inv.is_file(), "the tail-tier append_block was refused inside the tail band"
+    assert inv.is_file(), "the tail-tier record was refused inside the tail band"
 
 
 def test_same_tool_name_on_two_agents(tmp_path):
