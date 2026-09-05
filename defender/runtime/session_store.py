@@ -403,7 +403,18 @@ class StoreHandle:
         # #996, D6: read the document's state BEFORE the transaction opens — one read, shared
         # by every row this batch inserts (one document, one moment), and outside `BEGIN
         # IMMEDIATE` so the read itself cannot contend with the write lock it is about to take.
-        stamp = self.document_reader() if self.document_reader is not None else None
+        #
+        # GUARDED ON THE LANE THAT USES IT. Only `main`'s request rows are stamped (the test
+        # is repeated inside the loop, over each message), and every gather subagent ingests
+        # through this same handle and so through this same reader — so an unguarded read paid
+        # a full `read_text` plus a whole-document `scan_fences` for every message of every
+        # lead, and threw the answer away. `_wants_stamp` is the same question the insert
+        # below asks, spelled once.
+        stamp = (
+            self.document_reader()
+            if self.document_reader is not None and _wants_stamp(agent_id, messages)
+            else None
+        )
 
         conn = self.connection
         conn.execute("BEGIN IMMEDIATE")
@@ -798,6 +809,16 @@ def resolve_session_id(run_dir: Path) -> str | None:
 
 # the path walk
 
+def _wants_stamp(agent_id: str, messages: list) -> bool:
+    """Whether this batch has a row the document stamp would land on.
+
+    ONE spelling of the two conditions the insert applies per row — `agent_id == "main"` and
+    the message being a `ModelRequest` — asked once for the batch so the read can be skipped
+    entirely when no row in it qualifies. A second, drifting spelling of "which rows get
+    stamped" is exactly what would make the read and the insert disagree."""
+    return agent_id == "main" and any(isinstance(m, ModelRequest) for m in messages)
+
+
 def path_row_ids(store: Any, session_id: str) -> list[int]:
     """The parent walk from the session's RECORDED head — never from the highest-id row it
     happens to own. A NULL head reads as an empty path; nothing re-derives a tip from
@@ -823,19 +844,38 @@ def document_reader_for(run_dir: Path) -> Any:
     """The `StoreHandle.document_reader` the production driver attaches: `investigation.md`'s
     current `(byte_len, fence_count)` at `run_dir`, read fresh on every call.
 
-    FAIL-OPEN to `(0, 0)` for a missing or fence-less document — the value the branch/resume
-    seed already treats as legitimate, with no special case: `scan_fences` never raises,
-    answering zero fences for the empty string and for header-only text, and this constructor
-    touches no filesystem itself (the read happens lazily, inside the returned callable, once
-    per `append`)."""
+    `(0, 0)` for a MISSING or fence-less document — the value the branch/resume seed already
+    treats as legitimate, with no special case: `scan_fences` never raises, answering zero
+    fences for the empty string and for header-only text, and this constructor touches no
+    filesystem itself (the read happens lazily, inside the returned callable, once per
+    `append`).
+
+    `None` — NO STAMP — for a document it cannot READ, which is a different answer and has to
+    be. It must not raise: `StoreHandle.append` calls this on every request row, outside its
+    own transaction and with no guard, so an exception propagates out of `append`, out of
+    `selection.ingest`, out of the history processor, and kills the model round. The two ways
+    that happens are the two `_tool_append_block` already catches over this very file — text
+    that is not valid UTF-8, and a transient read error — and neither is worth a round.
+
+    But it must not answer `(0, 0)` either, and that is the sharper half. `fence_count` is the
+    branch/resume TRUNCATION AUTHORITY (see this table's own DDL), and `document_state_at`
+    walks backwards and STOPS at the first stamped row it meets — so a zero written for a
+    momentary read failure outranks the previous row's real count, and the branch seeded from
+    that point gets an empty frontier for a forty-fence document. Unstamped is the honest
+    degradation: the row simply carries no opinion, and the lookup falls through to the last
+    row that did. Through `read_text_soft`, the repo's own soft reader, so the error set is
+    the pinned one rather than a hand-listed pair."""
+    from defender._io import read_text_soft
     from defender._run_paths import RunPaths
     from defender.skills.invlang.parser import scan_fences
 
-    def read() -> tuple[int, int]:
+    def read() -> tuple[int, int] | None:
         path = RunPaths(Path(run_dir)).investigation
         if not path.is_file():
             return (0, 0)
-        text = path.read_text(encoding="utf-8")
+        text, _reason = read_text_soft(path)
+        if text is None:
+            return None
         return (len(text.encode("utf-8")), len(scan_fences(text).bodies))
 
     return read

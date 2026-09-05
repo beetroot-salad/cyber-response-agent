@@ -355,17 +355,29 @@ def grant_of(role: str, pairs, *, verb_class: str = "r") -> VerbGrant:
 
 
 def shipped_grants() -> dict[str, VerbGrant]:
-    """The role -> grant mapping the real-tree audit is handed: every role that ships a
-    generated roster, keyed by the role its roster is committed under.
+    """The role -> grant mapping the real-tree audit is handed: every role whose OWN prompt or
+    roster sits in the audited surface, keyed by the role that owns the directory.
 
     Built from the shipped definitions rather than from literals, because what this mapping
-    must cover is "every role with a roster on disk" — a literal list would go stale the
-    first time a third role gets one, and the audit would then score that role's roster
-    against gather's grant and report an offence that is not one."""
+    must cover is "every role the sweep will meet a file for" — a literal list would go stale
+    the first time another role gets one, and the audit would then score that role's text
+    against gather's grant and report an offence that is not one.
+
+    IT WAS "every role with a ROSTER on disk", and #996 broke that reading: the clerk ships a
+    `skills/clerk/SKILL.md` and no roster, so `_grant_for_surface` found no key for it and fell
+    through to `_AUDIT_DEFAULT_ROLE` — scoring a role whose grant is DENY_ALL against gather's
+    22 read verbs, i.e. auditing the most restricted prompt in the tree against the most
+    permissive grant. A roster is one way to enter the surface and a prompt is another; the
+    mapping is keyed on entering it."""
     from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
+    from defender.runtime.clerk import CLERK_DEF
     from defender.runtime.driver import GATHER_DEF
 
-    return {GATHER_ROLE: GATHER_DEF.verb_grant, JUDGE_ROLE: JUDGE_DEF.verb_grant}
+    return {
+        GATHER_ROLE: GATHER_DEF.verb_grant,
+        JUDGE_ROLE: JUDGE_DEF.verb_grant,
+        CLERK_DEF.role.value: CLERK_DEF.verb_grant,
+    }
 
 
 def scoped_ticket_registry(rec: VerbRecorder, pairs, **kw) -> ScopedFakeVerbs:

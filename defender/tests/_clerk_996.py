@@ -242,7 +242,15 @@ def oversize_rows(current: str) -> str:
     prose reason and `diagnose` returns ZERO diagnostics, which is premise [16] reached on
     ORDINARY input — MAIN's prose fits under the cap but leaves the clerk's rows no headroom.
     Not an imagined fault: it is the byte-cap check sitting outside the diagnostic machinery
-    entirely."""
+    entirely.
+
+    UNFENCED, deliberately and necessarily: fenced filler would be invlang content and would
+    earn parse diagnostics, which is the one thing this fixture must not have — the property
+    it exists for is a refusal carrying NO diagnostic in either partition. A caller must
+    therefore pair it with a `GAPS:` section (`clerk_reply(oversize_rows(...), gaps=(...))`),
+    because a reply with neither a fence nor that marker is the malformed shape the round loop
+    now pends rather than writing — a clerk answering in prose used to have its prose appended
+    to the document and reported as committed rows."""
     from defender._artifact_schema import INVESTIGATION_FILE_MAX
 
     filler = "x" * (INVESTIGATION_FILE_MAX + 1024 - len(current.encode("utf-8")))

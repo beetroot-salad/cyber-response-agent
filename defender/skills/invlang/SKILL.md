@@ -142,8 +142,8 @@ lead choice is mechanical.
   IMMUTABLE — a sharpened `ident` is a new `:R` row, never a rewrite of
   the row that declared the vertex.
 - **One row per slot, per write.** The progression above runs ACROSS
-  `append_block` calls: each step is its own write, sent when gather
-  returns something the last step could not know. Two rows in ONE write
+  writes: each step lands in its own, sent when gather returns
+  something the last step could not know. Two rows in ONE write
   giving the same `(target, key)` two DIFFERENT values are refused —
   nothing happened between them to justify the second, and only the last
   would be recorded, silently dropping a value you wrote. The write, not
@@ -631,7 +631,7 @@ mechanism refutation at l-007", "escalation forced before the measurement
 landed"), not merely that it was not. Write `none` as the single row when
 nothing was deferred.
 
-Send the deferral tables FIRST, each in its own `append_block`, and
+Send the deferral tables FIRST, each in its own write, and
 `:T conclude` last. The whole document is validated on every write, so a
 `:T conclude` that lands before them is refused for commitments you were about
 to account for — while a `deferred_*` table on its own is not yet a close and
@@ -653,7 +653,7 @@ It means "loop 1 is done — every lead I will gather/analyze in it is
 committed above; I am moving to the next loop." One scalar `loop N` row,
 nothing else: the invlang above is already the loop's record, so the marker
 carries no summary or disposition. Write one `:T close` per loop, in the same
-`append_block` call that lands the loop's final `:R`/`:T resolutions`. The
+write that lands the loop's final `:R`/`:T resolutions`. The
 marker is what the runtime folds a completed loop on (see
 `runtime/compaction.fold_boundary`); it is rejected if loop N has no committed
 finding yet (you cannot close a loop you have only *planned*), so only close a

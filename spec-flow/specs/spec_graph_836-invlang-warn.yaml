@@ -279,9 +279,14 @@ demands:
     kind: behavior
     form: test
     binds: ["fix_row_offer", "interacts(fix_row->flagged_row_set)"]
-    discharged_by: test_offer_and_body_disagree_about_the_window
+    discharged_by: test_the_repair_body_re_derives_the_window_at_call_time
     # settled: being offered the tool is never evidence the window is still open; the body
     # re-derives at call time and refuses with an explicit "nothing is currently flagged".
+    # RE-SITED at #996's D14, which took `fix_row` off MAIN's roster: there is no `prepare=`
+    # offer left for the guard to disagree with, so the offer half of the pair has no surface.
+    # The BODY half — the guard, and the load-bearing half — is unchanged and still driven; it
+    # now protects `record`'s own internal repair round, which calls the writer once per row
+    # from a set derived before the first of them landed.
   - id: window_recomputed_after_fix
     kind: behavior
     form: test
@@ -861,11 +866,17 @@ demands:
     kind: seam
     form: test
     binds: ["vulture_baseline", "interacts(vulture_lint->vulture_baseline)"]
-    discharged_by: test_vulture_baseline_already_carries_the_fix_row_entry
+    discharged_by: test_the_vulture_gate_is_green_over_mains_registered_roster
     # PROMOTED by the judge: the answerer excused this as "config outside this worktree". It is
     # not — `scripts/lint/lint_vulture_baseline.json` is IN-REPO, it is roster #5, and CI's
     # vulture lint blocks on a NEW unused-looking `@agent.tool` symbol without its entry
     # (brief F12).
+    # RE-SITED at #996's D14, which retired the `fix_row` registration this demand originally
+    # named an entry for. The entry is correctly gone, so the by-name form became a claim about
+    # a registration that no longer exists; the demand is the GATE being green over whatever
+    # MAIN's roster currently holds, which is what F12 was about and what survives the next
+    # roster change too. The gate's own checker answers, rather than a second reading of the
+    # baseline file.
   - id: model_facing_prose_updated_at_all_four_sites
     kind: coherence
     form: test

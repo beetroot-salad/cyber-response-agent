@@ -529,8 +529,12 @@ def _check_attr_update_keys(
                                 f"this write, to {previous!r} and then to "
                                 f"{rec.get('value') or ''!r}; only the LAST value is recorded and "
                                 f"{previous!r} is discarded with nothing said. Give this write one "
+                                # "a LATER WRITE", never "a LATER record": this refusal is
+                                # structural, so the round loop hands it back to the CLERK to
+                                # act on, and `record` is MAIN's verb — the clerk holds no
+                                # verb at all. The write is the unit either party recognises.
                                 f"row per slot and record it whole — refining the same slot again "
-                                f"in a LATER record is the documented `??` -> candidate "
+                                f"in a LATER write is the documented `??` -> candidate "
                                 f"set -> concrete value progression and stays legal"
                             ),
                             locus=Locus(block=ATTR_UPDATES_LOCUS, row_text=row),

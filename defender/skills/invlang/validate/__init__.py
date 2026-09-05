@@ -235,6 +235,19 @@ from ._closure import (
 )
 
 
+def _parse_once(proposed_text: str) -> tuple[str, CompanionBody, list[ParseWarning]]:
+    """The newline-normalized text and its ONE parse, for a caller that wants both halves.
+
+    Every check below reads the same companion off the same bytes, so the two halves asked
+    back to back were tokenizing and projecting the document twice — on the hottest validation
+    path in the tree (every write gate, every close gate, every warn-window derivation, and
+    `record`'s own retry-or-stop decision). The halves stay independently callable and each
+    parses for itself; `partitioned_diagnostics` is what asks for both over one parse."""
+    normalized = _normalize_newlines(proposed_text)
+    companion, warnings = parse_dense_companion(normalized)
+    return normalized, companion, warnings
+
+
 def structural_diagnostics(
     proposed_text: str, current_text: str | None = None
 ) -> list[Diagnostic]:
@@ -246,14 +259,21 @@ def structural_diagnostics(
 
     Kept as a literal split of `diagnose`'s own body (not a re-derivation) so the two stay a
     byte-identical partition of it by construction; `diagnose` below is their concatenation."""
-    proposed_text = _normalize_newlines(proposed_text)
+    return _structural_over(*_parse_once(proposed_text), current_text=current_text)
+
+
+def _structural_over(
+    proposed_text: str, companion: CompanionBody, warnings: list[ParseWarning],
+    *, current_text: str | None,
+) -> list[Diagnostic]:
+    """`structural_diagnostics`'s body over a parse already in hand. `proposed_text` is the
+    NORMALIZED text `_parse_once` returned — the same value the parse was taken from."""
     if current_text is not None:
         current_text = _normalize_newlines(current_text)
 
     found: list[Diagnostic] = []
     found.extend(_plain(_check_surface(proposed_text, current_text)))
 
-    companion, warnings = parse_dense_companion(proposed_text)
     current_companion: CompanionBody | None = None
     if current_text is not None:
         # THE SAME TEXT IS THE SAME PARSE. Two callers read a committed document as its OWN
@@ -327,8 +347,12 @@ def judgment_diagnostics(
 
     `current_text` is accepted (never read) only to keep the same call shape `diagnose` and
     `structural_diagnostics` take — none of these seven checks reads a baseline."""
-    proposed_text = _normalize_newlines(proposed_text)
-    companion, _warnings = parse_dense_companion(proposed_text)
+    _normalized, companion, _warnings = _parse_once(proposed_text)
+    return _judgment_over(companion)
+
+
+def _judgment_over(companion: CompanionBody) -> list[Diagnostic]:
+    """`judgment_diagnostics`'s body over a parse already in hand."""
     if not companion:
         return []
     found: list[Diagnostic] = []
@@ -364,6 +388,23 @@ def judgment_diagnostics(
     return found
 
 
+def partitioned_diagnostics(
+    proposed_text: str, current_text: str | None = None
+) -> tuple[list[Diagnostic], list[Diagnostic]]:
+    """`(structural, judgment)` — both halves, over ONE parse of the document.
+
+    The two halves are independently callable and each parses for itself, which is right for a
+    caller that wants one of them. Every caller that wants BOTH — `diagnose` below, and
+    `record`'s own retry-or-stop decision — was otherwise tokenizing and projecting the whole
+    companion twice per call, on the hottest validation path in the tree: every write gate,
+    every close gate, every warn-window derivation. One parse, two answers, same results."""
+    normalized, companion, warnings = _parse_once(proposed_text)
+    return (
+        _structural_over(normalized, companion, warnings, current_text=current_text),
+        _judgment_over(companion),
+    )
+
+
 def diagnose(
     proposed_text: str, current_text: str | None = None
 ) -> list[Diagnostic]:
@@ -371,12 +412,18 @@ def diagnose(
     at the offending row can. `validate_companion` is the string surface over this and is what
     nearly everything calls.
 
-    Byte-identical to `structural_diagnostics(...) + judgment_diagnostics(...)` (#996's own
-    parity demand) — kept as the concatenation so every existing caller gets exactly what it
-    got before the split, while `record` is the one caller that asks the two halves apart."""
-    return structural_diagnostics(proposed_text, current_text) + judgment_diagnostics(
-        proposed_text, current_text
-    )
+    Exactly `structural_diagnostics(...) + judgment_diagnostics(...)`, and kept as that
+    concatenation: `record` is the one caller that asks the two halves apart, and a `diagnose`
+    that answered anything else would let the halves drift from the whole.
+
+    THE SET IS WHAT #996'S SPLIT PRESERVED, NOT THE ORDER. One line moved: the `:R authz`
+    row-grounding report is emitted after the structural checks rather than before
+    `_check_authz_basis`, because grounding needs a fact only MAIN can state and therefore
+    belongs to the judgment half — see `judgment_diagnostics`. A caller that renders these in
+    order (the joined refusal string, a flagged-write refusal) sees the same lines in a
+    different order on a document that trips both."""
+    structural, judgment = partitioned_diagnostics(proposed_text, current_text)
+    return structural + judgment
 
 
 def warn_diagnostics(text: str) -> tuple[Diagnostic, ...]:
@@ -614,6 +661,7 @@ __all__ = [
     "normalized_disposition",
     "outstanding_authz_contracts",
     "parse_dense_companion",
+    "partitioned_diagnostics",
     "re",
     "scan_fences",
     "validate_companion",

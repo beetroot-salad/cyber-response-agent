@@ -250,17 +250,19 @@ def test_every_gate_flags_the_same_row_set(tmp_path):
     assert "record" in offered_tool_names(deps)
 
 
-@pytest.mark.skip(
-    reason="#996 D14: fix_row is retired from MAIN's roster entirely (no `prepare=` offer "
-    "exists for it any more — the repair round runs inside record()), so this test's whole "
-    "premise (the offer and the body's guard can disagree) no longer has a surface to probe."
-)
-def test_offer_and_body_disagree_about_the_window(tmp_path):
-    """Being OFFERED the tool is never evidence the window is still open.
+def test_the_repair_body_re_derives_the_window_at_call_time(tmp_path):
+    """The BODY is the guard (SEC3): it re-derives the window when the call arrives, so a
+    repair that reaches it after the window closed is refused with an explicit reason rather
+    than acting on a stale view.
 
-    `prepare=` is ergonomics and the body is the guard (SEC3). The offer is computed once per
-    model request; the body re-derives at call time, so a call that arrives after the window
-    closed is refused with an explicit reason rather than acting on the stale offer."""
+    RE-SITED AT #996's D14. The test this replaces drove both halves of one property — that
+    being OFFERED the tool is never evidence the window is open — against `prepare=`'s offer
+    and the body's guard together. D14 retired `fix_row` from MAIN's roster, so there is no
+    offer left to disagree with; the guard is the half that survives, and it is the half that
+    was load-bearing. It now protects `record`'s own internal repair round, which calls this
+    writer once per flagged row from a set derived before the first of them landed — so a
+    second call in the same round can arrive after the window it was computed from has already
+    closed."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime.tools import _tool_fix_row
@@ -268,7 +270,9 @@ def test_offer_and_body_disagree_about_the_window(tmp_path):
     deps, run = main_deps(tmp_path)
     inv = seed_investigation(run, WARN_DOC)
 
-    assert "fix_row" in offered_tool_names(deps), "the offer was never made"
+    assert flagged_rows(inv.read_text(encoding="utf-8")) == (WARN_ROW,), (
+        "the window was never open, so its closing cannot be observed"
+    )
 
     inv.write_text(PROLOGUE + attr_block(REPAIRED_ROW), encoding="utf-8")
     with pytest.raises(ModelRetry) as exc:
@@ -452,28 +456,41 @@ def test_the_accept_path_derives_its_warning_after_the_gate_returned_none(tmp_pa
     assert "refinement key" in result, "the rendered warning itself never reached the model"
 
 
-@pytest.mark.skip(
-    reason="#996 D14/D15: MAIN is never offered fix_row and never sees `fix_row(` in a "
-    "receipt any more (record's own receipt filters the internal writer's raw return down to "
-    "what D15 permits) — the correspondence this test pins (instruction <-> offer) has no "
-    "surface left on MAIN's side to probe. _tool_append_block's own return still names "
-    "fix_row for its DIRECT callers (D11), covered by "
-    "test_996_direct_append_block_callers_still_see_append_block."
-)
 def test_repair_instruction_names_a_verb_the_model_can_actually_call(tmp_path):
-    """The refusal's repair instruction and `prepare=`'s offer are keyed off the SAME
-    derivation, so whenever a message instructs repair the verb is simultaneously offered.
+    """The repair instruction on the ACCEPT path names a verb the CALLER holds — whoever the
+    caller is.
 
-    Driven at both edges in one scenario: the instruction is read off the accept-path return
-    and the offer off `AgentInfo.function_tools` for the very next request."""
+    RE-SITED AT #996's D14/D15, and the property is unchanged: a message instructing repair
+    must name something its reader can do. What changed is that there are now two readers. A
+    DIRECT caller of the internal writer still holds `fix_row`, and the offer half of the
+    original correspondence is still driven for it. MAIN calls through `record`, whose roster
+    holds neither `fix_row` nor `append_block` and whose repair round runs inside the call —
+    and `record` passes this return through verbatim as receipt section (0), so the `fix_row`
+    spelling reached MAIN on every warn-accepted write."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, _run = main_deps(tmp_path)
+    direct_deps, _direct_run = main_deps(tmp_path / "direct")
+    direct = _tool_append_block(direct_deps, WARN_DOC)
+    assert "fix_row" in direct, "the writer's own direct callers lost their repair verb"
 
-    result = _tool_append_block(deps, WARN_DOC)
-
-    assert "fix_row" in result
-    assert "fix_row" in offered_tool_names(deps)
+    main_deps_, _main_run = main_deps(tmp_path / "main")
+    through_record = _tool_append_block(main_deps_, WARN_DOC, verb="record")
+    for lost in ("fix_row", "append_block"):
+        assert lost not in through_record, (
+            f"the accept `record` passes through to MAIN names `{lost}`, a verb D14 retired "
+            f"from its roster: {through_record!r}"
+        )
+    assert "`record`" in through_record, (
+        "the instruction MAIN is given names no verb it can actually call"
+    )
+    offered = offered_tool_names(main_deps_)
+    assert "record" in offered, (
+        f"the verb the instruction names is not on MAIN's roster: {sorted(offered)}"
+    )
+    assert "fix_row" not in offered, (
+        f"`fix_row` is back on MAIN's roster, so the instruction split is stale: "
+        f"{sorted(offered)}"
+    )
 
 
 # M5 — the gate

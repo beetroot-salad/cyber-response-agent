@@ -116,12 +116,20 @@ def test_the_same_document_without_the_defect_closes(tmp_path):
     assert (run / "report.md").is_file()
 
 
-def test_the_close_refusal_names_the_rows_and_the_repair_verb(tmp_path):
+def test_the_close_refusal_names_the_rows_and_a_move_the_model_holds(tmp_path):
     """The refusal is the model's only channel: it is told its own context IS the file, so a
     close it cannot act on is a close it will retry unchanged until the budget runs out.
 
-    Three things have to be in it — that nothing was committed, which rows are wrong, and the
-    verb that reaches them."""
+    Three things have to be in it — that nothing was committed, which rows are wrong, and a
+    move that reaches them.
+
+    THE THIRD ONE MOVED AT #996's D14, and the property is why it had to. This refusal named
+    `fix_row`, and D14 took `fix_row` (with `append_block`) off MAIN's roster: a close refusal
+    naming it is a close the model cannot act on for exactly the reason stated above, which is
+    the failure this test exists to forbid rather than a wording preference. MAIN's move is
+    prose on its next `record`, so that is what the refusal names and what is asserted here —
+    together with the absence of the two retired verbs, because "names a move" and "names a
+    move the reader has" are the same demand only if the second half is checked."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -132,7 +140,14 @@ def test_the_close_refusal_names_the_rows_and_the_repair_verb(tmp_path):
     message = str(exc.value)
 
     assert "refined twice in this write" in message
-    assert "fix_row" in message
+    assert "`record`" in message, (
+        f"the refusal names no move MAIN can actually make: {message!r}"
+    )
+    for lost in ("fix_row", "append_block"):
+        assert lost not in message, (
+            f"the close refusal names `{lost}`, a verb D14 retired from MAIN's roster — so "
+            f"the close is one the model cannot act on: {message!r}"
+        )
     assert "publishes" in message, "say why a close is the moment this is checked"
 
 

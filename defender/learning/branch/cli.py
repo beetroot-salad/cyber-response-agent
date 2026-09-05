@@ -1279,6 +1279,7 @@ def _fence_count(source: Path, branch_message_id: int, *,
     """
     from defender.runtime import session_store as session_store_mod
     from defender.runtime.branch import BranchSpec, source_session
+    from defender.runtime.branch._spec import BranchError
     from defender.skills.invlang.parser import scan_fences
 
     path = RunPaths(source).investigation
@@ -1297,6 +1298,16 @@ def _fence_count(source: Path, branch_message_id: int, *,
                           continuation_prompt=continuation_prompt, as_of=as_of)
         return session_store_mod.document_state_at(
             store, source_session(store, spec), branch_message_id).fence_count
+    except BranchError:
+        # A store with NO STAMP is not the same as no store, and it is the ordinary case
+        # rather than an exotic one: `document_state` arrived with #996's D6 under a schema
+        # bump with no migration, so every run recorded before it carries rows and no stamps —
+        # and the archived episodes this CLI branches from are exactly those. The deleted
+        # `fence_count_at` answered the document's own total here; raising instead turns a
+        # readable source into a crash. Same fallback, same reason as the `store is None` arm
+        # above: an episode with nothing to say about when has its whole document as the
+        # prefix.
+        return total
     finally:
         store.close()
 

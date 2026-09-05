@@ -15,6 +15,7 @@ from defender._report import ReportRead
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
+    clerk_cost_by_model,
     gather_cost_by_model,
     gather_cost_by_phase,
     gather_wall_by_phase,
@@ -531,8 +532,16 @@ def render_runtime_page(run_dir: Path) -> str:
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
     main_model = md["models"][0] if md["models"] else "main"
     by_model = {main_model: main_total}
+    # The clerk's bucket sits beside gather's and the review's for the reason all three are
+    # here: a paid model call inside a tool the operator never sees dispatch has to land
+    # somewhere a per-run cost view reads. One `record` spends up to six clerk calls and a run
+    # spends `record` more than any other verb, so the reader shipped un-called made this table
+    # silently short by its largest missing bucket — worse than absent, because a number that
+    # is wrong reads as one that is right. `totals["cost"]` is a different value and stays as
+    # it is: it sums the STORE, which holds neither this role's calls nor gather's.
     for by_model_costs in (
         gather_cost_by_model(run_dir, messages), review_cost_by_model(run_dir, messages),
+        clerk_cost_by_model(run_dir, messages),
     ):
         for model, cost in by_model_costs.items():
             by_model[model] = by_model.get(model, 0.0) + cost

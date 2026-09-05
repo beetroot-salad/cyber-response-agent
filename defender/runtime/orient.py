@@ -88,10 +88,14 @@ def _invlang_grammar(defender_dir: Path) -> str | None:
     text, _err = read_text_soft(defender_dir / "skills" / "invlang" / "SKILL.md")
     if text is None:
         return None
+    # ADDRESSED TO THE CLERK, which is now this text's only reader: #996's D14 stopped
+    # inlining the grammar into MAIN's orientation, and `tools/_clerk._grammar_and_catalog`
+    # prepends it to every round prompt instead. The old header told its reader to author
+    # `investigation.md` and not to Read the file — both true of MAIN and neither true of a
+    # zero-grant role that returns text and holds no read verb to be talked out of using.
     return (
-        "## invlang grammar (authoritative block syntax — author "
-        "`investigation.md` from this; do NOT Read `skills/invlang/SKILL.md`, it "
-        "is reproduced here)\n\n" + strip_frontmatter(text).strip()
+        "## invlang grammar (authoritative block syntax — compile the prose into rows that "
+        "conform to it)\n\n" + strip_frontmatter(text).strip()
     )
 
 

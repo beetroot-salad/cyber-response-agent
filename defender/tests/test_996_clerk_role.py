@@ -19,6 +19,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender._run_paths import RunPaths  # noqa: E402
+from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.runtime import observe  # noqa: E402
 from defender.scripts import pricing  # noqa: E402
 from defender.tests import _clerk_996 as C  # noqa: E402
@@ -382,7 +384,15 @@ def test_996_the_clerk_skill_enters_the_audited_model_read_surface(tmp_path: Pat
     grant withholds must be REPORTED, by path.
 
     Driven over a copied tree rather than the real one, because the real clerk prompt is
-    supposed to be clean — and a clean tree cannot tell "audited" from "not reached"."""
+    supposed to be clean — and a clean tree cannot tell "audited" from "not reached".
+
+    THROUGH `shipped_grants()`, the mapping the real-tree audit is handed, never a mapping
+    built here. A hand-built `{gather: …, clerk: …}` goes green over a path production does
+    not take: `shipped_grants()` used to carry only the roles that ship a generated ROSTER, so
+    the clerk — which ships a prompt and no roster — had no key, and `_grant_for_surface` fell
+    through to the gather default. The most restricted prompt in the tree was being scored
+    against the most permissive grant, and a test that supplies the missing key itself cannot
+    see that."""
     verb_roster = C.mod("runtime.verb_roster")
     surfaces = verb_roster.model_read_surfaces(DEFENDER)
     assert surfaces, "the model-read surface census is empty — every audit over it is vacuous"
@@ -396,8 +406,13 @@ def test_996_the_clerk_skill_enters_the_audited_model_read_surface(tmp_path: Pat
     tree = tmp_path / "defender-copy"
     shutil.copytree(DEFENDER / "skills", tree / "skills")
     shutil.copytree(DEFENDER / "scripts" / "adapters", tree / "scripts" / "adapters")
-    grants = {"gather": C.sym("agents", "GATHER_DEF").verb_grant,
-              "clerk": _clerk_def().verb_grant}
+    from defender.tests._verb_authorization_632 import shipped_grants
+
+    grants = shipped_grants()
+    assert grants.get("clerk") == _clerk_def().verb_grant, (
+        "the mapping the real audit is handed carries no clerk grant, so the clerk's prompt "
+        f"is scored against the default role's: {sorted(grants)}"
+    )
     clean = verb_roster.audit_read_surfaces(tree, grants)
     planted = tree / "skills" / "clerk" / "SKILL.md"
     planted.write_text(
@@ -454,3 +469,150 @@ def test_996_the_runtime_does_not_import_experiments(tmp_path: Path) -> None:
         "the scan does not find an experiments import even where one exists, so the clean "
         "result above says nothing"
     )
+
+
+# ---------------------------------------------------------------------------------------
+# the module graph and the trace path (#1004 review)
+# ---------------------------------------------------------------------------------------
+
+
+def test_996_the_clerk_module_imports_on_its_own() -> None:
+    """`import defender.runtime.clerk` works as the FIRST defender import of a process.
+
+    The caller needs `AgentDeps`, which lives under `runtime.tools`, and `record` needs the
+    round budget, the pending cap, the malformed-reply class and the trace path, which live
+    with the caller — a cycle. It stayed invisible because every entry point in the tree
+    (`defender.agents`, this suite) happens to reach `runtime.tools` first, so the cycle
+    resolves in that order and raises in the other: a script whose first defender import is the
+    clerk breaks on import order alone, and `experiments/invlang-clerk-986/clerk_dryrun.py` is
+    one such script. Driven in a SUBPROCESS because an import order cannot be re-tested inside
+    a process that has already imported the tree."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import defender.runtime.clerk as c; "
+        "assert c.CLERK_ROUND_BUDGET and c.PENDING_CAP and c.ClerkMalformedReply"
+    )
+    done = subprocess.run(  # noqa: S603 — this interpreter, a literal probe, no shell
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=False,
+    )
+    assert done.returncode == 0, (
+        "importing `defender.runtime.clerk` first fails — the clerk and the tools package "
+        f"close an import cycle:\n{done.stderr}"
+    )
+
+
+def test_996_the_trace_writer_and_the_resume_reader_share_one_path(tmp_path: Path) -> None:
+    """The `clerk_trace.jsonl` WRITER and the resume READER derive the path from one helper.
+
+    `record_n` is seeded off the row count so a resumed process cannot re-issue a trace
+    identity a prior pass already used (HD-2's one exception). A reader spelling the path
+    independently of the writer finds no file the day the wire-log component moves — seeding
+    ZERO, silently, on exactly the resume the seeding exists for.
+
+    Asserted on the OWNERSHIP, because agreement today is what a second spelling also has: the
+    two sides referenced `wire_logs/clerk_trace.jsonl` through two different expressions, which
+    is a filename with two owners and reads correct until one of them moves. The end-to-end
+    count is the companion half — the rows a real run wrote through the writer are the rows the
+    reader counts."""
+    writer = C.sym("runtime.tools._clerk", "_append_trace")
+    reader = C.sym("runtime.clerk", "_highest_clerk_trace_n")
+    for fn in (writer, reader):
+        assert "clerk_trace_path" in fn.__code__.co_names, (
+            f"`{fn.__name__}` builds the trace path itself instead of asking the one helper "
+            "that owns the filename — the writer and the resume reader would then move apart"
+        )
+
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    C.record_run(tmp_path, run_dir=run_dir, clerk=C.ScriptedClerk(C.clerk_reply("")),
+                 prose=[C.PROSE, C.SECOND_PROSE])
+
+    written = C.trace_rows(run_dir)
+    assert written, "the run wrote no trace rows, so the reader has nothing to disagree with"
+    assert reader(run_dir) == max(int(r["n"]) for r in written), (
+        f"the resume reader answered {reader(run_dir)} where the writer's highest trace `n` "
+        f"is {max(int(r['n']) for r in written)}"
+    )
+
+
+def test_996_the_resume_seeds_from_the_highest_identity_not_the_count(tmp_path: Path) -> None:
+    """Both identity counters resume from the HIGHEST value already issued, never from a count.
+
+    `ClerkCaller.call` spends its id before it awaits and logs only on success, and
+    `_append_trace` is best effort — so both streams can carry gaps. With `clerk:1` and
+    `clerk:3` on disk a count seeds 2 and the resumed process issues `clerk:3` a second time,
+    which is the exact collision HD-2's seeding exists to prevent and it fails silently: two
+    calls become one identity and the run's clerk spend stops being attributable per call.
+
+    Driven on a wire log and a trace written with a hole in each, because a gap is the only
+    input on which a count and a maximum differ."""
+    run_dir = C.new_run_dir(tmp_path)
+    wire = RunPaths(run_dir).wire_log
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    wire.write_text(
+        '{"agent_id": "clerk:1"}\n{"agent_id": "main"}\n{"agent_id": "clerk:3"}\n',
+        encoding="utf-8")
+    C.trace_path(run_dir).write_text(
+        '{"n": 1}\n{"n": 4}\n', encoding="utf-8")
+
+    assert C.sym("runtime.clerk", "_highest_clerk_wire_call")(run_dir) == 3, (
+        "the wire-log seed counted rows instead of reading the highest id — the next call "
+        "re-issues `clerk:3`"
+    )
+    assert C.sym("runtime.clerk", "_highest_clerk_trace_n")(run_dir) == 4, (
+        "the trace seed counted rows instead of reading the highest `n`"
+    )
+
+    caller = C.sym("runtime.clerk", "make_clerk_caller")(
+        run_dir, C.DEFENDER, logger=None, raw=lambda prompt: prompt)
+    assert (caller.n, caller.record_n) == (3, 4), (
+        f"the caller resumed at {(caller.n, caller.record_n)} — its next call collides with "
+        "an identity already on disk"
+    )
+
+
+def test_996_the_clerk_ceiling_releases_the_queue_it_can_no_longer_drain(
+    tmp_path: Path,
+) -> None:
+    """Past the clerk ceiling, a non-empty queue is RELEASED and named — never held against a
+    close that can no longer be earned.
+
+    `close_investigation` refuses a MODEL close while `pending` is non-empty and tells MAIN to
+    call `record` again so it compiles. Past the ceiling every `record` makes no clerk call at
+    all, so that step provably cannot happen: held, the queue refuses every close for the rest
+    of the run and the framework force-closes `unresolved`, discarding the disposition the run
+    reached. The entries' prose is on the document, so what is lost is the compilation, and the
+    receipt says which.
+
+    Driven at a ceiling of one, with a faulted first call to put something in the queue."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+
+    class _FaultThenSilent:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def __call__(self, request):  # noqa: ANN001 — mirrors the seam's own shape
+            self.prompts.append(str(request))
+            raise ConnectionError("scripted clerk transport fault")
+
+    clerk = _FaultThenSilent()
+    _, main, _ = C.record_run(
+        tmp_path, run_dir=run_dir, clerk=clerk,
+        limits={**DEFAULT_LIMITS, "max_tool_calls": 1},
+        prose=[C.PROSE, C.SECOND_PROSE])
+
+    metered = main.receipts[-1]
+    assert "ceiling" in metered.lower(), (
+        f"the last call did not take the metered arm: {C.outcome_lines(metered)}"
+    )
+    assert "will not be compiled" in metered, (
+        f"the queue was held past the ceiling with no way to drain it: {metered!r}"
+    )
+
+    close_tool = C.mod("runtime.close_tool")
+    caller = C.sym("runtime.clerk", "ClerkCaller")(
+        run_dir=run_dir, defender_dir=C.DEFENDER, logger=None, instructions="")
+    close_tool._refuse_if_pending_prose(caller)  # an emptied queue refuses nothing

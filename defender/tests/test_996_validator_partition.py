@@ -148,3 +148,47 @@ def test_996_the_judgment_partition_survives_mains_grounding_dedup() -> None:
         "fact only MAIN can state — the refusal D7 exists to stop. This is the known-red "
         f"demand: fix it at the rebase by moving the family, not by relaxing this: {grounding}"
     )
+
+
+def test_996_the_two_halves_are_asked_over_one_parse() -> None:
+    """`partitioned_diagnostics` answers both halves over ONE parse of the document.
+
+    `diagnose` is the split's own concatenation, so asking the halves one after the other
+    tokenized and projected the whole companion twice — on the hottest validation path in the
+    tree (every write gate, every close gate, every warn-window derivation) and on `record`'s
+    own retry-or-stop decision, which asks for both by construction.
+
+    Counted at `scan_fences`, whose `lru_cache` is the one place in the pass that records how
+    many times a document was walked; the two forms are driven over the same bytes from a
+    cleared cache, so the difference is the second parse and nothing else. Parity with
+    `diagnose` is asserted alongside, so the cheaper form cannot buy its parse back by
+    answering something different."""
+    from defender.skills.invlang.parser import scan_fences
+    from defender.skills.invlang.validate import (
+        judgment_diagnostics,
+        partitioned_diagnostics,
+        structural_diagnostics,
+    )
+
+    doc = C.OPEN_SLOT_PROLOGUE + C.JUDGMENT_ONLY_ROWS
+
+    def walks(run) -> int:
+        scan_fences.cache_clear()
+        run()
+        info = scan_fences.cache_info()
+        return info.hits + info.misses
+
+    together = walks(lambda: partitioned_diagnostics(doc, C.OPEN_SLOT_PROLOGUE))
+    apart = walks(lambda: (
+        structural_diagnostics(doc, C.OPEN_SLOT_PROLOGUE),
+        judgment_diagnostics(doc, C.OPEN_SLOT_PROLOGUE),
+    ))
+
+    structural, judgment = partitioned_diagnostics(doc, C.OPEN_SLOT_PROLOGUE)
+    assert [str(d) for d in diagnose(doc, C.OPEN_SLOT_PROLOGUE)] == [
+        str(d) for d in (structural + judgment)
+    ], "the one-parse form answers something other than the concatenation it stands for"
+    assert together < apart, (
+        f"asking for both halves together walked the document {together} times and asking "
+        f"them apart walked it {apart} — the combined form is parsing twice"
+    )

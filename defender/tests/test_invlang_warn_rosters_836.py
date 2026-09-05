@@ -26,7 +26,6 @@ bash construction reaches `investigation.md`.
 """
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import sys
@@ -301,43 +300,34 @@ def test_visualize_data_tags_fix_row_to_its_phase():
     ) == ["ORIENT the alert"]
 
 
-@pytest.mark.skip(
-    reason="#996 D14 retired fix_row (and append_block) from MAIN's registered @agent.tool "
-    "roster entirely -- record replaces both, and its repair round runs as an internal "
-    "function call, never a second model-issued tool call. vulture correctly stopped "
-    "flagging 'fix_row' as an unused-but-registered symbol because it is no longer "
-    "registered at all, so the baseline entry this test pins is gone by design, not by "
-    "omission -- see lint_vulture_baseline.json's own diff (2 dropped) and "
-    "test_invlang_fix_row_836.py's _996_RETIRED_REASON for the sibling retirement."
-)
-def test_vulture_baseline_already_carries_the_fix_row_entry():
+def test_the_vulture_gate_is_green_over_mains_registered_roster():
     """Brief F12: `scripts/lint/lint_vulture_baseline.json` is IN-REPO and its lint is
-    CI-BLOCKING. Named for the property asserted, not the defect it forbids: a new
-    `@agent.tool`-registered function looks unused to vulture — pydantic-ai dispatches it by
-    tool NAME, never by symbol — so WITHOUT a baseline entry the gate would fail on a finding
-    that is a false positive by construction. This test pins that the checked-in baseline
-    ALREADY carries the `fix_row` entry, not that vulture flags its absence.
+    CI-BLOCKING. A `@agent.tool`-registered function looks unused to vulture — pydantic-ai
+    dispatches it by tool NAME, never by symbol — so a roster change that does not carry its
+    baseline change ships red CI, which is not shipped.
 
-    The answerer excused this as "config outside this worktree"; that excuse belongs to
-    `.claude/spec-flow.json`, not to a file the repo ships and CI reads. The judge promoted
-    it back, and it is a demand rather than a chore because a spec that ships red CI is not
-    shipped.
+    RE-SITED AT #996's D14. The test this replaces pinned one entry by name (`fix_row`), and
+    D14 retired that symbol from the roster, so the entry is correctly gone and the assertion
+    became a claim about a registration that no longer exists. The property underneath it is
+    about the GATE, not about any one entry: whatever MAIN's roster currently holds, the
+    checked-in baseline covers it and the lint reports nothing new. That survives the next
+    roster change too, which is the failure mode the by-name form could not see — a new verb
+    registered without its entry reads as a pass right up until CI.
 
-    The four sibling entries are asserted alongside so the shape of the required entry is
-    read off the file rather than invented."""
-    entries = json.loads(VULTURE_BASELINE.read_text(encoding="utf-8"))["entries"]
-    tool_entries = {
-        k for k in entries
-        if k.startswith("defender/runtime/tools/__init__.py: unused function ")
-    }
-
-    assert any("'fix_row'" in k for k in tool_entries), (
-        "no vulture baseline entry for the registration-only `fix_row` symbol — CI's vulture "
-        f"lint blocks on it. Siblings present: {sorted(tool_entries)}"
+    The gate's own checker is what answers, rather than a second reading of the baseline file:
+    a test that re-derives which symbols vulture would flag would be asserting against its own
+    model of the tool, not against the tool CI runs."""
+    lint = REPO_ROOT / "scripts" / "lint" / "lint_vulture.py"
+    proc = subprocess.run(  # noqa: S603 — this interpreter, an in-repo lint, no shell
+        [sys.executable, str(lint)], capture_output=True, text=True, check=False,
     )
-    assert {"'append_block'", "'read_file'"} <= {
-        k.split("unused function ")[1].split(" (")[0] for k in tool_entries
-    }
+    assert proc.returncode == 0, (
+        "CI's vulture gate is red — a registration-only symbol on MAIN's roster has no "
+        f"baseline entry:\n{proc.stdout}\n{proc.stderr}"
+    )
+    assert "0 new" in proc.stdout, (
+        f"the vulture gate reports new findings: {proc.stdout!r}"
+    )
 
 
 # A7 — the four model-facing prose sites
@@ -347,7 +337,11 @@ def test_vulture_baseline_already_carries_the_fix_row_entry():
     "section to prose-only record() language — this test's exact-wording probes (naming "
     "`fix_row` to MAIN, the specific #810-era paragraph shape) test a surface the port "
     "deliberately removed. test_996_the_shipped_main_skill_is_prose_only and "
-    "test_996_no_main_facing_text_instructs_row_syntax_or_a_lost_verb are its successors."
+    "test_996_no_main_facing_text_instructs_row_syntax_or_a_lost_verb are its successors -- "
+    "and site 4, validate_investigation's over-bound remedy, is now covered by the second of "
+    "those: _artifact_schema.py joined MAIN_FACING_MODULES once the remedy stopped naming "
+    "`fix_row` to a MAIN that no longer holds it, which is this site's own defect from the "
+    "other side."
 )
 def test_model_facing_prose_updated_at_all_four_sites(tmp_path):
     """A7: FOUR model-facing sites, where M7 named one.

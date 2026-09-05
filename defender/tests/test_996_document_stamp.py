@@ -593,3 +593,41 @@ def test_996_render_and_trace_readers_are_unaffected_by_the_stamp_table(
     assert rendered[0] == rendered[1], (
         f"the send-role render differs between a stamped and an unstamped store: {rendered}"
     )
+
+
+def test_996_an_unreadable_document_leaves_the_row_unstamped(tmp_path: Path) -> None:
+    """A document the stamp reader cannot READ neither raises nor stamps a zero: it answers
+    NO STAMP, and the branch point falls through to the last row that had one.
+
+    Two failures are in play and only one of them is obvious. It must not raise —
+    `StoreHandle.append` calls this on every request row, outside its own transaction and with
+    no guard, so an exception propagates out of `append`, out of the history processor, and
+    takes the model round with it, over the same two faults `_tool_append_block` already
+    catches on this file.
+
+    And it must not answer `(0, 0)`, which is the half a fail-open gets wrong. `fence_count` is
+    the branch/resume truncation authority and `document_state_at` STOPS at the first stamped
+    row it meets walking back — so a zero written for a momentary read failure outranks the
+    real count beside it, and a forty-fence document seeds a sibling with none. Driven on both:
+    the reader's own answer, and the branch lookup falling through it to the earlier stamp."""
+    ss = store_mod()
+    run_dir = C.new_run_dir(tmp_path)
+    RunPaths(run_dir).investigation.write_bytes(b"\xff\xfe not utf-8 \x00")
+
+    read = C.sym("runtime.session_store", "document_reader_for")(run_dir)
+    assert read() is None, (
+        f"the unreadable document was stamped {read()!r} — `fence_count` is the truncation "
+        "authority and this value outranks the real one on the row before it"
+    )
+
+    store = make_store(tmp_path)
+    session = store.new_session(agent_id="main")
+    store.document_reader = _reader_for(C.PROLOGUE)
+    r1 = store.append(session, [user_request("investigate")], agent_id="main")[0]
+    store.document_reader = read
+    r2 = store.append(session, [user_request("again")], agent_id="main", parent_id=r1)[0]
+
+    assert ss.document_state_at(store, session, r2).fence_count == C.fences(C.PROLOGUE), (
+        "the branch point at the unreadable row answered its own zero instead of falling "
+        "through to the last row that carried a real count"
+    )

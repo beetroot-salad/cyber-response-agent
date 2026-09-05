@@ -173,37 +173,46 @@ def test_a_shipped_inconclusive_document_names_its_gap_in_the_ceiling_test_block
         )
 
 
-def _example_a_fences() -> str:
-    """Example A's fences, concatenated in document order — the document the run would hold
-    after writing every block the example shows, which is what the gate sees.
+def _example_a_section() -> str:
+    """`defender/SKILL.md`'s Example A section.
 
-    Per-fence validation would be the weaker question: each fragment parses alone, and the
-    defects that matter across an accumulating document (a hypothesis id the later `:T` cites,
-    an `:R attr_updates` target the prologue must declare) only appear once the blocks are
-    stacked.
-    """
+    ANCHORED ON THE SECTION HEADERS rather than on an offset: the walk has to keep meaning
+    "Example A" as the section is edited, and a renamed header raises out of `str.index` here
+    — the loud failure this module exists to keep."""
     text = (_DEFENDER / "SKILL.md").read_text(encoding="utf-8")
     start = text.index("### Example A — FIM checksum change")
     end = text.index("### More worked examples", start)
-    fences = _FENCE_RE.findall(text[start:end])
-    # A renamed header must fail LOUDLY. Silently finding zero fences is the shape of a guard
-    # that stopped guarding, which is the failure this whole module exists to end.
-    assert len(fences) >= 3, "Example A's invlang fences moved — re-anchor this walk"
-    return "\n".join(fences)
+    return text[start:end]
 
 
-@pytest.mark.skip(
-    reason="#996 D14: SKILL.md's Example A was ported to prose-only record() language — MAIN "
-    "no longer authors invlang fences at all, so the worked example no longer carries any to "
-    "validate. defender/skills/clerk/SKILL.md is the clerk's own reference now."
-)
-def test_example_a_accumulates_clean() -> None:
-    """The flagship example, and the only one inlined into every ORIENT rather than loaded on
-    demand — so it is the example the model imitates whether it reads the others or not."""
-    doc = _example_a_fences()
-    _body, warnings = parse_dense_companion(doc)
-    assert [w.format() for w in warnings] == []
-    assert validate_companion(doc, None) == []
+def test_example_a_teaches_prose_and_not_rows() -> None:
+    """The flagship example — the only one inlined into every ORIENT rather than loaded on
+    demand, so it is the example the model imitates whether it reads the others or not —
+    carries NO invlang fence.
+
+    RE-SITED AT #996's D14. The test this replaces validated Example A's own fences as an
+    accumulating document; D14 took the grammar off MAIN entirely, the example was ported to
+    prose-only `record` language, and there are no fences left in it to validate. The property
+    that survives is the other side of that coin, and it is the one the port can actually
+    regress: a worked example that grows a fence back is teaching MAIN to author rows only the
+    clerk may write, in the one text every single ORIENT pays for.
+
+    The "a shipped worked example validates" half did not go anywhere. The two load-on-demand
+    examples still carry fences, and they are still driven — named here, so their falling out
+    of the corpus walk is a failure rather than a silence."""
+    assert "```invlang" not in _example_a_section(), (
+        "the flagship worked example carries an invlang fence again — MAIN holds no grammar "
+        "under D14, so this teaches it to imitate rows it cannot write"
+    )
+
+    on_demand = {p.name for p in corpus_docs()}
+    for still_validated in (
+        "example-b-parallel-iam-cmdb.md", "example-c-cumulative-escalation.md",
+    ):
+        assert still_validated in on_demand, (
+            f"{still_validated} fell out of the validated corpus, so the shipped worked "
+            "examples are no longer checked against the write gate at all"
+        )
 
 
 def _invlang_grammar_fences() -> str:

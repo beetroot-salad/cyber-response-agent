@@ -671,10 +671,18 @@ def test_996_a_refusal_with_no_diagnostic_surfaces_and_holds_the_block(tmp_path:
 
     The design words six outcome lines and this is a SEVENTH the resolutions add, so the
     assertion is on what the resolution requires — exactly one outcome line, none of the six,
-    naming the refusal — rather than on a string nobody has chosen."""
+    naming the refusal — rather than on a string nobody has chosen.
+
+    The reply carries a `GAPS:` section because the clerk's contract says every reply does, and
+    the round loop now holds it to that: a reply with neither a fence nor that marker is a
+    model that lost the format and is pended rather than written. `oversize_rows` has to stay
+    UNFENCED for its own reason (fenced filler earns parse diagnostics, and this fixture's
+    whole property is a refusal that carries none), so the marker is what keeps it a
+    well-formed reply — which is also what a real clerk emits."""
     run_dir = C.new_run_dir(tmp_path)
     C.seed(run_dir, C.PROLOGUE)
-    clerk = C.ScriptedClerk(C.clerk_reply(C.oversize_rows(C.PROLOGUE)))
+    clerk = C.ScriptedClerk(C.clerk_reply(
+        C.oversize_rows(C.PROLOGUE), gaps=("the prose left the rows no headroom",)))
     _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
 
     receipt = main.receipt
@@ -1599,3 +1607,926 @@ def test_996_lead_zero_and_seed_rows_are_outside_the_record_scope(
         "the positive control did not land, so the negative above is vacuous"
     )
     assert main.receipts, "MAIN received no receipt"
+
+
+# ---------------------------------------------------------------------------------------
+# the faults the round loop and the receipt used to swallow (#1004 review)
+# ---------------------------------------------------------------------------------------
+
+
+def test_996_a_post_accept_repair_fault_is_named_rather_than_thrown(tmp_path: Path) -> None:
+    """A clerk fault inside the POST-ACCEPT repair round reaches MAIN as a receipt, never as a
+    raised exception.
+
+    The two repair sites are the same call — `_repair_loop` raises a transport fault or an
+    unparseable reply from either — and step 0's site catches both. This one did not, so a
+    clerk that answered the round and then dropped its connection on the repair took the whole
+    agent run down, with no trace row for a call whose rows had already landed. The rows ARE
+    committed here, so the prose is not pended: the fault is named and the window stays open,
+    which section (3) reports."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    # round 1 warn-accepts, opening the window; the repair round that follows faults.
+    clerk = C.ScriptedClerk(C.clerk_reply(C.WARN_ROWS), fault=C.Fault(raise_after=1))
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
+
+    assert clerk.calls >= 2, (
+        f"the post-accept repair round never ran ({clerk.calls} clerk call(s)), so this "
+        "scenario never reached the site under test"
+    )
+    receipt = main.receipt
+    assert "ConnectionError" in receipt, (
+        f"the repair round's fault is not named in the receipt at all: {receipt!r}"
+    )
+    assert C.WARN_ROW in C.document(run_dir), (
+        "the rows the round had already committed are not on the document"
+    )
+    assert C.trace_rows(run_dir), "the faulting call wrote no trace row"
+
+
+def test_996_a_call_whose_budget_went_to_repair_pends_rather_than_claiming_six_rounds(
+    tmp_path: Path,
+) -> None:
+    """Repair rounds and round-loop rounds draw on ONE budget, so a repair pass that closes the
+    window on the LAST of the six leaves the round loop with nothing to spend.
+
+    That call appends MAIN's prose and shows it to no clerk at all. Reported as a give-up it
+    claimed six clerk rounds none of which ran, and — because a give-up deliberately does not
+    queue (`..._a_giveup_does_not_push_onto_pending`) — the prose sat on disk uncompiled, past
+    a close gate that only looks at `pending`. Nothing was attempted, so this is a FAULT: the
+    prose is queued and the next `record` re-serves it, which is where the queue is
+    observable."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE + C.WARN_ROWS)
+    # Five declined repair rounds, then one that lands the legal repair on the last of the six.
+    clerk = C.ScriptedClerk(
+        *[C.repair_reply()] * 5, C.repair_reply(C.REPAIR_PAIR), C.clerk_reply(""),
+    )
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk,
+                              prose=[C.PROSE, C.SECOND_PROSE])
+
+    first = main.receipts[0]
+    assert C.OUTCOME_GIVEUP not in first, (
+        f"a call that ran ZERO clerk rounds reported a give-up: {C.outcome_lines(first)}"
+    )
+    assert C.PROSE in C.document(run_dir), "MAIN's prose never landed, so nothing was at risk"
+    assert len(clerk.prompts) >= 7, (
+        f"the second `record` never reached the clerk ({len(clerk.prompts)} call(s))"
+    )
+    queued = C.pending_section(clerk.prompts[-1])
+    assert queued is not None, "the second call's turn carries no `pending:` slot at all"
+    assert C.PROSE in queued, (
+        "the prose that reached no clerk round was not queued — it is on disk, uncompiled, "
+        "and the close gate reads `pending`, so nothing will ever compile it"
+    )
+
+
+def test_996_the_giveup_line_names_the_rounds_actually_spent(tmp_path: Path) -> None:
+    """A give-up names the rounds THIS call spent, never the budget constant.
+
+    The two halves share one pool, so a call whose repair rounds took part of it gives up after
+    fewer than six — and a receipt that says six over four is the one number MAIN has for how
+    much of the budget its next prose can still buy."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE + C.WARN_ROWS)
+    # One declined repair round, then the repair; four round-loop rounds are then all that is
+    # left, and every one of them is refused structurally.
+    clerk = C.ScriptedClerk(
+        C.repair_reply(), C.repair_reply(C.REPAIR_PAIR),
+        C.clerk_reply(C.UNDECLARED_TARGET_ROWS),
+    )
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
+
+    receipt = main.receipt
+    assert C.OUTCOME_GIVEUP in receipt, C.outcome_lines(receipt)
+    assert f"{C.OUTCOME_GIVEUP}4 clerk rounds" in receipt, (
+        "the give-up line does not name the four rounds this call actually spent: "
+        f"{C.outcome_lines(receipt)}"
+    )
+
+
+def test_996_the_clerk_ceiling_is_not_reported_as_an_accept(tmp_path: Path) -> None:
+    """Past the run's clerk ceiling, `record` commits NOTHING — and says so, in the receipt and
+    in the trace row alike.
+
+    O10's arm is METERED, not refused: MAIN's prose still lands. What it must not do is report
+    the call as an accept — a `committed: true` trace row beside a receipt reading "nothing to
+    commit" is the one pairing that makes the trace unusable as the port's own evidence."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, limits=limits,
+                              clerk=C.ScriptedClerk(C.clerk_reply(C.CLEAN_ROWS)),
+                              prose=[C.PROSE, C.SECOND_PROSE])
+
+    metered = main.receipts[-1]
+    for accept in (C.OUTCOME_COMMITTED, C.OUTCOME_COMMITTED_ANON):
+        assert accept not in metered, (
+            f"the metered call reported an accept: {C.outcome_lines(metered)}"
+        )
+    assert "ceiling" in metered.lower(), (
+        f"the metered call's receipt does not say why nothing was compiled: {metered!r}"
+    )
+    rows = C.trace_rows(run_dir)
+    assert rows, "no trace rows at all"
+    assert rows[-1]["committed"] is False, (
+        "the metered call's trace row says it committed rows; it made no clerk call at all"
+    )
+
+
+def test_996_a_conclude_fence_screened_out_of_mains_prose_is_named(tmp_path: Path) -> None:
+    """The screen over MAIN'S OWN prose reports what it removed, exactly as the clerk-side drop
+    does.
+
+    Both sides run one rule, so both owe MAIN the same note. Without it the receipt for prose
+    that was ONLY a conclude fence reads "appended 0 bytes" and nothing else: the model is told
+    its record landed, with no way to learn that the block it wrote is not in the document and
+    has to be restated under `## REPORT`."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    smuggled = "Recording the finding:\n\n" + C.CONCLUDE_ROWS
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, prose=[smuggled],
+                              clerk=C.ScriptedClerk(C.clerk_reply("")))
+
+    assert "disposition" not in C.document(run_dir), "the screen did not run at all"
+    receipt = main.receipt
+    assert "conclude" in receipt.lower(), (
+        f"MAIN's own prose lost a `:T conclude` fence and the receipt never said so: "
+        f"{receipt!r}"
+    )
+    assert "REPORT" in receipt, (
+        "the note does not name the header the block would have needed"
+    )
+
+
+def test_996_an_early_conclude_in_one_fence_does_not_discard_the_others(
+    tmp_path: Path,
+) -> None:
+    """S6 excises the offending FENCE, not the whole reply.
+
+    The screen applied to MAIN's prose has always been surgical; the clerk-side test was a
+    substring scan over the joined reply, so a round that grounded real rows in one fence and
+    concluded early in another committed nothing — burning a `record` call and a clerk round
+    over rows the identical rule keeps on the other side of it. The dropped block is still held
+    on `pending` for the phase that can take it."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    clerk = C.ScriptedClerk(
+        C.clerk_reply(C.CLEAN_ROWS + C.CONCLUDE_ROWS), C.clerk_reply(""),
+    )
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk,
+                              prose=[C.PROSE, C.SECOND_PROSE])
+
+    doc = C.document(run_dir)
+    assert "attrs.owner" in doc, (
+        "the grounded rows were discarded along with the premature conclude block"
+    )
+    assert "disposition" not in doc, "the premature conclude block landed under `## ANALYZE`"
+    receipt = main.receipts[0]
+    assert "conclude" in receipt.lower(), f"the drop is not named: {receipt!r}"
+    # READ OFF THE `pending:` SLOT, never off the whole turn: the grammar and catalog the turn
+    # also carries name `termination.category` themselves, so a whole-turn scan is green
+    # whatever the queue holds.
+    queued = C.pending_section(clerk.prompts[-1])
+    assert queued is not None, "the second call's turn carries no `pending:` slot at all"
+    assert "termination.category" in queued, (
+        "the dropped conclude block was discarded rather than held on `pending`"
+    )
+
+
+def test_996_a_judgment_stop_names_the_caps_eviction_too(tmp_path: Path) -> None:
+    """The cap's eviction is named on EVERY path that can cause it, not only on a provider
+    fault.
+
+    `push_pending` returns what it evicted and three of its four call sites dropped that
+    return, so a D7 stop, an AR-7 hold and an S6 drop each evicted the oldest uncompiled prose
+    in silence — which is HD-4's own failing condition reached from the majority of its
+    triggers. Driven on the judgment stop, with the queue already at the cap."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.OPEN_SLOT_PROLOGUE)
+    faulting = [f"Reading {i}: the bastion host answered." for i in range(6)]
+
+    class _FaultsThenStops:
+        """Six transport faults fill the queue to the cap; the seventh call answers with the
+        judgment-priced block that stops the loop and pushes a seventh entry."""
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def __call__(self, request):  # noqa: ANN001 — mirrors the seam's own shape
+            self.prompts.append(str(request))
+            if len(self.prompts) <= len(faulting):
+                raise ConnectionError("scripted clerk transport fault")
+            return C.clerk_reply(C.JUDGMENT_ONLY_ROWS)
+
+    clerk = _FaultsThenStops()
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk,
+                              prose=[*faulting, C.PROSE])
+
+    receipt = main.receipts[-1]
+    assert C.OUTCOME_HELD in receipt, (
+        f"the last call did not reach the judgment stop: {C.outcome_lines(receipt)}"
+    )
+    assert "dropped the oldest pending entry" in receipt, (
+        f"the judgment stop evicted the oldest queued prose in silence: {receipt!r}"
+    )
+    assert faulting[0][:40] in receipt, (
+        "the eviction line does not name WHICH prose was lost"
+    )
+
+
+def test_996_clearing_the_queue_names_prose_that_never_reached_the_document(
+    tmp_path: Path,
+) -> None:
+    """A clean accept clears the whole queue — and names the entries whose prose is not on the
+    document.
+
+    Every pend but one happens after step 1 has written the prose, so those bytes survive in
+    `investigation.md` whatever the clerk does with them. The step-0 repair fault pends prose
+    the flagged-row gate would not let land at all, and clearing THAT entry silently is the one
+    disposal after which the prose exists nowhere: not in the document, not in the queue, and
+    not in the close gate."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE + C.WARN_ROWS)
+    lost = "The first reading, taken while a row was still flagged."
+
+    class _FaultThenRepairThenCompile:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def __call__(self, request):  # noqa: ANN001 — mirrors the seam's own shape
+            self.prompts.append(str(request))
+            if len(self.prompts) == 1:
+                raise ConnectionError("scripted clerk transport fault")
+            if len(self.prompts) == 2:
+                return C.repair_reply(C.REPAIR_PAIR)
+            return C.clerk_reply(C.CLEAN_ROWS)
+
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir,
+                              clerk=_FaultThenRepairThenCompile(),
+                              prose=[lost, C.SECOND_PROSE])
+
+    assert lost not in C.document(run_dir), (
+        "the first prose reached the document after all, so this scenario tests nothing"
+    )
+    receipt = main.receipts[-1]
+    assert "never reached investigation.md" in receipt, (
+        f"the clear disposed of prose that exists nowhere, in silence: {receipt!r}"
+    )
+    assert lost[:40] in receipt, "the line does not name WHICH prose was cleared"
+
+
+def test_996_no_record_receipt_names_a_verb_main_cannot_call(tmp_path: Path) -> None:
+    """D15, on the ACCEPT path: nothing `record` hands back names `fix_row` or `append_block`.
+
+    Receipt section (0) is `_tool_append_block`'s own return, passed through verbatim — and on
+    a warn-accept that return carried the writer's own repair instruction, telling MAIN to call
+    two verbs D14 took off its roster before its next `append_block`. Three model-facing
+    strings on one arm, none of them reachable. The instruction that replaces it names the
+    repair round that runs inside `record` itself.
+
+    Driven on MAIN'S OWN step-1 append, which is the only way that return can warn: step 0
+    returns before appending whenever a row is ALREADY flagged, so the warn has to arrive with
+    the bytes of this call. Prose carrying a fence is the ordinary shape here rather than an
+    exotic one — the replay harness sends whole golden invlang documents through `record`, and
+    MAIN quoting evidence back at itself does the same thing."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    clerk = C.ScriptedClerk(C.clerk_reply(""))
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk, prose=[C.WARN_ROWS])
+
+    receipt = main.receipt
+    assert "FLAGGED" in receipt or "flagged" in receipt, (
+        f"the warn window never opened, so the instruction under test never rendered: "
+        f"{receipt!r}"
+    )
+    for lost in ("fix_row", "append_block"):
+        assert lost not in receipt, (
+            f"the receipt tells MAIN to call `{lost}`, a verb D14 retired from its roster: "
+            f"{receipt!r}"
+        )
+    assert "`record`" in receipt, (
+        "the receipt names no verb MAIN can actually call in place of the retired ones"
+    )
+
+
+def test_996_the_flagged_section_carries_the_closed_spelling_it_offers(
+    tmp_path: Path,
+) -> None:
+    """Section (3) carries each diagnostic's `use:` corrections, not just its message.
+
+    The section used to be built by filtering the refusal's rendered text down to the lines
+    starting `- ` or `row:`, which kept the complaint and dropped every `use:` line under it —
+    the closed spellings the flagged row needs. The renderer is what owns those three lines, so
+    this goes through it."""
+    from defender._artifact_schema import render_diagnostic
+
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE + C.WARN_ROWS)
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir,
+                              clerk=C.ScriptedClerk(C.repair_reply()))
+
+    from defender.skills.invlang.validate import warn_diagnostics
+
+    flagged = warn_diagnostics(C.document(run_dir))
+    offered = [d for d in flagged if d.fix]
+    assert offered, (
+        "the fixture's flagged row carries no `use:` correction, so this test cannot see the "
+        "filter it exists to catch"
+    )
+    receipt = main.receipt
+    for d in offered:
+        for line in render_diagnostic(d).splitlines():
+            assert line.strip() in receipt, (
+                f"section (3) dropped a rendered line the flagged row needs: {line!r}"
+            )
+
+
+# ---------------------------------------------------------------------------------------
+# the second review pass: framing, spend accounting, and the held block the clear ate
+# ---------------------------------------------------------------------------------------
+
+
+def test_996_the_clerks_inputs_reach_it_inside_untrusted_frames(tmp_path: Path) -> None:
+    """The document, MAIN's prose and each pending entry are FRAMED in the clerk's turn.
+
+    MAIN quotes what gather retrieved into its prose and the prose lands in the document, so
+    an instruction planted in a payload reaches this role as ordinary turn content unless it
+    is framed as the data it is. Every other boundary in the tree where model- or
+    payload-influenced text reaches a model does this — the gather summary, the bash and file
+    reads, the raw alert — and the clerk holds no grant but WRITES the rows every downstream
+    gate reads.
+
+    Asserted on the frame CONTAINING the body, not on a tag appearing somewhere in the turn:
+    a delimiter that does not enclose the untrusted bytes is not a frame."""
+    import re
+
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    clerk = C.ScriptedClerk(C.clerk_reply(""))
+    C.record_run(tmp_path, run_dir=run_dir, clerk=clerk, prose=[C.PROSE])
+
+    turn = clerk.only()
+    frames = re.findall(r"<run-([0-9a-f]{16})-untrusted>\n(.*?)\n</run-\1-untrusted>",
+                        turn, re.S)
+    assert frames, f"the clerk's turn carries no untrusted frame at all: {turn[:400]!r}"
+    bodies = [body for _salt, body in frames]
+    assert any(C.PROSE in body for body in bodies), (
+        "MAIN's prose is in the turn but outside every frame"
+    )
+    assert any("prologue.vertices" in body for body in bodies), (
+        "the document excerpt is in the turn but outside every frame"
+    )
+
+
+def test_996_an_empty_pending_slot_stays_empty_under_framing(tmp_path: Path) -> None:
+    """Framing the queue does NOT put a delimiter where its empty rendering has to be.
+
+    The frames go one per ENTRY, not one around the slot, precisely so the falsy default still
+    renders blank — a clerk that reads anything there as a pended entry re-emits rows for prose
+    nobody sent. Driven beside the sibling above so the two cannot be satisfied separately."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    clerk = C.ScriptedClerk(C.clerk_reply(C.CLEAN_ROWS))
+    C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
+
+    body = C.pending_section(clerk.only())
+    assert body is not None, "the clerk turn carries no `pending:` slot at all"
+    assert body.strip() == "", f"the empty pending slot rendered {body.strip()!r}"
+
+
+def test_996_the_clerks_own_text_reaches_main_framed(tmp_path: Path) -> None:
+    """The clerk's block and its GAPS bullets are FRAMED on the way into MAIN's context.
+
+    Both are the clerk's own output, relayed verbatim and unvalidated — the same shape as a
+    gather summary, which is framed for exactly this reason. The give-up arm is the one that
+    hands MAIN the whole block, so it is where this is driven; the GAPS bullets ride the same
+    receipt."""
+    import re
+
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    clerk = C.ScriptedClerk(
+        C.clerk_reply(C.UNDECLARED_TARGET_ROWS, gaps=("who owns svc.config-mgmt?",)))
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
+
+    receipt = main.receipt
+    assert C.OUTCOME_GIVEUP in receipt, C.outcome_lines(receipt)
+    frames = re.findall(r"<run-([0-9a-f]{16})-untrusted>\n(.*?)\n</run-\1-untrusted>",
+                        receipt, re.S)
+    bodies = [body for _salt, body in frames]
+    assert any("attr_updates" in body for body in bodies), (
+        f"the clerk's own block reached MAIN outside every frame: {receipt!r}"
+    )
+    assert any("svc.config-mgmt" in body for body in bodies), (
+        "the clerk's GAPS bullets reached MAIN outside every frame"
+    )
+
+
+def test_996_a_faulted_call_records_the_rounds_it_spent(tmp_path: Path) -> None:
+    """A `record` that spent clerk calls and then faulted records THOSE calls in its trace row.
+
+    Every fault arm returns through `pend()` before the loops finish, and the round counters
+    used to be assigned after them — so a call that burned three of the six shared calls and
+    then lost its connection wrote `rounds: 0, repair_rounds: 0`. Per-call spend is the whole
+    reason the trace exists, and it was wrong on exactly the calls that spent budget and landed
+    nothing.
+
+    Driven on the round loop, where a structural refusal retries: two rounds are refused and
+    the third faults."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    clerk = C.ScriptedClerk(
+        C.clerk_reply(C.UNDECLARED_TARGET_ROWS), fault=C.Fault(raise_after=2))
+    C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
+
+    assert clerk.calls == 3, f"the scenario made {clerk.calls} clerk calls, not 3"
+    rows = C.trace_rows(run_dir)
+    assert rows, "the faulting call wrote no trace row"
+    assert rows[-1]["rounds"] == 3, (
+        f"the faulted call's trace row says it spent {rows[-1]['rounds']} rounds; it spent 3 "
+        "of the six shared clerk calls"
+    )
+
+
+def test_996_the_retry_prompt_carries_the_whole_refusal(tmp_path: Path) -> None:
+    """The clerk's retry turn gets the FULL refusal, not the trace row's clipped copy.
+
+    `trace["refusals"]` is truncated for the row's own sake; feeding that back handed the clerk
+    a refusal cut off mid-diagnostic, so it fixed what it could see, was refused on the rest,
+    and the shared budget went on a give-up neither party could act on.
+
+    The fixture's refusal has to be longer than the clip for this to discriminate, so the
+    document carries several undeclared targets and the assertion is on the refusal's own TAIL
+    reaching the turn."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    many = "```invlang\n:R attr_updates [resolved_by|target|key|value]\n" + "".join(
+        f"l-001|v-{n}|attrs.owner|svc.config-mgmt\n" for n in range(400, 412)
+    ) + "```\n"
+    clerk = C.ScriptedClerk(C.clerk_reply(many))
+    C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
+
+    assert clerk.calls >= 2, "the refusal never reached a retry turn"
+    refused = [p for p in clerk.prompts if "refused your last attempt" in p]
+    assert refused, "no retry turn carried the refusal section at all"
+    served = refused[-1].split("refused your last attempt", 1)[1]
+    assert "v-411" in served, (
+        "the retry turn carries a refusal clipped before its last diagnostic — the clerk "
+        "cannot fix what it was not shown"
+    )
+
+
+def test_996_a_held_conclude_block_survives_a_clean_accept(tmp_path: Path) -> None:
+    """An S6-held conclude block is NOT swept away by the next clean accept.
+
+    Every other entry in the queue is prose the clerk could have folded into the rows it just
+    committed, which is what makes the blanket clear safe. A conclude block held because the
+    phase forbids it could not be: the same screen that held it would drop it again this round.
+    Cleared anyway, MAIN's compiled conclusion vanished with no receipt line AND the close gate
+    — which reads only whether the queue is empty — was satisfied.
+
+    Read off the `pending:` SLOT, never the whole turn: the grammar and catalog the turn also
+    carries name `termination.category` themselves."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    # call 1 compiles a conclude block under ANALYZE (held); call 2 lands ordinary rows
+    # cleanly; call 3 is where the queue is observable.
+    clerk = C.ScriptedClerk(
+        C.clerk_reply(C.CONCLUDE_ROWS), C.clerk_reply(C.CLEAN_ROWS), C.clerk_reply(""))
+    C.record_run(tmp_path, run_dir=run_dir, clerk=clerk,
+                 prose=[C.PROSE, C.SECOND_PROSE, "A third reading."])
+
+    assert clerk.calls >= 3, f"only {clerk.calls} clerk calls — the third never ran"
+    queued = C.pending_section(clerk.prompts[-1])
+    assert queued is not None, "the third turn carries no `pending:` slot at all"
+    assert "termination.category" in queued, (
+        "the clean accept swept away the held conclude block — MAIN's compiled conclusion is "
+        "gone and the close gate now reads an empty queue"
+    )
+
+
+def test_996_a_held_conclude_block_clears_once_the_phase_can_take_it(tmp_path: Path) -> None:
+    """POSITIVE CONTROL for the sibling above, and the reason retention cannot wedge the run:
+    once the phase IS `## REPORT` the held block lands and the queue drains.
+
+    Retaining an entry no accept can clear would refuse every model close for the rest of the
+    run. It drains because the block becomes legal, not because anything special-cases it.
+
+    FOUR CALLS, because HD-3's rule is positional: the phase in force is read from the document
+    as it stood when the call BEGAN, so the `## REPORT` header MAIN records on call 2 is not
+    the phase in force until call 3. Call 1 compiles the block under ANALYZE (held), call 2
+    accepts ordinary rows and records the header, call 3 is the first call at which the block
+    can land, and call 4 is where the drained queue is observable."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    clerk = C.ScriptedClerk(
+        C.clerk_reply(C.CONCLUDE_ROWS), C.clerk_reply(C.CLEAN_ROWS),
+        C.clerk_reply(C.CONCLUDE_ROWS), C.clerk_reply(""))
+    C.record_run(tmp_path, run_dir=run_dir, clerk=clerk,
+                 prose=[C.PROSE, C.REPORT_PROSE, "The report stands.", "A fourth reading."])
+
+    assert "disposition" in C.document(run_dir), (
+        "the held block never landed under `## REPORT`, so nothing here shows it can drain"
+    )
+    queued = C.pending_section(clerk.prompts[-1])
+    assert queued is not None, "the last turn carries no `pending:` slot at all"
+    assert "termination.category" not in queued, (
+        "the block landed and the entry stayed queued — every later model close is refused "
+        "for a queue nothing can drain"
+    )
+
+
+def test_996_a_screened_pended_prose_is_not_reported_as_never_landed(tmp_path: Path) -> None:
+    """The "this prose never reached the document" line fires on prose that never reached the
+    document, and not on prose S6 trimmed on its way there.
+
+    The queue holds what step 1 actually WROTE, which is the screened bytes — MAIN's raw text
+    minus any conclude fence the phase forbade. Comparing the raw text against the document
+    instead makes the test false for every entry that lost a fence: MAIN is told its prose was
+    lost, and spends a whole `record` call restating material already on disk.
+
+    The genuine loss is still reported — its own scenario is
+    `..._names_prose_that_never_reached_the_document`, and this is the arm that must stay
+    quiet."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    trimmed = "The bastion host answered at 15:27Z.\n\n" + C.CONCLUDE_ROWS
+
+    class _FaultThenCompile:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def __call__(self, request):  # noqa: ANN001 — mirrors the seam's own shape
+            self.prompts.append(str(request))
+            if len(self.prompts) == 1:
+                raise ConnectionError("scripted clerk transport fault")
+            return C.clerk_reply(C.CLEAN_ROWS)
+
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=_FaultThenCompile(),
+                              prose=[trimmed, C.SECOND_PROSE])
+
+    doc = C.document(run_dir)
+    assert "The bastion host answered at 15:27Z." in doc, (
+        "the screened prose never landed, so this scenario tests nothing"
+    )
+    assert "disposition" not in doc, "the conclude fence was not screened out at all"
+    assert "never reached investigation.md" not in main.receipts[-1], (
+        "prose that DID land was reported to MAIN as lost, because the queue held the raw "
+        f"text and the document holds the screened bytes: {main.receipts[-1]!r}"
+    )
+
+
+def test_996_the_conclude_guard_is_not_keyed_on_one_spelling_of_its_header(
+    tmp_path: Path,
+) -> None:
+    """S6 screens a `:T conclude` header however the tokenizer would accept it — not only the
+    one-space spelling.
+
+    The tokenizer's header rule takes the tag, then a WHITESPACE RUN, then the name, so
+    `:T\tconclude` and `:T  conclude` both parse and both land in `companion["conclude"]`. The
+    guard tested for the literal substring, so neither reached it — and the close gate reads
+    the parsed companion and never the bytes, which is what makes a screen keyed on the
+    ordinary spelling a bypass rather than a rough edge. Driven through MAIN's own prose, the
+    path that needs no clerk cooperation at all.
+
+    The one-space arm is the positive control: the same document with the ordinary spelling is
+    screened too, so the assertion below is about the SPELLING and not about a screen that
+    stopped running."""
+    for name, header in (("tab", ":T\tconclude"), ("spaces", ":T  conclude")):
+        run_dir = C.new_run_dir(tmp_path, name=f"smuggle-{name}")
+        C.seed(run_dir, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+        smuggled = C.CONCLUDE_ROWS.replace(":T conclude", header)
+        assert header in smuggled, "the fixture did not actually change the header spelling"
+        C.record_run(tmp_path, run_dir=run_dir, prose=[smuggled],
+                     clerk=C.ScriptedClerk(C.clerk_reply("")))
+        assert "disposition" not in C.document(run_dir), (
+            f"a `{header}` block reached the document under `## ANALYZE` — the close gate "
+            "reads the parsed companion, which accepts this spelling"
+        )
+
+    ordinary = C.new_run_dir(tmp_path, name="smuggle-ordinary")
+    C.seed(ordinary, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    C.record_run(tmp_path, run_dir=ordinary, prose=[C.CONCLUDE_ROWS],
+                 clerk=C.ScriptedClerk(C.clerk_reply("")))
+    assert "disposition" not in C.document(ordinary), (
+        "the ordinary spelling is not screened either, so the two arms above prove nothing "
+        "about the header grammar"
+    )
+
+
+def test_996_a_held_conclusion_dropped_at_report_is_named(tmp_path: Path) -> None:
+    """When the phase reaches REPORT and the held conclusion is cleared without having landed,
+    MAIN is TOLD.
+
+    Retention keeps the block only while the phase forbids it, so at `## REPORT` the entry
+    becomes ordinary backlog and the next clean accept takes it — which is right, REPORT is
+    where it could have landed. What is not right is doing that in silence: the "never reached
+    the document" line cannot name it (its prose IS on disk, written by the call that compiled
+    it), and whether the clerk re-emitted a block its own prompt calls possibly-already-
+    compiled is precisely what nothing here can assume. The notice fires on the condition that
+    makes the loss real — the document ends the round with no conclusion in it at all.
+
+    FOUR CALLS, for HD-3's positional rule: the `## REPORT` header MAIN records on call 2 is
+    not the phase in force until call 3."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    other_rows = C.attr_block("l-001|v-002|attrs.dept|finance")
+    clerk = C.ScriptedClerk(
+        C.clerk_reply(C.CONCLUDE_ROWS), C.clerk_reply(C.CLEAN_ROWS),
+        C.clerk_reply(other_rows), C.clerk_reply(""))
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk,
+                              prose=[C.PROSE, C.REPORT_PROSE, "The report stands.",
+                                     "A fourth reading."])
+
+    assert "disposition" not in C.document(run_dir), (
+        "the conclusion landed after all, so there is no loss here to report"
+    )
+    named = [r for r in main.receipts if "was dropped from the queue" in r]
+    assert named, (
+        "the held conclusion was cleared at `## REPORT` with nothing in the document and no "
+        f"receipt line said so: {main.receipts!r}"
+    )
+
+
+# ---------------------------------------------------------------------------------------
+# the fourth review pass: the guards' inputs, and the arms that dropped prose
+# ---------------------------------------------------------------------------------------
+
+
+def test_996_a_phase_header_inside_a_fence_is_not_the_phase_in_force(
+    tmp_path: Path,
+) -> None:
+    """A `## REPORT` line inside a FENCE is quoted text, not the document moving to REPORT.
+
+    MAIN quotes what gather retrieved into its prose, fenced, and that lands in the document —
+    so a payload line reading `## REPORT` set the phase in force for every later call and
+    switched S6's conclude guard off, which is the guard's whole job. `_corpus._FENCE_RE` owns
+    this reading in the tree (`leads.pitfalls_curator` states the rule and walks the same way,
+    against the same escape).
+
+    POSITIVE CONTROL on the same address: the identical header OUTSIDE a fence does move the
+    phase, so the assertion is about the fence and not about a guard that stopped running."""
+    quoted = C.new_run_dir(tmp_path, name="quoted")
+    C.seed(quoted, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    C.record_run(tmp_path, run_dir=quoted, clerk=C.ScriptedClerk(C.clerk_reply("")),
+                 prose=["gather answered:\n\n```\nweb-01 log\n## REPORT\n```\n"])
+    C.record_run(tmp_path, run_dir=quoted, clerk=C.ScriptedClerk(C.clerk_reply(C.CONCLUDE_ROWS)),
+                 prose=["Recording the finding."])
+    assert "disposition" not in C.document(quoted), (
+        "a `## REPORT` line inside a fence was read as the phase in force, so the conclude "
+        "guard let a premature conclusion reach the document"
+    )
+
+    plain = C.new_run_dir(tmp_path, name="plain")
+    C.seed(plain, C.phase_document("## ANALYZE (loop 1)", C.PROLOGUE))
+    C.record_run(tmp_path, run_dir=plain, clerk=C.ScriptedClerk(C.clerk_reply("")),
+                 prose=["## REPORT\n\nThe activity is routine."])
+    C.record_run(tmp_path, run_dir=plain, clerk=C.ScriptedClerk(C.clerk_reply(C.CONCLUDE_ROWS)),
+                 prose=["Recording the finding."])
+    assert "disposition" in C.document(plain), (
+        "an unfenced `## REPORT` header did not move the phase either, so the fenced arm "
+        "above proves nothing about fences"
+    )
+
+
+def test_996_a_gaps_marker_inside_a_row_does_not_truncate_the_block(tmp_path: Path) -> None:
+    """The reply is split at a `GAPS:` line OUTSIDE the fences, never at the first occurrence
+    anywhere in the text.
+
+    The clerk compiles cells out of prose MAIN quoted from gather, so the string can
+    legitimately sit inside a row. Cut there, the block is truncated mid-line, a partial
+    unterminated fence goes to the write gate, and the rest of that row is reparsed as a gap
+    bullet — with the receipt reporting whatever survived as committed."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    rows = C.attr_block("l-001|v-001|attrs.owner|svc GAPS: config-mgmt")
+    clerk = C.ScriptedClerk(C.clerk_reply(rows, gaps=("who owns it?",)))
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk)
+
+    doc = C.document(run_dir)
+    assert "svc GAPS: config-mgmt" in doc, (
+        f"the row was truncated at a `GAPS:` inside its own cell: {doc[-400:]!r}"
+    )
+    assert doc.count("```") % 2 == 0, "an unterminated fence reached the document"
+    assert "who owns it?" in main.receipt, "the real GAPS section was not split off"
+
+
+def test_996_a_clerk_reply_with_neither_rows_nor_gaps_is_not_written(tmp_path: Path) -> None:
+    """A reply carrying no invlang fence AND no `GAPS:` marker is the malformed shape — pended,
+    never written.
+
+    Free prose outside a fence is not invlang content, so a clerk answering "I could not
+    compile this because…" had that sentence appended to `investigation.md` verbatim, the
+    document still validated, and the receipt reported it as committed rows. An EMPTY reply
+    stays the legitimate nothing-to-commit case, which the sibling assertion holds."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    lost = "I could not compile this because the prose names no vertex."
+    clerk = C.ScriptedClerk(lost, C.clerk_reply(""))
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk,
+                              prose=[C.PROSE, C.SECOND_PROSE])
+
+    assert lost not in C.document(run_dir), (
+        f"the clerk's prose was written into the document as rows: {C.document(run_dir)!r}"
+    )
+    assert C.OUTCOME_PENDING in main.receipts[0], C.outcome_lines(main.receipts[0])
+    assert C.OUTCOME_PENDING not in main.receipts[-1], (
+        "an EMPTY reply was treated as malformed too — that is the legitimate "
+        "nothing-to-commit case"
+    )
+
+
+def test_996_a_reference_leading_row_is_not_reported_as_a_committed_id(
+    tmp_path: Path,
+) -> None:
+    """A row whose leading cell REFERENCES an id declared earlier is not reported as an id this
+    call committed.
+
+    The rule is read off the block header's own first column (`resolved_by`), so every `:R`
+    family that leads with it is covered rather than the one that was named; `:T resolutions`,
+    which declares no column list, is the one exception and is listed as one. The receipt used
+    to read `record: committed rows for h-001` on a call that declared nothing new, and the
+    same value went into the trace's `ids`, which is what the observability lane reads."""
+    extract = C.sym("runtime.tools._clerk", "_extract_ids")
+
+    assert extract(":T resolutions\nh-001  null -> ++  [l-001 p1]\n") == [], (
+        "a `:T resolutions` row's leading hypothesis reference was reported as a declaration"
+    )
+    assert extract(
+        ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
+        "l-001|e-001|ac1|holds|cmdb|because\n"
+    ) == [], "a `resolved_by`-leading `:R authz` row was read as declaring `l-001`"
+    assert extract(
+        ":V prologue.vertices [id|type|class|ident|attrs?]\nv-001|compute|a/b/c|host|\n"
+    ) == ["v-001"], "a genuine declaration stopped being reported"
+
+
+def test_996_a_reference_block_does_not_swallow_the_next_fence(tmp_path: Path) -> None:
+    """The reference-leading flag ends at the FENCE, not only at the next block header.
+
+    A continuation fence that opens without repeating a header is a shape the tokenizer
+    documents; every row in one following a `resolved_by` block was being skipped as if still
+    inside it, so the receipt named none of the ids that fence actually committed."""
+    extract = C.sym("runtime.tools._clerk", "_extract_ids")
+    two_fences = (
+        "```invlang\n:R attr_updates [resolved_by|target|key|value]\n"
+        "l-001|v-001|attrs.owner|svc\n```\n"
+        "```invlang\nv-009|compute|a/b/c|host|\n```\n"
+    )
+    assert extract(two_fences) == ["v-009"], (
+        "the following fence's rows were skipped as if the reference block were still open"
+    )
+
+
+def test_996_a_refused_repair_round_pends_the_prose_like_a_fault(tmp_path: Path) -> None:
+    """A step-0 repair loop that cannot close the window PENDS MAIN's prose, exactly as the two
+    fault arms beside it do.
+
+    This arm returns before step 1 — the flagged-row gate would refuse the write anyway — so
+    the prose reached neither the document nor the queue, and the close gate's own account of
+    what is still uncompiled was short by it. A transport fault preserved the prose and a
+    refused repair lost it, over a difference neither party can act on.
+
+    READ OFF THE `pending:` SLOT of a later ROUND turn, never off the prompts as a whole: the
+    repair prompt of the very call under test inlines that same prose (it is the prose the
+    window opened on), so a whole-prompt scan is green whatever the queue holds. Which means
+    the window has to CLOSE on a later call for a round turn to exist at all — hence the two
+    calls: six declined repair rounds, then a repair that lands."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE + C.WARN_ROWS)
+
+    class _DeclineSixThenRepair:
+        """Call 1 spends its whole budget declining; call 2's repair lands and its round turn
+        is where the queue becomes observable."""
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def __call__(self, request):  # noqa: ANN001 — mirrors the seam's own shape
+            self.prompts.append(str(request))
+            if len(self.prompts) <= 6:
+                return C.repair_reply()
+            if len(self.prompts) == 7:
+                return C.repair_reply(C.REPAIR_PAIR)
+            return C.clerk_reply("")
+
+    clerk = _DeclineSixThenRepair()
+    C.record_run(tmp_path, run_dir=run_dir, clerk=clerk, prose=[C.PROSE, C.SECOND_PROSE])
+
+    assert C.PROSE not in C.document(run_dir), (
+        "the first call's prose landed after all, so there was nothing here to queue"
+    )
+    assert len(clerk.prompts) >= 8, (
+        f"the second call never reached a round turn ({len(clerk.prompts)} clerk calls)"
+    )
+    queued = C.pending_section(clerk.prompts[-1])
+    assert queued is not None, "the round turn carries no `pending:` slot at all"
+    assert C.PROSE in queued, (
+        "the prose of a call whose repair round was refused exists nowhere — not on the "
+        "document, not in the queue, and not in the close gate's account of what is owed"
+    )
+
+
+# ---------------------------------------------------------------------------------------
+# the fifth review pass: the edges the fourth pass's own fixes opened
+# ---------------------------------------------------------------------------------------
+
+
+def test_996_an_indented_gaps_marker_yields_no_phantom_gap(tmp_path: Path) -> None:
+    """An indented `GAPS:` line is split at the MARKER, not at the start of its line.
+
+    The offset the split advances from and the offset the search returned have to be the same
+    one. They were not: the search matched from the line start (models indent freely) and the
+    split advanced by the length of the word, cutting two characters into it and leaving
+    `"S: none"` behind as a gap. That is relayed to MAIN in the receipt, stored as the call's
+    unanswered questions, and re-served in every later round prompt — a question no prose can
+    ever answer because nobody asked it."""
+    split = C.sym("runtime.tools._clerk", "_split_clerk_reply")
+    rows = "```invlang\n:V prologue.vertices [id]\nv-1\n```"
+
+    body, gaps = split(rows + "\n  GAPS: none\n")
+    assert gaps == [], f"an indented `GAPS: none` produced a phantom gap: {gaps!r}"
+    assert body.strip() == rows, "the rows were cut short by the indented marker"
+
+    body2, gaps2 = split(rows + "\n   GAPS:\n   - who owns it?\n")
+    assert gaps2 == ["who owns it?"], f"an indented bullet list mis-split: {gaps2!r}"
+    assert body2.strip() == rows
+
+
+def test_996_one_stray_fence_marker_does_not_freeze_the_phase(tmp_path: Path) -> None:
+    """An UNPAIRED fence marker opens no region, so a stray one cannot hide every later
+    heading.
+
+    Excluding headings inside fences is what stops a quoted payload from setting the phase —
+    but a walk that toggles on every marker turns one odd ``` line, which every gate in the
+    tree treats as prose, into a permanent freeze: the phase in force never advances again, S6
+    excises every conclusion the clerk compiles, the close gate refuses every model close, and
+    the run can only force-close `unresolved`. That is a worse failure than the bypass, and it
+    is silent.
+
+    The CLOSED-fence arm is the control: a payload inside a properly paired fence still does
+    not move the phase, which is the property the walk exists for."""
+    phase = C.sym("runtime.tools._clerk", "_current_phase")
+
+    stray = "## ANALYZE (loop 1)\n\nquoted:\n\n```\npayload\n```\n```\n\n## REPORT\n\nprose\n"
+    assert phase(stray) == "REPORT", (
+        "one unpaired ``` line hid every later heading — the phase in force is frozen for the "
+        "rest of the run"
+    )
+
+    quoted = "## ANALYZE (loop 1)\n\nquoted:\n\n```\npayload\n## REPORT\n```\n\nprose\n"
+    assert phase(quoted) == "ANALYZE", (
+        "a heading inside a CLOSED fence moved the phase, so the exclusion this test is "
+        "bounding does not happen at all"
+    )
+
+
+def test_996_a_deferral_table_is_not_screened_as_a_conclusion(tmp_path: Path) -> None:
+    """S6 screens `:T conclude`, not every block whose name begins with it.
+
+    `:T conclude.deferred_authz` and `:T conclude.deferred_preds` are the deferral tables the
+    grammar tells its reader to send FIRST, before the conclusion — so a header match that
+    stopped at a word boundary excised them under every phase but REPORT, held them on the
+    queue as conclusions, and told MAIN a `:T conclude` block had been dropped for something
+    that is not one.
+
+    The conclusion itself is the control: it is still screened under the same phase."""
+    screen = C.sym("runtime.tools._clerk", "_screen_conclude_fences")
+
+    deferral = (
+        "```invlang\n:T conclude.deferred_preds [prediction_ref|rationale]\n"
+        "h-001.p1|the measurement never landed\n```\n"
+    )
+    kept, removed = screen(deferral, "ANALYZE")
+    assert removed == "", f"a deferral table was screened as a conclusion: {removed!r}"
+    assert kept == deferral, "the deferral table was altered on its way through"
+
+    _kept2, removed2 = screen(C.CONCLUDE_ROWS, "ANALYZE")
+    assert removed2, "the conclusion itself is no longer screened, so this proves nothing"
+
+
+def test_996_a_fault_after_the_prose_landed_still_reports_the_write(tmp_path: Path) -> None:
+    """A clerk fault AFTER step 1 wrote the prose still hands MAIN section (0) and the flagged
+    notice.
+
+    The pending line alone leaves MAIN unable to tell whether its bytes reached the document —
+    and silent about a row that warn-accepted on that same write, which now blocks every later
+    write AND the close. Every other exit reports those; a provider fault is not a reason to
+    stop reporting them."""
+    run_dir = C.new_run_dir(tmp_path)
+    C.seed(run_dir, C.PROLOGUE)
+    # MAIN's own prose carries the warn row, so step 1 warn-accepts and the window opens; the
+    # clerk call that follows faults.
+    clerk = C.ScriptedClerk(C.clerk_reply(""), fault=C.Fault(raise_after=0))
+    _, main, _ = C.record_run(tmp_path, run_dir=run_dir, clerk=clerk, prose=[C.WARN_ROWS])
+
+    receipt = main.receipt
+    assert C.OUTCOME_PENDING in receipt, C.outcome_lines(receipt)
+    assert "bytes to investigation.md" in receipt, (
+        f"the faulted call never told MAIN its prose landed: {receipt!r}"
+    )
+    assert "FLAGGED" in receipt, (
+        "the faulted call never told MAIN a flagged row now blocks every later write and the "
+        f"close: {receipt!r}"
+    )

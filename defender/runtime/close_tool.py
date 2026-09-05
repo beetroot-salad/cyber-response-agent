@@ -47,36 +47,6 @@ from defender.skills.invlang.validate import (
     runtime_evidence_block,
 )
 
-#: D3/O4 (#996): the wording MAIN's refusal carries when a MODEL close finds no `:T conclude`
-#: block. D15-conformant — it names the header MAIN writes prose under (a locus), never a row
-#: or a verb MAIN's roster does not hold.
-_NO_CONCLUDE_REFUSAL = (
-    "close blocked: record your REPORT prose under a `## REPORT` header — disposition "
-    "rationale, ceiling, detection notes, entity check — then close."
-)
-
-
-def _refuse_if_no_conclude(companion: CompanionBody) -> None:
-    """D3: no MODEL close commits without a `:T conclude` block, over ANY disposition — the
-    price table prices only three keywords (`benign`/`false-positive`/`inconclusive`) and the
-    structure gate calls a conclude-less document publishable, so `malicious` owed nothing
-    before this gate existed and its own conclusion could be recorded with nothing in the
-    companion stating it.
-
-    Sits AFTER the entry price and BEFORE the structure gate (P15): each refusal a close earns
-    is then the most specific one the document has earned, and the structure gate — which runs
-    rules conditioned on the disposition the DOCUMENT declares — never gets to answer a missing
-    conclude with a complaint about a keyword the document does not carry.
-
-    Takes the ALREADY-PARSED companion `_refuse_if_entry_price_is_owed` just read the price
-    off, never re-parsing the text itself: that function's own docstring names removing the
-    SECOND parse on this path as the point of returning the body, and a companion-less/
-    unparseable document is `CompanionBody()` (empty), never `None` — `.get` on it is exactly
-    the right "no conclude" answer with no `if companion else` guard needed."""
-    conclude = companion.get("conclude") or {}
-    if not conclude:
-        raise ModelRetry(_NO_CONCLUDE_REFUSAL)
-
 from . import challenge_gate
 from . import tools as tools_mod
 from .agent_role import AgentRole
@@ -473,10 +443,6 @@ async def _close_investigation_async(  # noqa: PLR0913, C901 — the close's own
             f"disposition must be exactly one of {list(DISPOSITION_VALUES)} (got "
             f"{disposition!r}) — a typed enum, not free text"
         )
-    # #996: a MODEL close is refused while the clerk's pending queue is non-empty — see
-    # `_refuse_if_pending_prose`'s own docstring for why the forced close stays exempt.
-    if not forced:
-        _refuse_if_pending_prose(clerk)
     _refuse_if_host_only_verdict_misused(disposition, forced=forced)
     # R4: a COMMITTED close is terminal, and the refusal comes BEFORE the gate so a second
     # attempt cannot spend the review either. Without it a confident `malicious` can be
@@ -490,6 +456,16 @@ async def _close_investigation_async(  # noqa: PLR0913, C901 — the close's own
             "the close is terminal. Re-closing would re-run the whole review and overwrite "
             "both the recorded disposition and the first close's own review record."
         )
+    # #996: a MODEL close is refused while the clerk's pending queue is non-empty — see
+    # `_refuse_if_pending_prose`'s own docstring for why the forced close stays exempt.
+    #
+    # BEHIND the terminal-close refusal, deliberately. Its remedy is "call `record` again so
+    # the queue compiles, then close" — and once a close has committed, `record` is refused by
+    # the closed-document gate, so a second close attempt would be told to take a step the
+    # runtime will not let it take. Ahead of everything that spends a review, which is the
+    # position the obligation needs.
+    if not forced:
+        _refuse_if_pending_prose(clerk)
     # TOP of the close — after the two cheap well-formedness refusals above, and before ANY
     # disposition branch. Inside a branch, `inconclusive` (which commits early, ahead of the
     # gate) could dodge the obligation entirely, and the reviewer's model calls would be spent
@@ -633,6 +609,37 @@ async def _tool_close_investigation(
         deps, disposition, stages=stages, bounds=bounds, clerk=clerk,
     )
     return result.message
+
+
+#: D3/O4 (#996): the wording MAIN's refusal carries when a MODEL close finds no `:T conclude`
+#: block. D15-conformant — it names the header MAIN writes prose under (a locus), never a row
+#: or a verb MAIN's roster does not hold.
+_NO_CONCLUDE_REFUSAL = (
+    "close blocked: record your REPORT prose under a `## REPORT` header — disposition "
+    "rationale, ceiling, detection notes, entity check — then close."
+)
+
+
+def _refuse_if_no_conclude(companion: CompanionBody) -> None:
+    """D3: no MODEL close commits without a `:T conclude` block, over ANY disposition — the
+    price table prices only three keywords (`benign`/`false-positive`/`inconclusive`) and the
+    structure gate calls a conclude-less document publishable, so `malicious` owed nothing
+    before this gate existed and its own conclusion could be recorded with nothing in the
+    companion stating it.
+
+    Sits AFTER the entry price and BEFORE the structure gate (P15): each refusal a close earns
+    is then the most specific one the document has earned, and the structure gate — which runs
+    rules conditioned on the disposition the DOCUMENT declares — never gets to answer a missing
+    conclude with a complaint about a keyword the document does not carry.
+
+    Takes the ALREADY-PARSED companion `_refuse_if_entry_price_is_owed` just read the price
+    off, never re-parsing the text itself: that function's own docstring names removing the
+    SECOND parse on this path as the point of returning the body, and a companion-less/
+    unparseable document is `CompanionBody()` (empty), never `None` — `.get` on it is exactly
+    the right "no conclude" answer with no `if companion else` guard needed."""
+    conclude = companion.get("conclude") or {}
+    if not conclude:
+        raise ModelRetry(_NO_CONCLUDE_REFUSAL)
 
 
 def _refuse_if_pending_prose(clerk: Any) -> None:

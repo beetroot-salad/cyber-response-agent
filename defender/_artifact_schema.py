@@ -225,13 +225,18 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
         # less" from "you are out of room".
         on_disk = _utf8_len(current) if current is not None else 0
         # With a row flagged, "close the investigation" is a verb the M5 gate refuses — that
-        # remedy would name the one move the model cannot make. `fix_row(old, "")` is the
-        # escape that actually shrinks the document.
+        # remedy would name the one move the model cannot make. The repair is the escape that
+        # actually shrinks the document, and it is named WITHOUT A VERB: this reason reaches
+        # the model through `permission.decide_write`, which knows the path and not the
+        # caller, so every write-granting role that can resolve an operand onto
+        # `investigation.md` reads it. `fix_row` was wrong for MAIN once D14 retired it;
+        # `record` would be wrong for everyone else, and naming the wrong verb is the defect
+        # either way. The verb-carrying spellings live where the caller IS known —
+        # `_document.flagged_write_refusal` and `_warning_return`, which take one.
         if on_disk and current is not None and _warns_quietly(current):
             remedy = (
                 f"{on_disk} of those bytes are already committed and cannot be removed, and a "
-                "flagged row is blocking the close — repair or delete it with "
-                '`fix_row(old_row, "")`, then send a smaller block.'
+                "flagged row is blocking the close — repair that row, then send less."
             )
         elif on_disk:
             remedy = (
@@ -335,8 +340,15 @@ def committed_investigation_reason(text: str) -> str | None:
         "what publishes it — the report commits against this document and the review gate "
         "reads it.\n\n"
         + rendered
-        + "\n\nRepair those rows with `fix_row(old_row, new_row)` — or delete one with "
-        '`fix_row(old_row, "")` — and close again.'
+        # NAMES `record`, and may, because this reason has exactly two production readers and
+        # both are MAIN: `close_tool`'s own structure gate and `_clerk`'s pre-existing-defect
+        # probe, through `tools.committed_document_refusal`. That is the constraint — a
+        # write-granting role reaching this text would be told to call a verb it does not
+        # hold, so a third caller from another roster has to take a verb here rather than
+        # inherit MAIN's.
+        + "\n\nCall `record` with prose stating what those rows should have said — the clerk "
+        "compiles the correction into the document — then close again. If nothing you can "
+        "`record` reaches them, record what you can and let the run reach its forced close."
     )
 
 

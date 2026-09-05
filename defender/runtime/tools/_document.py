@@ -185,6 +185,26 @@ def _flagged_rows(diags: tuple[Diagnostic, ...]) -> tuple[str, ...]:
     return tuple(d.locus.row_text for d in diags if d.locus is not None)
 
 
+#: D11/D15 (#996): the repair instruction names a path the verb's OWN HOLDER can take.
+#: `fix_row` is the internal repair writer, and D14 took it — with `append_block` — off MAIN's
+#: registered roster, so for MAIN's two verbs (`record`, `close_investigation`) an instruction
+#: to call `fix_row` names a verb that does not exist for the reader. `record` runs its repair
+#: round INSIDE the call; what MAIN can still do about a row flagged after that is state the
+#: correction in prose on its next `record`. Every OTHER verb reaching these renderers is a
+#: direct caller of the internal writer (the #836 suite, another write-granting role), which
+#: does hold `fix_row` — and keeps the wording it always had.
+_MAIN_VERBS = frozenset({"record", "close_investigation"})
+_MAIN_REPAIR = (
+    "The repair round runs inside `record` itself — there is no separate repair verb for you "
+    "to call. If a row is still flagged after it, say in prose on your next `record` what the "
+    "row should have stated, or that it should be dropped."
+)
+
+
+def _repair_instruction(verb: str, writer_spelling: str) -> str:
+    return _MAIN_REPAIR if verb in _MAIN_VERBS else writer_spelling
+
+
 def flagged_write_refusal(
     verb: str, diags: tuple[Diagnostic, ...], *, offered_text: bool = True
 ) -> str:
@@ -207,20 +227,31 @@ def flagged_write_refusal(
         UNCHANGED_NOTICE if offered_text
         else f"{UNCHANGED_LEAD} — no disposition was recorded for this run."
     )
+    instruction = _repair_instruction(
+        verb,
+        "Repair it in place with `fix_row(old_row, new_row)`, or delete it with "
+        '`fix_row(old_row, "")`.',
+    )
     return (
         f"{opening} `{verb}` is blocked while investigation.md carries a flagged "
-        f"row. The row LANDED and is committed, so re-sending the block cannot help; repair "
-        f"it in place with `fix_row(old_row, new_row)`, or delete it with "
-        f'`fix_row(old_row, "")`.\n\n'
+        f"row. The row LANDED and is committed, so re-sending the block cannot help. "
+        f"{instruction}\n\n"
         + "\n".join(render_diagnostic(d) for d in diags)
         + "\n\nRepair every row above, then retry."
     )
 
 
-def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
+def _warning_return(
+    lead: str, diags: tuple[Diagnostic, ...], *, verb: str = "append_block"
+) -> str:
     """An ACCEPT that carries a warning. It LEADS with the bytes and says the block landed, and
     never carries the unchanged-notice wording: a model that reads "warning" as "refusal"
-    re-emits the whole block, which is the cost the repair window exists to remove."""
+    re-emits the whole block, which is the cost the repair window exists to remove.
+
+    `verb` for the reason `flagged_write_refusal` takes one (D11), and it matters MORE here:
+    this text is an ACCEPT, returned to the caller verbatim, and `record` passes its own
+    return straight through as receipt section (0) — so the `fix_row` spelling reached a MAIN
+    that holds no such verb on every warn-accepted write."""
     from defender._artifact_schema import render_diagnostic
 
     if not diags:
@@ -229,8 +260,12 @@ def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
         lead
         + "\n\nBut one or more rows are FLAGGED and now block the next write:\n\n"
         + "\n".join(render_diagnostic(d) for d in diags)
-        + "\n\nRepair each flagged row with `fix_row(old_row, new_row)` — or delete it with "
-        '`fix_row(old_row, "")` — before the next append_block or close_investigation.'
+        + "\n\n"
+        + _repair_instruction(
+            verb,
+            "Repair each flagged row with `fix_row(old_row, new_row)` — or delete it with "
+            '`fix_row(old_row, "")` — before the next append_block or close_investigation.',
+        )
     )
 
 
@@ -301,11 +336,11 @@ def _tool_append_block(deps: AgentDeps, text: str, *, verb: str = "append_block"
     recall = _frontier_recall(deps, current, new_text)
     if warn:
         # INSIDE the warning return, not stapled after it. `_warning_return` ends with the
-        # `fix_row` instruction, and on this path that is the only legal next call — the next
-        # `append_block` is hard-refused by `flagged_diagnostics`. Appending the lessons block
-        # after it would put ~30 lines of precedent between the model and the one action it
-        # can take.
-        return _warning_return(f"{lead} — the block LANDED.{recall}", warn)
+        # repair instruction — whichever of the two `verb` selects — and on this path that is
+        # the only legal next move: the next write is hard-refused by `flagged_diagnostics`
+        # until the window closes. Appending the lessons block after it would put ~30 lines of
+        # precedent between the model and the one action it can take.
+        return _warning_return(f"{lead} — the block LANDED.{recall}", warn, verb=verb)
     return lead + recall
 
 

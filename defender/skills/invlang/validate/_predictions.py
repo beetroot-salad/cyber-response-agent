@@ -92,9 +92,17 @@ def _check_append_only(
                 )
             elif new_idx[rid] != core:
                 errors.append(
+                    # NAMES THE BLOCK. `_check_append_only` is in `structural_diagnostics`, so
+                    # `record`'s round loop retries on this refusal and feeds it straight back
+                    # to the clerk as "read this and fix it" — the clerk's only guidance for
+                    # the retry. D15's verb purge took `:R attr_updates` out along with the
+                    # verb names, leaving the one reader who acts on it unable to tell which
+                    # block to emit. The block is a locus, not a verb: naming it is what D15
+                    # permits and what the retry needs.
                     f"append-only violation: committed {label} {rid} was "
                     f"mutated in place ({core} → {new_idx[rid]}) — record the refinement as a "
-                    f"new observation, never by rewriting the original declaration"
+                    f"new `:R attr_updates` observation row, never by rewriting the original "
+                    f"declaration"
                 )
     return errors
 

@@ -24,6 +24,13 @@ from typing import Any, ClassVar
 
 from defender._env import env_int, env_str
 
+from ._clerk_contract import (
+    CLERK_ROUND_BUDGET,
+    PENDING_CAP,
+    ClerkMalformedReply,
+    PendingCompile,
+    clerk_trace_path,
+)
 from .agent_definition import AgentDefinition, ToolSet
 from .agent_role import CLERK_AGENT_ID_PREFIX, AgentRole
 from .tools import AgentDeps
@@ -40,13 +47,10 @@ DEFAULT_CLERK_MODEL = "glm-5p3-flash"
 DEFAULT_CLERK_EFFORT = "low"
 DEFAULT_CLERK_TIMEOUT_SECONDS = 120
 
-#: D2/D7's shared budget: repair rounds and round-loop rounds draw from ONE pool of six clerk
-#: invocations per `record` call — never two independent pools of six. HD-4 also fixes
-#: `pending`'s own cap at this same number.
-CLERK_ROUND_BUDGET = 6
-#: HD-4: `pending` holds at most six entries; the oldest is dropped on overflow, with a
-#: receipt line naming what was lost.
-PENDING_CAP = 6
+#: `CLERK_ROUND_BUDGET`, `PENDING_CAP`, `ClerkMalformedReply`, `PendingCompile` and
+#: `clerk_trace_path` are RE-EXPORTS from `_clerk_contract`, the leaf both this module and
+#: `tools/_clerk.py` read them from — see that module's own docstring for the cycle they
+#: would otherwise close. This is still where a reader imports them.
 
 _DENY_REASON = (
     "Blocked: the clerk is a pure projection — it receives text and returns text. Its "
@@ -89,17 +93,6 @@ CLERK_DEF = AgentDefinition(
 )
 
 
-#: `(prose, held_block, owed)` — a provider fault pushes `(prose, None, [])`; a D7 judgment
-#: stop or an S6 conclude-drop pushes `(prose, block, owed)`.
-PendingCompile = tuple[str, "str | None", tuple[str, ...]]
-
-
-class ClerkMalformedReply(Exception):
-    """The clerk answered with text the round loop cannot split into fences OR a `GAPS:`
-    section at all — what a model that lost the format and answered in prose produces.
-    Treated identically to a transport fault: pend the prose, write the trace, return."""
-
-
 @dataclass
 class ClerkCaller:
     """One per run, built at the composition root. `n` is the wire log's own counter — every
@@ -127,6 +120,22 @@ class ClerkCaller:
     record_n: int = 0
     pending: list[PendingCompile] = field(default_factory=list)
     last_gaps: list[str] = field(default_factory=list)
+    #: The clerk's grammar + closed-slot catalog, built lazily on first use by
+    #: `tools/_clerk._grammar_and_catalog` and then held for the life of the run — the same
+    #: read-once treatment `instructions` gets above, for the same reason: it is a shipped
+    #: asset plus a walk of a closed vocabulary, constant for the run, and otherwise rebuilt
+    #: at the top of every single `record` call.
+    grammar_catalog: str | None = None
+    #: Per-run cache of the BUILT MODEL, keyed on the `(name, effort)` pair actually resolved
+    #: at call time. Not the built Agent: `build_agent_core` bakes `agent_id` into the request
+    #: hooks and into the prompt-cache affinity key, and every clerk call needs its own
+    #: `clerk:{n}` identity in the run's ONE wire log (O5) — so the agent is per-call BY
+    #: CONTRACT and the model, which is identical for every call resolving the same pair, is
+    #: the part a cache may hold. One `record` spends up to six clerk calls and a run up to
+    #: `max_tool_calls` of them, so this is a provider build per call otherwise. An operator
+    #: moving either knob mid-run resolves a different pair and builds again, which is exactly
+    #: the "read fresh on every call" property both env seams exist for.
+    _models: dict[tuple[str, str | None], Any] = field(default_factory=dict)
 
     def allowed(self) -> bool:
         """O10's derived ceiling: `record` is metered, never refused, past it — so a caller
@@ -161,16 +170,26 @@ class ClerkCaller:
         effort_value = CLERK_DEF.effort() if callable(CLERK_DEF.effort) else CLERK_DEF.effort
         defn = replace(CLERK_DEF, effort=effort_value)
         assert defn.deps_cls is not None, "CLERK_DEF declares no deps_cls"
-        kwargs: dict[str, Any] = {}
-        if self.make_model is not None:
-            kwargs["make_model"] = self.make_model
         agent = build(
             defn, deps_type=defn.deps_cls, instructions=self.instructions,
-            logger=self.logger, agent_id=agent_id, **kwargs,
+            logger=self.logger, agent_id=agent_id, make_model=self._make_model,
         )
         deps = bind_review_role(defn, self.run_dir, defender_dir=self.defender_dir)
         result = await asyncio.wait_for(agent.run(prompt, deps=deps), timeout=deadline)
         return str(result.output or "")
+
+    def _make_model(self, name: str, effort: str | None):
+        """The builder's `make_model` seam, memoized per `(name, effort)` on this run — see
+        `_models`. Wraps whichever seam the caller was constructed with (a test's injected one,
+        or the shipped provider table), so the injection point is unchanged and only the
+        rebuild is removed."""
+        key = (name, effort)
+        if key not in self._models:
+            from . import providers
+
+            base = self.make_model if self.make_model is not None else providers.build_for_effort
+            self._models[key] = base(name, effort)
+        return self._models[key]
 
     def _log_scripted(self, agent_id: str, prompt: str, text: str) -> None:
         """A scripted clerk bypasses the Agent/hooks machinery entirely (it is a bare
@@ -201,32 +220,54 @@ def _clerk_call_ceiling(limits: dict | None) -> int | None:
     return int(cap) if isinstance(cap, int) else None
 
 
-def _count_clerk_wire_calls(run_dir: Path) -> int:
-    """How many `clerk:` agent ids the run's wire log already carries — the seed for `n` so a
-    resumed process cannot re-issue an id a prior pass already used (HD-2's one exception)."""
+def _highest_clerk_wire_call(run_dir: Path) -> int:
+    """The HIGHEST `clerk:{n}` the run's wire log already carries — the seed for `n`, so a
+    resumed process cannot re-issue an id a prior pass already used (HD-2's one exception).
+
+    THE MAXIMUM, NOT THE COUNT. `ClerkCaller.call` increments `n` before it awaits, and the
+    scripted lane logs only after a successful reply while the live lane logs through the
+    request hook — so a faulted call spends an id and leaves no row for it. With `clerk:1` and
+    `clerk:3` on disk, a count seeds 2 and the resumed process issues `clerk:3` again, which
+    is precisely the collision this seeding exists to prevent, and it fails silently: the two
+    calls become one identity and the run's clerk spend stops being attributable per call.
+
+    A malformed or non-numeric suffix contributes nothing rather than raising: this runs at
+    composition-root construction, where a torn last line must not stop a resume."""
     from defender._io import read_jsonl_rows
     from defender._run_paths import RunPaths
 
     path = RunPaths(Path(run_dir)).wire_log
     if not path.is_file():
         return 0
-    seen: set[str] = set()
+    highest = 0
     for row in read_jsonl_rows(path):
         agent_id = str(row.get("agent_id", ""))
-        if agent_id.startswith(CLERK_AGENT_ID_PREFIX):
-            seen.add(agent_id)
-    return len(seen)
+        if not agent_id.startswith(CLERK_AGENT_ID_PREFIX):
+            continue
+        suffix = agent_id[len(CLERK_AGENT_ID_PREFIX):]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return highest
 
 
-def _count_clerk_trace_rows(run_dir: Path) -> int:
-    """How many `clerk_trace.jsonl` rows already exist — the seed for `record_n`, HD-2's other
-    identity cell over the same counter."""
+def _highest_clerk_trace_n(run_dir: Path) -> int:
+    """The HIGHEST `n` in `clerk_trace.jsonl` — the seed for `record_n`, HD-2's other identity
+    cell over the same counter, and the maximum for the reason above.
+
+    `_append_trace` is best effort: it reports an `OSError` in the receipt and returns, so
+    `record_n` can already have run ahead of the rows on disk. A count then seeds low and the
+    resume re-issues a trace `n` a prior process used, which is the same silent collision."""
     from defender._io import read_jsonl_rows
 
-    path = Path(run_dir) / "wire_logs" / "clerk_trace.jsonl"
+    path = clerk_trace_path(Path(run_dir))
     if not path.is_file():
         return 0
-    return sum(1 for _ in read_jsonl_rows(path))
+    highest = 0
+    for row in read_jsonl_rows(path):
+        n = row.get("n")
+        if isinstance(n, int):
+            highest = max(highest, n)
+    return highest
 
 
 def make_clerk_caller(
@@ -242,7 +283,7 @@ def make_clerk_caller(
         run_dir=Path(run_dir), defender_dir=Path(defender_dir), logger=logger,
         instructions=instructions, raw=raw, make_model=make_model, build=build,
         call_ceiling=_clerk_call_ceiling(limits),
-        n=_count_clerk_wire_calls(run_dir), record_n=_count_clerk_trace_rows(run_dir),
+        n=_highest_clerk_wire_call(run_dir), record_n=_highest_clerk_trace_n(run_dir),
     )
 
 

@@ -42,6 +42,7 @@ EXPECTED_ROSTER = {"bash", "read_file", "record", "close_investigation", "gather
 #: two the widened sweep found. Every one of them is a file whose strings MAIN can be handed
 #: without asking for them.
 MAIN_FACING_MODULES = (
+    "_artifact_schema.py",
     "runtime/close_tool.py",
     "runtime/circuit_breaker.py",
     "hooks/budget_enforcer.py",
@@ -52,6 +53,15 @@ MAIN_FACING_MODULES = (
     "skills/invlang/validate/_predictions.py",
 )
 
+#: `runtime/tools/_document.py` is deliberately NOT on the list above, and the reason is the
+#: one thing a blanket literal scan cannot express: it speaks to two audiences and picks
+#: between them by `verb`. Its `fix_row` spelling is correct — and reachable — for the DIRECT
+#: callers of the internal writer (the #836 suite, any future write-granting role), and what
+#: MAIN gets through `record` is the other branch. Pinned by driving that branch instead:
+#: `test_repair_instruction_names_a_verb_the_model_can_actually_call` (both audiences, at the
+#: writer) and `test_996_no_record_receipt_names_a_verb_main_cannot_call` (MAIN's receipt,
+#: end to end).
+#:
 #: The phrasings D15 forbids, each one of O1's own stated failing conditions. A string may
 #: still NAME a row, a slot or an id — that is the locus of a fact and MAIN's catalog names the
 #: same things. What it may not do is tell MAIN to write one, or to call a verb D14 removed.
