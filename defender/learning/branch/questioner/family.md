@@ -45,14 +45,34 @@ worlds:
   - world_id: a short lowercase label for this world, unique in the family
     axis: the axis this world varies, in one sentence
     overlay:
-      patches: {}
-      elastic: {}   # lint-shippable: ok — the manifest's own overlay key; a prompt that spelled it any other way would name a key the parser does not read
+      patches:
+        identity:                  # one of the six state systems below
+          office-ws-1:             # the entity this system is re-answered about
+            owner: platform        # the fields that come back different
+      elastic:                     # lint-shippable: ok — the manifest's own overlay key; a prompt that spelled it any other way would name a key the parser does not read
+        logs-system.auth-*:        # THE BASE PATTERN IS THE KEY
+          inject:
+            - "@timestamp": "2026-05-25T15:22:39.400Z"
+              host.name: office-ws-1
+              event.action: ssh_login
+          exclude:                 # optional: a query matching what this world does NOT hold
+            match:
+              host.name: office-ws-2
   - world_id: another short lowercase label
     axis: the axis the second world varies, in one sentence
     overlay:
       patches: {}
       elastic: {}   # lint-shippable: ok — the manifest's own overlay key, same as above
 ```
+
+Both halves nest one level deeper than they may look. Under `patches`, the SYSTEM names a
+table of entities and each entity names the fields that come back different; the system must
+be one of `cmdb`, `identity`, `threat-intel`, `change-mgmt`, `ticket`, `host-state`. The corpus
+half is STAGED rather than patched, so its own key never belongs in `patches` — a patch table
+naming it is refused. Under the corpus half, THE BASE PATTERN IS THE KEY and the documents
+are a plain list under `inject` — a document does not carry its own pattern field, because the
+pattern is what staging builds the world's view from. An overlay that flattens either half is
+refused when the family is parsed, after all three calls have been paid for.
 
 `base_disposition` is what the REAL investigation had established by the branch point, not what
 you would conclude — it is the reading every counterfactual is measured against.

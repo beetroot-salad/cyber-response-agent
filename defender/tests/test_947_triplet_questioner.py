@@ -17,6 +17,7 @@ ten members (X3), and the three census sites still say ten.
 from __future__ import annotations
 
 import dataclasses
+import re
 
 import pytest
 import yaml
@@ -26,6 +27,10 @@ from defender.tests import _triplet_947 as T
 
 def _questioner():
     return T.mod("learning.branch.questioner")
+
+
+def _family_mod():
+    return T.mod("runtime.branch._family")
 
 
 # ---------------------------------------------------------------------------------------
@@ -270,3 +275,34 @@ def test_947_a_fenced_yaml_reply_is_read_as_the_document_it_holds(tmp_path):
     # returned an empty mapping would still compose three worlds and still raise nothing.
     assert composed["base_story"] == "the captured story"
     assert [w["world_id"] for w in composed["worlds"]] == ["a", "b", "c"]
+
+
+def test_947_the_prompts_overlay_example_parses_through_the_real_loader():
+    """Every overlay the family prompt SHOWS is one the family loader accepts.
+
+    The prompt is where the model learns the shape, and the loader is what refuses it — after
+    all three calls have been paid for and with the episode already aborted. The two agreed only
+    by prose until a live episode died on the gap: the prompt described "injects documents under
+    a base pattern" and showed nothing but `elastic: {}`, so the model authored the reasonable
+    other encoding (`inject:` directly under `elastic`, each document carrying its own
+    `index_pattern`) and `parse_family` refused it.
+
+    The example is PARSED, not searched for a substring: a prompt that merely mentions the right
+    key names while nesting them wrongly is exactly the failure this pins.
+    """
+    prompt = (T.mod("run_common").REPO_ROOT / "defender" / "learning" / "branch"
+              / "questioner" / "family.md")
+    text = prompt.read_text(encoding="utf-8")
+    blocks = re.findall(r"^```yaml\n(.*?)^```", text, re.DOTALL | re.MULTILINE)
+    assert blocks, "the family prompt shows no YAML block at all"
+    overlays = [w["overlay"] for block in blocks
+                for w in (yaml.safe_load(block).get("worlds") or [])
+                if isinstance(w, dict) and "overlay" in w]
+    # Without this the comprehension can yield nothing and the loop below asserts nothing —
+    # the empty-collection vacuity shape, reached by any edit that renames the `worlds` key.
+    assert len(overlays) >= 2, f"the prompt's worlds carry {len(overlays)} overlays, not two"
+    parsed = [_family_mod().parse_overlay(ov, where="the prompt's example") for ov in overlays]
+    # At least one example must actually STAGE something. Two empty overlays parse clean and
+    # teach the model nothing, which is the state this test was written against.
+    assert any(ov.patches and ov.elastic for ov in parsed), (
+        "no overlay in the prompt shows both halves populated, so the shape is still unshown")
