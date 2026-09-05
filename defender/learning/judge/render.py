@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import read_jsonl_rows
+from defender.learning.branch.archive import (
+    ALERT_NAME,
+    GATHER_SUMMARIES_DIRNAME,
+    LESSONS_LOADED_NAME,
+)
 from defender.learning.judge._errors import JudgeRefused
 from defender._report import read_report
 from defender.learning.judge.family import (
@@ -86,7 +91,7 @@ class JudgeInput:
             "coverage": _render_coverage(self.coverage, self.union_notes),
             "siblings": _render_siblings(self.siblings, self.union_notes),
             "lessons": _render_lessons(self.lessons),
-            "spread": _render_spread(self.spread),
+            "spread": _render_spread(self.spread, self.union_notes),
             "document": self.document_text,
             "report": self.report_text,
         }, self.payload_cap)
@@ -157,7 +162,7 @@ def _render_coverage(coverage: list[dict[str, Any]], union_notes: dict[str, Any]
 
 def _render_siblings(siblings: list[dict[str, Any]], union_notes: dict[str, Any]) -> str:
     lines = [f"- {row.get('run_id')}: disposition={row.get('disposition')}" for row in siblings]
-    if not siblings and not _union_unattempted(union_notes):
+    if not siblings and _union_empty_after_a_walk(union_notes):
         lines = ["This is a first-run alert: no sibling trial is recorded."]
     excluded = union_notes.get("source_run_excluded")
     if excluded:
@@ -170,7 +175,24 @@ def _union_unattempted(union_notes: dict[str, Any]) -> bool:
     """Was the sibling walk never actually made? ONE predicate, because three views ask it and
     the answer must be the same in all of them: an unattempted union is not "no sibling exists",
     and only a walk that RAN over a real directory may render that sentence."""
-    return bool(union_notes.get("runs_base_unset") or union_notes.get("runs_base_missing"))
+    return bool(union_notes.get("runs_base_unset") or union_notes.get("runs_base_missing")
+                or union_notes.get("alert_unidentified"))
+
+
+def _union_empty_after_a_walk(union_notes: dict[str, Any]) -> bool:
+    """May a view say "this is a first-run alert" — i.e. did a walk RUN and find nothing, with
+    nothing dropped on the way?
+
+    THE EXCLUSIONS COUNT TOO, not just whether the walk happened. An episode branched from a
+    source run that lives under the operator's runs base excludes that run by name — so the
+    alert has demonstrably been tried before, and the very next line of the view says so. The
+    sentence and its own footnote contradicted each other on every ordinary branched episode.
+    The same holds for a trial skipped as unreadable or unclosed: something WAS found and
+    dropped, which is not "no sibling trial is recorded"."""
+    return not (_union_unattempted(union_notes)
+                or union_notes.get("source_run_excluded")
+                or union_notes.get("skipped_unreadable")
+                or union_notes.get("skipped_unclosed"))
 
 
 def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
@@ -188,6 +210,10 @@ def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
         out.append("(the runs base named for this pass is not a directory, so the sibling "
                    "union was never attempted — this is not a statement that no sibling "
                    "trial exists)")
+    if union_notes.get("alert_unidentified"):
+        out.append("(this episode's own alert.json carries no alert id, so the sibling union "
+                   "had nothing to match trials against and was never attempted — this is not "
+                   "a statement that no sibling trial exists)")
     for key, what in (("skipped_unreadable", "could not be read"),
                       ("skipped_unclosed", "never reached a close")):
         count = union_notes.get(key) or 0
@@ -213,12 +239,23 @@ def _render_lessons(lessons: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines) + "\n"
 
 
-def _render_spread(spread: list[dict[str, Any]]) -> str:
+def _render_spread(spread: list[dict[str, Any]], union_notes: dict[str, Any]) -> str:
     """The spread's own row shape — `disposition` and `count`, NOT the sibling view's
     `run_id`/`disposition`. The spread is the tally ACROSS the siblings, so the count is the
     only thing it carries that the sibling list does not; rendering it with the sibling
-    formatter printed a `None` run id per line and dropped every count."""
+    formatter printed a `None` run id per line and dropped every count.
+
+    THE THIRD VIEW THAT ASKS `_union_unattempted` — its docstring says three do and only two
+    did. The spread is derived from the same union the siblings view renders, so an empty
+    spread meant "nobody looked" exactly as often as it meant "nothing is there", and the flat
+    sentence below stated the absence as a fact in the same prompt whose siblings view said the
+    walk was never attempted. Two contradictory statements about one fact is worse than the
+    unstated absence C11 measured."""
     if not spread:
+        if not _union_empty_after_a_walk(union_notes):
+            return ("The spread is empty because the sibling union it tallies is — see the "
+                    "sibling view above for why; this is not a statement that no other trial "
+                    "of this alert exists.\n")
         return "No other trial of this alert is recorded; the spread is empty.\n"
     lines = [
         f"- disposition={_spread_label(row.get('disposition'))}: {row.get('count')} trial(s)"
@@ -312,7 +349,7 @@ def _lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, li
             goal = data.get("goal")
     queries = queries_by_lead.get(lead_id, [])
     params = queries[0].get("params") if queries else None
-    summary_path = world_dir / "gather_summaries" / f"{lead_id}.md"
+    summary_path = world_dir / GATHER_SUMMARIES_DIRNAME / f"{lead_id}.md"
     summary = None
     if not safe:
         summary = ("(this lead id does not name a file inside this world, so no gather summary "
@@ -366,7 +403,7 @@ def _sibling_row(
     `normalized_disposition`, and — the part that matters at THIS call site — NEVER RAISES: a
     bare `read_text` here made one undecodable byte in one unrelated run under the operator's
     runs base refuse the whole grade of an episode whose own archive reads perfectly."""
-    alert_path = entry / "alert.json"
+    alert_path = entry / ALERT_NAME
     if not alert_path.is_file():
         return None, None
     alert_doc = json_mapping(alert_path)
@@ -400,11 +437,22 @@ def sibling_union(
     notes: dict[str, Any] = {
         "source_run_excluded": None, "skipped_unreadable": 0, "skipped_unclosed": 0,
         "runs_base_unset": runs_base is None, "runs_base_missing": False,
+        "alert_unidentified": alert_id is None,
     }
     if runs_base is None:
         return [], notes
     siblings: list[dict[str, Any]] = []
     runs_base = Path(runs_base)
+    if alert_id is None:
+        # NOTHING TO MATCH ON IS NOT "EVERYTHING MATCHES". `_sibling_row` selects with
+        # `alert_doc.get("alert_id") != alert_id`, and a graded world whose own `alert.json` is
+        # present but carries no `alert_id` (only `is_file()` is required of it) makes that
+        # `None != None` — FALSE for every unrelated run under the operator's runs base whose
+        # own `alert.json` also lacks the key. The union then handed the model other alerts'
+        # closes as prior trials of THIS one, and the spread tallied them. Refused here rather
+        # than in `_sibling_row` so the reason lands on the notes and is rendered (C11): nobody
+        # could look, which is not the same fact as "no sibling trial exists".
+        return siblings, notes
     if not runs_base.is_dir():
         # NAMED, not folded into the empty union. `run_common.resolve_runs_base()` returns
         # whatever `DEFENDER_RUNS_BASE` says (or its compiled default) and never checks that the
@@ -430,15 +478,16 @@ def sibling_union(
 
 
 def _world_alert_id(world_dir: Path) -> str | None:
-    data = json_mapping(world_dir / "alert.json")
+    data = json_mapping(world_dir / ALERT_NAME)
     return data.get("alert_id") if data is not None else None
 
 
-def render(  # noqa: C901 — one assembly of the four joined views (O4); each view is already its own helper, this is the join
+def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4); each view is already its own helper, this is the join, and the keyword tail is the per-pass hand-over (facts/union/manifest) that keeps this from re-reading what the caller has already read
     episode_dir: Path, world_label: str, runs_base: Path | None = None, *,
     git_show: Any = None, lessons_commit: str | None = None, payload_cap: int | None = None,
     facts: WorldFacts | None = None,
     union: tuple[list[dict[str, Any]], dict[str, Any]] | None = None,
+    manifest: dict[str, Any] | None = None,
 ) -> JudgeInput:
     """The judge's rendered input for one non-control world.
 
@@ -452,7 +501,12 @@ def render(  # noqa: C901 — one assembly of the four joined views (O4); each v
     nothing to hand over pays to compute them again.
     """
     episode_dir = Path(episode_dir)
-    doc = _raw_manifest(episode_dir)
+    # THE PASS'S OWN PARSE, when the caller has one. `family.yaml` was read and YAML-parsed here
+    # once per world on top of the orchestration's read and `grade_family`'s, so a two-world
+    # episode parsed one file four times — and, since the episode dir is a tree a box can reach,
+    # with no guarantee the four documents agreed. `facts=` and `union=` already exist for
+    # exactly this hand-over; the manifest simply was not put through it.
+    doc = manifest if manifest is not None else _raw_manifest(episode_dir)
     episode_token = episode_token_for(episode_id_of(doc))
     world_dir = episode_dir / "worlds" / world_label
     _world_entry(doc, world_label)  # validates the graded world is actually declared
@@ -463,7 +517,7 @@ def render(  # noqa: C901 — one assembly of the four joined views (O4); each v
     text = record.investigation_text
     resolutions_by_lead = record.resolutions_by_lead
     lead_ids = set(record.referenced_leads)
-    summaries_dir = world_dir / "gather_summaries"
+    summaries_dir = world_dir / GATHER_SUMMARIES_DIRNAME
     if summaries_dir.is_dir():
         lead_ids |= {p.stem for p in summaries_dir.glob("*.md")}
 
@@ -485,8 +539,8 @@ def render(  # noqa: C901 — one assembly of the four joined views (O4); each v
     provenance = _read_provenance(world_dir)
     commit = lessons_commit if lessons_commit is not None else provenance.get("commit")
     dirty = bool(provenance.get("dirty"))
-    lessons_loaded = read_jsonl_rows(world_dir / "lessons_loaded.jsonl") \
-        if (world_dir / "lessons_loaded.jsonl").is_file() else []
+    lessons_loaded = read_jsonl_rows(world_dir / LESSONS_LOADED_NAME) \
+        if (world_dir / LESSONS_LOADED_NAME).is_file() else []
     lessons: list[dict[str, Any]] = []
     for entry in lessons_loaded:
         name, path = entry.get("lesson_name"), entry.get("path")
@@ -531,12 +585,13 @@ def render(  # noqa: C901 — one assembly of the four joined views (O4); each v
     # world" standing in world b's coverage view — above the row world b had in fact recorded.
     # That is the exact fact the lead-set and lead-quality buckets turn on.
     union_notes = dict(union_notes)
-    if _union_unattempted(union_notes):
-        # NOT "this is a first-run alert". Nobody looked, which is a different fact from "no
-        # sibling exists" — and the siblings view says so in the same prompt, so asserting the
-        # absence here would hand the model two contradictory statements about one fact. The
-        # same predicate the siblings view uses, so the two cannot disagree about whether the
-        # walk was made.
+    if not _union_empty_after_a_walk(union_notes):
+        # NOT "this is a first-run alert". Either nobody looked, or something WAS found and
+        # dropped (the source run this episode branched from, an unreadable or unclosed trial)
+        # — both different facts from "no sibling exists", and the siblings view says which in
+        # the same prompt, so asserting the absence here would hand the model two contradictory
+        # statements about one fact. The same predicate the siblings and spread views use, so
+        # the three cannot disagree about whether the sentence may be said at all.
         if not coverage:
             union_notes["coverage_note"] = (
                 "no row on the holding system is recorded for this world")

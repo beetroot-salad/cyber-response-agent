@@ -191,13 +191,24 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         # refuse it for us: under `dirs_exist_ok=True` its own `makedirs(dst, exist_ok=True)`
         # RESOLVES a link planted at this name, writing the world's summaries wherever it
         # points — the exact escape this screen exists to stop, one directory over.
+        # ALL THREE OF THEM, not only the one this design added. `stage_tables` runs the same
+        # `copytree(dirs_exist_ok=True)` onto `worlds/<label>/gather_raw` and a `copy2` onto
+        # `worlds/<label>/executed_queries.jsonl`, and it screens only its SOURCES — so the
+        # destination escape screened here for `gather_summaries/` was still open one directory
+        # over, on artifacts that predate it. The screen belongs to the destination tree, which
+        # is this function's, so it is applied to every name written into that tree.
         summaries_dest = world_dir / GATHER_SUMMARIES_DIRNAME
-        if (summaries_dest.exists() or summaries_dest.is_symlink()) \
-                and not artifact_dir(summaries_dest):
+        staged_dests = RunPaths(world_dir)
+        for dest, is_dir in ((summaries_dest, True), (staged_dests.gather_raw, True),
+                             (staged_dests.executed_queries, False)):
+            if not (dest.exists() or dest.is_symlink()):
+                continue
+            if artifact_dir(dest) if is_dir else artifact_file(dest):
+                continue
             raise ArchiveRefused(
-                f"world {world!r}: {summaries_dest} is occupied by something that is not a "
-                "real directory — copying onto it would write this world's gather summaries "
-                "wherever it points")
+                f"world {world!r}: {dest} is occupied by something that is not a "
+                f"{'real directory' if is_dir else 'regular file'} — copying onto it would "
+                "write this world's archived artifact wherever it points")
         for source, name in sources:
             # Screened by `_screen` above, before this loop began: a link at any of these
             # names has already raised, so nothing here can follow one.
@@ -233,6 +244,13 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
 
 
 __all__ = [
+    # The three D7 names are EXPORTED, not private constants: the judge reads every one of them
+    # back out of the archive this module writes, and a name spelled here and re-spelled there
+    # is a rename that leaves the writer and the reader looking at two different files with no
+    # error anywhere — an absent `gather_summaries/` is a note on the record, not a refusal.
+    "ALERT_NAME",
+    "GATHER_SUMMARIES_DIRNAME",
+    "LESSONS_LOADED_NAME",
     "RUN_DIR_POINTER",
     "SCRUB_VERDICT_NAME",
     "WORLDS_DIRNAME",

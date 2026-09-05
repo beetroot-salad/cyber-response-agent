@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from defender._io import read_jsonl_rows_report
+from defender._io import read_guarded, read_jsonl_rows_report
 from defender._report import ReportRead, read_report
 from defender._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
@@ -64,9 +64,15 @@ from defender.learning.branch.ledger import (
     normalized_source,
     request_key,
 )
+from defender.learning.branch.archive import ALERT_NAME, GATHER_SUMMARIES_DIRNAME
 from defender.learning.judge._errors import JudgeRefused
 from defender.run_common import resolve_runs_base
-from defender.runtime.branch._family import BASE_ROLE, episode_token_for, world_token_for
+from defender.runtime.branch._family import (
+    BASE_ROLE,
+    MANIFEST_NAME,
+    episode_token_for,
+    world_token_for,
+)
 from defender.skills.invlang._walkers import iter_resolutions
 from defender.skills.invlang.parser import parse_dense_companion, scan_fences
 
@@ -94,11 +100,18 @@ def _raw_manifest(episode_dir: Path) -> dict[str, Any]:
 
     from defender._yaml import safe_load
 
-    path = Path(episode_dir) / "family.yaml"
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as bad:
-        raise JudgeRefused(f"the manifest at {path} could not be read: {bad}") from bad
+    path = Path(episode_dir) / MANIFEST_NAME
+    # THE SCREENED READ THE MANIFEST'S OWNER MAKES, not a plain `read_text`. `_family.
+    # _read_document` reads this same file through `read_guarded` for a stated reason — "the
+    # episode dir is reachable from a sibling box's rw bind, so an entry at the manifest's name
+    # may be a link the model planted — and a plain `read_text` follows the link the write side
+    # refuses". The judge reads the same bytes to decide which worlds there are, what H is and
+    # what each world's ground truth is, so a link the launcher refuses must not be one the
+    # grader honours. `read_guarded` folds ABSENT in with the alias refusal; both are "you have
+    # no content", and both were already this design's refusal here.
+    text, refusal = read_guarded(path)
+    if text is None:
+        raise JudgeRefused(f"the manifest at {path} could not be read: {refusal}")
     try:
         # THE HARDENED LOADER. `RecursionError` out of a deeply nested manifest is neither a
         # `YAMLError` nor a `ValueError`, so it escaped both this handler and `grade_episode`'s
@@ -251,6 +264,15 @@ def mapping_key(mapping: dict[str, Any]) -> str:
     to AGREE for the drift check to match a recorded key at all, so a change to one silently
     stopping the other from matching is the whole hazard."""
     params = mapping.get("params")
+    # THE KEYS ARE STRINGIFIED FIRST. `request_key` ends in `json.dumps(..., sort_keys=True)`,
+    # whose `default=str` rescues an unserialisable VALUE and does nothing for a key: a params
+    # mapping with mixed key types sorts `int` against `str` and raises `TypeError` — a class
+    # `grade_episode`'s conversion set does not name, out of `_control_drift_discard` AFTER
+    # every world's draws have been made. A ledger row's params come from JSONL and are already
+    # string-keyed, so this changes no recorded key; the manifest's `discriminator.envelope` is
+    # model-authored YAML and is the one mapping that can carry others.
+    if isinstance(params, dict):
+        params = {str(k): v for k, v in params.items()}
     return request_key(str(mapping.get("system") or ""), str(mapping.get("verb") or ""),
                        params if isinstance(params, dict) else {})
 
@@ -431,7 +453,7 @@ def _check_gather_summaries(world_dir: Path, *, world: str, referenced_leads: fr
     a lead its own document references — is MALFORMED, refused and NAMING the input that was
     short, which is what tells an operator a partial archive from a genuine one. The refusal is
     contained to this world by `_grade_world` (J5 tier 2), so the siblings still grade."""
-    summaries = world_dir / "gather_summaries"
+    summaries = world_dir / GATHER_SUMMARIES_DIRNAME
     if not summaries.is_dir():
         return
     # `names_one_file` FIRST: a lead id off that grammar stats a path outside this world's
@@ -520,7 +542,7 @@ def _archive_notes(world_dir: Path, *, world: str, facts: WorldFacts) -> list[st
             f"pass could not read ({first[:120]!r}…) — they are outside every invlang fence, "
             "unreadable to the parser, or carry no lead id, so this world's resolution facts "
             "are read from what landed alone")
-    summaries = world_dir / "gather_summaries"
+    summaries = world_dir / GATHER_SUMMARIES_DIRNAME
     if facts.referenced_leads and not summaries.is_dir():
         notes.append(
             f"gather_summaries/ is absent while investigation.md names "
@@ -539,7 +561,7 @@ def _missing_required_input(
     if not (world_dir / "investigation.md").is_file():
         return "investigation.md"
     if not alert_path.is_file():
-        return "alert.json"
+        return ALERT_NAME
     if not isinstance(declared, str) or not declared:
         return "disposition_declared"
     return None
@@ -557,7 +579,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     row: dict[str, Any] = {"world": label, "declared": normalized_disposition(raw_declared)}
     world_dir = Path(episode_dir) / "worlds" / label
     ledger_path = world_ledger_path(episode_dir, label, episode_token=episode_token)
-    alert_path = world_dir / "alert.json"
+    alert_path = world_dir / ALERT_NAME
 
     missing = _missing_required_input(
         world_dir=world_dir, ledger_path=ledger_path, alert_path=alert_path,

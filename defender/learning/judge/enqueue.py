@@ -78,7 +78,13 @@ def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> No
                 "bare KeyError inside the shared findings gate and stuck-records the whole "
                 "keyed batch (P6); refused at the appender instead")
     row_type = row.get("type")
-    if row_type not in QUEUEABLE_FINDING_TYPES:
+    # `isinstance` FIRST: `QUEUEABLE_FINDING_TYPES` is a `set`, so an UNHASHABLE value here
+    # (`bucket: [lead-set]` read back off a draw file) raises `TypeError` out of a function whose
+    # whole contract is to answer with this design's refusal — and `enqueue_report`'s
+    # drop-and-name arm catches `JudgeRefused` only, so one unusable finding took the whole
+    # append down. `_vocab.normalized_disposition` names the same hazard for the disposition
+    # vocabulary, and `run._parse_finding` already asks it of the reply's own bucket.
+    if not isinstance(row_type, str) or row_type not in QUEUEABLE_FINDING_TYPES:
         raise JudgeRefused(
             f"{where}a family finding row's type={row_type!r} is not one of the queueable "
             f"finding types {sorted(QUEUEABLE_FINDING_TYPES)}")
@@ -169,15 +175,21 @@ def _queue_trust_root(pending_file: Path) -> Path:
 
 
 def _episode_alert(episode_dir: Path, worlds: list[str]) -> dict[str, Any]:
+    """The alert this episode's worlds investigate, off the first world that carries one.
+
+    THROUGH `render.json_mapping`, which is the one home for this tolerance policy and names
+    this very reader as one of its five. The copy that used to live here caught `(OSError,
+    ValueError)` and dropped `RecursionError` — the class that docstring says it was centralised
+    to stop having to fix five times, and one that is neither in this module's handlers nor in
+    `grade_episode`'s conversion set, so a deeply nested `alert.json` took the whole pass down
+    as a bare traceback after every draw had already been made."""
+    from defender.learning.branch.archive import ALERT_NAME
+    from defender.learning.judge.render import json_mapping
+
     for label in worlds:
-        path = episode_dir / "worlds" / label / "alert.json"
-        if path.is_file():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if isinstance(data, dict):
-                return data
+        data = json_mapping(episode_dir / "worlds" / label / ALERT_NAME)
+        if data is not None:
+            return data
     return {}
 
 
@@ -329,6 +341,14 @@ def enqueue_report(episode_dir: Path, grade: Any, *, queue_dir: Path | None = No
             findings = draw_doc.get("findings") or []
             for index, finding in enumerate(findings):
                 if not isinstance(finding, dict):
+                    # NAMED, like every other drop in this loop. `_draws_on_disk` parses
+                    # model-authored draw YAML off a tree a box can reach, where `findings:` can
+                    # legitimately be a list of scalars — dropped in silence those vanished with
+                    # no line on `unqueueable_findings`, whose whole job is that a drop is said
+                    # out loud instead of read later as a finding the model never emitted.
+                    unqueueable.append(
+                        f"{run_id}/{label}/{draw}/{index}: the draw's finding[{index}] is "
+                        f"{type(finding).__name__}, not a mapping")
                     continue
                 row = _build_row(
                     run_id=run_id, label=label, draw=str(draw), index=index,

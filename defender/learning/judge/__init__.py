@@ -208,7 +208,7 @@ def _run_world_draws(  # noqa: PLR0913 — one world's whole per-draw configurat
     episode_dir: Path, label: str, *, judge: Any, runs_base: Path | None, draws: int,
     model: str, effort: str, payload_cap: int, git_show: Any,
     facts: family_mod.WorldFacts | None, lessons_commit: str | None,
-    union: tuple[list[dict[str, Any]], dict[str, Any]],
+    union: tuple[list[dict[str, Any]], dict[str, Any]], manifest: dict[str, Any],
 ) -> tuple[int, dict[str, int], dict[int, dict[str, Any]], int]:
     """Render once, call the judge `draws` times, write one `worlds/<X>/judge/<n>.yaml` per
     draw. Returns `(completed_draws, bucket_spread, this pass's draw documents KEYED BY DRAW
@@ -224,8 +224,8 @@ def _run_world_draws(  # noqa: PLR0913 — one world's whole per-draw configurat
     world_dir = Path(episode_dir) / "worlds" / label
     judge_input = render_mod.render(
         episode_dir, label, runs_base, git_show=git_show, payload_cap=payload_cap, facts=facts,
-        lessons_commit=lessons_commit, union=union)
-    prompt = run_mod._build_prompt(judge_input, world_label=label)
+        lessons_commit=lessons_commit, union=union, manifest=manifest)
+    prompt = run_mod._build_prompt(judge_input)
 
     draw_dir = world_dir / "judge"
     guarded_mkdir(draw_dir, base=episode_dir)
@@ -285,6 +285,10 @@ def _run_world_draws(  # noqa: PLR0913 — one world's whole per-draw configurat
         import yaml
 
         documents[n] = doc
+        # NOT CONTAINED, deliberately: `test_921_both_episode_write_sinks_go_through_write_guarded`
+        # pins that a link planted at this sink REFUSES the pass rather than being written
+        # through or noted and passed over. The draw file is the artifact the enqueue reads back,
+        # so an aliased one is not an observability fault.
         write_guarded(draw_dir / f"{n}.yaml", yaml.safe_dump(doc, sort_keys=False),
                      mode="replace")
     return completed, dict(spread), documents, malformed
@@ -344,6 +348,15 @@ def _default_judge_seam(episode_dir: Path) -> Any:
 
     def invoke(prompt: str, *, role: Any = None, agent_id: str = "judge", wiring: Any = None,
               **_kw: Any) -> str:
+        # `wiring` IS REQUIRED, and the default is what makes the signature honest about it.
+        # `run_stage`'s first statement is `label = wiring.label`, so a caller following the
+        # published shape and omitting it got `AttributeError: 'NoneType' object has no
+        # attribute 'label'` from deep inside the stage driver — swallowed by the draw loop's
+        # per-draw handler and recorded as a `failure_reason` naming no configuration problem.
+        if wiring is None:
+            raise JudgeRefused(
+                f"the judge seam was called for {agent_id!r} with no StageWiring — the model, "
+                "the effort and the trace name all arrive on it, so there is nothing to call")
         return run_stage(
             stage="judge", wiring=wiring,
             ctx=StageContext(learning_run_dir=Path(episode_dir), user=prompt, request_limit=1,
@@ -416,6 +429,12 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
     # parse per run under the operator's whole runs base; and `lessons_commit` was read per
     # world inside `render` AND read a second time out here purely to fill the record, so the
     # value the record carried could disagree with what worlds 2..N actually rendered against.
+    # AND ONLY WHEN THERE IS A WORLD TO RENDER FOR. Both facts exist to be threaded into
+    # `render`, and `render` runs once per GRADABLE world — so an episode whose worlds are all
+    # ungradable (no `disposition_declared`, an absent archive, a malformed document) paid for a
+    # walk of the operator's entire runs base, one `alert.json` read and one report parse per run
+    # dir on it, to build a union no render would consume. The record it would have carried is
+    # the same either way: `lessons_commit` is `None` and the union is empty.
     lessons_commit = _pass_lessons_commit(episode_dir, gradable)
     # ONE `git show` PER (commit, path) FOR THE PASS. `lessons_commit` is a per-pass constant
     # and the corpus is small, so N worlds loading the same lesson spawned N subprocesses for
@@ -424,7 +443,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
     # no memo simply does not add one.
     git_show = _memoized_show(git_show if git_show is not None else render_mod._git_show_default)
     union = render_mod.sibling_union(
-        Path(runs_base) if runs_base is not None else None,
+        Path(runs_base) if runs_base is not None and gradable else None,
         alert_id=_pass_alert_id(episode_dir, gradable),
         source_run_id=manifest.get("source_run_id"))
 
@@ -436,7 +455,8 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
         completed, spread, documents, malformed = _run_world_draws(
             episode_dir, label, judge=judge, runs_base=runs_base, draws=configured_draws,
             model=model, effort=effort, payload_cap=cap, git_show=git_show,
-            facts=grade.world_facts.get(label), lessons_commit=lessons_commit, union=union)  # noqa: E501
+            facts=grade.world_facts.get(label), lessons_commit=lessons_commit, union=union,
+            manifest=manifest)
         per_world_completed[label] = completed
         per_world_spread[label] = spread
         per_world_draws[label] = documents
@@ -505,11 +525,15 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
 
 
 def _memoized_show(show: Any) -> Any:
-    """`show`, answering each `(rev, path)` once per pass and replaying the answer after."""
-    seen: dict[tuple[str, str], Any] = {}
+    """`show`, answering each `(cwd, rev, path)` once per pass and replaying the answer after.
+
+    `cwd` IS IN THE KEY even though the one in-tree caller always passes `REPO_ROOT`: this
+    wrapper advertises the wrapped seam's whole three-argument contract, so a memo keyed on two
+    of the three replays the first checkout's answer — a `None` included — for a second one."""
+    seen: dict[tuple[str, str, str], Any] = {}
 
     def invoke(cwd: Path, rev: str, path: str) -> Any:
-        key = (str(rev), str(path))
+        key = (str(cwd), str(rev), str(path))
         if key not in seen:
             seen[key] = show(cwd, rev, path)
         return seen[key]
@@ -543,11 +567,24 @@ def _pass_alert_id(episode_dir: Path, labels: list[str]) -> Any:
 
 
 def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade:
+    # THE ROWS ARE NARROWED HERE, and that is not defensiveness. `judge.yaml` lives in the
+    # episode dir — a tree a box can reach — and `_existing_grade` validates only that the
+    # document is a mapping, so `worlds` reaches this frame as whatever is on disk. `r["world"]`
+    # on a row missing the key raises `KeyError` and `r.get` on a bare string raises
+    # `AttributeError`; neither is in `grade_episode`'s `(OSError, ValueError, TimeoutError,
+    # yaml.YAMLError)` conversion set, so a corrupted record left the package as a bare
+    # traceback past the handler that promises a refusal — the exact class `family.
+    # episode_id_of`'s docstring exists to close, one function over.
+    raw_worlds = doc.get("worlds")
+    worlds = [
+        row for row in (raw_worlds if isinstance(raw_worlds, list) else [])
+        if isinstance(row, dict) and isinstance(row.get("world"), str)
+    ]
     return EpisodeGrade(
-        episode_dir=episode_dir, worlds=list(doc.get("worlds") or []),
+        episode_dir=episode_dir, worlds=worlds,
         verdict_word=doc.get("verdict_word", "undecidable"),
         graded_worlds=frozenset(
-            r["world"] for r in (doc.get("worlds") or []) if not r.get("ungradable")),
+            r["world"] for r in worlds if not r.get("ungradable")),
         episode_outcome=doc.get("episode_outcome", "gradable"),
         enqueued_rows=doc.get("enqueued_rows", 0), enqueued_to=doc.get("enqueued_to", ""),
         draws=doc.get("draws", {}), knobs=doc.get("knobs", {}),

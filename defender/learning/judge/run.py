@@ -27,9 +27,10 @@ from typing import Any
 
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
+from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
 from defender.learning.core.validate import normalize_judge_yaml
 from defender.learning.judge._errors import JudgeRefused
-from defender.learning.judge.render import JudgeInput
+from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
 
 #: The judge's own reply-level outcome vocabulary — NOT `_vocab.JUDGE_OUTCOME_ENUM`. That
 #: vocabulary is the FAMILY's word (`caught|survived|undecidable|discard|corpus-contradiction`,
@@ -41,8 +42,15 @@ _REPLY_OUTCOME_ENUM = frozenset({"gradable", "discard", "corpus-contradiction"})
 
 #: The finding bucket vocabulary — closed, and NEVER coerced to the nearest member (a
 #: lookalike is rejected, not rounded).
-_BUCKET_ENUM = frozenset(
-    {"lead-set", "lead-quality", "analyze-discipline", "decision-discipline", "observability"})
+#:
+#: IT IS THE QUEUE'S OWN SET, not a fifth hand-typed copy of the same five words. Every finding
+#: this validator admits becomes a queue row whose `type` is that bucket, and
+#: `enqueue._validate_row` accepts it against `QUEUEABLE_FINDING_TYPES` — so the two must be the
+#: same set or the pair disagrees in one direction or the other. Spelled here, adding a sixth
+#: family bucket to `config.FAMILY_ONLY_FINDING_TYPES` widened the queue and left this validator
+#: refusing every reply that used it, counted as a malformed reply, with the draw file removed
+#: and no error above `malformed_replies`.
+_BUCKET_ENUM = frozenset(QUEUEABLE_FINDING_TYPES)
 
 _ROLE_PROMPT = Path(__file__).resolve().parent / "role.md"
 
@@ -115,6 +123,18 @@ def _parse_finding(raw: Any, index: int) -> Finding:
     for key in ("bucket", "claim", "root_cause", "anchor", "topic", "evidence"):
         if key not in raw:
             raise JudgeRefused(f"finding[{index}] is missing {key!r}")
+    # A PRESENT-AND-NULL KEY IS A MISSING ONE. `key not in raw` is satisfied by `anchor:` with
+    # nothing after it, and the coercion below then turns `None` into the four-character string
+    # `"None"` — which is not content-less, so `enqueue._validate_row`'s "subject_anchor must be
+    # a non-empty string" guard passes it, and a twelve-key row whose subject is the word None
+    # reaches the shared queue and the curator. The queue's rule cannot be enforced downstream
+    # of a coercion that manufactures content, so the refusal is here, where the value is still
+    # the model's own.
+    for key in ("claim", "root_cause", "anchor", "topic"):
+        if raw[key] is None:
+            raise JudgeRefused(
+                f"finding[{index}].{key} is null — a null is refused rather than rendered as "
+                "the string 'None', which reads downstream as content the model never wrote")
     bucket = raw["bucket"]
     if not isinstance(bucket, str) or bucket not in _BUCKET_ENUM:
         raise JudgeRefused(
@@ -213,12 +233,19 @@ def _draw_document(reply: JudgeReply, *, world_dir: Path) -> dict[str, Any]:
     }
 
 
-def _build_prompt(judge_input: JudgeInput, *, world_label: str) -> str:
+def _build_prompt(judge_input: JudgeInput, *, world_label: str | None = None) -> str:
     """D4: the correlating prompt, parameterised by the graded world's label. Wording names
     hand-offs, never entities or systems; keeps the 20-row cap and the quote-any-colon rule
-    that made 15/15 replies parse strictly (C12)."""
+    that made 15/15 replies parse strictly (C12).
+
+    THE LABEL COMES OFF THE RENDERED INPUT by default. `JudgeInput.world_label` is the world
+    `render` actually assembled these views for, so taking it a second time as a keyword gave
+    one value two carriers with nothing holding them in agreement — a caller could render `b`
+    and prompt for `c` and no type, test or assertion would notice. The keyword stays for a
+    caller that means to override it."""
+    label = world_label if world_label is not None else judge_input.world_label
     task = (
-        f"World {world_label} has run; grade it.\n\n"
+        f"World {label} has run; grade it.\n\n"
         "Compare it against the four joined views below: its per-lead chain (goal, params, "
         "payload, summary, document rows, resolutions), its coverage of the family's "
         "discriminator, the sibling trials of this same alert, and the lessons it loaded — "
@@ -249,7 +276,7 @@ def _build_prompt(judge_input: JudgeInput, *, world_label: str) -> str:
     titled = [titled_section(SECTION_TITLES.get(name, name.upper()), body)
               for name, body in sections.items()]
     salt = message_salt(task, *titled)
-    # ONE tag, "untrusted", on every section: the reader contract names sections by their
+    # ONE tag, `UNTRUSTED_TAG`, on every section: the reader contract names sections by their
     # run-salted frame, not by tag, and the suite's own frame regex (`_triplet_947.
     # UNTRUSTED_FRAME`) matches only `-untrusted` — a per-section tag name would silently
     # leave every body outside what the suite recognises as an untrusted frame at all.
@@ -262,7 +289,7 @@ def _build_prompt(judge_input: JudgeInput, *, world_label: str) -> str:
     # The title goes INSIDE the frame (`_prompt.titled_section`, the questioner's own spelling)
     # because a heading in the host region beside a framed body is one an attacker can imitate
     # from inside the body.
-    body = stage_user_message(salt, *(wrap(section, "untrusted", salt) for section in titled))
+    body = stage_user_message(salt, *(wrap(section, UNTRUSTED_TAG, salt) for section in titled))
     return task + body
 
 
