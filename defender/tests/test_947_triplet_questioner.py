@@ -19,6 +19,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+import yaml
 
 from defender.tests import _triplet_947 as T
 
@@ -238,3 +239,34 @@ def test_947_the_questioner_screens_the_source_document_before_reading_it(tmp_pa
         _questioner().read_frontier(src, fences_at=4)
     assert "investigation.md" in str(refusal.value)
     assert agent.calls == 0
+
+
+# ---------------------------------------------------------------------------------------
+# the reply as TEXT, which is what a raw model actually hands back
+# ---------------------------------------------------------------------------------------
+
+
+def test_947_a_fenced_yaml_reply_is_read_as_the_document_it_holds(tmp_path):
+    """A questioner reply arrives inside a ```yaml fence and is still read as its document.
+
+    The fence is not a model quirk to be tolerated grudgingly — `questioner/family.md` and
+    `questioner/world.md` both SHOW the required shape inside one, so a model that emits a
+    fenced document is doing what the prompt asked. Every other reader of a model reply in this
+    repo normalises through `core.validate` before parsing (the judge's `validate_reply`, the
+    oracle sampler, `learning/loop`); the questioner parsed the raw text, so `safe_load` hit the
+    backtick and the whole episode aborted on call 1 with "not a YAML document".
+
+    All THREE calls are fenced, because the seat-authoring calls parse through the same helper
+    and a fix applied to call 1 alone would abort one step later.
+    """
+    fenced = [f"```yaml\n{yaml.safe_dump(doc, sort_keys=False)}```"
+              for doc in (T.family_doc(), T.world_doc("b"), T.world_doc("c"))]
+    agent = T.FakeAgent(*fenced)
+    composed = _questioner().author_family(
+        source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
+        invoke=agent, leads=[], alert={}, frontier="")
+    assert agent.calls == 3, "an abort on call 1 leaves the seat-authoring calls unmade"
+    # The COMPOSED document, not merely "no exception": a `_reply_document` that silently
+    # returned an empty mapping would still compose three worlds and still raise nothing.
+    assert composed["base_story"] == "the captured story"
+    assert [w["world_id"] for w in composed["worlds"]] == ["a", "b", "c"]

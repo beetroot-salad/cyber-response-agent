@@ -63,6 +63,7 @@ from defender._report import REPORT_NAME, read_report
 from defender._run_paths import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
+from defender.learning.core.validate import strip_yaml_fence
 from defender.runtime.agent_definition import AgentDefinition, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.branch import BranchError
@@ -199,7 +200,12 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
     doc: Any = reply
     if isinstance(reply, str):
         try:
-            doc = _yaml.safe_load(reply)
+            # NORMALISED BEFORE PARSING, like every other reader of a model reply in this repo
+            # (the judge's `validate_reply`, the oracle sampler, `learning/loop`). Both prompts
+            # SHOW the required document inside a ```yaml fence, so a fenced reply is the model
+            # doing what it was asked; parsing the raw text made `safe_load` refuse on the
+            # backtick and abort the whole episode on call 1.
+            doc = _yaml.safe_load(strip_yaml_fence(reply))
         except yaml.YAMLError as e:
             raise BranchError(f"{what}: the questioner's reply is not a YAML document: {e}") from e
     if not isinstance(doc, dict):
