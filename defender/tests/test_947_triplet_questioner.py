@@ -349,3 +349,33 @@ def test_947_an_unstageable_pattern_is_still_refused_by_the_loader():
     with pytest.raises(T.sym("runtime.branch._family", "FamilyError")) as refusal:
         _family_mod().parse_family(T.family_doc(worlds=[T.base_world(), bad]))
     assert "logs-nosuchsensor.alerts-*" in str(refusal.value)
+
+
+def test_947_every_world_the_prompt_shows_survives_the_identity_gate():
+    """The prompt's example worlds pass the gate that mints their names.
+
+    The companion to the overlay test above, and the same failure four times over: `world_id`
+    is refused unless it is lowercase alphanumerics with `_` and `.` — a HYPHEN is the view
+    name's own delimiter — and the prompt asked for "a short lowercase label" without saying so.
+    A live episode died on `sshpass-at-alert-time`, the spelling any writer of English reaches
+    for first.
+
+    The example is composed into a real `Family` and run through `check_identities`, the gate
+    the launcher itself calls, so the prompt cannot show a name the launcher would refuse.
+    """
+    prompt = (T.mod("run_common").REPO_ROOT / "defender" / "learning" / "branch"
+              / "questioner" / "family.md")
+    blocks = re.findall(r"^```yaml\n(.*?)^```", prompt.read_text(encoding="utf-8"),
+                        re.DOTALL | re.MULTILINE)
+    shown = [w for block in blocks
+             for w in (yaml.safe_load(block).get("worlds") or [])
+             if isinstance(w, dict) and isinstance(w.get("world_id"), str)]
+    # Without this the composition below is the base world alone, which passes trivially — the
+    # empty-collection shape, reached by any edit that renames `worlds` or `world_id`.
+    assert len(shown) >= 2, f"the prompt shows {len(shown)} named worlds, not two"
+    family_mod = _family_mod()
+    worlds = [T.base_world()] + [
+        T.world_doc(w["world_id"], role=letter, ov=w.get("overlay") or {})
+        for letter, w in zip(("B", "C"), shown, strict=True)]
+    family = family_mod.parse_family(T.family_doc(worlds=worlds))
+    family_mod.check_identities(family)
