@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from defender._io import guarded_mkdir, read_jsonl_rows_report, write_guarded
+from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome
 from defender.learning.core.config import (
@@ -66,7 +67,11 @@ def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> No
     about a single row (and drop that row alone) while the appender still refuses outright for
     a caller handing rows in from anywhere else."""
     where = f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
-    for key in ("run_id", "direction"):
+    # `finding_id` FIRST, because `_gate_findings` indexes it FIRST — `fid = entry["finding_id"]`
+    # opens its per-row loop, before `skips_forward_check` and before the deliberate
+    # `entry["run_id"]` probe. A row missing it therefore raises exactly the bare `KeyError` this
+    # guard exists to keep off the queue, one line earlier than the two keys that were listed.
+    for key in ("finding_id", "run_id", "direction"):
         if key not in row:
             raise JudgeRefused(
                 f"{where}a family finding row is missing {key!r} — a row missing it raises a "
@@ -250,7 +255,10 @@ def _draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
         if not (path.stem.isascii() and path.stem.isdigit()):
             continue
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            # `_yaml.safe_load` for the same reason every other parse in this package uses it:
+            # a `RecursionError` out of a deeply nested draw file is neither a `ValueError` nor
+            # a `YAMLError`, so it escaped this handler and every one above it.
+            doc = _yaml_safe_load(path.read_text(encoding="utf-8")) or {}
         except (OSError, ValueError, yaml.YAMLError):
             continue
         if isinstance(doc, dict):
@@ -307,8 +315,15 @@ def enqueue_report(episode_dir: Path, grade: Any, *, queue_dir: Path | None = No
     rows: list[dict[str, Any]] = []
     unqueueable: list[str] = []
     for label in graded_labels:
-        documents = (drawn or {}).get(label) if drawn is not None else None
-        if documents is None:
+        # "THE CALLER HANDED NOTHING OVER" IS `drawn is None`, and nothing else. `(drawn or
+        # {})` folded an EMPTY map — and a map simply missing this label — back onto the disk
+        # fallback, which is the one thing `drawn` exists to avoid: a pass that produced no
+        # draw for a world would then queue whatever an earlier, wider attempt left in that
+        # world's draw directory as its own findings (P4: a retry clobbers, it cleans nothing
+        # up), under THIS pass's `verdict_word`.
+        if drawn is not None:
+            documents = drawn.get(label) or {}
+        else:
             documents = _draws_on_disk(episode_dir / "worlds" / label / "judge")
         for draw, draw_doc in documents.items():
             findings = draw_doc.get("findings") or []

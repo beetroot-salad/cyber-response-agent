@@ -92,13 +92,18 @@ class FamilyGrade:
 def _raw_manifest(episode_dir: Path) -> dict[str, Any]:
     import yaml
 
+    from defender._yaml import safe_load
+
     path = Path(episode_dir) / "family.yaml"
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as bad:
         raise JudgeRefused(f"the manifest at {path} could not be read: {bad}") from bad
     try:
-        doc = yaml.safe_load(text)
+        # THE HARDENED LOADER. `RecursionError` out of a deeply nested manifest is neither a
+        # `YAMLError` nor a `ValueError`, so it escaped both this handler and `grade_episode`'s
+        # conversion set; `_yaml.safe_load` is the one home for that conversion.
+        doc = safe_load(text)
     except yaml.YAMLError as bad:
         raise JudgeRefused(f"the manifest at {path} could not be read: {bad}") from bad
     if not isinstance(doc, dict):
@@ -250,6 +255,23 @@ def mapping_key(mapping: dict[str, Any]) -> str:
                        params if isinstance(params, dict) else {})
 
 
+def names_one_file(lead_id: object) -> bool:
+    """Is `lead_id` a name this pass may join into a path?
+
+    A lead id is MODEL-AUTHORED. `iter_resolutions` hands back whatever token the document's own
+    `:T resolutions` row put where a lead id goes — any non-whitespace text — and every per-lead
+    read joins it straight into `worlds/<X>/gather_summaries/<lead>.md` and
+    `gather_raw/<lead>.lead.json`. A token carrying a separator or `..` therefore reads OUT of
+    the graded world, and the leads view puts what it read INTO the prompt: a `[../../c/report
+    ...]` row makes a counterfactual sibling's whole `report.md` — its disposition included —
+    read as a fact about the graded world, which is the one thing O5/J14's withholding exists to
+    stop. The world LABEL is screened for exactly this reason (`_check_world_labels`); this is
+    the same hazard one directory down. The row itself is still carried (it is evidence); what
+    is refused is building a path out of it."""
+    return (isinstance(lead_id, str) and bool(lead_id)
+            and lead_id not in (".", "..") and lead_id == Path(lead_id).name)
+
+
 def scope_params(row: dict[str, Any]) -> dict[str, Any]:
     """A served row's params AS ASKED — `asked_params` when present, `params` otherwise (J4).
 
@@ -357,6 +379,13 @@ def _resolution_facts(
             unlanded.append(
                 f"a resolution row carries no lead id to group it under: {dict(row)!r}")
             continue
+        if not names_one_file(lead_id):
+            # SAID OUT LOUD, not dropped and not read through: nothing joins this token into a
+            # path (`names_one_file`), so the world's supporting files for it are never opened,
+            # and the operator is told which rows this pass would not follow.
+            unlanded.append(
+                f"a resolution row's lead id {lead_id!r} does not name a file inside this "
+                "world, so no per-lead artifact was read for it")
         by_lead.setdefault(lead_id, []).append(dict(row))
         before, after = row.get("before"), row.get("after")
         if before is not None and after is not None and before != after:
@@ -405,7 +434,13 @@ def _check_gather_summaries(world_dir: Path, *, world: str, referenced_leads: fr
     summaries = world_dir / "gather_summaries"
     if not summaries.is_dir():
         return
-    missing = sorted(lead for lead in referenced_leads if not (summaries / f"{lead}.md").is_file())
+    # `names_one_file` FIRST: a lead id off that grammar stats a path outside this world's
+    # subtree, so F-7 would answer about a file the archive was never supposed to hold — and a
+    # traversing id that happens to resolve to a real file elsewhere would make the check PASS
+    # on a genuinely short archive.
+    missing = sorted(
+        lead for lead in referenced_leads
+        if names_one_file(lead) and not (summaries / f"{lead}.md").is_file())
     if missing:
         raise JudgeRefused(
             f"world {world!r}: gather_summaries/ is short {missing} — the archive left this "
@@ -701,5 +736,5 @@ def grade_family(episode_dir: Path) -> FamilyGrade:
 
 __all__ = [
     "FamilyGrade", "WorldFacts", "discriminator_of", "episode_id_of", "grade_family",
-    "mapping_key", "read_world_facts", "scope_params",
+    "mapping_key", "names_one_file", "read_world_facts", "scope_params",
 ]

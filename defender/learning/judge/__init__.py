@@ -111,11 +111,13 @@ def _judge_yaml_path(episode_dir: Path) -> Path:
 def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
     import yaml
 
+    from defender._yaml import safe_load
+
     path = _judge_yaml_path(episode_dir)
     if not path.is_file():
         return None
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        doc = safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as bad:
         raise JudgeRefused(f"{path} exists but could not be read as a family grade: {bad}") from bad
     if not isinstance(doc, dict):
@@ -127,11 +129,13 @@ def _read_review(episode_dir: Path) -> dict[str, Any]:
     """`review.yaml`, parsed once per pass. `{}` when there is none."""
     import yaml
 
+    from defender._yaml import safe_load
+
     path = Path(episode_dir) / "review.yaml"
     if not path.is_file():
         return {}
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        doc = safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as bad:
         raise JudgeRefused(f"{path} could not be read: {bad}") from bad
     return doc if isinstance(doc, dict) else {}
@@ -214,7 +218,7 @@ def _run_world_draws(  # noqa: PLR0913 — one world's whole per-draw configurat
     The documents are RETURNED rather than left to be read back: they are what this pass
     produced, and a reader that re-globs the draw directory cannot tell them from a stale file
     a wider earlier attempt left behind (P4: a retry clobbers, it does not clean up)."""
-    from defender.learning.core.config import RunUnprocessable, StageWiring
+    from defender.learning.core.config import StageWiring
     from defender.runtime.agent_role import AgentRole
 
     world_dir = Path(episode_dir) / "worlds" / label
@@ -234,16 +238,24 @@ def _run_world_draws(  # noqa: PLR0913 — one world's whole per-draw configurat
         agent_id = f"judge:{label}:{n}"
         wiring = StageWiring(
             prompt_path=run_mod._ROLE_PROMPT, model=model, effort=effort,
-            trace_name=f"{agent_id}_trace.jsonl", label=agent_id)
+            trace_name=f"{agent_id.replace(':', '_')}_trace.jsonl", label=agent_id)
         reply_text: str | None = None
         doc: dict[str, Any]
         try:
             reply_text = judge(prompt, role=AgentRole.QUESTIONER, agent_id=agent_id,
                                wiring=wiring)
-        except RunUnprocessable as failed:
-            doc = {"failure_reason": f"RunUnprocessable: {failed}"}
+        # EVERY class the seam can raise, not `RunUnprocessable` alone — which is what this
+        # loop's own docstring already claims ("a failed call writes a draw record naming its
+        # own failure ... and both let the loop continue to the next draw"). `run_stage`
+        # deliberately re-raises `StageAbort` and `FatalConfigError` rather than wrapping them,
+        # and an injected seam may raise anything at all, so a misconfigured model or one bad
+        # transport class unwound the WHOLE pass — every already-completed world's draws
+        # thrown away and no `judge.yaml` written — which is precisely the blast radius the
+        # malformed-reply arm below was added to eliminate. The class is named in the record.
+        except Exception as failed:  # noqa: BLE001 — one draw's blast radius, see above
+            doc = {"failure_reason": f"{type(failed).__name__}: {failed}"}
             _write_wire_log(episode_dir, agent_id=agent_id, prompt=prompt,
-                            reply=None, failure=str(failed))
+                            reply=None, failure=f"{type(failed).__name__}: {failed}")
         else:
             _write_wire_log(episode_dir, agent_id=agent_id, prompt=prompt,
                             reply=reply_text, failure=None)
@@ -297,7 +309,11 @@ def _write_wire_log(
     so never opens the real logger."""
     from defender.runtime.observe import stage_trace_path
 
-    path = stage_trace_path(Path(episode_dir), f"{agent_id}_framed_trace.jsonl")
+    # THE SAME NAME SANITISATION THE QUESTIONER'S SEAM APPLIES (`seams.model_seam`:
+    # `agent_id.replace(':', '_')`). `agent_id` is `judge:<label>:<n>`, and a trace file called
+    # `judge:b:0_framed_trace.jsonl` is a name that seam deliberately does not produce.
+    path = stage_trace_path(
+        Path(episode_dir), f"{agent_id.replace(':', '_')}_framed_trace.jsonl")
     row = {"agent_id": agent_id, "prompt": prompt, "reply": reply, "failure": failure}
     write_guarded(path, json.dumps(row) + "\n", mode="replace")
 

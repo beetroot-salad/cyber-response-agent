@@ -136,9 +136,17 @@ def validate_reply(text: str) -> JudgeReply:
     validate STRICTLY: nothing is read off the reply before this returns."""
     import yaml
 
+    from defender._yaml import safe_load
+
     cleaned = normalize_judge_yaml(text)
     try:
-        doc = yaml.safe_load(cleaned)
+        # `_yaml.safe_load`, not PyYAML's: it converts a `RecursionError` (a reply nested too
+        # deeply) and a constructor `ValueError` (an out-of-range implicit timestamp) into
+        # `yaml.YAMLError`, and neither is a `YAMLError` on its own. The reply is MODEL-authored,
+        # so both are shapes to meet — and neither is in `grade_episode`'s conversion set either,
+        # so one such reply took the whole pass down as a bare interpreter error rather than
+        # costing its own draw.
+        doc = safe_load(cleaned)
     except yaml.YAMLError as bad:
         raise JudgeRefused(f"the judge's reply is not valid YAML: {bad}") from bad
     doc = _require_dict(doc)
@@ -232,7 +240,14 @@ def _build_prompt(judge_input: JudgeInput, *, world_label: str) -> str:
         "root_cause, anchor, topic, evidence, discriminator_related).\n"
     )
     sections = judge_input.as_prompt_sections()
-    titled = [titled_section(SECTION_TITLES[name], sections[name]) for name in SECTION_TITLES]
+    # ITERATE THE SECTIONS, not the titles. `as_prompt_sections` owns the set (and `_cap_sections`
+    # charges the payload cap over it), so driving the assembly from `SECTION_TITLES` made a view
+    # added there but not here rendered, capped, charged its equal share of the operator's
+    # `JUDGE_PAYLOAD_CAP` — and then silently never sent, with no exception and no log line. A
+    # section with no title of its own is titled by its key rather than dropped; the reverse
+    # mistake (a title with no section) was a bare `KeyError` out of the whole pass.
+    titled = [titled_section(SECTION_TITLES.get(name, name.upper()), body)
+              for name, body in sections.items()]
     salt = message_salt(task, *titled)
     # ONE tag, "untrusted", on every section: the reader contract names sections by their
     # run-salted frame, not by tag, and the suite's own frame regex (`_triplet_947.

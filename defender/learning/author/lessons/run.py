@@ -271,34 +271,52 @@ def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool
     return disposition == "benign"
 
 
-#: D6/O2: `judge_outcome` values that are SKIPPED (consumed, never authored) rather than held.
-#: `survived` is the one word `_gate_family` admits for authoring; `discard` and
-#: `corpus-contradiction` never reach the queue at all (M5 refuses them at the appender), so
-#: this partition never sees them.
+#: D6/O2: the ONE `judge_outcome` this partition admits for authoring. Stated positively, and
+#: that is the whole point: a denylist here answers "author" for every value it does not
+#: recognise, so a row whose `judge_outcome` is absent, torn, or `discard` was routed to the
+#: curator exactly as if the judge had scored the family `survived` — the O7 outcome
+#: `learning/judge/enqueue.py`'s own docstring says must never happen, guarded only at the
+#: appender and therefore not guarded at all for any other producer on this shared queue.
+_FAMILY_AUTHOR_OUTCOME = "survived"
+#: `judge_outcome` values that are SKIPPED (consumed, never authored) rather than held.
+#: `discard` and `corpus-contradiction` do not reach the queue through the judge's own appender
+#: (M5 refuses them there), so this partition should never see them — a row carrying one anyway
+#: came from somewhere the appender did not gate, and is HELD for a human rather than skipped.
 _FAMILY_SKIP_OUTCOMES = frozenset({"caught", "undecidable"})
 
 
-def _gate_family(entry: dict) -> dict | None:
+def _gate_family(entry: dict) -> tuple[str, dict] | None:
     """D6/O2: the family partition inside `_gate_findings`'s one gate.
+
+    `None` admits the row for authoring; otherwise `("consumed"|"held", row)` says which list
+    the caller files it under.
 
     A `direction: family` row's ground truth is `disposition_declared` on the family record —
     already resolved into `judge_outcome` by the judge's own mechanical pass — so this
-    partition never reads `source_refs.yaml` at all. `survived` is admitted for authoring
-    (returns `None`, and the caller lets the row fall through to `to_author` the same way an
-    admitted adversarial row does); `caught`/`undecidable` are consumed WITHOUT authoring,
-    terminally rather than held — a word that will never change must not sit in the queue
-    forever (a hold is forever; a skip is terminal, and the two read differently in the
-    drain's own report)."""
+    partition never reads `source_refs.yaml` at all. `survived` is admitted for authoring (the
+    caller lets the row fall through to `to_author` the same way an admitted adversarial row
+    does); `caught`/`undecidable` are consumed WITHOUT authoring, terminally rather than held —
+    a word that will never change must not sit in the queue forever (a hold is forever; a skip
+    is terminal). EVERYTHING ELSE IS HELD, with the value that could not be read named on the
+    row: this partition is a POSITIVE rule, so a row with no readable ground truth is the one
+    thing it will not do silently, which is the same posture the adversarial/benign arm below
+    takes for an unresolvable `source_refs.yaml`."""
     # THROUGH THE OWNER'S NORMALIZER, not a bare `in`. The appender validates `judge_outcome`
     # with `normalized_judge_outcome`, which casefolds and trims — so `Caught` passes validation,
     # is written to the queue verbatim, and a raw membership test here does not recognise it.
     # A family the judge scored as CAUGHT was then authored as though it had survived. This is
     # `lint-vocabulary`'s own shape: one parser, two interpreters, disagreeing on one string.
-    if normalized_judge_outcome(entry.get("judge_outcome")) in _FAMILY_SKIP_OUTCOMES:
+    outcome = normalized_judge_outcome(entry.get("judge_outcome"))
+    if outcome == _FAMILY_AUTHOR_OUTCOME:
+        return None
+    if outcome in _FAMILY_SKIP_OUTCOMES:
         rec = dict(entry)
         rec["consumed_category"] = "consumed_family_skip"
-        return rec
-    return None
+        return "consumed", rec
+    rec = dict(entry)
+    rec["held_reason"] = (
+        f"no_family_ground_truth(judge_outcome={entry.get('judge_outcome')!r})")
+    return "held", rec
 
 
 def _gate_findings(
@@ -334,9 +352,10 @@ def _gate_findings(
             # keeps that property true rather than silently routing a row the appender should
             # have refused.
             entry["run_id"]  # noqa: B018 — see comment above
-            skipped = _gate_family(entry)
-            if skipped is not None:
-                consumed_idempotent.append(skipped)
+            routed = _gate_family(entry)
+            if routed is not None:
+                kind, rec = routed
+                (consumed_idempotent if kind == "consumed" else held).append(rec)
             continue
         disp = disposition_for(cfg, entry["run_id"])
         direction = entry["direction"]

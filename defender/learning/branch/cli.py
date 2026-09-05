@@ -1261,14 +1261,30 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     # THE CLUSTER IS HANDED BACK BEFORE THE GRADE. Everything the judge reads is on disk — the
     # archived episode and the operator's runs base — so there is nothing left for the staged
     # names to serve, and the grade is the longest-running thing in the episode.
+    # HELD, NOT RAISED THROUGH. `_teardown_without_masking` re-raises when `aborting` is False,
+    # and moving the call ahead of the grade therefore made a CLEANUP failure preempt the grade
+    # entirely: a fully archived, fully reviewed episode ended with no draws, no queue rows and
+    # no `judge.yaml` — the file whose presence certifies the pass — and the operator saw only
+    # the staging refusal, indistinguishable from an episode that was never graded for any other
+    # reason. The refusal is still this episode's answer; it is raised AFTER the grade it has
+    # nothing to do with (nothing the judge reads is on the cluster).
+    teardown_failed: BaseException | None = None
     if teardown is not None:
-        teardown(aborting=False)
-
-    from defender.learning import judge as judge_mod
-    from defender.run_common import resolve_runs_base
+        try:
+            teardown(aborting=False)
+        except Exception as cleanup_failed:  # noqa: BLE001 — re-raised below, unchanged
+            teardown_failed = cleanup_failed
 
     try:
+        from defender.learning import judge as judge_mod
+        from defender.run_common import resolve_runs_base
+
         judge_mod.grade_episode(episode_dir, judge=judge, runs_base=resolve_runs_base())
+    # INSIDE THE `try`, imports included: an import fault in the judge package, or a
+    # `FatalConfigError` out of `resolve_runs_base`, is a judge failure like any other, and
+    # raised from outside this boundary it reached `_launch`'s `except BaseException` and was
+    # reported as "no sibling started and every staged name is torn down" — both halves false of
+    # an episode that has already run, archived and torn down.
     except Exception as judge_failed:  # noqa: BLE001 — F-5 IS the broad catch, see below
         # EVERY class, not `JudgeRefused` alone. "A judge failure is non-fatal to the episode"
         # is a property of this boundary, and a boundary that lists the failures it will
@@ -1281,6 +1297,10 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         print(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
               "episode itself is otherwise unaffected", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
+    if teardown_failed is not None:
+        # The cleanup's own refusal, unchanged and unmasked — `teardown` already wrote the names
+        # it could not verify gone into the review record before it raised.
+        raise teardown_failed
     # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
     # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
     # launch that did exactly what it was asked and found the results not comparable, which is a

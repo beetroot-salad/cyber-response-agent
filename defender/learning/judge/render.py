@@ -31,6 +31,7 @@ from defender.learning.judge.family import (
     _raw_manifest,
     discriminator_of,
     episode_id_of,
+    names_one_file,
     read_world_facts,
     scope_params,
 )
@@ -156,13 +157,20 @@ def _render_coverage(coverage: list[dict[str, Any]], union_notes: dict[str, Any]
 
 def _render_siblings(siblings: list[dict[str, Any]], union_notes: dict[str, Any]) -> str:
     lines = [f"- {row.get('run_id')}: disposition={row.get('disposition')}" for row in siblings]
-    if not siblings and not union_notes.get("runs_base_unset"):
+    if not siblings and not _union_unattempted(union_notes):
         lines = ["This is a first-run alert: no sibling trial is recorded."]
     excluded = union_notes.get("source_run_excluded")
     if excluded:
         lines.append(f"(the source run {excluded!r} this episode branched from is excluded)")
     lines.extend(_exclusion_lines(union_notes))
     return "\n".join(lines) + "\n"
+
+
+def _union_unattempted(union_notes: dict[str, Any]) -> bool:
+    """Was the sibling walk never actually made? ONE predicate, because three views ask it and
+    the answer must be the same in all of them: an unattempted union is not "no sibling exists",
+    and only a walk that RAN over a real directory may render that sentence."""
+    return bool(union_notes.get("runs_base_unset") or union_notes.get("runs_base_missing"))
 
 
 def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
@@ -176,6 +184,10 @@ def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
     if union_notes.get("runs_base_unset"):
         out.append("(no runs base was named for this pass, so the sibling union was never "
                    "attempted — this is not a statement that no sibling trial exists)")
+    if union_notes.get("runs_base_missing"):
+        out.append("(the runs base named for this pass is not a directory, so the sibling "
+                   "union was never attempted — this is not a statement that no sibling "
+                   "trial exists)")
     for key, what in (("skipped_unreadable", "could not be read"),
                       ("skipped_unclosed", "never reached a close")):
         count = union_notes.get(key) or 0
@@ -253,17 +265,33 @@ def _manifest_text(doc: dict[str, Any], graded_label: str) -> str:
 
 
 def _queries_by_lead(world_dir: Path) -> dict[str, list[dict[str, Any]]]:
-    """The world's whole queries table, grouped by lead, in ONE parse.
+    """The world's ISSUED queries, grouped by lead, in ONE parse.
 
     Called once per world rather than once per lead: the per-lead chain used to re-read and
     re-parse `executed_queries.jsonl` inside its own comprehension, so a world with N leads
-    parsed the same table N times."""
+    parsed the same table N times.
+
+    THE SENTINEL PARTITION IS THE WRITER'S OWN, through `is_reserved_query_id` — the same
+    predicate `lead_repository.QueryRow.is_sentinel` asks, so a fourth sentinel partitions here
+    on the day it is defined. A `∅.`-prefixed row records the lead's CONDUCT (a repeat the
+    guard refused, a call the argument schema turned back, a failed reducer shim); nothing it
+    describes reached a system of record. Grouped in with the rest they reached VIEW 1 as
+    queries the world issued and payload digests it read — under a task that asks the model to
+    say, per held row, "whether it was derived from a payload the defender actually read, or
+    invented". That is a defender failure invented out of a call the defender was refused.
+    `lead_repository.actor_view`'s docstring records this exact bug being fixed once already,
+    for the actor."""
+    from defender.scripts.gather_tools.record_query import is_reserved_query_id
+
     eq_path = world_dir / "executed_queries.jsonl"
     if not eq_path.is_file():
         return {}
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in read_jsonl_rows(eq_path):
         lead_id = row.get("lead_id")
+        query_id = row.get("query_id")
+        if isinstance(query_id, str) and is_reserved_query_id(query_id):
+            continue
         if isinstance(lead_id, str):
             grouped.setdefault(lead_id, []).append(row)
     return grouped
@@ -272,19 +300,24 @@ def _queries_by_lead(world_dir: Path) -> dict[str, list[dict[str, Any]]]:
 def _lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, list[dict]],
                 *, queries_by_lead: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     goal = None
+    # THE ID IS MODEL-AUTHORED and this is where it becomes a path. `names_one_file` refuses a
+    # token that would read outside the graded world — a `[../../c/report ...]` resolution row
+    # otherwise put a counterfactual sibling's whole `report.md` into this world's own prompt,
+    # under `- summary:`, as a fact about the world being graded (O5/J14).
+    safe = names_one_file(lead_id)
     lead_file = world_dir / "gather_raw" / f"{lead_id}.lead.json"
-    if lead_file.is_file():
-        try:
-            data = json.loads(lead_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = None
-        if isinstance(data, dict):
+    if safe and lead_file.is_file():
+        data = json_mapping(lead_file)
+        if data is not None:
             goal = data.get("goal")
     queries = queries_by_lead.get(lead_id, [])
     params = queries[0].get("params") if queries else None
     summary_path = world_dir / "gather_summaries" / f"{lead_id}.md"
     summary = None
-    if summary_path.is_file():
+    if not safe:
+        summary = ("(this lead id does not name a file inside this world, so no gather summary "
+                   "was read for it)")
+    elif summary_path.is_file():
         # `errors="replace"`, not a bare read. This is MODEL-WRITTEN text in a tree the box can
         # write, so an undecodable byte in it is an ordinary thing to meet; raising here would
         # be an unreadable summary costing the whole episode its grade, and the substitution
@@ -295,6 +328,59 @@ def _lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, li
         "summary": summary, "document_rows": queries,
         "resolutions": resolutions_by_lead.get(lead_id, []),
     }
+
+
+def json_mapping(path: Path) -> dict[str, Any] | None:
+    """One JSON artifact as a mapping, or `None` when it is not readable as one.
+
+    ONE HOME for the tolerance policy — which exception classes are survivable and whether a
+    non-mapping counts as unreadable — because five readers in this package want the same
+    answer (`alert.json` twice, `provenance.json`, a lead's `.lead.json`, and the enqueue's own
+    episode alert). Spelled per site, a class that has to be added later (a `RecursionError` out
+    of a deeply nested document is neither `OSError` nor `ValueError`) has to be found five
+    times, and the sites are far enough apart that only a grep finds them."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _sibling_row(
+    entry: Path, *, alert_id: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """One directory under the operator's runs base, CLASSIFIED EXHAUSTIVELY.
+
+    `(row, None)` — a finished trial of this alert. `(None, key)` — a trial of this alert that
+    was skipped, and `key` names the count in `union_notes` that says so in the view. `(None,
+    None)` — not a trial of this alert at all, and so not a skip either.
+
+    THE THIRD ANSWER IS THE POINT. `skipped_unreadable` renders as "N further trial(s) OF THIS
+    ALERT could not be read", and a directory under the runs base with no `alert.json` — a
+    half-created run dir, a scratch directory, a lock — is not a trial of this alert. Counted as
+    one it told the model N unreadable siblings exist when none do, in the one view whose whole
+    purpose is to keep an absence from being invented (C11).
+
+    `report.md` goes THROUGH `read_report`, like every other reader of a report in this repo. It
+    parses the frontmatter the close gate writes, answers the vocabulary through
+    `normalized_disposition`, and — the part that matters at THIS call site — NEVER RAISES: a
+    bare `read_text` here made one undecodable byte in one unrelated run under the operator's
+    runs base refuse the whole grade of an episode whose own archive reads perfectly."""
+    alert_path = entry / "alert.json"
+    if not alert_path.is_file():
+        return None, None
+    alert_doc = json_mapping(alert_path)
+    if alert_doc is None:
+        return None, "skipped_unreadable"
+    if alert_doc.get("alert_id") != alert_id:
+        return None, None
+    report_path = entry / "report.md"
+    if not report_path.is_file():
+        return None, "skipped_unclosed"
+    read = read_report(report_path)
+    if not read.text:
+        return None, "skipped_unreadable"
+    return {"run_id": entry.name, "disposition": read.disposition}, None
 
 
 def sibling_union(
@@ -313,13 +399,21 @@ def sibling_union(
     measured a model filling in."""
     notes: dict[str, Any] = {
         "source_run_excluded": None, "skipped_unreadable": 0, "skipped_unclosed": 0,
-        "runs_base_unset": runs_base is None,
+        "runs_base_unset": runs_base is None, "runs_base_missing": False,
     }
     if runs_base is None:
         return [], notes
     siblings: list[dict[str, Any]] = []
     runs_base = Path(runs_base)
     if not runs_base.is_dir():
+        # NAMED, not folded into the empty union. `run_common.resolve_runs_base()` returns
+        # whatever `DEFENDER_RUNS_BASE` says (or its compiled default) and never checks that the
+        # directory exists — `defender/CLAUDE.md` documents the devcontainer having to override
+        # that knob — so a typo or an unset knob left the walk unattempted and the prompt then
+        # asserted "This is a first-run alert: no sibling trial is recorded". That is the same
+        # unstated absence `runs_base_unset` exists for, one step further along: nobody looked,
+        # and the views must say so rather than state the absence as a fact (C11).
+        notes["runs_base_missing"] = True
         return siblings, notes
     for entry in sorted(runs_base.iterdir(), key=lambda p: p.name):
         if not entry.is_dir():
@@ -327,42 +421,17 @@ def sibling_union(
         if source_run_id is not None and entry.name == source_run_id:
             notes["source_run_excluded"] = entry.name
             continue
-        alert_path = entry / "alert.json"
-        try:
-            alert_doc = json.loads(alert_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            notes["skipped_unreadable"] += 1
-            continue
-        if not isinstance(alert_doc, dict) or alert_doc.get("alert_id") != alert_id:
-            continue
-        report_path = entry / "report.md"
-        if not report_path.is_file():
-            notes["skipped_unclosed"] += 1
-            continue
-        # THROUGH `read_report`, like every other reader of a report in this repo. It parses
-        # the frontmatter the close gate writes, answers the vocabulary through
-        # `normalized_disposition`, and — the part that matters at THIS call site — NEVER
-        # RAISES: a bare `read_text` here made one undecodable byte in one unrelated run under
-        # the operator's runs base refuse the whole grade of an episode whose own archive reads
-        # perfectly. An unreadable sibling is skipped and COUNTED, the same as an unreadable
-        # `alert.json` three lines up.
-        read = read_report(report_path)
-        if not read.text:
-            notes["skipped_unreadable"] += 1
-            continue
-        siblings.append({"run_id": entry.name, "disposition": read.disposition})
+        row, skipped = _sibling_row(entry, alert_id=alert_id)
+        if row is not None:
+            siblings.append(row)
+        elif skipped is not None:
+            notes[skipped] += 1
     return siblings, notes
 
 
 def _world_alert_id(world_dir: Path) -> str | None:
-    path = world_dir / "alert.json"
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return data.get("alert_id") if isinstance(data, dict) else None
+    data = json_mapping(world_dir / "alert.json")
+    return data.get("alert_id") if data is not None else None
 
 
 def render(  # noqa: C901 — one assembly of the four joined views (O4); each view is already its own helper, this is the join
@@ -462,10 +531,12 @@ def render(  # noqa: C901 — one assembly of the four joined views (O4); each v
     # world" standing in world b's coverage view — above the row world b had in fact recorded.
     # That is the exact fact the lead-set and lead-quality buckets turn on.
     union_notes = dict(union_notes)
-    if union_notes.get("runs_base_unset"):
+    if _union_unattempted(union_notes):
         # NOT "this is a first-run alert". Nobody looked, which is a different fact from "no
         # sibling exists" — and the siblings view says so in the same prompt, so asserting the
-        # absence here would hand the model two contradictory statements about one fact.
+        # absence here would hand the model two contradictory statements about one fact. The
+        # same predicate the siblings view uses, so the two cannot disagree about whether the
+        # walk was made.
         if not coverage:
             union_notes["coverage_note"] = (
                 "no row on the holding system is recorded for this world")
@@ -487,14 +558,7 @@ def render(  # noqa: C901 — one assembly of the four joined views (O4); each v
 
 
 def _read_provenance(world_dir: Path) -> dict[str, Any]:
-    path = world_dir / "provenance.json"
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    return json_mapping(world_dir / "provenance.json") or {}
 
 
-__all__ = ["JudgeInput", "render"]
+__all__ = ["JudgeInput", "json_mapping", "render", "sibling_union"]
