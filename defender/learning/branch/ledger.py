@@ -75,6 +75,20 @@ FAMILY_SOURCES = frozenset({BASE, CAPTURED})
 APPLIER_DECISIONS = frozenset({STAGED, PATCHED, PASSTHROUGH})
 
 
+def normalized_source(value: Any) -> str | None:
+    """The owner's answer to "is `value` a member of `SOURCES`, and what does it normalize
+    to" — every other module reading a served-row's `source` column calls this instead of
+    importing `SOURCES` and re-deriving the membership test itself (#785's shape: one parser,
+    N interpreters, some of which disagree on the same bytes).
+
+    A ledger row's `source` is written by this module's own callers, never typed by a model or
+    an operator, so there is no casefold/strip normalization to do here — a value is either
+    exactly one of `SOURCES`'s members or it is not a member at all. Returns the value
+    unchanged (never a case-folded or stripped variant) when it is a member, `None` otherwise.
+    """
+    return value if isinstance(value, str) and value in SOURCES else None
+
+
 class LedgerError(Exception):
     """A served response that cannot be honestly recorded."""
 

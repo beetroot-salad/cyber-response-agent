@@ -42,17 +42,47 @@ discriminator:
     verb: the verb that would ask it
     params: {}
 worlds:
-  - world_id: a short lowercase label for this world, unique in the family
+  - world_id: sshpass_confirmed    # see the id grammar below — NO HYPHENS
     axis: the axis this world varies, in one sentence
     overlay:
-      patches: {}
-      elastic: {}   # lint-shippable: ok — the manifest's own overlay key; a prompt that spelled it any other way would name a key the parser does not read
-  - world_id: another short lowercase label
+      patches:
+        identity:                  # one of the six state systems below
+          office-ws-1:             # the entity this system is re-answered about
+            owner: platform        # the fields that come back different
+      elastic:                     # lint-shippable: ok — the manifest's own overlay key; a prompt that spelled it any other way would name a key the parser does not read
+        logs-*:                    # THE BASE PATTERN IS THE KEY — and it must be
+                                   # one of those listed in the measurement above
+          inject:
+            - "@timestamp": "2026-05-25T15:22:39.400Z"
+              host.name: office-ws-1
+              event.action: ssh_login
+          exclude:                 # optional: a query matching what this world does NOT hold
+            match:
+              host.name: office-ws-2
+  - world_id: no_automation_precedent
     axis: the axis the second world varies, in one sentence
     overlay:
       patches: {}
       elastic: {}   # lint-shippable: ok — the manifest's own overlay key, same as above
 ```
+
+Both halves nest one level deeper than they may look. Under `patches`, the SYSTEM names a
+table of entities and each entity names the fields that come back different; the system must
+be one of `cmdb`, `identity`, `threat-intel`, `change-mgmt`, `ticket`, `host-state`. The corpus
+half is STAGED rather than patched, so its own key never belongs in `patches` — a patch table
+naming it is refused. Under the corpus half, THE BASE PATTERN IS THE KEY and the documents
+are a plain list under `inject` — a document does not carry its own pattern field, because the
+pattern is what staging builds the world's view from. An overlay that flattens either half is
+refused when the family is parsed, after all three calls have been paid for.
+
+Each `world_id` may carry ONLY lowercase letters, digits, `_` and `.`, and must be unique in
+the family. A HYPHEN IS REFUSED — it is the delimiter that separates a world's id from the
+corpus it stages, so an id holding one makes two worlds' names readable as each other's. Use
+`_` where you would write `-`. The label also names a directory and a staged corpus, so it may
+not be `base`, and two labels differing only in case are one label.
+
+An entity key under `patches` is bounded the same way and for the same reason: a leading
+alphanumeric, then alphanumerics, `.`, `_` and `-`.
 
 `base_disposition` is what the REAL investigation had established by the branch point, not what
 you would conclude — it is the reading every counterfactual is measured against.
@@ -71,6 +101,12 @@ in the world — nothing else about the case changes. Its two halves are `patche
 re-answer another system's view of a named entity, and the corpus half, which injects documents
 under a base pattern the environment already declares, or excludes the documents a predicate
 matches.
+
+The base patterns you may key are LISTED IN THE MEASUREMENT SECTION above, and that list is
+the whole of what this deployment serves. Do not reach for a pattern because the world you are
+authoring would be easier to evidence with one — a sensor this environment does not run has no
+corpus to stage into, and the family is refused rather than staged. Express the difference
+inside a pattern that is offered, or choose an axis the offered corpora can carry.
 
 Two ways an overlay silently describes a world that never existed: naming a pattern nobody
 serves, which stages nothing, and leaving both halves empty, which is the control again under a

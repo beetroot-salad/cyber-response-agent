@@ -17,14 +17,20 @@ ten members (X3), and the three census sites still say ten.
 from __future__ import annotations
 
 import dataclasses
+import re
 
 import pytest
+import yaml
 
 from defender.tests import _triplet_947 as T
 
 
 def _questioner():
     return T.mod("learning.branch.questioner")
+
+
+def _family_mod():
+    return T.mod("runtime.branch._family")
 
 
 # ---------------------------------------------------------------------------------------
@@ -238,3 +244,138 @@ def test_947_the_questioner_screens_the_source_document_before_reading_it(tmp_pa
         _questioner().read_frontier(src, fences_at=4)
     assert "investigation.md" in str(refusal.value)
     assert agent.calls == 0
+
+
+# ---------------------------------------------------------------------------------------
+# the reply as TEXT, which is what a raw model actually hands back
+# ---------------------------------------------------------------------------------------
+
+
+def test_947_a_fenced_yaml_reply_is_read_as_the_document_it_holds(tmp_path):
+    """A questioner reply arrives inside a ```yaml fence and is still read as its document.
+
+    The fence is not a model quirk to be tolerated grudgingly — `questioner/family.md` and
+    `questioner/world.md` both SHOW the required shape inside one, so a model that emits a
+    fenced document is doing what the prompt asked. Every other reader of a model reply in this
+    repo normalises through `core.validate` before parsing (the judge's `validate_reply`, the
+    oracle sampler, `learning/loop`); the questioner parsed the raw text, so `safe_load` hit the
+    backtick and the whole episode aborted on call 1 with "not a YAML document".
+
+    All THREE calls are fenced, because the seat-authoring calls parse through the same helper
+    and a fix applied to call 1 alone would abort one step later.
+    """
+    fenced = [f"```yaml\n{yaml.safe_dump(doc, sort_keys=False)}```"
+              for doc in (T.family_doc(), T.world_doc("b"), T.world_doc("c"))]
+    agent = T.FakeAgent(*fenced)
+    composed = _questioner().author_family(
+        source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
+        invoke=agent, leads=[], alert={}, frontier="")
+    assert agent.calls == 3, "an abort on call 1 leaves the seat-authoring calls unmade"
+    # The COMPOSED document, not merely "no exception": a `_reply_document` that silently
+    # returned an empty mapping would still compose three worlds and still raise nothing.
+    assert composed["base_story"] == "the captured story"
+    assert [w["world_id"] for w in composed["worlds"]] == ["a", "b", "c"]
+
+
+def test_947_the_prompts_overlay_example_parses_through_the_real_loader():
+    """Every overlay the family prompt SHOWS is one the family loader accepts.
+
+    The prompt is where the model learns the shape, and the loader is what refuses it — after
+    all three calls have been paid for and with the episode already aborted. The two agreed only
+    by prose until a live episode died on the gap: the prompt described "injects documents under
+    a base pattern" and showed nothing but `elastic: {}`, so the model authored the reasonable
+    other encoding (`inject:` directly under `elastic`, each document carrying its own
+    `index_pattern`) and `parse_family` refused it.
+
+    The example is PARSED, not searched for a substring: a prompt that merely mentions the right
+    key names while nesting them wrongly is exactly the failure this pins.
+    """
+    prompt = (T.mod("run_common").REPO_ROOT / "defender" / "learning" / "branch"
+              / "questioner" / "family.md")
+    text = prompt.read_text(encoding="utf-8")
+    blocks = re.findall(r"^```yaml\n(.*?)^```", text, re.DOTALL | re.MULTILINE)
+    assert blocks, "the family prompt shows no YAML block at all"
+    overlays = [w["overlay"] for block in blocks
+                for w in (yaml.safe_load(block).get("worlds") or [])
+                if isinstance(w, dict) and "overlay" in w]
+    # Without this the comprehension can yield nothing and the loop below asserts nothing —
+    # the empty-collection vacuity shape, reached by any edit that renames the `worlds` key.
+    assert len(overlays) >= 2, f"the prompt's worlds carry {len(overlays)} overlays, not two"
+    parsed = [_family_mod().parse_overlay(ov, where="the prompt's example") for ov in overlays]
+    # At least one example must actually STAGE something. Two empty overlays parse clean and
+    # teach the model nothing, which is the state this test was written against.
+    assert any(ov.patches and ov.elastic for ov in parsed), (
+        "no overlay in the prompt shows both halves populated, so the shape is still unshown")
+
+
+def test_947_the_questioner_is_told_which_base_patterns_it_may_key(tmp_path):
+    """The stageable base patterns reach the prompt, so the bounded domain is stated rather
+    than guessed.
+
+    `_check_overlay_keys` refuses an overlay keyed on anything outside the configured set, and
+    it refuses at `parse_family` — after all three calls are spent. The prompt described the
+    domain ("a base pattern the environment already declares") without naming its members, and
+    a live episode died when the model reached for a runtime sensor's alert index that this
+    deployment does not run.
+
+    Asserted on the PROMPT the seam was handed, not on a return value: what is at issue is
+    whether the model was told, and only `agent.prompts` holds that.
+    """
+    agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
+    _questioner().author_family(
+        source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
+        invoke=agent, leads=[], alert={}, frontier="",
+        stageable_patterns=("logs-alpha-*", "logs-beta-*"))
+    assert agent.prompts, "the questioner never called the model"
+    family_prompt = agent.prompts[0]
+    for pattern in ("logs-alpha-*", "logs-beta-*"):
+        assert pattern in family_prompt, f"the prompt never names the stageable {pattern!r}"
+    # HOST TEXT, ahead of the untrusted region: the patterns come from the deployment's own
+    # configuration, and a domain the model is told to OBEY must not arrive inside a frame that
+    # tells it to read the contents as evidence.
+    # The frame's OPENING tag, not the bare word — the shipped prompt names "untrusted" in its
+    # own reader contract long before any frame opens, so matching the word finds host text.
+    opened = re.search(rf"<[\w-]+-{_questioner().UNTRUSTED_TAG}>", family_prompt)
+    assert opened, "the capture was never framed at all"
+    assert family_prompt.index("logs-alpha-*") < opened.start(), (
+        "the stageable patterns arrived inside the untrusted frame")
+
+
+def test_947_an_unstageable_pattern_is_still_refused_by_the_loader():
+    """Telling the model the domain does not RELAX it: an overlay keyed outside the configured
+    set is still refused, so the prompt is guidance and the loader remains the authority."""
+    bad = T.world_doc("b", ov=T.overlay(elastic={"logs-nosuchsensor.alerts-*": {
+        "inject": [{"host.name": "office-ws-1"}]}}))
+    with pytest.raises(T.sym("runtime.branch._family", "FamilyError")) as refusal:
+        _family_mod().parse_family(T.family_doc(worlds=[T.base_world(), bad]))
+    assert "logs-nosuchsensor.alerts-*" in str(refusal.value)
+
+
+def test_947_every_world_the_prompt_shows_survives_the_identity_gate():
+    """The prompt's example worlds pass the gate that mints their names.
+
+    The companion to the overlay test above, and the same failure four times over: `world_id`
+    is refused unless it is lowercase alphanumerics with `_` and `.` — a HYPHEN is the view
+    name's own delimiter — and the prompt asked for "a short lowercase label" without saying so.
+    A live episode died on `sshpass-at-alert-time`, the spelling any writer of English reaches
+    for first.
+
+    The example is composed into a real `Family` and run through `check_identities`, the gate
+    the launcher itself calls, so the prompt cannot show a name the launcher would refuse.
+    """
+    prompt = (T.mod("run_common").REPO_ROOT / "defender" / "learning" / "branch"
+              / "questioner" / "family.md")
+    blocks = re.findall(r"^```yaml\n(.*?)^```", prompt.read_text(encoding="utf-8"),
+                        re.DOTALL | re.MULTILINE)
+    shown = [w for block in blocks
+             for w in (yaml.safe_load(block).get("worlds") or [])
+             if isinstance(w, dict) and isinstance(w.get("world_id"), str)]
+    # Without this the composition below is the base world alone, which passes trivially — the
+    # empty-collection shape, reached by any edit that renames `worlds` or `world_id`.
+    assert len(shown) >= 2, f"the prompt shows {len(shown)} named worlds, not two"
+    family_mod = _family_mod()
+    worlds = [T.base_world()] + [
+        T.world_doc(w["world_id"], role=letter, ov=w.get("overlay") or {})
+        for letter, w in zip(("B", "C"), shown, strict=True)]
+    family = family_mod.parse_family(T.family_doc(worlds=worlds))
+    family_mod.check_identities(family)

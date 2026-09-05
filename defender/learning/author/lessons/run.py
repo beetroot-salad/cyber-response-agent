@@ -15,6 +15,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender.learning.author import drain
 from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
+from defender._vocab import normalized_judge_outcome
 from defender._yaml import safe_load
 from defender._corpus import iter_lessons
 from defender.learning.core.config import (
@@ -159,13 +160,30 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             check=FINDINGS_CHECK,
             runs_dir=cfg.runs_dir,
             pending=cfg.channel.file,
-            queued_ids=frozenset(
-                str(f["run_id"]) for f in findings if f.get("run_id")
-            ),
+            # J12: a family row's id never enters the queued set the model may forward_check —
+            # its ground truth is the family record, not a source_refs.yaml under runs_dir.
+            queued_ids=forward_checkable_ids(findings),
         ),
         log=_log,
     )
 
+
+
+def forward_checkable_ids(findings: list[dict]) -> frozenset[str]:
+    """The run ids the model may name in a `forward_check` call for this batch.
+
+    J12: a family row's id never enters it — its ground truth is the family record, not a
+    `source_refs.yaml` under the runs dir — so the model-facing tool answers "not in this
+    batch's queued rows" for it rather than reaching the check at all. A NAMED function rather
+    than a comprehension inlined into the config, because it is the route the exemption IS: a
+    test can drive this and fail when the filter is removed, which a test that re-derives the
+    same comprehension against its own data cannot."""
+    from defender.learning.author.verify_forward.checks import skips_forward_check
+
+    return frozenset(
+        str(f["run_id"]) for f in findings
+        if f.get("run_id") and not skips_forward_check(f)
+    )
 
 
 def _forward_bad_reason(reason: str) -> str:
@@ -253,14 +271,70 @@ def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool
     return disposition == "benign"
 
 
+#: D6/O2: the ONE `judge_outcome` this partition admits for authoring. Stated positively, and
+#: that is the whole point: a denylist here answers "author" for every value it does not
+#: recognise, so a row whose `judge_outcome` is absent, torn, or `discard` was routed to the
+#: curator exactly as if the judge had scored the family `survived` — the O7 outcome
+#: `learning/judge/enqueue.py`'s own docstring says must never happen, guarded only at the
+#: appender and therefore not guarded at all for any other producer on this shared queue.
+_FAMILY_AUTHOR_OUTCOME = "survived"
+#: `judge_outcome` values that are SKIPPED (consumed, never authored) rather than held.
+#: `discard` and `corpus-contradiction` do not reach the queue through the judge's own appender
+#: (M5 refuses them there), so this partition should never see them — a row carrying one anyway
+#: came from somewhere the appender did not gate, and is HELD for a human rather than skipped.
+_FAMILY_SKIP_OUTCOMES = frozenset({"caught", "undecidable"})
+
+
+def _gate_family(entry: dict) -> tuple[str, dict] | None:
+    """D6/O2: the family partition inside `_gate_findings`'s one gate.
+
+    `None` admits the row for authoring; otherwise `("consumed"|"held", row)` says which list
+    the caller files it under.
+
+    A `direction: family` row's ground truth is `disposition_declared` on the family record —
+    already resolved into `judge_outcome` by the judge's own mechanical pass — so this
+    partition never reads `source_refs.yaml` at all. `survived` is admitted for authoring (the
+    caller lets the row fall through to `to_author` the same way an admitted adversarial row
+    does); `caught`/`undecidable` are consumed WITHOUT authoring, terminally rather than held —
+    a word that will never change must not sit in the queue forever (a hold is forever; a skip
+    is terminal). EVERYTHING ELSE IS HELD, with the value that could not be read named on the
+    row: this partition is a POSITIVE rule, so a row with no readable ground truth is the one
+    thing it will not do silently, which is the same posture the adversarial/benign arm below
+    takes for an unresolvable `source_refs.yaml`."""
+    # THROUGH THE OWNER'S NORMALIZER, not a bare `in`. The appender validates `judge_outcome`
+    # with `normalized_judge_outcome`, which casefolds and trims — so `Caught` passes validation,
+    # is written to the queue verbatim, and a raw membership test here does not recognise it.
+    # A family the judge scored as CAUGHT was then authored as though it had survived. This is
+    # `lint-vocabulary`'s own shape: one parser, two interpreters, disagreeing on one string.
+    outcome = normalized_judge_outcome(entry.get("judge_outcome"))
+    if outcome == _FAMILY_AUTHOR_OUTCOME:
+        return None
+    if outcome in _FAMILY_SKIP_OUTCOMES:
+        rec = dict(entry)
+        rec["consumed_category"] = "consumed_family_skip"
+        return "consumed", rec
+    rec = dict(entry)
+    rec["held_reason"] = (
+        f"no_family_ground_truth(judge_outcome={entry.get('judge_outcome')!r})")
+    return "held", rec
+
+
 def _gate_findings(
     batch: list[dict], cfg: AuthorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """The findings direction's pre-author policy: idempotency against the corpus, then
-    the `source_refs.yaml` ground truth a finding needs before it can become a lesson.
+    """The findings direction's pre-author policy: idempotency against the corpus, then EITHER
+    the family partition (D6) for a `direction: family` row OR the `source_refs.yaml` ground
+    truth an adversarial/benign finding needs before it can become a lesson.
 
     `to_author` is derived HERE by subtraction, so both directions return the same 3-tuple
     even though the policies are not one policy parameterised."""
+    # THE SAME PREDICATE THE ROUTE USES, not a second spelling of it. `skips_forward_check`
+    # already decides which rows are family rows for `queued_ids` above; re-deriving
+    # `entry["direction"] == "family"` here gives one rule two homes, and the duplicate-helper
+    # gate keys on the symbol NAME, so it is structurally blind to the copy. Widening the family
+    # route later would otherwise update one site and leave the other routing as it always did.
+    from defender.learning.author.verify_forward.checks import skips_forward_check
+
     existing_ids = existing_finding_ids(cfg)
     held: list[dict] = []
     consumed_idempotent: list[dict] = []
@@ -270,6 +344,18 @@ def _gate_findings(
             rec = dict(entry)
             rec["consumed_category"] = "consumed_idempotent"
             consumed_idempotent.append(rec)
+            continue
+        if skips_forward_check(entry):
+            # P6's blast radius still applies to a malformed family row: the WRITER is what is
+            # supposed to refuse a row lacking `run_id` before it ever reaches this gate
+            # (J12), not this partition — indexing it here (never using the value) is what
+            # keeps that property true rather than silently routing a row the appender should
+            # have refused.
+            entry["run_id"]  # noqa: B018 — see comment above
+            routed = _gate_family(entry)
+            if routed is not None:
+                kind, rec = routed
+                (consumed_idempotent if kind == "consumed" else held).append(rec)
             continue
         disp = disposition_for(cfg, entry["run_id"])
         direction = entry["direction"]

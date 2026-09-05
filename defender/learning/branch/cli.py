@@ -45,6 +45,7 @@ import os
 import sqlite3
 import sys
 import threading
+import traceback
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -1001,7 +1002,7 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(  # noqa: PLR0913 — the launcher's inputs plus its five injection seams
+def main(  # noqa: PLR0913 — the launcher's inputs plus its six injection seams
     argv: list[str],
     *,
     spawn: Callable[..., int] | None = None,
@@ -1010,6 +1011,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its five injection sea
     adapters: Any = None,
     invoke: Any = None,
     preflight: Callable[[str | None], int] | None = None,
+    judge: Any = None,
 ) -> int:
     """Launch one episode, reporting a refusal as a REFUSAL rather than as a crash.
 
@@ -1039,7 +1041,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its five injection sea
 
     try:
         return _launch(argv, spawn=spawn, door=door, questioner=questioner,
-                       adapters=adapters, invoke=invoke, preflight=preflight)
+                       adapters=adapters, invoke=invoke, preflight=preflight, judge=judge)
     except (branch.BranchError, LedgerError, EstateError, FamilyError,
             staging_mod.StagingRefused, ReviewError,
             session_store.StoreError, sqlite3.Error) as refusal:
@@ -1048,7 +1050,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its five injection sea
 
 def _launch(  # noqa: PLR0913 — see `main`
     argv: list[str], *, spawn: Any, door: Any, questioner: Any, adapters: Any, invoke: Any,
-    preflight: Callable[[str | None], int] | None,
+    preflight: Callable[[str | None], int] | None, judge: Any = None,
 ) -> int:
     from defender.run import preflight_role_models
 
@@ -1104,25 +1106,73 @@ def _launch(  # noqa: PLR0913 — see `main`
     # teardown frame has to know is whether an exception is already on its way to the operator,
     # and the only frame that can say so is this one — see `_teardown_without_masking`.
     aborting = False
+    # ONE SHOT, so the episode can hand the cluster back EARLY and the `finally` still covers
+    # every path that did not. The grade at the tail of `_run_episode` makes worlds x draws
+    # model calls, each bounded only by the subagent timeout, and it reads the ARCHIVE and the
+    # runs base — never the cluster. Holding every staged alias live across that is minutes to
+    # hours of namespace nobody is using, and any hang there delays teardown of names the next
+    # launch's sweep will refuse to touch.
+    teardown = _OneShotTeardown(episode_dir, write_door)
     try:
         return _run_episode(
             ns, source=source, episode_id=episode_id, episode_dir=episode_dir, token=token,
             patterns=patterns, door=write_door, questioner=author,
-            adapters=read_side, invoke=compare_with, spawn=spawn)
+            adapters=read_side, invoke=compare_with, spawn=spawn, judge=judge,
+            teardown=teardown)
     except SystemExit:
         aborting = True
         raise
     except BaseException as failed:  # noqa: BLE001 — ONE abort rule, see `main`'s docstring
         aborting = True
+        if teardown.done:
+            # UNCHANGED, not wrapped — and the condition is WHAT HAPPENED, not one exception
+            # class. Once the episode has handed the cluster back, every sibling has started,
+            # archived and been reviewed, so both halves of the abort sentence below ("no
+            # sibling started and every staged name is torn down") are false of anything raised
+            # from here on: the teardown's own refusal, whichever class `staging.teardown`
+            # leaked on the way to raising it (`read_staged`'s `UnicodeDecodeError`,
+            # `merge_review`'s `OSError`), or an interrupt during the grade. Named on the class
+            # instead, exactly one of those was reported honestly and every other one was
+            # reported as an episode that never ran. BEFORE the teardown, a `StagingRefused` out
+            # of `stage_world` IS the one-abort case and keeps the wrap.
+            raise
         raise LauncherRefused(
             f"[branch] episode {episode_id} aborted: {failed!r} — no sibling started and every "
             "staged name is torn down") from failed
     finally:
-        # ON EVERY EXIT: the rejection, the clean completion, the `incomplete` family and any
-        # exception raised after the first staging append. The cluster does not care why the
-        # episode ended, and a staged name left live under this episode's token is one the next
-        # launch's sweep will refuse to touch and nothing else will ever remove.
-        _teardown_without_masking(episode_dir, write_door, aborting=aborting)
+        # ON EVERY EXIT that has not already torn down: the rejection, the clean completion, the
+        # `incomplete` family and any exception raised after the first staging append. The
+        # cluster does not care why the episode ended, and a staged name left live under this
+        # episode's token is one the next launch's sweep will refuse to touch and nothing else
+        # will ever remove.
+        teardown(aborting=aborting)
+
+
+class _OneShotTeardown:
+    """`_teardown_without_masking`, called at most once however many callers ask.
+
+    Two frames want it now — the episode itself, which releases the cluster before it spends
+    minutes grading, and `_launch`'s `finally`, which covers every path the episode did not
+    reach. `staging.teardown` is not safe to run twice (it re-deletes a name already gone and
+    files the adapter's complaint as a verification failure), so the second call is the one that
+    must do nothing rather than the first being conditional on a flag someone has to thread."""
+
+    def __init__(self, episode_dir: Path, door: Any) -> None:
+        self._episode_dir = episode_dir
+        self._door = door
+        self._done = False
+
+    @property
+    def done(self) -> bool:
+        """Has the cluster already been handed back? Read by `_launch`'s abort arm, which must
+        not tell an operator "no sibling started" about an episode that ran to completion."""
+        return self._done
+
+    def __call__(self, *, aborting: bool) -> None:
+        if self._done:
+            return
+        self._done = True
+        _teardown_without_masking(self._episode_dir, self._door, aborting=aborting)
 
 
 def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -> None:
@@ -1157,10 +1207,15 @@ def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path, token: str,
     patterns: Sequence[str], door: Any, questioner: Any, adapters: Any, invoke: Any, spawn: Any,
+    judge: Any = None, teardown: Any = None,
 ) -> int:
-    """Steps 2 to 6, inside the teardown guard."""
+    """Steps 2 to 6, inside the teardown guard.
+
+    `teardown` is `_launch`'s one-shot guard, called here once the archive is written so the
+    cluster is released before the grade spends its model calls; `_launch`'s `finally` covers
+    every path that does not reach that call."""
     family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
-                     questioner=questioner)
+                     questioner=questioner, patterns=patterns)
     # THE STAGING RECORD EXISTS FROM THE MOMENT STAGING BEGINS, empty if nothing is staged.
     # It is the SOLE account of a cluster write — the write door bypasses `guard_outbound`,
     # which is also the capture recorder — so its ABSENCE has to mean "staging never started"
@@ -1209,6 +1264,11 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         print(f"[branch] world {label} exited {exits[label]}", file=sys.stderr)
     print(f"[branch] episode {episode_id}: outcome={report['outcome']} "
           f"({len(report['scrub_verified'])}/{len(labels)} verified)", file=sys.stderr)
+    # J10: the judge runs at the TAIL of the step runner, after the archive step and before the
+    # return — never in `_launch`'s post-teardown path, which is production-dead on this route.
+    # Its own frame, so the tear-down/grade/re-raise rule is one readable unit and this function
+    # keeps the branch count the shared complexity gate allows it.
+    _release_and_grade(episode_dir, episode_id=episode_id, judge=judge, teardown=teardown)
     # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
     # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
     # launch that did exactly what it was asked and found the results not comparable, which is a
@@ -1218,9 +1278,86 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     return 1 if failed else 0
 
 
+
+def _release_and_grade(
+    episode_dir: Path, *, episode_id: str, judge: Any, teardown: Any,
+) -> None:
+    """Hand the cluster back, then grade — J10's tail of the step runner.
+
+    A judge failure is NON-FATAL to the episode (F-5): the launcher's own exit status stays
+    about the LAUNCH, never about the grade, so a malformed reply or an unreachable model does
+    not turn an otherwise-clean episode into a `LauncherRefused`.
+
+    THE CLUSTER IS HANDED BACK BEFORE THE GRADE. Everything the judge reads is on disk — the
+    archived episode and the operator's runs base — so there is nothing left for the staged
+    names to serve, and the grade is the longest-running thing in the episode.
+
+    HELD, NOT RAISED THROUGH. `_teardown_without_masking` re-raises when `aborting` is False,
+    and calling it ahead of the grade therefore made a CLEANUP failure preempt the grade
+    entirely: a fully archived, fully reviewed episode ended with no draws, no queue rows and no
+    `judge.yaml` — the file whose presence certifies the pass — and the operator saw only the
+    staging refusal, indistinguishable from an episode that was never graded for any other
+    reason. The refusal is still this episode's answer; it is raised AFTER the grade it has
+    nothing to do with (nothing the judge reads is on the cluster).
+    """
+    teardown_failed: BaseException | None = None
+    graded = False
+    if teardown is not None:
+        try:
+            teardown(aborting=False)
+        except Exception as cleanup_failed:  # noqa: BLE001 — re-raised below, unchanged
+            teardown_failed = cleanup_failed
+
+    try:
+        from defender.learning import judge as judge_mod
+        from defender.run_common import resolve_runs_base
+
+        judge_mod.grade_episode(episode_dir, judge=judge, runs_base=resolve_runs_base())
+    # INSIDE THE `try`, imports included: an import fault in the judge package, or a
+    # `FatalConfigError` out of `resolve_runs_base`, is a judge failure like any other, and
+    # raised from outside this boundary it reached `_launch`'s `except BaseException` and was
+    # reported as "no sibling started and every staged name is torn down" — both halves false of
+    # an episode that has already run, archived and torn down.
+    except Exception as judge_failed:  # noqa: BLE001 — F-5 IS the broad catch, see below
+        # EVERY class, not `JudgeRefused` alone. "A judge failure is non-fatal to the episode"
+        # is a property of this boundary, and a boundary that lists the failures it will
+        # tolerate does not have it: the grade reads model-authored archives, a shared queue and
+        # an injected model seam, and each of those produced a live escape (a decode error, a
+        # corrupt draw file, a lock timeout, whatever the seam raises) that reached here as a
+        # traceback and cost an otherwise-clean episode its own exit status. The failure is
+        # printed in full rather than swallowed — the point is that the LAUNCH's status stays
+        # about the launch, not that the failure goes unreported.
+        print(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
+              "episode itself is otherwise unaffected", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        graded = True
+    else:
+        graded = True
+    finally:
+        # IN A `finally`, so the held cleanup fault survives a class the arm above does not
+        # catch. Raised only after the block, it was DROPPED whenever the grade exited on a
+        # `BaseException` — an operator's interrupt during minutes of model calls, a `SystemExit`
+        # out of an import — and because `_OneShotTeardown` latches `_done` BEFORE it calls,
+        # `_launch`'s `finally` was already a no-op: nothing retried, nothing reported, and the
+        # names stayed live under a token the next launch's sweep will refuse to touch.
+        if teardown_failed is not None:
+            # NEVER MASKING, which is `_teardown_without_masking`'s own rule at the frame that
+            # first had to make this choice — and answered from a FRAME-LOCAL flag, never
+            # `sys.exc_info()`, which is thread-global and answers for whatever is being handled
+            # anywhere up this thread's stack. `graded` is set on both paths that leave this
+            # block normally, so it is False exactly when something is still on its way to the
+            # operator: then the cleanup fault is printed (its unverified names are already in
+            # the review record, which is the obligation), and otherwise it is the answer.
+            if graded:
+                raise teardown_failed
+            print(f"[branch] episode {episode_id}: teardown also failed ({teardown_failed!r}); "
+                  "the names it could not verify gone are in the review record, and the failure "
+                  "that ended the episode is what follows", file=sys.stderr)
+
+
 def _author(
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
-    questioner: Any,
+    questioner: Any, patterns: Sequence[str] = (),
 ) -> Family:
     """Step 2: the questioner authors the triplet, and it is validated before anything reads it.
 
@@ -1245,6 +1382,9 @@ def _author(
         leads=_joined_leads(source, joined),
         alert=_alert_document(source),
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
+        # The SAME set `parse_family` five lines down judges the authored overlays against, so
+        # the prompt and the refusal cannot name two different domains.
+        stageable_patterns=patterns,
     )
     document.update({
         "episode_id": episode_id,

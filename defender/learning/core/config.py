@@ -214,6 +214,17 @@ def learning_run_paths(run_id: str) -> RunPaths:
 
 DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())
 
+
+def loop_paths() -> LoopPaths:
+    """`DEFAULT_PATHS`, resolved at CALL time rather than at import.
+
+    Same value, same derivation — but a module-level constant freezes `DEFENDER_LEARNING_STATE_DIR`
+    at ITS import, so a caller that must honour a state root set after import (a test isolating
+    the shared queue; a worker re-pointed by its environment) cannot use the constant. Callers
+    that only ever run against the process's start-up configuration should keep using
+    `DEFAULT_PATHS`; this exists for the ones that must not freeze."""
+    return LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())
+
 LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
 _PIPELINE_DIR = LEARNING_DIR / "pipeline"
@@ -244,16 +255,29 @@ BENIGN_OUTCOME_ENUM = {
     "skip-passthrough",
 }
 
-QUEUEABLE_FINDING_TYPES = {
+#: The four buckets the OLD pipeline judge may emit, and the only ones its reply is validated
+#: against (`core/validate.py::_validate_finding`, through the two `*_ALL_FINDING_TYPES` sets
+#: below). Kept separate from `QUEUEABLE_FINDING_TYPES` because that set is what the QUEUE
+#: accepts, and the two populations are no longer the same: widening the queue's set widened
+#: the pipeline judge's accepted replies with it, so a model whose prompts never mention
+#: `decision-discipline` could return one and have it persisted with an adversarial/benign
+#: direction and routed through a ground-truth gate the bucket was never defined against.
+PIPELINE_FINDING_TYPES = {
     "lead-set",
     "lead-quality",
     "analyze-discipline",
     "observability",
 }
+#: #921's fourth mechanical bucket: a resolution moved past the branch's fence and the verdict
+#: still disagreed with the declared disposition. Produced ONLY by the family judge's own
+#: appender (`learning/judge/enqueue.py`) — which is why it joins what the queue accepts and
+#: not what the pipeline judge's reply is validated against.
+FAMILY_ONLY_FINDING_TYPES = {"decision-discipline"}
+QUEUEABLE_FINDING_TYPES = PIPELINE_FINDING_TYPES | FAMILY_ONLY_FINDING_TYPES
 ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES = {"detection-confirmed"}
-ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES
+ALL_FINDING_TYPES = PIPELINE_FINDING_TYPES | ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES
 BENIGN_AUDIT_ONLY_FINDING_TYPES = {"disposition-confirmed"}
-BENIGN_ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
+BENIGN_ALL_FINDING_TYPES = PIPELINE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 # Every env-backed knob is read at CALL time, never as `X = os.environ.get(...)` at import:
