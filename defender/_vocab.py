@@ -68,10 +68,8 @@ UNKNOWN_DISPOSITION = "?"
 #: a `gradable`/degenerate split. Lives here, beside the disposition enum, because THREE
 #: schemas have to agree on it: the twelve-key finding row's `judge_outcome`, the family
 #: record's `verdict_word`, and the findings channel's `_gate_family` partition.
-JUDGE_OUTCOME_VALUES: tuple[str, ...] = (
-    "caught", "corpus-contradiction", "discard", "survived", "undecidable",
-)
-JUDGE_OUTCOME_ENUM = frozenset(JUDGE_OUTCOME_VALUES)
+JUDGE_OUTCOME_ENUM = frozenset(
+    {"caught", "corpus-contradiction", "discard", "survived", "undecidable"})
 
 
 def normalized_judge_outcome(value: object) -> str | None:

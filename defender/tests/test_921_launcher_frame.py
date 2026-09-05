@@ -32,6 +32,11 @@ def _tmp_roots(tmp_path, monkeypatch):
     """
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    # The learning STATE root too, so the shared findings queue this pass appends to is
+    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
+    # here rather than in the appender: a production path that picks a different queue when
+    # an env var is unset is a pass whose rows can land where no drain reads.
+    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
 
 
 def _cli():
@@ -280,8 +285,14 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
         tmp_path, monkeypatch):
     """The three operator knobs — draws-per-world, the judge's model/effort, and the render's
     payload cap — are resolved ONCE at the top of the episode-grading pass, their resolved
-    values are recorded on the family record beside the draw count, and a lead whose join
+    values are recorded on the family record beside the draw count, and a view whose content
     exceeds the cap is TRUNCATED with an explicit marker rather than dropped silently (J15).
+
+    THE CAP BOUNDS THE ASSEMBLED SET OF VIEWS, not one file inside one of them. It first bounded
+    a single lead's `gather_summaries/<lead>.md` while the document rows, the lesson bodies, the
+    investigation and the report went unmeasured, so the knob reported success over a prompt it
+    had barely looked at. The cap VALUE here moved with that meaning — the assertions are the
+    same four, over a quantity that is now the bytes the model actually receives.
 
     Reading once per pass is not tidiness. Because a retry clobbers each existing draw file in
     place rather than erroring and no cleanup step exists (P4), a draws knob that SHRINKS
@@ -297,7 +308,7 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
     monkeypatch.setenv(J.DRAWS_KNOB, "2")
     monkeypatch.setenv(J.MODEL_KNOB, "kimi-k3")
     monkeypatch.setenv(J.EFFORT_KNOB, "xhigh")
-    monkeypatch.setenv(J.CAP_KNOB, "400")
+    monkeypatch.setenv(J.CAP_KNOB, "3000")
 
     ep = J.accepted_episode(tmp_path)
     # One lead whose joined payload cannot fit the cap, through the real archived artifact.
@@ -311,7 +322,7 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
     record = J.judge_record(ep)
     assert record["draws"]["configured"] == 2
     assert record["knobs"] == {"draws": 2, "model": "kimi-k3", "effort": "xhigh",
-                               "payload_cap": 400}, (
+                               "payload_cap": 3000}, (
         "the resolved knob values are not recorded beside the draw count")
     assert len(J.draw_files(ep, "b")) == 2, "the draws knob was not honoured once per pass"
 
@@ -321,3 +332,10 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
         "the oversized lead was dropped with no marker: a dropped lead is invisible to the "
         "judge and to the reader of its reply")
     assert "l-001" in prompt, "the truncated lead vanished from the view entirely"
+
+    # And the bound is over the SET. Eight sections each allowed to reach the cap is eight
+    # times the number the operator set, which is the same defect one bounded file was.
+    sections = J.mod("learning.judge.render").render(
+        ep, "b", tmp_path / "defender-runs", payload_cap=3000).as_prompt_sections()
+    assert sum(len(body) for body in sections.values()) <= 3000, (
+        "the rendered views together exceed the operator's payload cap")

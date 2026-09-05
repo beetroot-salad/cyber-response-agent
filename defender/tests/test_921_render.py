@@ -34,6 +34,11 @@ from defender.tests import _judge_921 as J
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    # The learning STATE root too, so the shared findings queue this pass appends to is
+    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
+    # here rather than in the appender: a production path that picks a different queue when
+    # an env var is unset is a pass whose rows can land where no drain reads.
+    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
 
 
 def _render():
@@ -113,7 +118,7 @@ def test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_id(tmp_path
         run = base / name
         run.mkdir(parents=True, exist_ok=True)
         (run / "alert.json").write_text(json.dumps({"alert_id": alert}), encoding="utf-8")
-        (run / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+        (run / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     union = {row["run_id"] for row in _render().render(ep, "b", runs_base=base).siblings}
     assert {"trial-1", "trial-2"} <= union
@@ -279,7 +284,7 @@ def test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings(tmp
     closed = base / "closed-trial"
     closed.mkdir(parents=True, exist_ok=True)
     (closed / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
-    (closed / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (closed / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     in_flight = base / "in-flight-trial"
     in_flight.mkdir(parents=True, exist_ok=True)
@@ -294,7 +299,7 @@ def test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings(tmp
     own = ep / "runs" / f"{J.EPISODE_ID}-b"
     own.mkdir(parents=True, exist_ok=True)
     (own / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
-    (own / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (own / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     view = _render().render(ep, "b", runs_base=base)
     union = {row["run_id"] for row in view.siblings}
@@ -409,10 +414,15 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
 
     BOTH HALVES ARE DRIVEN, and the second is F-7, settled at the phase-F seam. The screen path
     keeps the world whole (first half). The path the screen does NOT cover leaves the world
-    short, and that state is now MALFORMED: the judge pass refuses it, naming the input that was
-    short, rather than grading it normally on a thinner view. This test used to cite the
-    half-populated world in its docstring and drive only the screen — the one path P10 says IS
-    all-or-nothing — so the state the citation is about reached no assertion at all.
+    short, and that state is MALFORMED: the judge pass excludes that world, marks it malformed
+    and names the input that was short, rather than grading it normally on a thinner view. This
+    test used to cite the half-populated world in its docstring and drive only the screen — the
+    one path P10 says IS all-or-nothing — so the state the citation is about reached no
+    assertion at all.
+
+    The exclusion is the WORLD's, not the pass's: a sibling whose own archive is whole still
+    grades, because one world's bad artifact is not a reason to throw away a clean sibling's
+    grade and leave no record of either.
     """
     archive = J.mod("learning.branch.archive")
     ep = J.episode(tmp_path)
@@ -437,20 +447,24 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
     # F-7 — the half the screen does not cover. The `copy2` loop has no rollback, so the state
     # a mid-copy I/O fault leaves is a world holding its five required inputs with a supporting
     # directory SHORT. P10 established that state is reachable; it is written to disk here
-    # rather than induced by an imagined disk fault, and the assertion is that the pass refuses
-    # it LOUDLY and says which input was short.
+    # rather than induced by an imagined disk fault, and the assertion is that the pass excludes
+    # that world LOUDLY and says which input was short.
     partial = J.accepted_episode(tmp_path / "partial",
                                  ledgers={"b": [J.staged_row("b")], "c": []})
     family = J.mod("learning.judge.family")
-    assert "b" in J.rows(family.grade_family(partial)), (
+    assert J.rows(family.grade_family(partial))["b"].get("ungradable") is not True, (
         "the control failed: the intact episode did not grade world b at all")
     (partial / "worlds" / "b" / "gather_summaries" / "l-001.md").unlink()
 
-    with pytest.raises(J.refusals()) as short:
-        family.grade_family(partial)
-    assert "gather_summaries" in str(short.value), (
-        "a world the archive left short graded, or was refused without naming the short input; "
-        "the message is the whole difference between a partial archive and a malformed one")
+    rows = J.rows(family.grade_family(partial))
+    assert rows["b"].get("malformed") is True, (
+        "a world the archive left short graded normally, on a thinner view than it appears to "
+        "have")
+    assert "gather_summaries" in rows["b"]["ungradable_reason"], (
+        "the world was excluded without naming the short input; the message is the whole "
+        "difference between a partial archive and a malformed artifact")
+    assert rows["c"].get("ungradable") is not True, (
+        "world b's short directory cost world c its grade")
 
 
 def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(tmp_path):

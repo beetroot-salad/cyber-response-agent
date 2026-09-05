@@ -50,7 +50,7 @@ from pathlib import Path
 
 from defender._io import guarded_mkdir, write_guarded
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
-from defender.learning.lead_repository import stage_tables
+from defender.learning.lead_repository import refuse_non_artifacts, stage_tables
 from defender.runtime.scrub import verdict_path
 
 #: The archived world's directory, under the episode. One level, keyed by the SHORT label X —
@@ -105,7 +105,7 @@ def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
         # The SIDECAR beside the run dir, not a path inside it (G17).
         (verdict_path(run_dir), SCRUB_VERDICT_NAME),
         (run_dir / LESSONS_LOADED_NAME, LESSONS_LOADED_NAME),
-        (run_dir / ALERT_NAME, ALERT_NAME),
+        (paths.alert, ALERT_NAME),
     )
 
 
@@ -135,20 +135,6 @@ def _screen(source: Path, *, world: str, is_dir: bool = False) -> bool:
             "the model planted, and copying it would write the target's bytes into the archive "
             "under a name every later reader takes for an in-run artifact")
     return False
-
-
-def _refuse_non_artifact_entries(refused: list[Path]):
-    """`copytree`'s ignore hook for `gather_summaries/`, mirroring
-    `lead_repository._refuse_non_artifacts`: drop and record every entry, at any depth, that is
-    not a regular file or a real directory — never abort the whole tree over one dangling link.
-    """
-    def _ignore(directory: str, names: list[str]) -> set[str]:
-        here = Path(directory)
-        dropped = {n for n in names
-                   if not (artifact_file(here / n) or artifact_dir(here / n))}
-        refused.extend(here / n for n in sorted(dropped))
-        return dropped
-    return _ignore
 
 
 def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
@@ -200,6 +186,18 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
                     f"world {world!r}: {dest} is occupied by something that is not a regular "
                     "file — the archive is written into a tree a box can reach, and copying "
                     "onto a link would put this world's artifact wherever it points")
+        # The DIRECTORY destination is screened by the same rule and for the same reason. It is
+        # not covered by the loop above (which judges the single files) and `copytree` will not
+        # refuse it for us: under `dirs_exist_ok=True` its own `makedirs(dst, exist_ok=True)`
+        # RESOLVES a link planted at this name, writing the world's summaries wherever it
+        # points — the exact escape this screen exists to stop, one directory over.
+        summaries_dest = world_dir / GATHER_SUMMARIES_DIRNAME
+        if (summaries_dest.exists() or summaries_dest.is_symlink()) \
+                and not artifact_dir(summaries_dest):
+            raise ArchiveRefused(
+                f"world {world!r}: {summaries_dest} is occupied by something that is not a "
+                "real directory — copying onto it would write this world's gather summaries "
+                "wherever it points")
         for source, name in sources:
             # Screened by `_screen` above, before this loop began: a link at any of these
             # names has already raised, so nothing here can follow one.
@@ -218,9 +216,9 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         summaries_src = _gather_summaries_source(run_dir)
         if artifact_dir(summaries_src):
             summaries_refused: list[Path] = []
-            shutil.copytree(  # lint-tree-read-follows-link: ok — root screened by `_screen` above, entries preserved
-                summaries_src, world_dir / GATHER_SUMMARIES_DIRNAME, symlinks=True,
-                ignore=_refuse_non_artifact_entries(summaries_refused), dirs_exist_ok=True)
+            shutil.copytree(  # lint-tree-read-follows-link: ok — source root screened by `_screen`, destination screened above, entries preserved
+                summaries_src, summaries_dest, symlinks=True,
+                ignore=refuse_non_artifacts(summaries_refused), dirs_exist_ok=True)
             refused = [*refused, *summaries_refused]
         if refused:
             print(f"[archive] world {world}: {len(refused)} non-artifact entr"

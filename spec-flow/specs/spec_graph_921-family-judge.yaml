@@ -1519,21 +1519,29 @@ demands:
       deliberately produces, which `verdicts` SKIPS, A8 executed), the world's ledger file,
       `disposition_declared` on the manifest entry, and `alert.json`.
 
-  - id: a_malformed_input_refuses_the_judge_pass_loudly
+  - id: a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
     kind: behavior
     form: test
-    source: "45-dispositions J5 tier 2, HUMAN-RESOLVED at §7"
+    source: "45-dispositions J5 tier 2, HUMAN-RESOLVED at §7; blast radius narrowed post-review"
     binds:
       - 'world_report.domain.distinguished[outside-vocabulary]'
       - 'world_investigation.domain'
       - 'interacts(judge_family->world_report)'
-    discharged_by: test_921_a_malformed_input_refuses_the_judge_pass_loudly
+    discharged_by: test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
     seed_docstring: >-
-      A MALFORMED input refuses the episode's judge pass loudly: a malformed artifact is a bug
-      in the writer, not a fact about the defender. This preserves base's own split rather than
-      contradicting it — `verdicts` SKIPS a world archived without a report and REFUSES one
-      whose report exists and cannot be read or declares a disposition outside the vocabulary
-      (A8, executed) — with tier 1 taking the absent and tier 2 the malformed. FOUR
+      A MALFORMED input is loud about ITS OWN WORLD: a malformed artifact is a bug in the
+      writer, not a fact about the defender, so the world carrying it is excluded from
+      `verdict_word` with `malformed: true` and the reason on the record, and its siblings still
+      grade. THE CLASSIFICATION IS §7's AND UNCHANGED; the BLAST RADIUS was narrowed after
+      review, at the human's instruction: the refusal used to unwind the whole pass, so one bad
+      artifact in one world cost every sibling its grade, ran no draws and left no `judge.yaml`
+      at all — the operator got a traceback where the record would have said which siblings
+      graded and why the last one did not. A fault in the MANIFEST still refuses the whole pass,
+      because the manifest is what says which worlds there are. This preserves base's own split
+      rather than contradicting it — `verdicts` SKIPS a world archived without a report and
+      REFUSES one whose report exists and cannot be read or declares a disposition outside the
+      vocabulary (A8, executed) — with tier 1 taking the absent and tier 2 the malformed, and
+      the record carrying `malformed` so the two stay separable to a reader. FOUR
       malformations are written as real bytes: a disposition outside the vocabulary, a report
       that cannot be read at all, a document truncated inside an open invlang fence, and — F-7,
       settled at the phase-F seam — A PARTIALLY ARCHIVED WORLD. P10 named the state the archive
@@ -1541,8 +1549,8 @@ demands:
       rollback, so a genuine mid-copy I/O fault leaves a world with all five required inputs
       present and a supporting directory SHORT, which otherwise grades normally and silently on
       a thinner view than it appears to have. It joins the MALFORMED tier rather than minting a
-      fourth, AND THE ERROR MESSAGE IS PART OF THE DEMAND: the refusal must name the input that
-      was short, because a partial archive is otherwise indistinguishable from a genuine
+      fourth, AND THE ERROR MESSAGE IS PART OF THE DEMAND: the exclusion must name the input
+      that was short, because a partial archive is otherwise indistinguishable from a genuine
       malformation and the operator would go hunting a writer bug in the world's own artifacts.
       The state is written to disk directly rather than reached by an invented I/O fault: P10's
       executed half establishes it is reachable, and inducing a disk fault no probe observed
@@ -3246,7 +3254,7 @@ handoff:
     - "F-4 [material] — J7 CAME OFF THE HUMAN'S LIST ON TWO PROBES THAT WERE NEVER RUN. The probe leaf's digest claimed all ten executed; only P1 ran a command, and J7 rested on P3 and P5, which were source excerpts. resolved_by: HUMAN — RE-RUN BOTH LEGS. CLOSED: `48-p3-p5-executed.md` executed both against the real writer and the real gate and BOTH CONFIRM the reads (one lock hold and one open per 25-row batch; two concurrent appenders as two contiguous blocks; a fault at row 15/25 leaving rows 0-14 and releasing the lock; the idempotency key is `finding_id` alone, content never inspected). J7's closure STANDS, and `test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding` pins a confirmed fact rather than a falsehood. The execution also OBSERVED what the read could only caveat — a torn trailing row under SIGKILL — which produced F-11"
     - "F-5 [the largest unreviewed commitment in the run] — THE COINED JUDGE API. The design named NO seam for the judge's model call, so phase E coined the whole surface and pinned it across the suite, AFTER the §7 seam had closed. It was recorded only as a phase-E red flag, and a red flag in `80-author-digest.md` ROUTES NOWHERE. resolved_by: AUTO at the phase-F seam — RECORDED AS DECIDED AND OVERTURNABLE AT THE MERGE GATE, the same treatment the seven round-1 auto-resolutions got. THE SURFACE, WRITTEN OUT SO THE MERGE-GATE READER SEES IT WITHOUT READING THE SUITE: `cli.main(..., judge=<invoke-shaped callable>)`; `learning/judge/__init__.py::grade_episode(episode_dir, *, judge, runs_base, draws=, git_show=, queue_dir=)`; `render.render(episode_dir, world_label, runs_base, *, git_show=)` returning a `JudgeInput` with `.leads/.coverage/.siblings/.lessons/.spread/.union_notes` and `.as_prompt_sections()`; `run.validate_reply(text) -> JudgeReply`; `family.grade_family(episode_dir) -> FamilyGrade` (`.worlds`, `.verdict_word`, `.graded_worlds`, `.enqueued_rows`); `enqueue.append_rows(episode_dir, rows) -> int` and `enqueue.enqueue(episode_dir, grade) -> int`; `checks.skips_forward_check(row) -> bool`; `_vocab.JUDGE_OUTCOME_ENUM` + `normalized_judge_outcome`; knobs `JUDGE_DRAWS`/`JUDGE_MODEL`/`JUDGE_EFFORT`/`JUDGE_PAYLOAD_CAP`, spelled with NO `DEFENDER_` prefix per run1/G23's executed convention. WHAT IS LEGITIMATE: a test cannot drive an unnamed seam, the knob spellings are grounded in an executed claim, and the injection shape follows `cli.main`'s five existing seams and the profile's no-`monkeypatch.setattr` idiom (G16). WHAT IS UNREVIEWED: adding a `judge=` parameter to the single production command is a design decision larger than several of the fifteen that WERE relayed (J8, J11, J15 are smaller). Overturning it at the merge gate means changing the suite, and that is the intended cost of saying so here rather than nowhere"
     - "F-6 [hygiene] — THE INHERITED `no-consequence` DISMISSAL OF THE TWO SAME-NAMED LOCK SYMBOLS. Zero facts were dismissed `no-consequence` in this run; run1/G30's two `queue_lock` symbols are inherited, and the dismissal's stated purpose (stopping a 'same pattern elsewhere' sweep from merging them) ALREADY FAILED ONCE — this run's own probe table named the wrong module for that exact symbol. resolved_by: AUTO at the phase-F seam — it becomes a DEMAND rather than a note. Minted as the clause `the_two_same_named_queue_lock_symbols_are_not_merged_by_a_census`"
-    - "F-7 [hygiene, real gap] — THE TENTH STATE THE THREE TIERS DO NOT NAME. The archiver's per-file copy has no rollback, so a disk fault leaves a world with all five required inputs present but a supporting directory SHORT: it grades normally and silently on a thinner view than it appears to have. Two tests named it in their docstrings and drove something else. resolved_by: HUMAN at the phase-F seam — A PARTIAL ARCHIVE IS `malformed`: refuse the pass, WITH A DESCRIPTIVE ERROR NAMING WHICH INPUT WAS SHORT. It extends the malformed tier rather than minting a fourth, and the MESSAGE IS PART OF THE DEMAND, not decoration, because the failure is otherwise indistinguishable from a genuine malformation. Both cited tests now drive it: `a_malformed_input_refuses_the_judge_pass_loudly` and `the_new_directory_input_is_per_entry_screened`"
+    - "F-7 [hygiene, real gap] — THE TENTH STATE THE THREE TIERS DO NOT NAME. The archiver's per-file copy has no rollback, so a disk fault leaves a world with all five required inputs present but a supporting directory SHORT: it grades normally and silently on a thinner view than it appears to have. Two tests named it in their docstrings and drove something else. resolved_by: HUMAN at the phase-F seam — A PARTIAL ARCHIVE IS `malformed`: refuse the pass, WITH A DESCRIPTIVE ERROR NAMING WHICH INPUT WAS SHORT. It extends the malformed tier rather than minting a fourth, and the MESSAGE IS PART OF THE DEMAND, not decoration, because the failure is otherwise indistinguishable from a genuine malformation. Both cited tests now drive it: `a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest` and `the_new_directory_input_is_per_entry_screened`. POST-REVIEW AMENDMENT (human-instructed, after a code review found the asymmetry): the classification stands — a partial archive is `malformed`, named, and distinguishable on the record from an absent input — but the refusal is CONTAINED TO THE WORLD it is about rather than unwinding the pass. Unwinding it meant one short directory in one world cost every clean sibling its grade and left no family record at all, which is the opposite of the tier rule's own purpose (\"a family record with something to say, not a refusal of the whole pass\") and inconsistent with the two neighbouring paths that already contain a fault to the finding or the draw it belongs to"
     - "F-8 [hygiene] — THE FORMAL SLOTS DISAGREED WITH `70-resolutions.md`. resolved_by: AUTO at the phase-F seam — the slots are FILLED from the resolutions: all 68 `gate.holes` witnesses now carry the decision's settled reading instead of `[routes to: OPEN at §7]`; `family_manifest.access[questioner_authored]`, `served_ledger.access[family_pass_reader]`, `runs_base.access[sibling_union_scan]`, `finding_evidence.access[pointer_resolution]` and the three `judge_prompt.access` vias carry real constraint lists; every `crosses_validation: unknown` is resolved with the arm that was taken named beside it; `judge_stage_wiring.domain.default` names the settled READ TIMING and still declines to invent a number the seam did not set. `handoff.deviations` recorded the disagreement deliberately, so this is the discharge of that record, not a contradiction of it"
     - "F-9 [hygiene] — THE PROJECT PROFILE SHIPPED KNOWINGLY STALE. `gate.test` read `-m 'not llm and not live'` against `.github/workflows/ci.yml:172`'s real `-m 'not live and not gate'` (A10, executed), in a diff that already edits that file. resolved_by: AUTO at the phase-F seam — CORRECTED IN THIS DIFF. F4's clause still owns registering the `llm` marker in the commit that adds the first model-graded test; the profile string is a separate fact and was true of no reference point"
     - "F-10 [note] — THE JUDGE'S BREAK COUNT DISAGREED WITH ITS OWN REASONING. J12's fork text said FOUR premises were answered as breaks; `45-dispositions.md` §2 names a break for three (promotions 5, 6, 7) and characterises the fourth, `adding_a_queueable_type_reaches_the_old_judge_validator`, as a doc SELF-CONTRADICTION. resolved_by: AUTO at the phase-F seam — THE PER-ITEM REASONING IS AUTHORITATIVE and the summary sentence is corrected in place, so 'four breaks' is not inherited as a fact by the next run"

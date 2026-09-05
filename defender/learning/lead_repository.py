@@ -345,15 +345,19 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
         # found while walking.
         shutil.copytree(  # lint-tree-read-follows-link: ok — root screened, entries preserved
             gather_src, RunPaths(dst_dir).gather_raw, symlinks=True,
-            ignore=_refuse_non_artifacts(refused), dirs_exist_ok=True)
+            ignore=refuse_non_artifacts(refused), dirs_exist_ok=True)
     elif gather_src.exists() or gather_src.is_symlink():
         refused.append(gather_src)
     return refused
 
 
-def _refuse_non_artifacts(refused: list[Path]):
+def refuse_non_artifacts(refused: list[Path]):
     """`copytree`'s ignore hook, recording as it goes: drops every entry at every depth that is
-    not a regular file or a real directory."""
+    not a regular file or a real directory.
+
+    PUBLIC because it has a second caller: the episode archive walks `gather_summaries/` with
+    the same hook, and a second `def` of it there would be a copy the duplicate-helper gate
+    cannot see (it keys on the symbol name, and the copy had a different one)."""
     def _ignore(directory, names):
         here = Path(directory)
         dropped = {n for n in names

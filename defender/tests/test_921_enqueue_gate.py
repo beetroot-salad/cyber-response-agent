@@ -41,6 +41,11 @@ from defender.tests import _judge_921 as J
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    # The learning STATE root too, so the shared findings queue this pass appends to is
+    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
+    # here rather than in the appender: a production path that picks a different queue when
+    # an env var is unset is a pass whose rows can land where no drain reads.
+    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
 
 
 def _enqueue():
@@ -62,7 +67,7 @@ def _graded(tmp_path, **kw):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
                             **kw)
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         runs_base=tmp_path / "defender-runs", draws=1)
@@ -216,10 +221,13 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
         J.finding_doc(topic="first"), J.finding_doc(topic="second", anchor="l-002")]))
     ep2 = J.accepted_episode(tmp_path / "two", ledgers={"b": [J.staged_row("b")], "c": []},
                              dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep2 / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep2 / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    # Its OWN queue: the appender writes to the one configured findings queue, and this second
+    # fixture episode reuses the first one's episode id by construction, so sharing a sink here
+    # would count the first episode's rows as this one's rather than test the id minting.
     J.mod("learning.judge").grade_episode(
         ep2, judge=J.FakeJudge(default=two), runs_base=tmp_path / "two" / "defender-runs",
-        draws=2)
+        draws=2, queue_dir=tmp_path / "two" / "queue")
     fresh = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep2))]
     assert len(fresh) == len(set(fresh)) == 8, (
         f"two worlds x two draws x two findings did not mint eight distinct ids: {fresh}")
@@ -241,7 +249,7 @@ def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
         # `disposition_declared` off the same value by default, so a doctored world (the
         # `staged_row` on H) buckets `None` on agreement — write the mismatch this assertion
         # needs explicitly, the standard idiom other bucket tests already use.
-        (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+        (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
         J.mod("learning.judge").grade_episode(
             ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(episode_outcome=word))),
             runs_base=tmp_path / word / "defender-runs", draws=1)
@@ -265,7 +273,7 @@ def test_921_gradable_episode_appends_one_row_per_finding(tmp_path):
         J.finding_doc(topic="first"), J.finding_doc(topic="second", anchor="l-002")]))
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=two_findings), runs_base=tmp_path / "defender-runs",
         draws=2)
@@ -442,7 +450,7 @@ def test_921_row_carries_subject_anchor_and_subject_topic_from_anchor_and_topic(
         J.finding_doc(anchor="h-001.ac1", topic="cadence break at the derivation hand-off")]))
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=reply), runs_base=tmp_path / "defender-runs", draws=1)
 
@@ -537,7 +545,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         runs_base=tmp_path / "defender-runs", draws=1, queue_dir=channel.file.parent)
@@ -595,10 +603,18 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     # See the sibling test above: the doctored world's `verdict` must differ from its
     # `declared` disposition for its bucket to be non-`None`.
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    # THE DRIFT IS WRITTEN WHERE `review.py` WRITES IT, and keyed the way it keys it. Both
+    # halves were wrong here and the production reader agreed with the fixture rather than with
+    # the writer, so the mechanical arm this test claims to drive could not fire on a real
+    # episode at all: `review._record` files each world's result under `worlds[<label>]` and
+    # the drift list is `consistency.control_mismatch_keys` on the CONTROL arm — never
+    # `episode.control_drift_keys`, a key nothing in this repo has ever emitted. And the key
+    # itself is minted by `ledger.request_key`, the one canonical encoding (it sorts the params;
+    # a hand-written `json.dumps` matches a recorded key only by luck of dict order).
     review = yaml.safe_load((ep / "review.yaml").read_text(encoding="utf-8"))
-    review["episode"]["control_drift_keys"] = [
-        json.dumps(["elastic", "esql", {"query": f"FROM {J.EVENTS_PATTERN} | LIMIT 5"}])]
+    review["worlds"] = {"a": {"consistency": {"control_mismatch_keys": [
+        J.request_key("elastic", "esql", {"query": f"FROM {J.EVENTS_PATTERN} | LIMIT 5"})]}}}
     (ep / "review.yaml").write_text(yaml.safe_dump(review), encoding="utf-8")
 
     J.mod("learning.judge").grade_episode(
@@ -638,7 +654,7 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
 
     ok = J.accepted_episode(tmp_path / "ok", ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ok / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ok / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ok, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         runs_base=tmp_path / "ok" / "defender-runs", draws=2)
@@ -657,7 +673,7 @@ def test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws(tmp_path
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     minority = J.FakeJudge(
         replies=[J.as_reply_text(J.reply_doc(episode_outcome="discard")),
                  J.as_reply_text(J.reply_doc()), J.as_reply_text(J.reply_doc())],
@@ -723,7 +739,6 @@ def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
     exemption is a route rather than the check's removal.
     """
     checks = J.mod("learning.author.verify_forward.checks")
-    forward = J.mod("learning.author.verify_forward.forward")
     paths = D.make_paths(tmp_path)
     D.write_source_refs(paths, "run-adv", disposition="benign")
 
@@ -738,5 +753,21 @@ def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
         "the model-facing direction literal was widened; J12 keeps the family direction out of "
         "the check rather than teaching the check about it")
 
-    with pytest.raises(J.refusals()):
-        forward.expected_disposition(paths, _family_row())
+    # AND THE EXEMPTION IS A ROUTE, not a runtime type check inside
+    # `forward.expected_disposition`. That function is typed `(str, str) -> str` and its one
+    # caller feeds it from a reader typed `-> tuple[str, str]`, so a guard inside it would
+    # defend against a call no code makes while putting the property in a second place that can
+    # disagree with `skips_forward_check` above.
+    #
+    # DRIVEN THROUGH PRODUCTION'S OWN DERIVATION, `lessons.run.forward_checkable_ids` — the
+    # function `invoke_agent` builds `ForwardCheckConfig.queued_ids` from. Re-deriving that
+    # comprehension inside the test instead would pin nothing: removing the filter from the
+    # production expression would leave the test green, because the test would still be
+    # filtering its own copy.
+    lessons_run = J.mod("learning.author.lessons.run")
+    queued = lessons_run.forward_checkable_ids([
+        _family_row(),
+        D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial"),
+    ])
+    assert queued == {"run-adv"}, (
+        f"the family row entered the set the model may forward_check: {sorted(queued)}")

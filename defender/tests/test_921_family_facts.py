@@ -44,6 +44,11 @@ from defender.tests import _judge_921 as J
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    # The learning STATE root too, so the shared findings queue this pass appends to is
+    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
+    # here rather than in the appender: a production path that picks a different queue when
+    # an env var is unset is a pass whose rows can land where no drain reads.
+    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
 
 
 def _family():
@@ -417,23 +422,39 @@ def test_921_verdict_is_read_off_the_archived_report_against_the_manifest(tmp_pa
     `_vocab.normalized_disposition`, compared against `disposition_declared` from the manifest —
     the ground truth known by construction.
 
-    `normalized_disposition` and not a locally written `in DISPOSITION_ENUM`: it owns the
-    zero-width strip a local membership test silently drops, and a report laced with one would
-    otherwise render as `malicious` to a human and refuse for a reader.
+    `normalized_disposition` and not a locally written membership test, and NOT a strip of the
+    reader's own before asking it: that normalizer is EXACT by decision (#923 removed the
+    zero-width strip from it, with the reason recorded in its own docstring — `malicious` with
+    a zero-width space inside it used to read back as `malicious`, a committed close no reader
+    could tell from a clean one). The judge is the reader that must not be fooled by that: a
+    world that laced its own headline would otherwise be scored as AGREEING with its declared
+    disposition and bucket to nothing, which is precisely the defect grading exists to find. So
+    a laced headline is refused, exactly as a headline outside the vocabulary is.
     """
     ep = J.accepted_episode(tmp_path,
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     rows = J.rows(_family().grade_family(ep))
 
     assert rows["b"]["verdict"] == "benign"
     assert rows["b"]["declared"] == "malicious"
     assert rows["c"]["verdict"] == rows["c"]["declared"] == "malicious"
 
-    # The vocabulary is read through the shipped normalizer: a zero-width-laced headline is the
-    # value that separates it from a local membership test.
+    # The vocabulary is read through the shipped normalizer, and that normalizer coerces
+    # nothing: a zero-width-laced headline renders as `malicious` to a human and is NOT one.
     (ep / "worlds" / "c" / "report.md").write_text(
-        "disposition: mali​cious\n", encoding="utf-8")
+        J.report_text("mali​cious"), encoding="utf-8")
+    laced = J.rows(_family().grade_family(ep))
+    assert laced["c"].get("malformed") is True, (
+        "a laced headline graded as a clean one; the normalizer is exact by decision and the "
+        "judge is the reader that must not be fooled by a value that renders as `malicious`")
+    assert laced["b"].get("ungradable") is not True, (
+        "world c's laced headline cost world b its grade")
+
+    # Positive control on the same drive: the same world with a CLEAN headline grades, so the
+    # exclusion above cannot pass on a reader that excludes everything.
+    (ep / "worlds" / "c" / "report.md").write_text(
+        J.report_text("malicious"), encoding="utf-8")
     assert J.rows(_family().grade_family(ep))["c"]["verdict"] == "malicious"
 
 
@@ -525,7 +546,7 @@ def test_921_a_world_missing_an_input_is_ungradable_named_and_excluded_from_the_
         "no non-control world remained gradable and the family still produced a verdict")
 
 
-def test_921_a_malformed_input_refuses_the_judge_pass_loudly(tmp_path):
+def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest(tmp_path):
     """J5 tier 2, settled: a MALFORMED input refuses the episode's judge pass loudly.
 
     A malformed artifact is a bug in the writer, not a fact about the defender, and this is
@@ -557,42 +578,58 @@ def test_921_a_malformed_input_refuses_the_judge_pass_loudly(tmp_path):
     """
     family_mod = _family()
 
-    outside = J.accepted_episode(tmp_path / "vocab")
-    (outside / "worlds" / "b" / "report.md").write_text(
-        "disposition: probably-bad\n", encoding="utf-8")
-    with pytest.raises(J.refusals()):
-        family_mod.grade_family(outside)
+    def _malform(name, mutate):
+        """One episode with world `b`'s archive malformed, graded. Returns b's row."""
+        ep = J.accepted_episode(tmp_path / name, ledgers={"b": [J.staged_row("b")], "c": []})
+        assert J.rows(family_mod.grade_family(ep))["b"].get("ungradable") is not True, (
+            f"the {name} control failed: the intact episode did not grade world b")
+        mutate(ep)
+        rows = J.rows(family_mod.grade_family(ep))
+        assert rows["c"].get("ungradable") is not True, (
+            f"{name}: world b's malformed archive cost world c its grade — one world's bad "
+            "artifact is not a reason to throw away a sibling that graded cleanly")
+        return rows["b"]
 
-    unreadable = J.accepted_episode(tmp_path / "unreadable")
-    (unreadable / "worlds" / "b" / "report.md").write_bytes(b"\xff\xfe\x00not utf-8")
-    with pytest.raises(J.refusals()):
-        family_mod.grade_family(unreadable)
+    for name, mutate in (
+        ("vocab", lambda ep: (ep / "worlds" / "b" / "report.md").write_text(
+            J.report_text("probably-bad"), encoding="utf-8")),
+        ("unreadable", lambda ep: (ep / "worlds" / "b" / "report.md").write_bytes(
+            b"\xff\xfe\x00not utf-8")),
+        ("truncated", lambda ep: (ep / "worlds" / "b" / "investigation.md").write_text(
+            "# investigation b\n\n```invlang\n:T resolutions\n"
+            "h-001  open \u2192 held    [l-001 r1 severe \u27c2 e-001 :: cut off here\n",
+            encoding="utf-8")),
+        # F-7 — the partially archived world: every required input present, the supporting
+        # directory short of a lead the world's own document names.
+        ("partial", lambda ep: (
+            ep / "worlds" / "b" / "gather_summaries" / "l-001.md").unlink()),
+    ):
+        row = _malform(name, mutate)
+        assert row.get("ungradable") is True, f"{name}: the malformed world still graded"
+        assert row.get("malformed") is True, (
+            f"{name}: the row does not say the input was MALFORMED — absent and malformed are "
+            "different answers and a reader keying on `ungradable` alone cannot tell them apart")
+        assert row.get("ungradable_reason"), f"{name}: the exclusion carries no reason"
+        assert "b" in row["ungradable_reason"], f"{name}: the reason does not name the world"
 
-    truncated = J.accepted_episode(tmp_path / "truncated")
-    (truncated / "worlds" / "b" / "investigation.md").write_text(
-        "# investigation b\n\n```invlang\n:T resolutions\n  - lead: l-001\n    before: open\n",
-        encoding="utf-8")
-    with pytest.raises(J.refusals()):
-        family_mod.grade_family(truncated)
-
-    # F-7 — the partially archived world. Control first: the same episode with the directory
-    # intact grades, so the refusal is on the SHORT input and not on the fixture.
-    partial = J.accepted_episode(tmp_path / "partial",
-                                 ledgers={"b": [J.staged_row("b")], "c": []})
-    assert "b" in J.rows(family_mod.grade_family(partial)), (
-        "the control failed: the intact episode did not grade world b at all")
-    short = partial / "worlds" / "b" / "gather_summaries" / "l-001.md"
-    assert short.is_file(), "the fixture stopped archiving the summary this leg makes short"
-    short.unlink()
-
-    with pytest.raises(J.refusals()) as raised:
-        family_mod.grade_family(partial)
-    said = str(raised.value)
+    # The partial archive's message is part of the demand, not decoration: a partial archive is
+    # otherwise indistinguishable from a genuine malformation, so it must NAME the input that
+    # was short or the operator hunts a writer bug in the world's own documents.
+    short = J.accepted_episode(tmp_path / "named", ledgers={"b": [J.staged_row("b")], "c": []})
+    (short / "worlds" / "b" / "gather_summaries" / "l-001.md").unlink()
+    said = J.rows(family_mod.grade_family(short))["b"]["ungradable_reason"]
     assert "gather_summaries" in said, (
-        "a world left short by a mid-copy fault was refused without naming the input that was "
-        "short; the message is what separates a partial archive from a malformed artifact, and "
-        "without it the operator hunts a writer bug in the world's own documents")
-    assert "b" in said, "the refusal does not say which world was short"
+        "a world left short by a mid-copy fault was excluded without naming the input that was "
+        "short")
+
+    # An ABSENT input is tier 1 and is NOT marked malformed — the two tiers stay separable.
+    absent = J.accepted_episode(tmp_path / "absent", ledgers={"b": [J.staged_row("b")], "c": []})
+    (absent / "worlds" / "b" / "report.md").unlink()
+    gone = J.rows(family_mod.grade_family(absent))["b"]
+    assert gone.get("ungradable") is True, "an absent report.md still graded"
+    assert gone.get("malformed") is not True, (
+        "an absent input was recorded as a malformed one; tier 1 skips, tier 2 refuses, and "
+        "the record is where the difference has to survive")
 
 
 def test_921_two_world_entries_under_one_label_are_refused_at_manifest_load(tmp_path):

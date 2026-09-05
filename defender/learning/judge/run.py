@@ -4,10 +4,19 @@ grounding, and one write per (world, draw) (#921 M2, D2, D3, D4, O1, O8, O9).
 D2 — the judge runs under `AgentRole.QUESTIONER`'s existing definition, with `agent_id`
 prefix `"judge:"`. `AgentRole.JUDGE` is already bound to the old pipeline's `JUDGE_DEF`, and the
 registry admits one definition per key (`agent_definition.build_registry`), so a second
-definition cannot register beside it until #922 frees the key. Model and effort come from
-`learning.core.config.judge_model()`/`judge_effort()` — the SAME env knobs (`JUDGE_MODEL`,
-`JUDGE_EFFORT`) `_judge_921.py`'s fixture names, read at call time in the `StageWiring` this
-module builds, never from `questioner_model()`.
+definition cannot register beside it until #922 frees the key.
+
+Model and effort come from `learning.core.config.judge_model()`/`judge_effort()` — read at call
+time in `learning/judge/__init__.py` and threaded into the `StageWiring` the orchestration
+builds, never from `questioner_model()`.
+
+THE TWO JUDGES SHARE THOSE KNOBS, and that is a limitation rather than a design. `JUDGE_MODEL`
+and `JUDGE_EFFORT` already name the OLD pipeline judge's model, so setting either retargets
+both; this module went through `config`'s accessors rather than spelling the same
+`env_str("JUDGE_MODEL", …)` a second time, because two copies of one default is drift waiting
+to happen and buys no separation at all. Separating them means a knob NAME of this judge's own,
+which the spec's fixtures pin to the shared spelling — so it is a change to make deliberately,
+not a side effect of reading the env twice.
 """
 
 from __future__ import annotations
@@ -17,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._untrusted import message_salt, wrap
-from defender.learning._prompt import stage_user_message
+from defender.learning._prompt import stage_user_message, titled_section
 from defender.learning.core.validate import normalize_judge_yaml
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.render import JudgeInput
@@ -36,6 +45,24 @@ _BUCKET_ENUM = frozenset(
     {"lead-set", "lead-quality", "analyze-discipline", "decision-discipline", "observability"})
 
 _ROLE_PROMPT = Path(__file__).resolve().parent / "role.md"
+
+#: Each rendered section's own heading, in the order the prompt presents them. The four the
+#: task sentence calls "the joined views" keep the numbering the measured arm used, so a reader
+#: of the reply can name which view a finding came from; the manifest, the document and the
+#: report are the graded world's own bytes and are titled for what they are.
+SECTION_TITLES: dict[str, str] = {
+    "manifest": "THE FAMILY MANIFEST (the graded world last; every other world counterfactual)",
+    "leads": "VIEW 1 — PER-LEAD CHAIN (goal -> params -> payload -> summary -> document rows "
+             "-> resolutions)",
+    "coverage": "VIEW 2 — COVERAGE (what this world asked on the family's holding system)",
+    "siblings": "VIEW 3 — SIBLING TRIALS OF THIS SAME ALERT",
+    "lessons": "VIEW 4 — LESSONS LOADED INTO THIS WORLD (name, path, and the body at its "
+               "recorded commit)",
+    "spread": "TRIAL SPREAD (the dispositions those sibling trials reached, tallied)",
+    "document": "THE GRADED WORLD'S OWN investigation.md",
+    "report": "THE GRADED WORLD'S OWN report.md",
+}
+
 
 
 def _normalize_reply_outcome(value: Any) -> str | None:
@@ -159,11 +186,12 @@ def _draw_document(reply: JudgeReply, *, world_dir: Path) -> dict[str, Any]:
     kept: list[dict[str, Any]] = []
     dropped = 0
     for finding in reply.findings:
-        resolved_any = any(_resolves(p, world_dir) for p in finding.evidence)
-        if not resolved_any:
+        # ONE resolution pass per pointer: "did any resolve" and "which did not" are two reads
+        # of the same answer, and asking twice `stat`s every pointer of every finding twice.
+        unresolved = [p for p in finding.evidence if not _resolves(p, world_dir)]
+        if len(unresolved) == len(finding.evidence):
             dropped += 1
             continue
-        unresolved = [p for p in finding.evidence if not _resolves(p, world_dir)]
         kept.append({
             "bucket": finding.bucket, "claim": finding.claim, "root_cause": finding.root_cause,
             "anchor": finding.anchor, "topic": finding.topic, "evidence": finding.evidence,
@@ -204,22 +232,22 @@ def _build_prompt(judge_input: JudgeInput, *, world_label: str) -> str:
         "root_cause, anchor, topic, evidence, discriminator_related).\n"
     )
     sections = judge_input.as_prompt_sections()
-    salt = message_salt(task, *sections.values())
+    titled = [titled_section(SECTION_TITLES[name], sections[name]) for name in SECTION_TITLES]
+    salt = message_salt(task, *titled)
     # ONE tag, "untrusted", on every section: the reader contract names sections by their
     # run-salted frame, not by tag, and the suite's own frame regex (`_triplet_947.
     # UNTRUSTED_FRAME`) matches only `-untrusted` — a per-section tag name would silently
     # leave every body outside what the suite recognises as an untrusted frame at all.
-    body = stage_user_message(
-        salt,
-        wrap(sections["manifest"], "untrusted", salt),
-        wrap(sections["leads"], "untrusted", salt),
-        wrap(sections["coverage"], "untrusted", salt),
-        wrap(sections["siblings"], "untrusted", salt),
-        wrap(sections["lessons"], "untrusted", salt),
-        wrap(sections["spread"], "untrusted", salt),
-        wrap(sections["document"], "untrusted", salt),
-        wrap(sections["report"], "untrusted", salt),
-    )
+    #
+    # SO THE SECTION'S NAME IS ITS TITLE, INSIDE THE FRAME. The arm this prompt is ported from
+    # headed each view (`## VIEW 1 — PER-LEAD CHAIN …` through `## VIEW 4 — TRIAL SPREAD …`),
+    # and the port dropped them: eight identically-tagged bodies concatenated with no names,
+    # under a task that says "compare it against the four joined views below". Coverage rows,
+    # sibling rows and spread rows are all bullet lists, so they ran together indistinguishably.
+    # The title goes INSIDE the frame (`_prompt.titled_section`, the questioner's own spelling)
+    # because a heading in the host region beside a framed body is one an attacker can imitate
+    # from inside the body.
+    body = stage_user_message(salt, *(wrap(section, "untrusted", salt) for section in titled))
     return task + body
 
 

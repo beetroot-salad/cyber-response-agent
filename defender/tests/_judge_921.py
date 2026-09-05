@@ -102,6 +102,7 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
     outside_untrusted_frames,
     overlay,
     provenance_record,
+    report_text,
     runs_base,
     sibling_run_dir,
     sym,
@@ -110,6 +111,12 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
     world_token,
     write_family,
 )
+
+#: The canonical identity of one question — `record_query._request_key`'s function, which the
+#: ledger, the episode's pair key and the review's own drift list all mint through. Re-exported
+#: so a fixture that has to plant a recorded key mints it the way the recorder does rather than
+#: hand-writing a `json.dumps` that matches only by luck of dict order.
+from defender.learning.branch.ledger import request_key  # noqa: E402
 
 #: The family's holding system. `elastic` and not a state system, because the amended M8
 #: fixture must carry a `staged`-served row on H and `staged` is reachable only for the sole
@@ -120,6 +127,12 @@ HOLDING_SYSTEM = "elastic"
 #: is model-writable by construction (run1/G9), which is why the union's own demands drive it
 #: as data rather than trusting it.
 ALERT_ID = "v2-cross-tier-ssh-pivot"
+
+#: The learning loop's state root — the tree the shared findings queue lives under. Named here
+#: because every scenario in this suite has to point it inside its own `tmp_path`: the judge's
+#: appender writes to the ONE configured queue, so a suite that left this unset would append a
+#: hundred fixtures' rows into the developer's (and CI's) real `learning/_pending/`.
+STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 #: The judge's three operator knobs (J15). Spelled WITHOUT a `DEFENDER_` prefix, because
 #: run1/G23 executed the convention every new knob inherits: `QUESTIONER_EFFORT`, not
@@ -272,18 +285,33 @@ def archived_judge_world(  # noqa: PLR0913 — one builder with one independentl
 
 
 def investigation_document(world_id: str, *, moved: bool = True, fences_at: int = 1) -> str:
-    """An archived `investigation.md` whose `:T resolutions` rows sit PAST `fences_at`.
+    """An archived `investigation.md` whose resolution rows sit PAST `fences_at`.
+
+    REAL INVLANG, in the format `skills/invlang`'s own parser reads and a real run writes:
+    `h-001  before -> after    [<lead> <refutation> <severity> ⟂ <edges> :: <reasoning>]`,
+    the shape `_golden_invlang/turnN-A.investigation.md` carries. The earlier fixture wrote a
+    YAML list of `{lead, before, after}` mappings as the ONLY block in its fence — a shape no
+    writer in this repo produces, and one that made a reader which works on nothing else look
+    correct. The lead a resolution belongs to is the enclosing finding's id, never a per-row
+    key.
 
     The fence prefix is what `fences_at` indexes: `read_frontier` takes the PREFIX and the
-    family pass wants the COMPLEMENT, which no symbol spells today (G8). `moved=False` writes a
-    row whose `before` equals its `after`, so "a row past the fence" and "a row that moved" stay
-    two separable conditions rather than one.
+    family pass wants the COMPLEMENT, which no symbol spells today (G8). `moved=False` writes
+    rows whose `before` equals their `after`, so "a row past the fence" and "a row that moved"
+    stay two separable conditions rather than one.
     """
     before, after = ("open", "held") if moved else ("held", "held")
-    blocks = [f"?h1 world {world_id} branch point\n"] * fences_at
+    blocks = [
+        ":H hypothesize.hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        f"h-001|?world-{world_id}-branch-point|v-001|modified|process|??||null|active\n"
+    ] * fences_at
     blocks.append(
-        f":T resolutions\n  - lead: l-001\n    before: {before}\n    after: {after}\n"
-        f"  - lead: l-001\n    before: {after}\n    after: {before}\n")
+        ":T resolutions\n"
+        f"h-001  {before} \u2192 {after}    [l-001 r1 severe \u27c2 e-001 :: the hand-off "
+        "was revisited after the branch]\n"
+        f"h-001  {after} \u2192 {before}    [l-001 r2 severe \u27c2 e-001 :: and revisited "
+        "once more]\n")
     fenced = "".join(f"```invlang\n{b}```\n\n" for b in blocks)
     return f"# investigation {world_id}\n\n{fenced}"
 
@@ -554,7 +582,7 @@ class FakeSibling:
         runs.mkdir(parents=True, exist_ok=True)
         run_dir = sibling_run_dir(runs, label, scrub_ran=self.scrub_ran, commit=self.commit)
         (run_dir / "report.md").write_text(
-            f"disposition: {self.dispositions.get(label, 'malicious')}\n", encoding="utf-8")
+            report_text(self.dispositions.get(label, "malicious")), encoding="utf-8")
         (run_dir / "investigation.md").write_text(
             investigation_document(label), encoding="utf-8")
         summaries = run_dir / "gather_summaries"
@@ -636,6 +664,7 @@ def refusals() -> tuple[type[BaseException], ...]:
 __all__ = [
     "ALERT_ID", "AS_OF", "BRANCH_MESSAGE_ID", "CAP_KNOB", "CLEAN", "DRAWS_KNOB",
     "EFFORT_KNOB", "EPISODES_BASE_ENV", "EPISODE_ID", "EPISODE_TOKEN", "EVENTS_PATTERN",
+    "STATE_DIR_ENV",
     "HOLDING_SYSTEM", "MODEL_KNOB", "PER_WORLD_FACTS", "ROW_KEYS", "RUNS_BASE_ENV",
     "SOURCE_RUN_ID",
     "FakeGitShow", "FakeJudge", "FakeSibling", "Fault",
@@ -643,7 +672,9 @@ __all__ = [
     "assert_wrapped_untrusted", "base_capture", "capture_call", "captured_row", "draw_doc",
     "draw_files", "elastic_overlay", "enqueued_rows", "episode", "family_doc", "finding_doc",
     "investigation_document", "judge_record", "ledger_row", "mod", "outside_untrusted_frames",
-    "overlay", "provenance_record", "refusals", "reply_doc", "review_record", "runs_base",
+    "overlay", "provenance_record", "refusals", "reply_doc", "report_text",
+    "request_key", "review_record",
+    "runs_base",
     "sibling_run_dir", "staged_row", "sym", "untrusted_frames", "wire_logs", "world_doc",
     "rows", "word_of", "world_rows", "world_token", "write_family", "write_ledger",
 ]

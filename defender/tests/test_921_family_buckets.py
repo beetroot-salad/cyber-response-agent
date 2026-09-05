@@ -24,6 +24,11 @@ from defender.tests import _judge_921 as J
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    # The learning STATE root too, so the shared findings queue this pass appends to is
+    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
+    # here rather than in the appender: a production path that picks a different queue when
+    # an env var is unset is a pass whose rows can land where no drain reads.
+    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
 
 
 def _family():
@@ -90,7 +95,7 @@ def test_921_doctored_answer_served_and_conclusion_unmoved_is_analyze_discipline
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "investigation.md").write_text(
         J.investigation_document("b", moved=False), encoding="utf-8")
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     row = J.rows(_family().grade_family(ep))["b"]
 
     assert (row["doctored_answer_served"], row["resolution_moved"]) == (True, False)
@@ -108,7 +113,7 @@ def test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline(tmp
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     row = J.rows(_family().grade_family(ep))["b"]
 
     assert (row["doctored_answer_served"], row["resolution_moved"]) == (True, True)
@@ -178,7 +183,7 @@ def test_921_any_graded_world_missing_its_declared_disposition_is_survived(tmp_p
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     grade = _family().grade_family(ep)
 
     assert J.rows(grade)["c"]["verdict"] == J.rows(grade)["c"]["declared"]
@@ -275,7 +280,7 @@ def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(
     # same value, so the mismatch this test's own bucket needs is written explicitly here, the
     # same one-line idiom `test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline`
     # already uses.
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     base = ep / "served" / "base.jsonl"
 
     base.unlink()
@@ -308,7 +313,7 @@ def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
     judge_mod = J.mod("learning.judge")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     loud = J.as_reply_text(J.reply_doc(findings=[
         J.finding_doc(bucket="observability",
@@ -369,7 +374,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     # the non-failure case) — the mismatch this assertion needs is written explicitly, same as
     # `test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline`.
     dead = J.accepted_episode(tmp_path / "dead", ledgers={"b": [J.staged_row("b")], "c": []})
-    (dead / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (dead / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     judge_mod.grade_episode(dead, judge=J.FakeJudge(fault=J.Fault(raise_after=0)),
                             runs_base=tmp_path / "dead" / "defender-runs", draws=2)
     dead_rows = J.world_rows(J.judge_record(dead))

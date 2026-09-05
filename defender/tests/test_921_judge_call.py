@@ -30,6 +30,11 @@ from defender.tests import _judge_921 as J
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    # The learning STATE root too, so the shared findings queue this pass appends to is
+    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
+    # here rather than in the appender: a production path that picks a different queue when
+    # an env var is unset is a pass whose rows can land where no drain reads.
+    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
 
 
 def _run():
@@ -253,7 +258,7 @@ def test_921_no_model_authored_text_reaches_the_prompt_unframed(tmp_path):
     (ep / "worlds" / "b" / "investigation.md").write_text(
         J.investigation_document("b") + f"\n{markers['document']}\n", encoding="utf-8")
     (ep / "worlds" / "b" / "report.md").write_text(
-        f"disposition: malicious\nnote: {markers['report']}\n", encoding="utf-8")
+        J.report_text("malicious", body=markers["report"]), encoding="utf-8")
     import yaml
     doc = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     for world in doc["worlds"]:
@@ -314,16 +319,34 @@ def test_921_reply_is_validated_into_JudgeReply_before_anything_reads_it(tmp_pat
     The observable is the order: an invalid reply leaves NO draw file, NO enqueued row and NO
     per-world fact touched, because the reader never ran. A validator that ran after the write
     would leave the file behind.
+
+    AND THE BLAST RADIUS IS THE DRAW, not the episode. The refusal used to propagate out of
+    `grade_episode`, so one malformed reply on one draw of one world discarded every other
+    world's completed draws and left no `judge.yaml` at all — the same all-or-nothing the
+    appender refuses for a single unusable finding, and inconsistent with the transport failure
+    beside it, which has always been recorded per draw and stepped over. So the pass completes,
+    the malformed draw is COUNTED on the world's row, and the unparseable bytes survive where
+    an operator looks for them: the wire log, written before validation.
     """
     ep = _episode(tmp_path)
     bad = J.as_reply_text(J.reply_doc(), malformed="lookalike-bucket")
     judge = J.FakeJudge(default=bad)
-    with pytest.raises(J.refusals()):
-        _grade(tmp_path, ep, judge, draws=1)
+    _grade(tmp_path, ep, judge, draws=1)
 
     assert not J.draw_files(ep, "b"), (
         "a reply that failed validation was written to disk first and judged second")
-    assert not (ep / "judge.yaml").exists()
+    record = J.judge_record(ep)
+    rows = J.world_rows(record)
+    assert rows["b"]["completed_draws"] == 0, "an invalid reply counted as a completed draw"
+    assert rows["b"]["malformed_replies"] == 1, (
+        "the malformed reply was skipped without a count; a silent skip and a counted skip are "
+        "the same pass and different evidence")
+    assert record["enqueued_rows"] == 0, "a finding was enqueued off a reply that never parsed"
+    assert J.wire_logs(ep), "the unparseable reply's own bytes were not kept anywhere"
+    assert (ep / "judge.yaml").is_file(), (
+        "the pass left no family record at all; a model that replies unparseably is exactly "
+        "the case an operator needs a record OF, and its absence is indistinguishable from an "
+        "episode nothing ever graded")
 
 
 def test_921_a_reply_whose_top_level_is_not_a_mapping_fails_before_anything_reads_it(tmp_path):

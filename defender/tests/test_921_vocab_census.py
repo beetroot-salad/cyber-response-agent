@@ -33,6 +33,11 @@ from defender.tests import _judge_921 as J
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    # The learning STATE root too, so the shared findings queue this pass appends to is
+    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
+    # here rather than in the appender: a production path that picks a different queue when
+    # an env var is unset is a pass whose rows can land where no drain reads.
+    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
 
 
 def _vocab():
@@ -169,7 +174,7 @@ def test_921_hand_built_episode_yields_lead_set_and_survived(tmp_path):
         ledgers={"b": [], "c": []})
     for label in ("a", "b", "c"):
         (ep / "worlds" / label / "report.md").write_text(
-            "disposition: benign\n", encoding="utf-8")
+            J.report_text("benign"), encoding="utf-8")
 
     import yaml
     doc = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
@@ -200,7 +205,7 @@ def test_921_fixture_carries_a_staged_row_world_with_a_wrong_verdict(tmp_path):
         tmp_path, holding_system="elastic",
         dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
         ledgers={"b": [J.staged_row("b")], "c": []})
-    (ep / "worlds" / "b" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
+    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     rows = J.rows(J.mod("learning.judge.family").grade_family(ep))
     assert rows["b"]["doctored_answer_served"] is True

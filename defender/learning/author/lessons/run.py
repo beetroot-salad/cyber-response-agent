@@ -15,6 +15,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender.learning.author import drain
 from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
+from defender._vocab import normalized_judge_outcome
 from defender._yaml import safe_load
 from defender._corpus import iter_lessons
 from defender.learning.core.config import (
@@ -136,7 +137,7 @@ def build_user_prompt(
 
 def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
     from defender.learning.author import curator_engine
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK, skips_forward_check
+    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     stage_salt = uuid.uuid4().hex
@@ -161,14 +162,28 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             pending=cfg.channel.file,
             # J12: a family row's id never enters the queued set the model may forward_check —
             # its ground truth is the family record, not a source_refs.yaml under runs_dir.
-            queued_ids=frozenset(
-                str(f["run_id"]) for f in findings
-                if f.get("run_id") and not skips_forward_check(f)
-            ),
+            queued_ids=forward_checkable_ids(findings),
         ),
         log=_log,
     )
 
+
+
+def forward_checkable_ids(findings: list[dict]) -> frozenset[str]:
+    """The run ids the model may name in a `forward_check` call for this batch.
+
+    J12: a family row's id never enters it — its ground truth is the family record, not a
+    `source_refs.yaml` under the runs dir — so the model-facing tool answers "not in this
+    batch's queued rows" for it rather than reaching the check at all. A NAMED function rather
+    than a comprehension inlined into the config, because it is the route the exemption IS: a
+    test can drive this and fail when the filter is removed, which a test that re-derives the
+    same comprehension against its own data cannot."""
+    from defender.learning.author.verify_forward.checks import skips_forward_check
+
+    return frozenset(
+        str(f["run_id"]) for f in findings
+        if f.get("run_id") and not skips_forward_check(f)
+    )
 
 
 def _forward_bad_reason(reason: str) -> str:
@@ -274,7 +289,12 @@ def _gate_family(entry: dict) -> dict | None:
     terminally rather than held — a word that will never change must not sit in the queue
     forever (a hold is forever; a skip is terminal, and the two read differently in the
     drain's own report)."""
-    if entry.get("judge_outcome") in _FAMILY_SKIP_OUTCOMES:
+    # THROUGH THE OWNER'S NORMALIZER, not a bare `in`. The appender validates `judge_outcome`
+    # with `normalized_judge_outcome`, which casefolds and trims — so `Caught` passes validation,
+    # is written to the queue verbatim, and a raw membership test here does not recognise it.
+    # A family the judge scored as CAUGHT was then authored as though it had survived. This is
+    # `lint-vocabulary`'s own shape: one parser, two interpreters, disagreeing on one string.
+    if normalized_judge_outcome(entry.get("judge_outcome")) in _FAMILY_SKIP_OUTCOMES:
         rec = dict(entry)
         rec["consumed_category"] = "consumed_family_skip"
         return rec
@@ -290,6 +310,13 @@ def _gate_findings(
 
     `to_author` is derived HERE by subtraction, so both directions return the same 3-tuple
     even though the policies are not one policy parameterised."""
+    # THE SAME PREDICATE THE ROUTE USES, not a second spelling of it. `skips_forward_check`
+    # already decides which rows are family rows for `queued_ids` above; re-deriving
+    # `entry["direction"] == "family"` here gives one rule two homes, and the duplicate-helper
+    # gate keys on the symbol NAME, so it is structurally blind to the copy. Widening the family
+    # route later would otherwise update one site and leave the other routing as it always did.
+    from defender.learning.author.verify_forward.checks import skips_forward_check
+
     existing_ids = existing_finding_ids(cfg)
     held: list[dict] = []
     consumed_idempotent: list[dict] = []
@@ -300,7 +327,7 @@ def _gate_findings(
             rec["consumed_category"] = "consumed_idempotent"
             consumed_idempotent.append(rec)
             continue
-        if entry["direction"] == "family":
+        if skips_forward_check(entry):
             # P6's blast radius still applies to a malformed family row: the WRITER is what is
             # supposed to refuse a row lacking `run_id` before it ever reaches this gate
             # (J12), not this partition — indexing it here (never using the value) is what
