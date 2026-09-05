@@ -1215,7 +1215,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     cluster is released before the grade spends its model calls; `_launch`'s `finally` covers
     every path that does not reach that call."""
     family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
-                     questioner=questioner)
+                     questioner=questioner, patterns=patterns)
     # THE STAGING RECORD EXISTS FROM THE MOMENT STAGING BEGINS, empty if nothing is staged.
     # It is the SOLE account of a cluster write — the write door bypasses `guard_outbound`,
     # which is also the capture recorder — so its ABSENCE has to mean "staging never started"
@@ -1357,7 +1357,7 @@ def _release_and_grade(
 
 def _author(
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
-    questioner: Any,
+    questioner: Any, patterns: Sequence[str] = (),
 ) -> Family:
     """Step 2: the questioner authors the triplet, and it is validated before anything reads it.
 
@@ -1382,6 +1382,9 @@ def _author(
         leads=_joined_leads(source, joined),
         alert=_alert_document(source),
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
+        # The SAME set `parse_family` five lines down judges the authored overlays against, so
+        # the prompt and the refusal cannot name two different domains.
+        stageable_patterns=patterns,
     )
     document.update({
         "episode_id": episode_id,

@@ -92,6 +92,12 @@ re-answer another system's view of a named entity, and the corpus half, which in
 under a base pattern the environment already declares, or excludes the documents a predicate
 matches.
 
+The base patterns you may key are LISTED IN THE MEASUREMENT SECTION above, and that list is
+the whole of what this deployment serves. Do not reach for a pattern because the world you are
+authoring would be easier to evidence with one — a sensor this environment does not run has no
+corpus to stage into, and the family is refused rather than staged. Express the difference
+inside a pattern that is offered, or choose an axis the offered corpora can carry.
+
 Two ways an overlay silently describes a world that never existed: naming a pattern nobody
 serves, which stages nothing, and leaving both halves empty, which is the control again under a
 second name. And the exclusion is as important as the injection — the difference that matters is

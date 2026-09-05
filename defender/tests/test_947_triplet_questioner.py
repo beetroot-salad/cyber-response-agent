@@ -306,3 +306,46 @@ def test_947_the_prompts_overlay_example_parses_through_the_real_loader():
     # teach the model nothing, which is the state this test was written against.
     assert any(ov.patches and ov.elastic for ov in parsed), (
         "no overlay in the prompt shows both halves populated, so the shape is still unshown")
+
+
+def test_947_the_questioner_is_told_which_base_patterns_it_may_key(tmp_path):
+    """The stageable base patterns reach the prompt, so the bounded domain is stated rather
+    than guessed.
+
+    `_check_overlay_keys` refuses an overlay keyed on anything outside the configured set, and
+    it refuses at `parse_family` — after all three calls are spent. The prompt described the
+    domain ("a base pattern the environment already declares") without naming its members, and
+    a live episode died when the model reached for a runtime sensor's alert index that this
+    deployment does not run.
+
+    Asserted on the PROMPT the seam was handed, not on a return value: what is at issue is
+    whether the model was told, and only `agent.prompts` holds that.
+    """
+    agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
+    _questioner().author_family(
+        source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
+        invoke=agent, leads=[], alert={}, frontier="",
+        stageable_patterns=("logs-alpha-*", "logs-beta-*"))
+    assert agent.prompts, "the questioner never called the model"
+    family_prompt = agent.prompts[0]
+    for pattern in ("logs-alpha-*", "logs-beta-*"):
+        assert pattern in family_prompt, f"the prompt never names the stageable {pattern!r}"
+    # HOST TEXT, ahead of the untrusted region: the patterns come from the deployment's own
+    # configuration, and a domain the model is told to OBEY must not arrive inside a frame that
+    # tells it to read the contents as evidence.
+    # The frame's OPENING tag, not the bare word — the shipped prompt names "untrusted" in its
+    # own reader contract long before any frame opens, so matching the word finds host text.
+    opened = re.search(rf"<[\w-]+-{_questioner().UNTRUSTED_TAG}>", family_prompt)
+    assert opened, "the capture was never framed at all"
+    assert family_prompt.index("logs-alpha-*") < opened.start(), (
+        "the stageable patterns arrived inside the untrusted frame")
+
+
+def test_947_an_unstageable_pattern_is_still_refused_by_the_loader():
+    """Telling the model the domain does not RELAX it: an overlay keyed outside the configured
+    set is still refused, so the prompt is guidance and the loader remains the authority."""
+    bad = T.world_doc("b", ov=T.overlay(elastic={"logs-nosuchsensor.alerts-*": {
+        "inject": [{"host.name": "office-ws-1"}]}}))
+    with pytest.raises(T.sym("runtime.branch._family", "FamilyError")) as refusal:
+        _family_mod().parse_family(T.family_doc(worlds=[T.base_world(), bad]))
+    assert "logs-nosuchsensor.alerts-*" in str(refusal.value)

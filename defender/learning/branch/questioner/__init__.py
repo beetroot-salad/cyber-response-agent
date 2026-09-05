@@ -52,6 +52,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, ClassVar
 
 import yaml
@@ -148,18 +149,32 @@ def _prompt(name: str) -> str:
     return (_PROMPTS / name).read_text(encoding="utf-8")
 
 
-def _measurement_header(source_run_dir: Path, episode_dir: Path) -> str:
-    """The two names this family is being authored FOR, as host text.
+def _measurement_header(source_run_dir: Path, episode_dir: Path,
+                       stageable_patterns: Sequence[str] = ()) -> str:
+    """The names this family is being authored FOR, as host text.
 
-    Host text and not a frame: both are names the operator and the host chose (a runs-base
-    entry and an episode directory), so neither is attacker-influenced the way the artifacts
-    INSIDE those directories are. They are in the prompt because a questioner that could not
-    say which run and which episode it is authoring for cannot say so in the story either, and
-    the story is what a later reader uses to tell one episode's worlds from another's."""
+    Host text and not a frame: all of them are names the operator and the host chose (a
+    runs-base entry, an episode directory, and the deployment's own configured corpus
+    patterns), so none is attacker-influenced the way the artifacts INSIDE those directories
+    are. They are in the prompt because a questioner that could not say which run and which
+    episode it is authoring for cannot say so in the story either, and the story is what a
+    later reader uses to tell one episode's worlds from another's.
+
+    THE STAGEABLE PATTERNS ARE STATED, not left to be inferred from the capture. The loader
+    refuses an overlay keyed on any pattern outside this set — and it refuses at
+    `parse_family`, after all three calls have been paid for. A prompt that says "a base
+    pattern the environment already declares" without saying WHICH is asking the model to
+    guess a bounded domain, and a plausible guess (an alert index for a runtime sensor this
+    deployment does not run) aborts the episode.
+    """
+    stageable = ", ".join(f"`{p}`" for p in stageable_patterns)
     return (
         "## The measurement\n\n"
         f"This family is authored for episode `{episode_dir.name}`, "
         f"branching the finished run `{source_run_dir.name}`.\n"
+        + (f"\nThe corpus half of an overlay may key ONLY these base patterns: {stageable}. "
+           "Any other pattern names a corpus this episode cannot address, and the family is "
+           "refused.\n" if stageable else "")
     )
 
 
@@ -439,6 +454,7 @@ def author_family(
     leads: Any,
     alert: Any,
     frontier: str,
+    stageable_patterns: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Author one family document: three model calls, one role key, three identities.
 
@@ -460,7 +476,8 @@ def author_family(
     `branch_message_id`, `fences_at`, `as_of`) and the operator's `continuation_prompt`, because
     those are facts about the measurement rather than anything a model may choose.
     """
-    header = _measurement_header(Path(source_run_dir), Path(episode_dir))
+    header = _measurement_header(Path(source_run_dir), Path(episode_dir),
+                                 stageable_patterns)
     # RENDERED ONCE, ABOVE THE FAN-OUT. Every call in this function is handed the same capture
     # — the joined leads, the alert and the whole frontier, routinely hundreds of kilobytes —
     # and spelled inside the seat loop it was rebuilt per seat for a value that cannot vary
