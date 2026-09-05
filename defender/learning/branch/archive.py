@@ -50,7 +50,11 @@ from pathlib import Path
 
 from defender._io import guarded_mkdir, write_guarded
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
-from defender.learning.lead_repository import refuse_non_artifacts, stage_tables
+from defender.learning.lead_repository import (
+    refuse_non_artifacts,
+    refusing_copy2,
+    stage_tables,
+)
 from defender.runtime.scrub import verdict_path
 
 #: The archived world's directory, under the episode. One level, keyed by the SHORT label X —
@@ -227,9 +231,15 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         summaries_src = _gather_summaries_source(run_dir)
         if artifact_dir(summaries_src):
             summaries_refused: list[Path] = []
-            shutil.copytree(  # lint-tree-read-follows-link: ok — source root screened by `_screen`, destination screened above, entries preserved
+            shutil.copytree(  # lint-tree-read-follows-link: ok — source root screened by `_screen`, destination root screened above and every entry by `refusing_copy2`
                 summaries_src, summaries_dest, symlinks=True,
-                ignore=refuse_non_artifacts(summaries_refused), dirs_exist_ok=True)
+                ignore=refuse_non_artifacts(summaries_refused), dirs_exist_ok=True,
+                # THE DESTINATION AT EVERY DEPTH, not only at the root. The screen above judges
+                # `worlds/<label>/gather_summaries` itself; `dirs_exist_ok=True` then walks INTO
+                # it, and `copy2` opens each leaf destination for writing — so a link planted at
+                # `gather_summaries/<lead>.md` by a box whose rw bind reaches the episode dir was
+                # still followed and this world's summary written wherever it pointed.
+                copy_function=refusing_copy2(summaries_refused))
             refused = [*refused, *summaries_refused]
         if refused:
             print(f"[archive] world {world}: {len(refused)} non-artifact entr"

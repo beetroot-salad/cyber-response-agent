@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from defender._run_paths import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
@@ -158,6 +159,18 @@ def validate_reply(text: str) -> JudgeReply:
 
     from defender._yaml import safe_load
 
+    # A NON-STRING REPLY IS THIS DESIGN'S REFUSAL, not an `AttributeError`. The seam is
+    # `judge: Any` — the design's own injection point — so a seam that returns `None` on a
+    # refusal (or a result object, or a dict) is a live shape, and `normalize_judge_yaml`'s
+    # first act is `text.strip()`. The draw loop contains `JudgeRefused` and nothing else, and
+    # `grade_episode`'s conversion set names neither `AttributeError` nor `TypeError` — so one
+    # such reply took the WHOLE pass down: every already-completed world's draws thrown away
+    # and no `judge.yaml` written, which is the blast radius the malformed-reply arm exists to
+    # eliminate.
+    if not isinstance(text, str):
+        raise JudgeRefused(
+            f"the judge seam returned {type(text).__name__}, not the reply text this design "
+            "parses — one draw is unusable, which is not the episode's grade")
     cleaned = normalize_judge_yaml(text)
     try:
         # `_yaml.safe_load`, not PyYAML's: it converts a `RecursionError` (a reply nested too
@@ -203,9 +216,14 @@ def _resolves(pointer: str, world_dir: Path) -> bool:
         root = world_dir.resolve()
         candidate = (world_dir / path_part).resolve()
         candidate.relative_to(root)
-    except (OSError, ValueError):
+    # `_run_paths._RESOLVE_ERRORS`' OWN THREE CLASSES, not two of them. `resolve()` on a hostile
+    # operand raises `RuntimeError` for a symlink cycle — and the graded world's subtree is a
+    # box's rw bind, so a pointer aimed at one is an ordinary shape to meet. `RuntimeError` is in
+    # neither this frame's handler nor `grade_episode`'s conversion set, so it escaped the whole
+    # pass as a bare traceback AFTER every world's model calls had been paid for.
+    except (OSError, RuntimeError, ValueError):
         return False
-    return candidate.is_file()
+    return artifact_file(candidate)
 
 
 def _draw_document(reply: JudgeReply, *, world_dir: Path) -> dict[str, Any]:
@@ -233,17 +251,18 @@ def _draw_document(reply: JudgeReply, *, world_dir: Path) -> dict[str, Any]:
     }
 
 
-def _build_prompt(judge_input: JudgeInput, *, world_label: str | None = None) -> str:
+def _build_prompt(judge_input: JudgeInput) -> str:
     """D4: the correlating prompt, parameterised by the graded world's label. Wording names
     hand-offs, never entities or systems; keeps the 20-row cap and the quote-any-colon rule
     that made 15/15 replies parse strictly (C12).
 
-    THE LABEL COMES OFF THE RENDERED INPUT by default. `JudgeInput.world_label` is the world
-    `render` actually assembled these views for, so taking it a second time as a keyword gave
-    one value two carriers with nothing holding them in agreement — a caller could render `b`
-    and prompt for `c` and no type, test or assertion would notice. The keyword stays for a
-    caller that means to override it."""
-    label = world_label if world_label is not None else judge_input.world_label
+    THE LABEL COMES OFF THE RENDERED INPUT, and there is no keyword to override it with.
+    `JudgeInput.world_label` is the world `render` actually assembled these views for; taking it
+    a second time as a keyword gave one value two carriers with nothing holding them in
+    agreement — a caller could render `b` and prompt for `c` and no type, test or assertion
+    would notice — and no caller in this repo ever passed it (`defender/CLAUDE.md`: resolve an
+    optional input once at the boundary, never re-coalesce it in the body)."""
+    label = judge_input.world_label
     task = (
         f"World {label} has run; grade it.\n\n"
         "Compare it against the four joined views below: its per-lead chain (goal, params, "
@@ -263,7 +282,13 @@ def _build_prompt(judge_input: JudgeInput, *, world_label: str | None = None) ->
         "Reply as one YAML mapping: episode_outcome (one of the three episode-outcome words — "
         "gradable, or the discard word, or the two-word corpus/world contradiction outcome), "
         "noise_floor_note, correlations, scope_checks, derivations, findings (each: bucket "
-        "[lead-set|lead-quality|analyze-discipline|decision-discipline|observability], claim, "
+        # THE VALIDATOR'S OWN SET, rendered — not a sixth hand-typed copy of the same five
+        # words. `_BUCKET_ENUM` is derived from `QUEUEABLE_FINDING_TYPES`, so a bucket added
+        # there widened what a reply may carry and was never named to the model, and a bucket
+        # removed there left the prompt advertising one every reply using it is refused for —
+        # counted as a malformed reply, with the draw file removed and no error above
+        # `malformed_replies`.
+        f"[{'|'.join(sorted(_BUCKET_ENUM))}], claim, "
         "root_cause, anchor, topic, evidence, discriminator_related).\n"
     )
     sections = judge_input.as_prompt_sections()

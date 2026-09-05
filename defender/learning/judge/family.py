@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import read_guarded, read_jsonl_rows_report
+from defender._run_paths import artifact_dir, artifact_file
 from defender._report import ReportRead, read_report
 from defender._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
@@ -74,7 +75,7 @@ from defender.runtime.branch._family import (
     world_token_for,
 )
 from defender.skills.invlang._walkers import iter_resolutions
-from defender.skills.invlang.parser import parse_dense_companion, scan_fences
+from defender.skills.invlang.parser import NO_OPEN_BLOCK, parse_dense_companion, scan_fences
 
 
 
@@ -246,7 +247,12 @@ def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
         return
     for world in worlds:
         label = world.get("world_id")
-        if isinstance(label, str) and (base / label).is_dir():
+        # `exists() or is_symlink()`, WIDER than `is_dir()` and deliberately so: this is a
+        # COLLISION probe, and anything at all standing at the label's name under the operator's
+        # runs base — a link, a file, a broken link — is a name the last-segment resolver can
+        # reach. `is_dir()` also followed a link planted at that name to answer about its target.
+        if isinstance(label, str) and (
+                (base / label).exists() or (base / label).is_symlink()):
             raise JudgeRefused(
                 f"world label {label!r} collides with a real run under the operator's runs "
                 f"base ({base / label}) — a family row's source_run_dir naming this label "
@@ -315,7 +321,10 @@ def _read_world_ledger(path: Path, world_token: str) -> tuple[list[dict[str, Any
     a `UnicodeDecodeError` thrown out of the whole grading pass. What this function adds is the
     SEMANTIC half the shared reader cannot know about — a row whose `source` is not one of the
     ledger's own decision words is malformed for this reader even though it parsed."""
-    if not path.is_file():
+    # `artifact_file`, the same `lstat` posture `Ledger._absorb` takes on these very bytes: the
+    # served ledger sits under the episode dir and a link at its name would have another file's
+    # rows read as this world's decisions.
+    if not artifact_file(path):
         raise JudgeRefused(f"the ledger at {path} is absent")
     parsed, malformed = read_jsonl_rows_report(path)
     kept: dict[str, dict[str, Any]] = {}
@@ -392,9 +401,18 @@ def _resolution_facts(
     # function whose docstring says the complement is returned — so a world whose resolutions
     # were malformed graded exactly like one that had none, which is the failure this reader was
     # rewritten to stop.
+    # AND `NO_OPEN_BLOCK`, which is where a whole resolutions block lands when its HEADER is the
+    # line the tokenizer refused. `_orphan_warning` files the header and every row under it under
+    # that one name, not under `:T resolutions` — so a trailing comment on the header
+    # (`:T resolutions   # after the branch`) made the block vanish from `by_lead`, from
+    # `moved`, AND from this complement, and `_archive_notes` then had nothing to report either:
+    # a world that DID revisit a hand-off graded `analyze-discipline` with nothing on the record
+    # saying evidence had been lost. `scan_fences.orphaned_headers` cannot cover it — those rows
+    # are INSIDE a fence.
     unlanded = [
         f"the invlang parser could not read a `{w.block}` row: {w.reason}" for w in warnings
         if getattr(w, "block", "").startswith(":T resolutions")
+        or getattr(w, "block", "") == NO_OPEN_BLOCK
     ]
     for lead_id, row in iter_resolutions(companion):
         if not isinstance(lead_id, str) or not lead_id:
@@ -454,7 +472,7 @@ def _check_gather_summaries(world_dir: Path, *, world: str, referenced_leads: fr
     short, which is what tells an operator a partial archive from a genuine one. The refusal is
     contained to this world by `_grade_world` (J5 tier 2), so the siblings still grade."""
     summaries = world_dir / GATHER_SUMMARIES_DIRNAME
-    if not summaries.is_dir():
+    if not artifact_dir(summaries):
         return
     # `names_one_file` FIRST: a lead id off that grammar stats a path outside this world's
     # subtree, so F-7 would answer about a file the archive was never supposed to hold — and a
@@ -462,7 +480,7 @@ def _check_gather_summaries(world_dir: Path, *, world: str, referenced_leads: fr
     # on a genuinely short archive.
     missing = sorted(
         lead for lead in referenced_leads
-        if names_one_file(lead) and not (summaries / f"{lead}.md").is_file())
+        if names_one_file(lead) and not artifact_file(summaries / f"{lead}.md"))
     if missing:
         raise JudgeRefused(
             f"world {world!r}: gather_summaries/ is short {missing} — the archive left this "
@@ -543,7 +561,7 @@ def _archive_notes(world_dir: Path, *, world: str, facts: WorldFacts) -> list[st
             "unreadable to the parser, or carry no lead id, so this world's resolution facts "
             "are read from what landed alone")
     summaries = world_dir / GATHER_SUMMARIES_DIRNAME
-    if facts.referenced_leads and not summaries.is_dir():
+    if facts.referenced_leads and not artifact_dir(summaries):
         notes.append(
             f"gather_summaries/ is absent while investigation.md names "
             f"{sorted(facts.referenced_leads)} — this world is graded on a thinner view than "
@@ -554,13 +572,16 @@ def _archive_notes(world_dir: Path, *, world: str, facts: WorldFacts) -> list[st
 def _missing_required_input(
     *, world_dir: Path, ledger_path: Path, alert_path: Path, declared: Any,
 ) -> str | None:
-    if not ledger_path.is_file():
+    # `artifact_file` on every one of them. These four decide whether a world is graded at all,
+    # they are read straight afterwards, and they live in a tree three boxes had an rw bind on —
+    # so `is_file()` admits a link and the world is then graded against whatever it points at.
+    if not artifact_file(ledger_path):
         return f"served ledger ({ledger_path})"
-    if not (world_dir / "report.md").is_file():
+    if not artifact_file(world_dir / "report.md"):
         return "report.md"
-    if not (world_dir / "investigation.md").is_file():
+    if not artifact_file(world_dir / "investigation.md"):
         return "investigation.md"
-    if not alert_path.is_file():
+    if not artifact_file(alert_path):
         return ALERT_NAME
     if not isinstance(declared, str) or not declared:
         return "disposition_declared"
@@ -711,16 +732,30 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     return row, facts
 
 
-def grade_family(episode_dir: Path) -> FamilyGrade:
+def is_gradable_row(row: Any) -> bool:
+    """Did this world contribute to the family's word? ONE predicate, because four sites asked
+    it and two of them asked it differently: `r.get("ungradable") is not True` here against
+    `not r.get("ungradable")` in the orchestration and the appender, which disagree for every
+    truthy non-`True` value a hand-edited or model-written `judge.yaml` can carry — so
+    `graded_worlds` on the record could name a world the enqueue had silently skipped."""
+    return isinstance(row, dict) and not row.get("ungradable")
+
+
+def grade_family(episode_dir: Path, *, manifest: dict[str, Any] | None = None) -> FamilyGrade:
     """The mechanical pass: five facts and a bucket per non-control world, plus the family's
     `verdict_word`. Self-contained over `episode_dir` alone — no comparison, no comparator
     call, order-independent across worlds (O3).
 
     Refuses only for a fault in the MANIFEST, which is what says which worlds there are. A
     fault in one world's own archive marks that world `ungradable` and grades the rest — see
-    the module docstring on where a refusal stops."""
+    the module docstring on where a refusal stops.
+
+    `manifest` is THE PASS'S OWN PARSE, when the caller has one — the same hand-over `render`
+    already takes. The orchestration reads and parses `family.yaml` immediately before calling
+    this, so without it one pass read and parsed the same file twice, and the episode dir is a
+    tree a box can reach: there was no guarantee the two documents were the same document."""
     episode_dir = Path(episode_dir)
-    doc = _raw_manifest(episode_dir)
+    doc = manifest if manifest is not None else _raw_manifest(episode_dir)
     holding_system = _holding_system(doc)
     worlds = _non_control_worlds(doc)
     episode_id = episode_id_of(doc)
@@ -740,7 +775,7 @@ def grade_family(episode_dir: Path) -> FamilyGrade:
     # only would make a manifest that spelled the control's word differently read as a contrast
     # that is not there.
     control_declared = normalized_disposition(_control_declared(doc))
-    graded = frozenset(r["world"] for r in rows if r.get("ungradable") is not True)
+    graded = frozenset(r["world"] for r in rows if is_gradable_row(r))
     contrasting = {
         r["world"] for r in rows
         if r["world"] in graded and r.get("declared") is not None
@@ -758,5 +793,5 @@ def grade_family(episode_dir: Path) -> FamilyGrade:
 
 __all__ = [
     "FamilyGrade", "WorldFacts", "discriminator_of", "episode_id_of", "grade_family",
-    "mapping_key", "names_one_file", "read_world_facts", "scope_params",
+    "is_gradable_row", "mapping_key", "names_one_file", "read_world_facts", "scope_params",
 ]

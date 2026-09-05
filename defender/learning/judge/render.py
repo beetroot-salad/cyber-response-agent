@@ -17,12 +17,14 @@ as the manifest does.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from defender._io import read_jsonl_rows
+from defender._run_paths import artifact_dir, artifact_file
 from defender.learning.branch.archive import (
     ALERT_NAME,
     GATHER_SUMMARIES_DIRNAME,
@@ -233,9 +235,16 @@ def _render_lessons(lessons: list[dict[str, Any]]) -> str:
             lines.append(f"### {name}\n{entry['body']}")
         else:
             lines.append(f"### {name}\n{entry.get('note')}")
-        if entry.get("dirty"):
-            lines.append("(caveat: this sibling's tree was DIRTY when it ran, so the checkout "
-                        "at its recorded commit may not be the tree it actually ran against)")
+        # `is not False`, not truthiness. `dirty` is three-valued and `None` means the tree was
+        # never measured, which is not a clean bill of health — the caveat belongs on that world
+        # too, saying which of the two it is.
+        if entry.get("dirty") is not False:
+            lines.append(
+                ("(caveat: this sibling's tree was DIRTY when it ran"
+                 if entry.get("dirty") else
+                 "(caveat: whether this sibling's tree was dirty was never measured")
+                + ", so the checkout at its recorded commit may not be the tree it actually "
+                  "ran against)")
     return "\n\n".join(lines) + "\n"
 
 
@@ -321,7 +330,11 @@ def _queries_by_lead(world_dir: Path) -> dict[str, list[dict[str, Any]]]:
     from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
     eq_path = world_dir / "executed_queries.jsonl"
-    if not eq_path.is_file():
+    # `artifact_file` on every entry this module admits out of the archived world dir — the same
+    # `lstat` posture `lead_repository.load_leads` takes on the very same table, and the one
+    # `archive.py` applies when it WRITES these names. A link admitted here puts another tree's
+    # rows into VIEW 1 as this world's own conduct.
+    if not artifact_file(eq_path):
         return {}
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in read_jsonl_rows(eq_path):
@@ -343,7 +356,7 @@ def _lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, li
     # under `- summary:`, as a fact about the world being graded (O5/J14).
     safe = names_one_file(lead_id)
     lead_file = world_dir / "gather_raw" / f"{lead_id}.lead.json"
-    if safe and lead_file.is_file():
+    if safe and artifact_file(lead_file):
         data = json_mapping(lead_file)
         if data is not None:
             goal = data.get("goal")
@@ -354,7 +367,7 @@ def _lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, li
     if not safe:
         summary = ("(this lead id does not name a file inside this world, so no gather summary "
                    "was read for it)")
-    elif summary_path.is_file():
+    elif artifact_file(summary_path):
         # `errors="replace"`, not a bare read. This is MODEL-WRITTEN text in a tree the box can
         # write, so an undecodable byte in it is an ordinary thing to meet; raising here would
         # be an unreadable summary costing the whole episode its grade, and the substitution
@@ -404,7 +417,7 @@ def _sibling_row(
     bare `read_text` here made one undecodable byte in one unrelated run under the operator's
     runs base refuse the whole grade of an episode whose own archive reads perfectly."""
     alert_path = entry / ALERT_NAME
-    if not alert_path.is_file():
+    if not artifact_file(alert_path):
         return None, None
     alert_doc = json_mapping(alert_path)
     if alert_doc is None:
@@ -412,7 +425,7 @@ def _sibling_row(
     if alert_doc.get("alert_id") != alert_id:
         return None, None
     report_path = entry / "report.md"
-    if not report_path.is_file():
+    if not artifact_file(report_path):
         return None, "skipped_unclosed"
     read = read_report(report_path)
     if not read.text:
@@ -453,7 +466,7 @@ def sibling_union(
         # than in `_sibling_row` so the reason lands on the notes and is rendered (C11): nobody
         # could look, which is not the same fact as "no sibling trial exists".
         return siblings, notes
-    if not runs_base.is_dir():
+    if not runs_base.is_dir():  # lint-tree-read-follows-link: ok — the operator's OWN configured root, not an entry inside a box-writable tree; `defender/CLAUDE.md` documents the devcontainer pointing this knob at a path that may itself be a link, and refusing that would refuse every union
         # NAMED, not folded into the empty union. `run_common.resolve_runs_base()` returns
         # whatever `DEFENDER_RUNS_BASE` says (or its compiled default) and never checks that the
         # directory exists — `defender/CLAUDE.md` documents the devcontainer having to override
@@ -464,7 +477,9 @@ def sibling_union(
         notes["runs_base_missing"] = True
         return siblings, notes
     for entry in sorted(runs_base.iterdir(), key=lambda p: p.name):
-        if not entry.is_dir():
+        # Each ENTRY under that root is a run dir — a box's rw bind — so it is judged by `lstat`
+        # even though the root above is the operator's own.
+        if not artifact_dir(entry):
             continue
         if source_run_id is not None and entry.name == source_run_id:
             notes["source_run_excluded"] = entry.name
@@ -480,6 +495,29 @@ def sibling_union(
 def _world_alert_id(world_dir: Path) -> str | None:
     data = json_mapping(world_dir / ALERT_NAME)
     return data.get("alert_id") if data is not None else None
+
+
+def episode_alert(episode_dir: Path, labels: list[str]) -> dict[str, Any]:
+    """The alert this episode's worlds all investigate, off the first world that names one.
+
+    ONE RULE, because two readers want this file and they must not pick different worlds. The
+    sibling union keys on the first world whose `alert.json` carries an `alert_id`; the queue
+    row's `alert_rule_key` used to be derived from the first whose `alert.json` merely PARSED —
+    so a family whose world b has an unkeyed alert and whose world c has a keyed one keyed the
+    union on c's alert while every row landed under a rule key derived from b's document. The
+    fallback (first that parses) is kept for a family where no world names an id at all, which
+    is a different fact from "no world has an alert".
+    """
+    fallback: dict[str, Any] = {}
+    for label in labels:
+        data = json_mapping(Path(episode_dir) / "worlds" / label / ALERT_NAME)
+        if data is None:
+            continue
+        if data.get("alert_id") is not None:
+            return data
+        if not fallback:
+            fallback = data
+    return fallback
 
 
 def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4); each view is already its own helper, this is the join, and the keyword tail is the per-pass hand-over (facts/union/manifest) that keeps this from re-reading what the caller has already read
@@ -518,7 +556,7 @@ def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4
     resolutions_by_lead = record.resolutions_by_lead
     lead_ids = set(record.referenced_leads)
     summaries_dir = world_dir / GATHER_SUMMARIES_DIRNAME
-    if summaries_dir.is_dir():
+    if artifact_dir(summaries_dir):
         lead_ids |= {p.stem for p in summaries_dir.glob("*.md")}
 
     # The report's BYTES for the prompt, off the same read the mechanical pass made.
@@ -537,21 +575,42 @@ def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4
         })
 
     provenance = _read_provenance(world_dir)
-    commit = lessons_commit if lessons_commit is not None else provenance.get("commit")
-    dirty = bool(provenance.get("dirty"))
+    commit = _usable_commit(
+        lessons_commit if lessons_commit is not None else provenance.get("commit"))
+    # THREE-VALUED, and the third value is not `False`. `RunProvenance.dirty` is `None` when the
+    # tree could not be measured at all — its own docstring calls collapsing that onto "clean"
+    # the one error a provenance record must not make — so `bool(...)` suppressed the caveat for
+    # exactly the world whose checkout is least certain to be the tree it ran against.
+    dirty = provenance.get("dirty")
     lessons_loaded = read_jsonl_rows(world_dir / LESSONS_LOADED_NAME) \
-        if (world_dir / LESSONS_LOADED_NAME).is_file() else []
+        if artifact_file(world_dir / LESSONS_LOADED_NAME) else []
     lessons: list[dict[str, Any]] = []
     for entry in lessons_loaded:
-        name, path = entry.get("lesson_name"), entry.get("path")
+        name = entry.get("lesson_name")
+        # DERIVED FROM THE NAME WHEN THE ROW CARRIES NO PATH, which on a real sibling is always.
+        # `lessons_loaded.jsonl` has exactly one production writer — `runtime/tools/_deps.
+        # _record_lesson_load` — and it writes `{lesson_name, ts}`: no `path` column exists. Read
+        # as an absent path, EVERY lesson of EVERY real archived world rendered as "unavailable:
+        # no path is recorded", so VIEW 4 shipped with no bodies at all and the whole `git_show`
+        # /`lessons_commit` seam below was dead in production while green against fixtures that
+        # synthesise the column. The name IS the path: `hooks/record_lesson_load.lesson_name`
+        # returns `p.stem` of `defender/<corpus>/<name>.md`, and the runtime corpus is one
+        # directory (`RUNTIME_LESSON_CORPORA`), so the row's own name resolves it.
+        recorded = entry.get("path")
+        candidates = [recorded] if isinstance(recorded, str) else _lesson_paths_for(name)
+        path = candidates[0] if candidates else None
         body = None
         note = None
         if commit is None:
             note = "unavailable: no commit is recorded for this sibling"
-        elif not isinstance(path, str):
-            note = "unavailable: no path is recorded for this lesson"
+        elif not candidates:
+            note = "unavailable: no path is recorded for this lesson and its name names none"
         else:
-            body = show(REPO_ROOT, commit, path)
+            for candidate in candidates:
+                body = show(REPO_ROOT, commit, candidate)
+                if body is not None:
+                    path = candidate
+                    break
             if body is None:
                 note = f"unavailable: {path!r} at {commit!r} could not be read"
         lessons.append({"lesson_name": name, "path": path, "body": body, "note": note,
@@ -596,6 +655,10 @@ def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4
             union_notes["coverage_note"] = (
                 "no row on the holding system is recorded for this world")
     elif not siblings:
+        # THE COVERAGE VIEW IS WHERE THE EMPTY UNION IS STATED, and that is the committed spec's
+        # own demand (`test_921_first_run_alert_coverage_view_states_the_empty_union`): an
+        # unstated absence is what a model fills in (C11), and this note is the first thing the
+        # prompt says about the union, above the coverage rows.
         union_notes["coverage_note"] = (
             "this is a first-run alert: no sibling trial is recorded" + (
                 " and no row on the holding system is recorded either" if not coverage else ""))
@@ -612,8 +675,49 @@ def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4
     )
 
 
+def _lesson_paths_for(lesson_name: Any) -> list[str]:
+    """The repo-relative paths a runtime lesson row's `lesson_name` could name, in a stable
+    order — the candidates to read a body at, empty when the name cannot become one.
+
+    THE WRITER'S OWN INVERSE. `hooks.record_lesson_load.lesson_name` accepts
+    `defender/<corpus>/<stem>.md` for a corpus in the set it is handed and returns the STEM;
+    the runtime readers hand it `RUNTIME_LESSON_CORPORA`. So the stem plus that set IS the path,
+    and this is the inverse of the writer rather than a second spelling of the repo layout —
+    a corpus added there becomes a candidate here with no edit.
+
+    Empty for a name that is not a single path segment: the row is model-adjacent text, and a
+    name carrying a separator would build a path outside the corpus."""
+    from defender.hooks.record_lesson_load import RUNTIME_LESSON_CORPORA
+
+    if (not isinstance(lesson_name, str) or not lesson_name
+            or lesson_name != Path(lesson_name).name or lesson_name in (".", "..")):
+        return []
+    return [f"defender/{corpus}/{lesson_name}.md"
+            for corpus in sorted(RUNTIME_LESSON_CORPORA)]
+
+
 def _read_provenance(world_dir: Path) -> dict[str, Any]:
     return json_mapping(world_dir / "provenance.json") or {}
 
 
-__all__ = ["JudgeInput", "json_mapping", "render", "sibling_union"]
+#: A commit this pass will spend in a subprocess argv. Nothing else is: `provenance.json` lives
+#: in the archived world dir, copied out of a tree the box has an rw bind on and screened only
+#: for being a regular FILE, so its `commit` is attacker-reachable text — and the sanctioned
+#: `_git.git_show_file` facade spends it as the single argv element `f"{rev}:{path}"`. A value
+#: beginning with `-` is then read as an OPTION rather than a revision (`--output=<file>` is one
+#: the command accepts), which turns a rendered prompt into a host-side write at a path the
+#: archive chose, in the LAUNCHER's own process and outside every box. It is also never
+#: type-checked upstream (`json_mapping` hands back whatever the JSON holds, and this frame's
+#: own fallback does not coerce), so a non-string reached the same interpolation. An object-name
+#: grammar is the whole fix: a resolvable object name is hex, and nothing else may reach an argv.
+_COMMIT_RE = re.compile(r"\A[0-9a-fA-F]{7,40}\Z")
+
+
+def _usable_commit(commit: Any) -> str | None:
+    """`commit` when it is an abbreviated-or-full object name, `None` otherwise — see
+    `_COMMIT_RE`. `None` renders as the lessons view's own "no commit is recorded" note, which
+    is the honest answer for a stamp this pass will not spend."""
+    return commit if isinstance(commit, str) and _COMMIT_RE.match(commit) else None
+
+
+__all__ = ["JudgeInput", "episode_alert", "json_mapping", "render", "sibling_union"]

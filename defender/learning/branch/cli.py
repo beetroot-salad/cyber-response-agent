@@ -1122,15 +1122,20 @@ def _launch(  # noqa: PLR0913 — see `main`
     except SystemExit:
         aborting = True
         raise
-    except staging_mod.StagingRefused:
-        # UNCHANGED, not wrapped. A teardown that could not verify its names gone is already
-        # this design's own refusal with the failing names in the review record, and `main`
-        # catches the class — wrapping it in the generic abort text would report "the episode
-        # aborted" for an episode that completed and whose CLEANUP is what went wrong.
-        aborting = True
-        raise
     except BaseException as failed:  # noqa: BLE001 — ONE abort rule, see `main`'s docstring
         aborting = True
+        if teardown.done:
+            # UNCHANGED, not wrapped — and the condition is WHAT HAPPENED, not one exception
+            # class. Once the episode has handed the cluster back, every sibling has started,
+            # archived and been reviewed, so both halves of the abort sentence below ("no
+            # sibling started and every staged name is torn down") are false of anything raised
+            # from here on: the teardown's own refusal, whichever class `staging.teardown`
+            # leaked on the way to raising it (`read_staged`'s `UnicodeDecodeError`,
+            # `merge_review`'s `OSError`), or an interrupt during the grade. Named on the class
+            # instead, exactly one of those was reported honestly and every other one was
+            # reported as an episode that never ran. BEFORE the teardown, a `StagingRefused` out
+            # of `stage_world` IS the one-abort case and keeps the wrap.
+            raise
         raise LauncherRefused(
             f"[branch] episode {episode_id} aborted: {failed!r} — no sibling started and every "
             "staged name is torn down") from failed
@@ -1156,6 +1161,12 @@ class _OneShotTeardown:
         self._episode_dir = episode_dir
         self._door = door
         self._done = False
+
+    @property
+    def done(self) -> bool:
+        """Has the cluster already been handed back? Read by `_launch`'s abort arm, which must
+        not tell an operator "no sibling started" about an episode that ran to completion."""
+        return self._done
 
     def __call__(self, *, aborting: bool) -> None:
         if self._done:
@@ -1255,20 +1266,42 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
           f"({len(report['scrub_verified'])}/{len(labels)} verified)", file=sys.stderr)
     # J10: the judge runs at the TAIL of the step runner, after the archive step and before the
     # return — never in `_launch`'s post-teardown path, which is production-dead on this route.
-    # A judge failure is NON-FATAL to the episode (F-5): the launcher's own exit status stays
-    # about the LAUNCH, never about the grade, so a malformed reply or an unreachable model does
-    # not turn an otherwise-clean episode into a `LauncherRefused`.
-    # THE CLUSTER IS HANDED BACK BEFORE THE GRADE. Everything the judge reads is on disk — the
-    # archived episode and the operator's runs base — so there is nothing left for the staged
-    # names to serve, and the grade is the longest-running thing in the episode.
-    # HELD, NOT RAISED THROUGH. `_teardown_without_masking` re-raises when `aborting` is False,
-    # and moving the call ahead of the grade therefore made a CLEANUP failure preempt the grade
-    # entirely: a fully archived, fully reviewed episode ended with no draws, no queue rows and
-    # no `judge.yaml` — the file whose presence certifies the pass — and the operator saw only
-    # the staging refusal, indistinguishable from an episode that was never graded for any other
-    # reason. The refusal is still this episode's answer; it is raised AFTER the grade it has
-    # nothing to do with (nothing the judge reads is on the cluster).
+    # Its own frame, so the tear-down/grade/re-raise rule is one readable unit and this function
+    # keeps the branch count the shared complexity gate allows it.
+    _release_and_grade(episode_dir, episode_id=episode_id, judge=judge, teardown=teardown)
+    # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
+    # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
+    # launch that did exactly what it was asked and found the results not comparable, which is a
+    # measurement rather than a failure — and it is written down, in the episode's own outcome
+    # field, where a reader who cares can see it. Collapsing the two into the status would make
+    # a real finding indistinguishable from a crashed child.
+    return 1 if failed else 0
+
+
+
+def _release_and_grade(
+    episode_dir: Path, *, episode_id: str, judge: Any, teardown: Any,
+) -> None:
+    """Hand the cluster back, then grade — J10's tail of the step runner.
+
+    A judge failure is NON-FATAL to the episode (F-5): the launcher's own exit status stays
+    about the LAUNCH, never about the grade, so a malformed reply or an unreachable model does
+    not turn an otherwise-clean episode into a `LauncherRefused`.
+
+    THE CLUSTER IS HANDED BACK BEFORE THE GRADE. Everything the judge reads is on disk — the
+    archived episode and the operator's runs base — so there is nothing left for the staged
+    names to serve, and the grade is the longest-running thing in the episode.
+
+    HELD, NOT RAISED THROUGH. `_teardown_without_masking` re-raises when `aborting` is False,
+    and calling it ahead of the grade therefore made a CLEANUP failure preempt the grade
+    entirely: a fully archived, fully reviewed episode ended with no draws, no queue rows and no
+    `judge.yaml` — the file whose presence certifies the pass — and the operator saw only the
+    staging refusal, indistinguishable from an episode that was never graded for any other
+    reason. The refusal is still this episode's answer; it is raised AFTER the grade it has
+    nothing to do with (nothing the judge reads is on the cluster).
+    """
     teardown_failed: BaseException | None = None
+    graded = False
     if teardown is not None:
         try:
             teardown(aborting=False)
@@ -1297,17 +1330,29 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         print(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
               "episode itself is otherwise unaffected", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
-    if teardown_failed is not None:
-        # The cleanup's own refusal, unchanged and unmasked — `teardown` already wrote the names
-        # it could not verify gone into the review record before it raised.
-        raise teardown_failed
-    # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
-    # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
-    # launch that did exactly what it was asked and found the results not comparable, which is a
-    # measurement rather than a failure — and it is written down, in the episode's own outcome
-    # field, where a reader who cares can see it. Collapsing the two into the status would make
-    # a real finding indistinguishable from a crashed child.
-    return 1 if failed else 0
+        graded = True
+    else:
+        graded = True
+    finally:
+        # IN A `finally`, so the held cleanup fault survives a class the arm above does not
+        # catch. Raised only after the block, it was DROPPED whenever the grade exited on a
+        # `BaseException` — an operator's interrupt during minutes of model calls, a `SystemExit`
+        # out of an import — and because `_OneShotTeardown` latches `_done` BEFORE it calls,
+        # `_launch`'s `finally` was already a no-op: nothing retried, nothing reported, and the
+        # names stayed live under a token the next launch's sweep will refuse to touch.
+        if teardown_failed is not None:
+            # NEVER MASKING, which is `_teardown_without_masking`'s own rule at the frame that
+            # first had to make this choice — and answered from a FRAME-LOCAL flag, never
+            # `sys.exc_info()`, which is thread-global and answers for whatever is being handled
+            # anywhere up this thread's stack. `graded` is set on both paths that leave this
+            # block normally, so it is False exactly when something is still on its way to the
+            # operator: then the cleanup fault is printed (its unverified names are already in
+            # the review record, which is the obligation), and otherwise it is the answer.
+            if graded:
+                raise teardown_failed
+            print(f"[branch] episode {episode_id}: teardown also failed ({teardown_failed!r}); "
+                  "the names it could not verify gone are in the review record, and the failure "
+                  "that ended the episode is what follows", file=sys.stderr)
 
 
 def _author(

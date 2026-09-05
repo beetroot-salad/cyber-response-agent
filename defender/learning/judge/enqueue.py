@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from defender._io import guarded_mkdir, read_jsonl_rows_report, write_guarded
+from defender._run_paths import artifact_dir, artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome
@@ -33,6 +34,8 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.persist import derive_alert_rule_key, queue_lock
 from defender.learning.judge._errors import JudgeRefused
+from defender.learning.judge.family import is_gradable_row
+from defender.learning.judge.render import episode_alert
 
 #: `discard` and `corpus-contradiction` are members of `JUDGE_OUTCOME_ENUM` and ARE the
 #: family's `verdict_word` when they apply — never a defender failure to author from (O7).
@@ -153,7 +156,7 @@ def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
         # unreadable line. A leading newline closes the fragment's own line without touching
         # its bytes; the fragment stays exactly as unreadable as it already was.
         _existing, malformed = read_jsonl_rows_report(pending_file)
-        if pending_file.is_file() and pending_file.stat().st_size > 0:
+        if artifact_file(pending_file) and pending_file.stat().st_size > 0:
             with pending_file.open("rb") as fh:
                 fh.seek(-1, 2)
                 if fh.read(1) != b"\n":
@@ -174,25 +177,6 @@ def _queue_trust_root(pending_file: Path) -> Path:
     return state_root if state_root in queue_dir.parents else queue_dir.parent
 
 
-def _episode_alert(episode_dir: Path, worlds: list[str]) -> dict[str, Any]:
-    """The alert this episode's worlds investigate, off the first world that carries one.
-
-    THROUGH `render.json_mapping`, which is the one home for this tolerance policy and names
-    this very reader as one of its five. The copy that used to live here caught `(OSError,
-    ValueError)` and dropped `RecursionError` — the class that docstring says it was centralised
-    to stop having to fix five times, and one that is neither in this module's handlers nor in
-    `grade_episode`'s conversion set, so a deeply nested `alert.json` took the whole pass down
-    as a bare traceback after every draw had already been made."""
-    from defender.learning.branch.archive import ALERT_NAME
-    from defender.learning.judge.render import json_mapping
-
-    for label in worlds:
-        data = json_mapping(episode_dir / "worlds" / label / ALERT_NAME)
-        if data is not None:
-            return data
-    return {}
-
-
 def _resolving_citations(finding: dict[str, Any]) -> list[str]:
     """A finding's evidence pointers MINUS the ones `_draw_document` recorded as not resolving.
 
@@ -202,13 +186,25 @@ def _resolving_citations(finding: dict[str, Any]) -> list[str]:
     the row rather than riding under a thirteenth key — the queue's shape is twelve keys the
     shared validator reads — and remain readable in full on the draw document the row's own
     `source_run_dir` names."""
-    unresolved = set(finding.get("unresolved_evidence") or [])
-    return [p for p in (finding.get("evidence") or []) if p not in unresolved]
+    # EVERY VALUE HERE IS MODEL-AUTHORED YAML off a tree a box can reach (`_draws_on_disk`), so
+    # neither key is a list until this frame has looked. `set(3)` raises `TypeError`, `set([[a]])`
+    # raises `TypeError: unhashable`, and a bare string `evidence` iterates into one-character
+    # citations — none of which `enqueue_report`'s per-row drop arm (which catches `JudgeRefused`
+    # alone) or `grade_episode`'s conversion set names, so the whole append died as a bare
+    # traceback with zero rows written. `str()` for the same reason `run._draw_document` coerces:
+    # a YAML-native scalar (`evidence: [2026-01-01]` -> `datetime.date`) is not JSON-serialisable,
+    # and `json.dumps` raises inside the queue's own lock hold.
+    raw = finding.get("evidence")
+    evidence = [str(p) for p in raw] if isinstance(raw, list) else []
+    raw_unresolved = finding.get("unresolved_evidence")
+    unresolved = (
+        {str(p) for p in raw_unresolved} if isinstance(raw_unresolved, list) else set())
+    return [p for p in evidence if p not in unresolved]
 
 
 def _build_row(
     *, run_id: str, label: str, draw: str, index: int, finding: dict[str, Any],
-    alert_rule_key: str, judge_outcome: str, episode_name: str,
+    alert_rule_key: str, judge_outcome: str,
 ) -> dict[str, Any]:
     """The twelve-key `FindingRow` for one finding of one draw of one world.
 
@@ -221,8 +217,12 @@ def _build_row(
     findings would suppress a real one), and it is the ONLY place in this module that mints
     one — `enqueue()`'s own loop calls this rather than interpolating the f-string itself.
 
-    `source_run_dir` is `f"episodes/{episode_name}/worlds/{label}"` — the archived world dir a
-    row's evidence is scoped to (F-3: a value the last-segment `resolve_run_bundle` resolver
+    `source_run_dir` is `f"episodes/{run_id}/worlds/{label}"` — the archived world dir a
+    row's evidence is scoped to. ONE parameter carries the episode's name for both keys: as two
+    (`run_id=` and `episode_name=`, which the single call site filled from one value), nothing
+    held them in agreement, and a caller taking one from a manifest field and the other from the
+    directory would mint rows whose `finding_id` and `source_run_dir` name different episodes —
+    which P5's idempotency guard, keyed on `finding_id` alone, cannot notice (F-3: a value the last-segment `resolve_run_bundle` resolver
     can honour, never a value shaped like a run id it could collide with)."""
     return {
         "schema_version": 1,
@@ -244,7 +244,7 @@ def _build_row(
         # shared validator reads — and they remain readable in full on the draw document the
         # row's own `source_run_dir` names.
         "citations": _resolving_citations(finding),
-        "source_run_dir": f"episodes/{episode_name}/worlds/{label}",
+        "source_run_dir": f"episodes/{run_id}/worlds/{label}",
     }
 
 
@@ -256,7 +256,10 @@ def _draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
     which puts draw 10 between 1 and 2 the moment an operator asks for ten draws. A caller that
     DID produce them passes them in (`drawn=`) rather than having them read back, which is both
     the cheaper path and the only one that cannot pick up a file this pass did not write."""
-    if not draw_dir.is_dir():
+    # `artifact_dir`, not `is_dir()`: the draw directory lives under the episode dir, and a
+    # link planted at its name would have the TARGET's `<n>.yaml` files read back as this
+    # episode's own draws and queued as its findings.
+    if not artifact_dir(draw_dir):
         return {}
     out: dict[int, dict[str, Any]] = {}
     for path in draw_dir.glob("*.yaml"):
@@ -265,6 +268,14 @@ def _draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
         # box can reach passed the filter and raised `ValueError` out of the whole pass. The two
         # tests have to answer the same question about the same string.
         if not (path.stem.isascii() and path.stem.isdigit()):
+            continue
+        # AND THE STEM MUST BE THE INT'S OWN SPELLING. `int("01") == int("1")`, so `01.yaml` and
+        # `1.yaml` — this design writes only the second, but P4 says a retry clobbers and cleans
+        # nothing up, and the directory is a tree a box can write — collapse onto one key over an
+        # UNORDERED `glob`, so which document becomes `<run>/<label>/1/<index>` differs between
+        # runs. `finding_id` is P5's sole idempotency key, so that either suppresses a real
+        # finding or gives two different ones the same id.
+        if path.stem != str(int(path.stem)):
             continue
         try:
             # `_yaml.safe_load` for the same reason every other parse in this package uses it:
@@ -313,16 +324,26 @@ def enqueue_report(episode_dir: Path, grade: Any, *, queue_dir: Path | None = No
     after the enqueue, J11) leaving no `judge.yaml` to say what had been graded at all."""
     episode_dir = Path(episode_dir)
     verdict_word = grade["verdict_word"] if isinstance(grade, dict) else grade.verdict_word
-    if verdict_word in _UNQUEUEABLE_VERDICTS:
+    # THROUGH THE OWNER'S NORMALIZER, not a bare `in` — the same rule `_validate_row` states two
+    # functions up, and for the same two reasons. `grade` may be built from `judge.yaml` off a
+    # tree a box can reach (`_grade_from_document`), so `verdict_word: [discard]` raises
+    # `TypeError: unhashable type` out of a function whose contract is this design's refusal, and
+    # `verdict_word: Discard` misses the O7 early return entirely — every row is then built with
+    # a `judge_outcome` `_validate_row` refuses one at a time, so the pass reports N unqueueable
+    # findings instead of the one honest "the family record is this episode's whole artifact".
+    if normalized_judge_outcome(verdict_word) in _UNQUEUEABLE_VERDICTS:
         return EnqueueReport()
     world_rows = grade["worlds"] if isinstance(grade, dict) else grade.worlds
-    graded_labels = [
-        (w["world"] if isinstance(w, dict) else w.world)
-        for w in world_rows
-        if not (w.get("ungradable") if isinstance(w, dict) else getattr(w, "ungradable", False))
-    ]
+    # `family.is_gradable_row`, the ONE predicate — see its docstring: this site and
+    # `grade_family`'s own answered the same question two ways.
+    graded_labels = [w["world"] for w in world_rows if is_gradable_row(w)]
     run_id = episode_dir.name
-    alert_rule_key = derive_alert_rule_key(_episode_alert(episode_dir, graded_labels))
+    # `render.episode_alert`, the ONE rule for which world's `alert.json` this episode's alert
+    # comes off. A local copy taking the first world whose file merely PARSED disagreed with
+    # `__init__._pass_alert_id`, which takes the first that carries an `alert_id`: the sibling
+    # union was then keyed on one world's alert while every row landed under a rule key derived
+    # from another's document.
+    alert_rule_key = derive_alert_rule_key(episode_alert(episode_dir, graded_labels))
 
     rows: list[dict[str, Any]] = []
     unqueueable: list[str] = []
@@ -353,7 +374,7 @@ def enqueue_report(episode_dir: Path, grade: Any, *, queue_dir: Path | None = No
                 row = _build_row(
                     run_id=run_id, label=label, draw=str(draw), index=index,
                     finding=finding, alert_rule_key=alert_rule_key,
-                    judge_outcome=verdict_word, episode_name=episode_dir.name)
+                    judge_outcome=verdict_word)
                 try:
                     _validate_row(row, episode_dir=episode_dir)
                 except JudgeRefused as refused:

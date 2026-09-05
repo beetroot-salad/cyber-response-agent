@@ -100,6 +100,15 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/branch/staging.py",
     "learning/branch/questioner/__init__.py",
     "runtime/branch/_family.py",
+    # #921's family judge, whose whole input is that same episode tree read back: the archived
+    # world dirs (copied out of three boxes' rw binds), the episode's own `judge.yaml`/
+    # `review.yaml`/`family.yaml`, the per-draw records it writes and re-reads, and the
+    # operator's runs base. Four modules that grow such reads and are not added here are four
+    # modules this gate stops covering — the failure mode this census's own comment names.
+    "learning/judge/__init__.py",
+    "learning/judge/enqueue.py",
+    "learning/judge/family.py",
+    "learning/judge/render.py",
 })
 
 SUPPRESS_MARKERS = ("lint-tree-read-follows-link: ok",)

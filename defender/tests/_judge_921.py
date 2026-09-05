@@ -406,9 +406,18 @@ def enqueued_rows(record: dict) -> list[dict]:
 
 
 def draw_files(episode_dir: Path, world_label: str) -> list[Path]:
-    """`worlds/<X>/judge/<n>.yaml`, in numeric order."""
+    """`worlds/<X>/judge/<n>.yaml`, in numeric order.
+
+    NUMERIC, which is what `enqueue._draws_on_disk` means by "draw order" and is why it keys on
+    `int(path.stem)`. Sorted by the STEM this helper disagreed with the production reader the
+    moment a scenario asked for ten draws — `['0','1','10','11','2', ...]` — so an assertion
+    indexed off this list was paired with a different draw's document than the code under test
+    had read."""
     d = Path(episode_dir) / "worlds" / world_label / "judge"
-    return sorted(d.glob("*.yaml"), key=lambda p: p.stem) if d.is_dir() else []
+    if not d.is_dir():
+        return []
+    numbered = [p for p in d.glob("*.yaml") if p.stem.isascii() and p.stem.isdigit()]
+    return sorted(numbered, key=lambda p: int(p.stem))
 
 
 def draw_doc(episode_dir: Path, world_label: str, draw: int) -> dict:

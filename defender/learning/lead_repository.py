@@ -343,12 +343,37 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
         # being dereferenced anyway.
         # The ROOT is judged by `artifact_dir` above, and `symlinks=True` covers every entry
         # found while walking.
-        shutil.copytree(  # lint-tree-read-follows-link: ok — root screened, entries preserved
+        shutil.copytree(  # lint-tree-read-follows-link: ok — root screened, entries preserved, destinations screened by `refusing_copy2`
             gather_src, RunPaths(dst_dir).gather_raw, symlinks=True,
-            ignore=refuse_non_artifacts(refused), dirs_exist_ok=True)
+            ignore=refuse_non_artifacts(refused), dirs_exist_ok=True,
+            copy_function=refusing_copy2(refused))
     elif gather_src.exists() or gather_src.is_symlink():
         refused.append(gather_src)
     return refused
+
+
+def refusing_copy2(refused: list[Path]):
+    """`shutil.copy2`, refusing a DESTINATION that is not already a plain file.
+
+    `refuse_non_artifacts` screens the SOURCE side of a walk; nothing screened the other end,
+    and `copy2` opens its destination for writing — which resolves a link planted at that name
+    and writes the copied bytes wherever it points. The root of each destination tree is judged
+    by its caller, but `copytree(dirs_exist_ok=True)` walks INTO an existing destination
+    directory and copies entry by entry, so an entry planted at any depth below that root was
+    still followed. Both trees this is used on are box-reachable (a run dir's rw bind, and the
+    episode dir the archive writes into), so this is the same rule as the source screen, one
+    level down and on the other side.
+
+    Refused rather than raised, matching `refuse_non_artifacts`: one planted name must not cost
+    a world its whole archive, and the caller prints what it dropped."""
+    def _copy(src, dst, *, follow_symlinks=True):
+        target = Path(dst)
+        if (target.exists() or target.is_symlink()) and not artifact_file(target):
+            refused.append(target)
+            return dst
+        return shutil.copy2(  # lint-tree-read-follows-link: ok — destination screened above, source screened by `refuse_non_artifacts`
+            src, dst, follow_symlinks=follow_symlinks)
+    return _copy
 
 
 def refuse_non_artifacts(refused: list[Path]):
