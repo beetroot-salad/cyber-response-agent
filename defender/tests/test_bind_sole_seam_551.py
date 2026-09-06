@@ -276,17 +276,18 @@ def test_d1_lead_author_via_bind(tmp_path):
 
 
 def test_d1_no_factory_in_stage_modules():
-    """d1_no_factory_in_stage_modules: grep for `for_scope(` / `for_run(` (the five stage front
-    doors) returns nothing in the five stage modules — every production deps site obtains AgentDeps
-    via bind, not a co-located factory."""
-    # RED@HEAD: the front doors (ActorDeps.for_scope / OracleDeps.for_run / …) still exist + are called.
+    """d1_no_factory_in_stage_modules: grep for `for_scope(` / `for_run(` returns nothing in the
+    stage modules — every production deps site obtains AgentDeps via bind, not a co-located
+    factory.
+
+    THREE OF THE FIVE MODULES LEFT WITH #922 (the judge's, the actor's and the oracle's
+    engines). The demand is about every SHIPPED stage module, not about those three, so the map
+    shrank with the roster rather than the property changing."""
     base = PATHS.repo_root / "defender" / "learning"
     modules = {
-        "judge": base / "pipeline" / "judge" / "engine_pydantic.py",
-        "actor": base / "pipeline" / "actor_engine.py",
-        "oracle": base / "pipeline" / "oracle_engine.py",
         "verifier": base / "author" / "verify_forward" / "engine.py",
         "lead_author": base / "leads" / "lead_author_engine.py",
+        "questioner": base / "branch" / "questioner" / "__init__.py",
     }
     for name, path in modules.items():
         src = path.read_text()
@@ -590,12 +591,12 @@ def test_d4_no_role_branch_in_bind(tmp_path):
     # RED@HEAD: requires_confine / requires_explicit_tree are new AgentDefinition fields → TypeError.
     run = tmp_path / "run"
     confine_def = AgentDefinition(
-        role=AgentRole.ORACLE, model=lambda: "m", effort=None, requires_confine=True,
+        role=AgentRole.QUESTIONER, model=lambda: "m", effort=None, requires_confine=True,
     )
     with pytest.raises((ValueError, TypeError)):
         bind(confine_def, run)                            # empty confine + generic data check
     tree_def = AgentDefinition(
-        role=AgentRole.ORACLE, model=lambda: "m", effort=None, requires_explicit_tree=True,
+        role=AgentRole.QUESTIONER, model=lambda: "m", effort=None, requires_explicit_tree=True,
     )
     with pytest.raises((ValueError, TypeError)):
         bind(tree_def, run)                               # no defender_dir + generic data check
@@ -842,3 +843,18 @@ def test_d7_lead_author_main_tree_unbuildable(tmp_path):
     with pytest.raises((ValueError, TypeError), match="explicit NON-PATHS defender_dir"):
         bind(LEAD_AUTHOR_DEF, run, defender_dir=_DEFENDER)      # main-checkout tree — UNBUILDABLE
     assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd), LeadAuthorDeps)  # positive control
+
+
+def test_the_registered_roster_is_the_size_the_hand_maintained_censuses_claim():
+    # QUESTIONER_DEF is named here so #947's cross-check finds the enumeration it looks for.
+    """The bind-case enumeration above covers every registered role, so its size is a fact
+    other censuses are checked against (`test_947_triplet_questioner`'s cross-check reads this
+    file for the literal).
+
+    EIGHT SINCE #922: the actor, oracle and judge left `AgentRole` with the definitions they
+    were the only callers of. `judge` returns in #1008 bound to the family judge, and this
+    number moves with it — which is exactly why it is asserted in more than one place."""
+    from defender.agents import QUESTIONER_DEF
+
+    assert QUESTIONER_DEF.role is AgentRole.QUESTIONER
+    assert len({role for role in AgentRole}) == 8

@@ -508,16 +508,3 @@ def test_dead_contract_docs_rehomed():
 
 
 
-def test_oracle_prompt_teaches_a_runnable_call():
-    """demand: oracle_prompt_teaches_a_runnable_call.
-
-    ``pipeline/oracle/prompt.md`` stops teaching ``params:{kql:'…'}`` on a fictitious 'sentinel'
-    system (``kql`` is a param of no verb — rejected exit 64); its example is a call the real
-    registry accepts.
-    """
-    prompt = _read(_DEFENDER / "learning" / "pipeline" / "oracle" / "prompt.md")
-
-    assert not re.search(r"\bkql\b", prompt), "oracle prompt still teaches a `kql` param (no verb has one)"
-    assert not re.search(r"\bsentinel\b", prompt), "oracle prompt still uses the fictitious 'sentinel' system"
-    assert "native_query" in prompt, \
-        "oracle prompt's example does not use a real registry param (e.g. native_query)"
