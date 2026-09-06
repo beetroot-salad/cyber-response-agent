@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -78,68 +76,3 @@ def strip_yaml_preamble(text: str) -> str:
 
 def normalize_judge_yaml(text: str) -> str:
     return strip_yaml_preamble(strip_yaml_fence(text))
-
-
-
-
-
-
-
-
-
-
-
-
-class _NoAliasOracleDumper(yaml.SafeDumper):
-
-    def ignore_aliases(self, data: Any) -> bool:
-        return True
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-@dataclass(frozen=True)
-class Verdict:
-    """One judge verdict, reduced to the fields a comparison can be made on.
-
-    Kept here rather than in an eval harness: the two production-judge suites
-    (`test_judge_pydantic_engine.py`, `test_judge_yaml_preamble.py`) assert on it as the
-    end-to-end shape a raw model return normalizes into.
-    """
-
-    case_id: str
-    direction: str
-    outcome: str | None
-    finding_keys: frozenset
-    parsed_ok: bool
-
-

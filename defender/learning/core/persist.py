@@ -59,15 +59,6 @@ def queue_lock(lock_path: Path, *, timeout_seconds: int | None = None):
 _flock = queue_lock
 
 
-def _load_jsonl_ids(path: Path, key: str) -> set[str]:
-    ids: set[str] = set()
-    for obj in read_jsonl_rows(path):
-        v = obj.get(key)
-        if isinstance(v, str):
-            ids.add(v)
-    return ids
-
-
 def _rewrite_queue(
     pending_file: Path,
     consumed_file: Path,

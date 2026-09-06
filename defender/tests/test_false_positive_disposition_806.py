@@ -302,7 +302,7 @@ def test_benigns_price_is_collected_at_the_close_too(tmp_path):
     over a log whose slots are still `??`, then pass `benign` to `close_investigation`.
 
     Worse than the FP bypass in one respect: the `??` slots stay on disk, so only `report.md`
-    disagrees with them, and `report.md` is what the learning loop reads — `directions_for`
+    disagrees with them, and `report.md` is what the learning loop reads — the direction router
     picks the FN-hunt leg alone for `benign` where the honest `inconclusive` picks both, and
     the case enters the corpus resolved.
 

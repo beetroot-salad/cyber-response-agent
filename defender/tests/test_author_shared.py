@@ -10,7 +10,7 @@ The git layer takes the repo root as a parameter, so every test **injects** a
 tmp repo directly — no monkeypatching of module globals (that was the smell the
 #330 consolidation removed). The per-direction provenance round-trip (the actor
 ``Actor-Model:`` trailer the generation counter greps) and the full
-``run_batch`` envelope live in ``test_author_actor.py`` /
+``run_batch`` envelope live in the per-direction author suites /
 ``test_author_postflight.py``, which drive the adapters end-to-end.
 """
 from __future__ import annotations

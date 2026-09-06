@@ -131,7 +131,9 @@ def test_791_the_project_profile_census_drops_the_retired_writer(tmp_path):
     substring; it freezes no prose.
 
     The positive control is the rest of the census: the row this change deletes goes, the
-    writers it does not touch stay, so a census emptied into green fails here."""
+    writers it does not touch stay, so a census emptied into green fails here. The control was
+    the pipeline judge's per-lead writer until #922 deleted that judge — and with it the whole
+    `learning_run_dir` census — so it now names a writer outside the learning tree entirely."""
     profile = json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))
     resources = profile["specGraph"]["resources"]
     census = json.dumps(resources)
@@ -145,7 +147,6 @@ def test_791_the_project_profile_census_drops_the_retired_writer(tmp_path):
         f"the census carries only {len(survivors)} writers — it was emptied rather than "
         "corrected, and the absence above means nothing"
     )
-    assert any("write_comparison_files" in w for w in survivors), (
-        "the judge's own per-lead writer left the census with the retired one; this change "
-        "does not touch it"
+    assert any("write_trace" in w for w in survivors), (
+        "the wire log's own writer left the census; neither this change nor #922 touches it"
     )

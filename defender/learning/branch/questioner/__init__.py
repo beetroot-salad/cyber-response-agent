@@ -5,8 +5,8 @@ then run from that point. This module owns the authoring half — the three mode
 the captured past into a `family.yaml` the launcher validates, stages and runs. It owns nothing
 else: it opens no cluster, spawns no process and writes no manifest.
 
-WHY THE ROLE GRANTS NOTHING. `QUESTIONER_DEF` is modelled on `ORACLE_DEF`
-(`learning/pipeline/oracle_engine.py`): `tools=ToolSet()`, no `bash_shapes`, no `write_shapes`,
+WHY THE ROLE GRANTS NOTHING. `QUESTIONER_DEF` was modelled on the retired oracle's definition:
+`tools=ToolSet()`, no `bash_shapes`, no `write_shapes`,
 no `verb_grant`. Every one of those is an OMISSION rather than an empty grant line, and that is
 deliberate — `AgentDefinition`'s defaults are deny-all, so a questioner that could reach
 anything would have to have a grant ADDED to it in this file, in a diff, where a reviewer sees

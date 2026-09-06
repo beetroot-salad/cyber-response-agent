@@ -119,7 +119,7 @@ def test_a_long_payload_is_truncated_and_says_so():
 
 
 def test_an_unrecorded_payload_is_flagged_rather_than_rendered_as_empty(tmp_path):
-    """`build_case.py` copies raw payloads verbatim, so a zero-byte file is a capture
+    """The case assembler copied raw payloads verbatim, so a zero-byte file is a capture
     that never happened — 12 are in the tree. Rendering it as an empty result set would
     ask the judge to infer absence from a missing measurement."""
     empty = tmp_path / "0.json"

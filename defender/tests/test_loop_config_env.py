@@ -67,8 +67,8 @@ def test_no_module_level_env_read_in_loop_config():
 @pytest.mark.parametrize(
     ("accessor", "var", "raw", "expected"),
     [
-        ("actor_model", "ACTOR_MODEL", "kimi-k2.6", "kimi-k2.6"),
-        ("oracle_model", "ORACLE_MODEL", "deepseek-v4", "deepseek-v4"),
+        ("judge_model", "JUDGE_MODEL", "kimi-k2.6", "kimi-k2.6"),
+        ("verifier_model", "LEARNING_VERIFIER_MODEL", "deepseek-v4", "deepseek-v4"),
         ("judge_effort", "JUDGE_EFFORT", "high", "high"),
         ("verifier_timeout", "LEARNING_VERIFIER_TIMEOUT_SECONDS", "42", 42),
         ("author_max_attempts", "LEARNING_AUTHOR_MAX_ATTEMPTS", "10", 10),
@@ -88,9 +88,9 @@ def test_accessor_returns_the_default_when_unset(monkeypatch):
     """The other half of the contract: the default is the accessor's, not a stale read of
     whatever the environment held when the module first loaded."""
     monkeypatch.delenv("LEARNING_AUTHOR_MAX_ATTEMPTS", raising=False)
-    monkeypatch.delenv("ACTOR_MODEL", raising=False)
+    monkeypatch.delenv("LEARNING_VERIFIER_MODEL", raising=False)
     assert config.author_max_attempts() == 3
-    assert config.actor_model() == "glm-5.2"
+    assert config.verifier_model() == "glm-5.2"
 
 
 # #713 — the grouping objects must not re-freeze what #717 unfroze
@@ -105,21 +105,19 @@ _STAGE_MODULES = (
 
 # Every module that CONSTRUCTS a wiring or a context — the engines above plus the spawn
 # boundaries, which is where the env-backed knobs are actually read. The freeze guard has to
-# span all of them: `malicious_actor/run.py` builds `StageWiring(ACTOR_PROMPT, actor_model(),
-# ...)` a few lines under a block of module constants, and hoisting it there would freeze
-# ACTOR_MODEL at import exactly as surely as doing it inside an engine.
+# span all of them, engine or not: a spawn boundary that builds its `StageWiring` a few lines
+# under a block of module constants is one hoist away from freezing that stage's model at
+# import, exactly as surely as doing it inside an engine.
 _WIRING_SITES = _STAGE_MODULES + (
     "learning/leads/_lead_spine.py",
     "learning/author/curator.py",
     "learning/author/lessons/run.py",
 )
 
-# `directions.py` snapshots these two deliberately and says so at its line 28: an A/B run
-# pins the judge model for the whole process. They are the ONLY grandfathered pair; anything
-# else built at import time is the #717 regression coming back through the new objects.
-_GRANDFATHERED = {"ADVERSARIAL_WIRING", "BENIGN_WIRING"}
-
-_GROUPING_TYPES = {"StageWiring", "StageContext", "JudgeWiring"}
+# There is no longer any exemption. Two module-level judge wirings used to hold one — an A/B
+# run pinned the judge model for the whole process — and #922 retired both with the direction
+# table. Anything built at import time now is the #717 regression coming back.
+_GROUPING_TYPES = {"StageWiring", "StageContext"}
 
 
 def _defender_root() -> Path:
@@ -143,10 +141,9 @@ def _constructs_a_grouping_object(node: ast.AST) -> bool:
 def _targets(node: ast.Assign | ast.AnnAssign) -> list[str]:
     """Every bare NAME bound by this assignment, including through tuple/list unpacking.
 
-    Walking the targets (rather than reading `.id` off the top level only) matters for the
-    exemption below: a target list that yields NO names must not be treated as 'all of its
-    names are grandfathered'. `A, B = StageWiring(...), StageWiring(...)` binds a Tuple, and
-    a top-level-only reader returns `[]` for it."""
+    Walking the targets (rather than reading `.id` off the top level only) is what makes the
+    failure report name the offender: `A, B = StageWiring(...), StageWiring(...)` binds a
+    Tuple, and a top-level-only reader returns `[]` for it."""
     targets = [node.target] if isinstance(node, ast.AnnAssign) else list(node.targets)
     return [
         sub.id
@@ -174,11 +171,6 @@ def test_no_module_level_stage_wiring_or_context(rel):
         if node.value is None or not _constructs_a_grouping_object(node.value):
             continue
         names = _targets(node)
-        # `names and ...` on purpose: an EMPTY name set is vacuously a subset of the
-        # grandfathered pair, so an assignment to something that is not a bare name
-        # (`obj.attr = ...`, `d["k"] = ...`) would otherwise exempt itself.
-        if names and set(names) <= _GRANDFATHERED:
-            continue
         frozen.append(f"{rel}:{node.lineno}: {', '.join(names) or ast.unparse(node)}")
     assert not frozen, (
         "a stage wiring/context is constructed at MODULE level:\n  "

@@ -130,7 +130,7 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
 
     THIS TEST OBSERVES A TRIP (blind reader R3): it is cited by name as the positive
     control for test_flag_off_leaves_run_unenforced and
-    test_learning_stages_are_accounting_only, so it must exercise the mechanism, not
+    the accounting-only property for the learning stages, so it must exercise the mechanism, not
     merely finish. It drives the SAME two-bash-then-text script under the SAME injected
     caps those two tests use, and asserts a refusal was delivered — proving enforcement
     fired here, which is exactly the difference the controlled tests observe the

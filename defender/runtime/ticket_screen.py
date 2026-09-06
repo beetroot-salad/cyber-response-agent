@@ -1,7 +1,7 @@
 """The shared ticket answer-key screen — one protocol, two consumers.
 
 Gather (``runtime/query_tool.py``) and the benign judge
-(``learning/pipeline/judge/closed_ticket_tool.py``) both read the ticket store, and both must
+(the retired pipeline judge's closed-ticket tool) both read the ticket store, and both must
 withhold the case they are themselves working on. The *protocol* is identical across the two:
 the same envelope-shape checks, the same ``(payload, exit_code, detail)`` return contract, and
 the same split between a policy withhold (a BUSINESS refusal, which never feeds the circuit

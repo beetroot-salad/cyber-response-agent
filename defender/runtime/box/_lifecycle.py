@@ -228,9 +228,9 @@ def _start_boxed_request(
     except BoxFault as e:
         # `_start_boxed`'s reason, on the request lane's own geography — with the caveat that
         # geography makes: `_did_not_run_for_request` writes one verdict per WRITABLE mount,
-        # and `run_cycle._run_cycle_box_request` composes every mount `writable=False`. So on
-        # the RUN-CYCLE lane — the one caller that reuses a name, and therefore the one this
-        # arm exists for — this writes NOTHING. That is `stop_and_scrub`'s rule holding, not
+        # and the retired run-cycle lane composed every mount `writable=False`. So on that
+        # lane — the one caller that reused a name, and therefore the one this arm was added
+        # for — this wrote NOTHING. That is `stop_and_scrub`'s rule holding, not
         # an omission (a tree the box could not write needs no verdict about what it wrote),
         # but it means the §7 D2 cover the sibling arm gets is not cover this lane gets.
         _did_not_run_for_request(request, f"box start refused before create: {e}")
@@ -388,8 +388,8 @@ def stop_and_scrub(
 ) -> None:
     """Reap a boxed run: tear the box down, then walk the tree it could write.
 
-    Both writable lanes call it. `run_cycle` does not, correctly: all of its mounts are
-    read-only, so it has no tree to walk. Call it from a `finally`, with `in_flight` saying
+    Both writable lanes call it. The retired read-only lane did not, correctly: all of its
+    mounts were read-only, so it had no tree to walk. Call it from a `finally`, with `in_flight` saying
     whether an exception is already propagating. Three rules, and their ordering is the point:
 
     - **The scrub runs only once the box is provably dead.** "No live writer" is the scrub's

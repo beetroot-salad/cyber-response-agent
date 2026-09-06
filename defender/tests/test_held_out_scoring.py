@@ -148,7 +148,7 @@ def test_un_run_fixtures_are_surfaced_not_scored(tmp_path: Path):
 
 
 def test_divergent_fixture_set_warns_that_it_was_never_netted(tmp_path: Path, capsys):
-    """`enqueue_learning` refuses exactly one directory. Scoring a different set means
+    """The retired learning-queue write refused exactly one directory. Scoring a different set means
     those runs were never refused, so the number may already be contaminated."""
     assert warn_if_outside_the_net(tmp_path) is True
     assert "NOT held out of learning" in capsys.readouterr().err

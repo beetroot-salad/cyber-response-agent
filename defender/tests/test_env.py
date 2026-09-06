@@ -125,7 +125,7 @@ def test_parse_iso_utc_accepts_the_trailing_z():
 
 
 def test_parse_iso_utc_reads_a_naive_value_as_utc_rather_than_rejecting_it():
-    """The judge's recency screen rests on this. `closed_ticket_tool._predates_case` asks
+    """The judge's recency screen rested on this. The retired closed-ticket tool asked
     "is every word of this record provably older than the case?", and the stores mint
     `datetime.now(utc)` — but a hand-written seed file may omit the offset. Treating that as
     unparseable would drop legitimate precedent over a formatting detail.

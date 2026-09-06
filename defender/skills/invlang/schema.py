@@ -352,7 +352,7 @@ class Conclude(TypedDict, total=False):
     # What the DETECTOR got wrong, kept out of `summary` on purpose: a run can find two
     # independent things (the alert's claim does not hold; the host is compromised anyway) and
     # `disposition` has room for one. Free text, ONE line like every other row here. It reaches
-    # the judge because `render_synthesis` dumps this whole dict; deliberately NOT mirrored into
+    # a reader because a synthesis render dumps this whole dict; deliberately NOT mirrored into
     # `report.md`, which is host-rendered from typed values and carries no model prose.
     detection_notes: str | None
     # The checks the run could NOT make — one entry per gap, which is why it is a list where its

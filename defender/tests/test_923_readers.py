@@ -80,26 +80,6 @@ def _prose_files() -> list[Path]:
 
 # --- the unmoved consumers of the vocabulary ------------------------------------------------
 
-def _run_cycle_selects_no_direction(_tmp_path: Path) -> None:
-    """Asserted as the WHOLE routing table rather than as one empty list: the router returns an
-    empty list for any unrecognized string, so `== []` for one member is true on a build where
-    nothing moved. The table fails if the new member routes anywhere, and it also fails if an
-    existing member's routing shifted while the vocabulary grew."""
-    from defender._vocab import DISPOSITION_ENUM
-    from defender.learning.core.run_cycle import _directions_for
-
-    routing = {member: sorted(_directions_for(member)) for member in sorted(DISPOSITION_ENUM)}
-    assert routing == {
-        "benign": ["adversarial"],
-        "false-positive": [],
-        GAP_MEMBER: ["adversarial", "benign"],
-        "malicious": ["benign"],
-        MEMBER: [],
-    }, routing
-
-
-
-
 def _lessons_run_has_no_confident_ground_truth(_tmp_path: Path) -> None:
     """Asserted as the reader's answer for EVERY member including the new one, in both
     directions — not as the set of members it says yes to.
@@ -124,18 +104,6 @@ def _lessons_run_has_no_confident_ground_truth(_tmp_path: Path) -> None:
                         "false-positive": False, "malicious": False},
     }
     assert confident == expected, confident
-
-
-def _visualize_judge_selects_no_direction_view(_tmp_path: Path) -> None:
-    from defender.scripts.visualize.visualize_judge import VIEWS, active_views
-
-    assert active_views("run-923", MEMBER) == (), (
-        "the judge page renders direction sections for a run that trained nothing"
-    )
-    assert active_views("run-923", "not-a-disposition") == VIEWS, (
-        "the unreadable-headline fallback moved — an out-of-enum value must still show "
-        "everything, and the new member must not be taking that branch"
-    )
 
 
 def _invlang_queries_finds_the_case(_tmp_path: Path) -> None:
@@ -311,9 +279,7 @@ def _no_roster_states_a_stale_price_count(_tmp_path: Path) -> None:
 
 _READERS = {
     # the vocabulary's unmoved consumers
-    "run_cycle": _run_cycle_selects_no_direction,
     "lessons_run": _lessons_run_has_no_confident_ground_truth,
-    "visualize_judge": _visualize_judge_selects_no_direction_view,
     "invlang_queries": _invlang_queries_finds_the_case,
     "invlang_cli": _invlang_cli_accepts_it_as_a_filter,
     "ticket_lane->disposition": _ticket_lane_refuses_it_as_an_authored_resolution,

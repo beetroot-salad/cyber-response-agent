@@ -2,9 +2,9 @@
 grounding, and one write per (world, draw) (#921 M2, D2, D3, D4, O1, O8, O9).
 
 D2 — the judge runs under `AgentRole.QUESTIONER`'s existing definition, with `agent_id`
-prefix `"judge:"`. `AgentRole.JUDGE` is already bound to the old pipeline's `JUDGE_DEF`, and the
-registry admits one definition per key (`agent_definition.build_registry`), so a second
-definition cannot register beside it until #922 frees the key.
+prefix `"judge:"`. `AgentRole.JUDGE` was bound to the old pipeline's judge, and the registry
+admits one definition per key (`agent_definition.build_registry`), so a second definition could
+not register beside it. #922 has since freed the key; #1008 is where this role claims it.
 
 Model and effort come from `learning.core.config.judge_model()`/`judge_effort()` — read at call
 time in `learning/judge/__init__.py` and threaded into the `StageWiring` the orchestration
@@ -343,7 +343,7 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         "root_cause, anchor, topic, evidence, discriminator_related).\n\n"
         # THE SHAPE OF `evidence`, stated. The field list above names it and stops, so a model
         # that reads "evidence" writes the English sense of the word — a sentence quoting what
-        # it saw. `_validate_finding` requires a LIST and refuses the reply outright, which
+        # it saw. The reply validator requires a LIST and refuses the reply outright, which
         # counts a malformed reply, deletes the draw and grades the world on nothing; and a
         # list of prose would then have been dropped one step later by `_draw_document`, which
         # discards any finding whose pointers all fail to resolve. Both failures are silent

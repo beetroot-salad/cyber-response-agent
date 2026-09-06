@@ -76,8 +76,8 @@ class AdapterArgumentParser(argparse.ArgumentParser):
     automatically (``parser_class=type(self)``), so subcommand usage errors and explicit
     ``parser.error(...)`` calls exit 64 too.
 
-    Only `ticket_cli` still has a CLI; its two subprocess callers (``ticket_seeds``,
-    ``verify_forward``) pin these exit codes.
+    Only `ticket_cli` still has a CLI; its one remaining subprocess caller
+    (``verify_forward``) pins these exit codes.
     """
 
     def error(self, message: str):  # noqa: D102 — overrides argparse's exit(2)

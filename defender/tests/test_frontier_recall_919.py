@@ -20,7 +20,7 @@ What ships:
 
 The load-bearing inversion is in the class match: a selector slot matches when it is `*`, when
 it EQUALS the case slot, or when the CASE slot is unresolved. An open slot is a HIT, not a
-miss — the ordinary `_class_match` reading (`lessons_env_retrieve.py`) is exactly backwards for
+miss — the ordinary class-match reading (the retired environment retriever's) is exactly backwards for
 a retrieval whose whole subject is what is not known yet.
 
 Deliberately out of scope: the PLAN-time signature retrieval is not removed here (the two
@@ -271,7 +271,7 @@ def _contract_tuples(text: str) -> list[tuple]:
 
 def _lessons_frontier():
     """The retrieval script as a module. Imported rather than path-loaded: it is a real
-    module under `defender.scripts.lessons`, the way `lessons_env_retrieve` is, and nothing
+    module under `defender.scripts.lessons`, the way its retired sibling was, and nothing
     here rebinds a module constant (the `--corpus` seam is what a fixture corpus goes
     through)."""
     from defender.scripts.lessons import lessons_frontier

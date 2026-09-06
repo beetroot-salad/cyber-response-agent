@@ -32,12 +32,13 @@ from pathlib import Path
 #: so the mirror held too: an injected subagent could read MAIN's whole transcript.
 #:
 #: THE SUBDIRECTORY ARGUMENT DOES NOT GENERALIZE PAST THOSE TWO ROLES. The JUDGE's `cat` scope
-#: is `under(run, TREE)` (`judge/engine_pydantic._judge_bash_shapes`) — multi-segment, so a
+#: was `under(run, TREE)` (the old pipeline judge's `cat` shapes) — multi-segment, so a
 #: subdirectory hides nothing from it — and the ACTOR carries no `cat` grant, so
 #: `read_allow_of` yields an EMPTY shape tuple and `decide_read` applies no shape filter at
 #: all, leaving it gated by root containment alone. Those two share the LEARNING run dir,
 #: where the same defect lived: the judge's trace carries its prompt's payload exemplars
-#: UNREDACTED (`judge/compare.unredacted_exemplar`) and the gray-box actor could read them
+#: UNREDACTED (that judge's prompt exemplars carried real values) and the gray-box actor
+#: could read them
 #: back, around the `gather_raw` deny.
 #:
 #: Which is why the component ALSO carries an outright deny (`permission.files.names_wire_log_dir`,
@@ -189,7 +190,7 @@ _PAYLOAD_SHAPES = (
 
 #: The case's ANSWER KEY: the finished investigation's own reasoning, its disposition, and the
 #: query record behind them. Named as a set because the learning loop STAGES all four into
-#: `<learning_run_dir>/` (`learning.core.persist._copy_shared_inputs`,
+#: `<learning_run_dir>/` (the retired per-case cycle's input staging, and
 #: `lead_repository.stage_tables`) — and that dir IS the gray-box actor's own run root, whose
 #: whole purpose is to withhold them. `alert.json` is deliberately NOT here: it is the case
 #: INPUT, handed to the actor in its own user message, so denying it would withhold nothing.

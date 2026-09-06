@@ -15,8 +15,17 @@ case whose every lead investigates a host the activity never ran on.
   alert      the rule's own alert if one fired, else synthesised from the runner record
   envelope   defender/run.py <alert.json> --run-id <slug> --no-learn
   story      story_from_run.py <meta.json> <story.md>
-  assemble   build_case.py <run_dir> <story.md> <controls.yaml> cases/<id>
+  assemble   RETIRED — see the refusal in `main`
   controls   controls.py cases/<id>
+
+**RECRUITMENT IS OFF (#922).** The assembler this drove — the step that turned a finished
+run dir plus a story into a `cases/<id>` tree — was the retired oracle's, and it went with
+the oracle. Every step before it still works and every reader of the EXISTING cases still
+works (`controls.py`, `score.py`, `report.py`, `validate_cases.py`); what has no
+implementation is the one in the middle. So this refuses up front rather than firing a
+scenario against the live stack and failing after the expensive part. Restoring it means
+naming the estate replay harness that replaces the oracle path — the same successor
+`validate_cases.py` names where its replay-boundary check used to be.
 
 Two properties the hand path could not guarantee, and this one gets for free:
 
@@ -416,7 +425,37 @@ def build_parser() -> argparse.ArgumentParser:  # lint-dup: ok — argparse only
     return p
 
 
+def _assemble(run_dir: Path, story: Path, controls_yaml: Path, case_dir: Path) -> None:
+    """The step with no implementation. Kept as a named hole rather than an inline `raise`,
+    so the shape the successor has to fill is still written down: a finished run dir, the
+    story rendered from its runner record, and the controls provenance, in, one `cases/<id>`
+    tree out. `main` refuses long before reaching it."""
+    raise SystemExit(
+        "generate_case.py: the case assembler retired with the oracle in #922 "
+        f"(wanted: {run_dir}, {story}, {controls_yaml} -> {case_dir})")
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Parse, then refuse — BEFORE the stack is touched.
+
+    The assemble step is gone (see the module docstring), so every minute `_recruit` would
+    spend firing a scenario, waiting on an alert and running a full investigation buys a run
+    dir nothing can turn into a case. Argument validation still runs, so `--help` and a
+    malformed invocation answer as they always did.
+
+    `_recruit` is kept, uncalled, rather than deleted: it is the executable record of how the
+    committed cases were recruited, and the successor harness has the same five steps to make.
+    """
+    build_parser().parse_args(argv)
+    print("!! generate_case.py cannot assemble a case: the assembler retired with the "
+          "oracle in #922. The steps it drove are listed in this file's docstring; the "
+          "existing cases under cases/ are still readable and scorable.", file=sys.stderr)
+    return 2
+
+
+def _recruit(argv: list[str] | None = None) -> int:
+    """The recruitment run, kept as the record of how the committed cases were made. Uncalled
+    since #922 deleted the assembler it reaches at `_assemble`."""
     ns = build_parser().parse_args(argv)
 
     # A local scenario retargets on --source. Default its story/alert target to the
@@ -468,7 +507,7 @@ def main(argv: list[str] | None = None) -> int:
     _run([sys.executable, HERE / "story_from_run.py", run_record / "meta.json", story],
          timeout=120, label="story")
 
-    # build_case.py wants a controls.yaml verbatim; the real, per-query controls are
+    # The assembler wanted a controls.yaml verbatim; the real, per-query controls are
     # measured by controls.py below. This records the provenance of that measurement
     # rather than pretending to be a hand-measured baseline.
     controls_yaml = work / "controls.yaml"
@@ -482,8 +521,7 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8")
 
     run_dir = investigate(alert, f"golden-{ns.case_id}")
-    _run([sys.executable, HERE / "build_case.py", run_dir, story, controls_yaml, case_dir],
-         timeout=600, label="assemble")
+    _assemble(run_dir, story, controls_yaml, case_dir)
 
     write_environment(case_dir / "environment.yaml", ns.capture_environment)
     write_manifest(case_dir / "manifest.yaml", case_id=ns.case_id, split=ns.split,
@@ -497,7 +535,7 @@ def main(argv: list[str] | None = None) -> int:
     _run(controls_cmd, timeout=3600, label="controls")
 
     print(f"\ngenerated {case_dir}")
-    print("  next: replay.py to project, then score.py to grade")
+    print("  next: project the case, then score.py to grade")
     return 0
 
 

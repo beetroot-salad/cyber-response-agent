@@ -282,7 +282,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
     """`render_and_mirror` writes `transcript.html` and `runtime.html` with a truncating
     write under ONE `run_id`, and it has two drivers: `run_common.visualize()`'s subprocess
-    and `orchestrate._render_transcript`'s in-process call. Driven in turn over one run dir,
+    and the in-process transcript render. Driven in turn over one run dir,
     the second render does not silently replace the first's pages with emptier ones — both
     pages still carry the run's own event content after each driver has run, and the two
     drivers agree on how many assistant events the page shows.
@@ -307,7 +307,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
         return {name: (run_dir / name).read_text()
                 for name in ("transcript.html", "runtime.html")}
 
-    # driver A — the in-process call `_render_transcript` makes
+    # driver A — the in-process transcript render
     visualize_run.render_and_mirror(run_dir)
     after_a = pages()
     for name, page in after_a.items():

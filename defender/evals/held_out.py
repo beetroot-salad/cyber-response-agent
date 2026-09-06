@@ -16,8 +16,8 @@ Launch the runs this scores with (see ``index_runs``)::
     python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \\
         --run-id <slug> --no-learn
 
-``--no-learn`` keeps a scored run out of the learning corpora; ``run_common
-.enqueue_learning`` independently refuses held-out fixtures as a fail-closed net.
+``--no-learn`` keeps a scored run out of the learning corpora. The second, independent net
+that refused held-out fixtures at the queue write left with the learn queue in #922.
 
 Failure accounting per design doc §Metrics: a run that fails to produce a
 parseable ``report.md`` (missing, frontmatter unparseable, disposition not

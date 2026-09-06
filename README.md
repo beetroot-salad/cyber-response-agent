@@ -53,49 +53,57 @@ Both lenses are **blind**: they read the investigation's observations (`:V`/`:E`
 
 ## Learning Loop
 
-The learning loop runs off-process: after the runtime loop exits, `run.py` drops a learn-queue marker (skip with `--no-learn`), and a worker drains the queue via `defender/learning/loop.py --learn-drain`. The disposition routes each run into one or both counterfactual directions — hexagons are in-process LLM stages (PydanticAI), rectangles are deterministic code:
+The learning loop runs off-process. A finished investigation contributes to it in two ways,
+and neither happens on the run's own critical path: `run.py` queues a curation request for the
+lead author (skip with `--no-learn`), and the run can later be FORKED into a branched episode
+that grades what a different decision would have produced. Two drains, each one drainer at a
+time, turn those into committed knowledge — hexagons are in-process LLM stages (PydanticAI),
+rectangles are deterministic code:
 
 ```mermaid
 flowchart TD
-    R([run_one]) --> LA[lead author · always-on]
-    R --> D{disposition?}
-    LA --> E
-    D -->|benign| ADV
-    D -->|inconclusive| ADV
-    D -->|inconclusive| BEN
-    D -->|malicious| BEN
+    R([defender/run.py]) --> Q[curation request]
+    R --> EP[["branch/cli.py — fork the run at a chosen message"]]
 
-    subgraph ADV [adversarial direction]
+    subgraph FAM [branched episode]
       direction TB
-      A1{{"actor — pass a malicious op off as benign"}}
-      A1 -->|skip| AX[no findings]
-      A1 -->|story| AO{{"oracle — story → per-lead telemetry"}}
-      AO --> AJ{{"judge — caught / survived"}}
-      AJ --> APP[persist + queue findings]
+      W{{"worlds — re-run the case from the fork, one per axis value"}}
+      W --> J{{"family judge — did the decision hold across the family?"}}
+      J --> APP[queue findings]
     end
 
-    subgraph BEN [benign direction]
-      direction TB
-      B1{{"actor_benign — reconstruct the authorized routine op"}}
-      B1 -->|skip| BX[no findings]
-      B1 -->|story| BO{{"oracle — story → per-lead telemetry"}}
-      BO --> BJ{{"judge_benign — false positive?"}}
-      BJ --> BPP[persist + queue findings]
-    end
-
-    ADV --> T{pending ≥ threshold?}
-    BEN --> T
+    EP --> FAM
+    APP --> T{pending ≥ threshold?}
     T -->|no| E([end])
-    T -->|yes| CUR["curators — author ×3<br/>fold findings into lessons"]
+    T -->|yes| CUR{{"lessons curator — fold findings into lessons"}}
     CUR --> L[(defender/lessons)]
     L -.->|read at PLAN| RT[runtime agent]
+
+    Q --> LA{{"lead author — the gather catalog + system skills"}}
+    LA --> CAT[(defender/skills)]
 ```
 
-The branch is the point: each disposition is probed with the opposite counterfactual. A `benign` verdict is tested adversarially (did the run miss a real attack?); a `malicious` verdict is tested with the benign actor (was it a false positive?); `inconclusive` runs both. Within a direction the oracle sits between actor and judge so the judge isn't grading its own imagination, and the actor can `skip` when it can't construct a coherent story. Curators fire once `_pending` reaches `LEARNING_AUTHOR_THRESHOLD` (default 5), folding queued findings into the lessons corpora and committing.
+The branch is the point: instead of imagining a counterfactual, the episode RE-RUNS the case
+from a real fork point and grades the family of outcomes against each other, so the judge is
+reading evidence a run actually produced. The lessons curator fires once `_pending` reaches
+`LEARNING_AUTHOR_THRESHOLD` (default 5), folds the queued findings into the corpus and opens a
+PR; the lead author drains its own queue on the same discipline.
 
-Lessons feed back in: at `PLAN` time the agent enumerates `defender/lessons/*.md` frontmatter and reads the bodies relevant to the current alert.
+`defender/learning/loop.py --author-drain` and `--lead-author-drain` are the two entry points.
 
-Design rationale lives in `defender/docs/` — start with `defender/docs/learning-loop.md` (the RL / evolutionary-algorithms framing the architecture borrows from). When a doc and the code disagree, the code wins.
+Lessons feed back in: at `PLAN` time the agent enumerates `defender/lessons/*.md` frontmatter
+and reads the bodies relevant to the current alert.
+
+**What left in #922.** A four-role pipeline (two actors, an oracle, a judge) used to run over
+each finished run, imagining the counterfactual rather than executing it: it authored a story,
+projected the telemetry that story would have produced, and graded itself against both. It is
+deleted, along with the learn queue, its drain, and the two sibling corpora it fed
+(`lessons-actor/`, `lessons-environment/`, whose authored lessons are left in place and read by
+nothing). Design docs under `defender/docs/` still describe it; when a doc and the code
+disagree, the code wins.
+
+Design rationale lives in `defender/docs/` — start with `defender/docs/learning-loop.md` (the
+RL / evolutionary-algorithms framing the architecture borrows from).
 
 ## Quick Start
 

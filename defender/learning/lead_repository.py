@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 import yaml
 
 from defender._io import (
-    TEXT_READ_ERRORS,
     read_guarded,
     read_jsonl_rows_report,
     read_text_utf8,
@@ -380,42 +379,6 @@ def corpus_samples(
                 capped = _capped_document(document)
                 samples[pattern] = capped if isinstance(capped, dict) else None
     return samples
-
-def first_rendered_payload(
-    lead: JoinedLead, render: Callable[[str], str], *, unreadable: str, missing: str
-) -> str:
-    """The first of `lead`'s by-ref payloads that `render` turns into real content.
-
-    The two stages that show a lead's raw events — the judge's evidence column
-    (`pipeline/judge/compare.real_sample_text`, values kept) and the oracle's schema skeleton
-    (`pipeline/oracle/sample.lead_sample_text`, values scrubbed) — differ ONLY in the renderer
-    and the two fallback strings, so the walk lives here, on the surface that owns
-    `QueryRow.raw_ref`.
-
-    `render` signals "nothing usable here" by returning a parenthesized string, its convention
-    for every empty case, and the walk keeps going. One unreadable payload likewise does not
-    blind the lead: a by-ref payload is bytes an adapter wrote, so neither its encoding nor its
-    readability is guaranteed, and raising took a whole stage down over one bad file.
-    `unreadable` is a template taking `{error}`, reported only when NO payload rendered.
-    """
-    failure: Exception | None = None
-    for q in lead.queries:
-        # `artifact_file`, not `is_file()`: this payload is rendered into the actor view, so a
-        # link planted at a by-ref name would put its TARGET's bytes there under the name of
-        # something an adapter wrote. Skipping is what an absent payload already gets.
-        if q.raw_ref is None or not artifact_file(q.raw_ref):
-            continue
-        try:
-            raw = read_text_utf8(q.raw_ref)
-        except TEXT_READ_ERRORS as e:
-            failure = e
-            continue
-        body = render(raw)
-        if not body.startswith("("):
-            return body
-    if failure is not None:
-        return unreadable.format(error=failure)
-    return missing
 
 
 def actor_view(run_dir: Path) -> dict:

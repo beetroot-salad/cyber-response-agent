@@ -661,7 +661,7 @@ def test_921_a_world_label_colliding_with_a_real_run_id_is_refused_at_manifest_l
 
     THE COLLISION IS THE ONE OUTCOME NOBODY WOULD CHOOSE. A family row carries
     `source_run_dir: episodes/<id>/worlds/<label>`, and its one existing consumer —
-    `verify_forward/env.py::case_entities_arg -> _run_paths.resolve_run_bundle`, also reached
+    the retired environment forward-check's own case-entities argument, also reached
     from `author/curator.py:184` — honours ONLY THE LAST PATH SEGMENT under the runs dir
     (`runs_dir / Path(source_run_dir).name`). A label spelled like a real run id therefore
     resolves to WRONG BUT REAL content instead of failing loudly, which the judge's own

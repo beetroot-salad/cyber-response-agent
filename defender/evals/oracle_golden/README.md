@@ -10,13 +10,21 @@ envelope, and the complete observed telemetry are all known.
 built when the learning loop substituted *actor story → oracle projection* for
 execution, which made oracle error a first-order source of false learning (a
 mis-projection can manufacture an apparent evasion or an apparent catch). #791
-and #792 took the oracle out of that loop: `run_cycle.run_direction` now drives
-the judge straight off the actor's story and the run's own executed evidence,
-and the oracle stage has no caller inside the learning cycle at all. What this
-suite measures is real and its discipline (the held-out ledger, the committed
+and #792 took the oracle out of that loop: the per-case cycle drove the judge
+straight off the actor's story and the run's own executed evidence, and the
+oracle stage had no caller inside the learning cycle at all. What this suite
+measures is real and its discipline (the held-out ledger, the committed
 calibration audits) is intact — but it calibrates a stage the loop no longer
-runs, so nothing downstream consumes the number today. Whether the suite is
-revived, archived, or retired is an open call; it is being kept, not defended.
+runs, so nothing downstream consumes the number today.
+
+**#922 then answered half the open call.** The learning pipeline the oracle
+belonged to is deleted, and with it this suite's two DRIVERS: the case assembler
+and the replay projector. Everything that READS an existing case still works —
+`controls.py`, `score.py`, `report.py`, `audit_judge.py`, `validate_cases.py` —
+and the committed cases and audits stand as the record. What cannot be done
+today is recruiting a NEW case or re-projecting an old one; `generate_case.py`
+refuses up front and says so. Passages below that name either driver are
+describing how the committed cases were produced, not a command you can run.
 
 Motivating probe + method write-up: `experiments/oracle-telemetry-fidelity/`
 (PR #707). This directory is the durable, reusable form of that probe.
@@ -57,8 +65,8 @@ case carries none, because inventing the answers is the thing the suite exists t
 
 Two details the layout does not show:
 
-- `leads.jsonl` stores `goal` for a human reader; `build_lead_user_prompt` does
-  **not** pass it to the oracle (prompt.md: "You are NOT given the defender's
+- `leads.jsonl` stores `goal` for a human reader; the oracle's lead-prompt builder did
+  **not** pass it to the model (prompt.md: "You are NOT given the defender's
   prose goal"). Only `what_to_summarize`, the queries, and the sample reach the
   model. Do not add it to a replay path — that would diverge from production.
 - A **zero-byte** `observed/<lead>/<seq>.json` is an **errored** query, not an
@@ -225,7 +233,7 @@ Orthogonal to case kind, and recorded per case in `manifest.yaml`:
 
 | `lead_source` | meaning |
 |---|---|
-| *(absent)* | the leads are a real `defender/run.py` gather, captured by `build_case.py` (case-001 only) |
+| *(absent)* | the leads are a real `defender/run.py` gather, captured by the assembler (case-001 only) |
 | `authored` | the lead envelopes were hand-written for a realistic investigation surface (case-002/003/004) |
 | `inherited from <case>` | a derived case reusing another case's envelopes byte-for-byte |
 
@@ -240,18 +248,13 @@ one.
 
 ## Tools
 
+The two commands that WROTE a case — the assembler that captured one from a defender run
+plus its story and controls, and the projector that re-ran the production oracle over an
+existing case's `oracle_visible/` — were deleted with the oracle in #922. The assembler's
+contract is recorded as a named hole in `generate_case.py`; the projector's is the seam
+described below. Everything that follows still runs against the committed cases.
+
 ```bash
-# Capture an observed case from a defender run + ground-truth story + controls.
-# The out dir's NAME is the case id — there is no separate id argument to drift
-# from it. Re-capturing clears oracle_visible/samples/ and hidden/observed/ so a
-# lead dropped since the last capture leaves no stale file behind; hand-authored
-# siblings (manifest.yaml, environment.yaml, projections/, scores/) are untouched.
-python3 defender/evals/oracle_golden/build_case.py \
-    <run_dir> <story.md> <controls.yaml> cases/<case_id>
-
-# Re-run the production oracle over a case (reads ONLY oracle_visible/):
-python3 defender/evals/oracle_golden/replay.py cases/<case_id> [--tag <model>_effort-<e>]
-
 # Score a projection. Writes cases/<case_id>/scores/<oracle-tag>__<judge-tag>.json.
 # Exits non-zero on a lead-set mismatch — a partial projection is not a result.
 # --dry-run runs the mechanical checks only and calls no model.
@@ -269,8 +272,8 @@ python3 defender/evals/oracle_golden/audit_judge.py --repeats 5 --out audits/<na
 python3 defender/evals/oracle_golden/record_held_out.py cases/<case_id> <tag>
 ```
 
-`replay.py` drives the exact production seam (`invoke_oracle_lead` →
-`_run_oracle_pydantic`), so a projection is production-identical; only its input
+The replay driver drove the exact production seam (the per-lead oracle invocation and
+its in-process stage), so a projection is production-identical; only its input
 source (the case's `oracle_visible/`) differs.
 
 **`score.py` is not deterministic, and that is the cost of this design.** The judge runs
@@ -301,7 +304,7 @@ explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
 
 ## Capturing a new observed case (needs the env)
 
-> **Only against `playground-v2`.** `build_case.py` performs no scrubbing: every
+> **Only against `playground-v2`.** The assembler performed no scrubbing: every
 > observed payload is committed verbatim under `hidden/`. That is correct for a
 > synthetic stack and only for one — never point the capture path at a run over
 > real telemetry.
@@ -321,7 +324,7 @@ explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
    where the stack was not running is **not** an empty baseline — the judge is required
    to abstain on it rather than read absence into it. Record counts per distinct ingest
    (see the re-ingest hazard above).
-6. `build_case.py` to assemble the case; write `manifest.yaml` (split, unit,
+6. the assembler (retired, #922) to build the case; write `manifest.yaml` (split, unit,
    `capture_environment`, `lead_source`) and `environment.yaml` from the capture. Do
    **not** author labels: the label pass measures `hidden/` at score time, and inventing
    the answers is the thing this redesign exists to avoid. `generate_case.py` does all
@@ -880,9 +883,9 @@ leak into captured telemetry. Both were confirmed on 2026-07-25.
 
 Every case's `samples/<lead>.txt` reads `(no schema sample available for this
 lead)`, and that is **production-faithful, not a gap in the cases**:
-`redact_exemplar` looks for a `### Raw Sample Events` markdown header, and
+The oracle's exemplar redactor looked for a `### Raw Sample Events` markdown header, and
 `query_tool.py` writes raw JSON payloads that never carry one, so
-`lead_sample_text` returns the placeholder for every lead of every playground-v2
+Its sample renderer returned the placeholder for every lead of every playground-v2
 run — confirmed in the #707 probe's own request trace. The seed README asked for
 "a doc-returning case" to exercise the channel; case-002 already is one
 (`KEEP … SORT`) and still has no exemplar. Exercising it needs a payload-format

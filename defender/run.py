@@ -334,7 +334,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     """Start the box, run the investigation inside it, and reap both on every exit.
 
     Sited one layer in from `main` so the lifecycle carries an injection seam a test can reach
-    (like `drains._run_worktree_batch`, `run_cycle.run_one`); `main` stays an argv entrypoint.
+    (like `drains._run_worktree_batch`); `main` stays an argv entrypoint.
 
     The exit half belongs to `box_mod.stop_and_scrub`, which owns the ordering, the
     only-scrub-a-provably-dead-box rule, and the exception preference for both writable lanes.

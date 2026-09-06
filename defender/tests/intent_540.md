@@ -100,7 +100,7 @@ try:
 finally:
     stop_box(box)                       # reap even on driver crash  (M5 — NO existing hook, see below)
 scrub(run_dir)                          # run.py:161-167, BEFORE sorted(run_dir.iterdir()) at :167
-sorted(run_dir.iterdir()) / cross_check_tables / enqueue_learning / visualize
+sorted(run_dir.iterdir()) / cross_check_tables / the learning-queue write / visualize
 ```
 
 **M1 — Box spawn + mount list.** One container per run, created at run setup: `run_dir` rw bind, `defender_dir` ro bind, `/tmp` tmpfs, rootfs ro, **nothing else mounted and no socket mounted inward**. *Discharges:* O1, O5, O6, O13. *Source:* `RSD §Filesystem isolation`, `§What it is now`; `issue-comment §3`.

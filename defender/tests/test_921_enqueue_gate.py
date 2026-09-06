@@ -400,8 +400,7 @@ def test_921_finding_row_carries_the_twelve_keys_persist_writes(tmp_path):
             f"row keys differ from the queue's shape: {sorted(set(row) ^ set(J.ROW_KEYS))}")
         assert row["direction"] == "family"
         assert row["judge_outcome"] == record["verdict_word"]
-        assert row["type"] in J.mod("learning.core.config").ALL_FINDING_TYPES | {
-            "decision-discipline"}
+        assert row["type"] in J.mod("learning.core.config").QUEUEABLE_FINDING_TYPES
         assert row["source_run_dir"] in expected_dirs, (
             f"source_run_dir must be exactly the row's own archived world dir "
             f"({sorted(expected_dirs)}), not merely something shaped like 'worlds/*': "
@@ -415,11 +414,10 @@ def test_921_decision_discipline_is_queueable_and_an_unknown_type_is_refused(tmp
     """`decision-discipline` is a queueable finding type, and a type OUTSIDE the vocabulary is
     refused AT THE APPENDER.
 
-    There is no production consumer of `QUEUEABLE_FINDING_TYPES` at base — the only membership
-    test on a finding `type` anywhere is over `ALL_FINDING_TYPES` inside
-    `core/validate.py::_validate_finding`, which validates the OLD pipeline judge's YAML
-    document and never sees a queue row — so the enforcement O6 names does not exist yet and is
-    M5's to build.
+    At base there was no production consumer of `QUEUEABLE_FINDING_TYPES` at all: the only
+    membership test on a finding `type` anywhere was inside the OLD pipeline judge's document
+    validator, which never saw a queue row. The appender below is the enforcement O6 named, and
+    since #922 deleted that validator it is the only one left.
     """
     config = J.mod("learning.core.config")
     enqueue = _enqueue()

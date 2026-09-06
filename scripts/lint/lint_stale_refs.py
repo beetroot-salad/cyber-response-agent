@@ -96,6 +96,10 @@ BASELINE_PATH = Path(__file__).with_name("lint_stale_refs_baseline.json")
 # Maximum total hits before we declare an ident too common to be signal.
 HIT_CAP = 50
 
+# Patterns per `git grep` call. See `_grep_lines`: the matcher degrades superlinearly in the
+# pattern count, so batching cuts the TOTAL cost rather than merely spreading it.
+_GREP_BATCH = 200
+
 REMOVED_DEF = re.compile(r"^-\s*(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
 REMOVED_ASSIGN = re.compile(r"^-\s*([A-Z][A-Z0-9_]{3,})\s*=")
 REMOVED_PY_IMPORT = re.compile(
@@ -104,8 +108,15 @@ REMOVED_PY_IMPORT = re.compile(
 )
 
 # Identifiers that are never project-specific stale-ref signal.
+#
+# The second line is the ordinary-English class, and it is a real shape rather than a
+# convenience: a deleted test's local double is routinely `def successful(...)` or
+# `def interrupted(...)`, and the name then condemns every ordinary use of the word in the live
+# tree — 57 of them on #922, including one inside a captured postgres log line. A word this
+# common cannot carry a rename, so a hit on it is noise by construction.
 GENERIC_NAMES = {
     "main", "handle", "author", "format_output",
+    "successful", "interrupted",
     "Callable", "Iterable", "Iterator", "Optional", "Union", "Any",
     "typing", "dataclass", "field", "Path", "List", "Dict",
 }
@@ -125,7 +136,14 @@ _ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "spec-f
 # commit donates hundreds of identifiers and every unrelated mention of the word in the live
 # tree reads as a stale reference. Excluded from the removal DIFF rather than from the grep,
 # because it is the `-` side that manufactures them.
-NON_SOURCE_DIRS = ("seam-harness",)
+#
+# `experiments` is here for a second reason that makes it structural rather than a judgement
+# call: it is also an `_ARCHIVAL_DIRS` entry, so a name surviving only there may not vouch for
+# itself. Deleting ONE file under it therefore donated the path component `experiments` as a
+# removed identifier that nothing could clear — and every ordinary mention of the word in the
+# live tree (34 of them on #922) read as a stale reference. Any tree in both lists has that
+# shape; these two are the trees that are in both.
+NON_SOURCE_DIRS = ("seam-harness", "experiments")
 
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
@@ -149,6 +167,13 @@ EXCLUDED_GREP_DIRS = (
     # prefix, which would silently swallow any future `defender/tests-*` sibling.
     "defender/fixtures-e2e",
     "defender/lessons-environment",
+    # The golden CASE tree — the same class again. Each case is a captured record of one
+    # recruitment: `manifest.yaml` says which code path produced its artifacts, `expected.yaml`
+    # says how the expectation was derived, and `hidden/`/`oracle_visible/` are the payloads
+    # themselves. Naming the producing symbol is the record's job, and rewriting it to name
+    # today's code would falsify what was actually run. The eval CODE beside it
+    # (`score.py`, `controls.py`, `validate_cases.py`, …) is not excluded and is still scanned.
+    "defender/evals/oracle_golden/cases",
 )
 
 # Frozen spec graphs of merged issues: inert records, not code. Rewriting one to name
@@ -178,6 +203,34 @@ FRONTMATTER_NAME = re.compile(r"^\s*name:\s*(\S+)\s*$")
 # The textual FALLBACK, for a file with no AST to ask (see `_PyFacts`).
 DEF_SIGNATURE = re.compile(r"^\s*(?:async\s+)?def\s")
 
+# Every maximal word run on a line. Used to narrow "which of the removed identifiers could
+# this line possibly be about" from a scan of all of them to a set lookup, which is what keeps
+# the two per-hit loops below off an idents x hits product (#922 removes 1526 identifiers and
+# the grep returns 23k lines — 35M regex searches per loop).
+#
+# EXACT for a word-shaped name, not an approximation: such a name is itself a `\w+` run, and
+# `\b` is defined off the same `\w` class, so `re.search(rf"\b{ident}\b", line)` is true exactly
+# when `ident` is one of this line's maximal runs. `\w+` rather than an identifier pattern for
+# the same reason — `1foo` must yield `1foo`, not `foo`, because `\bfoo\b` does not match
+# inside it. Names that are NOT one run — the path stems, which carry `-` and `.` — cannot come
+# back from this and are matched one regex each; there are a handful, so the product they cost
+# is not the one this exists to avoid.
+WORD_RUN = re.compile(r"\w+")
+
+
+def _referencing(content: str, word_idents: set[str], other: dict[str, re.Pattern]) -> set[str]:
+    """Which of the removed identifiers this line mentions, as `\b<ident>\b` would answer."""
+    found = set(WORD_RUN.findall(content)) & word_idents
+    found.update(i for i, pat in other.items() if pat.search(content))
+    return found
+
+
+def _split_idents(idents: Sequence[str]) -> tuple[set[str], dict[str, re.Pattern]]:
+    """`(word-shaped, {the rest: its \b-anchored pattern})` — the two lookup strategies above."""
+    word = {i for i in idents if WORD_RUN.fullmatch(i)}
+    other = {i: re.compile(rf"\b{re.escape(i)}\b") for i in idents if i not in word}
+    return word, other
+
 
 @dataclass(frozen=True)
 class _PyFacts:
@@ -199,6 +252,9 @@ class _PyFacts:
     bindings: frozenset[tuple[int, str]]
     params: frozenset[tuple[int, str]]
     loads: frozenset[tuple[int, str]]
+    #: `bindings` inverted to `lineno -> names`. Derived, never a second source of truth: it
+    #: answers "which names does THIS line bind" without a scan over every removed identifier.
+    bindings_by_line: dict[int, frozenset[str]]
 
 
 def _collect_py_facts(tree: ast.AST) -> _PyFacts:
@@ -229,7 +285,13 @@ def _collect_py_facts(tree: ast.AST) -> _PyFacts:
             loads.add((node.lineno, node.attr))
         elif isinstance(node, ast.keyword) and node.arg:
             loads.add((node.lineno, node.arg))
-    return _PyFacts(frozenset(bindings), frozenset(params), frozenset(loads))
+    by_line: dict[int, set[str]] = {}
+    for lineno, name in bindings:
+        by_line.setdefault(lineno, set()).add(name)
+    return _PyFacts(
+        frozenset(bindings), frozenset(params), frozenset(loads),
+        {ln: frozenset(names) for ln, names in by_line.items()},
+    )
 
 
 class _PySources:
@@ -421,16 +483,31 @@ def _grep_lines(repo_root: Path, idents: Sequence[str]) -> list[str]:
     `defender/fixtures*` and `experiments/` trees are most of the repo's bytes and none of
     them is a reference source. The 60s budget is left where it is deliberately: it is a real
     ceiling, and raising it to fit a grep that reads trees this gate ignores would hide the
-    next regression instead of failing on it."""
+    next regression instead of failing on it.
+
+    BATCHED, and that is what keeps the ceiling honest on a retirement an order of magnitude
+    larger. `grep -F` with many patterns is not linear in the pattern count: measured on #922
+    (1526 removed identifiers) the one-shot call took 120s, while 800 of the same patterns
+    took 44s, 400 took 5.7s and 100 took 0.1s. Chunking is therefore a real reduction in TOTAL
+    work — the same 1526 patterns in batches of `_GREP_BATCH` run in a few seconds — and not a
+    per-call bound quietly bought by spending more of them. Every batch still carries the same
+    60s ceiling, so one stalled call still names itself; a bigger diff now costs more CALLS,
+    which is bounded and visible, rather than a superlinear single one that hits the ceiling
+    and reports blindness."""
     if not idents:
         return []
-    cmd = ["grep", "-n", "-w", "-F"]
-    for ident in idents:
-        cmd.extend(["-e", ident])
-    cmd.append("--")
-    cmd.extend(f":(exclude){d}" for d in EXCLUDED_GREP_DIRS)
-    out = _git(cmd, cwd=repo_root, timeout=60, ok_codes=(0, 1))
-    return out.splitlines()
+    lines: list[str] = []
+    for start in range(0, len(idents), _GREP_BATCH):
+        cmd = ["grep", "-n", "-w", "-F"]
+        for ident in idents[start:start + _GREP_BATCH]:
+            cmd.extend(["-e", ident])
+        cmd.append("--")
+        cmd.extend(f":(exclude){d}" for d in EXCLUDED_GREP_DIRS)
+        # The union of the batches is the one-shot answer: every consumer reads these lines as
+        # an unordered bag keyed on (path, ident), so the batch a line came back in is not
+        # observable. Duplicates cannot arise — an ident appears in exactly one batch.
+        lines.extend(_git(cmd, cwd=repo_root, timeout=60, ok_codes=(0, 1)).splitlines())
+    return lines
 
 
 def _hits(lines: Sequence[str]) -> list[tuple[str, int, str]]:
@@ -486,6 +563,10 @@ def _batch_grep(
     Word-boundary (`-w`) so a removed `_by_id` doesn't match `template_path_by_id`;
     the attribution below is `\\b`-anchored for the same reason."""
     by_ident: dict[str, list[str]] = {i: [] for i in idents}
+    # Position in `idents`, so the narrowed candidate set below can be walked in the SAME
+    # order the full scan walked — "first ident it references" has to mean the same thing.
+    order = {ident: i for i, ident in enumerate(idents)}
+    word_idents, other_idents = _split_idents(idents)
     for rel, lineno, content in hits:
         if rel in exclude_files or _is_excluded_path(rel):
             continue
@@ -493,9 +574,9 @@ def _batch_grep(
             continue
         # Attribute the line to the first ident it REFERENCES. A declaration is skipped
         # rather than breaking the loop: one line can declare `a` and still call `b`.
-        for ident in idents:
-            if not re.search(rf"\b{re.escape(ident)}\b", content):
-                continue
+        candidates = sorted(
+            _referencing(content, word_idents, other_idents), key=order.__getitem__)
+        for ident in candidates:
             if _is_declaration(py.facts(rel), lineno, content, ident):
                 continue
             by_ident[ident].append(f"{rel}:{lineno}:{content}"[:200])
@@ -603,14 +684,26 @@ def _still_defined(
     and a name on its own line of a list literal, both read as a bare `name,` — the same
     text a multi-line import member has. The one binding the AST cannot answer for is a
     MODULE's, whose binding site is a file — see `_module_named`."""
+    word_idents, other_idents = _split_idents(idents)
+    wanted = set(idents)
     defined: set[str] = set()
     for rel, lineno, content in hits:
+        if not wanted:
+            break
         if _is_excluded_path(rel):
             continue
         facts = py.facts(rel)
-        for ident in idents:
-            if ident not in defined and _is_binding(facts, lineno, content, ident):
+        # The candidates, and only they. With an AST the line's bindings are already indexed
+        # by line, and `_is_binding` reduces to that membership — so the index IS the answer.
+        # Without one, every arm of the textual fallback requires the name on the line, so the
+        # names the line mentions are the complete candidate set. Neither narrowing can change
+        # a verdict; both are what keep this off an idents x hits product.
+        candidates = (facts.bindings_by_line.get(lineno, frozenset()) if facts is not None
+                      else _referencing(content, word_idents, other_idents))
+        for ident in candidates & wanted:
+            if _is_binding(facts, lineno, content, ident):
                 defined.add(ident)
+        wanted -= defined
     if repo_root is not None:
         defined.update(i for i in idents if i not in defined and _module_named(repo_root, i))
         defined.update(i for i in idents if i not in defined and _path_named(repo_root, i))

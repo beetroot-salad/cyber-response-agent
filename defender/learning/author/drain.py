@@ -521,10 +521,10 @@ def _vouched_for(
     only one.
 
     An already-committed file gets a second way to pass, and without it this gate faults on
-    ordinary curation. The actor/environment curators retire a contradicted lesson by
-    flipping the OLD file to `status: stale, superseded_by: {new}` while the replacement is
-    the file that cites the new observation (`benign_actor/prompt.md`, `malicious_actor/
-    prompt.md`, "Supersede"), and the lessons curator reverts a forward-BAD fold by
+    ordinary curation. The retired observation curators retired a contradicted lesson by
+    flipping the OLD file to `status: stale, superseded_by: {new}` while the replacement was
+    the file that cited the new observation (their prompts' "Supersede" rule), and the lessons
+    curator reverts a forward-BAD fold by
     re-editing the target back to its pre-batch body. Neither edit claims new provenance —
     the file cites exactly what it cited at HEAD — so it vouches for nothing and needs no
     voucher. Requiring one reverts the whole tick, deletes the legitimately-authored

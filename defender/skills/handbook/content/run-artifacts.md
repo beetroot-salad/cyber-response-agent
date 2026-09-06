@@ -37,7 +37,7 @@ writable scratch space.
   (`defender/fixtures/held-out/{slug}/ground_truth.yaml`) and are read there by
   `evals/held_out.py`. The eval walks fixtures and locates runs by run-id
   convention; the run dir carries no pointer back to a fixture and no label.
-  Contamination is stopped upstream instead: `run_common.enqueue_learning`
+  Contamination is stopped upstream instead: the learning-queue write
   refuses to hand a held-out fixture run to the learning loop at all, and the
   direct LEARN entrypoint refuses one whose `alert.json` is byte-identical to a
   held-out fixture's.

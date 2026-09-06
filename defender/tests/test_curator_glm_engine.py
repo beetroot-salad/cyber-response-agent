@@ -380,13 +380,14 @@ def test_systemic_faults_propagate_uncaught(tmp_path):
 
 
 def test_request_limit_generous_default_and_threaded(tmp_path):
-    """Each curator runs under a NEW generous per-curator REQUEST_LIMIT knob (default 250,
+    """The curator runs under a generous per-curator REQUEST_LIMIT knob (default 250,
     mirroring LEAD_AUTHOR_REQUEST_LIMIT), not a read-only-sized cap — the subprocess path had NO
     request cap, so a small cap would kill a multi-file curator on its 2nd tool call. The cap is
-    threaded to the transport (→ UsageLimits(request_limit))."""
+    threaded to the transport (→ UsageLimits(request_limit)).
+
+    One knob, not three: the ACTOR and ENV curators had their own, and #922 retired both
+    directions along with the accessors that served them."""
     assert config.author_request_limit() == 250
-    assert config.author_actor_request_limit() == 250
-    assert config.author_env_request_limit() == 250
     seen: list[int] = []
     _stage(
         tmp_path, request_limit=config.author_request_limit(),
@@ -479,16 +480,14 @@ def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path):
 
 
 def test_model_flip_glm_low_defaults_flow_to_transport(tmp_path):
-    """AUTHOR_MODEL / AUTHOR_ACTOR_MODEL / AUTHOR_ENV_MODEL default to glm-5.2 and the three
-    efforts to low. Leaving claude-sonnet-4-6 while routing in-process would silently move
-    curator billing from the subscription to the metered first-party key. The flipped default is
-    what the in-process transport is asked to build."""
+    """AUTHOR_MODEL defaults to glm-5.2 and AUTHOR_EFFORT to low. Leaving claude-sonnet-4-6 while
+    routing in-process would silently move curator billing from the subscription to the metered
+    first-party key. The flipped default is what the in-process transport is asked to build.
+
+    The ACTOR and ENV pairs this once spanned went with their directions in #922; the surviving
+    findings curator reads the un-suffixed pair."""
     assert config.author_model() == "glm-5.2"
-    assert config.author_actor_model() == "glm-5.2"
-    assert config.author_env_model() == "glm-5.2"
     assert config.author_effort() == "low"
-    assert config.author_actor_effort() == "low"
-    assert config.author_env_effort() == "low"
     seen: list[tuple[object, object]] = []
     _stage(
         tmp_path, model=config.author_model(), effort=config.author_effort(),

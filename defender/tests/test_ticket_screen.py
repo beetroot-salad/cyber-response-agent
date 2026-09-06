@@ -1,6 +1,6 @@
 """The shared ticket answer-key screen — the invariants both consumers depend on.
 
-``runtime/query_tool.py`` (gather) and ``learning/pipeline/judge/closed_ticket_tool.py`` (the
+``runtime/query_tool.py`` (gather) and the retired pipeline judge's closed-ticket tool (the
 benign judge) now route their ticket screens through one protocol. These tests pin the parts
 that are only meaningful ACROSS the two — the exit-code taxonomy and the self-case identity —
 so a change made for one consumer cannot silently diverge the other.

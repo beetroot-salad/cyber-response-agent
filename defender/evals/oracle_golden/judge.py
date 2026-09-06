@@ -137,7 +137,7 @@ def _bounded(payload: Any) -> tuple[Any, bool]:
     }, True
 
 
-#: What a payload file that was never written looks like to the judge. `build_case.py` copies
+#: What a payload file that was never written looks like to the judge. The assembler copied
 #: the run's raw payloads verbatim, so a zero-byte file means the capture never recorded that
 #: query's result. Rendering it as an empty result set would ask the judge to infer absence
 #: from a missing measurement, which is the error class this suite exists to catch.

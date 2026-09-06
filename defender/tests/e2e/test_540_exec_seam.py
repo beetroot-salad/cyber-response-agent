@@ -708,7 +708,7 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
         else:
             role_scope = scope
         # effective_tools_for (#632, §7 R7): the judge's static tools/verb_grant disagree by
-        # construction (only its per-leg replace() in _run_judge_pydantic agrees them); this
+        # construction (only the per-leg replace() at its own spawn site agreed them); this
         # probe is about the box lane, not the verb grant.
         from dataclasses import replace as _replace
         bindable = _replace(defn, tools=effective_tools_for(defn))

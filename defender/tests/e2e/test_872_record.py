@@ -503,7 +503,7 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     query tool's lane and `lead_zero._record_manual_row`'s inline assembly both append to THIS
     run's `executed_queries.jsonl`, so both are inside the differential below. The judge's
     appender writes a file of the same NAME in the LEARNING run dir
-    (`closed_ticket_tool.py:355`, `run_dir / "executed_queries.jsonl"` where `run_dir` is the
+    (the retired closed-ticket tool, `run_dir / "executed_queries.jsonl"` where `run_dir` is the
     learning run's), which no investigation ever writes and which the gate cannot reach from
     this altitude — so its absence here is a reach fact, recorded in `d41`'s note, not a lane
     this test declined to drive.

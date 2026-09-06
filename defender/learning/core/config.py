@@ -46,15 +46,6 @@ def provenance_field(id_key: str) -> str:
 
 
 @dataclass(frozen=True)
-class LegDirs:
-    """The two roots one direction leg writes across: the finished investigation it READS,
-    and the per-case leg-output dir it WRITES. Both required."""
-
-    run_dir: Path
-    learning_run_dir: Path
-
-
-@dataclass(frozen=True)
 class LoopPaths(DefenderPaths):
     """The loop's paths: every checked-in tree `DefenderPaths` locates, PLUS the mutable
     learning state (queues, locks, run artifacts) rooted at `state_root`.
@@ -105,10 +96,6 @@ class LoopPaths(DefenderPaths):
         return self.state_root / "_author.lock"
 
     @property
-    def learn_queue_dir(self) -> Path:
-        return self.state_root / "learn-queue"
-
-    @property
     def author_queue_dir(self) -> Path:
         return self.state_root / "author-queue"
 
@@ -119,14 +106,6 @@ class LoopPaths(DefenderPaths):
     @property
     def lead_author_drain_lock_file(self) -> Path:
         return self.state_root / ".lead-author-drain.lock"
-
-
-    @property
-    def learn_drain_lock_file(self) -> Path:
-        """The learn drain's own single-drainer lease. Load-bearing since the drain began
-        RECLAIMING markers left in `inflight/`: without it, a second concurrent drainer reads
-        a live drainer's claim as an orphan and learns the same run twice."""
-        return self.state_root / ".learn-drain.lock"
 
     @property
     def pending_file(self) -> Path:
@@ -151,38 +130,6 @@ class LoopPaths(DefenderPaths):
             append_lock=self.findings_lock_file,
             drain_lock=self.pending_dir / ".lock",
             id_key="finding_id",
-        )
-
-    @property
-    def actor_observations(self) -> QueueChannel:
-        return QueueChannel(
-            file=self.pending_dir / "actor_observations.jsonl",
-            consumed=self.pending_dir / "actor_observations.consumed.jsonl",
-            # The append-lock identity must not move: an appender running older code keeps
-            # taking the same file, so a rollover needs no coordination.
-            append_lock=self.pending_dir / ".actor.lock",
-            drain_lock=self.pending_dir / ".actor.drain.lock",
-            id_key="observation_id",
-        )
-
-    @property
-    def environment_observations(self) -> QueueChannel:
-        return QueueChannel(
-            file=self.pending_dir / "environment_observations.jsonl",
-            consumed=self.pending_dir / "environment_observations.consumed.jsonl",
-            append_lock=self.pending_dir / ".environment.lock",
-            drain_lock=self.pending_dir / ".environment.drain.lock",
-            id_key="observation_id",
-        )
-
-    @property
-    def actor_environment_observations(self) -> QueueChannel:
-        return QueueChannel(
-            file=self.pending_dir / "actor_environment_observations.jsonl",
-            consumed=self.pending_dir / "actor_environment_observations.consumed.jsonl",
-            append_lock=self.pending_dir / ".actor_environment.lock",
-            drain_lock=self.pending_dir / ".actor_environment.drain.lock",
-            id_key="observation_id",
         )
 
 
@@ -214,28 +161,12 @@ def loop_paths() -> LoopPaths:
 
 LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
-_PIPELINE_DIR = LEARNING_DIR / "pipeline"
-ACTOR_PROMPT = _PIPELINE_DIR / "malicious_actor" / "prompt.md"
-ORACLE_PROMPT = _PIPELINE_DIR / "oracle" / "prompt.md"
-JUDGE_PROMPT = _PIPELINE_DIR / "judge" / "malicious.md"
-JUDGE_BENIGN_PROMPT = _PIPELINE_DIR / "judge" / "benign.md"
 
-
-_LESSONS_SCRIPTS_DIR = REPO_ROOT / "defender" / "scripts" / "lessons"
-
-
-# Which dispositions select which direction is NOT declared here — it is a field on
-# `Direction` (`core/directions.py`). The enum itself lives in `defender/_artifact_schema.py`
-# beside the report.md schema that mints it; core.config stays the loop's import surface.
-
-
-#: The four buckets the OLD pipeline judge may emit, and the only ones its reply is validated
-#: against (`core/validate.py::_validate_finding`, through the two `*_ALL_FINDING_TYPES` sets
-#: below). Kept separate from `QUEUEABLE_FINDING_TYPES` because that set is what the QUEUE
-#: accepts, and the two populations are no longer the same: widening the queue's set widened
-#: the pipeline judge's accepted replies with it, so a model whose prompts never mention
-#: `decision-discipline` could return one and have it persisted with an adversarial/benign
-#: direction and routed through a ground-truth gate the bucket was never defined against.
+#: The four buckets the retired pipeline judge minted. It is gone, and with it the reply
+#: validator that was the only membership test over these four alone — so what survives is
+#: their contribution to `QUEUEABLE_FINDING_TYPES`, the set the findings queue accepts. Kept
+#: as its own name rather than folded into that union: the four are the buckets a lesson can
+#: be authored FROM, and the family bucket below is not one of them.
 PIPELINE_FINDING_TYPES = {
     "lead-set",
     "lead-quality",
@@ -245,39 +176,15 @@ PIPELINE_FINDING_TYPES = {
 #: #921's fourth mechanical bucket: a resolution moved past the branch's fence and the verdict
 #: still disagreed with the declared disposition. Produced ONLY by the family judge's own
 #: appender (`learning/judge/enqueue.py`) — which is why it joins what the queue accepts and
-#: not what the pipeline judge's reply is validated against.
+#: is kept apart from the four above.
 FAMILY_ONLY_FINDING_TYPES = {"decision-discipline"}
 QUEUEABLE_FINDING_TYPES = PIPELINE_FINDING_TYPES | FAMILY_ONLY_FINDING_TYPES
-ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES = {"detection-confirmed"}
-ALL_FINDING_TYPES = PIPELINE_FINDING_TYPES | ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES
-BENIGN_AUDIT_ONLY_FINDING_TYPES = {"disposition-confirmed"}
-BENIGN_ALL_FINDING_TYPES = PIPELINE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
 
 # Every env-backed knob is read at CALL time, never as `X = os.environ.get(...)` at import:
 # an import-time read freezes at first import and `monkeypatch.setenv` can no longer reach
 # the code under test. A module-level constant BUILT from one of these still freezes at ITS
-# import (the `AgentDefinition`s' `effort=`, directions.py's `JudgeWiring`s, a signature
-# default) — visible at that construction site rather than hidden here.
-
-
-def actor_model() -> str:
-    return env_str("ACTOR_MODEL", "glm-5.2")
-
-
-
-
-
-
-
-
-def oracle_model() -> str:
-    return env_str("ORACLE_MODEL", "glm-5.2")
-
-
-def oracle_effort() -> str:
-    return env_str("ORACLE_EFFORT", "none")
-
-
+# import (an `AgentDefinition`'s `effort=`, a signature default) — visible at that
+# construction site rather than hidden here.
 
 
 # The judge is on k3 for STABILITY, not per-verdict quality: on a frozen pair, GLM at this
@@ -408,36 +315,8 @@ def author_effort() -> str:
     return env_str("LEARNING_AUTHOR_EFFORT", "low")
 
 
-def author_actor_model() -> str:
-    return env_str("LEARNING_AUTHOR_ACTOR_MODEL", "glm-5.2")
-
-
-
-
-def author_actor_effort() -> str:
-    return env_str("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
-
-
-def author_env_model() -> str:
-    return env_str("LEARNING_AUTHOR_ENV_MODEL", "glm-5.2")
-
-
-
-
-def author_env_effort() -> str:
-    return env_str("LEARNING_AUTHOR_ENV_EFFORT", "low")
-
-
 def author_request_limit() -> int:
     return env_int("LEARNING_AUTHOR_REQUEST_LIMIT", 250)
-
-
-def author_actor_request_limit() -> int:
-    return env_int("LEARNING_AUTHOR_ACTOR_REQUEST_LIMIT", 250)
-
-
-def author_env_request_limit() -> int:
-    return env_int("LEARNING_AUTHOR_ENV_REQUEST_LIMIT", 250)
 
 
 def author_max_attempts() -> int:
@@ -482,12 +361,12 @@ class RunUnprocessable(Exception):
 class RunAlreadyLive(Exception):
     """Another pass already holds this run's per-run lock, so this one did NO work.
 
-    A distinct type rather than a return code, because the two callers of `run_one` must do
-    two different things with it and an `int` can carry neither. `learn_drain` has to keep the
-    queue marker — a refused pass has not learned the run, and its `_serve_marker` deletes the
-    marker for anything that does not raise, which turned "someone else has it" into "this run
-    is done and may be forgotten". The CLI has to exit 0 without a traceback: a human asking
-    for a run the worker already claimed has made no error.
+    A distinct type rather than a return code, because the two answers to it differ and an
+    `int` can carry neither. A drain has to KEEP the queue marker — a refused pass has not
+    learned the run, and a serve that drops the marker for anything that does not raise turns
+    "someone else has it" into "this run is done and may be forgotten". The CLI has to exit 0
+    without a traceback: a human asking for a run the worker already claimed has made no
+    error. #922 retired the stage that raised it; the CLI arm says why it stayed.
 
     TRANSIENT, and that is the whole difference from `RunUnprocessable`: the lock is released
     when the other pass ends, so the marker is RE-QUEUED, never quarantined."""

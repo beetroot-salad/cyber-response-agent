@@ -20,8 +20,8 @@ fails when that set grows, so a new consumer has to be classified rather than in
 THE WRITE HALF OF THE §7-ROUND-4 DESIGN CHANGE LIVES HERE TOO. A malformed verdict — one that
 only reads as a member after something strips or folds it — is refused at both write gates,
 because on write there is still an author to ask. Its read half is in `test_923_readers.py` and
-its training-routing half in `test_923_learning_routing.py`; the three are one decision and the
-write half is the one that was already true.
+its training-routing half went with the training directions in #922; the halves are one
+decision and the write half is the one that was already true.
 """
 from __future__ import annotations
 
@@ -69,8 +69,6 @@ _VOCABULARY_READERS = {
     "skills/invlang/vocab.py",                  # invlang's re-export of the owner
     "_artifact_schema.py",                      # the report.md frontmatter write gate (host-written)
     "_report.py",                               # the shared report accessor
-    "learning/core/directions.py",              # training-direction selection
-    "scripts/visualize/visualize_judge.py",     # which direction views to render
     "skills/invlang/cli.py",                    # read-only query filters
     "skills/invlang/queries.py",                # corpus rendering
     "skills/invlang/validate/_gating.py",       # the entry-price dispatch

@@ -384,10 +384,6 @@ def resolution_method_from_resolution(resolution: str | None) -> str | None:
 
 
 
-def ticket_key(ticket: Any) -> str | None:
-    return ticket.get("key") if isinstance(ticket, dict) else None
-
-
 def ticket_created(ticket: Any) -> str | None:
     return ticket.get("created") if isinstance(ticket, dict) else None
 
