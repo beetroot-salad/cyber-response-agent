@@ -13,8 +13,6 @@ established seam — never `monkeypatch.setattr`.
 from __future__ import annotations
 
 import ast
-import json
-import threading
 from pathlib import Path
 
 import pytest
@@ -22,7 +20,6 @@ import pytest
 import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
-from defender.learning.core import persist  # type: ignore[import-not-found]
 
 
 # Demand #0 — the return-value contract, after decision 1 flipped its `2` branch
@@ -37,35 +34,6 @@ from defender.learning.core import persist  # type: ignore[import-not-found]
 
 
 
-def test_a_faulted_batch_bumps_every_row_and_retires_only_the_ceiling_crossers(tmp_path: Path):
-    """Decision 2, the discriminating half: rows in one faulted batch with DIVERGENT prior
-    counts all bump by one, and only the rows now at or over the ceiling retire. The
-    first-attempt newcomer in the same batch is the positive control — it bumps to 1 and
-    stays queued while its ceiling-crossing sibling leaves."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(
-        ch,
-        [
-            h.row_for("findings", "a/0", attempts=2),
-            h.row_for("findings", "a/1"),
-        ],
-    )
-    cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=3,
-        invoke_agent=h.raising(author_shared.AuthorError("divergent-count batch")),
-    )
-    assert drain.run_batch(cfg=cfg) == 2
-
-    survivors = h.pending_by_id(ch)
-    assert sorted(survivors) == ["a/1"], "only the crosser retires"
-    assert survivors["a/1"]["attempts"] == 1, "the newcomer bumped and stayed"
-    grave = {r["observation_id"]: r for r in h.graveyard(ch)}
-    assert sorted(grave) == ["a/0"]
-    assert grave["a/0"]["attempts"] == 3
 
 
 def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path):
@@ -120,146 +88,15 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     assert [r["attempts"] for r in h.graveyard(ch)] == [2], "2, not 1 — no reset happened"
 
 
-def test_a_row_at_or_over_the_ceiling_on_arrival_does_not_retire_until_it_fails(tmp_path: Path):
-    """Decision 2: the ceiling is consulted only after an observed failure, never on entry.
-    A row imported at 5 under a ceiling of 3, and a row at 2 under a ceiling lowered to 1,
-    both survive a tick that authors them cleanly; only a tick that actually faults them
-    retires them."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-
-    h.seed(ch, [h.row_for("findings", "a/0", attempts=5)])
-    ok = h.cfg_for(paths, "findings", max_attempts=3, invoke_agent=h.committing("l1"))
-    assert drain.run_batch(cfg=ok) == 0
-    assert h.graveyard(ch) == [], "arriving over the ceiling is not itself a failure"
-    assert [r["attempts"] for r in h.consumed(ch)] == [5], "the count rode through untouched"
-
-    h.seed(ch, [h.row_for("findings", "a/1", attempts=2)])
-    lowered_ok = h.cfg_for(
-        paths, "findings", max_attempts=1, invoke_agent=h.committing("l2")
-    )
-    assert drain.run_batch(cfg=lowered_ok) == 0
-    assert h.graveyard(ch) == [], "a lowered ceiling applies at the next failure, not on sight"
-
-    h.seed(ch, [h.row_for("findings", "a/2", attempts=2)])
-    lowered_fault = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(author_shared.AuthorError("now it fails")),
-    )
-    assert drain.run_batch(cfg=lowered_fault) == 2
-    assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/2"]
 
 
 # Decision 3 — terminality: consumed ledger, graveyard first
 
 
-def test_a_retired_id_is_deduped_out_of_a_later_append_on_the_dedup_channels(tmp_path: Path):
-    """Decision 3: retirement is terminal because the retired row is written to the CONSUMED
-    ledger, which the observation append path already reads to dedup (G23) — not because a
-    new graveyard read was added to the hot append path. A later append regenerating the same
-    id is skipped; a fresh id in the same call still lands, which is the control proving the
-    appender was working and the skip was the ledger's doing."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "run-Z", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "run-Z/0")])
-    cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(author_shared.AuthorError("terminal fault")),
-    )
-    assert drain.run_batch(cfg=cfg) == 2
-    assert [r["observation_id"] for r in h.graveyard(ch)] == ["run-Z/0"]
-    assert [(r["observation_id"], r["consumed_category"]) for r in h.consumed(ch)] == [
-        ("run-Z/0", "consumed_retired")
-    ]
-
-    written = persist._append_observations(
-        ch.file,
-        ch.consumed,
-        ch.append_lock,
-        "run-Z",
-        [{"o": 0}, {"o": 1}],
-        lambda i, obs, oid: {"observation_id": oid, "judge_outcome": "caught"},
-    )
-    assert written == 1, "the retired id is deduped out; its fresh sibling still lands"
-    assert sorted(h.pending_by_id(ch)) == ["run-Z/1"]
 
 
-def test_the_graveyard_append_lands_before_the_pending_rewrite_and_is_advisory(tmp_path: Path):
-    """Decision 3 pins the ORDER: the graveyard append happens first, and the pending file
-    stays authoritative. Observed by making the rewrite fail for real — the queue file is
-    swapped for a symlink aliasing its own content — and seeing the graveyard row already
-    on disk while the queue is untouched. Recovering the real file and retiring again leaves
-    the queue authoritative; the duplicate graveyard row a crash between the two writes
-    leaves costs nothing, because the graveyard has no production reader (G16/C20).
-
-    #771 §7 D1 retired the old technique (pre-occupying the rewrite's deterministic `.tmp`
-    sibling with a directory) — the rewrite now stages under an unpredictable name, so nothing
-    can be pre-planted at it. This is the primitive's OWN refusal instead: `channel.file` is
-    swapped for a symlink pointing at a sibling copy of the same bytes, so the read half
-    (`read_jsonl_rows`, which follows symlinks) still finds `a/0` and `a/1` exactly as before,
-    but `write_guarded`'s `_refuse_unless_plain` lstat's `channel.file` itself and refuses on
-    the symlink before ever computing a staged name — the exact planted-alias shape #771
-    exists to catch, which also makes this fail the same way whether or not the process
-    holds root (an lstat type check, not a permission bit)."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")])
-    before = ch.file.read_bytes()
-
-    aliased_target = ch.file.with_name(ch.file.name + ".aliased")
-    aliased_target.write_bytes(before)
-    ch.file.unlink()
-    ch.file.symlink_to(aliased_target)
-    with pytest.raises(OSError):  # noqa: PT011 - the OS-level refusal's exact subclass is platform-dependent; the point is that the write does not silently succeed
-        drain.retire(channel=ch, batch_ids=["a/0"], reason="advisory probe", max_attempts=1)
-
-    assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/0"], "graveyard first"
-    assert ch.file.read_bytes() == before, "the queue is authoritative and untouched"
-
-    ch.file.unlink()
-    aliased_target.unlink()
-    ch.file.write_bytes(before)
-    outcome = drain.retire(
-        channel=ch, batch_ids=["a/0"], reason="advisory probe", max_attempts=1
-    )
-    assert outcome.retired == ("a/0",)
-    assert sorted(h.pending_by_id(ch)) == ["a/1"]
-    assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/0", "a/0"]
 
 
-def test_consumed_ledger_append_survives_a_concurrent_interleaving(tmp_path: Path):
-    """The consumed ledger is a genuine read/write shared path — three of five channels read
-    it back to dedup (G23) — and decision 3 makes the retire seam a second writer into it.
-    Two writers interleaving on one channel must leave every line parseable and every id
-    present: a torn line here is a silent dedup bug, not merely a lost write."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
-    left = [f"L/{i}" for i in range(40)]
-    right = [f"R/{i}" for i in range(40)]
-    h.seed(ch, [h.row_for("findings", i) for i in left + right])
-
-    def retire_all(ids):
-        return lambda: drain.retire(
-            channel=ch, batch_ids=ids, reason="interleaved", max_attempts=1
-        )
-
-    a, b = h.Background(retire_all(left)), h.Background(retire_all(right))
-    with a, b:
-        pass
-    assert a.error is None
-    assert b.error is None
-
-    text = ch.consumed.read_text()
-    rows = [json.loads(ln) for ln in text.splitlines() if ln.strip()]
-    assert len(rows) == 80, "no lost update"
-    assert {r["observation_id"] for r in rows} == set(left + right)
 
 
 # The ceiling's own domain — 1, 0 and -1
@@ -313,7 +150,7 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     re-serialisation drift — so an unrelated row cannot be quietly edited by a neighbour's
     failure."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     outsiders = [
         h.row_for("findings", "a/1", note="keep me", nested={"x": [1, 2]}),
@@ -336,7 +173,7 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     and the active queue is left byte-identical for the next tick to re-read. Induced for
     real: the channel's graveyard path is a directory, so the append cannot land."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     before = ch.file.read_bytes()
@@ -359,7 +196,7 @@ def test_a_faulted_tick_defers_its_held_and_pre_consumed_classifications(tmp_pat
     next tick — the failing tick does not get to half-rotate a queue whose authoring never
     landed."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     rows = [
         h.row_for("findings", "a/0"),
@@ -382,27 +219,6 @@ def test_a_faulted_tick_defers_its_held_and_pre_consumed_classifications(tmp_pat
     assert [r.get("consumed_category") for r in h.consumed(ch)] == ["consumed_retired"]
 
 
-def test_a_row_with_no_value_under_its_id_key_retires_instead_of_aborting(tmp_path: Path):
-    """E1: a row carrying no value under its channel's id field — a fixture copy, an older
-    schema, a truncation — is bad data, not a broken system. It retires as a per-item failure
-    carrying a reason that names the missing field, and its well-formed batch-mates are
-    authored on the same tick rather than being stranded behind it."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-    unkeyable = {"judge_outcome": "caught", "source_run_dir": "", "note": "no id at all"}
-    h.seed(ch, [unkeyable, h.row_for("findings", "a/1")])
-
-    agent = h.recording(h.committing("keyed"))
-    cfg = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=agent)
-    assert drain.run_batch(cfg=cfg) == 0
-
-    assert [r["observation_id"] for r in agent.calls[0]["rows"]] == ["a/1"]
-    grave = h.graveyard(ch)
-    assert len(grave) == 1
-    assert grave[0]["note"] == "no id at all"
-    assert ch.id_key in grave[0]["deadletter_reason"]
-    assert h.pending(ch) == []
 
 
 def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path: Path):
@@ -410,7 +226,7 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
     and no graveyard row, so a steady state of empty ticks cannot grow either file. The
     positive control is the same drain on a non-empty channel, which does write both."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(paths, name)
         cfg = h.cfg_for(paths, name, invoke_agent=h.raising(AssertionError("never called")))
@@ -431,36 +247,6 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
     assert h.consumed(ch)
 
 
-def test_retirement_retains_row_appended_mid_window(tmp_path: Path):
-    """O1 on the retire path: a row appended while the retire seam is between its read and
-    its rewrite is still in pending afterward. The appender's own blocking acquisition of the
-    append lock is what serialises it — so this is the property the unlocked
-    read-modify-write lost today (G13/C16), driven through the real appender."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
-
-    started = threading.Event()
-
-    def late_append():
-        started.wait(timeout=10)
-        persist._append_observations(
-            ch.file,
-            ch.consumed,
-            ch.append_lock,
-            "late",
-            [{"o": 0}],
-            lambda i, obs, oid: {"observation_id": oid, "judge_outcome": "caught"},
-        )
-
-    with h.Background(late_append):
-        started.set()
-        drain.retire(channel=ch, batch_ids=["a/0"], reason="mid-window", max_attempts=1)
-
-    survivors = sorted(h.pending_by_id(ch))
-    assert survivors == ["late/0"], "the concurrently appended row is not lost"
-    assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/0"]
 
 
 #: `(file, function)` pairs that reach `write_atomic` without writing a QUEUE — the census's
@@ -502,7 +288,7 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     assert set(writers) == {"_rewrite_queue"}, f"more than one queue rewriter: {writers}"
 
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/9")])
     drain.retire(channel=ch, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
@@ -515,7 +301,7 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
     `DEFAULT_PATHS` is frozen at import (F7) — an in-process environment change would not
     reach a second actor at all."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 

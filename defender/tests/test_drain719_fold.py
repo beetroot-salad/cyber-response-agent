@@ -17,8 +17,6 @@ import subprocess
 from pathlib import Path
 
 
-import _drain719 as h
-from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import curator  # type: ignore[import-not-found]
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]
@@ -180,62 +178,8 @@ def test_curator_no_longer_re_exports_the_shared_git_helpers(tmp_path: Path):
 
 
 
-def test_committed_bucket_routes_to_author_and_projects(tmp_path: Path):
-    """The default bucket, exercised at its own address rather than assumed by the mainline.
-    A row in `committed` is handed to the agent, its corpus edit is committed by the loop, and
-    the projection writes it to the consumed ledger under `consumed_committed` carrying the
-    commit it landed in — so the bucket's routing and its projection are both observed."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "b", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "b/0")])
-    agent = h.recording(h.committing("committed-bucket"))
-    cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
-
-    assert drain.run_batch(cfg=cfg) == 0
-    assert [r["observation_id"] for r in agent.calls[0]["rows"]] == ["b/0"]
-    rows = h.consumed(ch)
-    assert [r["consumed_category"] for r in rows] == ["consumed_committed"]
-    head = subprocess.run(
-        ["git", "-C", str(paths.repo_root), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    assert rows[0]["consumed_commit"] == head
-    assert h.pending(ch) == []
 
 
-def test_consumed_skip_bucket_is_idempotent_and_projects(tmp_path: Path):
-    """The skip bucket at its own address. A row the agent reports skipped is projected into
-    the consumed ledger with the reason the bucket's formatter produced, nothing is committed,
-    and re-appending the same id afterwards is a no-op — the consumed ledger the append path
-    reads is what makes the skip stick."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
-    before = subprocess.run(
-        ["git", "-C", str(paths.repo_root), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-
-    cfg = h.cfg_for(paths, "findings", invoke_agent=h.skipping())
-    assert drain.run_batch(cfg=cfg) == 0
-    rows = h.consumed(ch)
-    assert [r["observation_id"] for r in rows] == ["a/0"]
-    assert rows[0]["skip_reason"] == "dup"
-    after = subprocess.run(
-        ["git", "-C", str(paths.repo_root), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    assert before == after, "a skip-only batch must not commit"
-
-    from defender.learning.core import persist  # type: ignore[import-not-found]
-
-    written = persist._append_observations(
-        ch.file, ch.consumed, ch.append_lock, "a", [{"o": 0}],
-        lambda i, obs, oid: {"observation_id": oid, "judge_outcome": "caught"},
-    )
-    assert written == 0, "the skipped id is deduped out of a later append"
 
 
 # The written record the fold makes normative

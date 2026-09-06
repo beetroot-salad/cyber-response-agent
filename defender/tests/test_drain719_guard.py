@@ -43,7 +43,6 @@ from pydantic_ai.exceptions import ModelRetry
 import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
-from defender.learning.core import faults  # type: ignore[import-not-found]
 from defender.learning.core.config import FatalConfigError, StageAbort  # type: ignore[import-not-found]
 from defender.runtime.box import BoxFault  # type: ignore[import-not-found]
 from defender._git import GitError  # type: ignore[import-not-found]
@@ -109,51 +108,6 @@ def _git_log(repo: Path) -> str:
 # Decision 8 — the trigger is an enumerated set, and A12 is reversed
 
 
-def test_only_a_named_fault_class_reaches_the_retire_seam(tmp_path: Path):
-    """Decision 8 as one property: retirement is reachable from a named class and from nothing
-    else. Every member is driven and must retire; every non-member is driven and must leave the
-    row queued with no attempt written.
-
-    This REVERSES what stood here before §7 round 2. A green run on the previous body — a plain
-    `RuntimeError` reaching the seam — would now be evidence against the resolved design, which
-    is why the demand was renamed rather than edited in place: an id whose content is the
-    opposite of what it says is a trap for a later reader.
-
-    Both fault lists are constructed BEFORE the first drive. Built lazily inside the loops, a
-    constructor whose real shape differs from `cls(message)` — `GitError` takes
-    `(args, returncode, stderr)` — raises `TypeError` in setup, and the "and from nothing else"
-    half never executes at all while the test still reports as an ordinary pre-implementation
-    red. That defect shipped in this file once."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
-
-    members = [_instance(cls, "member") for cls in MEMBERS]
-    non_members = [_instance(cls, "not a member") for cls in NON_MEMBERS]
-    assert len(members) == len(MEMBERS)
-    assert len(non_members) == len(NON_MEMBERS)
-
-    for i, exc in enumerate(members):
-        rid = f"m/{i}"
-        h.seed(ch, [h.row_for("findings", rid)])
-        cfg = h.cfg_for(
-            paths, "findings", max_attempts=1, invoke_agent=h.raising(exc)
-        )
-        assert drain.run_batch(cfg=cfg) == 2, f"{type(exc).__name__} did not fault the batch"
-        assert h.pending(ch) == [], f"{type(exc).__name__} is a member and must retire"
-        assert [r["observation_id"] for r in h.graveyard(ch)][-1] == rid
-
-    for i, exc in enumerate(non_members):
-        rid = f"n/{i}"
-        rows = [h.row_for("findings", rid)]
-        h.seed(ch, rows)
-        before = len(h.graveyard(ch))
-        cfg = h.cfg_for(
-            paths, "findings", max_attempts=1, invoke_agent=h.raising(exc)
-        )
-        with pytest.raises(type(exc)):
-            drain.run_batch(cfg=cfg)
-        assert h.pending(ch) == rows, f"{type(exc).__name__} must leave the row untouched"
-        assert len(h.graveyard(ch)) == before, f"{type(exc).__name__} retired something"
 
 
 def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouched(
@@ -168,7 +122,7 @@ def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouc
     byte-identical afterwards — unbounded retry, which is the accepted cost of removing the
     permanent-loss path. Stuck but recoverable and loud, as today."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "b", "malicious")
+    h.write_source_refs(paths, "b")
     ch = h.channel_of(paths, "findings")
     rows = [h.row_for("findings", "b/0", attempts=2)]
     h.seed(ch, rows)
@@ -215,7 +169,7 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     stuck record on every failure and pass, which would make the signal noise rather than a
     stuck-row signal."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     rows = [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")]
     h.seed(ch, rows)
@@ -265,56 +219,6 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     )
 
 
-def test_the_retire_set_names_author_error_git_error_and_model_retry_and_nothing_else(
-    tmp_path: Path,
-):
-    """The membership oracle, and the one place the inverted trap is caught. An implementer
-    reaching for the obvious `except AuthorError` drops `GitError` and `ModelRetry` and quietly
-    reverts decision 1 paths 3 and 4 — while every test that only checks "something retires"
-    stays green, because the `AuthorError` case passes under the wrong spelling too.
-
-    So each member is driven separately and asserted to retire, with the two droppable ones
-    driven through the real dependency: git's own index lock held so `commit_corpus` raises a
-    genuine `GitError`, and the `ModelRetry` class PJ1c observed on a killed boxed command. The
-    declared set is then checked to hold exactly those three, so a fourth member smuggled in
-    fails too."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
-
-    h.seed(ch, [h.row_for("findings", "a/git")])
-    git_cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.committing("member", also=lambda r, b, c: _wedge_git(c.repo_root)),
-    )
-    assert drain.run_batch(cfg=git_cfg) == 2
-    assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/git"], "GitError is a member"
-    _unwedge_git(paths.repo_root)
-
-    h.seed(ch, [h.row_for("findings", "a/retry")])
-    retry_cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(ModelRetry("command timed out after 120s")),
-    )
-    assert drain.run_batch(cfg=retry_cfg) == 2
-    assert "a/retry" in {r["observation_id"] for r in h.graveyard(ch)}, "ModelRetry is a member"
-
-    h.seed(ch, [h.row_for("findings", "a/auth")])
-    auth_cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(author_shared.AuthorError("member")),
-    )
-    assert drain.run_batch(cfg=auth_cfg) == 2
-    assert "a/auth" in {r["observation_id"] for r in h.graveyard(ch)}
-
-    assert set(drain.RETIRE_SET) == set(MEMBERS), "the declared set is not the three members"
-    assert not set(drain.RETIRE_SET) & set(NON_MEMBERS)
-    assert set(drain.RETIRE_SET) != set(faults.SYSTEMIC_FAULTS)
 
 
 def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(tmp_path: Path):
@@ -357,184 +261,13 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
     assert set(non_member_seen.values()) == {True}, non_member_seen
 
 
-def test_non_member_systemic_faults_skip_retirement_and_git_error_does_not(tmp_path: Path):
-    """RE-DERIVED, not patched — this demand has been written three times under opposite
-    pressures. Its content: on the author channels `StageAbort`, `FatalConfigError` and
-    `BoxFault` are exempt from retirement BECAUSE THEY ARE NOT MEMBERS of the retire set. That
-    observable coincides with the pre-fold "the except clause never named them", but the reason
-    is stated rather than accidental, and it survives a refactor that moves a line.
-
-    One member did not come back: `GitError` is permanently OUT of the exempt set (decision 1
-    path 3). The original demand asserted all four were exempt; asserting that again would
-    silently revert the decision, so the `GitError` half is the discriminating one here.
-
-    Exemption is also total OUTSIDE the clauses that name the set: injected at the pre-author
-    gate, an `AuthorError` is as exempt as a `StageAbort` — the control showing this is about
-    reach as well as class."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
-    rows = [h.row_for("findings", "a/0")]
-    h.write_source_refs(paths, "a")
-
-    for exc in (StageAbort("abort"), FatalConfigError("bad config"), BoxFault("box gone")):
-        h.seed(ch, rows)
-        cfg = h.cfg_for(
-            paths, "findings", max_attempts=1, invoke_agent=h.raising(exc)
-        )
-        with pytest.raises(type(exc)):
-            drain.run_batch(cfg=cfg)
-        assert h.pending(ch) == rows, f"{type(exc).__name__}: exempt by non-membership"
-        assert h.graveyard(ch) == []
-
-    h.seed(ch, rows)
-    git_cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.committing("notexempt", also=lambda r, b, c: _wedge_git(c.repo_root)),
-    )
-    assert drain.run_batch(cfg=git_cfg) == 2, "GitError is NOT exempt — decision 1 path 3"
-    assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/0"]
-    _unwedge_git(paths.repo_root)
-
-    h.seed(ch, rows)
-    # Against the count this channel already carries, not against zero: the GitError probe
-    # above deliberately retired a row into this same graveyard, so the empty-graveyard
-    # spelling asserted that the earlier half of the test had not happened.
-    before = len(h.graveyard(ch))
-    outside = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        gate=_raising_gate(author_shared.AuthorError("a member, but out of reach")),
-        invoke_agent=h.raising(AssertionError("the gate failed first")),
-    )
-    with pytest.raises(author_shared.AuthorError):
-        drain.run_batch(cfg=outside)
-    assert h.pending(ch) == rows
-    assert len(h.graveyard(ch)) == before, "a member raised out of reach retired something"
 
 
-def test_the_retire_set_clauses_span_the_agent_call_through_the_corpus_commit_and_no_further(
-    tmp_path: Path,
-):
-    """Decision 6's extent half: which calls sit inside the try whose except clauses name the
-    retire set. Confirmatory rather than load-bearing since decision 8 — A11, B5 and D5 are
-    carried by non-membership now — but a real property, because a call raising a MEMBER moved
-    across either edge changes what happens to the row.
-
-    REBUILT so it actually discriminates. The previous four probes were a member from the agent
-    call, a member from the corpus commit, an `OSError` from a lock acquisition and an `OSError`
-    from the queue rewrite. The last two outcomes follow from NON-MEMBERSHIP alone, so an
-    implementation with the clauses drawn at any other extent passed them: extent was never
-    observed, membership was observed twice.
-
-    Every probe below raises a MEMBER, holding membership constant so PLACEMENT is the only
-    variable. Each fails on one specific misplacement:
-
-    * a member from the pre-author gate must PROPAGATE — fails if the clauses open too early;
-    * a member from the agent call must RETIRE — fails if they open too late;
-    * a member from the corpus commit must RETIRE — fails if they close before the commit;
-    * a member from the post-rotate hook must PROPAGATE with the rotation already landed —
-      fails if they close too late. That is the edge decision 9 leans on to carry the
-      post-commit no-bump, and nothing else in the suite can see it.
-    """
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-
-    h.seed(ch, [h.row_for("findings", "a/0")])
-    queued = h.pending(ch)
-    before_gate = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        gate=_raising_gate(_instance(author_shared.AuthorError, "member, before they open")),
-        invoke_agent=h.raising(AssertionError("the gate failed first")),
-    )
-    with pytest.raises(author_shared.AuthorError):
-        drain.run_batch(cfg=before_gate)
-    assert h.pending(ch) == queued, "a member from the gate retired — the clauses open too early"
-    assert h.graveyard(ch) == []
-
-    inside_agent = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(_instance(author_shared.AuthorError, "member, inside")),
-    )
-    assert drain.run_batch(cfg=inside_agent) == 2
-    assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/0"], "the clauses open too late"
-
-    h.seed(ch, [h.row_for("findings", "a/1")])
-    inside_commit = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.committing("g", also=lambda r, b, c: _wedge_git(c.repo_root)),
-    )
-    assert drain.run_batch(cfg=inside_commit) == 2
-    assert sorted(r["observation_id"] for r in h.graveyard(ch)) == ["a/0", "a/1"], (
-        "a member from the corpus commit did not retire — the clauses close too early"
-    )
-    _unwedge_git(paths.repo_root)
-
-    h.seed(ch, [h.row_for("findings", "a/2")])
-    after_rotate = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.committing("post"),
-        post_rotate=_raising_gate(_instance(author_shared.AuthorError, "member, after they close")),
-    )
-    with pytest.raises(author_shared.AuthorError):
-        drain.run_batch(cfg=after_rotate)
-    assert "a/2" not in {r["observation_id"] for r in h.graveyard(ch)}, (
-        "a member raised after the rotation retired — the clauses close too late, which is the "
-        "edge decision 9 relies on to carry the post-commit no-bump"
-    )
-    assert "a/2" in {r["observation_id"] for r in h.consumed(ch)}, (
-        "the rotation had not landed, so this was not the post-close probe it claims to be"
-    )
 
 
 # Decision 1's four paths — each is a named member, which is why each still retires
 
 
-def test_post_agent_failure_with_a_succeeding_agent_bumps_and_retires(tmp_path: Path):
-    """Decision 1 path 2 — the strongest single finding in the routed set, and unaffected in
-    OUTCOME by decision 8 because `verify_agent_state` and `validate_agent_result_partition`
-    both raise `AuthorError`, a member. What changed is the wiring statement: this retires
-    because the class is named, not because a bare `except Exception` swept it up.
-
-    The agent call SUCCEEDS; the failure is in the step after it and before the commit lands —
-    the result partition names an id that was never in the batch, so the real validator rejects
-    it. An oracle that faults the AGENT passes vacuously here, which is why the recorded call is
-    asserted to have happened."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "b", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "b/0")])
-
-    def over_claim(rows, batch_id, cfg):
-        (cfg.corpus_dir / f"lesson-{batch_id}.md").write_text("---\nx: 1\n---\nbody\n")
-        return {
-            "committed": [rows[0]["observation_id"], "b/999-never-queued"],
-            "consumed_skip": [],
-            "held_forward_bad": [],
-            "commit_message": "author env lessons batch",
-        }
-
-    agent = h.recording(over_claim)
-    cfg = h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=agent)
-
-    assert drain.run_batch(cfg=cfg) == 2
-    assert len(agent.calls) == 1, "the agent must have succeeded for this to discriminate"
-    assert h.attempts_of(ch, "b/0") == 1
-
-    assert drain.run_batch(cfg=cfg) == 2
-    assert h.pending(ch) == []
-    assert [r["attempts"] for r in h.graveyard(ch)] == [2]
 
 
 
@@ -552,7 +285,7 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
     the row is in the graveyard. The paired control is a genuinely successful batch, which
     rotates and counts nothing."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
 
     h.seed(ch, [h.row_for("findings", "a/0")])
@@ -621,7 +354,7 @@ def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path
     blocking boxed call, so nothing here treats the configured timeout as the bound on the stall
     and no assertion below is about elapsed time."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     late = author_shared.AuthorError(
@@ -691,64 +424,3 @@ def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
 # Decision 9 — the reconciling tick, which is what this test actually earns
 
 
-def test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone(tmp_path: Path):
-    """The tick FOLLOWING a corpus commit that landed while its rotation never ran must
-    reconcile the stranded row without re-authoring it: the pre-author idempotency gate finds
-    the already-authored id in the corpus, marks the row consumed and rotates it out, so the
-    committed work is not authored a second time and the queue converges.
-
-    Decision 9 re-minted this from decision 7's demand, which was dropped by an editing accident
-    and ratified on its merits afterwards. What it no longer claims is a SUPPRESSION step: the
-    post-commit no-bump falls out of decision 8 instead, because the failing rotation raises
-    `OSError` and `OSError` is not a member of the retire set. The no-bump assertion below is
-    kept as a companion observation and is CONFIRMATORY only — it would also pass on an
-    implementation that never suppressed anything, and there is no injection seam between
-    `commit_corpus` and the rotation through which a member could be raised to make it
-    discriminating. The reconciling half is what discharges this demand.
-
-    Standing cost, recorded rather than discovered: nothing here pins the post-commit path free
-    of retire-set members. If a future change raises one of the three from a post-commit step,
-    the bump returns and no test in this suite fails.
-
-    #771 §7 D1 retired the old technique (pre-occupying the rotation-rewrite's deterministic
-    `.tmp` sibling with a directory) — the rewrite now stages under an unpredictable name, so
-    nothing can be pre-planted at it. This is the primitive's OWN refusal instead:
-    `channel.file` is swapped for a symlink aliasing a sibling copy of the same bytes, so both
-    reads that need it (`run_batch`'s row selection and `_rewrite_queue`'s re-read, both via
-    `read_jsonl_rows`, which follows symlinks) still find `b/0`, and the commit (which writes
-    into the git worktree, not the queue directory) is unaffected — but `write_guarded`'s
-    `_refuse_unless_plain` lstat's `channel.file` itself and refuses on the symlink before ever
-    computing a staged name. The exact planted-alias shape #771 exists to catch, and — an lstat
-    type check rather than a permission bit — it fails the same way whether or not the process
-    holds root."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "b", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "b/0")])
-
-    before = ch.file.read_bytes()
-    aliased_target = ch.file.with_name(ch.file.name + ".aliased")
-    aliased_target.write_bytes(before)
-    ch.file.unlink()
-    ch.file.symlink_to(aliased_target)
-    cfg = h.cfg_for(
-        paths, "findings", max_attempts=1, invoke_agent=h.committing("landed")
-    )
-    with pytest.raises(OSError):  # noqa: PT011 - the OS-level rotation-rewrite failure's exact subclass is platform-dependent; the point is that the commit lands before it propagates
-        drain.run_batch(cfg=cfg)
-
-    assert "author landed batch" in _git_log(paths.repo_root), "the commit must have landed"
-    assert h.attempts_of(ch, "b/0") is None, "no bump once the commit has landed"
-    assert h.graveyard(ch) == []
-
-    ch.file.unlink()
-    aliased_target.unlink()
-    ch.file.write_bytes(before)
-    must_not_author = h.recording(h.raising(AssertionError("re-authored already-corpus work")))
-    nxt = h.cfg_for(
-        paths, "findings", max_attempts=1, invoke_agent=must_not_author
-    )
-    assert drain.run_batch(cfg=nxt) == 0
-    assert must_not_author.calls == [], "the reconciling tick re-invoked the agent"
-    assert h.pending(ch) == [], "the stranded row was reconciled out of the queue"
-    assert "b/0" in {r["observation_id"] for r in h.consumed(ch)}

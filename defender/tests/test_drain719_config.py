@@ -43,7 +43,7 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
     those files there and leave the worktree clean of them."""
     state = tmp_path / "elsewhere"
     paths = h.make_paths(tmp_path, state_dir=state)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     assert paths.state_root == state
 
     for name in h.ALL_CHANNELS:
@@ -81,7 +81,7 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     one directory up, outside that prefix, DOES abort the tick — so the observation channel
     can see the difference the demand is about."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
 
     for p in (
@@ -164,7 +164,7 @@ def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
     import os
 
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 

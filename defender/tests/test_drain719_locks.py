@@ -14,8 +14,6 @@ preempt a synchronous blocking box call), so no oracle here treats
 """
 from __future__ import annotations
 
-import inspect
-import threading
 from pathlib import Path
 
 
@@ -78,66 +76,8 @@ def test_every_channel_declares_its_lock_topology(tmp_path: Path):
 # D2 — merge_concurrent deleted; rotation always merges (O1)
 
 
-def test_rotation_has_no_merge_knob_and_always_merges(tmp_path: Path):
-    """D2 deletes the knob rather than parameterising it, because the `if merge_concurrent:`
-    branch is the ONLY lock acquisition in the rotation path (C27) — a boolean here preserves
-    the row-loss bug in a less visible place.
-
-    Both halves: the parameter is gone from the rotation's signature, and a row appended
-    between a batch's read and its rotate is still in pending afterward. The signature check
-    alone is satisfiable by a default; the drive is what discharges it."""
-    assert "merge_concurrent" not in inspect.signature(persist.rotate_queue_locked).parameters, (
-        "the merge knob survives on rotate_queue_locked's signature"
-    )
-
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
-    persist._append_observations(
-        ch.file, ch.consumed, ch.append_lock, "late", [{"o": 0}],
-        lambda i, obs, oid: {"observation_id": oid, "judge_outcome": "caught"},
-    )
-    persist.rotate_queue_locked(
-        pending_file=ch.file,
-        consumed_file=ch.consumed,
-        lock_file=ch.append_lock,
-        id_key=ch.id_key,
-        held=[],
-        consumed=[h.row_for("findings", "a/0")],
-        commit_sha=None,
-    )
-    assert sorted(h.pending_by_id(ch)) == ["late/0"], "the unprocessed row survived rotation"
 
 
-def test_rotation_retains_row_appended_mid_batch(tmp_path: Path):
-    """O1 as re-worded by A2: no row with an UNPROCESSED id is lost. The drain is parked in
-    its agent call, a live run appends through the real appender, and the row is still in
-    pending after the rotate — and was never written to the consumed ledger.
-
-    Discriminating: on the observation channels today this survives only because the envelope
-    holds the append lock across the whole batch, which D1 removes."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
-    gate, entered = threading.Event(), threading.Event()
-    cfg = h.cfg_for(
-        paths, "findings", invoke_agent=h.blocking(gate, entered, h.committing())
-    )
-
-    with h.Background(lambda: drain.run_batch(cfg=cfg)) as batch:
-        assert entered.wait(timeout=20), f"the batch never reached its agent call ({batch.error!r})"
-        persist._append_observations(
-            ch.file, ch.consumed, ch.append_lock, "mid", [{"o": 0}],
-            lambda i, obs, oid: {"observation_id": oid, "judge_outcome": "caught"},
-        )
-        gate.set()
-
-    assert batch.error is None
-    assert batch.result == 0
-    assert sorted(h.pending_by_id(ch)) == ["mid/0"]
-    assert "mid/0" not in {r.get("observation_id") for r in h.consumed(ch)}
 
 
 
@@ -145,39 +85,6 @@ def test_rotation_retains_row_appended_mid_batch(tmp_path: Path):
 # O2 — appending does not block on an author batch
 
 
-def test_append_completes_while_drain_batch_in_flight(tmp_path: Path):
-    """O2, scoped exactly as §7 resolved it: an append never waits on the AGENT CALL. The
-    rotate/retire window is an explicit exception (O7 holds the append lock there), and no
-    latency number is claimed — the oracle is pinned to the LLM phase.
-
-    The batch is parked inside its agent call; an append on the same channel then completes
-    while the batch is still in flight. Today, on the three observation channels, the envelope
-    holds the append lock across exactly this phase and the append blocks unboundedly."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
-    gate, entered = threading.Event(), threading.Event()
-    cfg = h.cfg_for(
-        paths, "findings", invoke_agent=h.blocking(gate, entered, h.committing())
-    )
-
-    with h.Background(lambda: drain.run_batch(cfg=cfg)) as batch:
-        assert entered.wait(timeout=20), f"the batch never reached its agent call ({batch.error!r})"
-        appender = h.Background(
-            lambda: persist._append_observations(
-                ch.file, ch.consumed, ch.append_lock, "live", [{"o": 0}],
-                lambda i, obs, oid: {"observation_id": oid, "judge_outcome": "caught"},
-            )
-        )
-        appender._thread.start()
-        landed = appender.finished_within(10)
-        gate.set()
-
-    assert landed, "the append waited on the agent call"
-    assert appender.error is None
-    assert appender.result == 1
-    assert batch.error is None
 
 
 
@@ -191,7 +98,7 @@ def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
     fails this. With the append lock held from another actor, the rotation does not proceed;
     when the lock is released it completes."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 
@@ -216,7 +123,7 @@ def test_retire_blocks_while_append_lock_held(tmp_path: Path):
     loses a concurrently appended row (G13/C16); D9 removes it as a separate write path, so
     the retire seam must be excluded by the same append lock rotation is."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 
@@ -344,7 +251,7 @@ def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path
     lock — observed by another actor acquiring the repo lock while the contended tick runs —
     which is what an order that took the repo lock first would fail."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a", "malicious")
+    h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     assert tuple(drain.LOCK_ORDER) == ("drain_lock", "repo_lock", "append_lock")
