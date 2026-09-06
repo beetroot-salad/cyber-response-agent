@@ -488,3 +488,68 @@ def test_947_a_real_document_outranks_an_esql_projection(tmp_path):
     got = repo.corpus_samples(run, pattern_of=lambda q: (q.params or {}).get("index"))
     assert got["logs-alpha-*"] == {"source": {"address": "::1"}}, (
         "the aggregate projection was kept over a real document")
+
+
+# ---------------------------------------------------------------------------------------
+# the capture's own patterns, as the manifest's derived half
+# ---------------------------------------------------------------------------------------
+
+
+def test_947_a_manifest_reloads_with_the_overlay_keys_its_launcher_accepted(tmp_path):
+    """A world keyed on a capture pattern survives the ROUND TRIP through the manifest.
+
+    `_check_overlay_keys` admits a configured pattern or one the capture's own FROM sources
+    name. Supplying the second half at the authoring call alone moved the refusal rather than
+    removing it: the launcher accepted the family, staged three worlds and reviewed them, and
+    then every sibling re-parsed the same manifest through `load_family` — which has no capture
+    to consult — and refused the document its own launcher had just written. Observed live.
+
+    Driven through the real write/read pair, because what failed was the round trip and an
+    in-memory `parse_family` never touches it.
+    """
+    family_mod = _family_mod()
+    narrow = "logs-narrow.sensor-*"
+    world = T.world_doc("b", ov=T.overlay(elastic={narrow: {"inject": [{"host.name": "ws-1"}]}}))
+    doc = T.family_doc(worlds=[T.base_world(), world], captured_patterns=[narrow])
+    # Author time: the launcher knows the capture, and passes it.
+    family_mod.parse_family(doc, captured_patterns=(narrow,))
+    episode = T.episode(tmp_path)
+    family_mod.write_family(episode, doc)
+    # Resume time: the sibling has only the file.
+    reloaded = family_mod.load_family(episode / family_mod.MANIFEST_NAME)
+    assert narrow in reloaded.world("b").overlay.elastic, "the staged corpus did not survive"
+    assert reloaded.captured_patterns == (narrow,), (
+        "the manifest did not carry the set its overlays were judged against")
+
+
+def test_947_an_overlay_key_outside_both_sets_is_still_refused_on_reload(tmp_path):
+    """Recording the capture's patterns WIDENS the rule; it does not retire it.
+
+    A pattern in neither the configured set nor the recorded capture is refused at load, so a
+    manifest edited after review cannot introduce a corpus the episode never addressed.
+    """
+    family_mod = _family_mod()
+    world = T.world_doc("b", ov=T.overlay(elastic={"logs-invented-*": {
+        "inject": [{"host.name": "ws-1"}]}}))
+    doc = T.family_doc(worlds=[T.base_world(), world],
+                       captured_patterns=["logs-narrow.sensor-*"])
+    with pytest.raises(T.sym("runtime.branch._family", "FamilyError")) as refusal:
+        family_mod.parse_family(doc)
+    assert "logs-invented-*" in str(refusal.value)
+
+
+def test_947_a_malformed_captured_patterns_is_refused_rather_than_read_as_empty(tmp_path):
+    """A present-but-broken field refuses; only an ABSENT one reads as empty.
+
+    The field WIDENS what an overlay may key, so a malformed value that silently normalised to
+    `()` would narrow the rule instead of failing — a manifest edited after review loading as
+    if the edit were part of the contract. Absent stays empty, because a manifest written
+    before the field existed is still one this loader must read.
+    """
+    family_mod = _family_mod()
+    for bad in ("logs-*", [""], [3]):
+        with pytest.raises(T.sym("runtime.branch._family", "FamilyError")):
+            family_mod.parse_family(T.family_doc(captured_patterns=bad))
+    absent = T.family_doc()
+    absent.pop("captured_patterns", None)
+    assert family_mod.parse_family(absent).captured_patterns == ()

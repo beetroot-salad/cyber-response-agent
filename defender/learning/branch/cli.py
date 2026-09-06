@@ -1403,14 +1403,20 @@ def _author(
         "fences_at": fences,
         "as_of": as_of.isoformat().replace("+00:00", "Z"),
         "continuation_prompt": ns.continuation_prompt,
+        # WRITTEN INTO THE MANIFEST, not only passed to the check below. `_check_overlay_keys`
+        # admits a configured pattern OR one the capture's own FROM sources name, and no caller
+        # had ever supplied the second half — so the rule had one branch and every world was
+        # forced onto the deployment's widest configured key. A view matches its pattern by
+        # EQUALITY (the stager owns that rule in its own `declares`), so a world staged under a
+        # wide key is invisible to every narrower query the investigation actually issues.
+        #
+        # Supplying it HERE alone was not enough, and the way it failed is the reason the field
+        # exists: the sibling and the derived readers re-parse this manifest through
+        # `load_family`, which has no capture to consult, so the refusal simply moved from
+        # authoring to RESUME — after three worlds had been staged and reviewed. Recorded, every
+        # reader judges the overlays against the set that authored them.
+        "captured_patterns": list(captured),
     })
-    # `captured_patterns` SUPPLIED, which no caller did before. `_check_overlay_keys` admits a
-    # configured pattern OR one the capture's own FROM sources name, and with the second half
-    # never passed the rule had one branch: every world was forced onto the deployment's widest
-    # configured key. A view matches its pattern by EQUALITY (the stager owns that rule in
-    # its own `declares`), so a
-    # world staged under `logs-*` is invisible to every narrower query the investigation
-    # actually issues — a difference that is staged, recorded and unobservable.
     family = parse_family(document, captured_patterns=captured)
     check_identities(family)
     _family.write_family(episode_dir, document)
