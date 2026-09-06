@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-LESSON_CORPORA = frozenset({"lessons", "lessons-actor", "lessons-environment"})
+#: Every corpus the AUTHOR side may touch. It was a proper superset of the runtime's set while
+#: the old pipeline shipped: `lessons-actor` and `lessons-environment` held the actor- and
+#: environment-side observations, written by two curators the deleted judge was the sole
+#: producer for. Both retired with it (#922), so the two sets coincide today.
+#:
+#: KEPT AS TWO NAMES rather than collapsed to one. They answer different questions — what a
+#: curator may read and write, versus what the runtime agent loads at PLAN — and a single
+#: constant would make the next author-only corpus silently readable by the runtime.
+LESSON_CORPORA = frozenset({"lessons"})
 
 RUNTIME_LESSON_CORPORA = frozenset({"lessons"})
 

@@ -30,10 +30,6 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai import Agent  # noqa: E402
 
-from defender.learning.core.validate import (  # noqa: E402
-    RunUnprocessable,
-    _validate_finding,
-)
 from defender.runtime import challenge_gate  # noqa: E402
 from defender.runtime.close_tool import register_close_tool  # noqa: E402
 from defender.runtime.review.projector import parse_investigation  # noqa: E402
@@ -171,18 +167,5 @@ def test_a_real_finding_still_reads(refs):
     assert read_composer_reply(text, refs=refs).finding == HOLDS
 
 
-@pytest.mark.parametrize("kind", [*UNHASHABLE, "nonsense"], ids=["list", "dict", "near-miss"])
-def test_a_non_member_judge_type_is_run_unprocessable(kind):
-    """The judge-side twin. The `TypeError` escaped `_validate_judge_yaml` BEFORE the
-    `*.raw.txt` audit companion was written, losing the only record of what the judge said."""
-    finding = {"type": kind, "subject_anchor": "v-001", "subject_topic": "topic",
-               "finding": "prose", "citations": []}
-    with pytest.raises(RunUnprocessable):
-        _validate_finding(0, finding, {"gap", "lead-set"})
 
 
-def test_a_real_judge_type_still_validates():
-    """The positive control for the judge side."""
-    finding = {"type": "lead-set", "subject_anchor": "v-001", "subject_topic": "topic",
-               "finding": "prose", "citations": []}
-    _validate_finding(0, finding, {"gap", "lead-set"})

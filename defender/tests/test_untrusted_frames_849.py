@@ -37,7 +37,7 @@ from defender.tests._frames680 import (
     FRAME_RE,
     _drive_learning_read,
     assert_one_frame,
-    _judge_deps,
+    _learning_read_deps,
 )
 
 CAPTURE_CAP = tools._capture_view_cap()
@@ -145,10 +145,23 @@ def test_the_sibling_legs_actor_story_reaches_the_judge_framed(tmp_path):
 def test_the_read_and_cat_lanes_agree_on_a_run_dir_artifact(tmp_path):
     """The disagreement that made this a defect rather than a preference: `_tool_bash` framed
     every learning-stage return already, so the SAME file arrived framed through `cat` and bare
-    through `read_file`. A boundary two lanes disagree about is not a boundary."""
+    through `read_file`. A boundary two lanes disagree about is not a boundary.
+
+    DRIVEN AT THE CORPUS SINCE #922, not at the run dir. The address moved because the ROLE
+    did: the pipeline judge was the learning stage whose bash grant reached a run dir, and it
+    is deleted. Of the roles that survive, none can `cat` a run dir — the curator's grant is
+    its own corpus, which is the whole point of that grant. So the two lanes are compared where
+    a surviving role can actually stand.
+
+    The run-dir half of the property is NOT dropped with the address: the read lane still frames
+    a run-dir artifact, and `test_a_host_written_run_dir_artifact_reaches_a_learning_stage_framed`
+    above is the assertion that says so. What this test still owns is the AGREEMENT — that the
+    two lanes answer the same way about one file — which is the half a single-lane test cannot
+    see."""
     body = "cross-stage text"
-    deps, _ = _judge_deps(tmp_path, box=Box(BoxResult(0, body.encode(), b"")))
-    artifact = deps.run_dir / "past_tickets.txt"
+    deps, corpus = _learning_read_deps(tmp_path, box=Box(BoxResult(0, body.encode(), b"")))
+    artifact = deps.corpus_dir / "lesson.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text(body, encoding="utf-8")
 
     assert FRAME_RE.search(_tool_read_file(deps, str(artifact)))

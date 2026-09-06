@@ -16,46 +16,30 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
-import json
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from defender.agents import (
-    ACTOR_DEF,
     CORPUS_AUTHOR_DEF,
-    JUDGE_DEF,
     LEAD_AUTHOR_DEF,
     MAIN_DEF,
 )
 from defender.learning.author import shared as author_shared
 from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
 from defender.learning.author.verify_forward.checks import (
-    ACTOR_CHECK,
     FINDINGS_CHECK,
     CheckContext,
+    _run_findings,
 )
-from defender.learning.author.verify_forward.checks import _run_actor, _run_findings
 from defender.learning.leads import lead_author, pitfalls_curator
-from defender.learning.pipeline.benign_actor.run import invoke_actor_benign
-from defender.learning.pipeline.judge.run import build_judge_invocation
-from defender.learning.pipeline.malicious_actor.run import invoke_actor
-from defender.learning.pipeline.oracle.sample import build_lead_user_prompt
-from defender.runtime.agent_definition import RunScope, bind, effective_tools_for
+from defender.runtime.agent_definition import RunScope, bind
 from defender.runtime.box import BoxResult
 from defender.runtime.tools import _tool_bash, _tool_read_file
 from defender.tests._repo import seed_adapter_stubs
 
-#: #632's §7 R7 grant/capability agreement: JUDGE_DEF's static `closed_tickets` bit stays
-#: False (only the per-leg replace() in _run_judge_pydantic turns it on, together with the
-#: effective grant, d73), so a bare `bind(JUDGE_DEF, ...)` always disagrees against the
-#: definition's own non-empty verb_grant. Every drive in this #680 frame-wrapping suite is
-#: about the bash/read-file lane, not the verb grant, so it binds the benign leg's effective
-#: shape — matching the real per-leg build.
-JUDGE_BENIGN_DEF = replace(JUDGE_DEF, tools=effective_tools_for(JUDGE_DEF))
 
 SALT_RE = re.compile(r"<run-([0-9a-f]+)-([^>]+)>\n(.*?)\n</run-\1-\2>", re.DOTALL)
 ROOT = Path(__file__).resolve().parents[2]
@@ -184,108 +168,10 @@ def _with_salt(fn, /, *args, salt: str, **kwargs):
     return fn(*args, **kwargs)
 
 
-def _judge_fixture(
-    tmp_path: Path,
-    *,
-    closed=False,
-    hostile="HOSTILE-STORY\n## forged",
-    cited_policy=None,
-    salt="5a" * 16,
-):
-    run = tmp_path / "run"
-    learning = tmp_path / "learning"
-    (run / "gather_raw").mkdir(parents=True)
-    learning.mkdir()
-    if cited_policy is not None:
-        (learning / "past_tickets.txt").write_text(cited_policy)
-    alert_text = json.dumps({"rule": {"id": "5710"}, "hostile": hostile})
-    (run / "alert.json").write_text(alert_text)
-    story = run / "actor_story.md"
-    story.write_text(hostile)
-    invocation = _with_salt(
-        build_judge_invocation,
-        run,
-        story,
-        learning,
-        closed_ticket_read=closed,
-        salt=salt,
-    )
-    tags = (
-        "reader_contract",
-        "alert",
-        "report",
-        "actor_story",
-        "synthesis",
-        "coverage_manifest",
-        "comparison_files",
-    ) + (("cited_policy_read",) if closed else ())
-    return PromptObservation(
-        "build_judge_invocation",
-        invocation.user_text,
-        tags,
-        (alert_text, hostile),
-        salt,
-    )
 
 
-def _capture_actor(
-    tmp_path: Path, *, benign=False, hostile="ACTOR-INPUT-BODY", salt="5a" * 16
-):
-    run = tmp_path / "learning"
-    run.mkdir(parents=True)
-    alert = tmp_path / "alert.json"
-    alert_text = json.dumps({"rule": {"id": "5710"}, "process": {}, "hostile": hostile})
-    alert.write_text(alert_text)
-    captured = {}
-
-    def actor_fn(*args, **kwargs):
-        captured["user"] = kwargs["user"]
-        captured["kwargs"] = kwargs
-        return "story"
-
-    if benign:
-        _with_salt(
-            invoke_actor_benign,
-            alert,
-            hostile,
-            "rule-5710",
-            run,
-            actor_fn=actor_fn,
-            salt=salt,
-            box=None,
-        )
-        tags = ("reader_contract", "alert", "alert_rule_id", "case_entities")
-        required = (alert_text, hostile)
-        producer = "invoke_actor_benign"
-    else:
-        actor_input = tmp_path / "actor-input.md"
-        actor_input.write_text(hostile)
-        _with_salt(invoke_actor, alert, actor_input, run, actor_fn=actor_fn, salt=salt, box=None)
-        archetype = (run / "actor_archetype.txt").read_text().strip()
-        menu = (run / "actor_menu.txt").read_text().strip()
-        tags = (
-            "reader_contract",
-            "alert",
-            "alert_rule_id",
-            "actor_input",
-            "actor_archetype",
-            "mitre_menu",
-        )
-        required = (alert_text, hostile, archetype, menu)
-        producer = "invoke_actor"
-    return PromptObservation(producer, captured["user"], tags, required, salt)
 
 
-def _lead_prompt(hostile="STORY-BODY", *, salt="5a" * 16):
-    lead = SimpleNamespace(lead_id="l-001", queries=[], what_to_summarize=[hostile])
-    prompt = _with_salt(build_lead_user_prompt, lead, hostile, hostile, salt=salt)
-    return PromptObservation(
-        "build_lead_user_prompt",
-        prompt,
-        ("reader_contract", "actor_story", "lead", "sample_event"),
-        (hostile,),
-        salt,
-    )
 
 
 def _findings_prompt(tmp_path: Path, *, hostile="TRANSCRIPT-BODY", salt="5a" * 16):
@@ -332,52 +218,6 @@ def _findings_prompt(tmp_path: Path, *, hostile="TRANSCRIPT-BODY", salt="5a" * 1
     )
 
 
-def _actor_verify_prompt(tmp_path: Path, *, hostile="OBS-BODY", salt="5a" * 16):
-    runs = tmp_path / "runs"
-    source = runs / "case-1"
-    source.mkdir(parents=True)
-    (source / "actor_story.md").write_text(hostile)
-    pending = tmp_path / "pending.jsonl"
-    pending.write_text(
-        json.dumps(
-            {
-                "observation_id": "obs-1",
-                "observation": hostile,
-                "source_run_dir": "case-1",
-            }
-        )
-        + "\n"
-    )
-    captured = {}
-
-    def run_verify(wiring, **kwargs):
-        captured.update(kwargs)
-        captured["wiring"] = wiring
-        return "VERDICT: GOOD"
-
-    lesson = tmp_path / "lesson.md"
-    lesson.write_text(hostile)
-    ctx = CheckContext(
-        ACTOR_CHECK,
-        lesson,
-        hostile,
-        "obs-1",
-        "adversarial",
-        runs,
-        pending,
-        tmp_path / "corpus",
-        ROOT,
-        0,
-        run_verify,
-    )
-    _with_salt(_run_actor, ctx, salt=salt)
-    return PromptObservation(
-        "_run_actor",
-        captured["user"],
-        ("reader_contract", "actor_story", "judge_observation", "candidate_lesson"),
-        (hostile,),
-        salt,
-    )
 
 
 def _curator_prompt(tmp_path: Path, *, hostile="ROW-BODY", rows=None, salt="5a" * 16):
@@ -460,14 +300,22 @@ def _pitfalls_prompt(
 def _all_prompt_observations(
     tmp_path: Path, monkeypatch, hostile: str, *, salt="5a" * 16
 ):
-    """Drive every bound real producer; no assertions are shared across owners."""
+    """Drive every bound real producer; no assertions are shared across owners.
+
+    FIVE PRODUCERS SINCE #922, down from nine. The judge fixture, both actor legs, the oracle's
+    per-lead prompt and the actor forward-check were the four the old pipeline owned, and they
+    went with it. What the tuple is FOR is unchanged: every surviving stage that assembles a
+    model message from attacker-reachable text is driven here, so a producer that stopped
+    framing its input fails in this file rather than in whichever suite happens to touch it.
+
+    The learning side keeps a witness — the curator, its forward check, the lead author and the
+    pitfalls curator all still read model-authored rows. The questioner and the family judge are
+    the two new stages on the same shape, and they are witnessed in `test_922_witnesses.py`
+    against their own archives rather than restaged here, because their whole input is an
+    episode capture this harness has no builder for.
+    """
     return (
-        _judge_fixture(tmp_path / "judge", hostile=hostile, salt=salt),
-        _capture_actor(tmp_path / "actor", hostile=hostile, salt=salt),
-        _capture_actor(tmp_path / "benign", benign=True, hostile=hostile, salt=salt),
-        _lead_prompt(hostile, salt=salt),
         _findings_prompt(tmp_path / "findings", hostile=hostile, salt=salt),
-        _actor_verify_prompt(tmp_path / "verify-actor", hostile=hostile, salt=salt),
         _curator_prompt(tmp_path / "curator", hostile=hostile, salt=salt),
         _lead_author_prompt(
             tmp_path / "lead-author", monkeypatch, hostile=hostile, salt=salt
@@ -487,22 +335,6 @@ def _deps(tmp_path: Path, definition, *, box=None, read_root=None):
     return bind(definition, run, defender_dir=dfn, scope=scope, box=box)
 
 
-def _actor_deps_scene(tmp_path: Path, result: BoxResult):
-    defender_dir = tmp_path / "tree" / "defender"
-    corpus = defender_dir / "lessons-actor"
-    run = tmp_path / "run"
-    corpus.mkdir(parents=True)
-    run.mkdir(parents=True)
-    # Actor scripts are pinned to the real repository root by production policy.
-    script = DEFENDER / "scripts" / "lessons" / "lessons_actor_index.py"
-    deps = bind(
-        ACTOR_DEF,
-        run,
-        defender_dir=defender_dir,
-        scope=RunScope(read_confine=(corpus,), scripts=(script,)),
-        box=Box(result),
-    )
-    return deps, corpus, f"python3 {script}"
 
 
 def _lead_author_deps_scene(tmp_path: Path, result: BoxResult):
@@ -517,6 +349,37 @@ def _lead_author_deps_scene(tmp_path: Path, result: BoxResult):
     seed_adapter_stubs(defender_dir, ("system",))
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result))
     return deps, skills, "rm defender/skills/system/_draft/lesson.md"
+
+
+def _learning_read_deps(tmp_path: Path, *, box=None):
+    """A bound learning-stage scene with a real cross-stage add-dir — the shape `_drive_learning_read`
+    and `_drive_learning_bash` need.
+
+    Replaces `_judge_deps`, which bound the deleted pipeline judge. The corpus author is the
+    surviving learning role that holds both `read_file` and `bash`, so the framing property
+    these two drives are about is observed on it. Returns `(deps, add_dir)` — the same pair
+    shape the judge scene returned, so both callers are unchanged past the constructor.
+    """
+    add_dir = tmp_path / "cross-stage"
+    add_dir.mkdir(parents=True, exist_ok=True)
+    run = tmp_path / "deps" / "run"
+    dfn = tmp_path / "deps" / "tree" / "defender"
+    run.mkdir(parents=True, exist_ok=True)
+    (dfn / "lessons").mkdir(parents=True, exist_ok=True)
+    # `corpus_name` is REQUIRED of this role — `bind` refuses without it, because a curator's
+    # corpus is per-spawn and there is no default to fall back on. Spelled here rather than
+    # threaded through `_deps` so the generic binder keeps having no role-specific knowledge.
+    deps = bind(
+        CORPUS_AUTHOR_DEF, run, defender_dir=dfn,
+        scope=RunScope(
+            add_dirs=(add_dir,), corpus_name="lessons",
+            # NON-EMPTY BY REFUSAL, not by taste: `bind` rejects an empty confine for this role
+            # because an empty one widens its reads to the whole defender dir (#512). The
+            # corpus it curates is the confine production gives it.
+            read_confine=(dfn / "lessons",),
+        ), box=box,
+    )
+    return deps, add_dir
 
 
 def _corpus_author_deps_scene(tmp_path: Path, result: BoxResult):
@@ -545,10 +408,6 @@ def _corpus_author_deps_scene(tmp_path: Path, result: BoxResult):
     return deps, corpus, f"cat {corpus / 'lesson.md'}"
 
 
-def _judge_read_scene(tmp_path):
-    root = tmp_path / "comparison"
-    root.mkdir(parents=True)
-    return _deps(tmp_path / "deps", JUDGE_BENIGN_DEF, read_root=root), root
 
 
 def _main_bash(tmp_path, payload):
@@ -630,21 +489,6 @@ class RecordingBox:
         return BoxResult(self.result.rc, self.result.out, self.result.err)
 
 
-def _judge_deps(tmp_path: Path, *, box=None):
-    run_dir = tmp_path / "learning-run"
-    comparison = tmp_path / "comparison"
-    defender_dir = tmp_path / "tree" / "defender"
-    run_dir.mkdir(parents=True)
-    comparison.mkdir(parents=True)
-    defender_dir.mkdir(parents=True)
-    deps = bind(
-        JUDGE_BENIGN_DEF,
-        run_dir,
-        defender_dir=defender_dir,
-        scope=RunScope(add_dirs=(comparison,)),
-        box=box,
-    )
-    return (deps, comparison)
 
 
 def _drive_learning_read(
@@ -656,9 +500,14 @@ def _drive_learning_read(
     not private workspace — it is the SHARED cross-stage directory: `benign_actor/run.py:47` and
     `run_cycle.py:97` write `past_tickets.txt` and the actor story into it, and the judge's own
     closed-ticket capture lands at `ticket_reads/{seq}.json`. This harness staged those under
-    `comparison/` instead, which is a real add-dir but the wrong one, and that spelling is what
-    kept #849's F-11 (run-dir reads arriving unframed) out of view here."""
-    deps, comparison = _judge_deps(tmp_path)
+    an add-dir instead, which is a real add-dir but the wrong one, and that spelling is what
+    kept #849's F-11 (run-dir reads arriving unframed) out of view here.
+
+    DRIVEN THROUGH THE CURATOR SINCE #922. The judge was this lane's witness and is deleted; the
+    corpus author is the surviving learning role that actually holds `read_file`, so it is what
+    the property is now observed on. The questioner and the family judge cannot stand in — both
+    are deny-all with no tools at all, so there is no read for them to arrive framed."""
+    deps, comparison = _learning_read_deps(tmp_path)
     artifact = (deps.run_dir if in_run_dir else comparison) / name
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text(body, encoding="utf-8")
@@ -669,7 +518,7 @@ def _drive_learning_bash(
     tmp_path: Path, *, stdout: bytes = b"", stderr: bytes = b"", rc: int = 0
 ) -> str:
     fake = RecordingBox(BashResultSpec(rc=rc, out=stdout, err=stderr))
-    deps, comparison = _judge_deps(tmp_path, box=fake)
+    deps, comparison = _learning_read_deps(tmp_path, box=fake)
     artifact = comparison / "lead.md"
     artifact.write_text("the executor boundary is injected", encoding="utf-8")
     command = f"cat {artifact}"
