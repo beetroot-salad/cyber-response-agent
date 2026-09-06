@@ -81,7 +81,6 @@ l-004|1|sshd-baseline-dana|v-001|h-001,h-002|elastic|7d
 
 ```invlang
 :V l-001.observations.vertices [id|type|class|ident|attrs?]
-v-006|compute|workstation/internal/known-corp|office-ws-1|os=linux
 v-007|compute|database-server/internal/known-corp|db-1|os=linux
 v-008|compute|ip-only/internal/??|172.18.0.14|knowledge=partial;note=source-of-db-1-attempts;likely=office-ws-1-network-interface
 

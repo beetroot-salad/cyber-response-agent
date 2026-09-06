@@ -122,3 +122,10 @@ experiments/actor-author-discipline/**/__pycache__/
 # artifacts). Swept into the tree by a `git add -A` during #941 and removed again;
 # ignored here so it cannot be re-added by accident.
 seam-harness/
+
+# Episode captures written by a sibling worktree. `episodes_root()` refuses a
+# DEFENDER_EPISODES_BASE inside the runs base or inside REPO_ROOT — but REPO_ROOT is the
+# *launching* checkout, so a run driven from a worktree can still point its episodes base
+# at this one, where nothing refuses it. The refusal already covers runs launched from
+# here; this covers the ones that are not.
+.defender-episodes/

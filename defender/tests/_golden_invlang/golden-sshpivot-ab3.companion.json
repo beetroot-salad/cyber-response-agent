@@ -83,15 +83,6 @@
               "attributes": {
                 "os": "linux"
               },
-              "classification": "workstation/internal/known-corp",
-              "id": "v-006",
-              "identifier": "office-ws-1",
-              "type": "compute"
-            },
-            {
-              "attributes": {
-                "os": "linux"
-              },
               "classification": "database-server/internal/known-corp",
               "id": "v-007",
               "identifier": "db-1",

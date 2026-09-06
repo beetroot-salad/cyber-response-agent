@@ -184,9 +184,12 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     # block header the SOURCE committed — legal there, since the write gate scopes that family
     # to what a write adds — reads as newly introduced, and a run whose document ever carried
     # one could never be branched or resumed again. What this call is actually for survives the
-    # change untouched: the reference and structure rules are document-global and do not look
-    # at the baseline at all, which is why the `undeclared lead` prefix that motivated the
-    # check is still refused.
+    # change untouched: the reference and structure rules that motivated it are document-global
+    # and do not look at the baseline, which is why the `undeclared lead` prefix is still
+    # refused. Vertex participation (#993) is the second family to read `current`, and reads it
+    # for exactly the hazard above: a `:V` row whose `:E` row landed in a LATER message leaves
+    # the prefix holding an orphan the SOURCE committed, so a baseline-blind reading would
+    # refuse a cut of a document that validates as a whole.
     reason = validate_artifact(INVESTIGATION_NAME, seed, seed)
     if reason is not None:
         raise BranchError(

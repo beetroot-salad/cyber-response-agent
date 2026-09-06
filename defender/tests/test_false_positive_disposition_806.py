@@ -36,11 +36,18 @@ _LEADS = (
 
 
 def _outcome(lead_id: str, vertex: str) -> str:
-    """A lead COMMITS by filing what it observed — the same shape a real run writes."""
+    """A lead COMMITS by filing what it observed — the same shape a real run writes.
+
+    The identity is EDGED to the alerted host (`v-001`, `_PROLOGUE`'s only vertex), not just
+    declared: #993 refuses a lead-declared vertex no `:E` row ever names, and a bare identity
+    row with no edge is exactly the shape that rule exists to catch."""
     return (
         "```invlang\n"
         f":V {lead_id}.observations.vertices [id|type|class|ident|attrs?]\n"
         f"{vertex}|identity|user/known-corp|svc.config-mgmt|\n"
+        "\n"
+        f":E {lead_id}.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+        f"e-001|attempted_auth|{vertex}|v-001||siem-event:elastic|\n"
         "```\n"
     )
 
