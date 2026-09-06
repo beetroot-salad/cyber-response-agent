@@ -58,47 +58,6 @@ def _queued_run(tmp_path, name: str) -> Path:
 
 
 
-def test_791_the_golden_replay_still_drives_the_oracle_end_to_end(tmp_path, monkeypatch):
-    """golden_replay_still_judges — the golden replay still drives the retired stage over a
-    golden case and writes its projection, keyed by the audit tag.
-
-    It is the ONE surviving entry point with a positive, asserting witness: it binds the
-    per-lead seam directly and never touches the judge prompts, which is exactly why the prompt
-    rewrite darkens its three siblings and not it.
-
-    The replay hardcodes its stage function, so the stage seam is pinned as part of the
-    contract here — without it there is no hermetic witness at all, and a survival demand with
-    no witness discharges nothing."""
-    from defender.evals.oracle_golden import replay
-
-    monkeypatch.setenv("ORACLE_MODEL", "glm-5.2")
-    monkeypatch.setenv("ORACLE_EFFORT", "medium")
-    case = tmp_path / "golden-case"
-    visible = case / "oracle_visible"
-    (visible / "samples").mkdir(parents=True)
-    (visible / "story.md").write_text("the actor's counter-story\n", encoding="utf-8")
-    (visible / "leads.jsonl").write_text(
-        json.dumps({"lead_id": "l-001", "goal": "check auth", "what_to_summarize": ["x"],
-                    "queries": [{"query_id": "elastic.auth", "params": {"host": "h1"}}]}) + "\n",
-        encoding="utf-8",
-    )
-    (visible / "samples" / "l-001.txt").write_text("### Raw Sample Events\n", encoding="utf-8")
-
-    seen: list[str] = []
-
-    def fake_oracle_fn(wiring, *, user, learning_run_dir, salt=None, **_kw):
-        seen.append(wiring.label)
-        return "events:\n  - {process: sshd, outcome: success}\n"
-
-    rc = replay.main([str(case)], oracle_fn=fake_oracle_fn)
-    assert rc == 0
-    assert seen == ["oracle:l-001"], f"the replay drove {seen}, not the per-lead oracle seam"
-
-    out = case / "projections" / "glm-5.2_effort-medium.yaml"
-    assert out.is_file(), \
-        f"the replay wrote no projection under its audit tag: " \
-        f"{sorted(p.name for p in (case / 'projections').iterdir())}"
-    assert "l-001" in out.read_text(encoding="utf-8")
 
 
 

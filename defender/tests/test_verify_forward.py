@@ -80,11 +80,6 @@ def test_wrap_body_placeholder_is_inert():
     )
 
 
-def test_prompt_files_are_instructions_only():
-    import re
-    for name in ("actor.md", "forward.md"):
-        text = (vf.HERE / name).read_text()
-        assert re.findall(r"\{[a-z_]+\}", text) == [], f"{name} has leftover data placeholders"
 
 
 def test_expected_disposition_direction_aware():

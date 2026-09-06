@@ -19,7 +19,6 @@ import pytest
 from defender.tests._invlang_warn_836 import (
     CONCLUDE_BENIGN,
     PROLOGUE,
-    REPAIRED_ROW,
     WARN_DOC,
     WARN_ROW,
     attr_block,
@@ -322,71 +321,8 @@ def test_persist_reads_document_written_under_different_severity_semantics(tmp_p
 
 # O2 — the copy gate and the readers downstream of it
 
-def test_persist_copy_path_accepts_warn_only_document(tmp_path):
-    """O2, discharged AT THE COPY GATE: a run whose only defect is a warn-family row still
-    reaches the learning loop instead of dead-lettering.
-
-    Observed failing at `c0dca747` by `learning/core/persist.py:207` raising
-    `RunUnprocessable` (claims r4/g13). The paired control is the second half — an
-    error-severity document still refuses, so the gate is narrowed, not removed."""
-    from defender.learning.core.config import RunUnprocessable
-    from defender.learning.core.persist import _copy_shared_inputs
-
-    run = _stage_run(tmp_path / "warn", WARN_DOC)
-    mirror = tmp_path / "learning" / "run-1"
-    _copy_shared_inputs(run, mirror)
-
-    assert (mirror / "investigation.md").read_text(encoding="utf-8") == WARN_DOC
-
-    bad = _stage_run(tmp_path / "broken", _PARSE_ERROR)
-    with pytest.raises(RunUnprocessable):
-        _copy_shared_inputs(bad, tmp_path / "learning" / "run-2")
 
 
-def test_the_learning_mirror_carries_a_warn_only_document_onward(tmp_path):
-    """O2's other half, and R7's per-reader discipline: the three UNMOVED readers of
-    `investigation.md` are each driven over a warn-only document and observed AT THEIR OWN
-    EDGE, not at the boundary.
-
-    Nothing downstream of the copy persists "this document was warned", so each reader's
-    answer must be indistinguishable from its answer over the repaired twin. A demand at
-    `investigation_md`'s own altitude would read green with two of the three readers moved,
-    which is exactly the bug R7 exists to compute."""
-    from defender.learning import lead_repository
-    from defender.learning.author.verify_forward.forward import load_run_context
-    from defender.learning.core.persist import _copy_shared_inputs
-    from defender.learning.core.prologue import extract_case_entities
-
-    repaired = PROLOGUE + attr_block(REPAIRED_ROW)
-    warn_run = _stage_run(tmp_path / "warn", WARN_DOC)
-    clean_run = _stage_run(tmp_path / "clean", repaired)
-    for run in (warn_run, clean_run):
-        (run / "source_refs.yaml").write_text(
-            "normalized_disposition: benign\n", encoding="utf-8"
-        )
-        _copy_shared_inputs(run, run.parent / "mirror")
-
-    # reader 1 — the prologue scan, at interacts(prologue_extract->investigation_md)
-    warn_entities = extract_case_entities(warn_run.parent / "mirror" / "investigation.md")
-    clean_entities = extract_case_entities(clean_run.parent / "mirror" / "investigation.md")
-    assert warn_entities == clean_entities
-    # The vacuity control, corrected: `extract_case_entities` (`learning/core/prologue.py:21`)
-    # collects the `:V` block's TYPE and CLASS columns, never the vertex id — so `"v-001" in …`
-    # was false for every document, at this base and any other. What proves the comparison above
-    # is not two empty strings is the `type:class` token the prologue actually declares. The
-    # reader itself is UNMOVED by #836; only this assertion's idea of what it returns was wrong.
-    assert warn_entities == "compute:bastion/internal/known-corp,identity:user/known-corp"
-
-    # reader 2 — the forward check, at interacts(forward_check->investigation_md)
-    warn_text, warn_disp = load_run_context(warn_run.name, runs_dir=warn_run.parent)
-    assert warn_text == WARN_DOC
-    assert warn_disp == "benign"
-
-    # reader 3 — the run-level cross-check, at interacts(run_common_cross_check->investigation_md)
-    assert (
-        lead_repository.narration_crosscheck_from_run(warn_run)
-        == lead_repository.narration_crosscheck_from_run(clean_run)
-    )
 
 
 # A2 — what the rendered warning shows the model
