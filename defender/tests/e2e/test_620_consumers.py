@@ -50,7 +50,6 @@ from defender.learning.leads import (  # noqa: E402
     lead_neighbors,
     pitfalls_curator,
 )
-from defender.learning.pipeline.judge import compare  # noqa: E402
 from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
 from defender.scripts.adapters import cmdb_adapter, elastic_adapter  # noqa: E402
 from defender.scripts.visualize import visualize_runtime  # noqa: E402

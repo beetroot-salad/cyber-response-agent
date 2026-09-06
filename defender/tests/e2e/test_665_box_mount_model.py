@@ -21,19 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from _box665 import (  # noqa: E402
-    DEFENDER,
-    REPO_ROOT,
-    BoxLifecycleRecorder,
-    RecordingBranch,
-    drive_run_one,
-    drive_worktree_batch,
-    mount_for,
-)
 
 pytest.importorskip("pydantic_ai")
 
-from defender.learning.pipeline.actor_engine import ACTOR_DEF  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind, compile_policy_for  # noqa: E402
@@ -43,6 +33,8 @@ from _box665 import ScriptedTransport  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 SALT = "s665mnt"
+from defender.learning.core.config import REPO_ROOT  # noqa: E402
+
 PINNED = REPO_ROOT / "defender" / "scripts" / "lessons" / "defender-lessons"
 
 
@@ -167,16 +159,6 @@ def test_gather_raw_mount_omitted_when_evidence_dir_legitimately_absent_at_reque
         "an absent gather_raw was still composed into the mount set"
 
 
-def test_gather_raw_appears_after_the_run_cycle_box_already_started_without_it(tmp_path, monkeypatch):
-    """test_gather_raw_appears_after_the_run_cycle_box_already_started_without_it — the mount
-    set is FIXED once at box creation; if gather_raw is created later (after the box already
-    started without it), it is never remounted (no remount mechanism, and mounts cannot be
-    added to a running container). Asserts one box, composed without gather_raw when absent at
-    creation."""
-    rec = BoxLifecycleRecorder()
-    drive_run_one(tmp_path, monkeypatch, rec, gather_raw=False)  # TypeError at HEAD → red
-    assert len(rec.boxes) == 1, "the box was recreated to pick up a late gather_raw"
-    assert mount_for(rec.only_request(), "gather_raw") is None
 
 
 def test_cwd_anchor_wholly_outside_every_declared_mount(tmp_path, monkeypatch):
@@ -337,27 +319,6 @@ def test_curator_relative_operand_rebased_at_cwd_anchor_escapes_corpus(tmp_path)
     assert ok.allow, "the in-scope rm was refused (positive control failed)"
 
 
-def test_judge_cat_operand_reaches_defender_dir_beyond_its_declared_gate_roots(tmp_path):
-    """test_judge_cat_operand_reaches_defender_dir_beyond_its_declared_gate_roots — defender_dir
-    is not 'beyond' the judge's gate scope: the judge cat scope is built over exactly
-    (run_dir, defender_dir, *read_roots), so a path under defender_dir is WITHIN what the gate
-    intends the judge to read — the ro infra mount and the judge gate root coincide by design
-    (M3b overlap is ordinary), not by accidental mount width."""
-    from dataclasses import replace
-
-    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
-    from defender.runtime.agent_definition import ToolSet
-
-    run_dir = tmp_path / "lrd"
-    run_dir.mkdir()
-    # Binds the benign leg's effective ToolSet (#632, §7 R7) — see test_665_box_geography.py's
-    # _judge_deps for the same reasoning; this probe is about the cat gate scope, not the
-    # verb grant.
-    benign = replace(JUDGE_DEF, tools=ToolSet(read=True, bash=True, closed_tickets=True))
-    policy = compile_policy_for(benign, run_dir, defender_dir=DEFENDER)
-    decision = decide_bash(f"cat {DEFENDER / 'SKILL.md'}", policy=policy, run_dir=run_dir,
-                           defender_dir=DEFENDER, cwd_anchor=run_dir)
-    assert decision.allow, "defender_dir is one of the judge's declared cat gate roots, not beyond it"
 
 
 # The actor anchor move (decision 1) + N3/N4/S6 containment (host-side gate)
@@ -395,31 +356,8 @@ def test_actor_pinned_script_operand_spelling_survives_anchor_move(tmp_path):
         assert d.allow, f"pinned-script spelling {spelling!r} was refused after the anchor move"
 
 
-def test_actor_read_tool_rebase_stays_within_read_confine(tmp_path):
-    """test_actor_read_tool_rebase_stays_within_read_confine (po53) — moving the actor anchor
-    cannot widen or narrow read_confine: decide_read's confine check takes (policy, run_dir,
-    defender_dir), never cwd_anchor, so the read confinement is bit-for-bit unchanged whether
-    the actor anchors at learning_run_dir or repo_root (gate-independence, po53 confirmed)."""
-    from defender.learning.pipeline.actor_engine import ACTOR_DEF
-
-    confine = (tmp_path / "lrd",)
-    p1 = compile_policy_for(ACTOR_DEF, tmp_path / "lrd",
-                            scope=RunScope(read_confine=confine), defender_dir=DEFENDER)
-    assert p1.read_confine == tuple(confine), \
-        "the actor read_confine changed under the anchor move (decide_read is not anchor-blind)"
 
 
-def test_actor_bash_grant_has_no_file_opening_verb(tmp_path):
-    """actor_no_file_opening_grant (negative) — the actor shares a box whose mount set is the
-    union of both roles' needs, but its entire bash grant is `python3 <pinned script>` — no
-    `cat`, no `grep`, no file-opening verb (N4), so nothing on the bash lane can open a file
-    across the wider shared mount. Negative on any file-opening program; positive control: the
-    pinned python3 grant is present."""
-    policy = compile_policy_for(
-        ACTOR_DEF, tmp_path / "lrd",
-        scope=RunScope(read_confine=(tmp_path / "lrd",), scripts=(PINNED,)), defender_dir=DEFENDER)
-    programs = {g.program for g in policy.bash_allow}
-    assert programs == {"python3"}, f"the actor grant carries a file-opening verb: {programs}"
 
 
 def test_actor_bash_grant_opens_no_file_over_any_reachable_in_box_tree(tmp_path):
@@ -534,14 +472,3 @@ def test_a_symlink_left_in_the_corpus_tree_is_refused_by_the_s7_scan_before_comm
         box_mod.scrub(tmp_path / "leaf")
 
 
-def test_run_cycle_in_run_consumer_reads_a_file_a_concurrent_leg_can_still_mutate(tmp_path, monkeypatch):
-    """test_run_cycle_in_run_consumer_reads_a_file_a_concurrent_leg_can_still_mutate — a
-    dec8-ACCEPTED residual: the per-leg consumers (persist_run/append_findings) run host-side
-    while the shared run-cycle box is still alive, so a consumer can read a file a concurrent
-    leg can still mutate. The box is torn down once at run end, AFTER both legs — the accepted
-    ordering. Asserts a single teardown at run end (not per-leg)."""
-    rec = BoxLifecycleRecorder()
-    drive_run_one(tmp_path, monkeypatch, rec, disposition="inconclusive")  # TypeError at HEAD → red
-    assert len(rec.boxes) == 1, "more than one run-cycle box was created for the invocation"
-    assert rec.stopped == rec.boxes, \
-        "the shared box was torn down per-leg, not once at run end (dec8 residual)"

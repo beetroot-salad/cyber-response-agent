@@ -45,7 +45,6 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.tools import _format_bash_result  # noqa: E402
 

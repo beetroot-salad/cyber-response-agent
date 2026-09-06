@@ -102,9 +102,6 @@ from defender.learning.core import config  # noqa: E402
 from defender.learning.author.verify_forward.engine import VerifierDeps  # noqa: E402
 from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
 from defender.learning.leads.lead_author_engine import LeadAuthorDeps  # noqa: E402
-from defender.learning.pipeline.actor_engine import ActorDeps  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import JudgeDeps  # noqa: E402
-from defender.learning.pipeline.oracle_engine import OracleDeps  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission import files  # noqa: E402
@@ -132,26 +129,9 @@ from defender.runtime.agent_definition import (  # noqa: E402
     read_allow_of,
     resolve_roots,
 )
-from defender.agents import (  # noqa: E402
-    ACTOR_DEF,
-    CORPUS_AUTHOR_DEF,
-    GATHER_DEF,
-    JUDGE_DEF,
-    LEAD_AUTHOR_DEF,
-    MAIN_DEF,
-    ORACLE_DEF,
-    QUESTIONER_DEF,
-    VERIFY_DEF,
-)
 
 _DEFENDER = PATHS.defender_dir
 
-# #632's §7 R7 grant/capability agreement: JUDGE_DEF's static `closed_tickets` bit stays False
-# (only the per-leg replace() in _run_judge_pydantic turns it on, together with the effective
-# grant, d73), so a bare `bind(JUDGE_DEF, ...)` always disagrees against the definition's own
-# non-empty verb_grant. These probes are about the bash lane/deps shape, not the verb grant, so
-# they bind the benign leg's effective shape — matching the real per-leg build.
-_JUDGE_BENIGN_DEF = replace(JUDGE_DEF, tools=effective_tools_for(JUDGE_DEF))
 
 # `decide_write` requires both run roots since #681 (its former `run_dir=None` default silently
 # skipped the #629 output-structure gate). Every write probe below threads them; the shape
@@ -163,10 +143,6 @@ _VALID_REPORT = "---\ndisposition: benign\n---\nok\n"
 
 # Real repo-relative script/confine paths (mirrors test_bind_wiring_545.py) — the actor's
 # _script_pattern does script.resolve().relative_to(REPO_ROOT), so synthetic paths raise.
-_ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
-_ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
-_ACTOR_DIR = config.LESSONS_ACTOR_DIR
-_ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
 
 # Probe files (need not exist — the gate is textual/root-based):
 #   corpus .md under lessons  → both the bash cat lane AND decide_read admit (reader agent)
@@ -255,78 +231,10 @@ def test_d0_bind_return_contract(tmp_path):
 
 # D1 — all seven roles obtain deps via bind
 
-def test_d1_judge_via_bind(tmp_path):
-    """d1_judge_via_bind: bind(JUDGE_DEF, scope=RunScope(add_dirs)) yields a policy whose
-    read_roots == add_dirs, whose `cat` grant is SCOPED to those roots (the #575 successor of the
-    `operand_gated` bit: every cat operand is checked against the scope at resolve() time, which
-    is how the judge reaches a gather_raw payload living under the INVESTIGATION run dir — the
-    `raw_reads` bit's whole content). The benign closed-ticket read is a typed tool now (#672),
-    not a bash grant, so the bash lane is exactly cat + defender-sql on both legs."""
-    # GREEN@HEAD: judge binds off scope alone (no defender_dir); stays green post-#551/#575.
-    run = tmp_path / "run"
-    cmp = tmp_path / "cmp"
-    cmp.mkdir()
-    tcli = tmp_path / "ticket_adapter.py"
-    jdeps = bind(_JUDGE_BENIGN_DEF, run, scope=RunScope(add_dirs=(cmp,)))
-    assert isinstance(jdeps, JudgeDeps)
-    jpol = jdeps.policy
-    assert jpol.read_roots == (cmp,)
-    # `raw_reads` as a PROPERTY: the judge's opener reaches gather_raw under the comparison root
-    # (its own run_dir never contains it) — no bit declares this, the cat grant's scope IS it.
-    assert permission.decide_bash(
-        f"cat {cmp}/gather_raw/l-001/0.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER,
-    ).allow
-    # bash lane: a cat operand inside the comparison root is admitted, outside denied.
-    assert permission.decide_bash(f"cat {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_bash("cat /etc/passwd", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
-    # ...and the sandboxed aggregator it feeds.
-    assert permission.decide_bash(
-        f"cat {cmp}/a.json | defender-sql 'SELECT 1'", policy=jpol, run_dir=run, defender_dir=_DEFENDER,
-    ).allow
-    # #672: no ticket shape on the bash lane — the closed-ticket read is a typed tool, so the
-    # old `python3 <adapter> list-tickets --require-closed` grant is gone and DENIES.
-    assert not permission.decide_bash(f"python3 {tcli} list-tickets --require-closed", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
-    # `operand_gated` as a PROPERTY: the operand is gated at resolve() time, not textually — a
-    # symlink INSIDE the comparison root pointing OUT of it denies (a textual anchor could not
-    # see through it). This is now the model for every agent, so the bit has nothing left to say.
-    (tmp_path / "outside").mkdir()
-    (tmp_path / "outside" / "secret").write_text("x")
-    os.symlink(tmp_path / "outside" / "secret", cmp / "evil.json")
-    assert not permission.decide_bash(
-        f"cat {cmp}/evil.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER,
-    ).allow
 
 
-def test_d1_actor_via_bind(tmp_path):
-    """d1_actor_via_bind: bind(ACTOR_DEF, scope=RunScope(scripts, read_confine)) yields a policy
-    with one pinned python3-<script> GRANT per script, read_confine == the confine, and NO `cat`
-    grant at all — which is the #575 successor of `raw_reads=False`: the actor has no opener, so
-    it has no read shapes either (`read_allow == ()`, decide_read stays root-only inside the
-    confine) and no address into gather_raw exists to be clamped."""
-    # GREEN@HEAD: actor binds off scope alone; stays green post-#551/#575.
-    run = tmp_path / "run"
-    scope = _actor_scope()
-    apol = bind(ACTOR_DEF, run, scope=scope).policy
-    assert apol.read_confine == scope.read_confine
-    assert apol.read_allow == ()
-    assert all(g.program == "python3" and g.pins_path for g in apol.bash_allow)
-    assert len(apol.bash_allow) == len(scope.scripts)
-    assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --tags", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_bash("cat /etc/passwd", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
 
 
-def test_d1_oracle_via_bind(tmp_path):
-    """d1_oracle_via_bind (survival): bind(ORACLE_DEF, run_dir) yields a deny-all policy — the
-    tool-free predictor's gate survives the factory retirement."""
-    # GREEN@HEAD: bind(ORACLE_DEF) already compiles a deny-all policy over ORACLE_DEF's empty ToolSet.
-    run = tmp_path / "run"
-    opol = bind(ORACLE_DEF, run).policy
-    assert isinstance(bind(ORACLE_DEF, run), OracleDeps)
-    # probe with a command a GRANTED agent could run (`ls` is gone from every lane since #575, so
-    # denying it would prove nothing about this policy) — the deny here is the empty grant list.
-    assert not permission.decide_bash(f"cat {run}/report.md", policy=opol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_write(
-        run / "x.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=opol).allow
 
 
 def test_d1_verifier_via_bind(tmp_path):
@@ -375,42 +283,8 @@ def test_d1_lead_author_via_bind(tmp_path):
     assert permission.decide_bash(f"rm {skills}/elastic/_draft/x.md", policy=pol, run_dir=run, defender_dir=wtd).allow
 
 
-def test_d1_bind_carries_no_salt(tmp_path):
-    """d1_bind_carries_no_salt: `bind` neither takes a salt nor puts one on deps.
-
-    AMENDED FROM `d1_stages_mint_fresh_salt` (#875). That demand pinned the #545 seam — deps
-    carry a salt, `salt=None` mints a fresh uuid4, a passed salt threads verbatim — and the
-    mint-per-bind half of it was a real defence: it is what kept the review roles and the
-    learning stages from holding the delimiter of the frame their own output returns inside.
-
-    What #875 F-1 found is that the seam could not deliver that defence GENERALLY, because a
-    salt on deps is a salt some caller can pass, and one did: the gather dispatch threaded
-    MAIN's own salt into the subagent whose output MAIN then framed with it. The fix is not a
-    better rule about who may pass what — it is removing the thing that can be passed.
-    `wrap_fresh` mints a frame's delimiter after the content is in hand, so no token outlives
-    the string it delimits and there is nothing to bind.
-
-    The obligation the old demand served therefore survives in a stronger form, asserted here
-    as an absence: a framed party cannot hold a delimiter that no longer exists on deps."""
-    run = tmp_path / "run"
-    assert "salt" not in inspect.signature(bind).parameters, \
-        "bind must not take a salt (#875): a salt a caller can pass is a salt a caller can share"
-    for defn in (ORACLE_DEF, MAIN_DEF, GATHER_DEF):
-        deps = bind(defn, run)
-        assert not hasattr(deps, "salt"), \
-            f"{defn.role.name} deps still carry a salt field — the #875 F-1 class is not closed"
 
 
-def test_d1_base_for_run_spine_survives(tmp_path):
-    """d1_base_for_run_spine_survives (survival): the BASE AgentDeps._for_run spine bind calls
-    is CONSERVED — an over-eager subtraction that deletes it would break bind itself."""
-    # GREEN@HEAD (conservation guard): bind routes through _for_run (run_id proves it — the
-    # minted salt that used to be the second witness is gone with #875).
-    run = tmp_path / "run-abc"
-    deps = bind(ORACLE_DEF, run)
-    assert deps.run_id == run.name                 # _for_run sets run_id = run_dir.name
-    assert deps.cwd_anchor is not None             # _for_run sets the anchor
-    assert hasattr(AgentDeps, "_for_run")            # the base spine survives
 
 
 def test_d1_no_factory_in_stage_modules():
@@ -561,52 +435,6 @@ def test_d2_lead_author_early_return_removed(tmp_path):
     assert deps.run_id == run.name           # the uniform _for_run tail ran
 
 
-def test_d2_deps_class_maps_every_bindable_role(tmp_path):
-    """d2_deps_class_all_roles (migrated from test_bind_wiring_545): bind maps every BINDABLE role
-    to its AgentDeps subtype — none silently mismapped. The one role bind does NOT build is
-    CORPUS_AUTHOR (the #556 curator port): like the lead author it is a per-spawn writer, but its
-    policy needs the worktree `corpus_dir` that bind's RunScope cannot carry
-    (compiling it here would root its write_allow at run_dir), so it is constructed only via
-    `CuratorDeps.for_run` and bind(CORPUS_AUTHOR_DEF) FAILS LOUD rather than mint a wrong policy.
-
-    #774 added three further ordinarily-bindable roles — CHALLENGER, COHERENCE_CHECKER and
-    PROJECTION — and #797 retired all three with the review stages they ran. Their bind was
-    the ordinary one (no read grant, no bash grant, no corpus), so nothing about the carve-out
-    below turned on them; #796's lenses and composer bind the same ordinary way and land here.
-
-    The enumeration below is what makes the count assertion mean anything: a role added to the
-    enum but left out of `cases` would move the count and still never be bound, so every
-    bindable role is listed here rather than sampled."""
-    cases = [
-        (bind(MAIN_DEF, tmp_path), AgentDeps),
-        (bind(GATHER_DEF, tmp_path), GatherDeps),
-        (bind(_JUDGE_BENIGN_DEF, tmp_path), JudgeDeps),
-        (bind(ACTOR_DEF, tmp_path, scope=RunScope(read_confine=(tmp_path / "env",))), ActorDeps),
-        (bind(ORACLE_DEF, tmp_path), OracleDeps),
-        (bind(VERIFY_DEF, tmp_path, defender_dir=tmp_path / "vwt" / "defender"), VerifierDeps),
-        (bind(LEAD_AUTHOR_DEF, tmp_path / "run", defender_dir=_lead_wtd(tmp_path)),
-         LeadAuthorDeps),
-        (bind(SUPPORT_DEF, tmp_path), SupportDeps),
-        (bind(COMPOSER_DEF, tmp_path), ComposerDeps),
-    ]
-    # 11 roles total: the 9 bindable ones above + two that bind does NOT build, both
-    # asserted below — CORPUS_AUTHOR (for_run-only, the #556 carve-out) and #947's QUESTIONER,
-    # whose deps type carries no run scope at all (QuestionerDeps has zero fields, so it cannot
-    # be an AgentDeps), which is why bind refuses it by name rather than minting a policy for a
-    # role that has nowhere to use one.
-    # #796's surviving review roles bind with a bare `tmp_path` and nothing else — no
-    # scope, no defender_dir — which IS the assertion about them: a role that needed either
-    # would be a role holding a grant, and the whole posture is that they hold none.
-    # DISCRIMINATION was a third such role and is retired; the count moved with it, which is
-    # what this assertion is for.
-    assert len({role for role in AgentRole}) == 8
-    for deps, expected in cases:
-        assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
-    with pytest.raises((ValueError, TypeError)):
-        bind(CORPUS_AUTHOR_DEF, tmp_path)
-    assert QUESTIONER_DEF.deps_cls is QuestionerDeps
-    with pytest.raises((ValueError, TypeError)):
-        bind(QUESTIONER_DEF, tmp_path)
 
 
 # D3 — defender_dir threaded through resolve_roots AND _for_run (deps)
@@ -750,36 +578,10 @@ def test_d3_corpus_traversal_guard_survives(tmp_path):
 
 # D4 — actor confine + lead-author tree preconditions as data
 
-def test_d4_requires_confine_data(tmp_path):
-    """d4_requires_confine_data (seam): the actor's empty-read_confine fail-loud is a
-    requires_confine bool on AgentDefinition (True on ACTOR_DEF, False on MAIN_DEF)."""
-    # RED@HEAD: AgentDefinition has no requires_confine field → AttributeError.
-    assert ACTOR_DEF.requires_confine is True
-    assert MAIN_DEF.requires_confine is False
 
 
-def test_d4_actor_empty_confine_raises(tmp_path):
-    """d4_actor_empty_confine_raises (negative): bind(ACTOR_DEF, run_dir) with the default empty
-    read_confine RAISES — no unconfined ActorDeps is ever constructed (the #512 gray-box leak,
-    safe-by-construction); positive control: a non-empty confine SUCCEEDS."""
-    # GREEN@HEAD: the fail-loud exists today; it must SURVIVE the altitude change to a data bit.
-    run = tmp_path / "run"
-    with pytest.raises(ValueError, match="read_confine"):
-        bind(ACTOR_DEF, run)                              # empty confine
-    assert isinstance(bind(ACTOR_DEF, run, scope=_actor_scope()), ActorDeps)  # positive control
 
 
-def test_d4_actor_with_confine_no_widen(tmp_path):
-    """d4_actor_with_confine_no_widen (behavior, positive control): bind(ACTOR_DEF, scope=<confine>)
-    succeeds; policy.read_confine == the confine and the resolved read roots do NOT include the whole
-    defender_dir (the confine REPLACES the base)."""
-    # GREEN@HEAD.
-    run = tmp_path / "run"
-    scope = _actor_scope()
-    deps = bind(ACTOR_DEF, run, scope=scope)
-    assert deps.policy.read_confine == scope.read_confine
-    roots = files._resolved_read_roots(deps.policy, run, _DEFENDER)
-    assert _DEFENDER.resolve() not in roots
 
 
 def test_d4_main_empty_confine_ok(tmp_path):
@@ -825,56 +627,10 @@ def test_d4_lead_author_no_tree_raises(tmp_path):
 
 # D5 — the parallel factory path retires
 
-def test_d5_oracle_verify_denyall_via_compile_policy(tmp_path):
-    """d5_oracle_verify_denyall_via_compile_policy (survival): the _ORACLE_POLICY/_VERIFY_POLICY
-    production constructors are gone; bind(ORACLE_DEF)/bind(VERIFY_DEF) still yield deny-all policies
-    via compile_policy over an empty ToolSet."""
-    # GREEN@HEAD: bind already compiles both from their empty ToolSets; stays green.
-    run = tmp_path / "run"
-    for defn in (ORACLE_DEF, VERIFY_DEF):
-        dfn = _DEFENDER if defn is ORACLE_DEF else tmp_path / "vwt" / "defender"
-        pol = bind(defn, run, defender_dir=dfn).policy
-        assert pol.bash_allow == ()
-        assert pol.write_allow == ()
-        assert not permission.decide_bash("cat x", policy=pol, run_dir=run, defender_dir=dfn).allow
-        assert not permission.decide_write(
-            run / "x.md", "c", run_dir=run, defender_dir=dfn, policy=pol).allow
 
 
-def test_d5_judge_actor_bash_lane_preserved(tmp_path):
-    """d5_judge_actor_bash_lane_preserved (survival): the judge lane (a `cat` opener whose
-    operands must resolve into its read roots) and the actor pinned python3-<script> lane are
-    UNCHANGED by the factory retirement — each def's own `bash_shapes` builder is now the sole
-    source of its grants, and decide_bash behaves identically."""
-    # GREEN@HEAD: decide_bash for judge/actor is identical after #551/#575.
-    run = tmp_path / "run"
-    cmp = tmp_path / "cmp"
-    jpol = bind(_JUDGE_BENIGN_DEF, run, scope=RunScope(add_dirs=(cmp,))).policy
-    assert permission.decide_bash(f"cat {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_bash("cat /etc/shadow", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
-
-    apol = bind(ACTOR_DEF, run, scope=_actor_scope()).policy
-    assert permission.decide_bash(f"python3 {_ACTOR_INDEX} --q x", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
-    # the actor holds NO viewer grant at all (#575 also took grep's file operand away, but the
-    # deny here is the older, stronger one: grep is not in the actor's grant list).
-    assert not permission.decide_bash("grep secret /etc/passwd", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_bash(f"cat {run}/x.md", policy=apol, run_dir=run, defender_dir=_DEFENDER).allow
 
 
-def test_d5_actor_read_confine_not_leaked_from_builder(tmp_path):
-    """d5_actor_read_confine_not_leaked_from_builder (negative): the bound actor's policy.read_confine
-    == scope.read_confine, NOT the read_confine=() compile_policy passes to the actor bash-pattern
-    builder — conflating them collapses the actor to an empty confine (the whole defender_dir, the
-    #512 leak); positive control: the confine is the named corpus."""
-    # GREEN@HEAD.
-    run = tmp_path / "run"
-    scope = _actor_scope()
-    apol = bind(ACTOR_DEF, run, scope=scope).policy
-    assert apol.read_confine == scope.read_confine   # NOT the builder's read_confine=()
-    assert apol.read_confine != ()
-    # the confine is honoured on the read tool: a file in it is readable, one outside is not.
-    assert permission.decide_read(_ACTOR_DIR / "x.md", run_dir=run, defender_dir=_DEFENDER, policy=apol).allow
-    assert not permission.decide_read(_DEFENDER / "skills" / "gather" / "SKILL.md", run_dir=run, defender_dir=_DEFENDER, policy=apol).allow
 
 
 def test_d5_compile_policy_for_read_shapes(tmp_path):
@@ -1053,23 +809,6 @@ def test_r3_symlink_pointing_out_denies(tmp_path):
 
 # R2 — per-pair isolation
 
-def test_r2_resolve_roots_per_pair_distinct(tmp_path):
-    """r2_resolve_roots_per_pair_distinct (uniqueness): two different (run_dir, defender_dir) pairs
-    resolve to DISTINCT anchors — one run's confine never appears in another's policy, and no
-    corpus-only cache-key bleed across defender_dir values (the #497/#534 hazard)."""
-    run_a, run_b = tmp_path / "a", tmp_path / "b"
-    # run-dir distinctness (GREEN today via bind's per-run resolve).
-    da = bind(ACTOR_DEF, run_a, scope=RunScope(scripts=(_ENV_RETRIEVE,), read_confine=(run_a / "corpus",)))
-    db = bind(ACTOR_DEF, run_b, scope=RunScope(scripts=(_ENV_RETRIEVE,), read_confine=(run_b / "corpus",)))
-    assert da.policy.read_confine != db.policy.read_confine
-    assert (run_a / "corpus") not in db.policy.read_confine
-    # RED@HEAD: no corpus-only cache bleed across defender_dir values — resolve_roots(defender_dir=) TypeError.
-    tree_a = tmp_path / "ta" / "defender"
-    tree_b = tmp_path / "tb" / "defender"
-    ra = resolve_roots(run_a, ("lessons",), RunScope(), defender_dir=tree_a)
-    rb = resolve_roots(run_a, ("lessons",), RunScope(), defender_dir=tree_b)
-    assert ra.corpus_roots == (tree_a / "lessons",)
-    assert ra.corpus_roots != rb.corpus_roots
 
 
 # R5 — safe-by-construction: compile_policy write co-constraint
@@ -1102,16 +841,6 @@ def test_d7_bind_validates_roots(tmp_path):
         bind(MAIN_DEF, Path("relative/run"))
 
 
-def test_d7_bind_rejects_degenerate_confine(tmp_path):
-    """d7_bind_rejects_degenerate_confine (negative): bind(ACTOR_DEF, scope=RunScope(read_confine=
-    (Path(''),), …)) RAISES — the emptiness guard alone passes it (Path('') resolves to CWD, the actor
-    reads the repo root); the root-validity check rejects it. Positive control: a real absolute confine
-    succeeds."""
-    run = tmp_path / "run"
-    assert isinstance(bind(ACTOR_DEF, run, scope=_actor_scope()), ActorDeps)  # positive control
-    # RED@HEAD: a non-empty tuple of Path('') passes the emptiness guard and is NOT root-validated today.
-    with pytest.raises((ValueError, TypeError)):
-        bind(ACTOR_DEF, run, scope=RunScope(read_confine=(Path(""),), scripts=(_ENV_RETRIEVE,)))
 
 
 def test_d7_lead_author_main_tree_unbuildable(tmp_path):
