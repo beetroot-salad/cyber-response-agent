@@ -15,6 +15,12 @@ PRICING = {
     "glm-5.2":           {"in": 1.4,  "out": 4.4,  "cache_w": 1.40, "cache_r": 0.14},
     "kimi-k2.6":         {"in": 0.95, "out": 4.0,  "cache_w": 0.95, "cache_r": 0.16},
     "kimi-k3":           {"in": 3.0,  "out": 15.0, "cache_w": 3.00, "cache_r": 0.30},
+    # docs.fireworks.ai/serverless/pricing 2026-09-01, Standard tier: DeepSeek V4 Flash (0731)
+    # $0.22 in / $0.007 cached / $0.66 out per M. (An earlier row here used the TRAINING-API
+    # table's prefill/sample prices by mistake — 8x too high.) Experiment invlang-clerk-986 arm D.
+    "deepseek-v4-flash": {"in": 0.22, "out": 0.66, "cache_w": 0.22, "cache_r": 0.007},
+    # docs.fireworks.ai/serverless/pricing 2026-09-01, Standard: GLM 5.3 Flash $0.15 / $0.03 / $0.50.
+    "glm-5.3-flash":     {"in": 0.15, "out": 0.50, "cache_w": 0.15, "cache_r": 0.03},
 }
 
 
@@ -22,8 +28,13 @@ def model_key(model: str) -> str:
     if not model:
         return "claude-sonnet-4-6"
     m = model.lower()
+    # Must precede the generic glm branch, or 5.3 Flash bills at 5.2's rate.
+    if "glm-5p3-flash" in m or "glm-5.3-flash" in m:
+        return "glm-5.3-flash"
     if "glm" in m:
         return "glm-5.2"
+    if "deepseek" in m:
+        return "deepseek-v4-flash"
     # Must precede the generic kimi branch, or K3 bills at K2.6's rate.
     if "kimi-k3" in m:
         return "kimi-k3"
