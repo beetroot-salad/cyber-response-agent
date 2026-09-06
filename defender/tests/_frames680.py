@@ -518,8 +518,12 @@ def _drive_learning_bash(
     tmp_path: Path, *, stdout: bytes = b"", stderr: bytes = b"", rc: int = 0
 ) -> str:
     fake = RecordingBox(BashResultSpec(rc=rc, out=stdout, err=stderr))
-    deps, comparison = _learning_read_deps(tmp_path, box=fake)
-    artifact = comparison / "lead.md"
+    deps, _add_dir = _learning_read_deps(tmp_path, box=fake)
+    # INSIDE THE CORPUS, which is where the curator's `cat` grant reaches. The deleted judge's
+    # grant spanned its run dir and add-dirs; the surviving role's does not, and a command it
+    # cannot claim is refused before the framing this drive is about ever happens.
+    artifact = deps.corpus_dir / "lead.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("the executor boundary is injected", encoding="utf-8")
     command = f"cat {artifact}"
     return _tool_bash(deps, command)
