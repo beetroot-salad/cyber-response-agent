@@ -206,8 +206,8 @@ def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key,
 def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
     """The reader asks for exactly the URL the writer wrote to, so a key the writer can mint
     is a key this reader can fetch. `ticket_writer` has always encoded the keys it mints
-    (`urllib.parse.quote(case_id, safe="")`, ticket_writer.py:189/217/310); until #684 this
-    reader interpolated raw, so for any case id needing encoding the two sides disagreed —
+    (`urllib.parse.quote(..., safe="")` at every site that puts one in a path — one site since
+    #922 retired the ticket-seed and enrichment lanes); until #684 this reader interpolated raw, so for any case id needing encoding the two sides disagreed —
     the ticket was stored under one URL and requested at another, and the read 404'd on a
     ticket that exists.
 
@@ -232,7 +232,7 @@ def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
         )
 
     writer_src = Path(ticket_writer.__file__).read_text(encoding="utf-8")
-    assert 'quote(case_id, safe="")' in writer_src, (
+    assert 'quote(rec.case_id, safe="")' in writer_src, (
         "ticket_writer no longer encodes the keys it mints the way this test assumes — "
         "re-derive the reader's encoding from what the writer now does"
     )

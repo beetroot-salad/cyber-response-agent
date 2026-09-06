@@ -119,7 +119,7 @@ GROUPS: dict[str, GroupSpec] = {
         "fields": [
             {"label": "Alert rules", "key": "alert_rule_ids", "kind": "chips"},
             # The display label for an environment lesson's own `entities` frontmatter key
-            # (validate.py's `environment_observations[].entities` selectors), not the retired
+            # (the retired environment-observation validator's own `entities` selectors), not the
             # `Entities` dataclass — same word, unrelated domain. Renaming it would change a
             # user-visible chip label and a corpus schema key. The suppression marker must sit
             # on the REFERENCING line: lint_stale_refs reads it off the matched line only.

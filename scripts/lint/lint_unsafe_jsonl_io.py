@@ -2,7 +2,7 @@
 """Unsafe JSONL-I/O smell — flag hand-rolled per-line JSONL reads/appends under
 ``defender/`` that bypass the shared ``defender._io`` helpers.
 
-A JSONL queue (``_pending/findings.jsonl``, ``actor_observations.jsonl``,
+A JSONL queue (``_pending/findings.jsonl``, ``_pending/pitfalls.jsonl``,
 ``executed_queries.jsonl``, ``lessons_loaded.jsonl`` …) is appended to live and
 read back by the off-process drains. Two hand-rolled shapes recur, each a dedup
 smell and (on the read side) a safety bug:

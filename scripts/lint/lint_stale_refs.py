@@ -167,6 +167,12 @@ EXCLUDED_GREP_DIRS = (
     # prefix, which would silently swallow any future `defender/tests-*` sibling.
     "defender/fixtures-e2e",
     "defender/lessons-environment",
+    # The judge-alignment dataset: human-labelled samples of what a judge emitted, batch by
+    # batch. Same class as the lesson corpora above — authored knowledge whose text quotes the
+    # code of its own moment, and #922 deleted the judge it was labelled against. Rewriting the
+    # samples to name today's vocabulary would falsify the labels, and deleting the dataset is
+    # the owner's call, not this gate's.
+    "defender/learning/judge-alignment",
     # The golden CASE tree — the same class again. Each case is a captured record of one
     # recruitment: `manifest.yaml` says which code path produced its artifacts, `expected.yaml`
     # says how the expectation was derived, and `hidden/`/`oracle_visible/` are the payloads
