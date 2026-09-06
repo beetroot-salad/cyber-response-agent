@@ -53,12 +53,8 @@ from defender.learning.author.verify_forward.engine import (  # noqa: E402
     VERIFY_REQUEST_LIMIT,
     VerifierDeps,
 )
-from defender.learning.pipeline.actor_engine import ActorDeps  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import JudgeDeps  # noqa: E402
-from defender.learning.pipeline.oracle_engine import (  # noqa: E402
-    ORACLE_REQUEST_LIMIT,
-    OracleDeps,
-)
+from defender.agents import QUESTIONER_DEF  # noqa: E402
+from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
 from defender.runtime import driver, observe, permission, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
@@ -78,18 +74,19 @@ from defender.runtime.agent_definition import (  # noqa: E402
 )
 from defender.runtime.permission import Grant, Route  # noqa: E402
 from defender.agents import (  # noqa: E402
-    ACTOR_DEF,
     AGENTS,
     GATHER_DEF,
     MAIN_DEF,
-    ORACLE_DEF,
     VERIFY_DEF,
 )
 
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
-_ACTOR_DIR = config.LESSONS_ACTOR_DIR
-_ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
+#: Two real directories under `defender/`, used as confine members below. They were the actor
+#: legs' corpora until #922 deleted those legs; the confine demand is the BINDER's, and needs
+#: only two real directories to state.
+_CONFINE_A = config.REPO_ROOT / "defender" / "lessons"
+_CONFINE_B = config.REPO_ROOT / "defender" / "skills"
 
 _ORACLE_YAML = 'events:\n  - Computer: "FINANCE-DB"\n    EventID: 4624\n'
 
@@ -223,16 +220,16 @@ def test_read_surface_is_the_cat_grants_scope(tmp_path):
     on the bash lane, so the set of paths an agent may `cat` IS the set it may read. Parity is
     identity, not a second grammar kept in sync (#545's two grammars drifted).
 
-    NEGATIVE: an agent with NO `cat` grant (the tool-free oracle) gets an EMPTY read_allow — no
+    NEGATIVE: an agent with NO `cat` grant (the tool-free questioner) gets an EMPTY read_allow — no
     shape filter — so the identity is not vacuously satisfied by "everything is ()"."""
-    assert not hasattr(AgentDefinition(role=AgentRole.ORACLE, model=_glm_thunk, effort=None),
+    assert not hasattr(AgentDefinition(role=AgentRole.QUESTIONER, model=_glm_thunk, effort=None),
                        "read_shapes")
     pol = compile_policy_for(MAIN_DEF, run_dir=tmp_path, defender_dir=PATHS.defender_dir)
     cat_scope = next(g.scope for g in pol.bash_allow if g.program == "cat")
     assert pol.read_allow is cat_scope
     assert pol.read_allow is read_allow_of(pol.bash_allow)
     assert cat_scope
-    assert read_allow_of(_compile(_defn(role=AgentRole.ORACLE), tmp_path).bash_allow) == ()
+    assert read_allow_of(_compile(_defn(role=AgentRole.QUESTIONER), tmp_path).bash_allow) == ()
 
 
 
@@ -245,15 +242,6 @@ def test_bind_gather_isinstance_preserved(tmp_path):
     assert deps.role is AgentRole.GATHER
 
 
-def test_bind_actor_read_confine(tmp_path):
-    """bind(ACTOR_DEF, run_dir, scope=<confine>) returns an ActorDeps carrying the required
-    read_confine (matching the scope's confine) — bind supplies the subtype's extra required
-    field, so a confined actor never falls back to the whole defender_dir corpus."""
-    confine = (_ACTOR_DIR, _ENV_DIR)
-    deps = bind(ACTOR_DEF, tmp_path, scope=RunScope(scripts=(_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=confine))
-    assert isinstance(deps, ActorDeps)
-    assert deps.policy.read_confine == confine
-    assert deps.policy.read_confine != ()
 
 
 def test_bind_gather_lead_id_channel(tmp_path):
@@ -339,22 +327,22 @@ def test_toolset_bash_presence_vs_permission(logger, tmp_path):
 
 
 
-def test_oracle_empty_toolset(logger):
-    """build_agent_core(ORACLE_DEF) with tools=ToolSet() registers NOTHING: the tool list is
+def test_deny_all_role_empty_toolset(logger):
+    """build_agent_core(<a deny-all role>) with tools=ToolSet() registers NOTHING: the tool list is
     [] (no read_file, no bash, no write_file/edit_file — all four covered by list-empty).
     POSITIVE CONTROL: main (read=True) registers read_file, proving the registration
     mechanism fired and the empty list is not vacuous."""
     with override_allow_model_requests(False):
-        oracle = driver.build_agent_core(
-            ORACLE_DEF, deps_type=OracleDeps, instructions="x", logger=logger,
-            agent_id="oracle", make_model=_fake_model(_text_fn()),
+        deny_all = driver.build_agent_core(
+            QUESTIONER_DEF, deps_type=QuestionerDeps, instructions="x", logger=logger,
+            agent_id="questioner", make_model=_fake_model(_text_fn()),
         )
         main = driver.build_agent_core(
             _defn(tools=ToolSet(read=True, bash=True, write=True)),
             deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=_fake_model(_text_fn()),
         )
-    assert list(oracle._function_toolset.tools) == []
+    assert list(deny_all._function_toolset.tools) == []
     assert "read_file" in list(main._function_toolset.tools)
 
 
@@ -367,8 +355,8 @@ def test_verify_empty_toolset(logger):
             agent_id="verify", make_model=_fake_model(_text_fn()),
         )
         judge = driver.build_agent_core(
-            _defn(role=AgentRole.JUDGE, tools=ToolSet(read=True, bash=True)),
-            deps_type=JudgeDeps, instructions="x", logger=logger,
+            _defn(role=AgentRole.VERIFIER, tools=ToolSet(read=True, bash=True)),
+            deps_type=VerifierDeps, instructions="x", logger=logger,
             agent_id="judge", make_model=_fake_model(_text_fn()),
         )
     assert list(verify._function_toolset.tools) == []
@@ -382,16 +370,16 @@ def test_oracle_no_escape_hatch(logger, tmp_path):
     read_file, so the missing read_file is structural, not incidental to the run_dir."""
     (tmp_path / "source_refs.yaml").write_text("normalized_disposition: malicious\n")
     with override_allow_model_requests(False):
-        oracle = driver.build_agent_core(
-            ORACLE_DEF, deps_type=OracleDeps, instructions="x", logger=logger,
-            agent_id="oracle", make_model=_fake_model(_text_fn()),
+        deny_all = driver.build_agent_core(
+            QUESTIONER_DEF, deps_type=QuestionerDeps, instructions="x", logger=logger,
+            agent_id="questioner", make_model=_fake_model(_text_fn()),
         )
         reader = driver.build_agent_core(
             _defn(tools=ToolSet(read=True)),
             deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="reader", make_model=_fake_model(_text_fn()),
         )
-    assert "read_file" not in list(oracle._function_toolset.tools)
+    assert "read_file" not in list(deny_all._function_toolset.tools)
     assert "read_file" in list(reader._function_toolset.tools)
 
 
@@ -519,8 +507,8 @@ def test_agents_duplicate_role_raises():
     """GUARD: building the registry from a tuple with two AgentDefinitions sharing a role
     RAISES (vs the dict-comp's silent last-wins overwrite). POSITIVE CONTROL: the real, distinct
     defs build the registry successfully."""
-    d1 = _defn(role=AgentRole.ORACLE)
-    d2 = _defn(role=AgentRole.ORACLE)
+    d1 = _defn(role=AgentRole.QUESTIONER)
+    d2 = _defn(role=AgentRole.QUESTIONER)
     with pytest.raises(ValueError, match="role"):
         build_registry((d1, d2))
     reg = build_registry(tuple(AGENTS.values()))
@@ -562,12 +550,12 @@ def test_effort_none_vs_None_distinct(monkeypatch, logger):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     with override_allow_model_requests(False):
         omit = driver.build_agent_core(
-            _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort=None, tools=ToolSet()),
-            deps_type=OracleDeps, instructions="x", logger=logger, agent_id="o1",
+            _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort=None, tools=ToolSet()),
+            deps_type=QuestionerDeps, instructions="x", logger=logger, agent_id="o1",
         )
         disabled = driver.build_agent_core(
-            _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
-            deps_type=OracleDeps, instructions="x", logger=logger, agent_id="o2",
+            _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
+            deps_type=QuestionerDeps, instructions="x", logger=logger, agent_id="o2",
         )
     # Read through `extra_body`, not off the settings object: both agents now also carry a
     # prompt-cache affinity key, so `omit` is no longer the bare `None` the seam returned —
@@ -587,17 +575,17 @@ def test_effort_none_claude_crossing(monkeypatch, logger):
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    claude_defn = _defn(role=AgentRole.ORACLE, model=lambda: "claude-sonnet-4-6",
+    claude_defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "claude-sonnet-4-6",
                         effort="none", tools=ToolSet())
     with pytest.raises((ValueError, FatalConfigError)), override_allow_model_requests(False):
         driver.build_agent_core(
-            claude_defn, deps_type=OracleDeps, instructions="x", logger=logger,
+            claude_defn, deps_type=QuestionerDeps, instructions="x", logger=logger,
             agent_id="oracle", make_model=providers.build_for_effort,
         )
     with override_allow_model_requests(False):
         ok = driver.build_agent_core(
-            _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
-            deps_type=OracleDeps, instructions="x", logger=logger,
+            _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
+            deps_type=QuestionerDeps, instructions="x", logger=logger,
             agent_id="oracle", make_model=providers.build_for_effort,
         )
     assert ok.model_settings["extra_body"]["reasoning_effort"] == "none"
@@ -611,11 +599,11 @@ def test_effort_live_on_toolfree(logger, tmp_path):
     independent of, tool registration)."""
     settings = {"extra_body": {"reasoning_effort": "none"}}
     fake, reqs = _counting_make_model(text=_ORACLE_YAML, settings=settings)
-    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
-                 deps_cls=OracleDeps)
+    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+                 deps_cls=VerifierDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            defn, deps_type=OracleDeps, instructions="x", logger=logger,
+            defn, deps_type=QuestionerDeps, instructions="x", logger=logger,
             agent_id="oracle", make_model=fake,
         )
         assert list(agent._function_toolset.tools) == []
@@ -629,22 +617,21 @@ def test_effort_live_on_toolfree(logger, tmp_path):
 
 
 def test_request_limit_one():
-    """ORACLE_REQUEST_LIMIT == 1 and VERIFY_REQUEST_LIMIT == 1 (down from 6): no tool is
+    """VERIFY_REQUEST_LIMIT == 1 (down from 6): no tool is
     callable, so no headroom above 1 is needed."""
-    assert ORACLE_REQUEST_LIMIT == 1
     assert VERIFY_REQUEST_LIMIT == 1
 
 
 def test_request_limit_one_sufficient(logger, tmp_path):
-    """Driving the tool-free oracle build with a single-turn replay COMPLETES under
+    """Driving the tool-free questioner build with a single-turn replay COMPLETES under
     request_limit=1 — 1 request is SUFFICIENT (not merely non-crashing): the tool-free
     predictor makes exactly one model request and returns its output."""
     fake, reqs = _counting_make_model(text=_ORACLE_YAML)
-    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
-                 deps_cls=OracleDeps)
+    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+                 deps_cls=VerifierDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            defn, deps_type=OracleDeps, instructions="x", logger=logger,
+            defn, deps_type=QuestionerDeps, instructions="x", logger=logger,
             agent_id="oracle", make_model=fake,
         )
         result = agent.run_sync("project this lead", deps=bind(defn, tmp_path),
@@ -660,11 +647,11 @@ def test_request_limit_reject_below_one(logger, tmp_path):
     spec-assumption: the <1 floor is realized as usage-limit starvation through the real run,
     not a silent coerce-to-1."""
     fake, _ = _counting_make_model(text=_ORACLE_YAML)
-    defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
-                 deps_cls=OracleDeps)
+    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+                 deps_cls=VerifierDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
-            defn, deps_type=OracleDeps, instructions="x", logger=logger,
+            defn, deps_type=QuestionerDeps, instructions="x", logger=logger,
             agent_id="oracle", make_model=fake,
         )
         deps = bind(defn, tmp_path)
