@@ -21,7 +21,6 @@ Every judge call goes through an injected `call` seam; nothing here reaches a mo
 """
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest

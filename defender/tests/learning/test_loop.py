@@ -340,7 +340,9 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert triggered == [
-        "author", "author_actor", "author_actor_env", "author_actor_benign",
+        # ONE CURATOR SINCE #922 — the three observation channels lost their producer
+        # with the old pipeline's judge, and their curators went with them.
+        "author",
     ]
 
 

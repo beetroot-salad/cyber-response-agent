@@ -19,7 +19,6 @@ under the questioner's key instead until #922 frees it).
 """
 from __future__ import annotations
 
-import json
 
 import pytest
 

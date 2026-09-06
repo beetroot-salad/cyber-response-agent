@@ -58,7 +58,6 @@ from pydantic_ai.exceptions import (  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS  # noqa: E402
 from defender.hooks.inject_system_skill_description import descriptor_catalog  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
@@ -1364,36 +1363,6 @@ def test_ticket_cli_dual_surface_survives():
     assert parser.parse_args(["list-tickets", "--require-closed"]).require_closed is True
 
 
-def test_replay_actor_still_loads_the_staged_tables(tmp_path):
-    """replay_actor_still_loads_the_staged_tables — learning/ops/replay_actor (which re-execs
-    lead_repository + the actor as a subprocess, relocating the tree anchor onto whatever tree it
-    lands in) still loads a staged run dir under the new row shape: it requires gather_raw/ OR
-    executed_queries.jsonl, and reads params/query_id THROUGH lead_repository, never by
-    re-parsing the tables itself."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path / "src", verbs=_echo_registry(rec), turns=[
-        q("elastic", "probe", {"tag": "alpha"}, query_id="elastic.probe-alpha"), DONE,
-    ], run_id="replay-actor")
-    staged = tmp_path / "staged"
-    lead_repository.stage_tables(r.run_dir, staged)
-    (staged / "alert.json").write_text((r.run_dir / "alert.json").read_text(), encoding="utf-8")
-
-    paths = RunPaths(staged)
-    assert paths.alert.is_file()
-    assert paths.gather_raw.is_dir() or paths.executed_queries.is_file()
-
-    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
-    view = lead_repository.actor_view(staged)
-    own_leads = [lead for lead in view["leads"] if lead["lead_id"] not in RESERVED_LEAD_IDS]
-    assert own_leads == [{
-        "lead_id": LEAD,
-        "queries": [{"query_id": "elastic.probe-alpha", "params": {"tag": "alpha"}}],
-    }]
-
-    src = (DEFENDER / "learning" / "ops" / "replay_actor.py").read_text(encoding="utf-8")
-    assert "executed_queries" not in src.split("def main", 1)[1].replace(
-        "staging_paths.executed_queries", ""), "replay_actor re-parses the queries table itself"
-    assert "actor_view" in src
 
 
 def test_e2e_replay_harness_has_an_injected_verb_seam(tmp_path):

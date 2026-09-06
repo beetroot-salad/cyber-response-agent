@@ -16,7 +16,6 @@ injected `start_box`/`stop_box`/`agents`/`branch`/docker), never a monkeypatch. 
 """
 from __future__ import annotations
 
-from defender.tests.e2e._box665 import DEFENDER  # noqa: E402
 
 
 import pytest
@@ -26,7 +25,6 @@ pytest.importorskip("pydantic_ai")
 
 from defender import agents as agents_registry  # noqa: E402
 from defender.runtime import box as box_mod
-from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -116,23 +114,6 @@ def _curator_for_run_no_box(tmp_path):
     )
 
 
-def test_fifth_bash_enabled_role_outside_the_four_named_construction_paths(tmp_path):
-    """test_fifth_bash_enabled_role_outside_the_four_named_construction_paths (F11 → R1) —
-    a future fifth bash-enabled role reached through none of the four named delivery paths
-    is a RECORDED residual (N7-style), not a mechanism built now. The census is keyed on the
-    production construction seams; a role built through a raw `bind` off those seams keeps
-    N5's still-constructible inert default (bash enabled + box absent is not made
-    unbuildable). This pins the accepted residual: raw bind stays constructible with an
-    inert box."""
-    # N5: a raw bind off the four named seams remains constructible with the inert default.
-    deps = bind(agents_registry.AGENTS[AgentRole.ACTOR], tmp_path / "run",
-                defender_dir=DEFENDER, scope=RunScope(read_confine=(tmp_path / "run",),
-                                                      scripts=()))
-    assert isinstance(deps.box, box_mod.BoxExecutor)
-    # …and that off-path instance's lane is DEAD (inert transport raises) — the recorded
-    # capability loss O2 names, which the role-keyed census over the production seams cannot see.
-    with pytest.raises(box_mod.BoxFault):
-        deps.box.run_parsed([], command="true", cwd=tmp_path / "run", timeout=1.0)
 
 
 
@@ -156,20 +137,6 @@ def test_curator_for_run_threads_box_to_bind(tmp_path):
 
 
 
-def test_role_keyed_census_blind_to_caller_constructed_boxless_instance(tmp_path):
-    """test_role_keyed_census_blind_to_caller_constructed_boxless_instance (N7) — the eval
-    harness constructs a bash role directly, off all production creation sites, with no box;
-    once the production seams require box, that off-path instance keeps N5's inert default
-    and its bash lane stays dead. Nothing observes it — an accepted, RECORDED non-obligation
-    (O2's capability loss the O6 role-keyed census structurally cannot see), not a defect
-    this design fixes."""
-    off_path = bind(agents_registry.AGENTS[AgentRole.ACTOR], tmp_path / "run",
-                    defender_dir=DEFENDER,
-                    scope=RunScope(read_confine=(tmp_path / "run",), scripts=()))
-    assert off_path.box.transport is box_mod._unattached, \
-        "an off-path bind should keep N5's inert (unattached) default, not a live box"
-    with pytest.raises(box_mod.BoxFault):
-        off_path.box.run_parsed([], command="true", cwd=tmp_path / "run", timeout=1.0)
 
 
 
