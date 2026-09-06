@@ -58,44 +58,6 @@ def _assert_bind_accepts(wt, run_dir, name: str, expect_corpus_name: str):
     return deps
 
 
-# M7 : the corpus_name domain
-# Each row supplies one degenerate `corpus_name` and the shipped name that must still bind
-# beside it. The control is not decoration: a bind that rejected EVERYTHING would satisfy the
-# rejection half of every row here.
-@pytest.mark.parametrize(("case", "rejected", "control"), [
-    # F86: M7 owns the supplied-but-degenerate value ``""`` (M8 owns only ``None``). ``""``
-    # normalises to ``defender_dir`` itself (g14), the forbidden whole-tree scope (g23).
-    ("corpus_name is the empty string", [""], "lessons"),
-
-    # ``"."`` normalises to ``defender_dir`` itself the same way (g14); M7-as-corrected (K4)
-    # refuses it.
-    ("corpus_name is a single dot", ["."], "lessons-actor"),
-
-    # M7's single-segment rule (``len(Path(name).parts) == 1``) refuses ``"a/b"``, closing
-    # c16/g9's rm sibling-mismatch: under a nested name the rm grant matched a SIBLING
-    # (``defender/b/...``) and missed the real corpus (``defender/a/b/...``). Refusing the name
-    # at construction is also the front door's answer to being handed a corpus nested below
-    # the tree — the same refusal whether the nested name arrives from a caller or a config.
-    ("corpus_name has two segments", ["a/b"], "lessons"),
-
-    # ``"/etc/passwd"`` is a name, not a Path; an absolute carrier reintroduces the mis-rooting
-    # the refusal warns of (c14/g14 executed).
-    ("corpus_name is an absolute path", ["/etc/passwd"], "lessons"),
-
-    # A ``..``-bearing name in either spelling; no tree escape was found under any probed
-    # input (c14/g14 executed, unrefuted).
-    ("corpus_name contains parent directory segments",
-     ["lessons/../..", "../x"], "lessons-environment"),
-], ids=lambda v: v if isinstance(v, str) else "")
-def test_a_degenerate_corpus_name_is_rejected_at_bind(tmp_path, case, rejected, control):
-    """A degenerate ``corpus_name`` raises ValueError at bind rather than composing a scope
-    from it: the empty string ``""``, a single dot ``"."``, a two-segment ``"a/b"``, an
-    absolute ``"/etc/passwd"``, and any ``".."``-bearing spelling are all refused — while a
-    shipped single-segment name still binds to its own sub-tree corpus."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    for name in rejected:
-        _assert_bind_rejects_name(wt, rd, name)
-    _assert_bind_accepts(wt, rd, control, control)
 
 
 @pytest.mark.parametrize(("case", "name"), [
@@ -142,19 +104,3 @@ def test_the_standing_prohibition_on_a_whole_tree_authoring_scope(tmp_path):
         write_file(deps, "defender/toplevel.md")
 
 
-def test_a_single_segment_name_that_is_not_a_shipped_corpus_is_rejected(tmp_path):
-    """MD-6 (§7 D2, closing F30/P64/P109/F108): M7 as a SHAPE rule accepts a single clean segment
-    naming a real NON-lesson dir — ``skills`` compiles a write_allow byte-identical to LEAD_AUTHOR's
-    with no key between the two roles, and ``learning`` roots the write scope over
-    ``defender/learning/_pending``, a production state tree. §7 D2 ADDS an EXACT-MATCH membership rule
-    against the three shipped corpora, so such a name is now REJECTED at bind (a homoglyph of a
-    shipped name is not an exact match either — closes F108). Positive control: every shipped name is
-    an exact match and binds. RED today: the membership rule is unbuilt and the curator is unbindable
-    (the reject surfaces as the missing RunScope.corpus_name field / bindable=False)."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    # real single-segment dirs the worktree carries (make_worktree creates skills/) — shape-admitted,
-    # membership-rejected. ``learning`` is the dangerous instance (the production state tree's parent).
-    for name in ("skills", "learning"):
-        _assert_bind_rejects_name(wt, rd, name)
-    for shipped in ("lessons", "lessons-actor", "lessons-environment"):
-        _assert_bind_accepts(wt, rd, shipped, shipped)

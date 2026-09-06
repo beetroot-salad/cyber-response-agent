@@ -190,9 +190,6 @@ def test_a_deleted_held_out_result_needs_a_retirement_reason(tmp_path):
 
 # the boundary
 
-def test_the_replay_boundary_check_is_not_vacuous():
-    """It asserts replay.py names no `hidden/` path — worthless if it found no paths."""
-    assert validate_cases.check_replay_boundary() == []
 
 
 # completeness

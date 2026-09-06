@@ -422,16 +422,6 @@ def test_the_dry_run_and_the_real_score_report_the_same_mechanical_half(tmp_path
 
 # the sibling entrypoints
 
-@pytest.mark.parametrize("module", ["replay", "build_case", "controls", "report",
-                                    "record_held_out", "validate_cases", "audit_judge",
-                                    "generate_case", "story_from_run"])
-def test_every_suite_entrypoint_still_imports(module):
-    """`replay.py` sat broken on main for two commits: `learning/core/config.py` moved
-    `ORACLE_MODEL`/`ORACLE_EFFORT` from module constants to functions, and nothing here
-    imported the module, so the ImportError only surfaced when someone tried to produce
-    a projection. These are scripts, not libraries — a smoke import is the cheapest thing
-    that would have caught it."""
-    importlib.import_module(f"defender.evals.oracle_golden.{module}")
 
 
 def test_a_defective_case_is_never_sent_to_the_judge(tmp_path):

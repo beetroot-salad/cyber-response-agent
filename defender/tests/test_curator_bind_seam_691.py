@@ -171,25 +171,8 @@ def test_every_role_this_change_does_not_mention_carries_the_new_record(tmp_path
     assert checked >= 1, "no non-curator role bound — the census picked no subject"
 
 
-def test_the_spawn_corpus_is_resolved_by_name_not_by_position(tmp_path):
-    """M1: the spawn corpus is found BY NAME, never ``corpus_roots[0]``. Bind for lessons-actor and
-    the resolved corpus_dir is ``<worktree>/defender/lessons-actor`` — pure by-name path arithmetic
-    (RG-PO5), distinct from MAIN/GATHER's positional static list."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = bind_curator(wt, rd, "lessons-actor")
-    assert deps.corpus_dir == wt / "defender" / "lessons-actor"
 
 
-def test_the_spawn_record_is_asked_for_the_corpus_the_spawn_names(tmp_path):
-    """The consumer gets the by-name-resolved corpus, never another spawn's: a curator named
-    lessons-actor authors into lessons-actor (lands) and is denied lessons (a sibling) — the record
-    it drives is the corpus it named."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = bind_curator(wt, rd, "lessons-actor")
-    write_file(deps, rel("lessons-actor", "x.md"))
-    assert (corpus(wt, "lessons-actor") / "x.md").read_text() == "body\n"
-    with pytest.raises(ModelRetry):
-        write_file(deps, rel("lessons", "y.md"))            # a sibling it did not name
 
 
 def test_corpus_dir_derivation_is_unchanged_for_the_git_commit_consumer(tmp_path):

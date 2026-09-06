@@ -539,26 +539,6 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
     return problems
 
 
-def check_replay_boundary() -> list[str]:
-    """`replay.py` must source every input from `oracle_visible/`."""
-    tree = ast.parse((GOLDEN_DIR / "replay.py").read_text(encoding="utf-8"))
-    docstrings = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)):
-            continue
-        first = next(iter(node.body), None)
-        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
-                and isinstance(first.value.value, str)):
-            docstrings.add(id(first.value))
-    literals = [n.value for n in ast.walk(tree)
-                if isinstance(n, ast.Constant) and isinstance(n.value, str)
-                and id(n) not in docstrings]
-    problems = []
-    if not any("oracle_visible" in s for s in literals):
-        problems.append("replay.py: found no path literals at all — this check is vacuous")
-    if [s for s in literals if "hidden" in s]:
-        problems.append("replay.py: names the hidden/ tree in code")
-    return problems
 
 
 # completeness
@@ -658,7 +638,12 @@ def main(argv: list[str] | None = None) -> int:
     for case_dir in case_dirs:
         problems += check_case(case_dir, by_id, known)
     problems += check_held_out_ledger(cases)
-    problems += check_replay_boundary()
+    # `check_replay_boundary` retired with `replay.py` (#922). It asserted that the oracle
+    # replay driver sourced every input from `oracle_visible/` and never from `hidden/` — the
+    # file-level boundary that kept a projection from peeking at the ground truth it was scored
+    # against. The driver and the oracle it drove are deleted; the golden cases, their ledger
+    # and every check below are unaffected, because they are about the CASES rather than about
+    # the thing that replayed them. Restore it with the estate replay harness that replaces it.
     problems += check_known_defects(ns.cases_dir, known)
 
     if not ns.quiet:
