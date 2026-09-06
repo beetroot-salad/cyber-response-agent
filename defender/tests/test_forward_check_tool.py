@@ -52,8 +52,6 @@ from defender.learning.author.curator_engine import (  # noqa: E402
     _run_curator_pydantic,
     run_curator_stage,
 )
-from defender.learning.author.verify_forward import forward as vf  # noqa: E402
-from defender.learning.author.verify_forward import shared as vfs  # noqa: E402
 from defender.learning.author.verify_forward.engine import (  # noqa: E402
     VerifierDeps,
     _run_verify_pydantic,
@@ -67,10 +65,7 @@ from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E4
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 
 from defender.learning.author.verify_forward.checks import (  # noqa: E402
-    ACTOR_CHECK,
-    ENV_CHECK,
     FINDINGS_CHECK,
-    ForwardCheck,
 )
 from defender.learning.author.verify_forward.tool import (  # noqa: E402
     Pair,
@@ -371,17 +366,6 @@ def test_d4c_duplicate_pairs_are_not_deduplicated(tmp_path):
     assert len(fake.calls) == 2
 
 
-def test_d5_all_four_curators_share_the_signature(tmp_path):
-    """Each of the four curators invokes the same forward_check tool signature; the only
-    per-curator variation is which check the deps bind."""
-    checks = [FINDINGS_CHECK, ACTOR_CHECK, ENV_CHECK]
-    assert all(isinstance(c, ForwardCheck) for c in checks)
-    assert len({c.error_prefix for c in checks}) == len(checks)
-    scene = _scene(tmp_path)
-    for c in checks:
-        deps = _deps(scene, run_verify=FakeVerify(), check=c, queued=set())
-        assert deps.check is c
-        assert _counts(_run(deps, [])) == (0, 0, 0)
 
 
 
@@ -680,55 +664,8 @@ def test_d16_bundle_resolves_from_deps(tmp_path):
     assert str(scene.runs) in str(fake.calls[0].source_run_dir)
 
 
-def test_d17_env_check_uses_the_worktree_corpus(tmp_path):
-    """The environment check retrieves against the corpus named by the deps — the worktree the
-    lesson was just written into — not the main checkout's corpus."""
-    scene = _scene(tmp_path)
-    env_corpus = scene.repo / "defender" / "lessons-environment"
-    env_corpus.mkdir(parents=True)
-    d = scene.runs / "run-E"
-    d.mkdir(parents=True)
-    (d / "investigation.md").write_text(
-        "```invlang\n:V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|process|nc|nc[1]|\n```\n"
-    )
-    scene.pending.write_text(json.dumps(
-        {"observation_id": "obs-1", "alert_rule_key": "rule-Z", "source_run_dir": "run-E"}
-    ) + "\n")
-    lp = "defender/lessons-environment/mylesson.md"
-    pair = Pair(lp, "obs-1")
-    fake = FakeVerify()
-    deps_empty = _deps(scene, run_verify=fake, check=ENV_CHECK, corpus=env_corpus,
-                       queued={"obs-1"})
-    out_bad = _run(deps_empty, [pair])
-    assert _counts(out_bad)[1] == 1 or _counts(out_bad)[2] == 1
-    (env_corpus / "mylesson.md").write_text(
-        "---\nsubject: s\nalert_rule_ids: [rule-Z]\nstatus: live\n"
-        "relevance_criteria: c\n---\nbody\n"
-    )
-    deps_full = _deps(scene, run_verify=fake, check=ENV_CHECK, corpus=env_corpus,
-                      queued={"obs-1"})
-    assert _counts(_run(deps_full, [pair])) == (1, 0, 0)
-    assert fake.calls == []
 
 
-def test_d20_pending_queue_resolves_from_deps(tmp_path):
-    """The finding or observation row is resolved from the pending queue named by the deps,
-    not the frozen module default."""
-    scene = _scene(tmp_path)
-    lp = _lesson(scene, "act")
-    d = scene.runs / "run-A"
-    d.mkdir(parents=True)
-    (d / "actor_story.md").write_text("ACTOR-STORY-SENTINEL\n")
-    pending = scene.tmp / "state" / "_pending" / "actor_observations.jsonl"
-    pending.write_text(json.dumps(
-        {"observation_id": "obs-1", "observation": "the failure", "source_run_dir": "run-A"}
-    ) + "\n")
-    fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
-    deps = _deps(scene, run_verify=fake, check=ACTOR_CHECK, pending=pending, queued={"obs-1"})
-    out = _run(deps, [Pair(lp, "obs-1")])
-    assert _counts(out) == (1, 0, 0)
-    assert "ACTOR-STORY-SENTINEL" in fake.calls[0].user
 
 
 
@@ -1153,25 +1090,6 @@ def test_d27_user_prompt_carries_no_command_template(tmp_repo):
     assert AGENTS[AgentRole.CORPUS_AUTHOR].tools.forward_check is True
 
 
-def test_m9_verify_forward_helpers_survive_as_a_library(tmp_path):
-    """The pure helpers the deleted CLI entry points wrapped — run-context loading,
-    expected-disposition selection, cited-policy loading, case-entity extraction, verdict
-    parsing — remain importable and behave unchanged."""
-    runs = tmp_path / "runs"
-    (runs / "r").mkdir(parents=True)
-    (runs / "r" / "investigation.md").write_text("body\n")
-    (runs / "r" / "source_refs.yaml").write_text("normalized_disposition: benign\n")
-    transcript, disp = vf.load_run_context("r", runs_dir=runs)
-    assert "body" in transcript
-    assert disp == "benign"
-    assert vf.expected_disposition("benign", "malicious") == "benign"
-    assert vf.expected_disposition("adversarial", "benign") == "benign"
-    assert vf.load_cited_policy("r", runs_dir=runs) == vf._NO_CITED_POLICY
-    from defender.learning.core.prologue import extract_case_entities
-    assert callable(extract_case_entities)
-    assert vfs.parse_verdict("x\n\nVERDICT: GOOD\n", error_prefix="verify_forward") == "GOOD"
-    assert Path(FINDINGS_CHECK.prompt_path).name == "forward.md"
-    assert isinstance(ACTOR_CHECK, ForwardCheck)
 
 
 def test_m10_curator_deps_cannot_be_built_without_a_corpus_confine(tmp_path):

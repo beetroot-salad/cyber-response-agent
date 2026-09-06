@@ -41,13 +41,12 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender.agents import CORPUS_AUTHOR_DEF, GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: E402
-from defender.agents import ACTOR_DEF, GATHER_DEF, JUDGE_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     RunScope,
     compile_policy_for,
-    effective_tools_for,
 )
 from defender.scripts import workspace_map as wsm  # noqa: E402
 
@@ -172,13 +171,16 @@ def test_the_workspace_map_does_not_name_the_observe_dir(env):
 
 # the offline lane: same stream class, same component, a DIFFERENT mechanism
 
-LEARNING_READERS = ("actor", "judge")
-
-
 @pytest.fixture
 def lenv(tmp_path):
-    """A learning run dir with the two stage traces where `run_stage` puts them, the staged
-    `gather_raw/` tree beside them, and the actor's own artifacts as positive controls.
+    """A learning run dir with a stage trace where `run_stage` puts it, a staged `gather_raw/`
+    tree beside it, and a bound learning role to ask the gate about.
+
+    THE STAGES CHANGED WITH #922, THE PROPERTY DID NOT. It used to build the actor's and the
+    judge's policies and check that neither could read the other's trace; both roles are
+    deleted. The curator is the surviving bindable learning role, and what the demands below
+    still state is the one that matters: a learning role does not read a wire-log trace, and
+    does not read the staged raw payloads beside it — traces carry unredacted exemplars.
 
     `stage_trace_path` is used rather than a hand-joined path for the reason the production
     call site uses it: the location is the thing under test, so a test that spelled it itself
@@ -186,30 +188,45 @@ def lenv(tmp_path):
     lrd = tmp_path / "learning-run"
     (lrd / "gather_raw" / "l-001").mkdir(parents=True)
     (lrd / "gather_raw" / "l-001" / "0.json").write_text('{"user": "root"}\n', encoding="utf-8")
-    (lrd / "actor_story.md").write_text("the story\n", encoding="utf-8")
-    (lrd / "actor_input.yaml").write_text("leads: []\n", encoding="utf-8")
     dfn = tmp_path / "defender"
-    (dfn / "lessons-actor").mkdir(parents=True)
-    (dfn / "lessons-actor" / "a.md").write_text("x\n", encoding="utf-8")
+    corpus = dfn / "lessons"
+    corpus.mkdir(parents=True)
+    (corpus / "a.md").write_text("x\n", encoding="utf-8")
 
     traces = {}
-    for name in ("judge_trace.jsonl", "oracle_actor_story_l-001.trace.jsonl",
-                 "actor_trace.jsonl"):
+    for name in ("judge_trace.jsonl", "questioner_trace.jsonl"):
         p = observe.stage_trace_path(lrd, name)
         p.write_text('{"message": "unredacted payload exemplar"}\n', encoding="utf-8")
         traces[name] = p
 
     return SimpleNamespace(
         run=lrd, dfn=dfn, traces=traces,
-        actor=compile_policy_for(
-            ACTOR_DEF, run_dir=lrd, defender_dir=dfn,
-            scope=RunScope(scripts=(), read_confine=(dfn / "lessons-actor",)),
-        ),
-        judge=compile_policy_for(
-            JUDGE_DEF, lrd, scope=RunScope(add_dirs=()), defender_dir=dfn,
-            tools=effective_tools_for(JUDGE_DEF),
+        curator=compile_policy_for(
+            CORPUS_AUTHOR_DEF, run_dir=lrd, defender_dir=dfn,
+            scope=RunScope(corpus_name="lessons", read_confine=(corpus,)),
         ),
     )
+
+
+#: TWO LEARNING-LANE DEMANDS LEFT WITH #922, recorded because their absence weakens this file.
+#:
+#: `test_the_bash_lane_denies_a_trace_for_the_judge` measured the `cat` lane at a role whose
+#: scope was `under(run, TREE)` — fullmatching at any depth, so the deny could only be carried
+#: by `files.names_wire_log_dir` itself. No surviving learning role has that shape: the
+#: curator's `cat` is its own corpus, where a subdirectory rule would exclude the file anyway,
+#: which is the vacuity that test existed to avoid.
+#:
+#: `test_the_deny_is_scoped_to_observe_and_nothing_else` was the POSITIVE CONTROL for the
+#: learning half — the judge still read the payloads it graded, the actor still read its own
+#: inputs — and both roles are gone. The curator reads nothing in a learning run dir
+#: (`read_allow == ()`), so there is no surviving learning role the control can be stated on.
+#: The runtime half's own control (`READERS`, below) still fires, so the class is not
+#: uncontrolled; the LEARNING half is, and that is the reduction.
+#:
+#: Restore both when a learning role is next granted a read scope over a run dir.
+LEARNING_READERS = ("curator",)
+
+
 
 
 def test_a_learning_stage_trace_lands_under_observe(lenv):
@@ -221,7 +238,7 @@ def test_a_learning_stage_trace_lands_under_observe(lenv):
         assert path.parent.is_dir()
 
 
-def test_the_gray_box_actor_cannot_read_the_judge_s_trace(lenv):
+def test_a_learning_role_cannot_read_a_stage_trace_or_the_staged_payloads(lenv):
     """The reported crossing, in the lane it actually lives in.
 
     The actor must write its story WITHOUT the payloads; `decide_read`'s `gather_raw` branch is
@@ -229,10 +246,10 @@ def test_the_gray_box_actor_cannot_read_the_judge_s_trace(lenv):
     is still doing its job here. The judge's prompt carries those same payloads UNREDACTED
     (`compare.unredacted_exemplar`), so its trace at the learning run dir's root was the same
     bytes by another name — and the actor's `read_allow` is EMPTY, so no shape filter ever ran."""
-    assert not _read(lenv, lenv.traces["judge_trace.jsonl"], "actor").allow
-    assert not _read(lenv, lenv.traces["oracle_actor_story_l-001.trace.jsonl"], "actor").allow
-    assert not _read(lenv, lenv.run / "gather_raw" / "l-001" / "0.json", "actor").allow
-    assert lenv.actor.read_allow == (), (
+    assert not _read(lenv, lenv.traces["judge_trace.jsonl"], "curator").allow
+    assert not _read(lenv, lenv.traces["questioner_trace.jsonl"], "curator").allow
+    assert not _read(lenv, lenv.run / "gather_raw" / "l-001" / "0.json", "curator").allow
+    assert lenv.curator.read_allow == (), (
         "the actor grew a read shape — this test's premise (no shape filter runs for it) is "
         "the reason its deny has to come from the component rule and not from enumeration"
     )
@@ -246,38 +263,8 @@ def test_no_learning_role_reads_a_trace(lenv, which):
     assert not _read(lenv, lenv.traces["judge_trace.jsonl"], which).allow
 
 
-def test_the_bash_lane_denies_a_trace_for_the_judge(lenv):
-    """The `cat` lane, asserted for the JUDGE and ONLY the judge — because it is the only
-    learning role where the assertion measures anything.
-
-    The judge is where a subdirectory could never have excluded the file: its `cat` scope is
-    `under(run, TREE)`, which fullmatches at any depth, so here the deny is carried by
-    `files.names_wire_log_dir` alone — and the run-root control beneath it is what shows the `cat`
-    itself is otherwise well-formed and claimable. The ACTOR is deliberately NOT parametrized
-    in: it holds ZERO bash grants, so every command it names is refused by the fallthrough
-    before an operand is ever resolved, and a `cat` deny for it would stay green with
-    `names_wire_log_dir` deleted. That vacuity is pinned rather than papered over — the last
-    assertion fails the day the actor grows a grant, which is the day the case belongs here
-    with a falsification of its own."""
-    trace = lenv.traces["judge_trace.jsonl"]
-    assert not _bash(lenv, f"cat {trace}", "judge").allow
-    assert _bash(lenv, f"cat {lenv.run / 'actor_story.md'}", "judge").allow, (
-        "positive control: a run-root artifact the judge may read must still `cat`, or the "
-        "deny above proves nothing about the component"
-    )
-    assert lenv.actor.bash_allow == (), (
-        "the actor grew a bash grant — its `cat` deny is no longer vacuous, so it belongs in "
-        "a parametrized case with a falsification of its own"
-    )
 
 
-def test_the_deny_is_scoped_to_observe_and_nothing_else(lenv):
-    """The positive control for the whole class. `wire_logs/` must be the only thing that moved:
-    the judge still reads the payloads it is supposed to judge, and the actor still reads its
-    own inputs. A deny that swept these up would be a blanket, not a boundary."""
-    assert _read(lenv, lenv.run / "gather_raw" / "l-001" / "0.json", "judge").allow
-    assert _read(lenv, lenv.run / "actor_story.md", "actor").allow
-    assert _read(lenv, lenv.run / "actor_input.yaml", "actor").allow
 
 
 @pytest.mark.parametrize("which", LEARNING_READERS)

@@ -15,7 +15,6 @@ module-top import is the expected collection-time red.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import threading
@@ -37,7 +36,6 @@ from defender.learning.author.verify_forward.engine import _run_verify_pydantic 
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 
 from defender.learning.author.verify_forward.checks import (  # noqa: E402
-    ENV_CHECK,
     FINDINGS_CHECK,
 )
 from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
@@ -182,43 +180,6 @@ def _make_curator_fn(pairs_args):
 
 
 
-def test_m2_env_checks_write_no_trace(tmp_path):
-    """The deterministic environment check runs no model and creates no trace file in the
-    source bundle, so the trace-uniqueness fix targets the two model-backed checks only."""
-    scene = _scene(tmp_path)
-    env_corpus = scene.repo / "defender" / "lessons-environment"
-    env_corpus.mkdir(parents=True)
-    src = scene.runs / "run-E"
-    src.mkdir(parents=True)
-    (src / "investigation.md").write_text(
-        "```invlang\n:V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|process|nc|nc[1]|\n```\n"
-    )
-    scene.pending.write_text(json.dumps(
-        {"observation_id": "obs-1", "alert_rule_key": "rule-Z", "source_run_dir": "run-E"}
-    ) + "\n")
-
-    calls: list = []
-
-    def _transport(wiring, **kw):
-        calls.append(kw)
-        return "VERDICT: GOOD"
-
-    deps = _deps(scene, run_verify=_transport, check=ENV_CHECK, corpus=env_corpus, queued={"obs-1"})
-    asyncio.run(run_forward_check(deps, [Pair("defender/lessons-environment/x.md", "obs-1")]))
-    assert calls == []
-    assert not list(src.glob(f"{WIRE_LOG_DIR}/*.trace.jsonl"))
-
-    (scene.corpus / "m.md").write_text("---\nname: m\n---\nbody\n")
-    src2 = _bundle(scene, "run-M")
-
-    def _real(wiring, **kw):
-        return _run_verify_pydantic(wiring, **kw, make_model=_fake_model(_verifier("VERDICT: GOOD")))
-
-    deps2 = _deps(scene, run_verify=_real, check=FINDINGS_CHECK, queued={"run-M"})
-    with override_allow_model_requests(False):
-        asyncio.run(run_forward_check(deps2, [Pair("defender/lessons/m.md", "run-M", "adversarial")]))
-    assert list(src2.glob(f"{WIRE_LOG_DIR}/*.trace.jsonl")), "a model-backed check wrote no trace (control failed)"
 
 
 
