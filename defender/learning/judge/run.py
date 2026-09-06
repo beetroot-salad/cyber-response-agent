@@ -289,7 +289,24 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         # counted as a malformed reply, with the draw file removed and no error above
         # `malformed_replies`.
         f"[{'|'.join(sorted(_BUCKET_ENUM))}], claim, "
-        "root_cause, anchor, topic, evidence, discriminator_related).\n"
+        "root_cause, anchor, topic, evidence, discriminator_related).\n\n"
+        # THE SHAPE OF `evidence`, stated. The field list above names it and stops, so a model
+        # that reads "evidence" writes the English sense of the word — a sentence quoting what
+        # it saw. `_validate_finding` requires a LIST and refuses the reply outright, which
+        # counts a malformed reply, deletes the draw and grades the world on nothing; and a
+        # list of prose would then have been dropped one step later by `_draw_document`, which
+        # discards any finding whose pointers all fail to resolve. Both failures are silent
+        # above `malformed_replies`, so the judge produced no findings at all and said only
+        # that its own reply was malformed.
+        "`evidence` IS A LIST OF POINTERS INTO THE GRADED WORLD'S OWN FILES, never prose and "
+        "never a quotation. Each entry is a path RELATIVE to that world's directory, "
+        "optionally with a `#fragment` naming what in the file you mean — for example "
+        "`report.md`, `investigation.md#ANALYZE`, `gather_summaries/l-001.md`. An absolute "
+        "path, a path climbing out of the world, and a path naming a file that is not there "
+        "all fail to resolve, and A FINDING WHOSE POINTERS ALL FAIL TO RESOLVE IS DISCARDED — "
+        "so put what you actually read in this world's archive here, and put the words you "
+        "would have quoted in `claim` and `root_cause` instead. "
+        "`discriminator_related` is a boolean.\n"
     )
     sections = judge_input.as_prompt_sections()
     # ITERATE THE SECTIONS, not the titles. `as_prompt_sections` owns the set (and `_cap_sections`

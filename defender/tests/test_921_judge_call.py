@@ -567,3 +567,71 @@ def test_921_a_timed_out_draw_and_a_raising_draw_are_the_same_class_and_both_lea
         assert "RunUnprocessable" in json.dumps(reasons), (
             f"{arm}: the recorded reason does not name the one class both arms arrive as")
         assert J.world_rows(J.judge_record(episode_dir))["b"]["completed_draws"] == 1
+
+
+# ---------------------------------------------------------------------------------------
+# the shape of `evidence`, as the prompt states it and the validator enforces it
+# ---------------------------------------------------------------------------------------
+
+
+def test_921_the_task_states_that_evidence_is_a_list_of_pointers(tmp_path):
+    """The prompt says what an evidence entry IS, not just that the field exists.
+
+    The field list named `evidence` and stopped, so the model wrote the English sense of the
+    word: one prose sentence quoting what it had read. `_validate_finding` requires a list and
+    refuses the whole reply, which counts a malformed reply, deletes the draw, and grades the
+    world on nothing — and a list of prose would have been discarded one step later anyway by
+    `_draw_document`, which drops a finding whose pointers all fail to resolve. Both silent
+    above `malformed_replies`.
+
+    Observed live: a judge draw whose REASONING was correct — it found that the defender closed
+    `benign` where its world called for `inconclusive` and had ridden an earlier precedent —
+    produced no finding at all, because every `evidence` value was a quotation.
+    """
+    run_mod = J.mod("learning.judge.run")
+    render = J.mod("learning.judge.render")
+    ep = J.accepted_episode(tmp_path)
+    # THE PROMPT THE MODEL IS ACTUALLY HANDED, built by the real assembler. Reading run.py's own
+    # source instead would pass on a sentence sitting in a docstring or a dead branch — the
+    # structural-claim-by-substring shape, which asserts that the words exist somewhere rather
+    # than that the model is told them.
+    prompt = run_mod._build_prompt(render.render(ep, "b"))
+    for required in ("`evidence` IS A LIST OF POINTERS", "#fragment", "IS DISCARDED"):
+        assert required in prompt, f"the model is never told {required!r}"
+
+
+def test_921_the_evidence_shape_the_prompt_documents_actually_validates(tmp_path):
+    """The example pointers the prompt shows are ones the validator and the resolver accept.
+
+    The companion to the questioner's own prompt-vs-loader guard, and the same failure mode: a
+    prompt that describes a shape in prose while the code enforces another is a prompt whose
+    every obedient reply is refused. Driven through BOTH gates the reply must pass —
+    `validate_reply`, then the pointer resolution `_draw_document` applies — because a shape
+    that parses and then resolves to nothing still yields no finding.
+    """
+    run_mod = J.mod("learning.judge.run")
+    ep = J.accepted_episode(tmp_path)
+    world_dir = ep / "worlds" / "b"
+
+    documented = J.reply_doc(findings=[J.finding_doc(evidence=["report.md",
+                                                               "investigation.md#ANALYZE"])])
+    reply = run_mod.validate_reply(J.as_reply_text(documented))
+    doc = run_mod._draw_document(reply, world_dir=world_dir)
+    assert doc["findings"], (
+        "a finding carrying the pointers the prompt documents was dropped as unresolvable")
+    assert doc["findings"][0]["evidence"] == ["report.md", "investigation.md#ANALYZE"]
+
+
+def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_path):
+    """A string where a list belongs refuses the reply, and says which field.
+
+    The positive control for the two above: the refusal is what makes the prompt's statement
+    load-bearing. It must stay a refusal — reading a bare string as a one-element list would
+    accept the exact shape that then resolves to nothing.
+    """
+    run_mod = J.mod("learning.judge.run")
+    prose = J.reply_doc(findings=[J.finding_doc(
+        evidence="report.md says disposition: benign")])
+    with pytest.raises(J.sym("learning.judge", "JudgeRefused")) as refusal:
+        run_mod.validate_reply(J.as_reply_text(prose))
+    assert "evidence" in str(refusal.value)
