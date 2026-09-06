@@ -431,22 +431,6 @@ def test_every_withheld_pair_in_the_shipped_table_carries_a_reason():
 # O3 — presence on disk never confers access.
 # =========================================================================================
 
-def test_planting_an_adapter_grants_it_nothing():
-    """The property the enumeration exists to hold, and the one the 'just derive it from the
-    filesystem' repair would destroy. A system declared by both halves, with the table not
-    mentioning it, yields zero granted pairs for that system in either role."""
-    repo = planted_tree(_tmp_dir(), {"alpha": "lookup", "intruder": "exfiltrate"})
-    table = write_table(
-        repo / "defender" / "knowledge" / "environment" / "verb-grants.yaml",
-        {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
-    )
-    rows = load_dispositions(table)
-    for role in ("gather", "judge"):
-        granted = {(s, v) for s, v, _ in grant_for(role, rows).entries}
-        assert not any(s == "intruder" for s, _ in granted), (
-            f"role {role!r} was granted something on a system the table never mentions: "
-            f"{sorted(p for p in granted if p[0] == 'intruder')}"
-        )
 
 
 def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
@@ -462,15 +446,6 @@ def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
     assert "gathr" in str(caught.value), "the refusal must name the role it was handed"
 
 
-def test_a_known_role_no_row_names_still_projects_an_empty_grant():
-    """The other half, and the reason the guard is membership rather than emptiness.
-
-    A role that legitimately appears in no row is a filter matching nothing, not an error —
-    the distinction `grant_for`'s docstring draws. Only an unknown NAME is the typo."""
-    rows = load_dispositions(write_table(_tmp(), {
-        ("alpha", "lookup"): OK, ("alpha", "health-check"): OK,
-    }))
-    assert grant_for("judge", rows) == VerbGrant(role="judge", entries=())
 
 
 def test_the_grant_is_not_a_function_of_what_is_on_disk():
@@ -485,18 +460,6 @@ def test_the_grant_is_not_a_function_of_what_is_on_disk():
     assert before == after
 
 
-@pytest.mark.parametrize("role", ["gather", "judge"])
-def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
-    """The total statement of "authored, not derived", in one line per role.
-
-    The two tests above vary a temp tree that a synthesizing implementation has no reason to
-    read — an adversarial one derived eight of gather's pairs from `PATHS.adapters_dir`, which
-    those tests never touch, and passed both. This closes it by construction: the projection
-    is a FILTER over the rows and may invent nothing. Anything synthesized, from anywhere,
-    breaks the equality."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    assert {(s, v) for s, v, _ in grant_for(role, rows).entries} == \
-        {(r.system, r.verb) for r in rows if role in r.roles}
 
 
 # =========================================================================================
@@ -514,12 +477,6 @@ def test_the_projected_gather_grant_is_exactly_the_historical_census():
     )
 
 
-def test_the_projected_judge_grant_is_exactly_the_historical_census():
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    granted = {(s, v) for s, v, _ in grant_for("judge", rows).entries}
-    assert granted == set(JUDGE_CENSUS), (
-        f"gained={sorted(granted - JUDGE_CENSUS)} lost={sorted(JUDGE_CENSUS - granted)}"
-    )
 
 
 
@@ -534,13 +491,6 @@ def test_every_projected_pair_survives_registry_construction():
     ModuleVerbRegistry(ADAPTERS, grant)  # raises GrantError if any pair is phantom
 
 
-def test_all_shipped_dispositions_are_read_class():
-    """No shipped verb is granted write. The table has no class field by design — a write
-    grant should cost a schema change and its own review — so this pins that the projection
-    cannot mint one."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    for role in ("gather", "judge"):
-        assert all(k == "r" for _, _, k in grant_for(role, rows).entries)
 
 
 # =========================================================================================

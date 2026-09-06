@@ -12,7 +12,8 @@ quietly reintroducing the frozen idiom, and the behavioral one proves the access
 actually observe an environment changed after import.
 
 Module-level constants BUILT from these accessors still snapshot at their own import —
-`directions.py`'s two `JudgeWiring`s are the deliberate remaining case, and they say so.
+The two `JudgeWiring`s that were the deliberate remaining case left with the old
+pipeline (#922); every wiring this census now sees is built per call.
 That is a different (and visible) thing from config.py owning the freeze.
 """
 from __future__ import annotations
@@ -97,9 +98,6 @@ def test_accessor_returns_the_default_when_unset(monkeypatch):
 # The stage ENGINES — the entry points whose signatures the passthrough guard polices.
 _STAGE_MODULES = (
     "learning/_pydantic_stage.py",
-    "learning/pipeline/actor_engine.py",
-    "learning/pipeline/oracle_engine.py",
-    "learning/pipeline/judge/engine_pydantic.py",
     "learning/author/curator_engine.py",
     "learning/author/verify_forward/engine.py",
     "learning/leads/lead_author_engine.py",
@@ -111,14 +109,9 @@ _STAGE_MODULES = (
 # ...)` a few lines under a block of module constants, and hoisting it there would freeze
 # ACTOR_MODEL at import exactly as surely as doing it inside an engine.
 _WIRING_SITES = _STAGE_MODULES + (
-    "learning/core/directions.py",
     "learning/leads/_lead_spine.py",
     "learning/author/curator.py",
     "learning/author/lessons/run.py",
-    "learning/pipeline/malicious_actor/run.py",
-    "learning/pipeline/benign_actor/run.py",
-    "learning/pipeline/oracle/run.py",
-    "learning/pipeline/judge/run.py",
 )
 
 # `directions.py` snapshots these two deliberately and says so at its line 28: an A/B run

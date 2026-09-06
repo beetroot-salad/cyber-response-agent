@@ -81,7 +81,9 @@ def _repo_root(tmp_path: Path) -> Path:
 
 
 def _corpus(tmp_path: Path) -> Path:
-    c = _repo_root(tmp_path) / "defender" / "lessons-actor"
+    # `lessons` since #922: it is the one shipped corpus, and `bind` refuses any other
+    # name — a corpus outside the confine is an unbuildable write scope.
+    c = _repo_root(tmp_path) / "defender" / "lessons"
     c.mkdir(parents=True, exist_ok=True)
     return c
 
@@ -95,7 +97,9 @@ def _run_dir(tmp_path: Path) -> Path:
 def _check_args(tmp_path: Path) -> dict:
     """The forward-check binding every curator spawn carries: which check, and the roots it
     reads. Bound on the deps at spawn (#558) — never a tool argument."""
-    from defender.learning.author.verify_forward.checks import ACTOR_CHECK
+    # The actor check retired with its corpus (#922); the findings check is the surviving
+    # one, and this scene is about the curator engine rather than about which check runs.
+    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK as ACTOR_CHECK
     return dict(
         check=ACTOR_CHECK,
         runs_dir=tmp_path / "runs",
