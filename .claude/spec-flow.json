@@ -2,7 +2,7 @@
   "project": "defender — an LLM SOC-analyst agent (python, pytest, uv)",
   "gate": {
     "ciConfig": ".github/workflows/ci.yml",
-    "test": "cd defender && uv run pytest tests/ -m \"not llm and not live\"",
+    "test": "cd defender && uv run pytest tests/ -m \"not live and not gate\" -n auto --dist loadfile --ignore tests/e2e/test_540_box_boundary.py",
     "checks": [
       "defender/.venv/bin/ruff check . --select E,F --ignore E402,E501",
       "defender/.venv/bin/ruff check defender",
@@ -75,7 +75,8 @@
           "defender/learning/core/persist.py::_append_observations",
           "defender/learning/core/persist.py::append_pitfalls",
           "defender/learning/author/drain.py::retire",
-          "defender/learning/author/drain.py::_record_stuck"
+          "defender/learning/author/drain.py::_record_stuck",
+          "defender/evals/harness.py::materialize"
         ],
         "readers": [
           "defender/learning/author/drain.py::_tick",
@@ -91,8 +92,10 @@
           "channel.append_lock",
           "channel.drain_lock",
           "deadletter.jsonl",
-          "stuck.jsonl"
-        ]
+          "stuck.jsonl",
+          "_pending/findings.jsonl"
+        ],
+        "note": "ADDED BY #921's GROUNDING: `evals/harness.py::materialize` is a writer of this sink's shape that no import-following census sees — it `shutil.copy`s a scenario's own findings.jsonl into `<tmp>/defender/learning/_pending/findings.jsonl` and copytrees a `runs/` fixture beside it, then runs the real author against that tree. It is a HARNESS edge, not a loop edge, and it is the reason a row-shape change has a second consumer. Also worth pinning for the next census: the findings channel has ONE gate (`CorpusAuthorConfig.gate`, wired to `learning/author/lessons/run.py::_gate_findings`), called once per tick over EVERY keyed row of findings.jsonl — so two directions in one file share one gate and one batch, and the gate indexes entry['finding_id'|'run_id'|'direction'] directly inside drain's stuck-recording guard, where a missing key takes the whole tick's batch to `<channel>.stuck.jsonl`. `QUEUEABLE_FINDING_TYPES` has NO production consumer: the only membership test on a finding `type` is over ALL_FINDING_TYPES inside `core/validate.py::_validate_finding`, which validates the OLD pipeline judge's YAML doc and never sees a queue row."
       },
       "session_store": {
         "writers": [
@@ -256,7 +259,8 @@
           "defender/learning/branch/review.py::review",
           "defender/learning/branch/archive.py::archive_episode",
           "defender/learning/branch/cli.py::_record_episode_outcome",
-          "defender/learning/branch/cli.py::_write_family_stamp"
+          "defender/learning/branch/cli.py::_write_family_stamp",
+          "defender/runtime/observe.py::RequestLogger"
         ],
         "readers": [
           "defender/learning/branch/ledger.py::base_file",
@@ -266,16 +270,18 @@
           "defender/learning/branch/episode.py::verdicts",
           "defender/learning/branch/episode.py::delta_o",
           "defender/learning/branch/staging.py::read_staged",
-          "defender/runtime/branch/_family.py::load_family"
+          "defender/runtime/branch/_family.py::load_family",
+          "defender/learning/branch/episode.py::_archived_labels"
         ],
         "grep": [
           "episodes/",
           "served/",
           "base.jsonl",
           "episode_dir",
-          "for_world"
+          "for_world",
+          "wire_logs"
         ],
-        "note": "Declared by #947's grounding. AT b8a63e66 `capture.py:130-136` composes it as `resolve_runs_base()/'episodes'/<id>/` — a sibling of the run dirs, inside the runs base. #947 MOVES BOTH ENDS OF THAT, and this note is written against the design, not the base: (1) the episodes root becomes a CONFIGURED location (`DEFENDER_EPISODES_BASE`), outside both the runs base and the checkout, with NO default derivation — a reader that re-derives it from the runs base silently restores the containment hole the relocation closed (#947 §7 round 2, F5-EPISODE-ROOT); and (2) the three sibling run dirs move UNDER it, at `{episode_dir}/runs/`, so the episode dir is a PARENT of run dirs rather than their sibling. `cli.py::episode_dir_for` is the symbol whose semantics change: it is the production resolver every reader of an episode must go through once the root is configured, and the one to follow instead of re-composing a path. The old safety clause here read 'a SIBLING of the run dirs, never inside one, so it is not bound into any box' — that is verbatim the reason `capture.py:134`'s waiver states, and #947 REFUTES it on that reason (claim C26): the episode dir now contains three rw box binds. The conclusion survives on a different ground, recorded as an examined no: the bind is the run dir alone, `served/` and `worlds/` stay unreachable from inside a box, and every archive read goes through the `_run_paths.artifact_file` / `stage_tables` screens. Rewrite `capture.py:134`'s waiver text in the same commit that moves the root. Today it holds only `served/`: `prime_base` writes `served/base.jsonl` once and `Ledger.record` appends `served/<world_id>.jsonl`, one writer per file — which is the whole of the launcher's parallel-safety premise. The directory is created as a side effect of `_io.append_jsonl`'s parent mkdir, NOT through `guarded_mkdir`, and NOTHING anywhere removes an episode dir: both `prepare_episode` and `prime_base` treat an existing one as a permanent refusal. #947 adds family.yaml, staged.yaml, review.yaml, provenance.json, worlds/<X>/ AND runs/<sibling>/ here — add those writers (staging.py, review.py, archive.py, _family.py) IN THE COMMIT THAT CREATES THEM, not before: a row naming a symbol that resolves to nothing is indistinguishable to a resolver from a row nobody wrote. ADDED IN THE COMMIT THAT CREATED THEM, as the sentence above requires: `write_family` (family.yaml), `record_staged` and `_record_teardown_failure` (staged.yaml and the teardown block of review.yaml), `review` (review.yaml), `archive_episode` (worlds/<X>/), and `cli._record_episode_outcome` / `_write_family_stamp` (the episode's own outcome and its provenance.json). The readers gain the two derived readers, the staging record's own reader and the manifest loader."
+        "note": "Declared by #947's grounding. AT b8a63e66 `capture.py:130-136` composes it as `resolve_runs_base()/'episodes'/<id>/` — a sibling of the run dirs, inside the runs base. #947 MOVES BOTH ENDS OF THAT, and this note is written against the design, not the base: (1) the episodes root becomes a CONFIGURED location (`DEFENDER_EPISODES_BASE`), outside both the runs base and the checkout, with NO default derivation — a reader that re-derives it from the runs base silently restores the containment hole the relocation closed (#947 §7 round 2, F5-EPISODE-ROOT); and (2) the three sibling run dirs move UNDER it, at `{episode_dir}/runs/`, so the episode dir is a PARENT of run dirs rather than their sibling. `cli.py::episode_dir_for` is the symbol whose semantics change: it is the production resolver every reader of an episode must go through once the root is configured, and the one to follow instead of re-composing a path. The old safety clause here read 'a SIBLING of the run dirs, never inside one, so it is not bound into any box' — that is verbatim the reason `capture.py:134`'s waiver states, and #947 REFUTES it on that reason (claim C26): the episode dir now contains three rw box binds. The conclusion survives on a different ground, recorded as an examined no: the bind is the run dir alone, `served/` and `worlds/` stay unreachable from inside a box, and every archive read goes through the `_run_paths.artifact_file` / `stage_tables` screens. Rewrite `capture.py:134`'s waiver text in the same commit that moves the root. Today it holds only `served/`: `prime_base` writes `served/base.jsonl` once and `Ledger.record` appends `served/<world_id>.jsonl`, one writer per file — which is the whole of the launcher's parallel-safety premise. The directory is created as a side effect of `_io.append_jsonl`'s parent mkdir, NOT through `guarded_mkdir`, and NOTHING anywhere removes an episode dir: both `prepare_episode` and `prime_base` treat an existing one as a permanent refusal. #947 adds family.yaml, staged.yaml, review.yaml, provenance.json, worlds/<X>/ AND runs/<sibling>/ here — add those writers (staging.py, review.py, archive.py, _family.py) IN THE COMMIT THAT CREATES THEM, not before: a row naming a symbol that resolves to nothing is indistinguishable to a resolver from a row nobody wrote. ADDED IN THE COMMIT THAT CREATED THEM, as the sentence above requires: `write_family` (family.yaml), `record_staged` and `_record_teardown_failure` (staged.yaml and the teardown block of review.yaml), `review` (review.yaml), `archive_episode` (worlds/<X>/), and `cli._record_episode_outcome` / `_write_family_stamp` (the episode's own outcome and its provenance.json). The readers gain the two derived readers, the staging record's own reader and the manifest loader. ADDED BY #921's GROUNDING (re-verified at base 9f4e8247, where #947's relocation HAS landed: `episodes_root()` is $DEFENDER_EPISODES_BASE with no default derivation, refused inside the runs base and inside REPO_ROOT, and the sibling run dirs live at {episode_dir}/runs/ via cli.RUNS_SUBDIR). The writer this list was missing is `observe.RequestLogger`: `learning/branch/seams.py::model_seam` builds StageContext(learning_run_dir=episode_dir), and `_pydantic_stage.run_stage` writes every questioner and comparator call's FULL wire stream to `<episode_dir>/wire_logs/<agent_id>_trace.jsonl` through `observe.stage_trace_path` (guarded_mkdir) + `open_guarded` — the seam's own docstring says 'THE TRACE LANDS IN THE EPISODE'. #921's per-world judge calls multiply that stream by worlds x draws and each one carries the whole 10-32K-token prompt verbatim, so a census that lists only judge.yaml and worlds/<X>/judge/ under-counts the writers by the largest artifact in the tree. `_archived_labels` is added beside `verdicts`/`delta_o` because it is the reader that turns `worlds/` into the label set both of them iterate. STILL TRUE and worth keeping: NOTHING removes an episode dir, and `capture.py:134`'s lint-unguarded-tree-write waiver STILL reads 'the episode archive is `runs_base/episodes/<id>/`, a sibling of the run dirs' — refuted text that the commit moving the root was supposed to rewrite and did not."
       },
       "elastic_corpus": {
         "writers": [
