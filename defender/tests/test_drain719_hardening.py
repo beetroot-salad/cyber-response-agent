@@ -218,6 +218,7 @@ def test_a_git_failure_after_the_commit_lands_does_not_delete_the_committed_less
     commit surviving in history is not enough — the working tree has to still hold the files
     that commit names, or the next tick sees deletions."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "b", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "b/0")])
 

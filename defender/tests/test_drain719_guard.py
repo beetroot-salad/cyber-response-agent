@@ -168,6 +168,7 @@ def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouc
     byte-identical afterwards — unbounded retry, which is the accepted cost of removing the
     permanent-loss path. Stuck but recoverable and loud, as today."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "b", "malicious")
     ch = h.channel_of(paths, "findings")
     rows = [h.row_for("findings", "b/0", attempts=2)]
     h.seed(ch, rows)
@@ -214,6 +215,7 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     stuck record on every failure and pass, which would make the signal noise rather than a
     stuck-row signal."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     rows = [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")]
     h.seed(ch, rows)
@@ -438,6 +440,7 @@ def test_the_retire_set_clauses_span_the_agent_call_through_the_corpus_commit_an
       post-commit no-bump, and nothing else in the suite can see it.
     """
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
 
     h.seed(ch, [h.row_for("findings", "a/0")])
@@ -509,6 +512,7 @@ def test_post_agent_failure_with_a_succeeding_agent_bumps_and_retires(tmp_path: 
     it. An oracle that faults the AGENT passes vacuously here, which is why the recorded call is
     asserted to have happened."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "b", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "b/0")])
 
@@ -548,6 +552,7 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
     the row is in the graveyard. The paired control is a genuinely successful batch, which
     rotates and counts nothing."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
 
     h.seed(ch, [h.row_for("findings", "a/0")])
@@ -616,6 +621,7 @@ def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path
     blocking boxed call, so nothing here treats the configured timeout as the bound on the stall
     and no assertion below is about elapsed time."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     late = author_shared.AuthorError(
@@ -716,6 +722,7 @@ def test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone
     type check rather than a permission bit — it fails the same way whether or not the process
     holds root."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "b", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "b/0")])
 

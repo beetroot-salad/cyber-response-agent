@@ -43,6 +43,7 @@ def test_a_faulted_batch_bumps_every_row_and_retires_only_the_ceiling_crossers(t
     first-attempt newcomer in the same batch is the positive control — it bumps to 1 and
     stays queued while its ceiling-crossing sibling leaves."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(
         ch,
@@ -125,6 +126,7 @@ def test_a_row_at_or_over_the_ceiling_on_arrival_does_not_retire_until_it_fails(
     both survive a tick that authors them cleanly; only a tick that actually faults them
     retires them."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
 
     h.seed(ch, [h.row_for("findings", "a/0", attempts=5)])
@@ -161,6 +163,7 @@ def test_a_retired_id_is_deduped_out_of_a_later_append_on_the_dedup_channels(tmp
     id is skipped; a fresh id in the same call still lands, which is the control proving the
     appender was working and the skip was the ledger's doing."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "run-Z", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "run-Z/0")])
     cfg = h.cfg_for(
@@ -205,6 +208,7 @@ def test_the_graveyard_append_lands_before_the_pending_rewrite_and_is_advisory(t
     exists to catch, which also makes this fail the same way whether or not the process
     holds root (an lstat type check, not a permission bit)."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")])
     before = ch.file.read_bytes()
@@ -309,6 +313,7 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     re-serialisation drift — so an unrelated row cannot be quietly edited by a neighbour's
     failure."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     outsiders = [
         h.row_for("findings", "a/1", note="keep me", nested={"x": [1, 2]}),
@@ -331,6 +336,7 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     and the active queue is left byte-identical for the next tick to re-read. Induced for
     real: the channel's graveyard path is a directory, so the append cannot land."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     before = ch.file.read_bytes()
@@ -353,6 +359,7 @@ def test_a_faulted_tick_defers_its_held_and_pre_consumed_classifications(tmp_pat
     next tick — the failing tick does not get to half-rotate a queue whose authoring never
     landed."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     rows = [
         h.row_for("findings", "a/0"),
@@ -381,6 +388,7 @@ def test_a_row_with_no_value_under_its_id_key_retires_instead_of_aborting(tmp_pa
     carrying a reason that names the missing field, and its well-formed batch-mates are
     authored on the same tick rather than being stranded behind it."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     unkeyable = {"judge_outcome": "caught", "source_run_dir": "", "note": "no id at all"}
     h.seed(ch, [unkeyable, h.row_for("findings", "a/1")])
@@ -402,6 +410,7 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
     and no graveyard row, so a steady state of empty ticks cannot grow either file. The
     positive control is the same drain on a non-empty channel, which does write both."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(paths, name)
         cfg = h.cfg_for(paths, name, invoke_agent=h.raising(AssertionError("never called")))
@@ -428,6 +437,7 @@ def test_retirement_retains_row_appended_mid_window(tmp_path: Path):
     append lock is what serialises it — so this is the property the unlocked
     read-modify-write lost today (G13/C16), driven through the real appender."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 
@@ -492,6 +502,7 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     assert set(writers) == {"_rewrite_queue"}, f"more than one queue rewriter: {writers}"
 
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/9")])
     drain.retire(channel=ch, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
@@ -504,6 +515,7 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
     `DEFAULT_PATHS` is frozen at import (F7) — an in-process environment change would not
     reach a second actor at all."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 

@@ -186,6 +186,7 @@ def test_committed_bucket_routes_to_author_and_projects(tmp_path: Path):
     the projection writes it to the consumed ledger under `consumed_committed` carrying the
     commit it landed in — so the bucket's routing and its projection are both observed."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "b", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "b/0")])
     agent = h.recording(h.committing("committed-bucket"))
@@ -209,6 +210,7 @@ def test_consumed_skip_bucket_is_idempotent_and_projects(tmp_path: Path):
     and re-appending the same id afterwards is a no-op — the consumed ledger the append path
     reads is what makes the skip stick."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     before = subprocess.run(

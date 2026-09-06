@@ -91,6 +91,7 @@ def test_rotation_has_no_merge_knob_and_always_merges(tmp_path: Path):
     )
 
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     persist._append_observations(
@@ -117,6 +118,7 @@ def test_rotation_retains_row_appended_mid_batch(tmp_path: Path):
     Discriminating: on the observation channels today this survives only because the envelope
     holds the append lock across the whole batch, which D1 removes."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     gate, entered = threading.Event(), threading.Event()
@@ -152,6 +154,7 @@ def test_append_completes_while_drain_batch_in_flight(tmp_path: Path):
     while the batch is still in flight. Today, on the three observation channels, the envelope
     holds the append lock across exactly this phase and the append blocks unboundedly."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     gate, entered = threading.Event(), threading.Event()
@@ -188,6 +191,7 @@ def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
     fails this. With the append lock held from another actor, the rotation does not proceed;
     when the lock is released it completes."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 
@@ -212,6 +216,7 @@ def test_retire_blocks_while_append_lock_held(tmp_path: Path):
     loses a concurrently appended row (G13/C16); D9 removes it as a separate write path, so
     the retire seam must be excluded by the same append lock rotation is."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 
@@ -339,6 +344,7 @@ def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path
     lock — observed by another actor acquiring the repo lock while the contended tick runs —
     which is what an order that took the repo lock first would fail."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "a", "malicious")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     assert tuple(drain.LOCK_ORDER) == ("drain_lock", "repo_lock", "append_lock")
