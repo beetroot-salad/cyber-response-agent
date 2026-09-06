@@ -234,8 +234,6 @@ ORACLE_PROMPT = _PIPELINE_DIR / "oracle" / "prompt.md"
 JUDGE_PROMPT = _PIPELINE_DIR / "judge" / "malicious.md"
 JUDGE_BENIGN_PROMPT = _PIPELINE_DIR / "judge" / "benign.md"
 
-LESSONS_ACTOR_DIR = DEFAULT_PATHS.lessons_actor_dir
-LESSONS_ENVIRONMENT_DIR = DEFAULT_PATHS.lessons_environment_dir
 
 _LESSONS_SCRIPTS_DIR = REPO_ROOT / "defender" / "scripts" / "lessons"
 LESSONS_ENV_RETRIEVE_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_env_retrieve.py"
@@ -246,14 +244,6 @@ LESSONS_ACTOR_INDEX_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_actor_index.py"
 # `Direction` (`core/directions.py`). The enum itself lives in `defender/_artifact_schema.py`
 # beside the report.md schema that mints it; core.config stays the loop's import surface.
 
-OUTCOME_ENUM = {"caught", "survived", "undecidable", "incoherent", "skip-passthrough"}
-BENIGN_OUTCOME_ENUM = {
-    "survived",
-    "refuted",
-    "undecidable",
-    "incoherent",
-    "skip-passthrough",
-}
 
 #: The four buckets the OLD pipeline judge may emit, and the only ones its reply is validated
 #: against (`core/validate.py::_validate_finding`, through the two `*_ALL_FINDING_TYPES` sets
@@ -379,13 +369,6 @@ class StageWiring:
         )
 
 
-@dataclass(frozen=True)
-class JudgeWiring(StageWiring):
-    """The judge's wiring: the shared fields plus its two per-leg knobs. Field order is
-    base-then-own, the order `directions.py` and the test builders pass positionally."""
-
-    comparison_dirname: str
-    closed_ticket_read: bool = False
 
 
 @dataclass(frozen=True)

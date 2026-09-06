@@ -134,40 +134,6 @@ def close_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> N
         _warn(f"close raised, ignored: {e!r}")
 
 
-def annotate_case_ticket(
-    case_id: str, outcome: str, deps: TicketWriterDeps = DEFAULT_DEPS
-) -> None:
-    try:
-        config = deps.load_config()
-        if config is None:
-            return
-        key = urllib.parse.quote(case_id, safe="")
-        status, body = deps.request(config, "GET", f"/tickets/{key}")
-        if status is None:
-            _warn(f"annotate {case_id}: {body}")
-            return
-        if status == "404":
-            _warn(f"annotate {case_id}: ticket not found (404); skipping")
-            return
-        if not status.startswith("2"):
-            _warn(f"annotate {case_id}: GET HTTP {status}: {body}")
-            return
-        try:
-            ticket = json.loads(body)
-        except json.JSONDecodeError as e:
-            _warn(f"annotate {case_id}: unparseable ticket: {e}")
-            return
-        if case_ticket.parse_survival_from_comments(ticket.get("comments")) is not None:
-            _log(f"annotate {case_id}: already flagged — skipping")
-            return
-        payload = case_ticket.enrichment_to_comment(outcome)
-        status, body = deps.request(config, "POST", f"/tickets/{key}/comments", payload)
-        if status is None or not status.startswith("2"):
-            _warn(f"annotate {case_id}: POST {status or 'transport error'}: {body}")
-        else:
-            _log(f"annotate {case_id}: seed-eligibility from {outcome} ({status})")
-    except Exception as e:  # noqa: BLE001 — an offline post-step must never break the learn
-        _warn(f"annotate raised, ignored: {e!r}")
 
 
 def _fetch_enrich_ticket(

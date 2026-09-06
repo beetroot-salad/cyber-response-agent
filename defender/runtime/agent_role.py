@@ -7,14 +7,16 @@ from enum import Enum
 class AgentRole(Enum):
     MAIN = "main"
     GATHER = "gather"
-    JUDGE = "judge"
-    ACTOR = "actor"
-    ORACLE = "oracle"
     VERIFIER = "verifier"
     LEAD_AUTHOR = "lead_author"
     CORPUS_AUTHOR = "corpus_author"
     # An enum key here grants compiled policy and names a trace file, so a member with no
     # definition behind it is a live grant nothing claims — a retired stage retires its key.
+    # `judge`, `actor` and `oracle` left under #922 for exactly that reason: the pipeline that
+    # was their only caller was deleted, and `set(AGENTS.keys()) == set(AgentRole)` is asserted,
+    # so leaving the keys behind would have been red rather than merely wrong. `judge` comes
+    # back in #1008 bound to the family judge — a different role that wants the same word, which
+    # is why it is re-added there rather than held open here.
     #
     # TWO roles, THREE calls: the ablation lens reuses SUPPORT rather than holding a key of
     # its own, because its whole purpose is to be the support lens under a narrower

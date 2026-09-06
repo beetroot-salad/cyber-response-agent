@@ -33,23 +33,15 @@ from defender.scripts.visualize.visualize_data import (
     tool_usage,
     transcript_phase_map,
 )
-from defender.scripts.visualize.visualize_judge import (
-    DirectionView,
-    active_views,
-    judge_finding_count,
-    render_judge_actor_section,
-    render_judge_defender_summary,
-    render_judge_judge_section,
-    render_judge_raw_bundle,
-    render_judge_toc,
-)
 from defender.scripts.visualize.visualize_primitives import (
     esc,
     esc_untrusted,
     fmt_duration,
-    load_judge_doc,
+    lead_repository,
     parse_report,
     render_alert_block,
+    render_lead_sequence_compact,
+    render_report_card,
     section,
 )
 from defender.scripts.visualize.visualize_runtime import (
@@ -63,7 +55,7 @@ from defender.scripts.visualize.visualize_runtime import (
 )
 
 
-JUDGE_FILENAME = "transcript.html"
+TRANSCRIPT_FILENAME = "transcript.html"
 RUNTIME_FILENAME = "runtime.html"
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
@@ -71,11 +63,11 @@ _REPO_ROOT = _DEFENDER_DIR.parent
 
 
 def render_and_mirror(run_dir: Path) -> list[Path]:
-    (run_dir / JUDGE_FILENAME).write_text(render_judge_page(run_dir), encoding="utf-8")
+    (run_dir / TRANSCRIPT_FILENAME).write_text(render_transcript_page(run_dir), encoding="utf-8")
     (run_dir / RUNTIME_FILENAME).write_text(render_runtime_page(run_dir), encoding="utf-8")
     dest_dir = _DEFENDER_DIR / "run-visualizations" / run_dir.name
     mirrored: list[Path] = []
-    for fname in (JUDGE_FILENAME, RUNTIME_FILENAME):
+    for fname in (TRANSCRIPT_FILENAME, RUNTIME_FILENAME):
         src = run_dir / fname
         if not src.is_file():
             continue
@@ -98,7 +90,7 @@ def render_header(case_id: str, active: str, byline: str, stats_html: str = "") 
     <h1>defender run: {esc(case_id)}</h1>
     {stats}
     <nav class="tabs">
-      <a class="tab{judge_active}" href="{JUDGE_FILENAME}">Judge eval</a>
+      <a class="tab{judge_active}" href="{TRANSCRIPT_FILENAME}">Judge eval</a>
       <a class="tab{runtime_active}" href="{RUNTIME_FILENAME}">Runtime inspection</a>
     </nav>
   </div>
@@ -115,30 +107,20 @@ def _byline(parts: list[str]) -> str:
 
 
 
-def render_judge_headline(
-    report: ReportRead, docs: list[tuple[DirectionView, dict | None]],
-) -> str:
+def render_transcript_headline(report: ReportRead) -> str:
+    """The page's tiles. Until #922 the left tile was the OLD PIPELINE JUDGE's outcome and
+    finding count, read off a per-direction `judge_findings.yaml` written by a stage that no
+    longer exists; the tile and the artifact went together. What is left is the defender's own
+    verdict on its own run, which is what the rest of this page is about.
+
+    A branched episode's judge writes its verdicts under the episode, per world and per draw,
+    not into a run dir — so there is no per-run judge outcome for this page to show, and a tile
+    reading "—" forever would be worse than none."""
     disposition = report.disposition_or_unknown
     confidence = str(report.frontmatter.get("confidence", "?"))
-    # First rendered direction that produced a doc supplies the outcome tile — page order, so
-    # adversarial still wins when both ran. The tile names its direction either way.
-    graded = next(((v, d) for v, d in docs if d), None)
-    if graded is not None:
-        view, doc = graded
-        outcome = str(doc.get("outcome", "—"))
-        n_findings = judge_finding_count(doc)
-        direction_sub = f"{n_findings} finding(s) · {view.direction.name} direction"
-    else:
-        outcome = "—"
-        direction_sub = "0 finding(s)"
     return f"""
 <section class="headline">
   <div class="tiles">
-    <div class="tile tile-out out-{esc(outcome)}">
-      <div class="tile-label">judge outcome</div>
-      <div class="tile-value">{esc(outcome)}</div>
-      <div class="tile-sub">{esc(direction_sub)}</div>
-    </div>
     <div class="tile tile-disp disp-{esc(disposition)}">
       <div class="tile-label">defender disposition</div>
       <div class="tile-value">{esc(disposition)}</div>
@@ -400,22 +382,35 @@ def render_store_transcript_section(run_dir: Path) -> str:
                     section_body)
 
 
-def render_judge_page(run_dir: Path) -> str:
+def _defender_summary(run_dir: Path) -> str:
+    """The defender's own output: its report card and the sequence of leads it worked.
+
+    MOVED HERE BY #922, out of the deleted judge page. Its subtitle used to read "what the
+    judge graded", which was true when the sections below it were that judge's verdict on
+    exactly these two artifacts. Nothing on this page grades anything now, so the section
+    describes what it shows instead of what used to read it."""
+    body = f"""<h3>report.md</h3>
+  {render_report_card(run_dir)}
+
+  <h3>lead sequence ({len(lead_repository.joined(run_dir))} lead(s))</h3>
+  {render_lead_sequence_compact(run_dir)}"""
+    return section("sec-defender-summary", "defender", "Defender summary",
+                   "— the report it wrote and the leads it worked", body)
+
+
+def render_transcript_page(run_dir: Path) -> str:
+    """The run's own page: what the defender was given, what it concluded, and what it said.
+
+    #922 REMOVED TWO OF ITS SECTIONS, not the page. It carried the old pipeline's per-direction
+    actor story and judge verdict, plus a raw bundle of that pipeline's inputs — all read out
+    of `defender/learning/runs/<run_id>/`, which no stage writes any more. The alert, the
+    defender's own summary and the model transcript are the run's own and stay. The layout's
+    table of contents went with them: it indexed the per-direction sections and had nothing
+    left to index."""
     case_id = run_dir.name
     events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
     n_events, n_tool_calls, cost = _stats(events)
-
-    # One pass over the directions this run selected or left artifacts for — the page never
-    # enumerates them, so a third `Direction` lands here for free.
     report = parse_report(run_dir)
-    docs = [
-        (v, load_judge_doc(case_id, v.direction))
-        for v in active_views(case_id, report.disposition_or_unknown)
-    ]
-    toc_sections = [(v, judge_finding_count(d) if d else None) for v, d in docs]
-    # Rendered once and handed to both the TOC and the page body, so a run with no raw
-    # artifacts cannot carry a TOC link to a section it never emits.
-    raw_bundle = render_judge_raw_bundle(case_id)
 
     byline = _byline([
         f"events={n_events}",
@@ -425,21 +420,14 @@ def render_judge_page(run_dir: Path) -> str:
     ])
 
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>judge eval — {esc(case_id)}</title>
+<html><head><meta charset="utf-8"><title>transcript — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, active="judge", byline=byline)}
-{render_judge_headline(report, docs)}
+{render_transcript_headline(report)}
 <div class="layout">
-  {render_judge_toc(toc_sections, raw_bundle=bool(raw_bundle))}
   <article class="content">
     {render_alert_block(run_dir, open_=True)}
-    {render_judge_defender_summary(run_dir)}
-    {"".join(
-        render_judge_actor_section(case_id, v)
-        + render_judge_judge_section(d, v)
-        for v, d in docs
-    )}
-    {raw_bundle}
+    {_defender_summary(run_dir)}
     {render_store_transcript_section(run_dir)}
   </article>
 </div>
@@ -612,7 +600,7 @@ def main(argv: list[str]) -> int:
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
     mirrored = render_and_mirror(run_dir)
-    print(f"wrote {run_dir / JUDGE_FILENAME}")
+    print(f"wrote {run_dir / TRANSCRIPT_FILENAME}")
     print(f"wrote {run_dir / RUNTIME_FILENAME}")
     for dest in mirrored:
         print(f"mirrored {dest.relative_to(_REPO_ROOT)}")

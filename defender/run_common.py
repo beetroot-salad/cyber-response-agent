@@ -244,26 +244,6 @@ def learning_refusal_gate(
     return None
 
 
-def enqueue_learning(
-    run_dir: Path,
-    alert: Path,
-    *,
-    truncated_by: str | None = None,
-    fixtures_dir: Path = HELD_OUT_FIXTURES,
-) -> bool:
-    reason = learning_refusal_gate(
-        run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
-    )
-    if reason is not None:
-        print(f"[run.py] NOT enqueuing for learning: {reason}", file=sys.stderr)
-        return False
-    from defender.learning import loop as _loop
-    from defender.learning.core.config import REPO_ROOT as _LEARN_REPO_ROOT
-    from defender.learning.core.config import LoopPaths, _env_state_dir
-
-    paths = LoopPaths(repo_root=_LEARN_REPO_ROOT, state_dir=_env_state_dir())
-    _loop.enqueue_for_learning(run_dir, paths)
-    return True
 
 
 def enqueue_curation(

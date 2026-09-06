@@ -19,16 +19,12 @@ from defender._text import is_content_less
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import artifact_file
 from defender.learning.core.config import (
-    ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
-    BENIGN_AUDIT_ONLY_FINDING_TYPES,
     DEFAULT_PATHS,
     RunUnprocessable,
     LoopPaths,
     QueueChannel,
-    RunPaths,
     make_logger,
 )
-from defender.learning.core.validate import _benign_outcome_keyword, _outcome_keyword
 # The reducer lane's routing key, at its owner (#870). Imported for the VALUE, the same way
 # `lead_extraction` and `pitfalls_curator` take it: the three seams that ask "is this the
 # reducer's row" have to compare the same literal, and a second spelling of it here is exactly
@@ -149,189 +145,28 @@ def derive_alert_rule_key(alert: dict) -> str:
     return "unkeyed"
 
 
-def _source_run_dir(learning_run_dir: Path, repo_root: Path) -> str:
-    try:
-        return str(learning_run_dir.relative_to(repo_root)) + "/"
-    except ValueError:
-        return str(learning_run_dir) + "/"
 
 
 
 
-_SHARED_COPY_ARTIFACTS = ("alert", "report", "investigation")
 
 _SHARED_INPUTS_LOCK = threading.Lock()
 
 _persist_log = make_logger("persist")
 
 
-def _refused(run_dir: Path, entries: list[Path]) -> None:
-    """A staging refusal is loud: it is evidence about the run, not a copy detail, and silence
-    here would read downstream as a case that simply gathered nothing."""
-    for entry in entries:
-        _persist_log(
-            f"REFUSED to stage {entry} from {run_dir}: not a regular file or a real directory "
-            "(a run writes neither links nor special files; #648)"
-        )
-
-
-def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
-    learning_run_dir.mkdir(parents=True, exist_ok=True)
-    src_paths, dst_paths = RunPaths(run_dir), RunPaths(learning_run_dir)
-    with _SHARED_INPUTS_LOCK:
-        for name in _SHARED_COPY_ARTIFACTS:
-            src = getattr(src_paths, name)
-            if not artifact_file(src):
-                # `is_file()` would answer about a link's TARGET and copy those bytes in under
-                # the artifact's name — these three are what the actor and judge read as the
-                # case itself, so a link at one is fatal, not skippable.
-                raise RunUnprocessable(
-                    f"source artifact for persist is missing or is not a regular file: {src}")
-            dst = getattr(dst_paths, name)
-            if name == "investigation":
-                # No grandfather clause, on purpose: the disposition SELECTS the direction the
-                # loop spends actor + oracle + judge calls on, so a headline outside the known
-                # keywords has no direction and grandfathering would mean guessing one and
-                # authoring lessons off the guess. Refusing costs a queued run a human can
-                # hand-edit and re-drive out of `queue/failed/`.
-                from defender.skills.invlang.validate import validate_companion
-
-                # THE DOCUMENT IS ITS OWN BASELINE. This is a finished run, not a write: the
-                # bytes are already committed and no repair can reach them. The surface rule
-                # (#932) refuses only the unfenced block headers a WRITE introduces, so a
-                # `None` baseline would read every one in the file as newly written and send
-                # a whole run to `queue/failed/` for prose that has been there since the
-                # append that wrote it. Passing the text as both halves makes the introduced
-                # set empty; the append-only comparison against itself is likewise a no-op,
-                # which is what `None` already meant here.
-                committed = src.read_text(encoding="utf-8")
-                errors = validate_companion(committed, committed)
-                if errors:
-                    raise RunUnprocessable(
-                        f"investigation.md failed invlang validation on the copy path "
-                        f"({src}): {errors}"
-                    )
-            # `src` is judged by `artifact_file` at the top of this loop, and a link there
-            # raises rather than reaching the copy.
-            shutil.copy2(src, dst)  # lint-tree-read-follows-link: ok — screened above
-        # THE SOURCE RUN'S STAMP, carried across (#976). Best-effort and separate from the
-        # three above, which are REQUIRED — a run whose stamp could not be written is still a
-        # run worth learning from, so a missing stamp is logged rather than raised, exactly as
-        # `run_common._stamp` chose when it declined to take a run down over one.
-        #
-        # COPIED RATHER THAN RE-CAPTURED, which is the whole point. This directory is
-        # materialised by the drain, potentially days after the investigation and off a
-        # checkout that has moved since; a stamp taken here would name when the LOOP ran, and
-        # the archive would carry a confident record of the wrong tree. The copy names what the
-        # investigation actually executed, which is the question #947's recomputation asks.
-        prov_src, prov_dst = src_paths.provenance, dst_paths.provenance
-        if artifact_file(prov_src):
-            shutil.copy2(  # lint-tree-read-follows-link: ok — screened on the line above
-                prov_src, prov_dst)
-        elif prov_src.exists() or prov_src.is_symlink():
-            _refused(run_dir, [prov_src])
-        loaded = run_dir / "lessons_loaded.jsonl"
-        if artifact_file(loaded):
-            # Guarded by the `artifact_file` above; the `elif` below is what a link here gets.
-            shutil.copy2(  # lint-tree-read-follows-link: ok — screened on the line above
-                loaded, learning_run_dir / "lessons_loaded.jsonl")
-        elif loaded.exists() or loaded.is_symlink():
-            _refused(run_dir, [loaded])
-        from defender.learning import lead_repository
-
-        _refused(run_dir, lead_repository.stage_tables(run_dir, learning_run_dir))
-
-
-def _write_source_refs(
-    run_dir: Path, learning_run_dir: Path, disposition: str, alert_rule_key: str
-) -> None:
-    rp = RunPaths(run_dir)
-    source_refs = {
-        "paths": {
-            "source_run_dir": str(run_dir),
-            "alert": str(rp.alert),
-            "report": str(rp.report),
-            "investigation": str(rp.investigation),
-            "executed_queries": str(rp.executed_queries),
-            "gather_raw": str(rp.gather_raw),
-        },
-        "normalized_disposition": disposition,
-        "alert_rule_key": alert_rule_key,
-    }
-    with _SHARED_INPUTS_LOCK:
-        # lint-artifact-gate: ok — the artifacts are NAMED here, not written: this is a
-        # manifest of where the source run's files live, and the only file it writes is
-        # `source_refs.yaml`. The gate keys on a write and an artifact name appearing in one
-        # frame, which cannot tell "writes X while naming Y" from "writes Y" — the cost of
-        # asking the question by co-occurrence rather than by dataflow, paid here.
-        (learning_run_dir / "source_refs.yaml").write_text(yaml.safe_dump(source_refs), encoding="utf-8")
-
-
-@dataclass(frozen=True)
-class DirectionArtifacts:
-
-    actor_story: str
-    story_name: str
-    judge_yaml: str | None
-    judge_name: str
-
-
-def persist_run(
-    run_dir: Path,
-    learning_run_dir: Path,
-    *,
-    artifacts: DirectionArtifacts,
-    disposition: str,
-    alert_rule_key: str,
-) -> None:
-    actor_story, story_name = artifacts.actor_story, artifacts.story_name
-    judge_yaml, judge_name = artifacts.judge_yaml, artifacts.judge_name
-    _copy_shared_inputs(run_dir, learning_run_dir)
-    (learning_run_dir / story_name).write_text(actor_story, encoding="utf-8")
-    if judge_yaml is not None:
-        (learning_run_dir / judge_name).write_text(judge_yaml, encoding="utf-8")
-    _write_source_refs(run_dir, learning_run_dir, disposition, alert_rule_key)
 
 
 
 
-def append_findings(
-    judge_doc: dict,
-    run_id: str,
-    alert_rule_key: str,
-    learning_run_dir: Path,
-    *,
-    direction: str = "adversarial",
-    paths: LoopPaths = DEFAULT_PATHS,
-) -> int:
-    if direction == "benign":
-        outcome = _benign_outcome_keyword(judge_doc["outcome"])
-        audit_only_types, namespace = BENIGN_AUDIT_ONLY_FINDING_TYPES, "benign/"
-    else:
-        outcome = _outcome_keyword(judge_doc["outcome"])
-        audit_only_types, namespace = ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES, ""
-    src = _source_run_dir(learning_run_dir, paths.repo_root)
-    paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    rows = [
-        {
-            "schema_version": 1,
-            "finding_id": f"{run_id}/{namespace}{n}",
-            "run_id": run_id,
-            "alert_rule_key": alert_rule_key,
-            "direction": direction,
-            "type": f["type"],
-            "subject_anchor": f["subject_anchor"],
-            "subject_topic": f["subject_topic"],
-            "finding": f["finding"],
-            "judge_outcome": outcome,
-            "citations": f["citations"],
-            "source_run_dir": src,
-        }
-        for n, f in enumerate(judge_doc["defender_findings"])
-        if f["type"] not in audit_only_types
-    ]
-    with queue_lock(paths.findings_lock_file):
-        return append_jsonl(paths.pending_file, rows)
+
+
+
+
+
+
+
+
 
 
 
@@ -513,168 +348,15 @@ def rotate_pitfalls(
 
 
 
-def _append_observations(
-    queue_file: Path,
-    consumed_file: Path,
-    lock_file: Path,
-    run_id: str,
-    observations: list[dict],
-    build_row: Callable[[int, dict, str], dict],
-    *,
-    id_prefix: str = "",
-) -> int:
-    with queue_lock(lock_file):
-        existing = _load_jsonl_ids(queue_file, "observation_id") | _load_jsonl_ids(
-            consumed_file, "observation_id"
-        )
-        rows: list[dict] = []
-        for i, obs in enumerate(observations):
-            obs_id = f"{run_id}/{id_prefix}{i}"
-            if obs_id in existing:
-                continue
-            rows.append(build_row(i, obs, obs_id))
-        return append_jsonl(queue_file, rows)
 
 
-def append_actor_observations(
-    judge_doc: dict,
-    run_id: str,
-    alert_rule_key: str,
-    learning_run_dir: Path,
-    *,
-    paths: LoopPaths = DEFAULT_PATHS,
-) -> int:
-    outcome = _outcome_keyword(judge_doc["outcome"])
-    if outcome == "skip-passthrough":
-        return 0
-    observations = judge_doc.get("actor_observations") or []
-    if not observations:
-        return 0
-    src = _source_run_dir(learning_run_dir, paths.repo_root)
-
-    def build_row(i: int, obs: dict, obs_id: str) -> dict:
-        return {
-            "observation_id": obs_id,
-            "run_id": run_id,
-            "observation_index": i,
-            "alert_rule_key": alert_rule_key,
-            "type": obs["type"],
-            "subject_anchor": obs["subject_anchor"],
-            "subject_topic": obs["subject_topic"],
-            "observation": obs["observation"],
-            "judge_outcome": outcome,
-            "source_run_dir": src,
-        }
-
-    ch = paths.actor_observations
-    return _append_observations(
-        ch.file, ch.consumed, ch.append_lock,
-        run_id, observations, build_row,
-    )
 
 
-def _anchor_with_case_key(judge_rule_ids: Any, alert_rule_key: str) -> list[str]:
-    ids = judge_rule_ids if isinstance(judge_rule_ids, list) else [judge_rule_ids]
-    # is_content_less, not `.strip()`: an id that renders as nothing must not survive
-    # into the stored anchor, and `.strip()` cannot see the zero-width ones.
-    ids = [str(r) for r in ids if not is_content_less(str(r))]
-    if alert_rule_key and alert_rule_key not in ids:
-        ids = [alert_rule_key, *ids]
-    return ids
 
 
-@dataclass(frozen=True)
-class _EnvFactStream:
-
-    outcome_keyword: Callable[[Any], str]
-    channel: QueueChannel
-    id_prefix: str
-    provenance: str
 
 
-def _append_env_fact_observations(
-    judge_doc: dict,
-    run_id: str,
-    alert_rule_key: str,
-    learning_run_dir: Path,
-    *,
-    paths: LoopPaths,
-    stream: _EnvFactStream,
-) -> int:
-    outcome_keyword = stream.outcome_keyword
-    ch, id_prefix, provenance = stream.channel, stream.id_prefix, stream.provenance
-    outcome = outcome_keyword(judge_doc["outcome"])
-    if outcome == "skip-passthrough":
-        return 0
-    observations = judge_doc.get("environment_observations") or []
-    if not observations:
-        return 0
-    src = _source_run_dir(learning_run_dir, paths.repo_root)
-
-    def build_row(i: int, obs: dict, obs_id: str) -> dict:
-        row = {
-            "observation_id": obs_id,
-            "run_id": run_id,
-            "observation_index": i,
-            "alert_rule_key": alert_rule_key,
-        }
-        subject = obs.get("subject")
-        if subject:
-            row["subject"] = subject
-        row.update({
-            "alert_rule_ids": _anchor_with_case_key(obs["alert_rule_ids"], alert_rule_key),
-            "entities": obs.get("entities") or [],
-            "relevance_criteria": obs["relevance_criteria"],
-            "fact": obs["fact"],
-            "citations": obs.get("citations") or [],
-            "judge_outcome": outcome,
-            "source_run_dir": src,
-            "provenance": provenance,
-        })
-        return row
-
-    return _append_observations(
-        ch.file, ch.consumed, ch.append_lock,
-        run_id, observations, build_row,
-        id_prefix=id_prefix,
-    )
 
 
-def append_environment_observations(
-    judge_benign_doc: dict,
-    run_id: str,
-    alert_rule_key: str,
-    learning_run_dir: Path,
-    *,
-    paths: LoopPaths = DEFAULT_PATHS,
-) -> int:
-    return _append_env_fact_observations(
-        judge_benign_doc, run_id, alert_rule_key, learning_run_dir,
-        paths=paths,
-        stream=_EnvFactStream(
-            outcome_keyword=_benign_outcome_keyword,
-            channel=paths.environment_observations,
-            id_prefix="",
-            provenance="benign",
-        ),
-    )
 
 
-def append_actor_environment_observations(
-    judge_doc: dict,
-    run_id: str,
-    alert_rule_key: str,
-    learning_run_dir: Path,
-    *,
-    paths: LoopPaths = DEFAULT_PATHS,
-) -> int:
-    return _append_env_fact_observations(
-        judge_doc, run_id, alert_rule_key, learning_run_dir,
-        paths=paths,
-        stream=_EnvFactStream(
-            outcome_keyword=_outcome_keyword,
-            channel=paths.actor_environment_observations,
-            id_prefix="adv-env/",
-            provenance="adversarial",
-        ),
-    )

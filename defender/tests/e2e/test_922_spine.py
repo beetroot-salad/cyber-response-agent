@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import ast
 from pathlib import Path
 
 import pytest
@@ -433,3 +434,44 @@ def test_922_the_retired_queues_alone_no_longer_wake_the_drain(tmp_path):
         f"the drain created a box for the retired queues: {rec.requests}")
     assert rec.events == [], (
         f"the drain minted batch resources for the retired queues: {rec.events}")
+
+
+def test_922_the_drain_decides_its_channel_without_consulting_a_direction_table():
+    """GUARD (green after the cut, must stay green) — the STRUCTURAL arm the three behavioural
+    demands above cannot supply.
+
+    Those three drive `author_drain` and assert what it reaches for: one curator, one writable
+    mount, no wake on the retired queues. All three are equally satisfied by a drain that still
+    DERIVES its answer from a table which happens to be empty — swap `BY_NAME` for a new empty
+    mapping and every one of them passes while the direction table, both observation curators
+    and their corpora stay fully alive. That was found by attacking this file, not imagined.
+
+    The difference is invisible from outside and decisive from inside: a derived answer comes
+    back the moment something repopulates the table, and it takes with it the three channels
+    whose producer the cutover deleted. So the property is asserted where it actually lives —
+    the drain module reaches no direction table at all.
+
+    Written against the IMPORT rather than against a symbol name so that reintroducing the
+    coupling under a different spelling fails here too; `learning.core.directions` is gone, but
+    a successor table imported into this module is the same defect wearing a new name.
+    """
+    drains_py = Path(drains.__file__).resolve()
+    tree = ast.parse(drains_py.read_text(encoding="utf-8"))
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported.append(node.module)
+        elif isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+
+    offenders = [m for m in imported if "direction" in m.lower()]
+    assert not offenders, (
+        f"the drain imports {offenders} — its channel, curator and box-mount decisions must be "
+        "spelled literally, not derived from a table whose emptiness is what makes the "
+        "behavioural demands pass")
+
+    # POSITIVE CONTROL on the same address: the scan really does see this module's imports, so
+    # the empty `offenders` above is a fact about the module and not about a broken walk.
+    assert any(m.startswith("defender.") for m in imported), (
+        "positive control: the import scan found no `defender.` import in the drain module at "
+        "all, so its silence about direction tables means nothing")

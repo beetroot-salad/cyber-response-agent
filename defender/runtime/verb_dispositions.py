@@ -62,8 +62,12 @@ _REL_TO_DEFENDER = Path("knowledge") / "environment" / "verb-grants.yaml"
 DISPOSITIONS_REL = f"defender/{_REL_TO_DEFENDER.as_posix()}"
 
 #: The roles a row may name. Sourced from `AgentRole` rather than respelled, so a role that is
-#: renamed cannot leave a table silently granting to a name nothing answers to.
-KNOWN_ROLES: frozenset[str] = frozenset({AgentRole.GATHER.value, AgentRole.JUDGE.value})
+#: renamed cannot leave a table silently granting to a name nothing answers to. `judge` left
+#: this set in #922 with the role itself; every row that named it now carries `roles: []` and a
+#: reason, so the verbs are still described and still granted to nobody. When #1008 re-adds the
+#: role for the family judge it does NOT come back here by default — the family judge holds no
+#: verb grant, and a row may only name a role that some caller actually claims.
+KNOWN_ROLES: frozenset[str] = frozenset({AgentRole.GATHER.value})
 
 #: Every shipped disposition is read-class. See the module docstring for why this is not a
 #: field in the file.

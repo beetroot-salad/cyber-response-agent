@@ -40,8 +40,6 @@ def enqueue_case_for_curation(case_id: str, run_dir: Path, paths: LoopPaths) -> 
     _log(f"enqueued for curation: {marker}")
 
 
-def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> None:
-    _enqueue_marker(run_dir, paths.learn_queue_dir, "learning")
 
 
 def rewrite_marker(marker: Path, spec: dict) -> None:

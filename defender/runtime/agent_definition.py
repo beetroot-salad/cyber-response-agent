@@ -43,7 +43,6 @@ class ToolSet:
     #: live signatures. Verb-bearing like `query` — it reads the role's grant to filter — so
     #: it counts toward the R7 agreement below.
     list_verbs: bool = False
-    closed_tickets: bool = False
     close: bool = False
 
     def __iter__(self) -> Iterator[str]:
@@ -167,32 +166,33 @@ def read_allow_of(bash_allow: tuple[Grant, ...]) -> PathShapes:
 
 def effective_tools_for(defn: AgentDefinition) -> ToolSet:
     """The ToolSet a generic, out-of-band consumer (the operator policy CLI, a permission-gate
-    probe) should compile a role's policy against when the static `defn.tools` does not show
-    its real capability.
+    probe) should compile a role's policy against.
 
-    The judge is the one such role: its `closed_tickets` bit is switched per LEG by a runtime
-    `replace()` well past `AGENTS`, so `defn.tools` alone reads as the benign-off, grant-on
-    disagreement `bind()`/`compile_policy` would refuse to build (§7 R7). A generic consumer
-    gets the richer (benign) leg's shape. The ONE place that knows any role's typed-capability
-    switching; a consumer never names a bit itself (N4 — the operator surface must not carry a
-    map of typed capabilities to attack)."""
-    if defn.role is AgentRole.JUDGE:
-        return replace(defn.tools, closed_tickets=True)
+    Today this is `defn.tools` for every role, and the function is kept rather than inlined
+    because what it exists to absorb is a role whose real capability is switched on PAST the
+    registry. The judge was the one such role — its closed-ticket bit was flipped per LEG by a
+    runtime `replace()` well after `AGENTS` — and #922 retired both the leg and the bit, so
+    there is no longer any role whose static shape understates it. A consumer still asks this
+    question rather than reading `defn.tools` directly, because the next role that switches a
+    capability at runtime must have exactly one place to declare it (N4 — the operator surface
+    must not carry its own map of typed capabilities to attack)."""
     return defn.tools
 
 
 def _require_verb_grant_agreement(defn: AgentDefinition, tools: ToolSet) -> None:
     """§7 R7: a role's verb_grant and the bit that reaches a verb-bearing tool agree, in EITHER
-    direction. A grant naming verbs while every verb-bearing bit (`query`, `list_verbs`,
-    `closed_tickets`) is off is a stale grant behind a switched-off capability; a verb-bearing
-    bit on with an empty grant is a capability with nothing behind it. Checked against the
-    EFFECTIVE `tools`, not only what `defn` declares, because a stage can switch its capability
-    on with a runtime `replace()` after `bind` compiled its policy.
+    direction. A grant naming verbs while every verb-bearing bit (`query`, `list_verbs`) is
+    off is a stale grant behind a switched-off capability; a verb-bearing bit on with an empty
+    grant is a capability with nothing behind it. Checked against the EFFECTIVE `tools`, not
+    only what `defn` declares, because a stage can switch its capability on with a runtime
+    `replace()` after `bind` compiled its policy. No shipped role does that since #922 retired
+    the judge's closed-ticket leg — the one role whose static shape understated it — but the
+    check stays written against the effective shape so the next one cannot slip past it.
 
     `list_verbs` joins the disjunction rather than sitting outside it: it does not DISPATCH a
     verb, but it reads the grant to decide what to name, so a role holding it over an empty
     grant is a discovery tool that can only ever answer "nothing"."""
-    has_verb_tool = bool(tools.query or tools.list_verbs or tools.closed_tickets)
+    has_verb_tool = bool(tools.query or tools.list_verbs)
     has_grant = bool(defn.verb_grant.entries)
     if has_verb_tool != has_grant:
         raise GrantError(

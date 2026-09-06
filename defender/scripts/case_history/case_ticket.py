@@ -13,7 +13,6 @@ from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION, normalize
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
 
-_SEED_ELIGIBLE_OUTCOMES = {"caught", "skip-passthrough"}
 
 _MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
 
@@ -327,8 +326,6 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
 
 
 
-def outcome_seeds_eligible(outcome: str) -> bool:
-    return outcome in _SEED_ELIGIBLE_OUTCOMES
 
 
 def enrichment_to_comment(outcome: str) -> dict[str, Any]:
@@ -355,25 +352,6 @@ def _seed_marker_and_separator(mapping: dict[str, Any]) -> tuple[str | None, str
     return (marker or None), (sep or None)
 
 
-def parse_survival_from_comments(comments: Any) -> bool | None:
-    try:
-        marker, sep = _seed_marker_and_separator(_load_mapping())
-    except CaseTicketError:
-        return None
-    if not marker:
-        return None
-    result: bool | None = None
-    for c in comments or []:
-        body = c.get("body") if isinstance(c, dict) else None
-        if not isinstance(body, str) or not body.startswith(marker):
-            continue
-        tail = body[len(marker):]
-        token = (tail.split(sep, 1)[0] if sep else tail).strip()
-        if token == "true":
-            result = True
-        elif token == "false":
-            result = False
-    return result
 
 
 
@@ -497,7 +475,3 @@ def ticket_resolution_method(ticket: Any) -> str | None:
     return resolution_method_from_resolution(ticket.get("resolution"))
 
 
-def ticket_seed_eligible(ticket: Any) -> bool | None:
-    if not isinstance(ticket, dict):
-        return None
-    return parse_survival_from_comments(ticket.get("comments"))
