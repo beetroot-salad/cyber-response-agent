@@ -75,8 +75,6 @@ _CONFINE_B = _DEFENDER / "skills"
 #: A real file OUTSIDE both, for the refusal side. It was the deleted judge's rubric; any file
 #: the confine does not cover carries the same demand, and this one ships.
 _OUTSIDE = _DEFENDER / "SKILL.md"
-_ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
-_ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 
 #: A two-directory confine and a one-directory confine. The two shapes are what the gate has to
 #: tell apart; which legs happened to bind them is not what these tests are about.

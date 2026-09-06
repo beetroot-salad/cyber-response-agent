@@ -27,13 +27,9 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import pytest
 
 from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender._io import read_jsonl_rows
-from defender.learning.author import curator, shared
-from defender.learning.author.benign_actor import run as benign_run
-from defender.learning.core.config import LoopPaths
 from defender.tests._repo import head_message, seed_repo
 
 
@@ -292,45 +288,6 @@ def _commit_msg_for(repo: Path, rel_path: str) -> str:
     return head_message(repo, path=rel_path)
 
 
-def test_env_corpus_two_writers_distinct(tmp_path: Path):
-    """Curators C (benign) and D (adversarial) both write ``defender/lessons-environment/``
-    but in separate, serialized batches. Their writes land on DISTINCT lesson paths, and
-    their per-direction provenance trailers (Benign-Actor-Model: vs Actor-Env-Model:) and
-    generation counters stay distinct — no cross-stream contamination on the shared sink."""
-    repo = _env_repo(tmp_path)
-    paths = LoopPaths(repo_root=repo)
-
-    def _committing(name: str):
-        def fake(observations, batch_id, cfg):
-            oid = observations[0]["observation_id"]
-            (cfg.corpus_dir / f"{name}.md").write_text(
-                f"---\nsource_observation_ids: [{oid}]\n---\nbody {name}\n"
-            )
-            return {"committed": [oid], "consumed_skip": [], "commit_message": f"env lesson {name}"}
-        return fake
-
-    ben = replace(benign_run.build_benign_config(paths), invoke_agent=_committing("lessonC"))
-    adv = replace(benign_run.build_adversarial_config(paths), invoke_agent=_committing("lessonD"))
-
-    ben.channel.file.write_text('{"observation_id": "eb/0", "judge_outcome": "survived", "source_run_dir": ""}\n')
-    adv.channel.file.write_text('{"observation_id": "ea/0", "judge_outcome": "caught", "source_run_dir": ""}\n')
-
-    assert curator.run_batch(hold_committed=False, cfg=ben) == 0
-    assert curator.run_batch(hold_committed=False, cfg=adv) == 0
-
-    corpus = repo / "defender" / "lessons-environment"
-    assert (corpus / "lessonC.md").is_file()
-    assert (corpus / "lessonD.md").is_file()
-
-    ben_msg = _commit_msg_for(repo, "defender/lessons-environment/lessonC.md")
-    adv_msg = _commit_msg_for(repo, "defender/lessons-environment/lessonD.md")
-    assert "Benign-Actor-Model:" in ben_msg
-    assert "Actor-Env-Model:" not in ben_msg
-    assert "Actor-Env-Model:" in adv_msg
-    assert "Benign-Actor-Model:" not in adv_msg
-
-    assert shared.benign_generation_count(repo) == 2
-    assert shared.actor_env_generation_count(repo) == 2
 
 
 
@@ -379,7 +336,9 @@ def _spawn_curator(**over):
     overrides per case. Mirrors test_lead_author_engine.py's ``_spawn`` over
     ``run_author_stage``. The ``run_author`` DI seam captures the trace anchor without
     running the pydantic-ai graph. Signature per the SEAM INTERFACE CONTRACT (assumed)."""
-    from defender.learning.author.verify_forward.checks import ENV_CHECK as _ENV_CHECK
+    # The env check retired with its corpus (#922); the findings check is the surviving one,
+    # and what this test measures — one trace file per spawn — is the same for either.
+    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK as _ENV_CHECK
     from defender.learning.author.curator_engine import (
         run_curator_stage,
     )
@@ -445,44 +404,6 @@ def test_trace_per_spawn_distinct(tmp_path: Path):
 
 
 
-def test_trace_persistent_not_worktree(tmp_path: Path):
-    """The curator trace lands in PERSISTENT shared state (a pending/state dir), never the
-    throwaway per-batch worktree, so it survives branch cleanup. Caller anchor (worktree
-    cfg): the pending/state dir is worktree-immune (NOT under repo_root). Stage anchor:
-    ``run_curator_stage`` writes the trace at the ``learning_run_dir`` it is handed (the
-    persistent dir), not at ``repo_root``."""
-    orig = tmp_path / "checkout"
-    (orig / "defender" / "learning").mkdir(parents=True)
-    state = tmp_path / "state"
-    worktree = tmp_path / "worktree"
-    worktree.mkdir()
-
-    paths = LoopPaths(repo_root=orig, state_dir=state).with_repo_root(worktree)
-    cfg = benign_run.build_benign_config(paths)
-    assert cfg.repo_root == worktree
-    assert cfg.pending_dir == state / "_pending"
-    with pytest.raises(ValueError, match="subpath"):
-        cfg.pending_dir.relative_to(worktree)
-
-    rd = state / "_pending"
-    rd.mkdir(parents=True, exist_ok=True)
-    captured: dict = {}
-
-    def _cap(wiring, ctx, **kw):
-        captured["anchor"] = ctx.learning_run_dir
-        captured["name"] = wiring.trace_name
-        return ""
-
-    _spawn_curator(
-        learning_run_dir=rd,
-        repo_root=worktree,
-        corpus_dir=worktree / "defender" / "lessons-environment",
-        run_author=_cap,
-    )
-    assert captured["anchor"] == rd
-    trace_path = captured["anchor"] / captured["name"]
-    with pytest.raises(ValueError, match="subpath"):
-        trace_path.relative_to(worktree)
 
 
 

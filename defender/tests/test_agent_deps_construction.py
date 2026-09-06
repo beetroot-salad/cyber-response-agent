@@ -31,8 +31,6 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._paths import PATHS  # noqa: E402
-from defender.learning.pipeline.actor_engine import ActorDeps  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import JudgeDeps  # noqa: E402
 from defender.runtime import tools  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -76,13 +74,6 @@ def test_agent_deps_requires_cwd_anchor(tmp_path):
         )
 
 
-def test_subtype_requires_cwd_anchor(tmp_path):
-    """AgentDeps subtypes inherit the required cwd-anchor contract."""
-    with pytest.raises(TypeError):
-        ActorDeps(
-            run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r",
-            policy=_MAIN_POLICY,
-        )
 
 
 def test_cwd_anchor_is_keyword_only(tmp_path):
@@ -90,21 +81,8 @@ def test_cwd_anchor_is_keyword_only(tmp_path):
         tools.AgentDeps(tmp_path, PATHS.defender_dir, "r", "s", tmp_path, policy=_MAIN_POLICY)
 
 
-def test_judge_deps_requires_policy(tmp_path):
-    """JudgeDeps inherits the base requiredness: JudgeDeps(4 identity fields) with no policy=
-    -> TypeError (a mis-built judge cannot silently get MAIN and lose its grounding roots)."""
-    with pytest.raises(TypeError):
-        JudgeDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r",
-                  cwd_anchor=tmp_path)
 
 
-def test_actor_deps_requires_policy(tmp_path):
-    """ActorDeps inherits the base requiredness: ActorDeps(4 identity fields) with no policy=
-    -> TypeError. This is the fail-OPEN case: MAIN's empty read_confine would re-expose the
-    judge rubric under defender/ (#512) — so the MAIN-shaped actor must be unconstructable."""
-    with pytest.raises(TypeError):
-        ActorDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r",
-                  cwd_anchor=tmp_path)
 
 
 def test_policy_is_keyword_only(tmp_path):
@@ -145,8 +123,3 @@ def test_main_loop_constructs_with_explicit_main_policy(tmp_path):
     assert deps.policy is _MAIN_POLICY
 
 
-def test_rename_agent_deps_is_base_of_subtypes():
-    """The rename RunDeps->AgentDeps: `AgentDeps` is the exported base of the deps subtypes."""
-    assert issubclass(tools.GatherDeps, tools.AgentDeps)
-    assert issubclass(JudgeDeps, tools.AgentDeps)
-    assert issubclass(ActorDeps, tools.AgentDeps)

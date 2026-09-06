@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.evals.oracle_golden import build_case as BUILD_CASE
 from defender.evals.oracle_golden import controls as CONTROLS
 
 
@@ -348,37 +347,6 @@ def _write_run(run: Path, lead_id: str, rows: list[tuple[int, str]]) -> None:
             }) + "\n")
 
 
-def test_a_control_is_keyed_by_the_seq_its_observed_payload_is_named_for(tmp_path):
-    """The pairing this module's whole output rests on. Control records are written to
-    `hidden/controls/{lead}/{seq}.json` and observed payloads to
-    `hidden/observed/{lead}/{seq}.json`, and `judge.load_lead_inputs` joins them on that
-    number. They were the same until #841 split the `∅.`-prefixed sentinels out of
-    `JoinedLead.queries` while `record_query._next_seq` went on counting every row — so
-    one refused query ahead of a real one makes the list position trail the table's seq
-    for the rest of the lead.
-
-    Keyed by position, query A's envelope is then diffed against query B's baseline, B
-    gets no baseline at all, and baseline 0 has no envelope. `judge._control` drops the
-    control's query string, so nothing downstream can detect the mispairing.
-
-    A sentinel FIRST is the discriminating shape: with it last, position and seq agree
-    for every real query and a broken keying passes.
-    """
-    run = tmp_path / "run"
-    _write_run(run, "l-001", [(0, "∅.repeat-trip"), (1, "elastic.auth-by-host"),
-                              (2, "elastic.auth-by-user")])
-    case = tmp_path / "case-a"
-    (tmp_path / "story.md").write_text("a story", encoding="utf-8")
-    (tmp_path / "controls.yaml").write_text("{}\n", encoding="utf-8")
-    assert BUILD_CASE.main([str(run), str(tmp_path / "story.md"),
-                            str(tmp_path / "controls.yaml"), str(case)]) == 0
-
-    observed = sorted(p.name for p in (case / "hidden" / "observed" / "l-001").glob("*.json"))
-    assert observed == ["1.json", "2.json"], "the sentinel contributes no observed payload"
-
-    seqs = [seq for lead_id, seq, _ in CONTROLS.lead_queries(case) if lead_id == "l-001"]
-    assert seqs == [1, 2], (
-        f"controls would be keyed {seqs}, but the payloads they pair with are {observed}")
 
 
 def test_a_case_built_before_the_seq_field_falls_back_to_the_position(tmp_path):

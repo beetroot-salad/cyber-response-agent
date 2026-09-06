@@ -80,8 +80,6 @@ from defender.agents import (  # noqa: E402
     VERIFY_DEF,
 )
 
-_ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
-_ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 #: Two real directories under `defender/`, used as confine members below. They were the actor
 #: legs' corpora until #922 deleted those legs; the confine demand is the BINDER's, and needs
 #: only two real directories to state.
