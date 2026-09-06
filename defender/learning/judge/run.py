@@ -41,6 +41,49 @@ from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
 #: it — `_vocab.py`'s own admission rule.
 _REPLY_OUTCOME_ENUM = frozenset({"gradable", "discard", "corpus-contradiction"})
 
+#: What each reply-level outcome MEANS, keyed by the word itself — so the prompt spells every
+#: member exactly once and a member added to the enum above cannot reach the model as a bare
+#: word with no criterion. Naming them a second time in prose was how the first version of this
+#: guidance was written, and a hand-typed list beside a rendered one is the drift the rendering
+#: was there to prevent: `_outcome_guidance` refuses when the two sets disagree, so a new
+#: outcome fails loudly here rather than silently arriving unexplained.
+_OUTCOME_GUIDANCE: dict[str, str] = {
+    "gradable": (
+        "this world ran and its record can be judged. THIS IS THE ORDINARY ANSWER, and it is "
+        "still the answer when the defender did badly: a world whose defender never queried "
+        "the discriminating system, never re-opened a lead, or closed over an open hypothesis "
+        "is a world you can grade, and those are exactly the findings worth having"
+    ),
+    "discard": (
+        "this world cannot be measured because the MEASUREMENT is spoilt — the control "
+        "drifted, or what the world was asked is not what it served. Nothing about the "
+        "defender's conduct puts an episode here"
+    ),
+    "corpus-contradiction": (
+        "the world's own staged corpus contradicts the capture it was branched from, so the "
+        "archive disagrees with itself and no verdict read off it means anything. Evidence "
+        "the defender never looked at is NOT a contradiction; it is a gradable world in which "
+        "the defender did not look"
+    ),
+}
+
+
+def _outcome_guidance() -> str:
+    """The episode-outcome words and their criteria, one line each.
+
+    Refuses rather than rendering a partial list: an outcome the validator accepts and the
+    prompt cannot explain is one the model chooses by guessing, and a live draw that guessed
+    wrote five sound findings and then discarded all of them by choosing a degenerate word.
+    """
+    missing = sorted(_REPLY_OUTCOME_ENUM - set(_OUTCOME_GUIDANCE))
+    if missing:
+        raise JudgeRefused(
+            f"the judge's prompt has no criterion for episode_outcome {missing} — the "
+            "validator accepts them and the model would be choosing by guesswork")
+    return "".join(
+        f"- `{word}` — {_OUTCOME_GUIDANCE[word]}.\n" for word in sorted(_REPLY_OUTCOME_ENUM)
+    )
+
 #: The finding bucket vocabulary — closed, and NEVER coerced to the nearest member (a
 #: lookalike is rejected, not rounded).
 #:
@@ -279,8 +322,16 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         "defender actually read, or invented.\n\n"
         "Cap any table at 20 rows. Quote any YAML scalar containing a colon — that is what "
         "made every reply of the correlating prompt's own trial parse strictly.\n\n"
-        "Reply as one YAML mapping: episode_outcome (one of the three episode-outcome words — "
-        "gradable, or the discard word, or the two-word corpus/world contradiction outcome), "
+        # THE VALIDATOR'S OWN SET, rendered — the same treatment the bucket enum below already
+        # gets, and for the same reason. The three words were DESCRIBED rather than written
+        # ("the discard word", "the two-word corpus/world contradiction outcome"), so the model
+        # had to guess both the literal strings and, with nothing said at all about when each
+        # applies, the criteria. It guessed the strings right and the criteria wrong: a live
+        # draw wrote five sound findings about the defender's gathering and then chose
+        # `corpus-contradiction`, which discards every one of them (O7), over an episode its own
+        # note described as the defender never pulling the payload — which is `gradable`.
+        f"Reply as one YAML mapping: episode_outcome (exactly one of "
+        f"{' | '.join(sorted(_REPLY_OUTCOME_ENUM))}), "
         "noise_floor_note, correlations, scope_checks, derivations, findings (each: bucket "
         # THE VALIDATOR'S OWN SET, rendered — not a sixth hand-typed copy of the same five
         # words. `_BUCKET_ENUM` is derived from `QUEUEABLE_FINDING_TYPES`, so a bucket added
@@ -306,7 +357,12 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         "all fail to resolve, and A FINDING WHOSE POINTERS ALL FAIL TO RESOLVE IS DISCARDED — "
         "so put what you actually read in this world's archive here, and put the words you "
         "would have quoted in `claim` and `root_cause` instead. "
-        "`discriminator_related` is a boolean.\n"
+        "`discriminator_related` is a boolean.\n\n"
+        "WHICH episode_outcome, and it decides whether your findings are kept at all:\n"
+        f"{_outcome_guidance()}"
+        f"{' and '.join(sorted(_REPLY_OUTCOME_ENUM - {'gradable'}))} DISCARD EVERY FINDING YOU "
+        "WRITE — the family record becomes the only artifact. Choose one of them for a fault "
+        "in the archive, never as a comment on how the defender performed.\n"
     )
     sections = judge_input.as_prompt_sections()
     # ITERATE THE SECTIONS, not the titles. `as_prompt_sections` owns the set (and `_cap_sections`
