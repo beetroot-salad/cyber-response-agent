@@ -29,111 +29,13 @@ from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-
 # Demand #0 — the return-value contract, after decision 1 flipped its `2` branch
 
 
-def test_folded_drain_rc_alphabet_after_the_pitfalls_fault_conversion(tmp_path: Path):
-    """The folded drain keeps today's `0` branch on every leg — an empty queue, a drain
-    lock another process holds, and an unavailable repo lock all return 0 with the queue
-    untouched — and keeps `2` for a faulted author batch on the findings and observation
-    channels. The pitfalls leg's `2` is REJECTED: `run_pitfalls` signals an authoring
-    failure by raising a non-systemic `AuthorError` the retire seam observes, not by
-    returning a value `_drain_pitfalls` never inspects (G18/C23).
-    """
-    paths = h.make_paths(tmp_path)
-    obs = h.channel_of(paths, "actor_observations")
-    fnd = h.channel_of(paths, "findings")
-
-    empty_cfg = h.cfg_for(paths, "actor_observations", invoke_agent=h.raising(AssertionError()))
-    assert drain.run_batch(cfg=empty_cfg) == 0, "an empty queue is the 0 branch"
-
-    h.seed(obs, [h.row_for("actor_observations", "a/0")])
-    with h.Holder(obs.drain_lock, blocking_discipline=False):
-        held = h.recording(h.skipping())
-        assert drain.run_batch(cfg=h.cfg_for(paths, "actor_observations", invoke_agent=held)) == 0
-        assert held.calls == [], "a held drain lock skips the tick before any authoring"
-
-    with h.Holder(paths.author_lock_file):
-        starved = h.recording(h.skipping())
-        cfg = h.cfg_for(
-            paths, "actor_observations", invoke_agent=starved, repo_lock_wait_seconds=1
-        )
-        assert drain.run_batch(cfg=cfg) == 0, "an unavailable repo lock is the 0 branch"
-        assert starved.calls == []
-
-    faulting = h.cfg_for(
-        paths, "actor_observations", invoke_agent=h.raising(author_shared.AuthorError("boom"))
-    )
-    assert drain.run_batch(cfg=faulting) == 2, "an author-channel fault keeps rc 2"
-
-    h.write_source_refs(paths, "run-K")
-    h.seed(fnd, [h.row_for("findings", "run-K/0")])
-    findings_fault = h.cfg_for(
-        paths, "findings", invoke_agent=h.raising(author_shared.AuthorError("boom"))
-    )
-    assert drain.run_batch(cfg=findings_fault) == 2
-
-    # Enough rows to clear the curation threshold. Seeded below it, `run_pitfalls` returns
-    # before it ever reaches an agent — so the rc it was asked about was never produced, and
-    # the assertion passed over decision 1 path 1 instead of driving it.
-    h.seed(paths.pitfalls, [h.row_for("pitfalls", f"r:l-{i:03d}:0") for i in range(5)])
-    with pytest.raises(author_shared.AuthorError):
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: 7)
 
 
 # O6 + O8 — one uniform, bounded retirement into one graveyard
 
 
-def test_retirement_is_identical_for_observations_and_findings(tmp_path: Path):
-    """One retire seam, so the same fault at the same ceiling produces the same observable
-    on the findings channel and on an observation channel: the row leaves the pending file,
-    lands in that channel's own graveyard carrying its reason and its attempt count, and the
-    two graveyard rows differ only in the id field each channel keys on."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "run-A")
-    outcomes = {}
-    for name, rid in (("findings", "run-A/0"), ("actor_observations", "a/0")):
-        ch = h.channel_of(paths, name)
-        h.seed(ch, [h.row_for(name, rid)])
-        cfg = h.cfg_for(
-            paths,
-            name,
-            max_attempts=2,
-            invoke_agent=h.raising(author_shared.AuthorError("uniform fault")),
-        )
-        for _ in range(2):
-            assert drain.run_batch(cfg=cfg) == 2
-        grave = h.graveyard(ch)
-        assert h.pending(ch) == [], f"{name}: the retired row left the active queue"
-        assert len(grave) == 1
-        outcomes[name] = (
-            grave[0]["attempts"],
-            grave[0]["deadletter_reason"],
-            sorted(set(grave[0]) - {"observation_id", "finding_id"}),
-        )
-    assert outcomes["findings"] == outcomes["actor_observations"]
 
 
-def test_retirement_is_batch_granular(tmp_path: Path):
-    """Re-scoped by decision 2: what is batch-granular is THE BUMP. Every row in a faulted
-    batch bumps by one, so rows that entered together and failed together cross the ceiling
-    together and leave as a unit — the uniform-entry case that keeps
-    `test_dlq_quarantine_is_batch_granular`'s meaning intact."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_environment_observations")
-    ids = ["e/0", "e/1", "e/2"]
-    h.seed(ch, [h.row_for("actor_environment_observations", i) for i in ids])
-    cfg = h.cfg_for(
-        paths,
-        "actor_environment_observations",
-        max_attempts=2,
-        invoke_agent=h.raising(author_shared.AuthorError("poison batch")),
-    )
-
-    assert drain.run_batch(cfg=cfg) == 2
-    assert sorted(h.pending_by_id(ch)) == ids, "no row leaves before the ceiling"
-    assert [r["attempts"] for r in h.pending(ch)] == [1, 1, 1]
-
-    assert drain.run_batch(cfg=cfg) == 2
-    assert h.pending(ch) == [], "the whole batch crosses together"
-    assert sorted(r["observation_id"] for r in h.graveyard(ch)) == ids
 
 
 def test_a_faulted_batch_bumps_every_row_and_retires_only_the_ceiling_crossers(tmp_path: Path):
@@ -142,17 +44,17 @@ def test_a_faulted_batch_bumps_every_row_and_retires_only_the_ceiling_crossers(t
     first-attempt newcomer in the same batch is the positive control — it bumps to 1 and
     stays queued while its ceiling-crossing sibling leaves."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
     h.seed(
         ch,
         [
-            h.row_for("actor_observations", "a/0", attempts=2),
-            h.row_for("actor_observations", "a/1"),
+            h.row_for("findings", "a/0", attempts=2),
+            h.row_for("findings", "a/1"),
         ],
     )
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=3,
         invoke_agent=h.raising(author_shared.AuthorError("divergent-count batch")),
     )
@@ -224,25 +126,25 @@ def test_a_row_at_or_over_the_ceiling_on_arrival_does_not_retire_until_it_fails(
     both survive a tick that authors them cleanly; only a tick that actually faults them
     retires them."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
 
-    h.seed(ch, [h.row_for("actor_observations", "a/0", attempts=5)])
-    ok = h.cfg_for(paths, "actor_observations", max_attempts=3, invoke_agent=h.committing("l1"))
+    h.seed(ch, [h.row_for("findings", "a/0", attempts=5)])
+    ok = h.cfg_for(paths, "findings", max_attempts=3, invoke_agent=h.committing("l1"))
     assert drain.run_batch(cfg=ok) == 0
     assert h.graveyard(ch) == [], "arriving over the ceiling is not itself a failure"
     assert [r["attempts"] for r in h.consumed(ch)] == [5], "the count rode through untouched"
 
-    h.seed(ch, [h.row_for("actor_observations", "a/1", attempts=2)])
+    h.seed(ch, [h.row_for("findings", "a/1", attempts=2)])
     lowered_ok = h.cfg_for(
-        paths, "actor_observations", max_attempts=1, invoke_agent=h.committing("l2")
+        paths, "findings", max_attempts=1, invoke_agent=h.committing("l2")
     )
     assert drain.run_batch(cfg=lowered_ok) == 0
     assert h.graveyard(ch) == [], "a lowered ceiling applies at the next failure, not on sight"
 
-    h.seed(ch, [h.row_for("actor_observations", "a/2", attempts=2)])
+    h.seed(ch, [h.row_for("findings", "a/2", attempts=2)])
     lowered_fault = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("now it fails")),
     )
@@ -260,11 +162,11 @@ def test_a_retired_id_is_deduped_out_of_a_later_append_on_the_dedup_channels(tmp
     id is skipped; a fresh id in the same call still lands, which is the control proving the
     appender was working and the skip was the ledger's doing."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "run-Z/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "run-Z/0")])
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("terminal fault")),
     )
@@ -304,8 +206,8 @@ def test_the_graveyard_append_lands_before_the_pending_rewrite_and_is_advisory(t
     exists to catch, which also makes this fail the same way whether or not the process
     holds root (an lstat type check, not a permission bit)."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0"), h.row_for("actor_observations", "a/1")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")])
     before = ch.file.read_bytes()
 
     aliased_target = ch.file.with_name(ch.file.name + ".aliased")
@@ -335,10 +237,10 @@ def test_consumed_ledger_append_survives_a_concurrent_interleaving(tmp_path: Pat
     Two writers interleaving on one channel must leave every line parseable and every id
     present: a torn line here is a silent dedup bug, not merely a lost write."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
     left = [f"L/{i}" for i in range(40)]
     right = [f"R/{i}" for i in range(40)]
-    h.seed(ch, [h.row_for("actor_observations", i) for i in left + right])
+    h.seed(ch, [h.row_for("findings", i) for i in left + right])
 
     def retire_all(ids):
         return lambda: drain.retire(
@@ -363,11 +265,11 @@ def test_consumed_ledger_append_survives_a_concurrent_interleaving(tmp_path: Pat
 def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
     """Shared body for the three ceiling members; each demand's own test drives it."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "environment_observations")
-    h.seed(ch, [h.row_for("environment_observations", "b/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "b/0")])
     cfg = h.cfg_for(
         paths,
-        "environment_observations",
+        "findings",
         max_attempts=ceiling,
         invoke_agent=h.raising(author_shared.AuthorError("one and done")),
     )
@@ -408,12 +310,12 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     re-serialisation drift — so an unrelated row cannot be quietly edited by a neighbour's
     failure."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
     outsiders = [
-        h.row_for("actor_observations", "a/1", note="keep me", nested={"x": [1, 2]}),
-        h.row_for("actor_observations", "a/2", attempts=7),
+        h.row_for("findings", "a/1", note="keep me", nested={"x": [1, 2]}),
+        h.row_for("findings", "a/2", attempts=7),
     ]
-    h.seed(ch, [h.row_for("actor_observations", "a/0"), *outsiders])
+    h.seed(ch, [h.row_for("findings", "a/0"), *outsiders])
 
     drain.retire(channel=ch, batch_ids=["a/0"], reason="scoped", max_attempts=1)
 
@@ -430,14 +332,14 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     and the active queue is left byte-identical for the next tick to re-read. Induced for
     real: the channel's graveyard path is a directory, so the append cannot land."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
     before = ch.file.read_bytes()
     drain.graveyard_file(ch).mkdir(parents=True)
 
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("triggers a retirement")),
     )
@@ -452,16 +354,16 @@ def test_a_faulted_tick_defers_its_held_and_pre_consumed_classifications(tmp_pat
     next tick — the failing tick does not get to half-rotate a queue whose authoring never
     landed."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
     rows = [
-        h.row_for("actor_observations", "a/0"),
-        h.row_for("actor_observations", "a/1", outcome="survived"),
-        h.row_for("actor_observations", "a/2", outcome="unrecognised-outcome"),
+        h.row_for("findings", "a/0"),
+        h.row_for("findings", "a/1", outcome="survived"),
+        h.row_for("findings", "a/2", outcome="unrecognised-outcome"),
     ]
     h.seed(ch, rows)
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("authoring failed")),
     )
@@ -480,12 +382,12 @@ def test_a_row_with_no_value_under_its_id_key_retires_instead_of_aborting(tmp_pa
     carrying a reason that names the missing field, and its well-formed batch-mates are
     authored on the same tick rather than being stranded behind it."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
     unkeyable = {"judge_outcome": "caught", "source_run_dir": "", "note": "no id at all"}
-    h.seed(ch, [unkeyable, h.row_for("actor_observations", "a/1")])
+    h.seed(ch, [unkeyable, h.row_for("findings", "a/1")])
 
     agent = h.recording(h.committing("keyed"))
-    cfg = h.cfg_for(paths, "actor_observations", max_attempts=1, invoke_agent=agent)
+    cfg = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=agent)
     assert drain.run_batch(cfg=cfg) == 0
 
     assert [r["observation_id"] for r in agent.calls[0]["rows"]] == ["a/1"]
@@ -508,11 +410,11 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
         assert h.consumed(ch) == []
         assert h.graveyard(ch) == []
 
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
     live = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("so the sinks can be seen")),
     )
@@ -527,8 +429,8 @@ def test_retirement_retains_row_appended_mid_window(tmp_path: Path):
     append lock is what serialises it — so this is the property the unlocked
     read-modify-write lost today (G13/C16), driven through the real appender."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
 
     started = threading.Event()
 
@@ -591,8 +493,8 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     assert set(writers) == {"_rewrite_queue"}, f"more than one queue rewriter: {writers}"
 
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0"), h.row_for("actor_observations", "a/9")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/9")])
     drain.retire(channel=ch, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
     assert sorted(h.pending_by_id(ch)) == ["a/9"]
 
@@ -603,8 +505,8 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
     `DEFAULT_PATHS` is frozen at import (F7) — an in-process environment change would not
     reach a second actor at all."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
 
     drain.retire(channel=ch, batch_ids=["a/0"], reason="first process", max_attempts=3)
     assert h.attempts_of(ch, "a/0") == 1

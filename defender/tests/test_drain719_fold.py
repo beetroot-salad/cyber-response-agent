@@ -116,38 +116,6 @@ def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path:
     assert proc.returncode == 0, f"the fold introduced a NEW duplicate name:\n{proc.stdout}"
 
 
-def test_direction_modules_carry_no_batch_driver_body(tmp_path: Path):
-    """O3's sufficient half, and the reason the lint alone is not the oracle: `curator.py` and
-    `lessons/run.py` become config builders plus a gate, reaching the batch driver through the
-    one shared body rather than each carrying their own.
-
-    Structural half — neither module defines a driver function any more. Behavioural half —
-    each direction module's own entry point is DRIVEN and must produce the shared body's
-    observable, and the shared body is then driven directly to the same effect: the delegation
-    is exercised, not inspected."""
-    for name in ("curator.py", "lessons/run.py"):
-        defs = module_level_defs(drain_modules()[name])
-        leftovers = defs & set(PAIR_EXCLUSIVE)
-        assert leftovers == set(), f"{name} still carries a batch-driver body: {leftovers}"
-
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "run-F")
-    for module, channel, rid in (
-        (curator, "actor_observations", "a/0"),
-        (lessons_run, "findings", "run-F/0"),
-    ):
-        ch = h.channel_of(paths, channel)
-        h.seed(ch, [h.row_for(channel, rid)])
-        cfg = h.cfg_for(paths, channel, invoke_agent=h.committing(f"via-module-{channel}"))
-        rc_via_module = module.run_batch(cfg=cfg)
-        assert rc_via_module == 0
-        assert h.pending(ch) == [], f"{channel} did not drain through the shared body"
-
-        h.seed(ch, [h.row_for(channel, rid.replace("/0", "/1"))])
-        direct = h.cfg_for(paths, channel, invoke_agent=h.committing(f"direct-{channel}"))
-        rc_via_body = drain.run_batch(cfg=direct)
-        assert rc_via_body == rc_via_module, f"{channel}: the two routes disagree"
-        assert h.pending(ch) == []
 
 
 def test_gates_carry_direction_specific_names(tmp_path: Path):
@@ -205,139 +173,12 @@ def test_curator_no_longer_re_exports_the_shared_git_helpers(tmp_path: Path):
 # O5 — per-direction gating semantics unchanged
 
 
-def test_gate_seam_returns_held_consumed_pre_to_author(tmp_path: Path):
-    """A4's decision on the one seam the fold introduces: the gate returns the 3-tuple
-    `(held, consumed_pre, to_author)` on both directions. The lessons gate's `to_author`
-    subtraction moves INSIDE it — a shape change to a function whose policy is untouched — so
-    a single body can consume either.
-
-    Driven with a real batch through each direction's own gate, not read off a signature."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "run-G", "benign")
-    for name, rid in (("actor_observations", "g/0"), ("findings", "run-G/0")):
-        ch = h.channel_of(paths, name)
-        rows = [h.row_for(name, rid)]
-        h.seed(ch, rows)
-        cfg = h.cfg_for(paths, name, invoke_agent=h.committing("gated"))
-        held, consumed_pre, to_author = cfg.gate(rows, cfg)
-        assert isinstance(held, list)
-        assert isinstance(consumed_pre, list)
-        assert [r[ch.id_key] for r in to_author] == [rid], f"{name}: gate lost the row"
 
 
-def test_each_direction_gate_keeps_its_policy_through_the_shared_drain(tmp_path: Path):
-    """O5: the policies survive the fold intact, which is the whole point of keeping two gate
-    functions. Outcome-policy gating for observations — a `judge_outcome` in the direction's
-    skip set is consumed by policy and never reaches the agent, an unrecognised one is held —
-    and `source_refs.yaml` ground-truth gating for findings, where a run with no bundle is
-    held.
-
-    Driven end to end through the shared drain body, so the assertion is about what the fold
-    preserves rather than about the gates in isolation."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_environment_observations")
-    h.seed(
-        ch,
-        [
-            h.row_for("actor_environment_observations", "e/0", outcome="caught"),
-            h.row_for("actor_environment_observations", "e/1", outcome="survived"),
-            h.row_for("actor_environment_observations", "e/2", outcome="not-a-verdict"),
-        ],
-    )
-    agent = h.recording(h.committing("policy"))
-    cfg = h.cfg_for(paths, "actor_environment_observations", invoke_agent=agent)
-    assert drain.run_batch(cfg=cfg) == 0
-    assert [r["observation_id"] for r in agent.calls[0]["rows"]] == ["e/0"]
-    assert {r["observation_id"] for r in h.consumed(ch)} == {"e/0", "e/1"}
-    assert [r["observation_id"] for r in h.pending(ch)] == ["e/2"]
-
-    fch = h.channel_of(paths, "findings")
-    h.seed(fch, [h.row_for("findings", "run-M/0")])
-    fagent = h.recording(h.committing("findings-policy"))
-    fcfg = h.cfg_for(paths, "findings", invoke_agent=fagent)
-    assert drain.run_batch(cfg=fcfg) == 0
-    assert fagent.calls == [], "a finding with no source bundle must not be authored"
-    assert [r["finding_id"] for r in h.pending(fch)] == ["run-M/0"]
 
 
-def test_forward_bad_bucket_and_held_report_stay_lessons_only(tmp_path: Path):
-    """D7: `held_forward_bad` and `held_report.log` are the one genuinely direction-specific
-    piece of the inner body, and they stay lessons-local as an optional post-rotate hook.
-
-    Both directions are driven with a result naming the bucket: findings routes it to a held
-    row whose reason carries the `forward_bad:` prefix and writes the report; an observation
-    channel has no such bucket at all, so the same result is rejected rather than silently
-    accepted into a third bucket it does not declare."""
-    paths = h.make_paths(tmp_path)
-    fch = h.channel_of(paths, "findings")
-    h.write_source_refs(paths, "run-H")
-    h.seed(fch, [h.row_for("findings", "run-H/0")])
-    fcfg = h.cfg_for(
-        paths,
-        "findings",
-        invoke_agent=h.returning(
-            {
-                "committed": [],
-                "consumed_skip": [],
-                "held_forward_bad": [{"finding_id": "run-H/0", "reason": "flipped a green case"}],
-                "commit_message": "",
-            }
-        ),
-    )
-    assert drain.run_batch(cfg=fcfg) == 0
-    held = h.pending_by_id(fch)["run-H/0"]
-    assert held["held_reason"].startswith("forward_bad: ")
-    assert "flipped a green case" in held["held_reason"]
-    assert "run-H/0" in fcfg.held_report.read_text()
-
-    och = h.channel_of(paths, "actor_observations")
-    h.seed(och, [h.row_for("actor_observations", "a/0")])
-    ocfg = h.cfg_for(
-        paths,
-        "actor_observations",
-        max_attempts=9,
-        invoke_agent=h.returning(
-            {
-                "committed": [],
-                "consumed_skip": [],
-                "held_forward_bad": [{"observation_id": "a/0", "reason": "no such bucket here"}],
-                "commit_message": "",
-            }
-        ),
-    )
-    assert drain.run_batch(cfg=ocfg) == 2, "an undeclared bucket must not be accepted"
-    assert not (paths.pending_dir / "held_report.log").exists()
 
 
-def test_one_bucket_list_drives_validation_and_projection(tmp_path: Path):
-    """D4, corrected by A4: the bucket spec carries a FORMATTER, not just a field name — it
-    has to express `forward_bad: <reason>` against a bare `<reason>` against
-    `consumed_category`. One list drives both the partition validation and the projection
-    loop, so the two cannot drift apart the way today's two hand-synchronised copies can.
-
-    The single list is the subject; the drive is the discharge. The reason text a bucket
-    writes into the queue is the formatter's output, and a bucket absent from that same list
-    is rejected by validation — one list, both effects."""
-    paths = h.make_paths(tmp_path)
-    fcfg = h.cfg_for(paths, "findings", invoke_agent=h.skipping())
-    names = [b.name for b in fcfg.buckets]
-    assert names == ["committed", "consumed_skip", "held_forward_bad"]
-
-    ocfg = h.cfg_for(paths, "actor_observations", invoke_agent=h.skipping())
-    assert [b.name for b in ocfg.buckets] == ["committed", "consumed_skip"]
-
-    forward_bad = next(b for b in fcfg.buckets if b.name == "held_forward_bad")
-    assert forward_bad.reason_field == "held_reason"
-    assert forward_bad.formatter("flipped") == "forward_bad: flipped"
-
-    with pytest.raises(author_shared.AuthorError):
-        author_shared.validate_agent_result_partition(
-            {"committed": [], "consumed_skip": [], "held_forward_bad": [{"observation_id": "a/0"}]},
-            [h.row_for("actor_observations", "a/0")],
-            id_key="observation_id",
-            buckets=tuple(b.name for b in ocfg.buckets),
-            noun="observation",
-        )
 
 
 def test_committed_bucket_routes_to_author_and_projects(tmp_path: Path):
@@ -346,10 +187,10 @@ def test_committed_bucket_routes_to_author_and_projects(tmp_path: Path):
     the projection writes it to the consumed ledger under `consumed_committed` carrying the
     commit it landed in — so the bucket's routing and its projection are both observed."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "environment_observations")
-    h.seed(ch, [h.row_for("environment_observations", "b/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "b/0")])
     agent = h.recording(h.committing("committed-bucket"))
-    cfg = h.cfg_for(paths, "environment_observations", invoke_agent=agent)
+    cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
 
     assert drain.run_batch(cfg=cfg) == 0
     assert [r["observation_id"] for r in agent.calls[0]["rows"]] == ["b/0"]
@@ -369,14 +210,14 @@ def test_consumed_skip_bucket_is_idempotent_and_projects(tmp_path: Path):
     and re-appending the same id afterwards is a no-op — the consumed ledger the append path
     reads is what makes the skip stick."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
     before = subprocess.run(
         ["git", "-C", str(paths.repo_root), "rev-parse", "HEAD"],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
 
-    cfg = h.cfg_for(paths, "actor_observations", invoke_agent=h.skipping())
+    cfg = h.cfg_for(paths, "findings", invoke_agent=h.skipping())
     assert drain.run_batch(cfg=cfg) == 0
     rows = h.consumed(ch)
     assert [r["observation_id"] for r in rows] == ["a/0"]

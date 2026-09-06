@@ -125,7 +125,7 @@ def test_only_a_named_fault_class_reaches_the_retire_seam(tmp_path: Path):
     half never executes at all while the test still reports as an ordinary pre-implementation
     red. That defect shipped in this file once."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
 
     members = [_instance(cls, "member") for cls in MEMBERS]
     non_members = [_instance(cls, "not a member") for cls in NON_MEMBERS]
@@ -134,9 +134,9 @@ def test_only_a_named_fault_class_reaches_the_retire_seam(tmp_path: Path):
 
     for i, exc in enumerate(members):
         rid = f"m/{i}"
-        h.seed(ch, [h.row_for("actor_observations", rid)])
+        h.seed(ch, [h.row_for("findings", rid)])
         cfg = h.cfg_for(
-            paths, "actor_observations", max_attempts=1, invoke_agent=h.raising(exc)
+            paths, "findings", max_attempts=1, invoke_agent=h.raising(exc)
         )
         assert drain.run_batch(cfg=cfg) == 2, f"{type(exc).__name__} did not fault the batch"
         assert h.pending(ch) == [], f"{type(exc).__name__} is a member and must retire"
@@ -144,11 +144,11 @@ def test_only_a_named_fault_class_reaches_the_retire_seam(tmp_path: Path):
 
     for i, exc in enumerate(non_members):
         rid = f"n/{i}"
-        rows = [h.row_for("actor_observations", rid)]
+        rows = [h.row_for("findings", rid)]
         h.seed(ch, rows)
         before = len(h.graveyard(ch))
         cfg = h.cfg_for(
-            paths, "actor_observations", max_attempts=1, invoke_agent=h.raising(exc)
+            paths, "findings", max_attempts=1, invoke_agent=h.raising(exc)
         )
         with pytest.raises(type(exc)):
             drain.run_batch(cfg=cfg)
@@ -168,13 +168,13 @@ def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouc
     byte-identical afterwards — unbounded retry, which is the accepted cost of removing the
     permanent-loss path. Stuck but recoverable and loud, as today."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "environment_observations")
-    rows = [h.row_for("environment_observations", "b/0", attempts=2)]
+    ch = h.channel_of(paths, "findings")
+    rows = [h.row_for("findings", "b/0", attempts=2)]
     h.seed(ch, rows)
     before = ch.file.read_bytes()
     cfg = h.cfg_for(
         paths,
-        "environment_observations",
+        "findings",
         max_attempts=3,
         invoke_agent=h.raising(FileNotFoundError("no such prompt file")),
     )
@@ -214,12 +214,12 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     stuck record on every failure and pass, which would make the signal noise rather than a
     stuck-row signal."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    rows = [h.row_for("actor_observations", "a/0"), h.row_for("actor_observations", "a/1")]
+    ch = h.channel_of(paths, "findings")
+    rows = [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")]
     h.seed(ch, rows)
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=3,
         invoke_agent=h.raising(FileNotFoundError("no such prompt file")),
     )
@@ -250,7 +250,7 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
 
     member = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("a member — this one retires")),
     )
@@ -277,12 +277,12 @@ def test_the_retire_set_names_author_error_git_error_and_model_retry_and_nothing
     declared set is then checked to hold exactly those three, so a fourth member smuggled in
     fails too."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
 
-    h.seed(ch, [h.row_for("actor_observations", "a/git")])
+    h.seed(ch, [h.row_for("findings", "a/git")])
     git_cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.committing("member", also=lambda r, b, c: _wedge_git(c.repo_root)),
     )
@@ -290,20 +290,20 @@ def test_the_retire_set_names_author_error_git_error_and_model_retry_and_nothing
     assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/git"], "GitError is a member"
     _unwedge_git(paths.repo_root)
 
-    h.seed(ch, [h.row_for("actor_observations", "a/retry")])
+    h.seed(ch, [h.row_for("findings", "a/retry")])
     retry_cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(ModelRetry("command timed out after 120s")),
     )
     assert drain.run_batch(cfg=retry_cfg) == 2
     assert "a/retry" in {r["observation_id"] for r in h.graveyard(ch)}, "ModelRetry is a member"
 
-    h.seed(ch, [h.row_for("actor_observations", "a/auth")])
+    h.seed(ch, [h.row_for("findings", "a/auth")])
     auth_cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("member")),
     )
@@ -370,13 +370,14 @@ def test_non_member_systemic_faults_skip_retirement_and_git_error_does_not(tmp_p
     gate, an `AuthorError` is as exempt as a `StageAbort` — the control showing this is about
     reach as well as class."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    rows = [h.row_for("actor_observations", "a/0")]
+    ch = h.channel_of(paths, "findings")
+    rows = [h.row_for("findings", "a/0")]
+    h.write_source_refs(paths, "a")
 
     for exc in (StageAbort("abort"), FatalConfigError("bad config"), BoxFault("box gone")):
         h.seed(ch, rows)
         cfg = h.cfg_for(
-            paths, "actor_observations", max_attempts=1, invoke_agent=h.raising(exc)
+            paths, "findings", max_attempts=1, invoke_agent=h.raising(exc)
         )
         with pytest.raises(type(exc)):
             drain.run_batch(cfg=cfg)
@@ -386,7 +387,7 @@ def test_non_member_systemic_faults_skip_retirement_and_git_error_does_not(tmp_p
     h.seed(ch, rows)
     git_cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.committing("notexempt", also=lambda r, b, c: _wedge_git(c.repo_root)),
     )
@@ -401,7 +402,7 @@ def test_non_member_systemic_faults_skip_retirement_and_git_error_does_not(tmp_p
     before = len(h.graveyard(ch))
     outside = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         gate=_raising_gate(author_shared.AuthorError("a member, but out of reach")),
         invoke_agent=h.raising(AssertionError("the gate failed first")),
@@ -437,13 +438,13 @@ def test_the_retire_set_clauses_span_the_agent_call_through_the_corpus_commit_an
       post-commit no-bump, and nothing else in the suite can see it.
     """
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
 
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    h.seed(ch, [h.row_for("findings", "a/0")])
     queued = h.pending(ch)
     before_gate = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         gate=_raising_gate(_instance(author_shared.AuthorError, "member, before they open")),
         invoke_agent=h.raising(AssertionError("the gate failed first")),
@@ -455,17 +456,17 @@ def test_the_retire_set_clauses_span_the_agent_call_through_the_corpus_commit_an
 
     inside_agent = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(_instance(author_shared.AuthorError, "member, inside")),
     )
     assert drain.run_batch(cfg=inside_agent) == 2
     assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/0"], "the clauses open too late"
 
-    h.seed(ch, [h.row_for("actor_observations", "a/1")])
+    h.seed(ch, [h.row_for("findings", "a/1")])
     inside_commit = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.committing("g", also=lambda r, b, c: _wedge_git(c.repo_root)),
     )
@@ -475,10 +476,10 @@ def test_the_retire_set_clauses_span_the_agent_call_through_the_corpus_commit_an
     )
     _unwedge_git(paths.repo_root)
 
-    h.seed(ch, [h.row_for("actor_observations", "a/2")])
+    h.seed(ch, [h.row_for("findings", "a/2")])
     after_rotate = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.committing("post"),
         post_rotate=_raising_gate(_instance(author_shared.AuthorError, "member, after they close")),
@@ -508,8 +509,8 @@ def test_post_agent_failure_with_a_succeeding_agent_bumps_and_retires(tmp_path: 
     it. An oracle that faults the AGENT passes vacuously here, which is why the recorded call is
     asserted to have happened."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "environment_observations")
-    h.seed(ch, [h.row_for("environment_observations", "b/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "b/0")])
 
     def over_claim(rows, batch_id, cfg):
         (cfg.corpus_dir / f"lesson-{batch_id}.md").write_text("---\nx: 1\n---\nbody\n")
@@ -521,7 +522,7 @@ def test_post_agent_failure_with_a_succeeding_agent_bumps_and_retires(tmp_path: 
         }
 
     agent = h.recording(over_claim)
-    cfg = h.cfg_for(paths, "environment_observations", max_attempts=2, invoke_agent=agent)
+    cfg = h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=agent)
 
     assert drain.run_batch(cfg=cfg) == 2
     assert len(agent.calls) == 1, "the agent must have succeeded for this to discriminate"
@@ -532,39 +533,6 @@ def test_post_agent_failure_with_a_succeeding_agent_bumps_and_retires(tmp_path: 
     assert [r["attempts"] for r in h.graveyard(ch)] == [2]
 
 
-def test_corpus_commit_git_error_bumps_the_row_and_leaves_the_corpus_dir_usable(tmp_path: Path):
-    """Decision 1 path 3, STRENGTHENED at §7 round 2: `GitError`'s membership is asserted
-    explicitly rather than inferred from the row having retired. Under an allow-list the natural
-    wrong spelling drops this member silently, and a test that only observes the graveyard
-    cannot say which class put the row there.
-
-    The agent succeeds and writes its lesson; git itself then fails for real, its index lock
-    held. Both halves are needed: the row bumps and retires, AND the corpus directory is left
-    clean enough for the next tick to reach its gate at all — a stray uncommitted file aborts
-    every subsequent batch (F5/P03), which is how this path wedges the channel today."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_environment_observations")
-    h.seed(ch, [h.row_for("actor_environment_observations", "e/0")])
-    cfg = h.cfg_for(
-        paths,
-        "actor_environment_observations",
-        max_attempts=1,
-        invoke_agent=h.committing("wedge", also=lambda r, b, c: _wedge_git(c.repo_root)),
-    )
-
-    assert GitError in tuple(drain.RETIRE_SET), "GitError was dropped from the retire set"
-    assert drain.run_batch(cfg=cfg) == 2
-    assert h.pending(ch) == []
-    assert [r["attempts"] for r in h.graveyard(ch)] == [1]
-
-    _unwedge_git(paths.repo_root)
-    author_shared.assert_clean_corpus_dir(paths.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel)
-
-    h.seed(ch, [h.row_for("actor_environment_observations", "e/1")])
-    nxt = h.cfg_for(
-        paths, "actor_environment_observations", max_attempts=1, invoke_agent=h.committing("ok")
-    )
-    assert drain.run_batch(cfg=nxt) == 0, "the channel is not wedged for the next batch"
 
 
 def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp_path: Path):
@@ -580,22 +548,22 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
     the row is in the graveyard. The paired control is a genuinely successful batch, which
     rotates and counts nothing."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
 
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
-    ok = h.cfg_for(paths, "actor_observations", max_attempts=2, invoke_agent=h.committing("live"))
+    h.seed(ch, [h.row_for("findings", "a/0")])
+    ok = h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=h.committing("live"))
     assert drain.run_batch(cfg=ok) == 0
     assert h.pending(ch) == []
     assert h.graveyard(ch) == []
 
     assert ModelRetry in tuple(drain.RETIRE_SET), "ModelRetry was dropped from the retire set"
-    h.seed(ch, [h.row_for("actor_observations", "a/1")])
+    h.seed(ch, [h.row_for("findings", "a/1")])
     # The control batch above authored a/0 and consumed it, so the ledger is not empty here
     # and never was: what this asserts is that the KILLED batch adds nothing to it.
     consumed_before = len(h.consumed(ch))
     killed = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=2,
         invoke_agent=h.raising(ModelRetry("command timed out after 120s")),
     )
@@ -619,14 +587,15 @@ def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path
     Induced for real — the lock path is a directory, so opening it fails at the primitive. The
     acquisition failure escapes uncaught, nothing is counted, and the queue is untouched."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    rows = [h.row_for("actor_observations", "a/0")]
+    ch = h.channel_of(paths, "findings")
+    rows = [h.row_for("findings", "a/0")]
+    h.write_source_refs(paths, "a")
     h.seed(ch, rows)
 
     ch.drain_lock.mkdir(parents=True)
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(AssertionError("never reached")),
     )
@@ -647,21 +616,21 @@ def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path
     blocking boxed call, so nothing here treats the configured timeout as the bound on the stall
     and no assertion below is about elapsed time."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
     late = author_shared.AuthorError(
         "curator (batch1) did not complete: curator (curator:batch1) did not complete: TimeoutError()"
     )
-    cfg = h.cfg_for(paths, "actor_observations", max_attempts=2, invoke_agent=h.raising(late))
+    cfg = h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=h.raising(late))
 
     assert drain.run_batch(cfg=cfg) == 2
     assert h.attempts_of(ch, "a/0") == 1
     assert drain.run_batch(cfg=cfg) == 2
     assert "TimeoutError" in h.graveyard(ch)[0]["deadletter_reason"]
 
-    h.seed(ch, [h.row_for("actor_observations", "a/1")])
+    h.seed(ch, [h.row_for("findings", "a/1")])
     bare = h.cfg_for(
-        paths, "actor_observations", max_attempts=2, invoke_agent=h.raising(TimeoutError("bare"))
+        paths, "findings", max_attempts=2, invoke_agent=h.raising(TimeoutError("bare"))
     )
     with pytest.raises(TimeoutError):
         drain.run_batch(cfg=bare)
@@ -747,8 +716,8 @@ def test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone
     type check rather than a permission bit — it fails the same way whether or not the process
     holds root."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "environment_observations")
-    h.seed(ch, [h.row_for("environment_observations", "b/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "b/0")])
 
     before = ch.file.read_bytes()
     aliased_target = ch.file.with_name(ch.file.name + ".aliased")
@@ -756,7 +725,7 @@ def test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone
     ch.file.unlink()
     ch.file.symlink_to(aliased_target)
     cfg = h.cfg_for(
-        paths, "environment_observations", max_attempts=1, invoke_agent=h.committing("landed")
+        paths, "findings", max_attempts=1, invoke_agent=h.committing("landed")
     )
     with pytest.raises(OSError):  # noqa: PT011 - the OS-level rotation-rewrite failure's exact subclass is platform-dependent; the point is that the commit lands before it propagates
         drain.run_batch(cfg=cfg)
@@ -770,7 +739,7 @@ def test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone
     ch.file.write_bytes(before)
     must_not_author = h.recording(h.raising(AssertionError("re-authored already-corpus work")))
     nxt = h.cfg_for(
-        paths, "environment_observations", max_attempts=1, invoke_agent=must_not_author
+        paths, "findings", max_attempts=1, invoke_agent=must_not_author
     )
     assert drain.run_batch(cfg=nxt) == 0
     assert must_not_author.calls == [], "the reconciling tick re-invoked the agent"

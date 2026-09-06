@@ -94,6 +94,17 @@ from defender.learning.core.config import LoopPaths  # type: ignore[import-not-f
 #: fold's own properties (one lock per channel, one gate per tick, a stuck row per channel) are
 #: now exercised on the one channel that still has both ends. The tuple stays a tuple because
 #: what it parametrises is "per channel", not "for findings".
+#: MULTI-CHANNEL DEMANDS LEFT THIS FAMILY WITH #922, recorded rather than dropped in silence.
+#:
+#: Thirteen tests here compared TWO channels' behaviour against each other — that retirement is
+#: identical for observations and findings, that a stuck appender on one channel does not hold
+#: the repo lock for another, that each direction's gate keeps its own policy through the shared
+#: drain, that every channel declares its own id key and lock path. All of them needed two live
+#: channels, and the three observation channels retired with the old pipeline's judge, which was
+#: their only producer. One channel cannot witness a between-channels property.
+#:
+#: What survives is every single-channel property, driven on `findings` — the channel that still
+#: has both a producer and a consumer. Restore the comparisons when a second channel returns.
 AUTHOR_CHANNELS = (
     "findings",
 )

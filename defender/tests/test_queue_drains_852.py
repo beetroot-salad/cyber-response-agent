@@ -172,8 +172,8 @@ def test_852_f02_attribution_reads_the_channels_own_provenance_key(tmp_path: Pat
     on every following tick. Keying on `channel.id_key` is what keeps "attributable" and
     "recognised as already authored" the same question."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
 
     def curate_under_the_wrong_key(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "mis-cited", "source_finding_ids", ["a/0"])
@@ -184,7 +184,7 @@ def test_852_f02_attribution_reads_the_channels_own_provenance_key(tmp_path: Pat
             "commit_message": "author actor lesson",
         }
 
-    cfg = h.cfg_for(paths, "actor_observations", invoke_agent=curate_under_the_wrong_key)
+    cfg = h.cfg_for(paths, "findings", invoke_agent=curate_under_the_wrong_key)
     assert drain.run_batch(cfg=cfg) == 2
     assert not (cfg.corpus_dir / "mis-cited.md").exists()
     assert _commits(paths.repo_root) == 1
@@ -198,7 +198,7 @@ def test_852_f02_attribution_reads_the_channels_own_provenance_key(tmp_path: Pat
             "commit_message": "author actor lesson",
         }
 
-    cfg = h.cfg_for(paths, "actor_observations", invoke_agent=curate)
+    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
     assert drain.run_batch(cfg=cfg) == 0
     assert _head_files(paths.repo_root) == ["defender/lessons-actor/cited.md"]
 
@@ -219,10 +219,10 @@ def test_852_f02_a_supersede_flip_is_not_read_as_an_unattributed_file(tmp_path: 
     own case cites nothing), and a fold that appends an id the forward check rejected has
     changed its provenance and still fails."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/1")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/1")])
 
-    seeded = h.cfg_for(paths, "actor_observations")
+    seeded = h.cfg_for(paths, "findings")
     old = _write_corpus_file(seeded.corpus_dir, "old-fact", "source_observation_ids", ["a/0"])
     h.git(paths.repo_root, "add", "-A")
     h.git(paths.repo_root, "commit", "-q", "-m", "an earlier batch's lesson")
@@ -242,7 +242,7 @@ def test_852_f02_a_supersede_flip_is_not_read_as_an_unattributed_file(tmp_path: 
             "commit_message": "author actor lesson, supersede the contradicted one",
         }
 
-    cfg = h.cfg_for(paths, "actor_observations", invoke_agent=curate)
+    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
     assert drain.run_batch(cfg=cfg) == 0, "the supersede flip faulted the tick"
     assert sorted(_head_files(paths.repo_root)) == [
         "defender/lessons-actor/new-fact.md",

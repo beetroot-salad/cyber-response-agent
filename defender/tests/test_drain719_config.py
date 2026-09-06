@@ -54,14 +54,14 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
             assert state in p.parents, f"{name}: {p} is not under the state root"
             assert paths.repo_root not in p.parents
 
-    cfg = h.cfg_for(paths, "actor_observations", max_attempts=1, invoke_agent=h.committing("s"))
+    cfg = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=h.committing("s"))
     assert cfg.corpus_dir.is_relative_to(paths.repo_root), "the corpus is repo-rooted"
 
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
     fault = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("so the graveyard is written")),
     )
@@ -80,17 +80,17 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     one directory up, outside that prefix, DOES abort the tick — so the observation channel
     can see the difference the demand is about."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
+    ch = h.channel_of(paths, "findings")
 
     for p in (
         ch.append_lock, ch.drain_lock, drain.graveyard_file(ch), drain.stuck_report_file(ch)
     ):
         assert p.is_relative_to(paths.pending_dir), f"{p} is outside the ignored prefix"
 
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    h.seed(ch, [h.row_for("findings", "a/0")])
     fault = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("writes the graveyard")),
     )
@@ -98,14 +98,14 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     assert drain.graveyard_file(ch).is_file()
     assert ch.drain_lock.exists()
 
-    h.seed(ch, [h.row_for("actor_observations", "a/1")])
-    clean = h.cfg_for(paths, "actor_observations", max_attempts=1, invoke_agent=h.committing("ok"))
+    h.seed(ch, [h.row_for("findings", "a/1")])
+    clean = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=h.committing("ok"))
     assert drain.run_batch(cfg=clean) == 0, "the new state files aborted the next batch"
 
-    h.seed(ch, [h.row_for("actor_observations", "a/2")])
+    h.seed(ch, [h.row_for("findings", "a/2")])
     stray = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=9,
         invoke_agent=h.committing(
             "stray",
@@ -127,8 +127,9 @@ def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_p
     In-range values, including the falsy 0, stay queue-level and are exercised by their own
     demands."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    rows = [h.row_for("actor_observations", "a/0")]
+    ch = h.channel_of(paths, "findings")
+    rows = [h.row_for("findings", "a/0")]
+    h.write_source_refs(paths, "a")
     h.seed(ch, rows)
 
     import os
@@ -137,7 +138,7 @@ def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_p
     os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"] = "abc"
     try:
         with pytest.raises(FatalConfigError):
-            h.cfg_for(paths, "actor_observations", invoke_agent=h.committing("never"))
+            h.cfg_for(paths, "findings", invoke_agent=h.committing("never"))
     finally:
         if previous is None:
             del os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"]
@@ -161,14 +162,14 @@ def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
     import os
 
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "a/0")])
 
     def lower_then_fail(rows, batch_id, cfg):
         os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"] = "1"
         raise author_shared.AuthorError("fails after moving the environment")
 
-    cfg = h.cfg_for(paths, "actor_observations", max_attempts=3, invoke_agent=lower_then_fail)
+    cfg = h.cfg_for(paths, "findings", max_attempts=3, invoke_agent=lower_then_fail)
     assert cfg.max_attempts == 3
     try:
         assert drain.run_batch(cfg=cfg) == 2
