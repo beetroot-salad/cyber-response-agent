@@ -77,7 +77,8 @@ _ENTITY_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 #: Every top-level field the manifest declares. Unknown ones refuse.
 _FAMILY_FIELDS = (
     "episode_id", "source_run_dir", "source_run_id", "branch_message_id", "fences_at",
-    "as_of", "continuation_prompt", "base_story", "discriminator", "worlds",
+    "as_of", "continuation_prompt", "captured_patterns", "base_story", "discriminator",
+    "worlds",
 )
 
 #: Every field a world entry declares.
@@ -371,6 +372,17 @@ class Family:
     fences_at: int
     as_of: dt.datetime
     continuation_prompt: str
+    #: The base patterns the CAPTURE's own queries addressed, recorded by the launcher.
+    #:
+    #: PART OF THE DERIVED HALF, beside the episode id and T0, because it is a fact about the
+    #: measurement rather than anything a model may choose — and because every later reader
+    #: has to judge the overlays against the SAME set the launcher judged them against. Left
+    #: to be re-derived, a sibling re-reads the source run's tables to answer a question the
+    #: authoring already answered, and a source run that has since changed makes the sibling
+    #: refuse the manifest its own launcher wrote. That is not hypothetical: supplying
+    #: `captured_patterns` at the authoring call and nowhere else moved the refusal from
+    #: author time to RESUME time, where three worlds had already been staged and reviewed.
+    captured_patterns: tuple[str, ...]
     base_story: str
     discriminator: dict
     worlds: list[World]
@@ -470,6 +482,30 @@ def _check_overlay_keys(worlds: list[World], captured_patterns: tuple[str, ...])
                     f"sources name ({sorted(allowed)})")
 
 
+
+def _parse_captured_patterns(raw: Any) -> tuple[str, ...]:
+    """The capture's own FROM sources as the manifest records them.
+
+    ABSENT IS EMPTY, not a refusal: a manifest written before this field existed is still a
+    manifest this loader must read, and an episode whose capture addressed nothing is a real
+    (if unbranchable) shape. What is refused is a PRESENT value that is not a list of non-empty
+    strings — the field widens what an overlay may key, so a malformed one that silently read
+    as empty would narrow the rule instead, and a manifest edited after review would load as if
+    the edit were part of the contract.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, (list, tuple)):
+        raise FamilyError(
+            f"the manifest's captured_patterns must be a list, got {type(raw).__name__}")
+    out: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str) or not entry:
+            raise FamilyError(
+                f"the manifest's captured_patterns names {entry!r}, which is not a pattern")
+        out.append(entry)
+    return tuple(dict.fromkeys(out))
+
 def parse_family(doc: Any, *, captured_patterns: tuple[str, ...] = ()) -> Family:
     """Validate a raw manifest document into `Family`, naming the field that refused.
 
@@ -491,12 +527,19 @@ def parse_family(doc: Any, *, captured_patterns: tuple[str, ...] = ()) -> Family
         raise FamilyError("the manifest's discriminator must be a non-empty mapping")
     as_of = parse_as_of(doc.get("as_of"))
     worlds = _parse_worlds(doc.get("worlds"))
-    _check_overlay_keys(worlds, captured_patterns)
+    # THE DOCUMENT'S OWN RECORD FIRST, the argument second. A manifest being LOADED carries the
+    # set its launcher judged it against; only the authoring call, which is composing the
+    # document and has no record to read yet, passes the argument. Preferring the argument
+    # would let a re-derivation at load time disagree with what was actually authored.
+    recorded = _parse_captured_patterns(doc.get("captured_patterns"))
+    _check_overlay_keys(worlds, recorded or tuple(captured_patterns))
     return Family(
         episode_id=doc["episode_id"], source_run_dir=doc["source_run_dir"],
         source_run_id=doc["source_run_id"], branch_message_id=doc["branch_message_id"],
         fences_at=doc["fences_at"], as_of=as_of,
-        continuation_prompt=doc["continuation_prompt"], base_story=doc["base_story"],
+        continuation_prompt=doc["continuation_prompt"],
+        captured_patterns=recorded or tuple(captured_patterns),
+        base_story=doc["base_story"],
         discriminator=dict(discriminator), worlds=worlds,
     )
 

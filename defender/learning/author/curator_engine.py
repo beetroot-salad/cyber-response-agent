@@ -133,6 +133,11 @@ class ForwardCheckConfig:
     runs_dir: Path
     pending: Path
     queued_ids: frozenset[str]
+    #: Rows whose KIND the forward check does not cover — exempt, which is not the same fact
+    #: as absent from `queued_ids`. Kept as its own set so the tool can answer EXEMPT for the
+    #: first and ERROR for the second; collapsed, an exemption reads as a failed check and the
+    #: curator prompt reverts the lesson it just wrote.
+    exempt_ids: frozenset[str] = frozenset()
     run_verify: Callable[..., str] = _run_verify_pydantic
 
 
@@ -170,6 +175,10 @@ class CuratorDeps(AgentDeps):
     @property
     def queued_ids(self) -> frozenset[str]:
         return self._forward_check_config().queued_ids
+
+    @property
+    def exempt_ids(self) -> frozenset[str]:
+        return self._forward_check_config().exempt_ids
 
     @property
     def run_verify(self) -> Callable[..., str]:

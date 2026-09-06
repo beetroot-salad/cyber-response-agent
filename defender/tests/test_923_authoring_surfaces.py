@@ -74,6 +74,12 @@ _VOCABULARY_READERS = {
     "skills/invlang/cli.py",                    # read-only query filters
     "skills/invlang/queries.py",                # corpus rendering
     "skills/invlang/validate/_gating.py",       # the entry-price dispatch
+    # READER, not an authoring surface: #921's mechanical pass reads a world's archived
+    # headline (through `_report.read_report`) and the manifest's `disposition_declared`, and
+    # asks the owner whether each is in the vocabulary. It writes no disposition anywhere, so
+    # it owes an in-or-out verdict and nothing else — and it gives one: a value outside the
+    # vocabulary makes that world `ungradable`, named on the record, never coerced.
+    "learning/judge/family.py",                 # the family judge's mechanical pass
 }
 _VOCABULARY_OWNER_NAMES = frozenset({
     "DISPOSITION_ENUM", "DISPOSITION_VALUES", "DISPOSITION", "normalized_disposition",

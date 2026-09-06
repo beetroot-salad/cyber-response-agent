@@ -742,13 +742,37 @@ def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = Fa
     return doc
 
 
+def report_text(disposition: str, *, extra: str = "", body: str = "") -> str:
+    """`report.md` AS THE CLOSE GATE WRITES IT — YAML frontmatter, not a bare line.
+
+    `close_tool._render_report` is the only writer of this file in production and it emits a
+    `---` block carrying `disposition`/`outcome`/`cause`. A fixture writing a bare
+    `disposition: x` line produces a shape no production path makes, and a reader built against
+    it — `_report.read_report`, which every other consumer of a report in this repo goes
+    through — answers `None` for it. Every fixture report in this suite therefore renders here,
+    so a reader tested against them is tested against the shape it will actually meet.
+
+    `extra` adds further frontmatter lines (already newline-terminated); `body` is the prose
+    under the fence.
+    """
+    return (
+        "---\n"
+        f"disposition: {disposition}\n"
+        "outcome: stands\n"
+        "cause: the disposition was recorded without a challenge review\n"
+        f"{extra}"
+        "---\n"
+        f"{body or 'Disposition recorded by the close gate. outcome=stands.'}\n"
+    )
+
+
 def archived_world(episode_dir: Path, world_id: str, *, disposition: str = "malicious",
                    scrub_ran: bool = True, commit: str | None = "deadbee",
                    dirty: bool | None = False, unavailable: str | None = None) -> Path:
     """One `worlds/<X>/` directory carrying every artifact M8's row declares."""
     w = episode_dir / "worlds" / world_id
     (w / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (w / "report.md").write_text(f"disposition: {disposition}\n", encoding="utf-8")
+    (w / "report.md").write_text(report_text(disposition), encoding="utf-8")
     (w / "investigation.md").write_text(f"# world {world_id}\n", encoding="utf-8")
     (w / "executed_queries.jsonl").write_text("", encoding="utf-8")
     (w / "provenance.json").write_text(
@@ -776,7 +800,7 @@ def sibling_run_dir(base: Path, world_id: str, *, scrub_ran: bool = True,
     """
     run_dir = base / f"{EPISODE_ID}-{world_id}"
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (run_dir / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
+    (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
     (run_dir / "investigation.md").write_text(f"# world {world_id}\n", encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text("", encoding="utf-8")
     if stamp:
@@ -938,9 +962,36 @@ __all__ = [
     "UNTRUSTED_FRAME", "assert_wrapped_untrusted", "outside_untrusted_frames", "untrusted_frames",
     "Fault", "base_capture", "captured_row",
     "archived_world", "base_world", "capture_call", "configured_layout",
+    "report_text",
     "corpus_document",
     "elastic_overlay", "episode", "family_doc", "provenance_record",
     "lesson_row", "mod", "overlay", "refusals", "replace", "review_doc", "runs_base",
     "sibling_run_dir",
     "staged_rows", "sym", "world_doc", "world_token", "write_family",
 ]
+
+
+def sampled_run(tmp_path: Path, *, rows: list) -> Path:
+    """A run dir whose two tables hold `rows` — `(base_pattern, payload)` pairs, in order.
+
+    The sampler's own inputs and nothing else: one lead, one query row per pair, and the
+    payload by-ref at the path `payload_path` names. Hand-built rather than driven through
+    `capture_call` because what is under test is the WALK — which payload a pattern ends up
+    with when several are eligible — so the order and the shapes have to be the scenario's.
+    """
+    run = tmp_path / "sampled-run"
+    (run / "gather_raw" / "l-001").mkdir(parents=True, exist_ok=True)
+    (run / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"goal": "g", "what_to_summarize": []}), encoding="utf-8")
+    lines = []
+    for seq, (pattern, payload) in enumerate(rows):
+        ref = f"gather_raw/l-001/{seq}.json"
+        (run / ref).write_text(json.dumps(payload), encoding="utf-8")
+        lines.append(json.dumps({
+            "lead_id": "l-001", "seq": seq, "system": "elastic", "verb": "query",
+            "query_id": "elastic.ad-hoc", "params": {"index": pattern},
+            "raw_command": "", "exit_code": 0, "payload_status": "ok",
+            "payload_digest": "n bytes", "payload_path": ref,
+        }))
+    (run / "executed_queries.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return run

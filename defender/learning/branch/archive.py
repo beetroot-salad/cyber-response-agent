@@ -50,7 +50,11 @@ from pathlib import Path
 
 from defender._io import guarded_mkdir, write_guarded
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
-from defender.learning.lead_repository import stage_tables
+from defender.learning.lead_repository import (
+    refuse_non_artifacts,
+    refusing_copy2,
+    stage_tables,
+)
 from defender.runtime.scrub import verdict_path
 
 #: The archived world's directory, under the episode. One level, keyed by the SHORT label X —
@@ -78,12 +82,24 @@ class ArchiveRefused(ValueError):
     """
 
 
+#: The judge's directory-of-summaries role's name, both in a sibling's run dir and archived.
+GATHER_SUMMARIES_DIRNAME = "gather_summaries"
+#: The judge's two single-file additions' archived names — the same as their run-dir names.
+LESSONS_LOADED_NAME = "lessons_loaded.jsonl"
+ALERT_NAME = "alert.json"
+
+
 def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
-    """The four single-file roles, as `(source, archived name)`.
+    """The six single-file roles, as `(source, archived name)`.
 
     Spelled once, in the order the archived-world row declares them, because two readers of
     this list exist — the screen and the copy — and a name in one and not the other is an
     artifact that is checked and not copied, or copied and not checked.
+
+    D7 (#921) adds the last two: `lessons_loaded.jsonl` and `alert.json`, the two of the
+    judge's three new inputs that are single files. `gather_summaries/` is the third and is a
+    DIRECTORY, so it takes the per-entry-screened walk beside `stage_tables`' own two tables
+    rather than a slot in this tuple — see `_gather_summaries_source`/`archive_episode`.
     """
     paths = RunPaths(run_dir)
     return (
@@ -92,7 +108,14 @@ def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
         (paths.provenance, "provenance.json"),
         # The SIDECAR beside the run dir, not a path inside it (G17).
         (verdict_path(run_dir), SCRUB_VERDICT_NAME),
+        (run_dir / LESSONS_LOADED_NAME, LESSONS_LOADED_NAME),
+        (paths.alert, ALERT_NAME),
     )
+
+
+def _gather_summaries_source(run_dir: Path) -> Path:
+    """The sibling's own directory of per-lead gather summaries, D7's directory-shaped input."""
+    return run_dir / GATHER_SUMMARIES_DIRNAME
 
 
 def _screen(source: Path, *, world: str, is_dir: bool = False) -> bool:
@@ -131,6 +154,7 @@ def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     paths = RunPaths(run_dir)
     _screen(paths.executed_queries, world=world)
     _screen(paths.gather_raw, world=world, is_dir=True)
+    _screen(_gather_summaries_source(run_dir), world=world, is_dir=True)
     return present
 
 
@@ -166,6 +190,29 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
                     f"world {world!r}: {dest} is occupied by something that is not a regular "
                     "file — the archive is written into a tree a box can reach, and copying "
                     "onto a link would put this world's artifact wherever it points")
+        # The DIRECTORY destination is screened by the same rule and for the same reason. It is
+        # not covered by the loop above (which judges the single files) and `copytree` will not
+        # refuse it for us: under `dirs_exist_ok=True` its own `makedirs(dst, exist_ok=True)`
+        # RESOLVES a link planted at this name, writing the world's summaries wherever it
+        # points — the exact escape this screen exists to stop, one directory over.
+        # ALL THREE OF THEM, not only the one this design added. `stage_tables` runs the same
+        # `copytree(dirs_exist_ok=True)` onto `worlds/<label>/gather_raw` and a `copy2` onto
+        # `worlds/<label>/executed_queries.jsonl`, and it screens only its SOURCES — so the
+        # destination escape screened here for `gather_summaries/` was still open one directory
+        # over, on artifacts that predate it. The screen belongs to the destination tree, which
+        # is this function's, so it is applied to every name written into that tree.
+        summaries_dest = world_dir / GATHER_SUMMARIES_DIRNAME
+        staged_dests = RunPaths(world_dir)
+        for dest, is_dir in ((summaries_dest, True), (staged_dests.gather_raw, True),
+                             (staged_dests.executed_queries, False)):
+            if not (dest.exists() or dest.is_symlink()):
+                continue
+            if artifact_dir(dest) if is_dir else artifact_file(dest):
+                continue
+            raise ArchiveRefused(
+                f"world {world!r}: {dest} is occupied by something that is not a "
+                f"{'real directory' if is_dir else 'regular file'} — copying onto it would "
+                "write this world's archived artifact wherever it points")
         for source, name in sources:
             # Screened by `_screen` above, before this loop began: a link at any of these
             # names has already raised, so nothing here can follow one.
@@ -178,6 +225,22 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         # returns what it dropped, so the drop is said out loud instead of read later as a
         # payload the run never wrote.
         refused = stage_tables(run_dir, world_dir)
+        # `gather_summaries/`, D7's directory-shaped input, through the SAME per-entry-screened
+        # walk as `gather_raw` — a non-artifact entry at any depth is refused and reported, and
+        # the rest of the directory (and the rest of the world) still archives.
+        summaries_src = _gather_summaries_source(run_dir)
+        if artifact_dir(summaries_src):
+            summaries_refused: list[Path] = []
+            shutil.copytree(  # lint-tree-read-follows-link: ok — source root screened by `_screen`, destination root screened above and every entry by `refusing_copy2`
+                summaries_src, summaries_dest, symlinks=True,
+                ignore=refuse_non_artifacts(summaries_refused), dirs_exist_ok=True,
+                # THE DESTINATION AT EVERY DEPTH, not only at the root. The screen above judges
+                # `worlds/<label>/gather_summaries` itself; `dirs_exist_ok=True` then walks INTO
+                # it, and `copy2` opens each leaf destination for writing — so a link planted at
+                # `gather_summaries/<lead>.md` by a box whose rw bind reaches the episode dir was
+                # still followed and this world's summary written wherever it pointed.
+                copy_function=refusing_copy2(summaries_refused))
+            refused = [*refused, *summaries_refused]
         if refused:
             print(f"[archive] world {world}: {len(refused)} non-artifact entr"
                   f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
@@ -191,6 +254,13 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
 
 
 __all__ = [
+    # The three D7 names are EXPORTED, not private constants: the judge reads every one of them
+    # back out of the archive this module writes, and a name spelled here and re-spelled there
+    # is a rename that leaves the writer and the reader looking at two different files with no
+    # error anywhere — an absent `gather_summaries/` is a note on the record, not a refusal.
+    "ALERT_NAME",
+    "GATHER_SUMMARIES_DIRNAME",
+    "LESSONS_LOADED_NAME",
     "RUN_DIR_POINTER",
     "SCRUB_VERDICT_NAME",
     "WORLDS_DIRNAME",

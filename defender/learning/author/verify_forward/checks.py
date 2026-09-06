@@ -116,6 +116,21 @@ def _run_env(ctx: CheckContext) -> str:
     return "GOOD" if hit else "BAD"
 
 
+def skips_forward_check(row: dict) -> bool:
+    """J12: a `direction: family` row is exempt from the forward check.
+
+    Its ground truth is `disposition_declared` on the family record, not a `source_refs.yaml`
+    it does not have — `forward.expected_disposition`/`load_run_context` resolve a row's
+    `run_id` under the RUNS dir, and a family row's `run_id` is an episode id under the
+    EPISODES root, a different tree entirely. Read by `learning.author.lessons.run.
+    invoke_agent` when it builds the batch's `queued_ids`: a family row's id never enters that
+    set, so the model-facing `forward_check` tool call for it returns "not in this batch's
+    queued rows" (`tool._prepare`) rather than reaching `_run_findings` at all — the exemption
+    is a ROUTE, and the model-facing `direction` literal stays `Literal["adversarial",
+    "benign"]`, unwidened."""
+    return row.get("direction") == "family"
+
+
 FINDINGS_CHECK = ForwardCheck(
     error_prefix="verify_forward",
     prompt_path=forward.PROMPT_PATH,

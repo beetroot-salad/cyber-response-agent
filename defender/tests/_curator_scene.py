@@ -60,7 +60,7 @@ def source_bundle(
     return d
 
 
-def curator_deps(
+def curator_deps(  # noqa: PLR0913 — one keyword per axis a curator test may vary; collapsing any two into a struct would make the helper name a shape no case is about
     scene,
     *,
     run_verify,
@@ -69,6 +69,7 @@ def curator_deps(
     corpus: Path | None = None,
     runs: Path | None = None,
     pending: Path | None = None,
+    exempt: Sequence[str] = (),
     box=None,
 ) -> CuratorDeps:
     """`CuratorDeps` over the scene, through the real `for_run` entry point.
@@ -86,17 +87,41 @@ def curator_deps(
             runs_dir=runs if runs is not None else scene.runs,
             pending=pending if pending is not None else scene.pending,
             queued_ids=frozenset(queued),
+            exempt_ids=frozenset(exempt),
             run_verify=run_verify,
         ),
         box=box,
     )
 
 
-def batch_counts(out: str) -> tuple[int, int, int]:
-    """`(n_good, n_bad, n_error)` off the BATCH summary line."""
-    m = re.search(r"BATCH:\s*n_good=(\d+)\s+n_bad=(\d+)\s+n_error=(\d+)", out)
+#: One parse of the BATCH summary, so the two accessors below cannot read it two ways. Every
+#: count is named and optional-free: a field that stops being emitted fails the match loudly
+#: here rather than silently reading as zero at one call site and raising at the other.
+_BATCH_RE = re.compile(
+    r"BATCH:\s*n_good=(?P<good>\d+)\s+n_bad=(?P<bad>\d+)"
+    r"\s+n_exempt=(?P<exempt>\d+)\s+n_error=(?P<error>\d+)"
+)
+
+
+def _batch(out: str) -> dict[str, int]:
+    m = _BATCH_RE.search(out)
     assert m, f"no BATCH summary line in output:\n{out}"
-    return tuple(int(x) for x in m.groups())  # type: ignore[return-value]
+    return {k: int(v) for k, v in m.groupdict().items()}
+
+
+def batch_counts(out: str) -> tuple[int, int, int]:
+    """`(n_good, n_bad, n_error)` off the BATCH summary line.
+
+    THREE, still: `n_exempt` gets its own accessor rather than a fourth slot here, because every
+    existing caller unpacks this into three names and a widened tuple would break them all at
+    once for a count none of them asks about."""
+    counts = _batch(out)
+    return counts["good"], counts["bad"], counts["error"]
+
+
+def batch_exempt(out: str) -> int:
+    """How many pairs the check declared out of its own scope."""
+    return _batch(out)["exempt"]
 
 
 def build_curator_agent(tmp_path: Path, prompt_path: Path, make_model):
