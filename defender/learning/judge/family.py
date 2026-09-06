@@ -677,6 +677,17 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
         holding_queried=holding_queried, scope_discriminated=scope_discriminated,
         doctored_answer_served=doctored, resolution_moved=resolution_moved,
         verdict=verdict, malformed_rows=facts.malformed_rows,
+        # SAID SEPARATELY from `holding_queried: false`, because the two are different failures
+        # and the lesson each deserves is different. A world with no rows on the holding system
+        # may still have queried elsewhere; a world that served NOTHING AT ALL never made a
+        # single live call, so its staged difference was never consulted and its verdict is not
+        # a measurement — the sibling closed without ever opening its own world.
+        #
+        # From the ROWS, not from the file: the writer creates a world's ledger when the world
+        # starts (`Ledger.declare`), so an absent file is once again an incomplete archive and
+        # J5's tier rule keeps its meaning. Derived from absence, this fact and that refusal
+        # would be competing readings of one missing file.
+        served_nothing=not facts.ledger_rows,
     )
     if integrity_notes:
         row["integrity_notes"] = integrity_notes

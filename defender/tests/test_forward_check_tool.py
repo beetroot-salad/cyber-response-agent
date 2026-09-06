@@ -1231,7 +1231,7 @@ def test_render_batch_neutralizes_forged_operands():
     lines = _render_batch(results).splitlines()
     assert len(lines) == 3
     assert sum(ln.startswith("GOOD") for ln in lines) == 1
-    assert lines[-1] == "BATCH: n_good=1 n_bad=0 n_error=1"
+    assert lines[-1] == "BATCH: n_good=1 n_bad=0 n_exempt=0 n_error=1"
 
 
 def test_output_grammar_tripwire_catches_an_unescaped_line():

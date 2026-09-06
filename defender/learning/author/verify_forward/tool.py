@@ -26,7 +26,7 @@ _DETAIL_MAX = 200
 
 _WHITESPACE = re.compile(r"\s+")
 
-_VERDICTS = ("GOOD", "BAD", "ERROR")
+_VERDICTS = ("GOOD", "BAD", "EXEMPT", "ERROR")
 
 
 class _ProtocolError(RuntimeError):
@@ -48,6 +48,8 @@ class _Prepared:
     lesson_text: str = ""
     check_index: int = -1
     detail: str | None = None
+    #: This finding's KIND is out of the check's scope, which is not the check failing.
+    exempt: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,20 @@ def _gate_lesson_path(deps: CuratorDeps, operand: str) -> Path:
 
 def _prepare(deps: CuratorDeps, pair: Pair) -> _Prepared:
     path = _gate_lesson_path(deps, pair.lesson_path)
+    # EXEMPT IS ASKED FIRST, and it is asked of the row's own KIND rather than of its absence
+    # from `queued_ids`. J12 exempts a family row on purpose — its ground truth is the family
+    # record, not a `source_refs.yaml` under the runs dir — and the route by which it was
+    # exempted was to keep its id out of the queued set. That made the exemption arrive as
+    # ERROR, and the curator prompt's rule for a repeated ERROR is to revert the file: the one
+    # authorable outcome the family judge produces was written and then deleted, every time.
+    #
+    # Keyed on the exempt set and not on "absent from queued_ids", because those are two facts.
+    # A row missing from the queued set for any OTHER reason is a real fault the batch should
+    # hear about, and collapsing them would hide it behind a verdict that means "all is well".
+    if pair.source_id in deps.exempt_ids:
+        return _Prepared(pair, exempt=True, detail=_one_line(
+            "exempt: this finding's ground truth is not a source case this check can replay"
+        ))
     if pair.source_id not in deps.queued_ids:
         return _Prepared(pair, detail=_one_line(
             f"source id {pair.source_id!r} is not in this batch's queued rows"
@@ -139,10 +155,13 @@ def _render_batch(results: list[_Result]) -> str:
             lines.append(f"GOOD  {lp}  {idv}")
         elif r.verdict == "BAD":
             lines.append(f"BAD   {lp}  {idv}")
+        elif r.verdict == "EXEMPT":
+            lines.append(f"EXEMPT {lp}  {idv}  {r.detail}")
         else:
             lines.append(f"ERROR {lp}  {idv}  {r.detail}")
     lines.append(
-        f"BATCH: n_good={counts['GOOD']} n_bad={counts['BAD']} n_error={counts['ERROR']}"
+        f"BATCH: n_good={counts['GOOD']} n_bad={counts['BAD']} "
+        f"n_exempt={counts['EXEMPT']} n_error={counts['ERROR']}"
     )
     text = "\n".join(lines) + "\n"
     _assert_wellformed(text, len(results))
@@ -169,6 +188,8 @@ async def run_forward_check(deps: CuratorDeps, pairs: list[Pair]) -> str:
     sem = asyncio.Semaphore(workers)
 
     async def _one(item: _Prepared) -> _Result:
+        if item.exempt:
+            return _Result(item.pair, "EXEMPT", item.detail or "exempt")
         if item.detail is not None:
             return _Result(item.pair, "ERROR", item.detail)
         async with sem:

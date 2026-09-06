@@ -163,6 +163,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             # J12: a family row's id never enters the queued set the model may forward_check —
             # its ground truth is the family record, not a source_refs.yaml under runs_dir.
             queued_ids=forward_checkable_ids(findings),
+            exempt_ids=forward_exempt_ids(findings),
         ),
         log=_log,
     )
@@ -183,6 +184,23 @@ def forward_checkable_ids(findings: list[dict]) -> frozenset[str]:
     return frozenset(
         str(f["run_id"]) for f in findings
         if f.get("run_id") and not skips_forward_check(f)
+    )
+
+
+def forward_exempt_ids(findings: list[dict]) -> frozenset[str]:
+    """The run ids this batch exempts from the forward check, by the ROW'S OWN KIND.
+
+    The complement of `forward_checkable_ids` over the rows that HAVE a run id, and the other
+    half of J12's exemption. Keeping a family row's id out of the checkable set was the whole
+    of the route before, which meant the exemption arrived at the model as "not in this batch's
+    queued rows" — an ERROR, and the prompt reverts a file whose check errors twice. Named
+    here beside its complement so the two cannot come to disagree about which rows are exempt.
+    """
+    from defender.learning.author.verify_forward.checks import skips_forward_check
+
+    return frozenset(
+        str(f["run_id"]) for f in findings
+        if f.get("run_id") and skips_forward_check(f)
     )
 
 

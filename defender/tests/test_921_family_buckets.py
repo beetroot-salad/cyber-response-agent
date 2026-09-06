@@ -381,3 +381,76 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     assert dead_rows["b"]["completed_draws"] == 0
     assert dead_rows["b"]["bucket"], (
         "a world whose every draw failed lost the bucket its own archive still supports")
+
+
+# ---------------------------------------------------------------------------------------
+# a world that served nothing leaves a ledger saying so
+# ---------------------------------------------------------------------------------------
+
+
+def test_921_a_running_world_leaves_a_ledger_even_when_it_serves_nothing(tmp_path):
+    """`Ledger.declare` creates the file at world setup, so serving nothing is EXPRESSIBLE.
+
+    The rows are written by `record`, which creates the file on its first append — so a sibling
+    that answered every question from the replayed capture, and made no live call at all, left
+    no ledger. One missing file then stood for two facts: J5's tier rule reads an absent ledger
+    as an incomplete archive and refuses to grade the world (right, and unchanged), while the
+    sibling above produced that state by running perfectly.
+
+    Observed live: of two siblings, one issued the same 76 queries as the control, served
+    nothing, closed `benign`, and was filed unjudgeable — when "closed without ever consulting
+    the world it was given" is the strongest finding this design can make.
+
+    Declared up front, that sibling leaves an EMPTY ledger, which the grader already buckets
+    `lead-set`.
+    """
+    ledger_mod = J.mod("learning.branch.ledger")
+    ep = J.accepted_episode(tmp_path)
+    fresh = ledger_mod.Ledger.for_world(ep, "newborn")
+    assert not fresh.path.exists(), "the scenario started with the file already there"
+
+    returned = fresh.declare()
+    assert returned is fresh, "declare did not hand back the ledger the caller must write through"
+    assert fresh.path.is_file(), "a world that served nothing left no ledger"
+    assert fresh.path.read_text(encoding="utf-8") == "", "declare wrote a row"
+
+
+def test_921_declaring_a_ledger_twice_keeps_the_rows_already_written(tmp_path):
+    """`declare` opens in APPEND and never truncates.
+
+    It runs once at world setup, but this world's gather leads dispatch in parallel and `record`
+    may already be appending. A create that truncated would silently drop the rows the table
+    exists to hold — and the loss would look exactly like the world having served nothing, which
+    is the very fact `declare` exists to make trustworthy.
+    """
+    ledger_mod = J.mod("learning.branch.ledger")
+    ep = J.accepted_episode(tmp_path)
+    led = ledger_mod.Ledger.for_world(ep, "already_writing").declare()
+    led.path.write_text('{"source": "staged"}\n', encoding="utf-8")
+
+    led.declare()
+    assert led.path.read_text(encoding="utf-8") == '{"source": "staged"}\n', (
+        "a second declare truncated rows a concurrent writer had already appended")
+
+
+def test_921_an_empty_ledger_reports_served_nothing_on_the_record(tmp_path):
+    """The row says it served nothing, separately from `holding_queried`.
+
+    A world with no rows on the holding system may have queried elsewhere; a world that served
+    NOTHING never made a live call at all, so its staged difference was never consulted and its
+    verdict is not a measurement. The two deserve different lessons, so they are two fields.
+    """
+    # World `c` serves a row on a system that is NOT the family's holding system. That is the
+    # case where the two fields part company — `holding_queried` is false for it while
+    # `served_nothing` is false too — so a `served_nothing` derived from `holding_queried`
+    # instead of from the rows passes every fixture where the two happen to coincide.
+    elsewhere = J.ledger_row(source="passthrough", system="cmdb", verb="lookup",
+                             world_label="c")
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [], "c": [elsewhere]})
+    rows = J.rows(_family().grade_family(ep))
+    assert rows["b"]["served_nothing"] is True, "an empty ledger did not report serving nothing"
+    assert rows["b"]["bucket"] == "lead-set"
+    assert rows["c"]["served_nothing"] is False, (
+        "a world that served rows off the holding system was reported as having served nothing")
+    assert rows["c"]["holding_queried"] is False, (
+        "the fixture no longer separates the two facts: c queried the holding system after all")

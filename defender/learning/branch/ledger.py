@@ -317,6 +317,32 @@ class Ledger:
         base = base_file(episode_dir)
         return cls(path=base.parent / f"{world_id}.jsonl", base_path=base)
 
+    def declare(self) -> Ledger:
+        """Create this world's ledger EMPTY if it is not there yet, and return the ledger.
+
+        WRITE-AHEAD, the posture `staged.yaml` already takes toward a cluster name: the record
+        exists from the moment the world starts, so its ABSENCE means the world never started —
+        never "the world ran and served nothing". One missing file cannot carry both, and it was
+        carrying both: J5's tier rule reads an absent ledger as an incomplete archive and
+        refuses to grade the world, which is right, while a sibling that answered every question
+        from the replayed capture produced exactly that state by running perfectly. The strongest
+        finding this design can make — a defender that closed without ever consulting the world
+        it was given — was arriving as "unjudgeable". With the file declared up front it arrives
+        as an EMPTY ledger, which the grader already buckets `lead-set`.
+
+        Called by the sibling as it builds its registry, and by nothing that reads: `for_world`
+        is also the factory a derived reader names the path with, so creating the file there
+        would have every read of an episode mint the artifact it came to read.
+
+        APPEND, never a truncating mode: this runs once at world setup, but `record` may already
+        be appending for a gather lead dispatched in parallel, and a create that truncated would
+        drop rows the table exists to hold.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount, exactly as `record`'s own append below  # noqa: E501
+        with self.path.open("a", encoding="utf-8"):  # lint-unguarded-tree-write: ok — same tree and same rationale as `record`; opened in append so a concurrent writer's rows survive  # noqa: E501
+            pass
+        return self
+
     def __post_init__(self) -> None:
         #: THE FAMILY TIER ONLY, keyed by request key. `base_payload` is the sole reader and
         #: only ever asks for a `world_id is None` row, so memoizing a world's own rows kept a

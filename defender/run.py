@@ -287,7 +287,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
         family = world.family
         verbs: Any = WorldRegistry(
             defender_dir / "scripts" / "adapters", driver.GATHER_DEF.verb_grant,
-            world=world, ledger=Ledger.for_world(world.episode_dir, world.world_id),
+            # DECLARED, not merely constructed: a world that serves nothing must still leave a
+            # ledger, or its silence is indistinguishable from an archive that lost the file.
+            world=world, ledger=Ledger.for_world(
+                world.episode_dir, world.world_id).declare(),
             as_of=world.as_of, applier=WorldApplier(),
         )
         resume = branch_mod.BranchSpec(

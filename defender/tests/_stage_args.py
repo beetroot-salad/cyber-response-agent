@@ -13,7 +13,7 @@ from __future__ import annotations
 from defender.learning.author.curator_engine import ForwardCheckConfig
 from defender.learning.core.config import StageContext, StageWiring
 
-_FORWARD_CHECK = ("check", "runs_dir", "pending", "queued_ids", "run_verify")
+_FORWARD_CHECK = ("check", "runs_dir", "pending", "queued_ids", "exempt_ids", "run_verify")
 
 
 def as_curator_stage_args(kw: dict) -> dict:

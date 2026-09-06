@@ -771,3 +771,77 @@ def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
     ])
     assert queued == {"run-adv"}, (
         f"the family row entered the set the model may forward_check: {sorted(queued)}")
+
+
+def test_921_a_family_row_answers_exempt_rather_than_error(tmp_path):
+    """The J12 exemption reaches the model as EXEMPT, not as a check that broke.
+
+    The exemption was implemented as a ROUTE — a family row's id is kept out of `queued_ids` —
+    and the model-facing tool then answered "not in this batch's queued rows", which renders as
+    ERROR. The curator prompt's rule for a pair that errors twice is to revert the file like a
+    BAD, so the one authorable outcome the family judge produces was written and then deleted
+    on every tick: the row rotates back onto the queue and the next batch repeats it forever.
+
+    Driven through the real tool over real `CuratorDeps`, because what was wrong is the VERDICT
+    the tool renders — a test asserting on `skips_forward_check` alone never sees it, and the
+    committed one did not.
+    """
+    import asyncio
+
+    from defender.tests import _curator_scene as S
+
+    tool = J.mod("learning.author.verify_forward.tool")
+    lessons_run = J.mod("learning.author.lessons.run")
+
+    family = _family_row()
+    scene = S.curator_scene(tmp_path)
+    lesson = scene.corpus / "L1.md"
+    lesson.write_text("---\nid: L1\n---\nbody\n", encoding="utf-8")
+
+    # THE PRODUCTION DERIVATIONS, both of them: the route is that one set excludes the row and
+    # the other names it. Re-deriving either here would leave the test green when production's
+    # filter is removed.
+    queued = lessons_run.forward_checkable_ids([family])
+    exempt = lessons_run.forward_exempt_ids([family])
+    assert queued == frozenset(), "the family row entered the checkable set"
+    assert exempt == {str(family["run_id"])}, "the family row is not named exempt"
+
+    deps = S.curator_deps(scene, queued=queued, exempt=exempt, run_verify=_never_verifies)
+    out = asyncio.run(tool.run_forward_check(
+        deps, [tool.Pair(lesson_path=str(lesson), source_id=str(family["run_id"]))]))
+
+    assert out.startswith("EXEMPT "), f"the exemption did not render as EXEMPT: {out!r}"
+    assert S.batch_exempt(out) == 1, f"the batch summary does not count it: {out!r}"
+    assert S.batch_counts(out) == (0, 0, 0), (
+        f"an exempt pair was also counted as good, bad or errored: {out!r}")
+
+
+def test_921_a_row_missing_for_any_other_reason_still_errors(tmp_path):
+    """EXEMPT is keyed on the row's KIND, never on absence from the queued set.
+
+    Collapsing the two would answer "nothing to do here" for a row that went missing through a
+    real fault, and the batch would stop hearing about it — the opposite of what the queued-set
+    check is for. The positive control for the test above.
+    """
+    import asyncio
+
+    from defender.tests import _curator_scene as S
+
+    tool = J.mod("learning.author.verify_forward.tool")
+    scene = S.curator_scene(tmp_path)
+    lesson = scene.corpus / "L1.md"
+    lesson.write_text("---\nid: L1\n---\nbody\n", encoding="utf-8")
+
+    deps = S.curator_deps(scene, queued=["some-other-run"], exempt=(),
+                          run_verify=_never_verifies)
+    out = asyncio.run(tool.run_forward_check(
+        deps, [tool.Pair(lesson_path=str(lesson), source_id="run-nobody-queued")]))
+
+    assert out.startswith("ERROR "), f"a genuinely absent row was excused: {out!r}"
+    assert S.batch_exempt(out) == 0, "a fault was filed as an exemption"
+
+
+def _never_verifies(*_a, **_k) -> str:
+    """A verify seam that must not be reached: both cases above are settled before the check
+    runs, and reaching it would mean the exemption or the queued-set guard did not."""
+    raise AssertionError("the forward check ran for a pair it should have settled first")
