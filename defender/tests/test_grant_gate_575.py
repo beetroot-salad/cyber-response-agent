@@ -68,7 +68,6 @@ from defender.learning.author.curator_engine import (  # noqa: E402
     CuratorDeps,
     ForwardCheckConfig,
 )
-from defender.learning.core import config  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     bind,
@@ -86,7 +85,6 @@ from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 _DEFENDER = PATHS.defender_dir
 _POLICY_CLI = _DEFENDER / "bin" / "defender-policy"
 
-_ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 
 
 @pytest.fixture

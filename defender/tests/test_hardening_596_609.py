@@ -41,12 +41,7 @@ from defender._frontmatter import (
 )
 from defender.learning.author.lessons.run import AuthorConfig, disposition_for
 from defender.learning.core.config import RunUnprocessable
-from defender.learning.core.directions import ADVERSARIAL
 from defender.learning.core.validate import normalize_disposition
-from defender.learning.tickets.ticket_enrichment import (
-    _read_adversarial_outcome,
-    _read_resolution_method,
-)
 
 
 def _load_tl():
@@ -264,29 +259,8 @@ def test_d_b12_disposition_for_flood_source_refs_is_held(tmp_path):
     assert disposition_for(cfg, "r1") is None
 
 
-def test_d_b13_ticket_outcome_flood_verdict_skips(tmp_path):
-    """d: b13 — ticket enrichment is non-fatal by construction: a flooded verdict is
-    "unusable → skip" (None), like any unusable verdict. Control: a healthy verdict
-    resolves its outcome keyword."""
-    lrd = tmp_path / "lrd"
-    lrd.mkdir()
-    verdict = lrd / ADVERSARIAL.judge_name
-    verdict.write_text("outcome: survived\n", encoding="utf-8")
-    assert _read_adversarial_outcome(lrd) == "survived"
-    verdict.write_text("[" * 3000, encoding="utf-8")
-    assert _read_adversarial_outcome(lrd) is None
 
 
-def test_d_b14_ticket_resolution_method_flood_verdict_skips(tmp_path):
-    """d: b14 — the second verdict reader has its own except tuple; the flood joins it
-    the same way (None → skip), with the healthy control alongside."""
-    lrd = tmp_path / "lrd"
-    lrd.mkdir()
-    verdict = lrd / ADVERSARIAL.judge_name
-    verdict.write_text("resolution_method: policy-check\n", encoding="utf-8")
-    assert _read_resolution_method(lrd) == "policy-check"
-    verdict.write_text("[" * 3000, encoding="utf-8")
-    assert _read_resolution_method(lrd) is None
 
 
 

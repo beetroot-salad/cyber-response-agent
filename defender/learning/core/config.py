@@ -236,8 +236,6 @@ JUDGE_BENIGN_PROMPT = _PIPELINE_DIR / "judge" / "benign.md"
 
 
 _LESSONS_SCRIPTS_DIR = REPO_ROOT / "defender" / "scripts" / "lessons"
-LESSONS_ENV_RETRIEVE_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_env_retrieve.py"
-LESSONS_ACTOR_INDEX_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_actor_index.py"
 
 
 # Which dispositions select which direction is NOT declared here — it is a field on
