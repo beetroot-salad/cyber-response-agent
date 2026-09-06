@@ -33,8 +33,6 @@ class DefenderPaths:
     skills_rel: ClassVar[str] = "defender/skills/"
     adapters_rel: ClassVar[str] = "defender/scripts/adapters/"
     lessons_dir_rel: ClassVar[str] = "defender/lessons/"
-    lessons_actor_dir_rel: ClassVar[str] = "defender/lessons-actor/"
-    lessons_environment_dir_rel: ClassVar[str] = "defender/lessons-environment/"
 
     @property
     def defender_dir(self) -> Path:

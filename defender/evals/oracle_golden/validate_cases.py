@@ -49,7 +49,6 @@ Usage: validate_cases.py [<cases_dir>] [--quiet]
 from __future__ import annotations
 
 import argparse
-import ast
 import hashlib
 import json
 import sys

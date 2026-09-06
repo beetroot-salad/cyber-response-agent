@@ -14,7 +14,6 @@ from defender._yaml import safe_load  # noqa: E402
 from defender._report import ReportRead, read_report  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
-from defender.learning.core import config as _loop_config  # noqa: E402
 
 
 

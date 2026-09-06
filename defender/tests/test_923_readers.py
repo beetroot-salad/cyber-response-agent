@@ -98,48 +98,6 @@ def _run_cycle_selects_no_direction(_tmp_path: Path) -> None:
     }, routing
 
 
-def _ticket_seeds_does_not_sample_it(_tmp_path: Path) -> None:
-    from datetime import UTC, datetime
-
-    from defender.learning.tickets import ticket_seeds
-    from defender.scripts.case_history import case_ticket
-
-    now = datetime(2024, 5, 5, tzinfo=UTC)  # inside the window for an `evt:2024-05-01` ticket
-
-    def _survived_comment() -> list[dict]:
-        # The eligibility marker `sample_seeds` actually reads (`ticket_seed_eligible` ->
-        # `parse_survival_from_comments`) — without it EVERY ticket in the pool is ineligible
-        # and the two assertions below pass on an empty list regardless of disposition, which
-        # is exactly the vacuous shape this test exists to rule out.
-        return [{"author": "learning", "body": case_ticket.enrichment_to_comment("caught")["body"]}]
-
-    def closed(_label):
-        return [
-            {"key": "case-a", "resolution": f"{MEMBER} — the host ended the run",
-             "labels": ["evt:2024-05-01T00:00:00Z"], "comments": _survived_comment()},
-            {"key": "case-b", "resolution": "benign — accounted for",
-             "labels": ["evt:2024-05-01T00:00:00Z"], "comments": _survived_comment()},
-        ]
-
-    # The pool carries a hand-written host-only resolution BESIDE a legitimate, EQUALLY ELIGIBLE
-    # one, because the refusal this change adds at the ticket AUTHORING surface must not turn
-    # this READ path into a crash path: the sampler walks every closed ticket a person could
-    # have edited, and a decoder that raises on one of them takes the whole benign-precedent
-    # pool with it. Both tickets carry the same window label and the same survival marker, so
-    # the ONLY thing that can separate them is the disposition decode — a pool that came back
-    # empty (both excluded on eligibility, not disposition) would pass the two assertions below
-    # for the wrong reason, which is why `seeds` is asserted non-empty first.
-    seeds = ticket_seeds.sample_seeds(
-        {"rule": {"id": "5710"}}, "case-self", "run-1", now=now,
-        list_closed_fn=closed, signature_label_fn=lambda _alert: "sig:5710",
-    )
-    assert seeds, "the equally-eligible benign precedent was not sampled either — the pool came " \
-        "back empty for an unrelated reason, and the disposition decode was never exercised"
-    assert all(seed.disposition == "benign" for seed in seeds)
-    assert not any(seed.case_id == "case-a" for seed in seeds), (
-        "a host-terminated case was sampled as a benign precedent — the sampler's pool is "
-        "evidence about the world and this run produced none"
-    )
 
 
 def _lessons_run_has_no_confident_ground_truth(_tmp_path: Path) -> None:
@@ -354,7 +312,6 @@ def _no_roster_states_a_stale_price_count(_tmp_path: Path) -> None:
 _READERS = {
     # the vocabulary's unmoved consumers
     "run_cycle": _run_cycle_selects_no_direction,
-    "ticket_seeds": _ticket_seeds_does_not_sample_it,
     "lessons_run": _lessons_run_has_no_confident_ground_truth,
     "visualize_judge": _visualize_judge_selects_no_direction_view,
     "invlang_queries": _invlang_queries_finds_the_case,

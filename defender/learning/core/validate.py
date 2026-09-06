@@ -9,7 +9,6 @@ import yaml
 
 from defender._yaml import safe_load
 from defender._report import ReportRead, read_report
-from defender._text import is_content_less, strip_zero_width
 from defender.learning.core.config import RunUnprocessable
 
 

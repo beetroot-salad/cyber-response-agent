@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 from defender.learning.author import shared as _shared
 from defender.learning.author import drain
-from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
+from defender.learning.author._config import CorpusAuthorConfig
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._run_paths import resolve_run_bundle
@@ -124,28 +124,8 @@ def invoke_curator_agent(
 
 
 
-OBSERVATION_BUCKETS: tuple[BucketSpec, ...] = (
-    BucketSpec(name="committed", disposition="committed", reason_field=None, formatter=str),
-    BucketSpec(
-        name="consumed_skip", disposition="consumed", reason_field="skip_reason",
-        formatter=str,
-    ),
-)
 
 
-def commit_observations(message: str, cfg: CuratorConfig) -> str | None:
-    """The observation directions' corpus commit: the loop owns provenance, so the
-    generation counter and the direction's own model trailer are appended here rather than
-    trusted from the agent's message."""
-    return _shared.commit_corpus(
-        cfg.repo_root,
-        cfg.corpus_dir,
-        message,
-        trailers=[
-            ("Generation", str(cfg.generation_fn())),
-            (cfg.trailer_label, cfg.actor_model),
-        ],
-    )
 
 
 def run_batch(*, hold_committed: bool = False, cfg: CuratorConfig, box: Any = None) -> int:

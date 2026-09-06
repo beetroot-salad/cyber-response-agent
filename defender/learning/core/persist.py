@@ -3,26 +3,18 @@ from __future__ import annotations
 import contextlib
 import json
 import re
-import shutil
 import threading
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-from collections.abc import Callable
 
-import yaml
 
 # Aliased to `_lockfile` so this module can keep `_flock` as its own name for `queue_lock`.
 from defender import _flock as _lockfile
 from defender._clock import now_iso
 from defender._text import is_content_less
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
-from defender._run_paths import artifact_file
 from defender.learning.core.config import (
     DEFAULT_PATHS,
-    RunUnprocessable,
     LoopPaths,
-    QueueChannel,
     make_logger,
 )
 # The reducer lane's routing key, at its owner (#870). Imported for the VALUE, the same way

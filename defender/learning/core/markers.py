@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender._io import write_atomic
-from defender.learning.core.config import DEFAULT_PATHS, LoopPaths, _log
+from defender.learning.core.config import LoopPaths, _log
 
 
 def _enqueue_marker(run_dir: Path, queue_dir: Path, label: str) -> None:

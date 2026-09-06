@@ -41,8 +41,6 @@ def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Ro
 
 
 
-def _enrichment_comment(outcome: str) -> dict:
-    return {"author": "learning", "body": case_ticket.enrichment_to_comment(outcome)["body"]}
 
 
 

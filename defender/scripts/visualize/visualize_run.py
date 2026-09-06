@@ -37,7 +37,6 @@ from defender.scripts.visualize.visualize_primitives import (
     esc,
     esc_untrusted,
     fmt_duration,
-    lead_repository,
     parse_report,
     render_alert_block,
     render_lead_sequence_compact,

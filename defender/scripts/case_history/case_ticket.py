@@ -328,28 +328,8 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
 
 
 
-def enrichment_to_comment(outcome: str) -> dict[str, Any]:
-    mapping = _load_mapping()
-    eligible = outcome_seeds_eligible(outcome)
-    ctx = _ctx(outcome=outcome, seed_eligible="true" if eligible else "false")
-    return _render(mapping.get("annotate") or {}, ctx)
 
 
-def _seed_marker_and_separator(mapping: dict[str, Any]) -> tuple[str | None, str | None]:
-    tmpl = _dig(mapping, "annotate.body")
-    if not isinstance(tmpl, str):
-        return None, None
-    ph = "{seed_eligible}"
-    i = tmpl.find(ph)
-    if i == -1:
-        return None, None
-    marker = tmpl[:i]
-    if "{" in marker:
-        return None, None
-    rest = tmpl[i + len(ph):]
-    nxt = rest.find("{")
-    sep = rest[:nxt] if nxt != -1 else rest
-    return (marker or None), (sep or None)
 
 
 

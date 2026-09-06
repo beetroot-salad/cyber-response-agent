@@ -120,17 +120,6 @@ class LoopPaths(DefenderPaths):
     def lead_author_drain_lock_file(self) -> Path:
         return self.state_root / ".lead-author-drain.lock"
 
-    def run_cycle_lock_file(self, run_id: str) -> Path:
-        """One lock per RUN, held across the run cycle's box.
-
-        The learn drain's own lease keeps two drainers apart, but it is not the only way into
-        `run_one`: the single-run CLI stage calls it directly, holding no lease, and the
-        run-cycle box REUSES its container name across starts (`defender-runcycle-{run_id}`).
-        So a hand-run pass on a run the drain worker already picked up put two lanes on one
-        container name — the collision #955 F-49's ownership check makes honest, and this
-        makes not happen. Per run id rather than one global lock: two DIFFERENT runs share
-        nothing and must still learn concurrently."""
-        return self.state_root / "run-cycle-locks" / f"{run_id}.lock"
 
     @property
     def learn_drain_lock_file(self) -> Path:
@@ -208,8 +197,6 @@ def learning_state_root() -> Path:
     return _env_state_dir() or (REPO_ROOT / "defender" / "learning")
 
 
-def learning_run_paths(run_id: str) -> RunPaths:
-    return RunPaths(learning_state_root() / "runs" / run_id)
 
 
 DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())
@@ -229,7 +216,6 @@ LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
 _PIPELINE_DIR = LEARNING_DIR / "pipeline"
 ACTOR_PROMPT = _PIPELINE_DIR / "malicious_actor" / "prompt.md"
-ACTOR_BENIGN_PROMPT = _PIPELINE_DIR / "benign_actor" / "prompt.md"
 ORACLE_PROMPT = _PIPELINE_DIR / "oracle" / "prompt.md"
 JUDGE_PROMPT = _PIPELINE_DIR / "judge" / "malicious.md"
 JUDGE_BENIGN_PROMPT = _PIPELINE_DIR / "judge" / "benign.md"
@@ -266,7 +252,6 @@ ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES = {"detection-confirmed"}
 ALL_FINDING_TYPES = PIPELINE_FINDING_TYPES | ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES
 BENIGN_AUDIT_ONLY_FINDING_TYPES = {"disposition-confirmed"}
 BENIGN_ALL_FINDING_TYPES = PIPELINE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
-ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 # Every env-backed knob is read at CALL time, never as `X = os.environ.get(...)` at import:
 # an import-time read freezes at first import and `monkeypatch.setenv` can no longer reach
@@ -279,16 +264,10 @@ def actor_model() -> str:
     return env_str("ACTOR_MODEL", "glm-5.2")
 
 
-def benign_actor_model() -> str:
-    return env_str("BENIGN_ACTOR_MODEL", "glm-5.2")
 
 
-def actor_effort() -> str:
-    return env_str("ACTOR_EFFORT", "low")
 
 
-def benign_actor_effort() -> str:
-    return env_str("BENIGN_ACTOR_EFFORT", "low")
 
 
 def oracle_model() -> str:
@@ -299,8 +278,6 @@ def oracle_effort() -> str:
     return env_str("ORACLE_EFFORT", "none")
 
 
-def oracle_max_concurrency() -> int:
-    return env_int("ORACLE_MAX_CONCURRENCY", 8)
 
 
 # The judge is on k3 for STABILITY, not per-verdict quality: on a frozen pair, GLM at this
@@ -313,16 +290,12 @@ def judge_model() -> str:
     return env_str("JUDGE_MODEL", "kimi-k3")
 
 
-def benign_judge_model() -> str:
-    return env_str("BENIGN_JUDGE_MODEL", "kimi-k3")
 
 
 def judge_effort() -> str:
     return env_str("JUDGE_EFFORT", "medium")
 
 
-def benign_judge_effort() -> str:
-    return env_str("BENIGN_JUDGE_EFFORT", "medium")
 
 
 @dataclass(frozen=True)
@@ -439,8 +412,6 @@ def author_actor_model() -> str:
     return env_str("LEARNING_AUTHOR_ACTOR_MODEL", "glm-5.2")
 
 
-def author_actor_timeout() -> int:
-    return env_int("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", 1800)
 
 
 def author_actor_effort() -> str:
@@ -451,8 +422,6 @@ def author_env_model() -> str:
     return env_str("LEARNING_AUTHOR_ENV_MODEL", "glm-5.2")
 
 
-def author_env_timeout() -> int:
-    return env_int("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
 
 
 def author_env_effort() -> str:

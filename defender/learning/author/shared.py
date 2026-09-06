@@ -98,12 +98,8 @@ def actor_generation_count(repo_root: Path) -> int:
     return _generation_count("Actor-Model", repo_root=repo_root)
 
 
-def benign_generation_count(repo_root: Path) -> int:
-    return _generation_count("Benign-Actor-Model", repo_root=repo_root)
 
 
-def actor_env_generation_count(repo_root: Path) -> int:
-    return _generation_count("Actor-Env-Model", repo_root=repo_root)
 
 
 def without_consumed_category(rec: dict) -> dict:
