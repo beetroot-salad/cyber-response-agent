@@ -102,9 +102,18 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
 # The ceiling's own domain — 1, 0 and -1
 
 
+#: ONE DEMAND LEFT THIS FILE WITH #922. `test_a_faulted_tick_defers_its_held_and_pre_consumed_
+#: classifications` needed one batch whose rows land in THREE different gate buckets at once —
+#: authored, held, pre-consumed — which the observation channels gave for free because their
+#: rows carried no source bundle for the gate to judge. Every findings row in one batch with
+#: one ground truth lands in the same bucket, so the batch shape the demand was about cannot be
+#: built on the surviving channel. Restore it when a second channel returns.
+
+
 def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
     """Shared body for the three ceiling members; each demand's own test drives it."""
     paths = h.make_paths(tmp_path)
+    h.write_source_refs(paths, "b")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "b/0")])
     cfg = h.cfg_for(
@@ -190,33 +199,6 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     assert ch.file.read_bytes() == before, "the queue survives a failed retirement write"
 
 
-def test_a_faulted_tick_defers_its_held_and_pre_consumed_classifications(tmp_path: Path):
-    """A8: a tick whose authoring faults commits only the retirement. The rows the gate held
-    and the rows it pre-consumed are left exactly where they were, to be re-classified on the
-    next tick — the failing tick does not get to half-rotate a queue whose authoring never
-    landed."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
-    rows = [
-        h.row_for("findings", "a/0"),
-        h.row_for("findings", "a/1", outcome="survived"),
-        h.row_for("findings", "a/2", outcome="unrecognised-outcome"),
-    ]
-    h.seed(ch, rows)
-    cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(author_shared.AuthorError("authoring failed")),
-    )
-    assert drain.run_batch(cfg=cfg) == 2
-
-    survivors = h.pending_by_id(ch)
-    assert sorted(survivors) == ["a/1", "a/2"], "only the authored row retired"
-    assert survivors["a/1"] == rows[1], "the pre-consumed row was not rotated out"
-    assert survivors["a/2"] == rows[2], "the held row carries no held_reason yet"
-    assert [r.get("consumed_category") for r in h.consumed(ch)] == ["consumed_retired"]
 
 
 
@@ -314,7 +296,7 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
         "from defender.learning.author import drain\n"
         "from defender.learning.core.config import LoopPaths\n"
         "paths = LoopPaths(repo_root=Path(sys.argv[1]))\n"
-        "out = drain.retire(channel=paths.actor_observations, batch_ids=['a/0'],\n"
+        "out = drain.retire(channel=paths.findings, batch_ids=['a/0'],\n"
         "                   reason='second process', max_attempts=2)\n"
         "print(out.bumped['a/0'])\n"
     )

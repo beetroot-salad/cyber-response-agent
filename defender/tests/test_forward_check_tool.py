@@ -1082,7 +1082,9 @@ def test_d27_user_prompt_carries_no_command_template(tmp_repo):
     assert "f-1" in built
 
     root = config.REPO_ROOT / "defender" / "learning" / "author"
-    for name in ("lessons", "malicious_actor", "benign_actor"):
+    # `lessons` alone since #922: the two observation curators and their prompts went with
+    # the channels they authored. The demand is about every SHIPPED curator prompt.
+    for name in ("lessons",):
         text = (root / name / "prompt.md").read_text()
         for token in _COMMAND_TEMPLATE_TOKENS:
             assert token not in text, f"{name}/prompt.md still carries {token!r}"
