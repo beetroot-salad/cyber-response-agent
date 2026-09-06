@@ -599,7 +599,7 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
     # would be a role holding a grant, and the whole posture is that they hold none.
     # DISCRIMINATION was a third such role and is retired; the count moved with it, which is
     # what this assertion is for.
-    assert len({role for role in AgentRole}) == 11
+    assert len({role for role in AgentRole}) == 8
     for deps, expected in cases:
         assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
     with pytest.raises((ValueError, TypeError)):
