@@ -102,8 +102,18 @@ re-answer another system's view of a named entity, and the corpus half, which in
 under a base pattern the environment already declares, or excludes the documents a predicate
 matches.
 
+A REAL DOCUMENT FROM EACH CORPUS IS BELOW, in the framed capture. Copy its field names and
+its value shapes — an injected document that invents them is retrieved by no query the
+investigation's own vocabulary writes, so the world stages a difference nothing can observe.
+Read the sample for the exact spellings: which fields are nested and which are flat, and what
+a value actually looks like (a loopback source recorded as `::1` is not the same document as
+one recorded as `127.0.0.1`, and a query for one does not return the other). A corpus listed
+with no document was queried and held nothing.
+
 The base patterns you may key are LISTED IN THE MEASUREMENT SECTION above, and that list is
-the whole of what this deployment serves. Do not reach for a pattern because the world you are
+the whole of what this deployment serves. Prefer the NARROWEST pattern that carries your
+evidence: a world's view matches the pattern it is keyed on exactly, so a document staged
+under a wide pattern is not returned to a query addressing a narrow one. Do not reach for a pattern because the world you are
 authoring would be easier to evidence with one — a sensor this environment does not run has no
 corpus to stage into, and the family is refused rather than staged. Express the difference
 inside a pattern that is offered, or choose an axis the offered corpora can carry.

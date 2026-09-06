@@ -969,3 +969,29 @@ __all__ = [
     "sibling_run_dir",
     "staged_rows", "sym", "world_doc", "world_token", "write_family",
 ]
+
+
+def sampled_run(tmp_path: Path, *, rows: list) -> Path:
+    """A run dir whose two tables hold `rows` — `(base_pattern, payload)` pairs, in order.
+
+    The sampler's own inputs and nothing else: one lead, one query row per pair, and the
+    payload by-ref at the path `payload_path` names. Hand-built rather than driven through
+    `capture_call` because what is under test is the WALK — which payload a pattern ends up
+    with when several are eligible — so the order and the shapes have to be the scenario's.
+    """
+    run = tmp_path / "sampled-run"
+    (run / "gather_raw" / "l-001").mkdir(parents=True, exist_ok=True)
+    (run / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"goal": "g", "what_to_summarize": []}), encoding="utf-8")
+    lines = []
+    for seq, (pattern, payload) in enumerate(rows):
+        ref = f"gather_raw/l-001/{seq}.json"
+        (run / ref).write_text(json.dumps(payload), encoding="utf-8")
+        lines.append(json.dumps({
+            "lead_id": "l-001", "seq": seq, "system": "elastic", "verb": "query",
+            "query_id": "elastic.ad-hoc", "params": {"index": pattern},
+            "raw_command": "", "exit_code": 0, "payload_status": "ok",
+            "payload_digest": "n bytes", "payload_path": ref,
+        }))
+    (run / "executed_queries.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return run

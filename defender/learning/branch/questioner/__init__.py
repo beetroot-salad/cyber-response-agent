@@ -55,6 +55,7 @@ from pathlib import Path
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
+import json
 import yaml
 
 from defender import _yaml
@@ -178,6 +179,33 @@ def _measurement_header(source_run_dir: Path, episode_dir: Path,
     )
 
 
+def _corpus_section(samples: Any) -> str:
+    """One real document per corpus, as a framed section — the answer to "what does a document
+    here look like".
+
+    UNTRUSTED, with the rest of the capture. These are documents out of the monitored estate,
+    which is the same attacker-influenced material the leads and the alert carry; the sample is
+    shown so the author can MATCH a shape, never so it can be obeyed.
+
+    A pattern whose every query came back empty is listed with no document rather than omitted.
+    "Asked, and held nothing" is a fact about this deployment an author needs — it is the
+    difference between a corpus that is live and one that is not — and dropping the key would
+    leave the two indistinguishable.
+    """
+    if not isinstance(samples, dict) or not samples:
+        return ""
+    lines: list[str] = []
+    for pattern, document in samples.items():
+        if document:
+            lines.append(f"{pattern}:\n{json.dumps(document, indent=2, default=str)}")
+        else:
+            lines.append(f"{pattern}:\n(every query against this corpus returned no rows)")
+    return titled_section(
+        "One real document from each corpus this investigation queried — match these field "
+        "names and value shapes when you author documents to inject",
+        "\n\n".join(lines))
+
+
 @dataclass(frozen=True)
 class _Capture:
     """The three captured inputs as rendered SECTION BODIES, ready to be framed.
@@ -192,14 +220,17 @@ class _Capture:
     leads: str
     alert: str
     frontier: str
+    corpora: str = ""
 
 
-def _capture_sections(*, leads: Any, alert: Any, frontier: str) -> _Capture:
-    """The three captured inputs, rendered."""
+def _capture_sections(*, leads: Any, alert: Any, frontier: str,
+                      corpus_samples: Any = None) -> _Capture:
+    """The captured inputs, rendered."""
     return _Capture(
         leads=titled_section("The joined leads at the branch point", leads),
         alert=titled_section("The alert this investigation started from", alert),
         frontier=titled_section("The investigation document at the branch point", frontier),
+        corpora=_corpus_section(corpus_samples),
     )
 
 
@@ -320,7 +351,7 @@ def _family_prompt(header: str, capture: _Capture) -> str:
     instruction in it. `stage_user_message` puts the reader contract at the head of the framed
     region, so what follows the contract is exactly the region it speaks about.
     """
-    salt = message_salt(capture.leads, capture.alert, capture.frontier)
+    salt = message_salt(capture.leads, capture.alert, capture.frontier, capture.corpora)
     return (
         f"{_prompt('family.md')}\n{header}\n"
         + stage_user_message(
@@ -328,6 +359,7 @@ def _family_prompt(header: str, capture: _Capture) -> str:
             wrap(capture.leads, UNTRUSTED_TAG, salt),
             wrap(capture.alert, UNTRUSTED_TAG, salt),
             wrap(capture.frontier, UNTRUSTED_TAG, salt),
+            *([wrap(capture.corpora, UNTRUSTED_TAG, salt)] if capture.corpora else []),
         )
     )
 
@@ -345,7 +377,7 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
     seen — the reply was already in hand when it was minted. A family-wide salt would hand the
     framed party the delimiter of the frame its own words arrive in."""
     seeded = titled_section(f"Call 1's output (seat {seat} authors against this)", family_reply)
-    salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier)
+    salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier, capture.corpora)
     axis_line = f"Your axis, as call 1 named it: {axis}\n" if axis is not None else ""
     return (
         f"{_prompt('world.md')}\n"
@@ -357,6 +389,11 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
             wrap(capture.leads, UNTRUSTED_TAG, salt),
             wrap(capture.alert, UNTRUSTED_TAG, salt),
             wrap(capture.frontier, UNTRUSTED_TAG, salt),
+            # THE SEAT SEES THE CORPORA TOO, though it authors no overlay. Its story has to be
+            # true of the documents call 1 staged, and a story that names a field the corpus
+            # does not carry — or a value in a shape it never holds — describes a world the
+            # overlay did not build.
+            *([wrap(capture.corpora, UNTRUSTED_TAG, salt)] if capture.corpora else []),
         )
     )
 
@@ -455,6 +492,7 @@ def author_family(
     alert: Any,
     frontier: str,
     stageable_patterns: Sequence[str] = (),
+    corpus_samples: Any = None,
 ) -> dict[str, Any]:
     """Author one family document: three model calls, one role key, three identities.
 
@@ -482,7 +520,8 @@ def author_family(
     # — the joined leads, the alert and the whole frontier, routinely hundreds of kilobytes —
     # and spelled inside the seat loop it was rebuilt per seat for a value that cannot vary
     # between them. The FRAMING is per call, because the salt is (see `_world_prompt`).
-    capture = _capture_sections(leads=leads, alert=alert, frontier=frontier)
+    capture = _capture_sections(leads=leads, alert=alert, frontier=frontier,
+                                corpus_samples=corpus_samples)
     family_reply = invoke(
         _family_prompt(header, capture),
         role=AgentRole.QUESTIONER,

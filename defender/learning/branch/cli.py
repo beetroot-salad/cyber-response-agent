@@ -1371,20 +1371,29 @@ def _author(
     costs a primed episode and however many siblings had already run against a live model.
     """
     from defender.learning.branch import questioner as questioner_mod
-    from defender.learning.lead_repository import joined
+    from defender.learning.branch.estate.stagers.elastic import source_pattern  # noqa: E501 # lint-shippable: ok — the per-vendor stager owns which key of a call names its corpus; the join surface holds no vendor knowledge and takes this as its `pattern_of`
+    from defender.learning.lead_repository import corpus_samples, joined
 
     as_of = branch_point_clock(source, ns.branch_message_id)
     fences = _fence_count(source, ns.branch_message_id,
                           continuation_prompt=ns.continuation_prompt, as_of=as_of)
+    # ONE WALK, TWO ANSWERS. `corpus_samples` keys every base pattern the capture addressed,
+    # so its keys ARE the capture's own FROM sources — which is exactly what `parse_family`
+    # judges an overlay's keys against, and what the prompt must name as stageable. Derived
+    # apart, the sampler and the pattern set would answer for two different captures.
+    samples = _corpus_samples(source, corpus_samples, source_pattern)
+    captured = tuple(samples)
+    stageable = tuple(dict.fromkeys([*patterns, *captured]))
     document = questioner_mod.author_family(
         source_run_dir=source, episode_dir=episode_dir,
         invoke=questioner,
         leads=_joined_leads(source, joined),
         alert=_alert_document(source),
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
-        # The SAME set `parse_family` five lines down judges the authored overlays against, so
-        # the prompt and the refusal cannot name two different domains.
-        stageable_patterns=patterns,
+        # The SAME set `parse_family` below judges the authored overlays against, so the prompt
+        # and the refusal cannot name two different domains.
+        stageable_patterns=stageable,
+        corpus_samples=samples,
     )
     document.update({
         "episode_id": episode_id,
@@ -1395,11 +1404,38 @@ def _author(
         "as_of": as_of.isoformat().replace("+00:00", "Z"),
         "continuation_prompt": ns.continuation_prompt,
     })
-    family = parse_family(document)
+    # `captured_patterns` SUPPLIED, which no caller did before. `_check_overlay_keys` admits a
+    # configured pattern OR one the capture's own FROM sources name, and with the second half
+    # never passed the rule had one branch: every world was forced onto the deployment's widest
+    # configured key. A view matches its pattern by EQUALITY (the stager owns that rule in
+    # its own `declares`), so a
+    # world staged under `logs-*` is invisible to every narrower query the investigation
+    # actually issues — a difference that is staged, recorded and unobservable.
+    family = parse_family(document, captured_patterns=captured)
     check_identities(family)
     _family.write_family(episode_dir, document)
     return family
 
+
+def _corpus_samples(source: Path, sampler: Any, pattern_of: Any) -> dict[str, Any]:
+    """One document per corpus the capture queried, or nothing if the tables cannot be read.
+
+    Best-effort like `_joined_leads` beside it, and for the same reason: the samples are an
+    ORIENTATION aid, so a run whose payloads are unreadable should author a family with a
+    thinner prompt rather than refuse an episode over an aside. The count is printed because a
+    silently empty sample set looks identical to a capture that queried nothing, and the two
+    call for different operator responses.
+    """
+    try:
+        samples = sampler(source, pattern_of=lambda q: pattern_of(q.verb, q.params or {}))
+    except Exception as unreadable:  # noqa: BLE001 — an unreadable table is a thinner prompt
+        print(f"[branch] could not sample the source's corpora ({unreadable!r}); the questioner "
+              "is shown none", file=sys.stderr)
+        return {}
+    shown = sum(1 for doc in samples.values() if doc)
+    print(f"[branch] sampled {shown} corpus document(s) across {len(samples)} pattern(s) the "
+          "capture addressed")
+    return samples
 
 def _fence_count(source: Path, branch_message_id: int, *,
                  continuation_prompt: str, as_of: Any) -> int:

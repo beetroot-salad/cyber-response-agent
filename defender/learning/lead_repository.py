@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from defender._io import TEXT_READ_ERRORS, read_jsonl_rows_report, read_text_utf8
+from defender._io import (
+    TEXT_READ_ERRORS,
+    read_guarded,
+    read_jsonl_rows_report,
+    read_text_utf8,
+)
 from defender._run_paths import (
     LEAD_ID_RE as _LEAD_ID_RE,
     RunPaths,
@@ -245,6 +250,136 @@ def _partition(rows: list[QueryRow]) -> tuple[list[QueryRow], list[QueryRow]]:
         [r for r in ordered if r.is_sentinel],
     )
 
+
+
+#: How much of one sampled document reaches a prompt. A payload is whatever an adapter wrote —
+#: routinely thousands of fields across hundreds of hits — and the reader of a sample needs the
+#: SHAPE of a document, not the document. Both caps are applied per sampled document, and the
+#: sample says so when it elides, because a reader that cannot tell a short document from a
+#: truncated one will author against the truncation.
+SAMPLE_MAX_FIELDS = 40
+SAMPLE_MAX_VALUE_CHARS = 200
+#: Containers are capped too, and nesting is bounded: a payload can carry an object deep
+#: enough that a faithful rendering is longer than the prompt it is an aside in.
+SAMPLE_MAX_ITEMS = 5
+SAMPLE_MAX_DEPTH = 6
+
+
+def _one_document(payload: object) -> dict | None:
+    """One document out of a parsed payload, in whichever shape the wire used.
+
+    Two shapes reach here and both are real: a search answers `{"hits": [...]}`, where a hit IS
+    a document; ES|QL answers `{"columns": [...], "values": [[...]]}`, where a row is a
+    PROJECTION and the document shape is only as wide as the query's own SELECT. The projection
+    is still worth showing — it names real fields — but it is not the same claim, so the caller
+    is told which it got by the `esql_projection` key rather than left to infer it from shape.
+    """
+    if not isinstance(payload, dict):
+        return None
+    hits = payload.get("hits")
+    if isinstance(hits, list):
+        for hit in hits:
+            if isinstance(hit, dict) and hit:
+                return dict(hit)
+    columns, values = payload.get("columns"), payload.get("values")
+    if isinstance(columns, list) and isinstance(values, list):
+        names = [c.get("name") for c in columns if isinstance(c, dict)]
+        for row in values:
+            if isinstance(row, list) and row and len(row) == len(names):
+                return {"esql_projection": True,
+                        **{n: v for n, v in zip(names, row, strict=True) if isinstance(n, str)}}
+    return None
+
+
+def _capped_document(value: object, depth: int = 0) -> object:
+    """`value` trimmed to what a prompt can carry, saying so wherever it elided.
+
+    STRUCTURE SURVIVES THE TRIM. Stringifying a nested object here rendered it as a Python
+    repr — single-quoted keys, `None` for null — inside a sample whose whole purpose is to show
+    what a document in this corpus looks like. An author copying that shape writes a document
+    with one flat field holding a quoted blob where the corpus has an object, which is the
+    invented-shape failure this sampler exists to remove, reintroduced by its own renderer.
+    Only leaf STRINGS are truncated; containers are capped by length and recursed into.
+    """
+    if depth >= SAMPLE_MAX_DEPTH:
+        return "…(nested further)"
+    if isinstance(value, dict):
+        out: dict = {str(k): _capped_document(v, depth + 1)
+                     for k, v in list(value.items())[:SAMPLE_MAX_FIELDS]}
+        if len(value) > SAMPLE_MAX_FIELDS:
+            out["…"] = f"{len(value) - SAMPLE_MAX_FIELDS} further field(s) not shown"
+        return out
+    if isinstance(value, list):
+        out_list: list = [_capped_document(v, depth + 1) for v in value[:SAMPLE_MAX_ITEMS]]
+        if len(value) > SAMPLE_MAX_ITEMS:
+            out_list.append(f"…{len(value) - SAMPLE_MAX_ITEMS} further item(s) not shown")
+        return out_list
+    if isinstance(value, str) and len(value) > SAMPLE_MAX_VALUE_CHARS:
+        return value[:SAMPLE_MAX_VALUE_CHARS] + " …(truncated)"
+    return value
+
+
+def corpus_samples(
+    run_dir: Path, *, pattern_of: Callable[[QueryRow], str | None]
+) -> dict[str, dict | None]:
+    """One real document per base pattern this run's queries addressed.
+
+    THE ANSWER TO "what does a document in this corpus look like". Its caller is the questioner,
+    which authors documents to INJECT into these corpora and, without this, had only
+    `QueryRow.payload_digest` — the byte count — to go on. A world staged with invented field
+    names is a world whose evidence no query of the investigation's own vocabulary retrieves,
+    and that is a difference that is staged, recorded and unobservable.
+
+    EVERY ADDRESSED PATTERN IS A KEY, including the ones whose every query came back empty:
+    `None` there says "this corpus was asked and held nothing", which is a different fact from
+    a pattern the run never addressed, and the difference is exactly what tells an author which
+    corpora are live in this deployment. The keys are therefore also the capture's own FROM
+    sources — what `parse_family(captured_patterns=...)` judges an overlay's keys against.
+
+    `pattern_of` is INJECTED because which key of a call names its corpus is the estate's
+    vendor knowledge and this module holds none: the join surface owns the walk, the stager
+    owns the routing.
+
+    Reads go through `read_guarded`, not `artifact_file` then read. A payload lives in a prior
+    box's rw bind, and this one is bound for a model PROMPT: the lstat-then-open pair is a
+    check-then-act window on a path a model can replace between the two, and the bytes that
+    then reach the prompt are the planted link's target. One unreadable payload skips to the
+    next candidate rather than blinding the pattern.
+    """
+    samples: dict[str, dict | None] = {}
+    for lead in joined(Path(run_dir)):
+        for query in lead.queries:
+            try:
+                pattern = pattern_of(query)
+            except Exception:  # noqa: BLE001 — a router that refuses a call names no corpus
+                continue
+            if not isinstance(pattern, str) or not pattern:
+                continue
+            # A REAL DOCUMENT OUTRANKS A PROJECTION, so a pattern whose first usable payload
+            # was an ES|QL row keeps looking. The author's question is "what does a document
+            # here look like", and an aggregate's columns (`STATS ... BY proc`) answer a
+            # different one — they name real fields, but nothing about the shape of the record
+            # those fields sit in. First-usable-wins locked the weaker answer in whenever a
+            # summarising query happened to run before a retrieving one, which is the ordinary
+            # order for a lead that counts before it reads.
+            held = samples.get(pattern)
+            if held is not None and not held.get("esql_projection"):
+                continue
+            samples.setdefault(pattern, None)
+            if query.raw_ref is None or query.payload_status != "ok":
+                continue
+            text, _refused = read_guarded(query.raw_ref)
+            if text is None:
+                continue
+            try:
+                document = _one_document(json.loads(text))
+            except (ValueError, TypeError):
+                continue
+            if document and (samples.get(pattern) is None
+                             or not document.get("esql_projection")):
+                capped = _capped_document(document)
+                samples[pattern] = capped if isinstance(capped, dict) else None
+    return samples
 
 def first_rendered_payload(
     lead: JoinedLead, render: Callable[[str], str], *, unreadable: str, missing: str
