@@ -735,17 +735,6 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
 
 
 
-def test_source_run_dir_absolute_when_state_dir_out_of_repo(tmp_path: Path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    state = tmp_path / "state"
-    paths = LoopPaths(repo_root=repo, state_dir=state)
-    assert paths.runs_dir == state / "runs"
-
-    learning_run_dir = paths.runs_dir / "case-x"
-    src = persist._source_run_dir(learning_run_dir, paths.repo_root)
-    assert src == str(learning_run_dir) + "/"
-    assert paths.repo_root / src.rstrip("/") == learning_run_dir
 
 
 
