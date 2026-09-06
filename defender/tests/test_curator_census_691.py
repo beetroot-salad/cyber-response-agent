@@ -62,15 +62,6 @@ def test_the_generic_bash_census_enumerates_the_curator(tmp_path):
         build_registry((_misconfigured_writer_def(),))
 
 
-def test_the_census_prose_and_the_census_predicate_disagree(tmp_path):
-    """The ``d.tools.bash`` predicate yields SIX roles; the prose count beside it (five) goes stale
-    and must be updated (K9/x5). The curator is among the six and is now bindable — every registered
-    def binds through the one seam, so there is no ``bindable`` field left to gate on."""
-    assert _bash_roles() == {
-        AgentRole.MAIN, AgentRole.GATHER, AgentRole.JUDGE, AgentRole.ACTOR,
-        AgentRole.LEAD_AUTHOR, AgentRole.CORPUS_AUTHOR,
-    }
-    assert "bindable" not in AgentDefinition.__dataclass_fields__
 
 
 def test_the_second_census_hiding_inside_the_first(tmp_path):
@@ -188,22 +179,6 @@ def test_every_role_in_the_registry_binds_through_the_one_seam(tmp_path):
     assert curator.policy.write_allow  # a real corpus-rooted write scope, produced by bind
 
 
-def test_shared_runscope_reused_across_role_loop_iterations(tmp_path):
-    """Reusing one RunScope across role-loop iterations has no observable effect on the next role's
-    bind — bind READS the scope, never writes back to it. Drive two binds from one scope object;
-    the second's policy is independent of the first. RED today (corpus_name field / bindable)."""
-    from defender.runtime.agent_definition import RunScope, compile_policy_for, effective_tools_for
-    rd = pending_run_dir(tmp_path)
-    scope = RunScope(corpus_name="lessons")  # RED: no field
-    p1 = compile_policy_for(AGENTS[AgentRole.GATHER], rd, scope=scope)
-    p2 = compile_policy_for(
-        AGENTS[AgentRole.JUDGE], rd, scope=scope, tools=effective_tools_for(AGENTS[AgentRole.JUDGE]),
-    )
-    # two distinct roles compiled from the ONE reused scope get distinct policies — the shared
-    # scope did not leak the first role's policy into the second (discriminating: fails if bind
-    # mutated the scope so the second bind reproduced the first).
-    assert p1.write_allow != p2.write_allow or p1.read_allow != p2.read_allow
-    assert scope.read_confine == ()  # unchanged: bind never wrote back
 
 
 def test_the_generic_bind_callers_survive_the_corpus_requirement(tmp_path):

@@ -30,7 +30,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender._paths import PATHS  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
@@ -41,7 +40,6 @@ from _curator_691_harness import (  # noqa: E402
     confine,
     corpus,
     curator_deps,
-    forward_check_gate,
     make_worktree,
     pending_run_dir,
     read_decision,

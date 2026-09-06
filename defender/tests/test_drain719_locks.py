@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import inspect
 import threading
-import time
 from pathlib import Path
 
 

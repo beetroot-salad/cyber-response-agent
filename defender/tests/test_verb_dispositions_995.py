@@ -30,7 +30,6 @@ from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry, declared_verb_names
 from defender.tests._dispositions995 import (
     GATHER_CENSUS,
-    JUDGE_CENSUS,
     WITHHELD_CENSUS,
     Disposition,
     DispositionError,

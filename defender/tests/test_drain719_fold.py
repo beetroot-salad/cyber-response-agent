@@ -16,7 +16,6 @@ import re
 import subprocess
 from pathlib import Path
 
-import pytest
 
 import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim

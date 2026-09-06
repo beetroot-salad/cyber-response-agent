@@ -33,7 +33,6 @@ from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 import defender.runtime.tools as _rt_tools  # noqa: E402  (the shared read core / char cap)
-from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.agents import AGENTS  # noqa: E402
@@ -214,43 +213,8 @@ def test_l7_denied_path_raises_no_existence_oracle(tmp_path):
         logger.close()
 
 
-def test_l8_admits_a_sibling_corpus_the_cat_lane_cannot(tmp_path):
-    """demand: L8 — the read surface is root-only (like the removed read_file): it admits a SIBLING
-    corpus file that the corpus-anchored bash ``cat`` lane denies."""
-    scene = _scene(tmp_path)
-    sib = scene.repo / "defender" / "lessons-actor" / "sib.md"
-    sib.write_text("---\ntechniques: [T1]\n---\nSIB-BODY\n")
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
-        deps = _deps(scene)
-        out = _read(agent, deps, path="defender/lessons-actor/sib.md", part="full")
-        cat = permission.decide_bash(
-            "cat defender/lessons-actor/sib.md", policy=deps.policy,
-            run_dir=deps.run_dir, defender_dir=deps.defender_dir,
-        )
-    finally:
-        logger.close()
-    assert "SIB-BODY" in out
-    assert not cat.allow
 
 
-def test_l9_template_schema_read_via_full(tmp_path):
-    """demand: L9 — the ``_TEMPLATE.md`` schema-read workflow completes via part='full' (the schema
-    frontmatter is returned) while the default body strips it."""
-    scene = _scene(tmp_path)
-    tmpl = scene.repo / "defender" / "lessons-actor" / "_TEMPLATE.md"
-    tmpl.write_text("---\ntechniques: []\nmutable: false\n---\nTEMPLATE-BODY\n")
-    lp = "defender/lessons-actor/_TEMPLATE.md"
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
-        deps = _deps(scene)
-        full = _read(agent, deps, path=lp, part="full")
-        body = _read(agent, deps, path=lp)
-    finally:
-        logger.close()
-    assert "techniques" in full
-    assert "techniques" not in body
-    assert "TEMPLATE-BODY" in body
 
 
 def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
@@ -298,65 +262,10 @@ def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
     assert out.endswith(f"\n</run-{salt}-untrusted>")
 
 
-def test_l12_records_lesson_load_across_all_three_corpora(tmp_path):
-    """demand: L12 — a lesson_read of a findings, actor, OR env lesson appends a lessons_loaded.jsonl
-    row into run_dir (the record-load matcher widened to all three corpora)."""
-    scene = _scene(tmp_path)
-    find = _lesson(scene.corpus, "find-lesson")
-    actor = _lesson(scene.repo / "defender" / "lessons-actor", "actor-lesson", name_key=False)
-    env = _lesson(scene.repo / "defender" / "lessons-environment", "env-lesson", name_key=False)
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
-        deps = _deps(scene)
-        for lp in (find, actor, env):
-            _read(agent, deps, path=lp, part="full")
-    finally:
-        logger.close()
-    rows = read_jsonl_rows(scene.curdir / "lessons_loaded.jsonl")
-    loaded = {r.get("lesson_name") for r in rows}
-    assert "actor-lesson" in loaded
-    assert "env-lesson" in loaded
-    assert "find-lesson" in loaded
 
 
-def test_l12b_read_file_keeps_the_author_corpora_out_of_the_case_trace(tmp_path):
-    """demand: L12, scope half — the F3 widening belongs to ``lesson_read``, NOT to every reader.
-    The generic ``read_file`` core still records the RUNTIME corpus only: the gray-box actor reads
-    ``lessons-actor/`` tradecraft through ``read_file`` on every run (its ``read_confine`` names it
-    and, having no ``cat`` grant, it carries no path shapes at all — #575, so ``decide_read`` stays
-    root-only inside that confine) and its ``run_dir`` IS the durable per-case learning bundle
-    ``trace_lesson`` scans — so recording there would write attacker-corpus rows straight into the
-    defender's lesson→outcome trace."""
-    scene = _scene(tmp_path)
-    find = _lesson(scene.corpus, "rf-find")
-    actor = _lesson(scene.repo / "defender" / "lessons-actor", "rf-actor", name_key=False)
-    deps = _deps(scene)
-    assert "lesson body" in _rt_tools._tool_read_file(deps, actor)
-    _rt_tools._tool_read_file(deps, find)
-    rows = read_jsonl_rows(scene.curdir / "lessons_loaded.jsonl")
-    loaded = {r.get("lesson_name") for r in rows}
-    assert "rf-actor" not in loaded
-    assert "rf-find" in loaded
 
 
-def test_l12c_template_schema_read_is_not_a_lesson_load(tmp_path):
-    """demand: L9/L12 corner — ``_TEMPLATE.md`` is the corpus SCHEMA a curator reads (part='full'),
-    not a lesson, so it records NO load. The ``_`` skip matches the convention
-    ``build_corpus_manifest`` / ``existing_observation_ids`` already follow."""
-    scene = _scene(tmp_path)
-    tmpl = scene.repo / "defender" / "lessons-actor" / "_TEMPLATE.md"
-    tmpl.write_text("---\ntechniques: []\n---\nTEMPLATE-BODY\n")
-    real = _lesson(scene.repo / "defender" / "lessons-actor", "tmpl-ctl", name_key=False)
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
-        deps = _deps(scene)
-        _read(agent, deps, path="defender/lessons-actor/_TEMPLATE.md", part="full")
-        _read(agent, deps, path=real, part="full")
-    finally:
-        logger.close()
-    loaded = {r.get("lesson_name") for r in read_jsonl_rows(scene.curdir / "lessons_loaded.jsonl")}
-    assert "_TEMPLATE" not in loaded
-    assert "tmpl-ctl" in loaded
 
 
 

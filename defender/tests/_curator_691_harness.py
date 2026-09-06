@@ -48,7 +48,11 @@ from defender.learning.author.curator_engine import (  # noqa: E402
 from defender.learning.author.verify_forward.checks import FINDINGS_CHECK  # noqa: E402
 
 # The three shipped lesson corpora — the exact-match membership set (MD-6) and the read confine (R4).
-SHIPPED: tuple[str, ...] = ("lessons", "lessons-actor", "lessons-environment")
+#: The shipped corpora, as the production census reports them. Three until #922 retired the
+#: actor and environment corpora with the curators that were their only writers; spelled here
+#: rather than imported because what the harness needs is the SHIPPED set as a fact, and a test
+#: that imported the very constant under change could not observe a divergence.
+SHIPPED: tuple[str, ...] = ("lessons",)
 
 
 # On-disk fixtures: a worktree (where lessons are authored) + a _pending run dir

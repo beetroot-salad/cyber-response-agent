@@ -23,7 +23,6 @@ import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core import persist  # type: ignore[import-not-found]
-from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 
 
 # Demand #0 — the return-value contract, after decision 1 flipped its `2` branch
