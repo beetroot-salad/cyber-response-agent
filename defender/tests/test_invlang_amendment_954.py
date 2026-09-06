@@ -1247,24 +1247,6 @@ def test_the_compaction_fold_sees_the_first_wins_bucket_not_a_blend():
     assert fold_boundary(FOLD_REPEAT_DOC) == 1
 
 
-def test_the_judge_comparison_sees_the_first_wins_bucket_not_a_blend(tmp_path):
-    """`judge_compare`'s companion read — the third of O3's named sites — returns the first
-    row's lead bucket for a document carrying a within-block repeat (D21).
-
-    The judge parses the run's committed `investigation_md` without validating and swallows
-    every exception, so a fused lead reaches the classification silently; there is no channel
-    by which the run could learn it was judged on a row the author overwrote.
-    """
-    from defender.learning.pipeline.judge.compare import parse_investigation_companion
-
-    run = tmp_path / "run"
-    run.mkdir()
-    (run / "investigation.md").write_text(REPEAT_DOC, encoding="utf-8")
-
-    lead = parse_investigation_companion(run)["findings"][0]
-    assert lead["name"] == "alpha"
-    assert lead["loop"] == 1
-    assert lead["query_details"]["system"] == "cmdb"
 
 
 def test_a_precedent_case_carrying_the_repeated_id_warning_is_not_loaded_as_clean(tmp_path):

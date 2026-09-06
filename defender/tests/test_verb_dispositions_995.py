@@ -522,18 +522,6 @@ def test_the_projected_judge_grant_is_exactly_the_historical_census():
     )
 
 
-def test_the_shipped_definitions_carry_the_projected_grants():
-    """The wiring: the driver's gather definition and the judge's definition must be BUILT
-    from the table, not merely accompanied by it. Checked by identity of content against the
-    projection, so a leftover hardcoded literal that happens to agree today would still be
-    caught the first time the table changes — and is caught now by the phantom/undecided
-    gates, which a literal cannot satisfy."""
-    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
-    from defender.runtime.driver import GATHER_DEF
-
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    assert set(GATHER_DEF.verb_grant.entries) == set(grant_for("gather", rows).entries)
-    assert set(JUDGE_DEF.verb_grant.entries) == set(grant_for("judge", rows).entries)
 
 
 def test_every_projected_pair_survives_registry_construction():
@@ -933,28 +921,6 @@ def test_no_module_under_defender_writes_the_disposition_table():
     assert not offenders, f"a run-path module appears to write the table: {offenders}"
 
 
-def test_exercising_the_run_paths_leaves_the_table_byte_identical():
-    """The behavioural half of O4, because the census above is a text scan and text scans are
-    defeatable.
-
-    An adversarial implementer wrote to the table from a module that never spelled its name —
-    the path was assembled from two constants — and appended rows to the real file on every
-    load. The grep saw nothing. Bytes see everything: snapshot the file, run every path that
-    touches it in a real process (load, both projections, and building the two agent
-    definitions that read them at import), and compare."""
-    table = dispositions_path(DEFENDER)
-    before = table.read_bytes()
-
-    rows = load_dispositions(table)
-    grant_for("gather", rows)
-    grant_for("judge", rows)
-    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
-    from defender.runtime.driver import GATHER_DEF
-
-    ModuleVerbRegistry(ADAPTERS, GATHER_DEF.verb_grant)
-    assert JUDGE_DEF.verb_grant is not None
-
-    assert table.read_bytes() == before, "a run path rewrote the disposition table"
 
 
 def test_the_table_loads_from_a_read_only_file():

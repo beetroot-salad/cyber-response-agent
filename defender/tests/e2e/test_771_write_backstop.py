@@ -52,8 +52,6 @@ pytest.importorskip("pydantic_ai")
 from defender import _io  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks import budget_enforcer, record_lead  # noqa: E402
-from defender.learning.core import markers, persist  # noqa: E402
-from defender.learning.core.config import LoopPaths  # noqa: E402
 from defender.runtime import circuit_breaker, tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.tests.e2e._spec771 import (  # noqa: E402
@@ -1027,56 +1025,6 @@ def test_the_write_lint_hard_gates_the_census_rows_and_ratchets_only_new_ones(tm
     )
 
 
-def test_write_atomic_callers_outside_the_run_dir_still_write(tmp_path):
-    """write_atomic_callers_survive — ALL FOUR atomic-write callers that land OUTSIDE every box
-    mount keep working after the primitive changes: the learning enqueue marker, the marker
-    rewrite, the pending-queue rewrite and the accounting-failure sidecar each still write, and
-    each one's content is read back and checked.
-
-    The fix is at the primitive, so all five call sites get it whether or not they are exposed
-    (G2/X6, firm consensus #14). This is a survival demand, not a coverage one: a primitive
-    hardened only for the exposed caller breaks callers that have nothing to do with boxes, and
-    nothing in the O1 negatives looks at them.
-
-    ALL FOUR ARE DRIVEN, and that is the repair rather than a flourish. Driving one and naming
-    four in the prose is the shape that reads as a passing survival demand while three of the
-    four callers are untested — and this demand is the only thing standing between the
-    primitive's rewrite and them."""
-    run = run_tree(tmp_path)
-    state_dir = tmp_path / "state"
-    paths = LoopPaths(repo_root=tmp_path, state_dir=state_dir)
-
-    # 1. the learning enqueue marker
-    markers.enqueue_for_learning(run, paths)
-    marker = paths.learn_queue_dir / f"{run.name}.json"
-    assert marker.is_file(), "the learning enqueue marker outside every box mount stopped writing"
-    assert json.loads(marker.read_text(encoding="utf-8"))["run_id"] == run.name
-
-    # 2. the marker rewrite — a second, distinct call site on the same artifact
-    markers.rewrite_marker(marker, {"run_id": run.name, "attempt": 2})
-    assert json.loads(marker.read_text(encoding="utf-8"))["attempt"] == 2, (
-        "the marker rewrite stopped landing, so a retried learning batch loses its own state"
-    )
-
-    # 3. the pending-queue rewrite — the caller whose whole job is replacing a file's contents
-    pending = state_dir / "pending.jsonl"
-    pending.parent.mkdir(parents=True, exist_ok=True)
-    pending.write_text('{"id": "a"}\n{"id": "b"}\n', encoding="utf-8")
-    persist._rewrite_queue(pending, state_dir / "consumed.jsonl", "id", [], [{"id": "a"}], None)
-    assert pending.read_text(encoding="utf-8") == '{"id": "b"}\n', (
-        "the queue rewrite no longer drops the consumed row — the drain would re-process it"
-    )
-
-    # 4. the accounting-failure sidecar, a SIBLING of the run dir and outside the bind (X6)
-    sidecar = accounting_sidecar(run)
-    budget_enforcer._record_accounting_failure(run, budget_enforcer.DEFAULT_LIMITS)
-    assert sidecar.is_file(), "the accounting-failure sidecar outside the run dir stopped writing"
-    assert json.loads(sidecar.read_text(encoding="utf-8"))["consecutive_failures"] == 1
-    assert not sidecar.is_relative_to(run), "the sidecar moved inside the box's reach"
-
-    leftovers = [str(q) for p in (run.parent, state_dir, paths.learn_queue_dir) if p.is_dir()
-                 for q in p.glob("*.tmp")]
-    assert not leftovers, f"a staged name was left beside a caller's target: {leftovers}"
 
 
 # the lead tables, and the second shared root

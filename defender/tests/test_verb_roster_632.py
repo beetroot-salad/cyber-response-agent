@@ -79,14 +79,11 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.hooks.inject_system_skill_description import descriptor_catalog  # noqa: E402
 from defender.runtime.driver import GATHER_DEF  # noqa: E402
 from defender.runtime.verb_roster import (  # noqa: E402
     RosterError,
-    audit_read_surfaces,
     generate_roster,
     load_roster,
-    model_read_surfaces,
     roster_path,
 )
 from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
@@ -99,13 +96,10 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     UNDECLARED,
     WITHHELD_COLLIDING_PAIR,
     WITHHELD_FROM_GATHER,
-    bare_only_surfaces,
-    declared_verbs_everywhere,
     grant_of,
     recording_table,
     roster_pairs,
     run_gather,
-    shipped_grants,
     ScopedFakeVerbs,
 )
 from defender.tests.e2e._replay_harness import DEFENDER, Turn, VerbRecorder  # noqa: E402

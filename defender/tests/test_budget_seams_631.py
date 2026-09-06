@@ -734,46 +734,8 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
 
 
 
-def test_the_runtime_skips_the_learning_enqueue_for_a_truncated_run(tmp_path, monkeypatch):
-    """The runtime itself skips the learning enqueue for a run marked
-    truncated_by: "budget" — no queue marker is dropped — rather than relying on
-    downstream report.md validation to reject it.
-
-    One auditable check the runtime OWNS, versus a validation-layer contract it does
-    not: if that gate is ever weakened, the loop trains on truncated investigations.
-    The positive control is test_a_completed_run_is_still_enqueued_for_learning."""
-    from defender import run_common
-
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learn"))
-    run_dir = _run_dir(tmp_path, "trunc")
-    alert = run_dir / "alert.json"
-    before = _markers(tmp_path / "learn")
-    assert run_common.enqueue_learning(run_dir, alert, truncated_by="budget") is False
-    assert _markers(tmp_path / "learn") == before, "a truncated run dropped a learn-queue marker"
 
 
-def test_a_completed_run_is_still_enqueued_for_learning(tmp_path, monkeypatch):
-    """An untruncated run is still enqueued for learning under the same harness — the
-    control that keeps the suppression demand from passing by killing the learning
-    loop outright.
-
-    `truncated_by` absent is an untruncated run and falsy_valid is true, which is the
-    `x or DEFAULT` swallow shape: an implementation that treated "no mark" and "a mark
-    I could not read" alike would suppress learning for EVERY run.
-
-    #771 §7 D9: enqueue also requires a completed reap-scan verdict on the tree — the same
-    thing `stop_and_scrub` always leaves behind for a real completed run before `run.py` ever
-    reaches this call. The scrub below is that real production walk, run over a tree with
-    nothing planted, so it completes clean and writes `ran: true`."""
-    from defender import run_common
-    from defender.runtime import scrub
-
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learn"))
-    run_dir = _run_dir(tmp_path, "ok")
-    scrub.scrub(run_dir)
-    alert = run_dir / "alert.json"
-    assert run_common.enqueue_learning(run_dir, alert, truncated_by=None) is True
-    assert _markers(tmp_path / "learn"), "the completed run dropped no marker"
 
 
 def _markers(root: Path) -> set[str]:

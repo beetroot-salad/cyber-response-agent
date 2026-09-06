@@ -31,24 +31,12 @@ from pathlib import Path
 
 from defender.tests._by_path import load_lint_gate
 
-import pytest
 
-from defender.learning.core import markers  # noqa: E402
 from defender.tests._spec791 import (  # noqa: E402
     PROJECT_PROFILE,
     RETIRED_DEAD_SYMBOLS,
     RETIRED_TELEMETRY_WRITER,
     VULTURE_BASELINE,
-    GroundedJudgeSubagents,
-    SpecBranch,
-    author_markers,
-    learn_markers,
-    loop_paths,
-    make_run_dir,
-    noop_scrub,
-    noop_start_box,
-    noop_stop_box,
-    satisfy_engine_keys,
     worktree_package_guard,  # noqa: F401 — session-scoped autouse guard, see _spec791
 )
 

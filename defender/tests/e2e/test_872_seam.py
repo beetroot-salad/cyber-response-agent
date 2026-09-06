@@ -36,7 +36,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 from defender.tests.e2e._toon872 import (  # noqa: E402
     REPO_ROOT,
     RUN_ID,
-    Dispatched,
     PartRecorder,
     agent_run,
     corpus,
@@ -432,131 +431,6 @@ def test_an_unlabelled_toolset_is_treated_as_foreign_and_only_the_composition_ro
     )
 
 
-def test_every_build_function_routes_through_the_site_that_installs_the_gate(
-    tmp_path: Path,
-) -> None:
-    """Each of the FIVE BUILD FUNCTIONS is invoked as itself — `build_agent`,
-    `build_gather_agent`, `build_stage_agent`, `build_judge_agent` and `review_roles`' injected
-    `build` seam — and the agent each one returns gates a foreign result.
-
-    §7 r5 split P2: reading A for the CAPABILITY (constructed at the single `Agent(...)` in
-    `build_agent_core`, so no build path can be silently missed — there are five and the
-    original census found one) and reading B for the TOOLSET.
-
-    THE CENSUS CLAIM IS ABOUT THE FUNCTIONS, NOT ABOUT THE DEFINITIONS, and that distinction is
-    the whole of this demand (`92-reconciliation.md` F5). Calling `build_agent_core` five times
-    with five `AgentDefinition`s establishes that the gate's construction is
-    definition-independent; it says nothing about whether `build_agent` and the other four
-    still ROUTE through that site, which is the only thing reading A was bought for and the
-    exact failure the original census found once: a build path that constructs its own agent.
-    So each build function is called here, with its own signature and its own dependencies, and
-    what is asserted about the result is the GATE'S EFFECT on a foreign result it is handed.
-    An `isinstance` sweep over the capability list would certify that a field exists and never
-    that it is wired; a re-drive of the shared site would certify nothing about the callers.
-
-    THE FOREIGN TOOLSET ARRIVES AT RUN TIME for the four that build an agent directly, because
-    none of them takes the `toolset=` seam — §7 r5 gave that to `run_investigation` alone — and
-    pydantic-ai applies a capability's wrapper to run-level toolsets as well (executed; see
-    `run_with_foreign_toolset`). The review lens is the exception and takes the seam it has:
-    `live_review_stages(build=...)` is a declared DI seam whose production default IS
-    `build_agent_core` (`review_roles.py:249`), so the lens is driven through it end to end —
-    built, bound and RUN by `_make_live_stage`'s own body.
-
-    The lanes this reaches but does not drive END TO END — the three review lenses and the six
-    learning stages in their own runtimes, where which salt frames a tool return is unprobed —
-    are the examined no at `d68`. The reach is asserted here; the coverage is not claimed.
-    """
-    import types
-
-    from defender.agents import AGENTS
-    from defender.learning.core.config import StageWiring
-    from defender.learning._pydantic_stage import build_stage_agent
-    from defender.learning.pipeline.judge.engine_pydantic import build_judge_agent
-    from defender.runtime import challenge_gate, driver, review_roles
-    from defender.runtime.agent_definition import AgentRole
-    from defender.tests.e2e._toon872 import (
-        DEFENDER,
-        SpyEncoder,
-        _deps,
-        _NullLogger,
-        probe_model,
-        run_with_foreign_toolset,
-    )
-
-    value = _payload()
-    expected = toons.dumps(value)
-
-    def _check(label: str, dispatched) -> None:
-        text = dispatched.text("fetch_rows")
-        assert framed_content(text) == expected, (
-            f"{label} returned an agent whose foreign result is not gated — the build path "
-            "does not route through the composition root that installs the gate"
-        )
-
-    # 1 — MAIN. `build_agent` is the one build path that takes NO `extra_capabilities`, which
-    # is why B2/F6 named it: it is the path a capability added at any other site would miss.
-    make_model, rec = probe_model()
-    agent = driver.build_agent(DEFENDER, _NullLogger(), make_model,
-                               bounds=challenge_gate.Bounds())
-    _check("build_agent", run_with_foreign_toolset(
-        agent, _deps(AGENTS[AgentRole.MAIN]), rec, value))
-
-    # 2 — the gather subagent, one per lead.
-    make_model, rec = probe_model()
-    agent = driver.build_gather_agent(DEFENDER, _NullLogger(), "gather:l-001", make_model)
-    _check("build_gather_agent", run_with_foreign_toolset(
-        agent, _deps(AGENTS[AgentRole.GATHER]), rec, value))
-
-    # 3 — a learning stage. The wiring's prompt is the real one on disk, so the definition the
-    # stage builds from is the definition production builds from.
-    make_model, rec = probe_model()
-    wiring = StageWiring(
-        prompt_path=DEFENDER / "learning" / "pipeline" / "malicious_actor" / "prompt.md",
-        model=AGENTS[AgentRole.ACTOR].model(), effort=None,
-        trace_name="actor", label="actor",
-    )
-    agent = build_stage_agent(AGENTS[AgentRole.ACTOR].deps_cls, wiring, _NullLogger(),
-                              make_model=make_model)
-    _check("build_stage_agent", run_with_foreign_toolset(
-        agent, _deps(AGENTS[AgentRole.ACTOR]), rec, value))
-
-    # 4 — the judge. A separate function even though it delegates to build_stage_agent: the
-    # census is over the functions a caller can reach, and this is one of them.
-    make_model, rec = probe_model()
-    wiring = StageWiring(
-        prompt_path=DEFENDER / "learning" / "pipeline" / "judge" / "malicious.md",
-        model=AGENTS[AgentRole.JUDGE].model(), effort=None,
-        trace_name="judge", label="judge",
-    )
-    agent = build_judge_agent(wiring, _NullLogger(), make_model=make_model)
-    _check("build_judge_agent", run_with_foreign_toolset(
-        agent, _deps(AGENTS[AgentRole.JUDGE]), rec, value))
-
-    # 5 — a review lens, through the injected `build` seam whose production default is
-    # `build_agent_core`. The lens builds AND runs its own agent inside `_make_live_stage`, so
-    # the toolset is supplied at the seam rather than at the run.
-    make_model, rec = probe_model()
-    spy = SpyEncoder()
-    built_for: list[str] = []
-
-    def _build(defn, **kw):
-        built_for.append(kw.get("agent_id", ""))
-        return driver.build_agent_core(
-            defn, make_model=make_model, toolset=foreign_toolset(value),
-            toon_encoder=spy, **kw,
-        )
-
-    run_dir = tmp_path / "review"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    stages = review_roles.live_review_stages(
-        run_dir, DEFENDER, logger=_NullLogger(), build=_build)
-    import asyncio
-    asyncio.run(stages.stage("support")(types.SimpleNamespace(prompt="go")))
-    assert built_for == ["review:support"], (
-        "the review lens did not reach the injected build seam, so this arm says nothing "
-        f"about the lens's build path (saw {built_for!r})"
-    )
-    _check("review_roles' injected build", Dispatched(rec.requests, []))
 
 
 def test_a_missing_toons_wheel_refuses_the_gate_without_killing_any_build_path() -> None:

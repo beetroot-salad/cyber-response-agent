@@ -85,10 +85,10 @@ directly. No network, no key, no fault-injection fakes (the entry points are pur
 """
 from __future__ import annotations
 
+from defender.agents import GATHER_DEF, LEAD_AUTHOR_DEF, MAIN_DEF, VERIFY_DEF  # noqa: E402
+
 import os
-import inspect
 import re
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -98,23 +98,14 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender._paths import PATHS  # noqa: E402
-from defender.learning.core import config  # noqa: E402
 from defender.learning.author.verify_forward.engine import VerifierDeps  # noqa: E402
-from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
 from defender.learning.leads.lead_author_engine import LeadAuthorDeps  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
-from defender.runtime.permission import files  # noqa: E402
 from defender.runtime.permission.grant import Grant  # noqa: E402
 from defender.runtime.permission.policies._common import reader_grants  # noqa: E402
 from defender.runtime.permission.policy import AgentPolicy  # noqa: E402
-from defender.runtime.review_roles import (  # noqa: E402
-    COMPOSER_DEF,
-    SUPPORT_DEF,
-    ComposerDeps,
-    SupportDeps,
-)
-from defender.runtime.tools import AgentDeps, GatherDeps, _tool_write_file  # noqa: E402
+from defender.runtime.tools import AgentDeps, _tool_write_file  # noqa: E402
 
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
@@ -125,7 +116,6 @@ from defender.runtime.agent_definition import (  # noqa: E402
     bind,
     compile_policy,
     compile_policy_for,
-    effective_tools_for,
     read_allow_of,
     resolve_roots,
 )
@@ -176,8 +166,6 @@ def _policy_full(p) -> tuple:
     )
 
 
-def _actor_scope() -> RunScope:
-    return RunScope(scripts=(_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=(_ACTOR_DIR, _ENV_DIR))
 
 
 def _reader_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:

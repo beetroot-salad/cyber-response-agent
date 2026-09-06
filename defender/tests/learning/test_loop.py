@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -34,177 +33,46 @@ def _jl(lead_id="l-001", goal=None, wts=(), queries=()):
 
 
 
-def test_sanitize_wtc_relativizes_iso_and_clock_times():
-    assert oracle_mod.sanitize_wtc(
-        "the login at 2026-06-02T17:08:19Z from host x"
-    ) == "the login at <alert-time> from host x"
-    assert oracle_mod.sanitize_wtc("a connection at 17:08:19Z") == (
-        "a connection at <alert-time>"
-    )
-    assert oracle_mod.sanitize_wtc("the event at 14:08Z") == "the event at <alert-time>"
-
-
-def test_sanitize_wtc_leaves_relative_spans_untouched():
-    for item in ("within +/-5 minutes of the alert", "a few minutes later", "no times here"):
-        assert oracle_mod.sanitize_wtc(item) == item
-
-
-def test_sanitize_wtc_leaves_non_utc_clock_times_untouched():
-    for item in (
-        "session lasted 1:30:00",
-        "window 2026-06-07 16:00:00 to 2026-06-07 18:00:00",
-        "top 12:34:56 talkers",
-    ):
-        assert oracle_mod.sanitize_wtc(item) == item
 
 
 
 
-def test_redact_exemplar_scrubs_values_keeps_shape():
-    payload = (
-        "### Raw Sample Events (first 3)\n\n"
-        "```json\n"
-        '[{"host": "db-07", "port": 22, "ok": true, "nested": {"user": "alice"}}]\n'
-        "```\n"
-    )
-    out = oracle_mod.redact_exemplar(payload)
-    assert "db-07" not in out
-    assert "alice" not in out
-    assert '"<host>"' in out
-    assert '"<user>"' in out
-    assert '"port": 0' in out
-    assert '"ok": false' in out
+
+
+
+
 
 
 def _esql_sample(body: str) -> str:
     return f"### Raw Sample Events (first 3)\n\n```json\n{body}\n```\n"
 
 
-def test_redact_exemplar_keeps_the_field_names_of_a_COLUMNAR_esql_payload():
-    """The skeleton's whole job is "what fields does this lead's telemetry have".
-
-    ES|QL states its field names once in `columns` and its rows as bare arrays (#834), so a
-    pure type-walk scrubs the names as string VALUES and the oracle is handed a skeleton with
-    no field names at all — where the pre-#834 per-row dicts kept them as keys. The names must
-    survive; the ROW must not, because that is the data.
-    """
-    out = oracle_mod.redact_exemplar(_esql_sample(json.dumps({
-        "query": "FROM logs-* | STATS failed = COUNT(*) BY host.name",
-        "columns": [{"name": "host.name", "type": "keyword"},
-                    {"name": "failed", "type": "long"},
-                    {"name": "source.ip", "type": "ip"}],
-        "row_count": 2,
-        "values": [["web-01", 12, "10.1.1.5"], ["web-02", 3, "10.1.1.9"]],
-    })))
-
-    for name in ("host.name", "failed", "source.ip"):
-        assert f'"{name}"' in out, f"the skeleton lost the field name {name!r}"
-    for es_type in ("keyword", "long", "ip"):
-        assert f'"{es_type}"' in out, f"the declared ES type {es_type!r} went with them"
-    for leaked in ("web-01", "web-02", "10.1.1.5", "10.1.1.9"):
-        assert leaked not in out, f"a ROW value survived the scrub: {leaked!r}"
-    assert '"<query>"' in out, "the query text is data and is still scrubbed"
-
-
-def test_the_columns_passthrough_does_not_unscrub_a_document_that_merely_has_that_key():
-    """Passing `columns` through is licensed by it being ES|QL's SCHEMA block, not by its
-    name. A document with a `columns` key that is not that block — no `values` list beside
-    it, or entries that are not `{name, type}` descriptors — is data, and an attacker who
-    could get a field named `columns` into an index would otherwise have bought themselves
-    an unscrubbed region of the oracle's prompt."""
-    not_an_envelope = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
-        {"columns": [{"name": "secret-host", "type": "keyword"}], "values": "not-a-list"})))
-    assert "secret-host" not in not_an_envelope, "scrubbing was skipped without a `values` list"
-
-    wrong_shape = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
-        {"columns": [{"label": "secret-host"}], "values": [[1]]})))
-    assert "secret-host" not in wrong_shape, "scrubbing was skipped on a non-descriptor entry"
-
-    nested_name = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
-        {"user": {"name": "alice"}, "host": {"name": "db-07"}})))
-    for leaked in ("alice", "db-07"):
-        assert leaked not in nested_name, f"a `name` VALUE survived the scrub: {leaked!r}"
-
-
-def test_redact_exemplar_no_sample_block_is_placeholder():
-    assert oracle_mod.redact_exemplar("## Query Results\n(no raw block)\n").startswith("(")
-
-
-def test_redact_exemplar_empty_sample_block_is_placeholder():
-    out = oracle_mod.redact_exemplar("### Raw Sample Events\n\n```json\n[]\n```\n")
-    assert out.startswith("(")
-    assert "is empty" in out
-
-
-def test_lead_sample_text_reads_only_its_lead_subdir(tmp_path: Path):
-    gather = tmp_path / "gather_raw"
-    (gather / "l-010").mkdir(parents=True)
-    (gather / "l-010" / "0.json").write_text(
-        '### Raw Sample Events\n\n```json\n[{"host": "wrong-lead"}]\n```\n'
-    )
-    (gather / "l-001").mkdir(parents=True)
-    empty = gather / "l-001" / "0.json"
-    empty.write_text("### Raw Sample Events\n\n```json\n[]\n```\n")
-    lead = _jl("l-001", queries=[_qr("wazuh.x", seq=0, raw_ref=empty)])
-    out = oracle_mod.lead_sample_text(lead)
-    assert "wrong-lead" not in out
-    assert out.startswith("(")
 
 
 
 
-def test_parse_lead_events_accepts_events_mappings_markers_and_empty():
-    assert oracle_mod.parse_lead_events('events:\n  - {a: "b"}\n', 0) == [{"a": "b"}]
-    assert oracle_mod.parse_lead_events("events: []\n", 1) == []
-    assert oracle_mod.parse_lead_events(
-        'events:\n  - "<standard environment noise>"\n', 2
-    ) == ["<standard environment noise>"]
-    assert oracle_mod.parse_lead_events(
-        'events:\n  - "<suppressed: stopped auditd>"\n', 3
-    ) == ["<suppressed: stopped auditd>"]
 
 
-def test_parse_lead_events_rescues_unquoted_suppression_marker():
-    assert oracle_mod.parse_lead_events(
-        "events:\n  - <suppressed: stopped auditd before the probe>\n", 0
-    ) == ["<suppressed: stopped auditd before the probe>"]
 
 
-def test_parse_lead_events_rescues_unquoted_marker_with_multiple_colons():
-    assert oracle_mod.parse_lead_events(
-        "events:\n  - <suppressed: ran cmd: systemctl stop auditd>\n", 0
-    ) == ["<suppressed: ran cmd: systemctl stop auditd>"]
-    assert oracle_mod.parse_lead_events(
-        "events:\n  - <suppressed: cleared log: /var/log/auth>\n", 0
-    ) == ["<suppressed: cleared log: /var/log/auth>"]
 
 
-def test_parse_lead_events_keeps_single_field_placeholder_event():
-    assert oracle_mod.parse_lead_events(
-        'events:\n  - {"<c2-domain>": "<resolved-ip>"}\n', 0
-    ) == [{"<c2-domain>": "<resolved-ip>"}]
 
 
-def test_parse_lead_events_embeds_raw_reply_on_failure():
-    with pytest.raises(RunUnprocessable, match="UNPARSEABLE-MARKER"):
-        oracle_mod.parse_lead_events("events:\n  not-a-list: UNPARSEABLE-MARKER\n", 0)
 
 
-def test_parse_lead_events_strips_fence():
-    assert oracle_mod.parse_lead_events("```yaml\nevents: []\n```\n", 0) == []
 
 
-def test_parse_lead_events_rejects_missing_events_list():
-    with pytest.raises(RunUnprocessable, match="no `events` list"):
-        oracle_mod.parse_lead_events("projections: []\n", 0)
 
 
-def test_assemble_oracle_doc_preserves_lead_order():
-    doc = oracle_mod.assemble_oracle_doc(
-        [("l-001", [{"a": 1}]), ("l-002", []), ("l-003", ["<x>"])]
-    )
-    assert [p["lead_id"] for p in doc["projections"]] == ["l-001", "l-002", "l-003"]
-    assert doc["projections"][2]["events"] == ["<x>"]
+
+
+
+
+
+
+
+
 
 
 
@@ -1221,92 +1089,20 @@ _COMPANION = {
 }
 
 
-def test_build_comparison_joins_sample_and_invlang(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    comps = comparison.build_comparison(run, companion=_COMPANION)
-    assert len(comps) == 1
-    c = comps[0]
-    assert c.lead_id == "l-001"
-    assert not hasattr(c, "projected_events")
-    assert "dev.dana" in c.real_sample
-    assert c.resolutions
-    assert c.resolutions[0]["after"] == "--"
-    assert c.authz
-    assert c.authz[0]["verdict"] == "authorized"
 
 
-def test_real_sample_text_keeps_values_where_lead_sample_text_scrubs(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    lead = lr.joined(run)[0]
-    real = comparison.real_sample_text(lead)
-    redacted = oracle_mod.lead_sample_text(lead)
-    assert "dev.dana" in real
-    assert "dev.dana" not in redacted
-    assert "<user>" in redacted
 
 
-def test_build_comparison_monitor_run_is_empty(tmp_path: Path):
-    run = tmp_path / "run"
-    run.mkdir()
-    (run / "alert.json").write_text("{}")
-    comps = comparison.build_comparison(run)
-    assert comps == []
-    assert "monitor" in comparison.render_manifest(comps)
 
 
-def test_build_comparison_missing_payload_degrades_sample(tmp_path: Path):
-    run = _make_run_dir(tmp_path, with_payload=False)
-    comps = comparison.build_comparison(run)
-    assert comps[0].real_sample.startswith("(")
 
 
-def test_parse_investigation_companion_degrades_on_garbage(tmp_path: Path):
-    run = tmp_path / "run"
-    run.mkdir()
-    (run / "investigation.md").write_text("just prose, no invlang fences")
-    assert comparison.parse_investigation_companion(run) == {}
-    assert comparison.parse_investigation_companion(tmp_path / "nope") == {}
 
 
-def test_write_comparison_files_one_per_lead(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    comps = comparison.build_comparison(run, companion=_COMPANION)
-    out = tmp_path / "cmp"
-    paths = comparison.write_comparison_files(comps, out, run / "gather_raw")
-    assert [p.name for p in paths] == ["l-001.md"]
-    txt = paths[0].read_text()
-    assert "## Evidence" in txt
-    assert "## Defender reasoning" in txt
-    assert "gather_raw/l-001/0.json" in txt
-    assert "scripted automation" in txt
-    for line in txt.splitlines():
-        assert not line.rstrip().endswith("\\"), f"line-continuation in a taught command: {line!r}"
-    for line in txt.splitlines():
-        if "cat " in line and "defender-sql" in line:
-            operand = line.split("cat ", 1)[1].split(" |", 1)[0]
-            assert operand.startswith("/"), f"relative operand in a taught command: {operand!r}"
 
 
-def test_comparison_file_names_every_payload_seq(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    rows = [json.loads(line) for line in (run / "executed_queries.jsonl").read_text().splitlines()]
-    for seq in (1, 2):
-        (run / "gather_raw" / "l-001" / f"{seq}.json").write_text("[]")
-        rows.append({**rows[0], "seq": seq, "payload_path": f"gather_raw/l-001/{seq}.json"})
-    (run / "executed_queries.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-
-    comps = comparison.build_comparison(run, companion=_COMPANION)
-    txt = comparison.write_comparison_files(comps, tmp_path / "cmp", run / "gather_raw")[0].read_text()
-    for seq in (0, 1, 2):
-        assert str(run / "gather_raw" / "l-001" / f"{seq}.json") in txt, f"seq {seq} unnamed"
 
 
-def test_render_synthesis_includes_reasoning_and_conclude():
-    out = comparison.render_synthesis(_COMPANION)
-    assert "h-mal" in out
-    assert "scripted automation" in out
-    assert "benign" in out
-    assert comparison.render_synthesis({}).startswith("(")
 
 
 

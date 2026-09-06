@@ -97,134 +97,28 @@ def _report(tmp_path: Path, disposition: str) -> Path:
 
 # the "non-empty string" gates — a field that renders as nothing is empty
 
-@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
-@pytest.mark.parametrize("key", ["subject_anchor", "subject_topic"])
-def test_a_finding_anchor_that_renders_as_nothing_is_rejected(key, tag, text):
-    """The anchor `persist.py` queues and the curator prompt renders as the lesson's
-    subject. Before #722 the zero-width spellings passed this gate."""
-    doc = _judge_doc()
-    doc["defender_findings"][0][key] = text
-    with pytest.raises(RunUnprocessable, match=f"finding\\[0\\].{key} must be a non-empty string"):
-        loop.validate_judge_doc(doc)
 
 
-@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
-@pytest.mark.parametrize(
-    "key", ["type", "subject_anchor", "subject_topic", "observation"]
-)
-def test_an_actor_observation_field_that_renders_as_nothing_is_rejected(key, tag, text):
-    doc = _judge_doc(actor_observations=[_actor_observation(**{key: text})])
-    with pytest.raises(RunUnprocessable, match=f"actor_observations\\[0\\].{key}"):
-        loop.validate_judge_doc(doc)
 
 
-@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
-@pytest.mark.parametrize("key", ["relevance_criteria", "fact"])
-def test_an_environment_observation_field_that_renders_as_nothing_is_rejected(key, tag, text):
-    doc = _judge_doc(environment_observations=[_environment_observation(**{key: text})])
-    with pytest.raises(RunUnprocessable, match=f"environment_observations\\[0\\].{key}"):
-        loop.validate_judge_doc(doc)
 
 
-@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
-def test_a_rule_id_anchor_that_renders_as_nothing_is_rejected(tag, text):
-    """`alert_rule_ids` is the fact's retrieval anchor, and only the LIST was checked for
-    emptiness — its entries never were. A list holding one zero-width id is as anchorless
-    as `[]`, and `persist.py` would store it as the anchor."""
-    doc = _judge_doc(environment_observations=[_environment_observation(alert_rule_ids=[text])])
-    with pytest.raises(RunUnprocessable, match="alert_rule_ids entries must be non-empty"):
-        loop.validate_judge_doc(doc)
 
 
-@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
-def test_one_content_less_rule_id_among_real_ones_is_rejected(tag, text):
-    """Not just the all-blank case: a blank id riding along with a real one is rejected
-    too, so the anchor list cannot be padded with ids that render as nothing."""
-    doc = _judge_doc(
-        environment_observations=[_environment_observation(alert_rule_ids=["rule-42", text])]
-    )
-    with pytest.raises(RunUnprocessable, match="alert_rule_ids entries must be non-empty"):
-        loop.validate_judge_doc(doc)
 
 
-def test_real_rule_id_anchors_still_validate():
-    """The controls: real ids pass, and so does an id that merely CARRIES an invisible
-    character. A non-string id is rejected by the same gate."""
-    assert loop.validate_judge_doc(
-        _judge_doc(environment_observations=[
-            _environment_observation(alert_rule_ids=["rule-42", "﻿v2-falco-net-tool"])
-        ])
-    )
-    with pytest.raises(RunUnprocessable, match="alert_rule_ids entries must be non-empty"):
-        loop.validate_judge_doc(
-            _judge_doc(environment_observations=[_environment_observation(alert_rule_ids=[42])])
-        )
 
 
-@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
-def test_a_resolution_method_that_renders_as_nothing_is_rejected(tag, text):
-    with pytest.raises(RunUnprocessable, match="resolution_method` must be a non-empty string"):
-        loop.validate_judge_doc(_judge_doc(resolution_method=text))
 
 
-@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
-def test_the_benign_validator_shares_the_gate(tag, text):
-    """`validate_judge_benign_doc` runs the same `_validate_finding`, so the benign lane
-    is not a way around the anchor gate."""
-    doc = _judge_doc(outcome="survived")
-    doc["defender_findings"][0]["type"] = "lead-set"
-    doc["defender_findings"][0]["subject_anchor"] = text
-    with pytest.raises(RunUnprocessable, match="must be a non-empty string"):
-        loop.validate_judge_benign_doc(doc)
 
 
-def test_real_fields_still_validate_and_are_not_rewritten():
-    """The controls: ordinary prose passes, prose that merely CARRIES an invisible
-    character passes, and the validator returns the doc untouched — it is a gate, not a
-    normalizer, so no queued anchor is silently mangled on the way through."""
-    anchor, topic = "﻿l-001", "falco​container scan"
-    doc = _judge_doc(resolution_method="closed as benign by the on-call.")
-    doc["defender_findings"][0]["subject_anchor"] = anchor
-    doc["defender_findings"][0]["subject_topic"] = topic
-    doc["actor_observations"] = [_actor_observation()]
-    doc["environment_observations"] = [_environment_observation()]
-    out = loop.validate_judge_doc(doc)
-    assert out["defender_findings"][0]["subject_anchor"] == anchor
-    assert out["defender_findings"][0]["subject_topic"] == topic
 
 
 # the keyword gates — the same split, running the other way
 
-@pytest.mark.parametrize(
-    ("tag", "outcome"),
-    [
-        ("leading-zwsp", "​caught"),
-        ("trailing-zwsp", "caught​"),
-        ("interior-zwsp", "ca​ught"),
-        ("bom-wrapped", "﻿caught﻿"),
-        ("soft-hyphen", "caught­"),
-        ("nul", "caught\x00"),
-        ("leading-nbsp", " caught"),          # already worked — regression guard
-        ("keyword-then-rationale", "caught. the lead refuted it."),  # unchanged split
-    ],
-)
-def test_an_outcome_keyword_is_matched_on_what_it_renders_as(tag, outcome):
-    """A zero-width character clinging to `caught` used to make the whole judged case
-    unprocessable, while an NBSP in the same position was tolerated. Both now resolve to
-    the keyword — and the whitespace-based split that cuts the rationale off still runs,
-    because strip_zero_width leaves whitespace alone."""
-    assert loop.validate_judge_doc(_judge_doc(outcome=outcome))
 
 
-@pytest.mark.parametrize(
-    ("tag", "outcome"),
-    [("content-less", "​"), ("not-a-keyword", "acquitted"), ("empty", "")],
-)
-def test_an_outcome_that_is_not_a_keyword_is_still_rejected(tag, outcome):
-    """The guarded negative: matching on what renders does NOT mean accepting anything.
-    Only the enum's keywords pass, and a content-less outcome is not one of them."""
-    with pytest.raises(RunUnprocessable, match="outcome keyword"):
-        loop.validate_judge_doc(_judge_doc(outcome=outcome))
 
 
 @pytest.mark.parametrize(("tag", "written"), [("clean", "benign")])

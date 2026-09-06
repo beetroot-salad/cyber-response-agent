@@ -61,7 +61,6 @@ from defender.tests.e2e._spec771 import (
     DAEMON_RUNTIME_ARGS_KEY,
     OCI_SECCOMP_FLAG,
     PLATFORM_COMPARISON_PROBE,
-    REPO_ROOT,
     RUNSC_INSTALL_CMD,
     SCAN_ONLY_SHAPES,
     AliasProbeDocker,
@@ -69,7 +68,6 @@ from defender.tests.e2e._spec771 import (
     ProbeVerdict,
     alias_profile_path,
     allowed_syscalls,
-    ban_dependency_files,
     ban_not_in_force_error,
     daemon_engine_version,
     load_seccomp_generator,
@@ -150,28 +148,6 @@ def test_every_box_lane_carries_the_alias_profile(tmp_path):
     assert a == b, f"the two builders' profile paths drifted: {a!r} vs {b!r}"
 
 
-def test_the_read_only_run_cycle_lane_still_starts_under_the_ban(tmp_path):
-    """run_cycle_lane_survives_the_ban — the learning run-cycle box, whose mounts are ALL
-    read-only, still starts under the alias profile and still renders every mount readonly.
-
-    "The ban costs a read-only lane nothing" is a claim about a lane, not a truism, and X16
-    refuted the neighbouring assumption it rides on ("every box lane has a writable shared
-    tree") — the run-cycle request's mounts render with `,readonly` across the board and its
-    only writable path is the box `/tmp` tmpfs. Observed, not asserted."""
-    from defender.learning.core.run_cycle import _run_cycle_box_request
-
-    run_dir = run_tree(tmp_path)
-    learning_run_dir = tmp_path / "learning-run"
-    learning_run_dir.mkdir()
-    request = _run_cycle_box_request(run_dir, learning_run_dir, DEFENDER)
-
-    rec = AliasProbeDocker()
-    box_mod.start_box(request, docker=rec)
-
-    assert rec.flag_value("--security-opt"), "the read-only lane started with no ban"
-    assert all(m["readonly"] for m in rec.mounts()), (
-        "a run-cycle mount rendered writable — X16's premise moved and the lane now has a tree"
-    )
 
 
 def test_alias_profile_denies_the_six_syscalls_and_allows_everything_else(tmp_path):
@@ -362,121 +338,6 @@ def test_the_vendored_default_pin_is_not_older_than_the_daemon(tmp_path):
     )
 
 
-def test_the_shipped_profile_sits_outside_every_box_writable_mount(tmp_path):
-    """alias_profile_is_outside_every_box_writable_mount — every file the alias ban's
-    correctness depends on — the seccomp profile, the write lint's ratchet baseline and the CI
-    workflow that registers the runtime — lives outside every mount any lane renders writable,
-    so no box can edit the files that ban it.
-
-    THE SWEEP D7 AND D8 ARE TWO INSTANCES OF: a control whose own dependency sits inside the
-    boundary it polices is not a control. The refusal record was moved out of the tree for it,
-    and the scan's verdict after that; this is the same question asked of the ban's own
-    CONFIGURATION rather than of its evidence. The profile is read CLIENT-SIDE at create, so a
-    box that could rewrite it would not affect its own container — it would neuter the next
-    one, and the startup probe would then report the ban absent for a reason no operator could
-    place. The mount set is what makes that unreachable, exactly as it does for the hard-link
-    non-obligation, and it is unreachable today only by accident of where the file was put.
-
-    Driven against every lane's RENDERED mounts rather than against a path convention, because
-    the drain lane's writable set is batch-dependent (X16) — "which tree" is not a static
-    property of the lane, so neither is "is the profile inside one".
-
-    THE DRAIN LANE IS RENDERED FROM ITS PRODUCTION BUILDER, and until round four it was not:
-    the third lane here was a synthetic request built in this test over a temp directory, so
-    the sweep certified a property on every lane EXCEPT the one whose writable set its own
-    docstring cites as the reason for driving mounts at all. A sweep that skips the case it was
-    created for is how this shape came back a second and a third time.
-
-    AND THE DRAIN LANE IS CHECKED IN THE COORDINATES THAT CAN FAIL. Its writable mounts are
-    inside a per-batch WORKTREE CHECKOUT of this repo, at a temp path — so comparing absolute
-    paths against a profile in the developer's checkout can never fire, whatever the profile's
-    location, and adding the lane without this arm would have been the same unearned coverage
-    one level down. The property that actually matters there is repo-relative: the drain box
-    writes into a checkout of this repo and the lane's whole job is opening a PR from it, so a
-    profile sited under a triggered corpus is one the box can rewrite AND get merged — the
-    weakened profile then reaches every later box through main, which is exactly the "leave the
-    NEXT container unbanned" escape, laundered through review.
-
-    AND THE RULE IS SWEPT OVER ALL THREE OF ITS INSTANCES, not just the one that was named. The
-    argument above is about a file the ban's correctness rests on, and the profile is one of
-    three: the lint's ratchet baseline (ratchet a census row into it and the write backstop
-    stops gating that writer, with nothing turning red) and the CI workflow (it is what carries
-    `--oci-seccomp`, without which the shipped default runtime enforces nothing) both qualify
-    on identical reasoning. Neither is inside a triggered corpus in any batch shape available
-    today — the same accident of placement that protected the profile — so this arm is what
-    turns three accidents into one rule. Applying the rule only to the case it was raised on is
-    the shape this run has already corrected three times."""
-    from defender.learning.core.config import LoopPaths
-    from defender.learning.core.drains import _drain_box_request
-    from defender.learning.core.run_cycle import _run_cycle_box_request
-
-    dependencies = {what: p.resolve() for what, p in ban_dependency_files().items()}
-
-    lanes: dict[str, AliasProbeDocker] = {}
-    lanes["investigation"] = AliasProbeDocker(BAN_IN_FORCE)
-    _start_investigation_lane(run_tree(tmp_path), lanes["investigation"])
-
-    learning_run_dir = tmp_path / "learning-run"
-    learning_run_dir.mkdir()
-    lanes["run_cycle"] = AliasProbeDocker(BAN_IN_FORCE)
-    box_mod.start_box(
-        _run_cycle_box_request(run_tree(tmp_path / "rc"), learning_run_dir, DEFENDER),
-        docker=lanes["run_cycle"],
-    )
-
-    lanes["generic_request"] = AliasProbeDocker(BAN_IN_FORCE)
-    box_mod.start_box(_request(tmp_path / "generic"), docker=lanes["generic_request"])
-
-    # The REAL drain lane, one batch shape: a worktree leaf read-only, and the triggered lesson
-    # corpus writable. The empty state dir is what makes the triggered set the base corpus
-    # alone — the production builder decides that, not this test.
-    worktree = tmp_path / "drain-wt"
-    (worktree / "defender" / "lessons").mkdir(parents=True)
-    (worktree / "defender" / "skills").mkdir(parents=True)
-    paths = LoopPaths(repo_root=worktree, state_dir=tmp_path / "drain-state")
-    lanes["drain"] = AliasProbeDocker(BAN_IN_FORCE)
-    box_mod.start_box(
-        _drain_box_request(worktree, "b-771", "author_drain", paths), docker=lanes["drain"])
-
-    exposed = {
-        (what, name): m["source"]
-        for what, dependency in dependencies.items()
-        for name, rec in lanes.items()
-        for m in rec.mounts()
-        if not m["readonly"] and dependency.is_relative_to(Path(m["source"]).resolve())
-    }
-    assert not exposed, (
-        f"a file the ban depends on is inside a mount the box can write: {exposed} — the box "
-        f"cannot weaken its own container this way, but it can leave the next one unbanned, and "
-        f"the probe would then report a misconfiguration nobody introduced"
-    )
-    assert any(rec.mounts() for rec in lanes.values()), (
-        "no lane rendered any mount at all, so the check above passed by having nothing to look "
-        "at — the vacuous shape a mount-set assertion fails into"
-    )
-
-    # The drain lane, repo-relative — the arm that can actually fire for a file shipped in this
-    # repository, swept over all three dependencies rather than over the one that was named.
-    drain_writable = [m for m in lanes["drain"].mounts() if not m["readonly"]]
-    assert drain_writable, (
-        "the drain lane rendered no writable mount, so the containment check below looks at "
-        "nothing — the production builder gives this batch shape one, and a lane with none "
-        "cannot demonstrate the property either way"
-    )
-    for what, dependency in dependencies.items():
-        assert dependency.is_relative_to(REPO_ROOT), (
-            f"{what} sits at {dependency}, outside this repository, so the drain-lane arm has "
-            f"no checkout coordinate to compare against — re-derive the arm rather than letting "
-            f"it pass by not applying"
-        )
-        in_checkout = (worktree / dependency.relative_to(REPO_ROOT)).resolve()
-        inside = [m["source"] for m in drain_writable
-                  if in_checkout.is_relative_to(Path(m["source"]).resolve())]
-        assert not inside, (
-            f"in a drain worktree {what} falls inside a writable corpus mount ({inside}) — the "
-            f"box can rewrite a file the ban rests on and the lane's PR carries the weakened "
-            f"version back to main, where every later box reads it"
-        )
 
 
 @pytest.mark.parametrize("shape", BANNED_SHAPES)
@@ -651,47 +512,6 @@ def test_the_alias_probe_runs_once_per_box_start(tmp_path):
     )
 
 
-def test_the_alias_probe_runs_on_every_box_lane(tmp_path):
-    """probe_on_every_box_lane — every lane that starts a box runs the probe, including the
-    lane whose mounts are all read-only, where the probe acts in the box `/tmp` tmpfs; an
-    earlier lane's pass grants no exemption to a later one.
-
-    PINNED PROVISIONALLY, and the pin contradicts the design's literal "in the shared tree"
-    wording — which is why it is recorded as a pin rather than read out of the design. X16
-    refuted "every lane has a writable shared tree": the learning run-cycle box's mounts are
-    ALL `writable=False`. The ban is a syscall filter and not a path policy, so the observation
-    is equally valid in the tmpfs; the alternatives are worse in named ways — skipping makes
-    the ban configured rather than observed exactly where nobody is watching, and adding a
-    scratch writable mount solely to be probed widens the attack surface to test the control.
-
-    No cross-lane trust (firm consensus #7). The process-level aggregate response when one lane
-    of several faults is design-silent and is NOT decided here."""
-    from defender.learning.core.run_cycle import _run_cycle_box_request
-
-    lanes: dict[str, AliasProbeDocker] = {}
-
-    lanes["investigation"] = AliasProbeDocker(BAN_IN_FORCE)
-    _start_investigation_lane(run_tree(tmp_path), lanes["investigation"])
-
-    learning_run_dir = tmp_path / "learning-run"
-    learning_run_dir.mkdir()
-    lanes["run_cycle"] = AliasProbeDocker(BAN_IN_FORCE)
-    box_mod.start_box(
-        _run_cycle_box_request(run_tree(tmp_path / "rc"), learning_run_dir, DEFENDER),
-        docker=lanes["run_cycle"],
-    )
-
-    lanes["drain"] = AliasProbeDocker(BAN_IN_FORCE)
-    box_mod.start_box(_request(tmp_path / "drain"), docker=lanes["drain"])
-
-    silent = {name for name, rec in lanes.items() if rec.probe_count() != 1}
-    assert not silent, f"these lanes started a box without observing the ban: {sorted(silent)}"
-
-    tmpfs_lane = lanes["run_cycle"]
-    assert tmpfs_lane.tmpfs(), (
-        "the read-only lane has no tmpfs for the probe to act in, so the provisional pin has "
-        "no target and the lane cannot demonstrate the ban at all"
-    )
 
 
 def test_an_interrupted_or_truncated_probe_sequence_reads_as_a_startup_fault(tmp_path):

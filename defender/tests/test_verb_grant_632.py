@@ -11,15 +11,13 @@ disagree — D6 in particular is refuted (g10), not narrowed.
 from __future__ import annotations
 
 import importlib
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender._io import read_jsonl_rows  # noqa: E402
-from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
@@ -34,10 +32,8 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     HEALTH_CHECK,
     SYSTEMS,
     UNDECLARED,
-    UNGRANTED_PAIRS,
     VERB_CLASSES,
     GrantError,
-    RegistryShaped,
     ScopedFakeVerbs,
     VerbGrant,
     declared_verb_names,

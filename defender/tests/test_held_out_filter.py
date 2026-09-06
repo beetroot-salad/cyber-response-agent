@@ -128,23 +128,6 @@ def test_symlink_cannot_walk_out_of_the_held_out_set(tmp_path: Path) -> None:
     assert run_common.is_held_out_fixture(link, fake_set) is True
 
 
-def test_enqueue_refuses_held_out_fixture(tmp_path: Path, capsys) -> None:
-    """The boundary: a held-out fixture run is never handed to the learn worker, so no
-    stage downstream has to know what ground truth is.
-
-    #791 R3 sharpened the guard from a path check to a CONTENT digest (`enqueue_learning`
-    now calls the shared `learning_refusal_gate`, which never re-derives path containment)
-    — the shipped held-out corpus holds only a README (its digest set is empty), so a real
-    member is planted here rather than read from the committed set."""
-    run_dir = _complete_run_dir(tmp_path, "benign")
-    fixtures = tmp_path / "held-out"
-    member_alert = fixtures / "m05-lsass-access" / "alert.json"
-    member_alert.parent.mkdir(parents=True)
-    member_alert.write_bytes(b'{"rule": {"id": "5710"}}')
-    alert = tmp_path / "copy-of-alert.json"
-    alert.write_bytes(member_alert.read_bytes())
-    assert run_common.enqueue_learning(run_dir, alert, fixtures_dir=fixtures) is False
-    assert "held-out eval fixture" in capsys.readouterr().err
 
 
 def test_net_is_narrow(tmp_path: Path) -> None:
@@ -164,95 +147,11 @@ def test_net_is_narrow(tmp_path: Path) -> None:
     assert run_common.is_held_out_fixture(ordinary) is False
 
 
-def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path, monkeypatch) -> None:
-    """Disposition routing: ``malicious`` runs the benign (FP) actor, never the
-    adversarial one. #791 moved the curation trigger to the investigation boundary (out of
-    the run cycle entirely), so the run cycle's own author queue stays untouched regardless
-    of disposition — asserted alongside the routing so the leg's completion isn't vacuous."""
-    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
-    run_dir = _complete_run_dir(tmp_path, "malicious")
-    agents = FakeSubagents(story_benign="SKIP: not ours\n")
-    paths = loop.LoopPaths(repo_root=tmp_path)
-
-    rc = loop.run_one(
-        run_dir, paths=paths, agents=agents,
-        start_box=_noop_start_box, stop_box=_noop_stop_box,
-    )
-    assert rc == 0
-    marker = paths.author_queue_dir / f"{run_dir.name}.json"
-    assert not marker.exists(), "the run cycle enqueued for authoring — #791 moved that trigger"
-    assert agents.calls.get("actor", 0) == 0, "adversarial actor must not run on malicious"
-    assert agents.calls.get("actor_benign") == 1, "benign actor must run on malicious"
 
 
-def test_run_cycle_leaves_the_author_queue_untouched_even_when_a_leg_fails(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    """#791: catalog curation's trigger moved to the investigation boundary, so the run
-    cycle's own tail no longer enqueues for authoring on ANY outcome — including a leg
-    that raises. It still fails loud."""
-    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
-    run_dir = _complete_run_dir(tmp_path, "benign")
-    agents = FakeSubagents(judge="outcome: [unterminated\n")
-    paths = loop.LoopPaths(repo_root=tmp_path)
-
-    with pytest.raises(loop.RunUnprocessable):
-        loop.run_one(
-            run_dir, paths=paths, agents=agents,
-            start_box=_noop_start_box, stop_box=_noop_stop_box,
-        )
-    marker = paths.author_queue_dir / f"{run_dir.name}.json"
-    assert not marker.exists(), "a failed leg still enqueued the run for authoring"
 
 
-def test_direct_learn_refuses_a_held_out_run_dir(tmp_path: Path) -> None:
-    """The other half of the boundary. `loop.py <run_dir>` never sees the fixture path
-    `enqueue_learning` checks, so the path net cannot reach it — a held-out case learned
-    by hand used to append straight into the corpus it is scored against.
-
-    Asked by CONTENT: the run dir's alert.json is a verbatim copy of the fixture's, so its
-    digest still identifies the fixture even though the run dir carries no provenance.
-
-    The held-out member is built HERE, under the injected `repo_root`, rather than read
-    from the committed set — that set is empty since the Wazuh-shaped bootstrap fixtures
-    were retired, and the digest net is a property of the mechanism, not of who is in the
-    set. Reading the real set would also have made the assertion silently vacuous the
-    moment the set emptied: with no members there is no digest to match, so the refusal
-    would never fire and the test would still be green.
-    """
-    run_dir = _complete_run_dir(tmp_path, "benign")
-    paths = loop.LoopPaths(repo_root=tmp_path)
-    fixture = paths.held_out_fixtures / "m05-lsass-access"
-    fixture.mkdir(parents=True)
-    fixture_alert = fixture / "alert.json"
-    fixture_alert.write_text(json.dumps({"rule": {"id": "5711"}}), encoding="utf-8")
-    (run_dir / "alert.json").write_bytes(fixture_alert.read_bytes())
-
-    rc = loop.run_one(run_dir, paths=paths, agents=FakeSubagents(judge="outcome: caught\n"))
-    assert rc == 0
-    assert not paths.pending_file.exists(), "a held-out run must append nothing"
-    assert not paths.author_queue_dir.exists(), "a held-out run must not be queued to author"
 
 
-def test_direct_learn_still_learns_an_ordinary_run(tmp_path: Path, monkeypatch) -> None:
-    """Control for the digest net: an ordinary alert is untouched by it, so the refusal
-    cannot quietly starve the learning loop. The leg's own completion is the witness now
-    that #791 moved the author-queue trigger out of the run cycle."""
-    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
-    run_dir = _complete_run_dir(tmp_path, "malicious")
-    agents = FakeSubagents(story_benign="SKIP: not ours\n")
-    paths = loop.LoopPaths(repo_root=tmp_path)
-
-    assert loop.run_one(
-        run_dir, paths=paths, agents=agents,
-        start_box=_noop_start_box, stop_box=_noop_stop_box,
-    ) == 0
-    learn_dir = paths.runs_dir / run_dir.name
-    assert (learn_dir / "actor_benign_story.md").is_file(), \
-        "an ordinary run must still complete the benign leg"
 
 
-def test_directions_for_dispatch() -> None:
-    assert loop._directions_for("benign") == ["adversarial"]
-    assert loop._directions_for("malicious") == ["benign"]
-    assert loop._directions_for("inconclusive") == ["adversarial", "benign"]

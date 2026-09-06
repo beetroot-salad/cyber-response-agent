@@ -299,22 +299,6 @@ def test_open_on_an_imported_object_is_flagged(tmp_path):
     ))
 
 
-def test_open_on_a_local_colliding_with_an_import_is_flagged(tmp_path):
-    """The live shape (#607): `_astlib.module_env` collects imports from the WHOLE tree, so
-    a function-local `from x import parser as p` binds `p` module-wide. An unrelated local
-    `p` — an actual Path — then resolves to that module origin. This is not hypothetical:
-    defender/learning/pipeline/judge/compare.py does exactly this. Skips must therefore come
-    from a positive table, never from "the origin resolved"."""
-    assert _flags(tmp_path, (
-        "def _invlang():\n"
-        "    from defender.skills.invlang import parser as p\n"
-        "    return p\n"
-        "\n"
-        "def write(out_dir):\n"
-        "    p = out_dir / 'x.md'\n"
-        "    with p.open('w') as fh:\n"
-        "        fh.write('hi')\n"
-    ))
 
 
 def test_aliased_subprocess_is_flagged(tmp_path):

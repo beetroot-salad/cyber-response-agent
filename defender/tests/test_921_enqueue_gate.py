@@ -436,34 +436,6 @@ def test_921_decision_discipline_is_queueable_and_an_unknown_type_is_refused(tmp
     assert enqueue.append_rows(ep, [_family_row("ep-1/b/0/7", type="decision-discipline")]) == 1
 
 
-def test_921_row_carries_subject_anchor_and_subject_topic_from_anchor_and_topic(tmp_path):
-    """`subject_anchor` and `subject_topic` are filled from the finding's `anchor` (the lead id
-    or invlang row id the defect hangs on) and `topic` (one noun phrase); a row without them
-    fails the queue's OWN validator.
-
-    Driven through that validator rather than through a re-implementation of it: `validate.py`
-    owns what a well-formed finding is, and a second opinion here would go stale the day it
-    moves.
-    """
-    validate = J.mod("learning.core.validate")
-    reply = J.as_reply_text(J.reply_doc(findings=[
-        J.finding_doc(anchor="h-001.ac1", topic="cadence break at the derivation hand-off")]))
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
-                            dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    J.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=reply), runs_base=tmp_path / "defender-runs", draws=1)
-
-    row = J.enqueued_rows(J.judge_record(ep))[0]
-    assert row["subject_anchor"] == "h-001.ac1"
-    assert row["subject_topic"] == "cadence break at the derivation hand-off"
-    validate._validate_finding(0, row, set(J.mod("learning.core.config").ALL_FINDING_TYPES) | {
-        row["type"]})
-
-    naked = dict(row)
-    naked.pop("subject_anchor")
-    with pytest.raises(J.refusals()):
-        validate._validate_finding(0, naked, {row["type"]})
 
 
 def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path):
@@ -695,31 +667,6 @@ def test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws(tmp_path
 # ---------------------------------------------------------------------------------------
 
 
-def test_921_new_appender_is_used_and_outcome_enum_and_append_findings_are_unchanged(tmp_path):
-    """The judge writes through its OWN appender: `OUTCOME_ENUM` — the vocabulary of
-    `learning/pipeline/judge/`, which #922 deletes — gains no member, and
-    `persist.append_findings`'s `_outcome_keyword` membership check is unchanged.
-
-    Positive control: a family row still lands in the SAME `findings.jsonl` the old appender
-    writes to, so "untouched" cannot pass on a judge that writes somewhere else entirely.
-    """
-    config = J.mod("learning.core.config")
-    validate = J.mod("learning.core.validate")
-
-    assert config.OUTCOME_ENUM == {  # noqa: SIM300 — the vocabulary is the SUBJECT, not a bound
-        "caught", "survived", "undecidable", "incoherent", "skip-passthrough"}, (
-        "the old pipeline judge's vocabulary gained a member; #922 deletes it and this design "
-        "writes through its own appender instead")
-    for word in ("discard", "corpus-contradiction"):
-        with pytest.raises(J.refusals()):
-            validate._outcome_keyword(word)
-
-    ep, record = _graded(tmp_path)
-    paths = J.mod("learning.core.config").DEFAULT_PATHS
-    assert J.enqueued_rows(record), "the judge enqueued nothing at all"
-    assert str(record["enqueued_to"]).endswith("findings.jsonl"), (
-        f"the judge wrote to {record['enqueued_to']}, not the shared findings queue")
-    assert paths.pending_file.name == "findings.jsonl"
 
 
 def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):

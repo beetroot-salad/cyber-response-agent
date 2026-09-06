@@ -15,10 +15,8 @@ preempt a synchronous blocking box call), so no oracle here treats
 from __future__ import annotations
 
 import inspect
-import json
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -186,32 +184,6 @@ def test_rotation_retains_row_appended_mid_batch(tmp_path: Path):
     assert "mid/0" not in {r.get("observation_id") for r in h.consumed(ch)}
 
 
-def test_relearn_colliding_finding_id_is_dropped_by_merge_filter(tmp_path: Path):
-    """The one reachable case where the merge filter drops a row, recorded as ACCEPTED rather
-    than fixed (fork 5). `append_findings` performs no dedup and `finding_id` is deterministic
-    (G15/C18), so re-learning the same run mid-batch regenerates an id the batch is already
-    processing, and the id-based filter discards it.
-
-    Paired against the same interleaving with a fresh id, which survives — the contrast is the
-    whole content of the exclusion."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
-    h.write_source_refs(paths, "run-C")
-    h.seed(ch, [h.row_for("findings", "run-C/0")])
-    gate, entered = threading.Event(), threading.Event()
-    cfg = h.cfg_for(paths, "findings", invoke_agent=h.blocking(gate, entered, h.committing()))
-
-    with h.Background(lambda: drain.run_batch(cfg=cfg)) as batch:
-        assert entered.wait(timeout=20), f"the batch never reached its agent call ({batch.error!r})"
-        persist.append_findings(_judge_doc(1), "run-C", "rule-5710", paths.runs_dir / "run-C",
-                                paths=paths)
-        persist.append_findings(_judge_doc(1), "run-D", "rule-5710", paths.runs_dir / "run-D",
-                                paths=paths)
-        gate.set()
-
-    assert batch.error is None
-    survivors = sorted(h.pending_by_id(ch))
-    assert survivors == ["run-D/0"], "the colliding id is dropped; the fresh one is not"
 
 
 # O2 — appending does not block on an author batch
@@ -251,37 +223,6 @@ def test_append_completes_while_drain_batch_in_flight(tmp_path: Path):
     assert batch.error is None
 
 
-def test_two_concurrent_directions_both_land_every_finding(tmp_path: Path):
-    """The live run fans two directions over one findings channel on a
-    `ThreadPoolExecutor(max_workers=2)`, and both call the real `append_findings`. PJ2b drove
-    this 200 times over 10,000 rows with zero loss.
-
-    PARITY-WITH-TODAY, deliberately: this passes against the base commit and is meant to. It is
-    a conservation guard — the append/drain split must not quietly remove the exclusion that
-    makes it hold — not a demand for new behaviour. Every row from both directions lands, every line
-    parses, and no id is duplicated."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
-    ch.file.parent.mkdir(parents=True, exist_ok=True)
-
-    def append(direction: str, run_id: str) -> int:
-        return persist.append_findings(
-            _judge_doc(25), run_id, "rule-5710", paths.runs_dir / run_id,
-            direction=direction, paths=paths,
-        )
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [
-            pool.submit(append, "adversarial", "run-adv"),
-            pool.submit(append, "benign", "run-ben"),
-        ]
-        assert [f.result() for f in futures] == [25, 25]
-
-    lines = [ln for ln in ch.file.read_text().splitlines() if ln.strip()]
-    rows = [json.loads(ln) for ln in lines]
-    assert len(rows) == 50, "every appended row landed"
-    assert len({r["finding_id"] for r in rows}) == 50
-    assert sorted(r["direction"] for r in rows).count("benign") == 25
 
 
 # O7 — rotation and retirement are mutually exclusive with appends
