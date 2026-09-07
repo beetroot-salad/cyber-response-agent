@@ -3,10 +3,10 @@
 
 `monkeypatch.setattr` reaches into a module and swaps a collaborator (a function,
 class, or client) at import scope. It is the dependency-injection-avoidance smell
-the author-family refactors removed: instead of patching `author._curator` from a
-test, the collaborator is now injected via a config/deps seam (AuthorConfig /
-CuratorConfig / LeadAuthorDeps / the ticket_writer transport seam), so the test
-constructs the object it wants and hands it in. setattr-patching couples tests to
+the author-family refactors removed: instead of patching a drain's collaborator from
+a test, it is injected via a config/deps seam (AuthorConfig / LeadAuthorDeps / the
+ticket_writer transport seam), so the test constructs the object it wants and hands
+it in. setattr-patching couples tests to
 private module layout, survives renames silently, and leaks state across tests
 when `undo` is missed.
 
