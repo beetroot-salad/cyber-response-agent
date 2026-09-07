@@ -1,5 +1,14 @@
 # The agent definition: one source of truth for an agent's tools + permissions
 
+> **Roster note (post-#922).** The seam this designs is live and unchanged; the
+> *roster* below is not. `judge`, `actor` and `oracle` left `AgentRole` with the
+> pipeline that was their only caller (`docs/learning-loop-cutover.md`), and the
+> eight roles today are `main`, `gather`, `verifier`, `lead_author`,
+> `corpus_author`, `support`, `composer`, `questioner` — `runtime/agent_role.py`
+> is the census. Read the six-agent table as the shape of the argument, not as
+> the current registry. The tool-free-predictor case now applies to `verifier`
+> and `questioner`.
+
 **Status:** design — implemented (step two: #545 / PR #546; step three: #551 / PR #555,
 which made `bind` the sole policy seam and retired the parallel factory path — see
 [[agent-definition-consolidation-step-three.md]]). **Decision:** collapse the two

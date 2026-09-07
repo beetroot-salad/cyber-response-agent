@@ -4,8 +4,8 @@ Per-system knowledge under `defender/skills/{system}/` is split into
 two surfaces by audience, across two files:
 
 - **Visibility surface** — `SKILL.md`. Read by the orchestrating
-  defender (gather routing, judge), the author skill (template
-  scaffolding), and the actor-reviewer judge. Describes what the system
+  defender (gather routing) and the lead-author skill (template
+  scaffolding). Describes what the system
   *can* and *cannot* answer in this deployment, and how to read its
   output. Independent of how queries are dispatched.
 - **Execution** — `execution.md`, a sibling file read **only** by the

@@ -80,6 +80,17 @@ class GroupSpec(TypedDict):
     label: str
     dir: str
     blurb: str
+    #: Is anything still authoring this corpus? A retired group is one whose PRODUCER is
+    #: gone while its files remain — the view must say so, because a reader cannot tell a
+    #: corpus nothing writes from one nothing has written to lately, and "the loop's
+    #: current output" is exactly the claim this page makes. Declared per group rather
+    #: than inferred from a lesson's `status: stale`: staleness is a property of one
+    #: lesson its author set, retirement is a property of the channel.
+    retired: bool
+    #: Why it is retired, in one sentence, rendered beside the badge. Empty for a live
+    #: group. Not optional-by-absence: a group that declares `retired` and no reason
+    #: renders a badge nobody can act on.
+    retired_note: str
     title_keys: list[str]
     desc_key: str
     fields: list[dict[str, str]]
@@ -89,7 +100,10 @@ GROUPS: dict[str, GroupSpec] = {
     "defender": {
         "label": "Defender lessons",
         "dir": "lessons",
-        "blurb": "Pitfalls the runtime defender agent learned to avoid — folded from judged findings.",
+        "blurb": "Pitfalls the runtime defender agent learned to avoid — folded from the "
+                 "branched episode's judged findings, and read at PLAN time.",
+        "retired": False,
+        "retired_note": "",
         "title_keys": ["name"],
         "desc_key": "description",
         "fields": [
@@ -100,7 +114,13 @@ GROUPS: dict[str, GroupSpec] = {
     "actor": {
         "label": "Actor lessons",
         "dir": "lessons-actor",
-        "blurb": "Pattern/tradecraft lessons the adversarial actor learned — what cover holds and what trips the defender. Standing deployment facts now live in the shared environment corpus (issue #298).",
+        "blurb": "Pattern/tradecraft lessons the adversarial actor learned — what cover held "
+                 "and what tripped the defender.",
+        "retired": True,
+        "retired_note": "Frozen archive. The adversarial actor that authored these, and the "
+                        "curator that folded them, were deleted with the four-role pipeline "
+                        "(#922). Nothing writes this corpus and nothing reads it; the lessons "
+                        "are kept so what was learned stays findable.",
         "title_keys": ["subject"],
         "desc_key": "relevance_criteria",
         "fields": [
@@ -113,7 +133,13 @@ GROUPS: dict[str, GroupSpec] = {
     "environment": {
         "label": "Environment lessons",
         "dir": "lessons-environment",
-        "blurb": "Standing deployment facts both actors retrieve to ground their stories — fed by the benign (FP) and adversarial directions alike (issue #298).",
+        "blurb": "Standing deployment facts the two actors retrieved to ground their stories, "
+                 "fed by the benign and adversarial directions alike (issue #298).",
+        "retired": True,
+        "retired_note": "Frozen archive. Both directions that fed it were deleted with the "
+                        "four-role pipeline (#922), and no live role retrieves it. Kept "
+                        "readable; environment knowledge the runtime uses lives in "
+                        "defender/skills/ instead.",
         "title_keys": ["subject"],
         "desc_key": "relevance_criteria",
         "fields": [
@@ -147,6 +173,8 @@ def build_view(defender_dir: Path = DEFENDER) -> dict:
         groups[name] = {
             "label": spec["label"],
             "blurb": spec["blurb"],
+            "retired": spec["retired"],
+            "retired_note": spec["retired_note"],
             "fields": spec["fields"],
             "lessons": lessons,
         }

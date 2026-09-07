@@ -1,5 +1,12 @@
 # Lessons success scoring — design draft (2026-05-30)
 
+> **Status: historical — designs a signal for stages that are deleted.** The
+> benign and malicious actors, the telemetry oracle and the pipeline judge all
+> went in #922 (`docs/learning-loop-cutover.md`), as did the two corpora this
+> scores retrieval against. The live analogue of the question it asks — "did
+> this lesson actually help?" — is the forward-check gate plus
+> `evals/held_out.py`; see `docs/learning-loop.md` §Evaluation.
+
 Companion to `defender/learning/actor_benign.md` / `actor.md`,
 `defender/scripts/lessons/lessons_env_retrieve.py` / `lessons_actor_index.py`,
 and the task `docs/decisions/benign-actor-success-retrieval.md`. Captures the

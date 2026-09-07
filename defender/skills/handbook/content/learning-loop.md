@@ -8,7 +8,7 @@ starting point an operator picks up later, deliberately, by naming it.
 python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>
 ```
 
-For the *why* — the RL / evolutionary-algorithms framing — read
+For the *why* — the RL / ablation-study framing — read
 `defender/docs/learning-loop.md`. For what changed and when, read
 `defender/docs/learning-loop-cutover.md`.
 
@@ -21,9 +21,15 @@ Everything the loop learned from was therefore imagined, and the judge was
 grading a world no system had ever answered for.
 
 That pipeline is **deleted**. Nothing under `defender/learning/pipeline/`
-exists; neither do the `actor`, `oracle` and `judge` agent roles, the
-disposition→direction routing, or the `lessons-actor/` and
-`lessons-environment/` corpora that the actor-side curators fed.
+exists; neither do the `actor`, `oracle` and `judge` agent roles, nor the
+disposition→direction routing, nor the actor-side curators and the queues that
+fed them.
+
+The two corpora those curators wrote — `defender/lessons-actor/` and
+`defender/lessons-environment/` — are the one exception: the directories and
+their authored lessons are **left in place as frozen archives**. Nothing
+produces them and nothing reads them. The posture view marks them retired
+rather than hiding them.
 
 What runs now branches a **real** investigation instead of inventing one.
 
@@ -50,6 +56,13 @@ What runs now branches a **real** investigation instead of inventing one.
    pass per world, then one model call per world per draw. The episode comes
    out `gradable`, `discard` (the measurement was spoilt) or
    `corpus-contradiction` (the archive disagrees with itself).
+
+   The mechanical pass reads each world's *own* archived record and assigns at
+   most one bucket, which is the four places a verdict can lose the fact the
+   family varied: never queried the system holding it (`lead-set`), queried it
+   at the wrong scope (`lead-quality`), received the changed answer and reached
+   the same verdict anyway (`analyze-discipline`), or moved a resolution on it
+   and still reached the same verdict (`decision-discipline`).
 7. **Enqueue** — a gradable episode's surviving findings are appended to
    `_pending/findings.jsonl`, the same queue the curators have always read.
 
@@ -85,29 +98,34 @@ gather query catalog and the per-system skills, and opens its own PR.
 
 The old loop ran two directions and fed three corpora — defender findings
 into `lessons/`, plus actor and environment observations into their own. Only
-the first had a producer after the cutover, so the other two retired with the
-pipeline. There is now **one** authored corpus, `defender/lessons/`, fed by
+the first has a producer after the cutover, so the other two are frozen (see
+above). There is now **one** authored corpus, `defender/lessons/`, fed by
 **one** queue, drained by **one** curator.
 
 The canonical enumeration of the queues and their thresholds is
 `defender/learning/core/config.py` and `core/drains.py`.
 
-## Why a forward-check gate but no runtime validators
+## Why the forward-check gate is heavier than any runtime gate
 
-The defender has no runtime safety gates by design (`content/design.md`), but
-the *learning* loop does gate — the forward-check confirms a candidate lesson
-would not flip its own source case off the correct disposition before it is
-allowed into the corpus. The asymmetry is deliberate: a bad lesson is durable
-(it shapes every future run), so the offline path earns a verification step
-that the fast online path does not.
+The runtime's gates are all cheap and local — permission, artifact schema, the
+one semantic gate on a confident close (`content/design.md`). The forward-check
+is none of those: it re-runs an entire investigation to decide whether one
+lesson may land. The asymmetry is deliberate. A bad disposition costs one case;
+a **bad lesson is durable** — it shapes every future run and nothing downstream
+re-reads it — so the offline path earns a verification step whose cost the
+online path could never pay.
 
 ## Evaluating the loop itself
 
 `defender/evals/` is the eval home: the held-out metric driver
 (`held_out.py`, the north-star) plus the harness-on-the-harness
-(`harness.py` + `scenarios/`). The `judge-alignment/` calibration set lives
-under `defender/learning/`. `defender/tests/` covers learning-loop
+(`harness.py` + `scenarios/`). `defender/tests/` covers learning-loop
 invariants.
+
+`learning/judge-alignment/` is **not** a live calibration set: it holds
+synthetic inputs for the retired pipeline judge, and its batches are written
+in that judge's artifact vocabulary. Read it as history, not as a fixture for
+the family judge.
 
 Sources: `defender/CLAUDE.md` §Learning loop, `defender/learning/branch/cli.py`,
 `defender/learning/judge/`, `defender/learning/core/drains.py`,

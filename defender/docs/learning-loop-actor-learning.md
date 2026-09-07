@@ -1,5 +1,13 @@
 # Actor-learning workstream — design (2026-05-11)
 
+> **Status: historical — never implemented, and its subject is deleted.** This
+> workstream designs *actor self-learning*: a second corpus so the adversary
+> improves alongside the defender. The adversary itself was deleted in #922
+> (`docs/learning-loop-cutover.md`), so nothing here has a subject. The
+> co-evolution caveats it collects — cycling, arms-race drift, Red Queen
+> dynamics — are carried forward in `docs/learning-loop.md` §Future
+> Enhancements, which is where to look before proposing an adversary again.
+
 Companion to `learning-loop.md` and `learning-loop-actor-design.md`.
 Activates the deferred *actor self-learning* pointer from that doc.
 

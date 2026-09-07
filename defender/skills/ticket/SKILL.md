@@ -9,10 +9,8 @@ retired. This adapter is v2-flavored (`_stub_transport.py` +
 docker-exec-curl) and read-only.
 
 This file briefs **gather**, which reaches this store through the `query`
-tool — its verb_grant names `list-tickets` only. The judge's closed-ticket
-reads (a full-record lookup and the store's key grammar) are separate typed
-tools it registers directly (the retired pipeline judge's closed-ticket tool);
-they are not part of gather's catalog and are not documented here.
+tool — its verb_grant names `list-tickets` only, and that is the only path
+into this store.
 **Execution** is read only by code paths that dispatch queries.
 
 ## Visibility surface

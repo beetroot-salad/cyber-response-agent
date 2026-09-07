@@ -19,7 +19,7 @@ The idea is to provide the agent with a structured way to identify its runtime m
 
 ## Runtime Loop
 
-A single agent — driven by the in-process PydanticAI runtime (`defender/runtime/driver.py`) with `defender/SKILL.md` as its system prompt — works one alert through explicit phases. The common case is a few iterations of `PLAN → GATHER → ANALYZE` before `REPORT`; ANALYZE loops back to PLAN only when the next move is genuinely undecided.
+A single agent — driven by the in-process PydanticAI runtime (`defender/runtime/driver/`) with `defender/SKILL.md` as its system prompt — works one alert through explicit phases. The common case is a few iterations of `PLAN → GATHER → ANALYZE` before `REPORT`; ANALYZE loops back to PLAN only when the next move is genuinely undecided.
 
 A **confident** close is not committed on the agent's say-so: it passes a write-time **review gate** first (hexagons are in-process LLM roles, as in the learning-loop diagram below). The gate is not a phase — the investigator never occupies it, and it can hand the close back for another loop.
 
@@ -99,11 +99,12 @@ each finished run, imagining the counterfactual rather than executing it: it aut
 projected the telemetry that story would have produced, and graded itself against both. It is
 deleted, along with the learn queue, its drain, and the two sibling corpora it fed
 (`lessons-actor/`, `lessons-environment/`, whose authored lessons are left in place and read by
-nothing). Design docs under `defender/docs/` still describe it; when a doc and the code
-disagree, the code wins.
+nothing). `defender/docs/learning-loop-cutover.md` is the account of the swap and the list of
+names not to go looking for; the design docs that describe the old pipeline carry a status
+banner pointing at it. When a doc and the code disagree, the code wins.
 
 Design rationale lives in `defender/docs/` — start with `defender/docs/learning-loop.md` (the
-RL / evolutionary-algorithms framing the architecture borrows from).
+RL / ablation-study framing the architecture borrows from).
 
 ## Quick Start
 

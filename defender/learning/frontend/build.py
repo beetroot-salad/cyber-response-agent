@@ -45,6 +45,15 @@ section.stage-defender { --accent-group: var(--accent-defender); }
 section.stage-actor    { --accent-group: var(--accent-actor); }
 section.stage-oracle   { --accent-group: var(--accent-oracle); }
 section.stage .blurb { font-size: 12px; color: var(--text-dim); margin: 0 0 4px; max-width: 760px; }
+/* A retired group's PRODUCER is gone while its files remain. Dimmed and badged rather than
+   hidden: the lessons are still findable, but the page must not read as if the loop is
+   still authoring them. */
+section.stage.is-retired { opacity: 0.66; }
+section.stage.is-retired .lesson-card { border-left-color: var(--border-2); }
+section.stage .retired-note {
+  font-size: 12px; color: var(--warn); margin: 0 0 4px; max-width: 760px;
+}
+.badge-retired { background: rgba(110, 118, 129, 0.20); color: var(--text-dim); border: 1px solid var(--border-2); }
 section.stage .count-pill {
   font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px;
   color: var(--text-dim); margin-left: 8px; font-weight: 400;
@@ -188,21 +197,34 @@ function renderGroup(name){
   const g = DATA.groups[name];
   const stale = g.lessons.filter(l => l.status === "stale").length;
   const pill = g.lessons.length + " lesson" + (g.lessons.length === 1 ? "" : "s") + (stale ? " · " + stale + " stale" : "");
+  // An empty LIVE group is "nothing authored yet"; an empty RETIRED one is "nothing was
+  // left behind". Different facts, so they get different sentences.
   const cards = g.lessons.length
     ? '<div class="lesson-grid">' + g.lessons.map(l => renderCard(l, g.fields)).join("") + '</div>'
-    : '<div class="empty">No ' + escHtml(name) + ' lessons yet.</div>';
-  return '<section class="stage ' + (STAGE[name] || "") + '" data-group="' + name + '">'
-    + '<h2>' + escHtml(g.label) + '<span class="count-pill">' + pill + '</span></h2>'
+    : '<div class="empty">' + (g.retired ? 'This retired corpus is empty.' : 'No ' + escHtml(name) + ' lessons yet.') + '</div>';
+  const badge = g.retired ? '<span class="badge badge-retired">retired</span>' : "";
+  const note = (g.retired && g.retired_note) ? '<p class="retired-note">' + escHtml(g.retired_note) + '</p>' : "";
+  return '<section class="stage ' + (STAGE[name] || "") + (g.retired ? " is-retired" : "") + '" data-group="' + name + '">'
+    + '<h2>' + escHtml(g.label) + ' ' + badge + '<span class="count-pill">' + pill + '</span></h2>'
     + '<p class="blurb">' + escHtml(g.blurb) + '</p>'
+    + note
     + cards + '<div class="no-match" hidden>No lessons match the filter.</div>'
     + '</section>';
 }
 
 document.getElementById("root").innerHTML = ORDER.map(renderGroup).join("");
 
-const total = ORDER.reduce((a, n) => a + DATA.groups[n].lessons.length, 0);
+// COUNTED SEPARATELY, because one total over live and retired groups is the claim this
+// page used to make and it is no longer true: only the live corpora are the loop's current
+// output. A retired lesson still renders — it just does not count as posture.
+const live = ORDER.filter(n => !DATA.groups[n].retired)
+                  .reduce((a, n) => a + DATA.groups[n].lessons.length, 0);
+const archived = ORDER.filter(n => DATA.groups[n].retired)
+                      .reduce((a, n) => a + DATA.groups[n].lessons.length, 0);
 document.getElementById("headline").textContent =
-  total + " lessons · generated " + (DATA.generated_at || "—");
+  live + " live lesson" + (live === 1 ? "" : "s")
+  + (archived ? " · " + archived + " archived" : "")
+  + " · generated " + (DATA.generated_at || "—");
 
 function applyFilters(){
   const q = document.getElementById("filter").value.trim().toLowerCase();

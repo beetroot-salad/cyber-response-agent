@@ -4,7 +4,7 @@ How the runtime driver enforces its gates in-process (the successor to the retir
 
 The learning loop has proven its value end-to-end on real cases, so the
 earlier "runtime reliability gates are out of scope" stance is **lifted**.
-The runtime is the in-process **PydanticAI driver** (`runtime/driver.py`),
+The runtime is the in-process **PydanticAI driver** (`runtime/driver/`),
 so these gates run **in-process** — not as Claude Code PreToolUse/PostToolUse
 subprocesses. The legacy `claude -p` runtime and its `run-settings.json` hook
 wiring were retired; the gate *logic* lives on, re-hosted in-process (the

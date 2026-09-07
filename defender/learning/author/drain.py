@@ -1,10 +1,12 @@
 """The one corpus-author drain body, and the one retire seam.
 
-Every corpus-author channel — findings and the three observation channels — reaches its
-batch through `run_batch` here. What varies per direction (pre-author gate, AUTHOR_RESULT
-buckets, row key, the queue's two locks, commit trailers, the lessons-only held report)
-is a field on the config; the batch body (read, partition, author, verify, commit,
-project, rotate, log) is this module.
+Every corpus-author channel reaches its batch through `run_batch` here. Since #922 that
+is ONE channel — findings; the three observation channels lost their producer with the
+old pipeline. The parameterisation stays because it is the batch driver's contract with
+its config, not because a second channel is pending: what varies per direction
+(pre-author gate, AUTHOR_RESULT buckets, row key, the queue's two locks, commit trailers,
+the lessons-only held report) is a field on the config, and the batch body (read,
+partition, author, verify, commit, project, rotate, log) is this module.
 
 **Retirement is reachable only from `RETIRE_SET`.** A fault whose class is not in that
 tuple never reaches the retire seam: it leaves its row queued — stuck, recoverable, and
@@ -28,7 +30,7 @@ its attempt count and the tick is recorded as stuck instead. Otherwise an index-
 collision during a read-only probe burns an attempt against work that was fine, and three
 collisions over a queue's life delete it.
 
-SCOPE: the set governs the four AUTHOR channels. The pitfalls and lead-author legs keep
+SCOPE: the set governs the AUTHOR channel. The pitfalls and lead-author legs keep
 `core/faults.run_or_dead_letter`'s own re-raise set, which CONTAINS `GitError` — so a
 commit-time `GitError` retires here and kills the drain there. One class, two
 classifications, by channel: deliberate, and left for a follow-up.

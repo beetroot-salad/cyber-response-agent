@@ -11,8 +11,8 @@ system auth, syslog, security alerts — goes through one adapter
 (`elastic_adapter.py`) against this one cluster.
 
 This file is the **Visibility surface** — read by the defender (gather
-routing, judge), the author (template scaffolding), and the
-actor-reviewer judge. It describes what the v2 ES instance can answer,
+routing) and the lead author (template scaffolding). It describes what
+the v2 ES instance can answer,
 regardless of how queries are dispatched. The **Execution** surface
 (query syntax, index scoping, connectivity, param value constraints)
 lives in the adjacent

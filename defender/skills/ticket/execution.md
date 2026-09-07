@@ -18,8 +18,8 @@ enforces — a param it names will bind, one it omits is refused. Don't Read
 The adapter returns the upstream JSON response unchanged. At gather's query
 boundary, the current run's own ticket is removed before both the model-facing
 view and `gather_raw` capture. This is an identity exclusion, not a closed-only
-filter: other open and in-progress tickets are valid correlation context, while
-closed-only actor/judge reads remain the confirmation path for precedent.
+filter: every other ticket, closed ones included, stays valid correlation
+context.
 
 ## Connectivity
 
