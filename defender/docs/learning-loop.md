@@ -191,7 +191,7 @@ defender/learning/branch/cli.py <run_dir> <branch_message_id>
         │
         ├── 1. preflight        — everything that can refuse before anything is spent
         ├── 2. questioner       — family.yaml: a control world + one-axis counterfactuals
-        ├── 3. staging          — each world's corpus into its own `wv-` namespace
+        ├── 3. staging          — each world's corpus into its own namespace
         ├── 4. review by replay — the captured query set through each world; any
         │                         rejection ends the EPISODE, so no sibling starts
         ├── 5. the family       — each accepted world as its own `run.py --resume`
@@ -245,8 +245,18 @@ whole document before anything is staged.
 ### 3. Staging
 
 `learning/branch/staging.py` + `branch/estate/` write each world's corpus into its
-own `wv-` namespace, every name write-ahead-recorded in `staged.yaml` *before* it
-is created, so teardown can find what a crashed run left behind. The staged estate
+own namespace, every name write-ahead-recorded in `staged.yaml` *before* it is
+created, so teardown can find what a crashed run left behind.
+
+**The namespace prefix is deliberately not spelled here, and must not be added.**
+A sibling is a real investigation whose model can read `defender/docs/`, and the
+isolation guarantee is that the fault channel is the *only* way that scheme could
+be learned — a world that knows how staged names are spelled can recognise it is
+in a staged world, which is the one thing the measurement cannot survive. The
+prefix, the label template and the world labels are all held out of every
+prompt-reachable tree; `tests/test_947_triplet_isolation.py` sweeps
+`defender/{docs,skills,knowledge}` for them on every run. Read the constant in
+`branch/staging.py` if you need it. The staged estate
 is what a sibling's queries are answered from: it answers for the world the run is
 in, not for the real environment.
 
