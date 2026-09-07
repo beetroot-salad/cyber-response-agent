@@ -488,3 +488,119 @@ def test_run_stage_maps_giterror_to_exit_2():
         raise _git.GitError(["commit"], 1, "pre-commit hook rejected")
 
     assert cli._run_stage(stage) == 2
+
+
+
+
+# ---------------------------------------------------------------------------------------
+# #881 / O2 — the wake gate and the threshold measure rows that can be AUTHORED
+# ---------------------------------------------------------------------------------------
+#
+# `held_reason` is the drain's own "this row is held" marker: both gates stamp it on the copy
+# they hold (`author/lessons/run.py:335`, `:382`), the forward-check bucket writes it (`:223`),
+# and the closing rotation writes those stamped copies back (`author/drain.py:388`). So a row
+# carrying it is one the drain has already looked at and declined to author — it is not work,
+# and counting it wakes the drain forever for a batch it will hold again.
+#
+# The trigger is not hypothetical: a pre-cutover adversarial/benign row left in a deployed
+# queue reads `disposition=None` forever now that `source_refs.yaml`'s writer is gone, so it is
+# held on every tick and pins the gate open behind it.
+
+
+def _seed_queue(paths: LoopPaths, lines: list[str]) -> None:
+    paths.pending_file.parent.mkdir(parents=True, exist_ok=True)
+    paths.pending_file.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+
+
+def _row(fid: str, **extra) -> str:
+    return json.dumps({"finding_id": fid, "run_id": fid.split("/")[0], **extra})
+
+
+#: The two spellings the gates actually stamp, plus the bucket's. The count keys on the FIELD,
+#: never on one of these strings — a reader matching a prefix would miss the other writers.
+_HELD_REASONS = (
+    "no_ground_truth(direction='adversarial', disposition=None)",
+    "no_family_ground_truth(judge_outcome=None)",
+    "forward_bad: the lesson flips a correctly-resolved case",
+)
+
+
+def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
+    """#881/O2: `_pending_queue_count` counts what a tick could take, not file lines.
+
+    Four cases on one address, so no single mis-reading satisfies it:
+
+    * five HELD rows count as zero — the defect. Each carries `held_reason`, which is the
+      field the gate itself writes, so the count needs no second rule and no queue change.
+    * five otherwise identical rows WITHOUT the field count as five. This is the control that
+      makes the first case mean something: a counter that answered 0 for every queue would
+      pass the first assertion and pin the drain shut instead of open.
+    * a blank line still counts as nothing (the behaviour that is already right).
+    * an UNPARSABLE line still counts as ONE. It is work — the drain's unkeyable path retires
+      exactly such a row — so a count that skipped every line it could not read as a held-less
+      row would strand a queue full of junk below the threshold, unretired and invisible.
+    """
+    paths = LoopPaths(repo_root=tmp_path)
+    held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
+
+    _seed_queue(paths, held)
+    assert drains._pending_queue_count(paths.pending_file) == 0, (
+        "five rows the gate has already held were counted as pending work"
+    )
+
+    _seed_queue(paths, [_row(f"h/{i}") for i in range(5)])
+    assert drains._pending_queue_count(paths.pending_file) == 5, (
+        "the same five rows without `held_reason` are authorable and must be counted"
+    )
+
+    _seed_queue(paths, ["", _row("h/0"), "   ", ""])
+    assert drains._pending_queue_count(paths.pending_file) == 1, "a blank line is not a row"
+
+    _seed_queue(paths, [*held, "{not json at all"])
+    assert drains._pending_queue_count(paths.pending_file) == 1, (
+        "an unreadable line is work for the drain's unkeyable retirement, so it counts"
+    )
+
+
+def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_again(
+    tmp_path, monkeypatch
+):
+    """#881/O2: `_has_curator_work` answers for rows that can be AUTHORED.
+
+    Three positions, each with its complement on the same address:
+
+    * five held rows do NOT trip a threshold of five — today they do, and the drain spins up
+      every tick, takes the repo lock, re-holds the same five rows and writes nothing.
+    * five UNHELD rows DO trip it, so the gate is not simply wedged shut.
+    * one clean row beside those five held ones does not trip it either. This is the sharper
+      half: a gate that merely subtracted "some" held rows, or that special-cased an
+      all-held queue, still answers True for 5+1 while only ONE row is authorable. Adding
+      four more clean rows trips it, which is the arithmetic stated in the other direction.
+
+    The threshold is set explicitly rather than left to `env_int`'s default so the test says
+    what number the counts are being judged against.
+    """
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
+    paths = LoopPaths(repo_root=tmp_path)
+    held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
+
+    _seed_queue(paths, held)
+    assert drains._has_curator_work(paths) is False, (
+        "the wake gate fired for five rows the gate has already held; the drain will take "
+        "the repo lock, hold them again and write nothing, on every tick, forever"
+    )
+
+    _seed_queue(paths, [_row(f"c/{i}") for i in range(5)])
+    assert drains._has_curator_work(paths) is True, (
+        "five authorable rows must still wake the drain"
+    )
+
+    _seed_queue(paths, [*held, _row("c/0")])
+    assert drains._has_curator_work(paths) is False, (
+        "one authorable row beside five held ones is one row of work, not six"
+    )
+
+    _seed_queue(paths, [*held, *(_row(f"c/{i}") for i in range(5))])
+    assert drains._has_curator_work(paths) is True, (
+        "five authorable rows are five rows of work however many held ones sit beside them"
+    )

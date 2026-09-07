@@ -192,6 +192,58 @@ def test_strip_yaml_fence_passes_through_when_no_thinking_tag():
     assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
 
 
+#: #881/O1's five shapes, spelled once. The BODY is a judge verdict rather than the
+#: two-key `outcome:` document the cluster above uses, because `normalize_judge_yaml` is
+#: what the family judge's `validate_reply` calls and the shape it must recover is the one
+#: a graded world arrives in.
+_VERDICT = "episode_outcome: caught\nfindings: []\n"
+
+#: Every way a model has been observed to wrap that verdict. Four of them already parse;
+#: `fence then prose` is the one the guard clause at `core/validate.py:49` disables the only
+#: rule that would recover — and it is not an exotic shape, it is a model that answers with
+#: the document first and a closing sentence after it.
+FENCE_SHAPES = {
+    "plain": _VERDICT,
+    "whole fence": f"```yaml\n{_VERDICT}```\n",
+    "prose then fence": f"Here is the grading you asked for.\n\n```yaml\n{_VERDICT}```\n",
+    "fence then prose": f"```yaml\n{_VERDICT}```\n\nLet me know if you want more detail.\n",
+    "prose fence prose": (
+        f"Here is the grading you asked for.\n\n```yaml\n{_VERDICT}```\n\nHappy to expand.\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FENCE_SHAPES))
+def test_normalize_judge_yaml_recovers_a_fenced_verdict_whatever_prose_surrounds_it(shape):
+    """#881/O1: a syntactically valid verdict inside a fence parses with prose before it,
+    after it, on both sides, or on neither.
+
+    `fence then prose` is the regression; the other four are its POSITIVE CONTROLS on the
+    same address, and they are what makes the assertion discriminating. The bug is one
+    over-narrow guard (`and not s.startswith("```")`) on the rule that reduces a fence
+    found mid-string, so the naive repairs — strip every fence line, take everything
+    between the first and last backticks, drop the tail after the closing fence — all
+    recover this shape while breaking one of the four that already worked. Parametrised so
+    a repair that trades one shape for another names which one it lost.
+
+    Asserted through the PARSED DOCUMENT, not through the normalizer's return string: what
+    the caller needs is a document, and pinning the intermediate text would refuse a
+    normalizer that recovers the same verdict with different whitespace."""
+    import yaml
+
+    from defender._yaml import safe_load
+
+    cleaned = loop.normalize_judge_yaml(FENCE_SHAPES[shape])
+    try:
+        doc = safe_load(cleaned)
+    except yaml.YAMLError as bad:
+        pytest.fail(f"{shape}: the verdict did not survive normalization ({bad}); "
+                    f"normalizer returned {cleaned!r}")
+    assert doc == {"episode_outcome": "caught", "findings": []}, (
+        f"{shape}: normalization returned {cleaned!r}"
+    )
+
+
 
 
 def _judge_doc(outcome: str, observations: list[dict] | None) -> dict:
