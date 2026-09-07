@@ -19,6 +19,7 @@ from defender.learning.core.config import (
     pitfalls_threshold,
 )
 from defender import _git
+from defender._io import read_jsonl_rows_report
 from defender.runtime import box as box_mod
 from defender.learning.author import drain
 from defender.learning.author import shared as _author_shared
@@ -123,9 +124,25 @@ def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
 
 
 def _pending_queue_count(pending_file: Path) -> int:
-    if not pending_file.is_file():
-        return 0
-    return sum(1 for line in pending_file.read_text(encoding="utf-8").splitlines() if line.strip())
+    """How many queued rows a tick could still author — not how many lines the file has.
+
+    `held_reason` IS the answer, and it is the drain's own: both arms of the pre-author gate
+    stamp it on the copy they hold and the forward-check bucket writes it too, and the closing
+    rotation writes those stamped copies back into this file. So the field this reads is the
+    field the holder wrote, one source of truth, with nothing new stored and no second rule
+    about what "held" means (#881/O2).
+
+    Counting lines instead made a permanent hold look like pending work. A hold is permanent
+    by construction — the fact it waits on has no writer any more — so five of them pinned the
+    wake gate open forever: every tick fetched, added a worktree, started a box and scrubbed
+    it, to re-hold the same five rows; and the first genuinely authorable row arrived at a
+    count already over threshold, so the curator got a batch of one against a documented five.
+
+    AN UNREADABLE LINE COUNTS AS ONE. It is work — the drain's unkeyable path retires exactly
+    such a row — and a count that skipped what it could not parse would strand a queue full of
+    junk below the threshold, unretired and invisible."""
+    rows, unreadable = read_jsonl_rows_report(pending_file)
+    return sum(1 for row in rows if not row.get("held_reason")) + unreadable
 
 
 def _has_curator_work(paths: LoopPaths) -> bool:
