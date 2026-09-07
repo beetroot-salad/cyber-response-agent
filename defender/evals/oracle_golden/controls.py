@@ -391,10 +391,10 @@ def _operation_window(case_dir: Path) -> tuple[datetime, datetime] | None:
 
 
 def lead_queries(case_dir: Path) -> list[tuple[str, int, dict]]:
-    """(lead_id, seq, params) for every query, in the order build_case.py stored them.
+    """(lead_id, seq, params) for every query, in the order the case assembler stored them.
 
     `seq` is the QUERIES TABLE's seq, not this list's position, because that is what the
-    observed payload beside it is named for (`build_case.py` copies `raw_ref`, whose name
+    observed payload beside it is named for (the assembler copied `raw_ref`, whose name
     is `{seq}.json`). They differ once `∅.`-prefixed sentinel rows are split out of
     `JoinedLead.queries` while `record_query._next_seq` still counts them: one refused
     query ahead of a real one makes the position trail the seq for the rest of the lead.

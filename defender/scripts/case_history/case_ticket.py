@@ -13,7 +13,6 @@ from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION, normalize
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
 
-_SEED_ELIGIBLE_OUTCOMES = {"caught", "skip-passthrough"}
 
 _MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
 
@@ -327,53 +326,12 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
 
 
 
-def outcome_seeds_eligible(outcome: str) -> bool:
-    return outcome in _SEED_ELIGIBLE_OUTCOMES
 
 
-def enrichment_to_comment(outcome: str) -> dict[str, Any]:
-    mapping = _load_mapping()
-    eligible = outcome_seeds_eligible(outcome)
-    ctx = _ctx(outcome=outcome, seed_eligible="true" if eligible else "false")
-    return _render(mapping.get("annotate") or {}, ctx)
 
 
-def _seed_marker_and_separator(mapping: dict[str, Any]) -> tuple[str | None, str | None]:
-    tmpl = _dig(mapping, "annotate.body")
-    if not isinstance(tmpl, str):
-        return None, None
-    ph = "{seed_eligible}"
-    i = tmpl.find(ph)
-    if i == -1:
-        return None, None
-    marker = tmpl[:i]
-    if "{" in marker:
-        return None, None
-    rest = tmpl[i + len(ph):]
-    nxt = rest.find("{")
-    sep = rest[:nxt] if nxt != -1 else rest
-    return (marker or None), (sep or None)
 
 
-def parse_survival_from_comments(comments: Any) -> bool | None:
-    try:
-        marker, sep = _seed_marker_and_separator(_load_mapping())
-    except CaseTicketError:
-        return None
-    if not marker:
-        return None
-    result: bool | None = None
-    for c in comments or []:
-        body = c.get("body") if isinstance(c, dict) else None
-        if not isinstance(body, str) or not body.startswith(marker):
-            continue
-        tail = body[len(marker):]
-        token = (tail.split(sep, 1)[0] if sep else tail).strip()
-        if token == "true":
-            result = True
-        elif token == "false":
-            result = False
-    return result
 
 
 
@@ -424,10 +382,6 @@ def resolution_method_from_resolution(resolution: str | None) -> str | None:
     return seg.strip() or None
 
 
-
-
-def ticket_key(ticket: Any) -> str | None:
-    return ticket.get("key") if isinstance(ticket, dict) else None
 
 
 def ticket_created(ticket: Any) -> str | None:
@@ -497,7 +451,3 @@ def ticket_resolution_method(ticket: Any) -> str | None:
     return resolution_method_from_resolution(ticket.get("resolution"))
 
 
-def ticket_seed_eligible(ticket: Any) -> bool | None:
-    if not isinstance(ticket, dict):
-        return None
-    return parse_survival_from_comments(ticket.get("comments"))

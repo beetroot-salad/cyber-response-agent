@@ -19,7 +19,6 @@ RED against `d1b8b06a`: `_vocab.py` has no `JUDGE_OUTCOME_ENUM` and no normalize
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -306,44 +305,3 @@ def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(
             policy=policy).allow, "the positive control failed: nothing reads at all"
 
 
-def test_921_append_findings_writes_a_gate_conforming_row(tmp_path):
-    """`append_findings` — the PRE-EXISTING generic queue writer every direction calls, not just
-    the judge's new one — writes a row carrying `run_id` and `direction`.
-
-    P6 shows a row missing either raises a bare `KeyError` inside the shared gate, which `_tick`
-    stuck-records as the WHOLE keyed batch — every well-formed adversarial and benign row riding
-    beside it — and then re-raises. The shared sink's shape guarantee has to hold for THIS
-    writer too, not only for the family direction's new one: #921 makes the failure reachable
-    from a new direction, but the sink was always shared.
-
-    Driven through the real writer and then through the real gate, so "conforming" is the gate's
-    answer rather than a key list this file re-states.
-    """
-    paths = D.make_paths(tmp_path)
-    persist = J.mod("learning.core.persist")
-    D.write_source_refs(paths, "run-adv", disposition="benign")
-    learning_run_dir = paths.runs_dir / "run-adv"
-    learning_run_dir.mkdir(parents=True, exist_ok=True)
-
-    judge_doc = {"outcome": "survived", "defender_findings": [{
-        "type": "lead-set", "subject_anchor": "l-001", "subject_topic": "coverage",
-        "finding": "the holding system was never re-queried",
-        "citations": [{"source": "investigation", "quote": "..."}]}]}
-    written = persist.append_findings(judge_doc, "run-adv", "rule-5710", learning_run_dir,
-                                      paths=paths)
-    assert written == 1
-
-    channel = D.channel_of(paths, "findings")
-    row = D.pending(channel)[0]
-    assert "run_id" in row, (
-        "the shared writer emitted a row the shared gate indexes by a key it does not carry")
-    assert "direction" in row, (
-        "the shared writer emitted a row the shared gate indexes by a key it does not carry")
-
-    agent = D.recording(D.committing("shared-writer"))
-    assert J.mod("learning.author.drain").run_batch(
-        cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
-    assert [r["finding_id"] for r in agent.calls[0]["rows"]] == [row["finding_id"]]
-    assert not D.stuck_records(channel), (
-        "the shared writer's own row took a tick to stuck.jsonl")
-    assert json.dumps(row), "the row is not JSON-serialisable; the queue file is JSONL"

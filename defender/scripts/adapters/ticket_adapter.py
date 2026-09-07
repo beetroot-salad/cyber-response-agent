@@ -7,7 +7,6 @@ read-only.
 Two surfaces over ONE implementation. Alone among the adapters, ticket keeps an argparse
 entry point, because two non-gather consumers run it as a subprocess and pin its exit codes:
 
-  - `learning/tickets/ticket_seeds.py`
   - `learning/author/verify_forward/forward.py`
 
 Both surfaces call `list_tickets` / `get_ticket` — the verbs. `main()` is the sole place

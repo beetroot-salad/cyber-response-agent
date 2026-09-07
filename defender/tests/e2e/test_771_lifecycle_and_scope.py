@@ -180,84 +180,6 @@ def test_consumers_treat_an_unmarked_tree_as_unverified(tmp_path):
     )
 
 
-def test_the_learning_enqueue_refuses_an_unverified_tree(tmp_path, monkeypatch):
-    """unmarked_tree_is_never_enqueued_for_learning — the run's real learning-enqueue step
-    REFUSES a tree that carries no scan verdict and a tree whose verdict records a skip: it
-    reports that it did not enqueue and leaves no marker in the queue. A tree the scan walked
-    clean is enqueued as it is today.
-
-    §7 D2'S SECOND HALF, DRIVEN AT A CONSUMER. The human's clause says every downstream
-    consumer treats an unmarked tree as unverified, and until round four that half was
-    discharged by one test calling the verdict predicate directly and checking it answers
-    correctly. No demand required anything to CALL it — so an implementation that shipped the
-    predicate and wired it nowhere passed the whole suite, which is the "document the gap
-    without a marker" option D2 was chosen over, reached by another road.
-
-    WHAT THIS PIN IS ACTUALLY FOR, STATED AGAINST THE LEDGER RATHER THAN AGAINST THE HAZARD IT
-    WAS SOLD ON. D9 was argued from a live route — an unverified run reaching the learning loop
-    becomes actor stories, judge findings and eventually lessons. G12's executed break attempt
-    says that route is already shut: on exactly the skipped-scan cells this marker exists to
-    describe, whichever exception won propagates out of the lifecycle and nothing above catches
-    it, so the post-run steps are never reached and this entry point is never called with an
-    unverified tree at all. The enqueue is unreachable with an unverified tree TODAY, and it is
-    unreachable by accident of control flow, not by any rule.
-
-    THIS DEMAND EXISTS SO THAT STAYS TRUE BY CONSTRUCTION. It is a tripwire for the change that
-    starts CATCHING the lifecycle's fault — degrade that exception anywhere above the reap and
-    the enqueue becomes reachable with an unverified tree, and this test is what fails. Read it
-    as a defensive pin, not as a hole being plugged; the cost it accepts (a fifth module in play
-    for the implementer) is priced accordingly.
-
-    THIS CONSUMER, AND NOT ANOTHER, because it is the cheap one. It already reads the tree, and
-    the refusal needs no new mechanism: this entry point already declines to enqueue on two
-    other grounds (a truncated investigation, a held-out eval fixture), reporting False and
-    saying why on stderr. An unverified tree is the third member of a set that exists.
-
-    THE POSITIVE CONTROL IS THE THIRD ARM and it is not ceremony: a consumer that enqueued
-    nothing would satisfy both refusals and silently end the learning loop, which is the failure
-    mode nobody would see for weeks."""
-    from defender import run_common
-
-    state = tmp_path / "learning-state"
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(state))
-    alert = tmp_path / "alert.json"
-    alert.write_text('{"id": "a-771"}\n', encoding="utf-8")
-    queue = state / "learn-queue"
-
-    def queued() -> list[str]:
-        # The queue's whole contents, not one expected name: every tree `run_tree` builds
-        # carries the same directory name, so a per-name check would read a marker written for
-        # a different arm as this arm's absence.
-        return sorted(p.name for p in queue.glob("*.json")) if queue.is_dir() else []
-
-    unmarked = run_tree(tmp_path / "unmarked")
-    assert run_common.enqueue_learning(unmarked, alert) is False, (
-        "a tree carrying no scan verdict was enqueued for learning — the marker is available "
-        "and no consumer consults it, which is D2's clause discharged by a predicate nothing "
-        "is required to call"
-    )
-    assert not queued(), (
-        f"the enqueue reported a refusal and wrote a marker anyway ({queued()}), so the "
-        f"learning loop picks the run up regardless of what the caller was told"
-    )
-
-    skipped = run_tree(tmp_path / "skipped")
-    write_verdict(skipped, {"ran": False, "reason": "teardown faulted"})
-    assert run_common.enqueue_learning(skipped, alert) is False, (
-        "a tree whose verdict records that the walk never ran was enqueued — the crash path "
-        "most likely to hold what a box planted is the one that must not feed the corpus"
-    )
-    assert not queued(), f"the skipped-scan tree left a marker in the queue: {queued()}"
-
-    verified = run_tree(tmp_path / "verified")
-    scrub_mod.scrub(verified)
-    assert run_common.enqueue_learning(verified, alert) is True, (
-        "a tree the scan walked clean was refused too, so the learning loop is starved and the "
-        "two refusals above pass by the enqueue refusing everything"
-    )
-    assert (queue / f"{verified.name}.json").is_file(), (
-        f"the enqueue reported success and left no marker in {queue}"
-    )
 
 
 def test_an_emptied_artifact_still_leaves_the_tree_verified(tmp_path):
@@ -641,44 +563,6 @@ def test_artifacts_still_land_at_their_current_paths_in_the_shared_tree(tmp_path
         )
 
 
-def test_the_box_writable_mount_set_pins_the_hard_link_non_obligation(tmp_path):
-    """box_writable_mount_set_pins_the_hardlink_premise — the investigation lane renders exactly
-    ONE writable bind (the run dir) beside its read-only mounts and its `/tmp` tmpfs, and the
-    read-only lane renders none.
-
-    This is the premise, and only the premise, under an explicit NON-OBLIGATION. The model's
-    write gate is blind to a hard link (X17/G3, refuted and executed) — but the box cannot reach
-    that blindness, because `link(2)` refuses to cross a mount boundary (R6: cross-mount and
-    rootfs-to-shared both `EXDEV`, within-mount succeeded). The box's only writable mount is the
-    shared tree, so a hard link it creates can only alias entries already inside that tree. The
-    gate's blindness is real; the route to it is not.
-
-    The premise pinned here is the MOUNT SET, not permissions. Widening a bind, or mounting a
-    parent directory read-write, would convert this from unreachable to live without touching
-    any code #771 changes — and the gate would still be blind. This test is what fails loudly
-    when the mount topology drifts."""
-    from defender.learning.core.run_cycle import _run_cycle_box_request
-
-    run = run_tree(tmp_path)
-    rec = AliasProbeDocker(BAN_IN_FORCE)
-    box_mod.start_box(run, DEFENDER, docker=rec)
-
-    writable = [m for m in rec.mounts() if not m["readonly"]]
-    assert len(writable) == 1, f"the investigation lane's writable bind set moved: {writable}"
-    assert Path(writable[0]["target"]) == run, (
-        "the one writable bind is no longer the run dir, so a hard link the box creates can "
-        "alias something outside it"
-    )
-    assert rec.tmpfs(), "the /tmp tmpfs is gone; the read-only lane loses its only probe target"
-
-    learning_run_dir = tmp_path / "learning-run"
-    learning_run_dir.mkdir()
-    ro = AliasProbeDocker(BAN_IN_FORCE)
-    box_mod.start_box(
-        _run_cycle_box_request(run_tree(tmp_path / "rc"), learning_run_dir, DEFENDER), docker=ro)
-    assert not [m for m in ro.mounts() if not m["readonly"]], (
-        "the read-only lane gained a writable bind — X16's premise moved"
-    )
 
 
 def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_path, monkeypatch):

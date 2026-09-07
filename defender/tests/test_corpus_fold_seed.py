@@ -154,35 +154,6 @@ class _BlockYaml:
         return None
 
 
-def test_c2_corpus_module_imports_with_no_pyyaml():
-    """demand: c2 (negative) — ``defender._corpus`` must import cleanly on an interpreter with NO
-    PyYAML. This is the contract the whole relocation hinges on and NOTHING pins it today: it is a
-    docstring claim in ``_lessons_common.py``.
-
-    It is not theoretical. The adversarial actor runs the pinned lesson scripts as
-    ``python3 defender/scripts/lessons/lessons_actor_index.py …`` on its bash lane
-    (``learning/pipeline/actor_engine.py``'s ``_script_grant``) under the SYSTEM interpreter, which
-    has no PyYAML; each script imports ``_lessons_common`` at module scope and only THEN calls
-    ``reexec_into_venv`` under its ``__main__`` guard. A module-top ``import yaml`` — or a module-top
-    import of anything yaml-backed, like ``defender._frontmatter`` — in the new file breaks the
-    actor's lesson retrieval live, in the learning loop, where no unit test is looking.
-
-    Masking at the meta_path (not grepping the source) is deliberate: the fault is TRANSITIVE, and a
-    grep for ``import yaml`` misses ``from defender._frontmatter import parse_frontmatter``."""
-    purged = {}
-    for name in list(sys.modules):
-        if name == "yaml" or name.startswith(("yaml.", "defender._corpus", "defender._frontmatter")):
-            purged[name] = sys.modules.pop(name)
-    blocker = _BlockYaml()
-    sys.meta_path.insert(0, blocker)
-    try:
-        mod = importlib.import_module("defender._corpus")
-        assert hasattr(mod, "iter_lessons")
-        assert "yaml" not in sys.modules
-    finally:
-        sys.meta_path.remove(blocker)
-        sys.modules.pop("defender._corpus", None)
-        sys.modules.update(purged)
 
 
 def test_c2b_positive_control_iter_lessons_parses_under_the_venv(tmp_path):
@@ -269,117 +240,12 @@ def test_c2c_corpus_module_top_level_imports_are_import_safe():
 
 
 
-@pytest.mark.parametrize(
-    ("script", "argv"),
-    [
-        ("lessons_fm.py", ["--tags"]),
-        ("lessons_actor_index.py", ["--techniques", "T1078"]),
-        ("lessons_env_retrieve.py", ["--alert-rule-ids", "rule-x"]),
-        ("lessons_frontier.py", ["--investigation", str(
-            DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md"
-        )]),
-    ],
-)
-def test_c3_each_lesson_cli_still_runs_as_a_real_subprocess(script, argv):
-    """demand: c3 (survival) — each lesson CLI still runs as a REAL subprocess and exits
-    0 after the relocation.
-
-    A subprocess is the only shape that exercises the script's own ``sys.path`` bootstrap, its
-    ``reexec_into_venv``, and the new ``defender._corpus`` resolution TOGETHER. ``test_lessons_fm.py``
-    loads ``lessons_fm.py`` in-process via ``importlib.exec_module``, so ``__name__ != "__main__"``,
-    the re-exec never fires, and PyYAML is already imported — it is structurally blind to the contract
-    this relocation depends on. The fault caught here: ``defender/_corpus.py`` resolvable under
-    pytest's path but NOT from the script's own bootstrap."""
-    proc = subprocess.run(
-        [sys.executable, str(DEFENDER / "scripts" / "lessons" / script), *argv],
-        cwd=REPO_ROOT, capture_output=True, text=True,
-    )
-    assert proc.returncode == 0, f"{script} failed after the relocation:\n{proc.stderr}"
-    assert "ModuleNotFoundError" not in proc.stderr
-    assert "ImportError" not in proc.stderr
-
-
-def test_c4_mirrored_fake_tree_carries_every_defender_import_of_the_copied_script(tmp_path):
-    """demand: c4 (survival) — ``test_author_actor.py::_index_cli_runner`` does not IMPORT the actor's
-    index CLI; it MIRRORS source files into a fake repo tree (at the real depth, so the script's
-    ``REPO_ROOT = parents[3]`` lands in tmp) and runs the copy as a subprocess. Its copy list is a
-    hardcoded four names. After the relocation the copied ``_lessons_common`` imports
-    ``defender._corpus`` — not in the list — and the subprocess dies with ``ModuleNotFoundError``.
-
-    Pinned STRUCTURALLY, not by appending one filename: compute the transitive closure of module-level
-    ``defender.*`` imports reachable from ``lessons_actor_index.py`` over the real source tree, and
-    assert every one of them exists in the fake tree the runner builds. Appending ``_corpus.py`` to the
-    list would re-arm the identical trap for the next module the CLIs pick up."""
-    from defender.tests.test_author_actor import _index_cli_runner, _isolate
-
-    ctx = _isolate(tmp_path)
-    run_index = _index_cli_runner(ctx)
-    fake_root = ctx["repo"]
-
-    run_index(["--techniques", "T1078"])
-
-    def defender_imports(src: Path) -> set[str]:
-        found = set()
-        for node in ast.parse(src.read_text()).body:
-            if isinstance(node, ast.Import):
-                found |= {a.name for a in node.names if a.name.startswith("defender.")}
-            elif (
-                isinstance(node, ast.ImportFrom)
-                and node.module
-                and node.level == 0
-                and node.module.startswith("defender.")
-            ):
-                found.add(node.module)
-        return found
-
-    seen: set[str] = set()
-    queue = defender_imports(DEFENDER / "scripts" / "lessons" / "lessons_actor_index.py")
-    while queue:
-        mod = queue.pop()
-        if mod in seen:
-            continue
-        seen.add(mod)
-        real = REPO_ROOT / (mod.replace(".", "/") + ".py")
-        if real.exists():
-            queue |= defender_imports(real)
-
-    missing = [m for m in seen if not (fake_root / (m.replace(".", "/") + ".py")).exists()]
-    assert not missing, f"_index_cli_runner's copy list misses {missing} — the subprocess will die"
 
 
 
 
-def test_c5_iter_lessons_observable_contract_is_unchanged(tmp_path, capsys):
-    """demand: c5 (parity) — the fold must not repurpose the shared iterator's defaults to serve the
-    manifest, because the three CLIs stream its output straight to the actor. Pinned over one corpus:
-    the return shape, the ``_``-prefix skip, warn-and-skip on BOTH a malformed and an undecodable
-    file, and — the one a fold is tempted to change — the default ``warn_label`` of ``p.name``.
 
-    ``lessons_actor_index`` passes its own repo-relative ``warn_label`` and ``lessons_env_retrieve``
-    relies on the default, so a default changed to say "corpus manifest" silently rewrites the actor's
-    stderr.
 
-    #584 SUPERSEDES the SHAPE half of this demand — deliberately, and flagged in that PR. This test
-    used to pin the 2-tuple default AND the 3-tuple ``(path, raw, fm)`` under ``with_raw=True``;
-    ``iter_lessons`` now yields one frozen ``Lesson(path, fm, raw, body)`` and the ``with_raw`` flag
-    is gone. Every OTHER property c5 pins is re-asserted below, unchanged, on the dataclass — the
-    shape moved, the contract did not. The new shape itself is pinned by
-    ``test_corpus_fold_584.py`` (d0/d1/d2)."""
-    mod = importlib.import_module("defender._corpus")
-    corpus = _corpus_of(tmp_path, "good")
-    (corpus / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")
-    (corpus / "unfenced.md").write_text("no frontmatter fence\n")
-    (corpus / "undecodable.md").write_bytes(b"---\nname: c\n---\n\xff\xfe\n")
-
-    lessons = list(mod.iter_lessons(corpus))
-    assert [lesson.path.stem for lesson in lessons] == ["good"]
-    assert "name: good" in lessons[0].raw
-    assert lessons[0].fm["name"] == "good"
-
-    err = capsys.readouterr().err
-    assert "unfenced.md" in err
-    assert "undecodable.md" in err
-    assert "corpus manifest" not in err
 
 
 def test_c5b_iter_lessons_yields_in_full_path_order(tmp_path):

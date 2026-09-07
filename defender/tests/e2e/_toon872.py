@@ -585,7 +585,7 @@ def _deps(defn: Any = None, run_dir: Path | None = None):
     `_untrusted.wrap_fresh` — #875 retired `AgentDeps.salt` and `bind`'s `salt=` parameter
     entirely, so there is no standing value left to inject here; every frame mints its own.
 
-    THE SCOPE IS PART OF THE STRIP. `ACTOR_DEF` sets `requires_confine`, so `bind` refuses it
+    THE SCOPE IS PART OF THE STRIP. The definition under test sets `requires_confine`, so `bind` refuses it
     against the default empty `RunScope` ("an empty confine widens the agent's reads to the
     whole defender_dir"). The confine is the run dir itself, which is the narrowest honest
     answer for an agent whose tools are stripped: it reads nothing."""

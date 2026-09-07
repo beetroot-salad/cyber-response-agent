@@ -249,7 +249,7 @@ def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int |
 
     A slot MATCHES when the selector names `*`, names the same value, or the case slot is
     still open. That last clause is the inversion, and it is why this is a second matcher
-    rather than an edit to `lessons_env_retrieve._class_match`: that one wildcards on the
+    rather than an edit to the retired environment retriever's class match: that one wildcarded on the
     SELECTOR side only, which is right for the actors it serves and exactly backwards
     here. The SCORE is the part that has to be about the
     match rather than about the selector: a slot that matched only THROUGH the inversion

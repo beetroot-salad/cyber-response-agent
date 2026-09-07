@@ -19,7 +19,6 @@ under the questioner's key instead until #922 frees it).
 """
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -419,28 +418,6 @@ def test_921_fenced_reply_with_prose_around_it_parses_and_then_validates(tmp_pat
 # ---------------------------------------------------------------------------------------
 
 
-def test_921_judge_registers_no_role_and_calls_under_questioner_with_a_judge_agent_id(tmp_path):
-    """The judge registers NO role of its own and calls under the QUESTIONER key with
-    `agent_id="judge:<X>:<n>"`.
-
-    A second definition under `AgentRole.JUDGE` cannot register while `JUDGE_DEF` is registered
-    — the registry admits one definition per key — so this is not a preference. When #922
-    retires `JUDGE_DEF`, moving this judge onto the freed key is that change's to make, and this
-    demand is what write-code-from-spec's reconciliation reads until then.
-    """
-    role_mod = J.mod("runtime.agent_role")
-    registry = J.mod("agents")
-    ep = _episode(tmp_path)
-    judge = _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(J.reply_doc())), draws=1)
-
-    assert judge.kwargs, "the positive control failed: the judge was never called"
-    assert all(kw["role"] == role_mod.AgentRole.QUESTIONER for kw in judge.kwargs), (
-        f"the judge called under {[kw['role'] for kw in judge.kwargs]}")
-    assert all(aid.startswith("judge:") for aid in judge.agent_ids)
-    definition = registry.AGENTS[role_mod.AgentRole.JUDGE]
-    assert definition is not None
-    assert "judge" not in {getattr(d, "agent_id", None) for d in registry.AGENTS.values()}, (
-        "the judge registered a definition of its own beside the one already on the key")
 
 
 def test_921_judge_call_is_zero_grant_and_deny_all(tmp_path):
@@ -541,38 +518,6 @@ def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_p
         "the record does not distinguish this pass's draws from the files on disk")
 
 
-def test_921_a_timed_out_draw_and_a_raising_draw_are_the_same_class_and_both_leave_a_record(
-        tmp_path):
-    """A wall-clock timeout and a raw transport failure BOTH surface as `RunUnprocessable` —
-    never a sentinel, never a hang — separable only by message text and `__cause__` (P9,
-    executed against the real `run_stage` with a model that awaits, one that blocks the event
-    loop, and one that raises `TransportFault`).
-
-    So a draw handler that branches on exception TYPE cannot tell them apart, and the demand is
-    that the handler DOES NOT TRY: both are recorded, both leave a draw record carrying the
-    failure reason, and the family record says which draws completed. The two arms are driven
-    separately here precisely because an implementation branching on type would pass one and
-    fail the other.
-    """
-    ep = _episode(tmp_path)
-    reply = J.as_reply_text(J.reply_doc())
-
-    timeout = J.FakeJudge(default=reply, fault=J.Fault(raise_after=1))
-    _grade(tmp_path, ep, timeout, draws=2)
-
-    transport = J.FakeJudge(default=reply, fault=J.Fault(fail_on=("judge:b:1",)))
-    ep2 = _episode(tmp_path / "transport")
-    J.mod("learning.judge").grade_episode(
-        ep2, judge=transport, runs_base=tmp_path / "transport" / "defender-runs", draws=2)
-
-    for episode_dir, arm in ((ep, "timeout"), (ep2, "transport")):
-        failed = [J.draw_doc(episode_dir, "b", n) for n in (0, 1)
-                  if (episode_dir / "worlds" / "b" / "judge" / f"{n}.yaml").exists()]
-        reasons = [d["failure_reason"] for d in failed if d.get("failure_reason")]
-        assert reasons, f"{arm}: a failed draw left no record; that is a draw never requested"
-        assert "RunUnprocessable" in json.dumps(reasons), (
-            f"{arm}: the recorded reason does not name the one class both arms arrive as")
-        assert J.world_rows(J.judge_record(episode_dir))["b"]["completed_draws"] == 1
 
 
 # ---------------------------------------------------------------------------------------

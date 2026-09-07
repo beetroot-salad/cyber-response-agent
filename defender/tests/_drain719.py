@@ -82,19 +82,31 @@ except ImportError as _missing_target:  # pragma: no cover — the pre-implement
     drain = _NotYetWritten("defender.learning.author.drain", _missing_target)  # type: ignore[assignment]
 
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
-from defender.learning.author.benign_actor import run as benign_run  # type: ignore[import-not-found]
 from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]
-from defender.learning.author.malicious_actor import run as actor_run  # type: ignore[import-not-found]
 from defender.learning.core import persist  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
-#: The four channels one folded drain body serves. `pitfalls` is the fifth queue but is
-#: drained by the lead-author tick, not by a corpus author, so it is named separately.
+#: The channels one folded drain body serves. `pitfalls` is the other queue but is drained by
+#: the lead-author tick, not by a corpus author, so it is named separately.
+#:
+#: ONE SINCE #922. The three observation channels were written by the old pipeline's judge and
+#: read by two curators under `author/`; producer and consumers were deleted together, so the
+#: fold's own properties (one lock per channel, one gate per tick, a stuck row per channel) are
+#: now exercised on the one channel that still has both ends. The tuple stays a tuple because
+#: what it parametrises is "per channel", not "for findings".
+#: MULTI-CHANNEL DEMANDS LEFT THIS FAMILY WITH #922, recorded rather than dropped in silence.
+#:
+#: Thirteen tests here compared TWO channels' behaviour against each other — that retirement is
+#: identical for observations and findings, that a stuck appender on one channel does not hold
+#: the repo lock for another, that each direction's gate keeps its own policy through the shared
+#: drain, that every channel declares its own id key and lock path. All of them needed two live
+#: channels, and the three observation channels retired with the old pipeline's judge, which was
+#: their only producer. One channel cannot witness a between-channels property.
+#:
+#: What survives is every single-channel property, driven on `findings` — the channel that still
+#: has both a producer and a consumer. Restore the comparisons when a second channel returns.
 AUTHOR_CHANNELS = (
     "findings",
-    "actor_observations",
-    "environment_observations",
-    "actor_environment_observations",
 )
 ALL_CHANNELS = AUTHOR_CHANNELS + ("pitfalls",)
 
@@ -102,18 +114,12 @@ ALL_CHANNELS = AUTHOR_CHANNELS + ("pitfalls",)
 #: per-direction config builders (D3); it deletes their batch-driver bodies, not them.
 BUILDERS = {
     "findings": lambda paths: lessons_run.build_author_config(paths),
-    "actor_observations": lambda paths: actor_run.build_actor_config(paths),
-    "environment_observations": lambda paths: benign_run.build_benign_config(paths),
-    "actor_environment_observations": lambda paths: benign_run.build_adversarial_config(paths),
 }
 
 #: The append-lock file names as they stand at the base commit, per channel. D1 keeps these
 #: identities so in-flight appenders need no coordination.
 APPEND_LOCK_NAMES_TODAY = {
     "findings": ".findings.lock",
-    "actor_observations": ".actor.lock",
-    "environment_observations": ".environment.lock",
-    "actor_environment_observations": ".actor_environment.lock",
     "pitfalls": ".pitfalls.lock",
 }
 

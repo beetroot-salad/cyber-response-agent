@@ -30,7 +30,7 @@ import ast
 import os
 import re
 import subprocess
-from dataclasses import MISSING, fields
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -71,8 +71,8 @@ UNRELATED_TREES = (
 )
 # A lint baseline fingerprints its findings BY FILE AND SYMBOL, so it spells the names of
 # whatever the lint found there — #771's write-lint carries the legitimate
-# `run_common.py:materialize_run_dir` writer, and the vulture baseline carries
-# `defender/run_common.py: unused function 'enqueue_learning'`. Every such row is a record OF a
+# `run_common.py:materialize_run_dir` writer, and the vulture baseline carries an
+# `unused function` row for every corpse it accepts. Every such row is a record OF a
 # site, never a caller of one, and that holds for any baseline the suite grows, so it is a rule
 # rather than the growing list of one-offs it replaces. The lint SCRIPTS beside them stay in
 # scope — they are code and could import for real.
@@ -603,17 +603,12 @@ def test_run_paths_resolves_artifacts_under_exactly_one_root():
     per-case leg-output root "travel together". Nothing that resolves an artifact name ever
     read it: the two consumers destructured the pair and asserted it non-`None` on their
     first line, while every one of the ~48 other constructions carried an always-`None`
-    Optional. The pair is real — it is `config.LegDirs` now, with both halves required — and
-    keeping it here made the second root look optional at 48 sites where it was not a
-    question at all.
+    Optional. The pair moved out to `config.LegDirs`, with both halves required, and #922
+    then retired the per-case cycle that was its only holder — so today there is no second
+    root anywhere, which is the strongest form of the property this pins.
 
     Field-count, not name-absence: re-adding it under any spelling is the regression."""
-    from defender.learning.core.config import LegDirs
-
     assert [f.name for f in fields(RunPaths)] == ["run_dir"]
-    assert [f.name for f in fields(LegDirs)] == ["run_dir", "learning_run_dir"]
-    assert all(f.default is MISSING for f in fields(LegDirs)), (
-        "both roots are required — an optional half is the shape this moved away from")
 
 
 def test_no_call_site_anywhere_still_reaches_run_paths_meta_or_the_literal_meta_json():

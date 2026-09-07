@@ -212,8 +212,8 @@ def decide_read(
     if names_run_provenance(rp, rd):
         return Decision(False, PROVENANCE_DENY_REASON)
     # The same argument as `gather_raw` one step up, applied to the OTHER thing the learning loop
-    # stages into the gray-box agent's own root. `persist._copy_shared_inputs` and
-    # `lead_repository.stage_tables` write the source run's investigation.md, report.md,
+    # stages into the gray-box agent's own root. The retired per-case cycle's input staging
+    # and `lead_repository.stage_tables` write the source run's investigation.md, report.md,
     # source_refs.yaml and executed_queries.jsonl into `<learning_run_dir>/` — which IS the actor's
     # `run_dir`, an unconditional read root it declares no shapes over — so the case's reasoning
     # and its disposition sit one `read_file` away from the agent whose whole confine exists to
@@ -283,7 +283,7 @@ RAW_DENY_REASON = (
 # the ACTOR declares no shape at all (root containment only, every depth admitted). The concrete
 # case is the gray-box actor: `_names_raw` keeps it out of `gather_raw/`, while a judge trace at
 # the learning run dir's root hands the SAME payloads back through the judge's prompt
-# (`judge/compare.unredacted_exemplar` — real values, not the oracle's scrubbed skeleton).
+# (that judge's prompt exemplars carried real values, not the oracle's scrubbed skeleton).
 #
 # DISTINCTIVE ON PURPOSE, like `gather_raw` and `ticket_reads` beside it. This deny is
 # unconditional and applies inside EVERY read root, not just a run dir — and the judge's shapes
@@ -392,7 +392,7 @@ def _names_query_draft(p: Path) -> bool:
 
 
 # The judge's ticket-read capture writes `ticket_reads/{seq}.json` instead of `gather_raw/`
-# (`learning/pipeline/judge/closed_ticket_tool.py`). Both are by-ref payload families
+# (the retired pipeline judge's closed-ticket tool). Both are by-ref payload families
 # (`_run_paths._PAYLOAD_SHAPES`); a cap that knew only the first would leave the judge (which
 # holds `read=True`) able to re-read at the authored ceiling exactly what the capture view
 # withheld.
@@ -414,8 +414,9 @@ def is_untrusted_read(path: Path) -> bool:
     (False): it is the curated corpus gather exists to reuse, and wrapping it would teach gather
     to distrust its own catalog.
 
-    `ticket_reads/`: the closed-ticket store's free text is attacker-influenced (`_predates_case`
-    exists because a comment on a three-year-old record can name the live incident), and the
+    `ticket_reads/`: the closed-ticket store's free text is attacker-influenced (that judge's
+    recency screen existed because a comment on a three-year-old record can name the live
+    incident), and the
     judge's capture persists it verbatim, then prints the absolute path so the model can re-open
     what the 8 KB view elided. Every other route to those bytes already frames them, so an
     unframed `read_file` would be the one lane delivering a withheld span bare. Additive only:

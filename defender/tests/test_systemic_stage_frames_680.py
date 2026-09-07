@@ -14,14 +14,9 @@ import ast
 import importlib.util
 import inspect
 from pathlib import Path
-from types import SimpleNamespace
 
-from pydantic_ai.models import override_allow_model_requests
 
-from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
-from defender.agents import MAIN_DEF, ORACLE_DEF
-from defender.learning.core import config
-from defender.learning import _pydantic_stage
+from defender.agents import MAIN_DEF
 from defender.runtime.agent_definition import RunScope, bind
 from defender.runtime.box import BoxResult
 from defender.runtime.permission.files import (
@@ -29,74 +24,42 @@ from defender.runtime.permission.files import (
     _decide_report_write,
 )
 from defender.runtime.tools import (
-    _bound_and_wrap,
     _format_bash_result,
     _tool_bash,
     _tool_read_file,
 )
 from defender.tests._by_path import load_module, on_sys_path
-from defender.tests._engine_helpers import fake_model, replay_turns
 from defender.tests._frames680 import (
     frame_salt_of,
     DEFENDER,
     FRAME_RE,
-    JUDGE_BENIGN_DEF,
     ROOT,
     RUN_SALT,
     STAGE_SALT,
-    BashResultSpec,
     Box,
-    RecordingBox,
-    _actor_deps_scene,
-    _actor_verify_prompt,
     _all_prompt_observations,
-    _capture_actor,
-    _corpus_author_deps_scene,
     _curator_prompt,
-    _deps,
     _drive_frame,
     _drive_learning_bash,
     _drive_learning_read,
     _expected_frame,
     assert_one_frame,
     _findings_prompt,
-    _judge_deps,
-    _judge_fixture,
-    _lead_author_deps_scene,
     _lead_author_prompt,
-    _lead_prompt,
     _main_bash,
     _pitfalls_prompt,
     _python_sources,
     _shape,
     assert_producer_shape,
-    _shared_module,
     _shared_wrap,
-    _with_salt,
 )
 
-def test_repair_gate_r1_build_judge_invocation_shape(tmp_path):
-    """The real `build_judge_invocation` payload starts with its contract and retains ordered alert, story, synthesis, and manifest frames."""
-    observation = _judge_fixture(tmp_path)
-    assert_producer_shape(observation)
 
 
-def test_repair_gate_r1_invoke_actor_shape(tmp_path):
-    """The real `invoke_actor` entry sends ordered contract, alert, actor-input, archetype, and menu frames to its injected actor transport."""
-    observation = _capture_actor(tmp_path)
-    assert_producer_shape(observation)
 
 
-def test_repair_gate_r1_invoke_actor_benign_shape(tmp_path):
-    """The real `invoke_actor_benign` entry sends ordered contract, alert, rule, and entity frames to its injected actor transport."""
-    observation = _capture_actor(tmp_path, benign=True)
-    assert_producer_shape(observation)
 
 
-def test_repair_gate_r1_build_lead_user_prompt_shape():
-    """The real `build_lead_user_prompt` output orders contract, story, lead, and sample bodies in fully substituted frames."""
-    observation = _lead_prompt()
-    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_run_findings_shape(tmp_path):
@@ -105,10 +68,6 @@ def test_repair_gate_r1_run_findings_shape(tmp_path):
     assert_producer_shape(observation)
 
 
-def test_repair_gate_r1_run_actor_shape(tmp_path):
-    """The real `_run_actor` payload captured at `run_verify` orders contract, actor story, observation, and lesson frames."""
-    observation = _actor_verify_prompt(tmp_path)
-    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_build_curator_user_prompt_shape(tmp_path):
@@ -129,39 +88,8 @@ def test_repair_gate_r1_invoke_pitfalls_agent_shape(tmp_path, monkeypatch):
     assert_producer_shape(observation)
 
 
-def test_repair_gate_r5_section_removal_survival(tmp_path, monkeypatch):
-    """Real judge, actor, benign-actor, and oracle workflows survive `_section` removal with their complete ordered framed section sets."""
-    observations = (
-        _judge_fixture(tmp_path / "j"),
-        _capture_actor(tmp_path / "a"),
-        _capture_actor(tmp_path / "b", benign=True),
-        _lead_prompt(),
-    )
-    actual = []
-    for observation in observations:
-        tags, bodies, salts, gaps = _shape(observation)
-        actual.append((tags, bodies, salts, gaps))
-    assert [row[0] for row in actual] == [o.expected_tags for o in observations]
-    assert all(
-        row[2] == (o.salt,) * len(o.expected_tags)
-        for row, o in zip(actual, observations, strict=True)
-    )
-    assert all(all(not gap.strip() for gap in row[3]) for row in actual)
 
 
-def test_repair_gate_r5_data_section_removal_survival(tmp_path):
-    """Both real verify-forward workflows survive `data_section` removal with their complete ordered framed section sets."""
-    observations = (
-        _findings_prompt(tmp_path / "findings"),
-        _actor_verify_prompt(tmp_path / "actor"),
-    )
-    actual = [_shape(observation) for observation in observations]
-    assert [row[0] for row in actual] == [o.expected_tags for o in observations]
-    assert all(
-        row[2] == (o.salt,) * len(o.expected_tags)
-        for row, o in zip(actual, observations, strict=True)
-    )
-    assert all(all(not gap.strip() for gap in row[3]) for row in actual)
 
 
 def test_main_uses_shared_bash_after_learning_stage_bash_protection_changes(tmp_path):
@@ -169,27 +97,6 @@ def test_main_uses_shared_bash_after_learning_stage_bash_protection_changes(tmp_
     assert _main_bash(tmp_path, b"main") == _format_bash_result(0, "main", "")
 
 
-def test_main_bash_call_occurs_before_and_after_a_learning_bash_call(tmp_path):
-    """Real MAIN Bash results remain raw both before and after a learning-role Bash result is wrapped."""
-    before = _main_bash(tmp_path / "before", b"before")
-    root = tmp_path / "cmp"
-    root.mkdir()
-    p = root / "x"
-    p.write_text("x")
-    learning = _deps(
-        tmp_path / "learn",
-        JUDGE_BENIGN_DEF,
-        read_root=root,
-        box=Box(BoxResult(0, b"learn", b"")),
-    )
-    middle = _tool_bash(learning, f"cat {p}")
-    after = _main_bash(tmp_path / "after", b"after")
-    assert before.startswith("exit=0")
-    # The learning role's return is FRAMED and MAIN's two are not — the property this
-    # interleaving is about. Read off the return rather than compared to a deps field, which
-    # #875 removed: the frame's salt is minted at wrap time and nobody else holds it.
-    assert frame_salt_of(middle, "untrusted")
-    assert after.startswith("exit=0")
 
 
 def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
@@ -285,51 +192,10 @@ def test_curator_manifest_contains_a_model_authored_lesson_stem_with_boundary_sy
     assert all(not gap.strip() for gap in gaps)
 
 
-def test_judge_registers_closed_ticket_tools_after_the_wrap_helper_moves(tmp_path):
-    """A real benign judge build lazily registers both closed-ticket tools and executes a successful result through the relocated shared wrapper."""
-    from defender.tests import _closed_ticket_672 as closed
-
-    recorder = closed.VerbRecorder()
-    run = closed._drive(
-        tmp_path,
-        [closed._get(closed.OTHER_KEY), closed.DONE],
-        registry=closed._ticket_registry(recorder),
-    )
-    assert {closed.TOOL_GET, closed.TOOL_LIST} <= run.tool_names()
-    assert closed.WRAP_RE.search(run.all_text)
-    assert "TKT-CONTENT-777" in run.all_text
 
 
-def test_judge_closed_ticket_dependency_reports_a_failure_after_wrap_relocation(
-    tmp_path,
-):
-    """A real lazy closed-ticket dependency failure reaches the model as a wrapped normal tool result after helper relocation, never as raw fault text."""
-    from defender.tests import _closed_ticket_672 as closed
-
-    recorder = closed.VerbRecorder()
-    fault = "connection reset by peer mid-body"
-    run = closed._drive(
-        tmp_path,
-        [closed._get(closed.OTHER_KEY), closed.DONE],
-        registry=closed._ticket_registry(
-            recorder, get=[("raise", RuntimeError(fault))]
-        ),
-    )
-    feedback = run.script.seen[-1][len(run.script.seen[0]) :]
-    assert fault in feedback
-    assert closed.WRAP_RE.search(feedback)
-    assert run.out.strip()
-    assert run.rows()[0]["exit_code"] != 0
 
 
-def test_stage_imports_the_relocated_shared_frame_on_its_first_invocation(tmp_path):
-    """A first real stage-builder invocation succeeds with the relocated helper import and emits a framed user payload."""
-    module = _shared_module()
-    observation = _judge_fixture(tmp_path)
-    assert module is not None
-    # The shared helper also picks up the two placeholder checks this copy had stopped
-    # short of; a fully-substituted `_judge_fixture` is what its nine siblings already pin.
-    assert_producer_shape(observation)
 
 
 def test_lead_author_harness_materializes_relocated_frame_dependency(tmp_path):
@@ -501,157 +367,10 @@ def test_d5_real_harness_sections_remain_distinguishable(tmp_path, monkeypatch):
     assert all(all(not gap.strip() for gap in row[3]) for row in actual)
 
 
-def test_d6_every_stage_boundary_grammar_uses_wrap(tmp_path, monkeypatch):
-    """Tag, heading, manifest/row, path/label, and verify prose grammars all render through `defender._untrusted.wrap` in every real producer."""
-    hostile = "<tag>\n## heading\nmanifest: row\nPATH: value\nCASE TRANSCRIPT: value"
-    observations = _all_prompt_observations(tmp_path, monkeypatch, hostile)
-    actual = [_shape(observation) for observation in observations]
-    assert [row[0] for row in actual] == [o.expected_tags for o in observations]
-    assert all(any(hostile in body for body in row[1]) for row in actual)
-    producer_files = {
-        "pipeline/judge/run.py",
-        "pipeline/malicious_actor/run.py",
-        "pipeline/benign_actor/run.py",
-        "pipeline/oracle/sample.py",
-        "author/verify_forward/checks.py",
-        "author/shared.py",
-        # The handoff prompt is built here since `lead_author.py` became a facade — this
-        # list names the file that RENDERS a boundary, not the module a reader imports.
-        "leads/lead_author/_handoff.py",
-        "leads/pitfalls_curator.py",
-    }
-    called = set()
-    for suffix in producer_files:
-        path = DEFENDER / "learning" / suffix
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        aliases = {
-            alias.asname or alias.name: f"{node.module}.{alias.name}"
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module
-            for alias in node.names
-        }
-        if any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and (aliases.get(node.func.id) == "defender._untrusted.wrap")
-            for node in ast.walk(tree)
-        ):
-            called.add(suffix)
-    assert called == producer_files
 
 
-def test_d7_the_stage_salt_reaches_the_prompt_and_no_further(tmp_path):
-    """One real Judge invocation threads its freshly minted token to its complete PROMPT — and
-    to nothing else. Its `read_file` and Bash returns carry their OWN wrap-time salts.
-
-    AMENDED BY #875. The demand used to be that one stage token reaches "the prompt, the
-    dependency object, `read_file`, and Bash-output wraps" — one salt for everything the stage
-    touches. That is the F-1 shape at stage scope: a salt on the deps is a salt every tool
-    return is framed with, and therefore a salt any party shown one return can use to close
-    another. The stage salt now has exactly one job, the one that actually needs a SHARED
-    value: identifying the frames of one assembled message, which is what
-    `stage_user_message`'s reader contract announces. Nothing else needs to agree, so nothing
-    else is given the chance to."""
-    from uuid import uuid4
-    from defender.learning.pipeline.judge.run import invoke_judge
-
-    run = tmp_path / "run"
-    learning = tmp_path / "learning"
-    (run / "gather_raw").mkdir(parents=True)
-    learning.mkdir()
-    (run / "alert.json").write_text('{"rule":{"id":"5710"}}')
-    story = run / "story.md"
-    story.write_text("story")
-    seen = {}
-
-    def judge_fn(*args, **kwargs):
-        salt = kwargs.get("salt")
-        assert salt is not None, (
-            "the Judge model seam must receive the demand's stage salt"
-        )
-        seen["prompt"] = kwargs["user"]
-        comparison = learning / "comparison"
-        artifact = comparison / "artifact.md"
-        artifact.parent.mkdir(exist_ok=True)
-        artifact.write_text("artifact")
-        box = RecordingBox(BashResultSpec(out=b"artifact"))
-        deps = bind(
-            JUDGE_BENIGN_DEF,
-            learning,
-            scope=RunScope(add_dirs=(comparison,)),
-            box=box,
-        )
-        seen["deps"] = deps
-        seen["read"] = _tool_read_file(deps, str(artifact))
-        seen["bash"] = _tool_bash(deps, f"cat {artifact}")
-        return "done"
-
-    expected = uuid4().hex
-    result = _with_salt(
-        invoke_judge,
-        SimpleNamespace(
-            prompt_path=tmp_path / "judge.md",
-            model="test",
-            effort="low",
-            trace_name="judge.trace.jsonl",
-            label="judge",
-            comparison_dirname="comparison",
-            closed_ticket_read=False,
-        ),
-        run,
-        story,
-        learning,
-        judge_fn=judge_fn,
-        salt=expected,
-        box=None,
-    )
-    assert result == "done"
-    assert not hasattr(seen["deps"], "salt"), \
-        "the stage salt landed on deps — every tool return would be framed with it again"
-
-    prompt_salts = {m.group("salt") for m in FRAME_RE.finditer(seen["prompt"])}
-    assert prompt_salts == {expected}, \
-        f"the prompt's frames are not the stage's own set: {sorted(prompt_salts)}"
-
-    read_salt = frame_salt_of(seen["read"], "untrusted")
-    bash_salt = frame_salt_of(seen["bash"], "untrusted")
-    assert expected not in {read_salt, bash_salt}, \
-        "a tool return is framed with the stage salt — the judge holds its own delimiter"
-    assert read_salt != bash_salt, \
-        "two tool returns share one delimiter — the salt is not minted per wrap"
 
 
-def test_d8_stage_salt_is_never_the_run_salt(tmp_path):
-    """Two real oracle invocation entries sharing a run directory mint distinct stage tokens unrelated to the runtime run salt, observable in their model-bound messages."""
-    from defender.learning.pipeline.oracle.run import invoke_oracle_lead
-
-    run = tmp_path / "run"
-    run.mkdir()
-    lead = type(
-        "Lead", (), {"lead_id": "l", "queries": [], "what_to_summarize": ["body"]}
-    )()
-    seen = []
-
-    def oracle_fn(*args, **kwargs):
-        salt = kwargs.get("salt")
-        assert salt is not None, (
-            "the oracle model seam must receive a per-invocation stage salt"
-        )
-        seen.append((kwargs["user"], salt))
-        return "events: []"
-
-    invoke_oracle_lead(
-        lead, "story", "sample", run, trace_prefix="test", oracle_fn=oracle_fn
-    )
-    invoke_oracle_lead(
-        lead, "story", "sample", run, trace_prefix="test", oracle_fn=oracle_fn
-    )
-    parsed = [
-        {m.group("salt") for m in FRAME_RE.finditer(prompt)} for prompt, _ in seen
-    ]
-    assert parsed == [{seen[0][1]}, {seen[1][1]}]
-    assert seen[0][1] != seen[1][1]
-    assert all((salt != RUN_SALT and RUN_SALT not in prompt for prompt, salt in seen))
 
 
 def test_d9_stage_never_frames_output_from_an_author_told_its_salt(
@@ -787,88 +506,26 @@ def test_d17_legal_artifacts_gain_no_new_deny_or_modelretry(tmp_path):
     ).allow
 
 
-def test_d18_run_stage_still_accepts_prejoined_user_string(tmp_path):
-    """After salts move above the builders, `run_stage` keeps its `user: str` call contract and returns the driven stage output without a `Section` tuple or signature redesign."""
-    run = tmp_path / "run"
-    run.mkdir()
-    prompt = tmp_path / "oracle.md"
-    prompt.write_text("Return done.", encoding="utf-8")
-    deps = bind(ORACLE_DEF, run)
-    seen: list[str] = []
-    replay = replay_turns([{"text": "done"}], seen=seen)
-    with override_allow_model_requests(False):
-        out = _pydantic_stage.run_stage(
-            stage="oracle",
-            wiring=StageWiring(
-                prompt_path=prompt,
-                model="test",
-                effort=None,
-                trace_name="trace.jsonl",
-                label="oracle:test",
-            ),
-            ctx=StageContext(
-                learning_run_dir=run,
-                user="prejoined user string",
-                request_limit=2,
-                wall_clock_timeout=config.subagent_timeout(),
-            ),
-            deps=deps,
-            make_model=fake_model(replay),
-        )
-    assert out == "done"
-    assert any("prejoined user string" in message for message in seen)
 
 
 def test_d19_logical_section_names_and_judge_source_enum_stay_stable(
     tmp_path, monkeypatch
 ):
-    """Every real producer retains its complete approved logical tag order while salted physical delimiters leave the judge citation `source` enum unchanged."""
+    """Every real producer retains its complete approved logical tag order.
+
+    THE SECOND HALF LEFT WITH #922. It also pinned the judge citation `source` enum against
+    the two shipped judge prompts (`pipeline/judge/{malicious,benign}.md`), and both prompts
+    and the enum went with the pipeline. The family judge has its own reply contract with its
+    own vocabulary, pinned in its own suite; a copy of that assertion here would be a second
+    place for the two to drift.
+    """
     observations = _all_prompt_observations(tmp_path, monkeypatch, "logical-body")
+    assert observations, "positive control: no producer was driven at all"
     assert [_shape(o)[0] for o in observations] == [
         o.expected_tags for o in observations
     ]
-    for prompt_name in ("malicious.md", "benign.md"):
-        text = (DEFENDER / "learning" / "pipeline" / "judge" / prompt_name).read_text(
-            encoding="utf-8"
-        )
-        assert (
-            "source: comparison | synthesis | coverage_manifest | report | actor | alert"
-            in text
-        )
 
 
-def test_d20_learning_stage_bash_output_is_salt_tagged(tmp_path):
-    """Every admitted learning Bash role—JUDGE, ACTOR, LEAD_AUTHOR, and CORPUS_AUTHOR—wraps its complete replacement-decoded result once under its own dependency salt."""
-    result = BoxResult(7, b"MODEL_AUTHORED\n", b"warning\n")
-    ordinary = _format_bash_result(7, "MODEL_AUTHORED\n", "warning\n")
-    judge_root = tmp_path / "judge-root"
-    judge_root.mkdir()
-    judge_artifact = judge_root / "x"
-    judge_artifact.write_text("x")
-    judge = bind(
-        JUDGE_BENIGN_DEF,
-        tmp_path / "judge-run",
-        scope=RunScope(add_dirs=(judge_root,)),
-        box=Box(result),
-    )
-    actor_deps, _, actor_command = _actor_deps_scene(tmp_path / "actor-real", result)
-    lead_deps, _, lead_command = _lead_author_deps_scene(tmp_path / "lead", result)
-    corpus_deps, corpus, corpus_command = _corpus_author_deps_scene(
-        tmp_path / "corpus", result
-    )
-    (corpus / "lesson.md").write_text("lesson")
-    scenes = [
-        (judge, f"cat {judge_artifact}"),
-        (actor_deps, actor_command),
-        (lead_deps, lead_command),
-        (corpus_deps, corpus_command),
-    ]
-    outputs = [_tool_bash(deps, command) for deps, command in scenes]
-    # #875: each return is framed on its OWN minted salt, so the expected frame is built from
-    # the salt read off that return — every role still gets exactly one verbatim frame.
-    for out in outputs:
-        assert_one_frame(out, ordinary, "untrusted")
-    assert all(FRAME_RE.fullmatch(out) for out in outputs)
 
 
 def test_d21_learning_stage_cannot_observe_raw_bash_output(tmp_path):
@@ -883,20 +540,6 @@ def test_d21_learning_stage_cannot_observe_raw_bash_output(tmp_path):
     assert out != ordinary
 
 
-def test_gate_r1_wrap_stage_message_shape(tmp_path):
-    """A real producer's `wrap` calls send disjoint reader-contract/logical-section sources with every salt/content slot substituted at stage_user_message."""
-    hostile = "source bytes {salt} {content}"
-    observation = _capture_actor(tmp_path, hostile=hostile)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert hostile in bodies
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert all(
-        "{salt}" not in body and "{content}" not in body
-        for body in bodies
-        if hostile not in body
-    )
 
 
 def test_gate_r1_tool_read_file_output_shape(tmp_path):
@@ -919,10 +562,3 @@ def test_gate_r1_tool_bash_output_shape(tmp_path):
     )
 
 
-def test_gate_r1_bound_and_wrap_output_shape(tmp_path):
-    """`_bound_and_wrap` emits a learning_tool_output payload with disjoint harness/body sources and fully substituted bounded body and receiving stage-salt slots."""
-    deps, comparison = _judge_deps(tmp_path)
-    artifact = comparison / "captured.md"
-    body = "captured inbound body"
-    out = _bound_and_wrap(deps, artifact, str(artifact), body, read_tool="read_file")
-    assert_one_frame(out, body, "untrusted")

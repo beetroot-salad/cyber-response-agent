@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender._io import write_atomic
-from defender.learning.core.config import DEFAULT_PATHS, LoopPaths, _log
+from defender.learning.core.config import LoopPaths, _log
 
 
 def _enqueue_marker(run_dir: Path, queue_dir: Path, label: str) -> None:
@@ -40,8 +40,6 @@ def enqueue_case_for_curation(case_id: str, run_dir: Path, paths: LoopPaths) -> 
     _log(f"enqueued for curation: {marker}")
 
 
-def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> None:
-    _enqueue_marker(run_dir, paths.learn_queue_dir, "learning")
 
 
 def rewrite_marker(marker: Path, spec: dict) -> None:

@@ -38,7 +38,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
-    RunScope, ToolSet, bind, compile_policy_for,
+    ToolSet, compile_policy_for,
 )
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.permission import AgentPolicy  # noqa: E402
@@ -55,17 +55,6 @@ def _gather_policy(tmp: Path) -> AgentPolicy:
     return compile_policy_for(GATHER_DEF, run_dir=tmp / "run", defender_dir=_DEFENDER)
 
 
-def _judge_policy(tmp: Path) -> AgentPolicy:
-    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
-    # #632's §7 R7: JUDGE_DEF's static closed_tickets bit stays False (only the per-leg
-    # replace() in _run_judge_pydantic turns it on, together with the effective grant, d73),
-    # so a bare bind() always disagrees with the definition's own non-empty verb_grant. This
-    # probe is about the bash lane, so it binds the benign leg's effective capability.
-    from dataclasses import replace
-
-    from defender.runtime.agent_definition import effective_tools_for
-    benign = replace(JUDGE_DEF, tools=effective_tools_for(JUDGE_DEF))
-    return bind(benign, tmp / "run", scope=RunScope(add_dirs=())).policy
 
 
 def _admits(policy: AgentPolicy, command: str, run_dir: Path) -> bool:
@@ -108,16 +97,6 @@ def test_overflow_hint_gather_pipes_into_defender_sql_without_the_write_sink(tmp
     assert _admits(pol, _hinted_command(hint), run)
 
 
-def test_overflow_hint_judge_pipes_into_defender_sql(tmp_path) -> None:
-    """The judge has NO `jq` and NO write tool, so it must be told to aggregate through
-    `defender-sql`. A hint naming a program it cannot run is worse than none."""
-    run = tmp_path / "run"
-    pol = _judge_policy(tmp_path)
-    hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
-    assert "defender-sql" in hint
-    assert "jq" not in hint
-    assert "write the result" not in hint
-    assert _admits(pol, _hinted_command(hint), run)
 
 
 def test_overflow_hint_reducer_less_agent_points_at_its_read_tool() -> None:
@@ -149,15 +128,6 @@ def test_overflow_hint_names_the_callers_read_tool_not_a_constant() -> None:
     assert "[read_file]" not in over
 
 
-def test_overflow_hint_never_advertises_jq_over_a_file_operand(tmp_path) -> None:
-    """The regression this branch exists to prevent, stated directly: the pre-#569 hint
-    was `jq '<filter>' {path}`, which EVERY agent's gate denies — main/gather because
-    their `jq` takes no file operand, the judge because it has no `jq`."""
-    run = tmp_path / "run"
-    target = str(run / "big.json")
-    for pol in (_main_policy(tmp_path), _gather_policy(tmp_path), _judge_policy(tmp_path)):
-        assert not _admits(pol, f"jq '.a' {target}", run)
-        assert f"jq '<filter>' {target}" not in tools._overflow_filter_hint(target, pol)
 
 
 def test_a_captured_payload_is_read_at_the_CAPTURE_ceiling() -> None:

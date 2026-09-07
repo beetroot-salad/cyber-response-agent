@@ -29,7 +29,7 @@ import pytest
 
 from defender.runtime import box as box_mod
 from defender.runtime.scrub import verdict_path
-from defender.tests._docker import daemon_reachable, is_dood, satisfy_engine_keys
+from defender.tests._docker import daemon_reachable, is_dood
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -305,7 +305,7 @@ def start_box_request(request, *, docker):
     return box_mod.start_box(request, docker=docker)  # type: ignore[call-arg]
 
 
-# Composition-frame seams: run_one / _run_worktree_batch gain injectable
+# Composition-frame seams: the run cycle and `_run_worktree_batch` gain injectable
 # `start_box`/`stop_box` (matching box.py's own names) so a test observes the
 # box's creation geography, its delivery to the roles, and its teardown order
 # WITHOUT a live daemon. These are part of the contract (the design gives box
@@ -360,42 +360,6 @@ class BoxLifecycleRecorder:
         return self.requests[0]
 
 
-class RecordingSubagents:
-    """Fake `Subagents` recording the box each bash-reaching method received (the future
-    per-call `box=` param, R1). Returns a SKIP story from actor/actor_benign so `run_one`
-    persists and completes WITHOUT reaching the oracle/judge LLM stages (the SKIP branch of
-    run_direction). Records nothing but delivery."""
-
-    def __init__(self, *, actor_fault: Exception | None = None):
-        self.actor_box: Any = None
-        self.actor_benign_box: Any = None
-        self.judge_box: Any = None
-        self.calls: list[str] = []
-        self._actor_fault = actor_fault
-
-    def actor(self, run_dir, learning_run_dir, *, box=None) -> str:
-        self.calls.append("actor")
-        self.actor_box = box
-        if self._actor_fault is not None:
-            raise self._actor_fault
-        return "SKIP: spec fake — no story"
-
-    def actor_benign(self, run_dir, learning_run_dir, alert_rule_key, *, box=None) -> str:
-        self.calls.append("actor_benign")
-        self.actor_benign_box = box
-        return "SKIP: spec fake — no story"
-
-    def oracle(self, run_dir, actor_story_path, learning_run_dir) -> str:
-        self.calls.append("oracle")
-        return "projections: []\n"
-
-    def judge(self, wiring, run_dir, actor_story_path, projected_telemetry_path,
-              learning_run_dir, *, box=None) -> str:
-        self.calls.append("judge")
-        self.judge_box = box
-        return "classification: skip-passthrough\nfindings: []\n"
-
-
 class RecordingBranch:
     """Fake `AuthorBranch` recording the worktree lifecycle order relative to box teardown.
     `start_batch` mints a real temp leaf dir; `finish_batch` is the supply-chain step
@@ -448,10 +412,10 @@ class RecordingBranch:
         verdict_path(wt).unlink(missing_ok=True)
 
 
-# run_dir / learning setup + provider-key satisfaction for driving run_one.
+# run_dir / learning setup for driving the run cycle.
 def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive",
                  gather_raw: bool = True) -> Path:
-    """A finished defender run dir run_one accepts: alert.json + report.md (its
+    """A finished defender run dir the run cycle accepted: alert.json + report.md (its
     disposition drives which direction legs dispatch) + investigation.md + gather_raw/.
     `gather_raw=False` omits the evidence dir (the legitimately-absent conditional-mount
     case, decision 9)."""
@@ -473,20 +437,6 @@ def loop_paths(tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / "defender").mkdir(parents=True, exist_ok=True)
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-
-
-def drive_run_one(tmp_path, monkeypatch, rec, *, agents=None, disposition="inconclusive",
-                  gather_raw=True, **kw):
-    """Drive the REAL run_one with the future injectable start_box/stop_box seams. TypeError
-    at HEAD (no such kwargs); the recorder captures the composed run-cycle box request."""
-    from defender.learning.core.run_cycle import run_one
-
-    satisfy_engine_keys(monkeypatch, disposition)
-    run_dir = make_run_dir(tmp_path, disposition=disposition, gather_raw=gather_raw)
-    return run_one(
-        run_dir, paths=loop_paths(tmp_path), agents=agents or RecordingSubagents(),
-        start_box=rec.start_box, stop_box=rec.stop_box, **kw,
-    )
 
 
 def drive_worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,

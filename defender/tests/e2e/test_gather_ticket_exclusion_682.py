@@ -150,149 +150,14 @@ def _ticket_registry(
     }})
 
 
-def test_direct_self_get_rejected_before_store_and_capture(tmp_path):
-    """The authoritative identity is deps.run_id; a direct self get never reaches the verb."""
-    rec = VerbRecorder()
-    run = _drive(
-        tmp_path,
-        verbs=_ticket_registry(rec, get_payload={
-            "key": SELF,
-            "status": "closed",
-            "summary": "SELF-TICKET-SECRET",
-        }),
-        turns=[_q("ticket", "get-ticket", {"key": SELF}), DONE],
-    )
-
-    assert rec.calls == []
-    assert len(run.own_rows) == 1
-    assert run.own_rows[0]["exit_code"] == 64
-    assert run.own_rows[0]["error_class"] == "agent-fixable"
-    assert run.payload_text() == ""
-    assert "SELF-TICKET-SECRET" not in run.all_model_text
-    assert run.breaker.get("total_failures", 0) == 0
 
 
-def test_list_drops_only_self_and_preserves_open_case_correlation(tmp_path):
-    """Identity filtering happens per item before capture; lifecycle state is not a filter."""
-    rec = VerbRecorder()
-    listing = {
-        "tickets": [
-            {"key": SELF, "status": "open", "summary": "SELF-LIST-SECRET"},
-            {
-                "key": "SOC-OPEN",
-                "status": "open",
-                "summary": "active sibling",
-                "description": f"correlates with {SELF}",
-            },
-            {"key": "SOC-WIP", "status": "in_progress", "summary": "triage in progress"},
-            {"key": "SOC-CLOSED", "status": "closed", "summary": "historical sibling"},
-            {"status": "open", "summary": "identity missing"},
-            "not-a-ticket-object",
-        ],
-        "total": 6,
-        "source": "ticket-store",
-    }
-    run = _drive(
-        tmp_path,
-        verbs=_ticket_registry(rec, list_payload=listing),
-        turns=[_q("ticket", "list-tickets", {
-            "q": "same-host",
-            "require_closed": False,
-        }), DONE],
-    )
-
-    assert rec.only().params["require_closed"] is False
-    payload = run.payload()
-    assert payload["total"] == 3
-    assert payload["source"] == "ticket-store"
-    assert [ticket["key"] for ticket in payload["tickets"]] == [
-        "SOC-OPEN",
-        "SOC-WIP",
-        "SOC-CLOSED",
-    ]
-    assert {ticket["status"] for ticket in payload["tickets"]} == {
-        "open",
-        "in_progress",
-        "closed",
-    }
-    assert SELF in payload["tickets"][0]["description"], (
-        "record-identity exclusion must not erase useful cross-ticket references"
-    )
-    assert "SELF-LIST-SECRET" not in run.payload_text()
-    assert "SELF-LIST-SECRET" not in run.all_model_text
-    assert run.own_rows[0]["exit_code"] == 0
 
 
-def test_other_open_ticket_get_remains_available_and_persisted(tmp_path):
-    """An unrestricted gather get for a different open ticket retains its existing behavior."""
-    rec = VerbRecorder()
-    other = {
-        "key": OTHER,
-        "status": "open",
-        "summary": "ACTIVE-CASE-CONTEXT",
-        "description": f"may be related to {SELF}",
-    }
-    run = _drive(
-        tmp_path,
-        verbs=_ticket_registry(rec, get_payload=other),
-        turns=[_q("ticket", "get-ticket", {
-            "key": OTHER,
-            "require_closed": False,
-        }), DONE],
-    )
-
-    assert rec.only().params == {"key": OTHER, "require_closed": False}
-    assert run.payload() == other
-    assert "ACTIVE-CASE-CONTEXT" in run.all_model_text
-    assert run.own_rows[0]["exit_code"] == 0
 
 
-def test_get_response_that_resolves_to_self_is_withheld_before_capture(tmp_path):
-    """The response identity is rechecked even when the requested key was not the self key."""
-    rec = VerbRecorder()
-    run = _drive(
-        tmp_path,
-        verbs=_ticket_registry(rec, get_payload={
-            "key": SELF,
-            "status": "open",
-            "summary": "MISROUTED-SELF-SECRET",
-        }),
-        turns=[_q("ticket", "get-ticket", {"key": OTHER}), DONE],
-    )
-
-    assert rec.only().params["key"] == OTHER
-    # A policy withhold files its OWN exit code (3), distinct from the adapter's generic
-    # business code (1, a 404 / query error), so the queries table distinguishes "withheld
-    # the current case" from "no such ticket" without parsing the free-text detail. It stays
-    # outside the infra set, so the breaker is untouched.
-    assert run.own_rows[0]["exit_code"] == 3
-    assert run.own_rows[0]["error_class"] == "agent-fixable"
-    assert run.payload_text() == ""
-    assert "MISROUTED-SELF-SECRET" not in run.all_model_text
-    assert run.breaker.get("total_failures", 0) == 0
 
 
-@pytest.mark.parametrize(("verb", "params", "payload"), [
-    ("get-ticket", {"key": OTHER}, ["not", "a", "ticket"]),
-    ("list-tickets", {}, {"tickets": "not-a-list", "total": "unknown"}),
-])
-def test_malformed_ticket_payload_fails_without_persisting_vendor_content(
-    tmp_path, verb, params, payload,
-):
-    """A top-level shape that cannot be identity-screened becomes an infrastructure fault."""
-    rec = VerbRecorder()
-    kwargs = {"get_payload": payload} if verb == "get-ticket" else {"list_payload": payload}
-    run = _drive(
-        tmp_path,
-        verbs=_ticket_registry(rec, **kwargs),
-        turns=[_q("ticket", verb, params), DONE],
-    )
-
-    assert len(rec.calls) == 1
-    assert run.own_rows[0]["exit_code"] == 2
-    assert run.own_rows[0]["error_class"] == "infra"
-    assert run.payload_text() == ""
-    assert run.breaker["systems"]["ticket"]["failures"] == 1
 
 
 def test_non_ticket_payload_with_run_id_is_untouched(tmp_path):

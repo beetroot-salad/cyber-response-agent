@@ -1,7 +1,6 @@
 """verify_forward.py verdict parser + run-context loader."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -80,11 +79,6 @@ def test_wrap_body_placeholder_is_inert():
     )
 
 
-def test_prompt_files_are_instructions_only():
-    import re
-    for name in ("actor.md", "forward.md"):
-        text = (vf.HERE / name).read_text()
-        assert re.findall(r"\{[a-z_]+\}", text) == [], f"{name} has leftover data placeholders"
 
 
 def test_expected_disposition_direction_aware():
@@ -140,32 +134,3 @@ def test_load_cited_policy_neutral_when_no_menu(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
     assert vf.load_cited_policy("run-B", runs_dir=runs) == vf._NO_CITED_POLICY
-
-
-
-
-def test_load_observation_skips_torn_line(tmp_path):
-    pending = tmp_path / "actor_observations.jsonl"
-    pending.write_text(
-        '{"observation_id": "torn"'
-        + "\n\n"
-        + json.dumps({"observation_id": "o-2", "v": 7}) + "\n"
-    )
-    row = vfs.load_observation("o-2", pending, error_prefix=_PREFIX)
-    assert row == {"observation_id": "o-2", "v": 7}
-
-
-def test_load_observation_missing_file_raises(tmp_path):
-    with pytest.raises(SystemExit, match="pending queue not found"):
-        vfs.load_observation("o-1", tmp_path / "absent.jsonl", error_prefix=_PREFIX)
-
-
-def test_load_observation_missing_id_raises(tmp_path):
-    pending = tmp_path / "actor_observations.jsonl"
-    pending.write_text(json.dumps({"observation_id": "o-1"}) + "\n")
-    with pytest.raises(SystemExit, match="not found"):
-        vfs.load_observation("o-9", pending, error_prefix=_PREFIX)
-
-
-
-

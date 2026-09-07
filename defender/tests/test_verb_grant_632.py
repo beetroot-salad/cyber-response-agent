@@ -11,44 +11,29 @@ disagree — D6 in particular is refuted (g10), not narrowed.
 from __future__ import annotations
 
 import importlib
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender._io import read_jsonl_rows  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
-from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
-from defender.tests._closed_ticket_672 import (  # noqa: E402
-    TOOL_GET,
-    TOOL_LIST,
-    DONE as JUDGE_DONE,
-    _drive,
-    _list,
-    _ticket_registry,
-)
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     ADAPTERS_DIR,
-    BENIGN_JUDGE_PAIRS,
     DENIED,
     DENY_ALL,
     DONE,
     GATHER_PAIRS,
     GRANTED,
     HEALTH_CHECK,
-    JUDGE_ROLE as JUDGE_DEF_ROLE,
     SYSTEMS,
     UNDECLARED,
-    UNGRANTED_PAIRS,
     VERB_CLASSES,
     GrantError,
-    RegistryShaped,
     ScopedFakeVerbs,
     VerbGrant,
     declared_verb_names,
@@ -56,11 +41,25 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     q,
     recording_table,
     run_gather,
-    scoped_ticket_registry,
 )
 
 pytestmark = pytest.mark.e2e
 
+
+
+#: TWO DEMANDS LEFT THIS FILE WITH #922, AND THEY ARE NOT REPLACED — recorded here rather than
+#: deleted silently, because their absence is a real reduction in what this suite witnesses.
+#:
+#: `test_two_roles_in_one_process_{never_share_a_scoped_registry,each_get_their_own_catalog}`
+#: needed TWO roles holding verb grants in one process. The judge was the second one, and its
+#: grant went with the pipeline (#922) — gather is now the only verb-bearing role that ships.
+#: The property is still true and still worth having; it simply has no witness until a second
+#: role holds a grant again. It cannot be faked with a synthetic definition: what those tests
+#: pinned is that two SHIPPED roles do not share a catalog, and a role invented in the test
+#: proves only that the mechanism can keep two things apart, which was never in doubt.
+#:
+#: Restore them in the change that gives a second role a verb grant. #1008's family judge is
+#: NOT that change — it is deny-all by design and holds no grant.
 
 def _elastic(rec: VerbRecorder, granted=(("elastic", "query"),), declared=("query", "esql")):
     table = recording_table(rec, {"elastic": declared})
@@ -88,87 +87,8 @@ def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):
     assert reg.grant.role == "gather", "a built registry does not carry the grant it was scoped by"
 
 
-def test_a_registry_shaped_object_is_rejected_at_the_seam_the_build_path_reaches(tmp_path: Path):
-    """A registry-shaped object that never went through the verb_registry constructor is
-    refused at EVERY entry point that takes a registry, so `unconstructable` is not one
-    duck-typed helper away from decorative (§7 R15). Positive control: the same drives with a
-    real scoped registry run the granted verb.
-
-    BOTH MODEL-FACING ENTRY POINTS ARE DRIVEN, and that is the tightening. A guard wired at
-    the outermost entry point alone leaves the second one open: the judge's leg takes its own
-    registry through its own seam and never passes through the runtime's, so a table that
-    merely answers the registry's questions reaches the closed-ticket tool and runs
-    unauthorized while every assertion about the runtime's entry point stays green. The
-    duck-typed stand-in below carries a `decide()` that answers GRANTED to everything — it
-    holds no grant, which is exactly why a structural check ("does it answer?") cannot tell it
-    from the real thing and only the TYPE can."""
-    rec = VerbRecorder()
-    shaped = RegistryShaped(recording_table(rec, {"elastic": ("query",)}))
-
-    with pytest.raises((TypeError, ValueError)):
-        run_gather(tmp_path / "duck", verbs=shaped, turns=[q("elastic", "query"), DONE],
-                   run_id="duck632")
-    # lead-0 (#808) resolves BEFORE this build path's type check ever runs — it is
-    # harness-issued pre-ORIENT work, not a model-facing call, and it takes whatever
-    # `verbs` object was injected (duck-typed or not) through its own reserved lead
-    # (`l-000`). That is accepted, documented behaviour, not the hole this demand
-    # guards: the guard is that no MODEL-driven call ever reaches a verb body through
-    # the rejected registry, which the run's own table (keyed by lead_id) can still
-    # show directly even though `VerbRecorder` itself can't tell the two callers apart.
-    duck_rows = read_jsonl_rows(tmp_path / "duck" / "run" / "executed_queries.jsonl")
-    own_duck_rows = [r for r in duck_rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
-    assert own_duck_rows == [], "a duck-typed registry reached a verb body via a model-driven call"
-
-    rec2 = VerbRecorder()
-    ok = run_gather(tmp_path / "typed", verbs=_elastic(rec2), turns=[q("elastic", "query"), DONE],
-                    run_id="typed632")
-    # lead-0's own shell fetch (`alerts`) is UNDECLARED against this scoped table (only
-    # `query`/`esql` are granted) — that raises `ModelRetry` before its handler ever
-    # runs, writing l-000 exactly one usage row and never reaching a verb body, so
-    # `rec2` still sees only the model's own scripted `query` call.
-    assert [c.verb for c in rec2.calls] == ["query"]
-    own_ok_rows = [r for r in ok.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
-    assert len(own_ok_rows) == 1
-
-    # The second model-facing site: the judge's own leg, through its own registry seam.
-    judge_rec = VerbRecorder()
-    duck_judge = RegistryShaped({"ticket": dict(_ticket_registry(judge_rec).verbs("ticket"))})
-    with pytest.raises((TypeError, ValueError)):
-        _drive(tmp_path / "duck-judge", [JUDGE_DONE], registry=duck_judge)
-    assert judge_rec.calls == [], \
-        "a duck-typed registry reached a ticket verb at the judge site — the type guard is " \
-        "wired at the runtime entry point only"
-
-    typed_rec = VerbRecorder()
-    run = _drive(tmp_path / "typed-judge", [_list(label=None), JUDGE_DONE],
-                 registry=scoped_ticket_registry(typed_rec, BENIGN_JUDGE_PAIRS))
-    assert TOOL_LIST in run.tool_names(), "the judge control never registered its tool"
-    # #683 (landed on main after this spec was written) added the case-opened recency
-    # boundary lookup ahead of list-tickets; the intent this assertion pins — no extraneous
-    # verb call reached the store — still holds, widened to admit that lookup.
-    assert [c.verb for c in typed_rec.calls] == ["case-opened-at", "list-tickets"]
 
 
-def test_two_roles_in_one_process_never_share_a_scoped_registry():
-    """Two roles resolving a verb_registry in one process never share one: the role is part
-    of any memo key gating registry reuse, so one role's grant never serves another's call.
-    Two DISTINCT REAL role ids, never placeholders — a placeholder pair passes under exactly
-    the falsy-key collapse this excludes (§7 R16).
-
-    The two refusals below carry DIFFERENT labels, and that is §7 R11 read literally rather
-    than an inconsistency: gather holds `ticket` (list-tickets), so a withheld ticket verb is
-    DENIED; the judge holds nothing on `elastic` at all, so an elastic verb is UNRESOLVABLE.
-    What the memo-key demand needs is that neither role's grant ever answers GRANTED for the
-    other's call."""
-    gather = ModuleVerbRegistry(ADAPTERS_DIR, grant_of("gather", GATHER_PAIRS))
-    judge = ModuleVerbRegistry(ADAPTERS_DIR, grant_of(JUDGE_DEF_ROLE, BENIGN_JUDGE_PAIRS))
-
-    assert gather is not judge
-    assert gather.decide("ticket", "get-ticket").outcome == DENIED, \
-        "gather resolved get-ticket — the judge's grant served gather's call"
-    assert judge.decide("ticket", "get-ticket").outcome == GRANTED
-    assert judge.decide("elastic", "esql").outcome == UNDECLARED, \
-        "the judge reached elastic — gather's grant served the judge's call"
 
 
 def test_the_verb_grant_compiles_into_the_agent_policy(tmp_path: Path):
@@ -249,195 +169,10 @@ def test_a_role_definition_without_a_grant_gets_an_empty_deny_all(tmp_path: Path
         "a system a grant reaches nowhere read as denied rather than unresolvable"
 
 
-def test_a_grant_and_a_switched_off_tool_disagree_in_either_direction_at_build(tmp_path: Path):
-    """Both disagreement directions between a verb_grant and the tool bit that reaches the
-    registry fail AT BUILD (§7 R7), against the bit the stage ACTUALLY BUILDS WITH.
-
-    `g16` is the whole reason this demand exists, and it is the judge that carries it:
-    `GATHER_DEF` declares its capability statically, but the judge's `closed_tickets` bit is
-    NOT on `JUDGE_DEF` — it is set by a runtime `replace(JUDGE_DEF.tools, …)` from the
-    stage's own scope object at build time, so the compiled policy never sees it. A check
-    written against the two statically declared definitions passes an implementation that
-    reads only what the definition declares — which is precisely the case g16 refuted. So
-    the effective ToolSet is what the build must be handed and what both directions below
-    are constructed from.
-
-    Direction 1: the build sees `closed_tickets=False` while the grant it is handed names
-    ticket verbs — a stale grant sitting behind a switched-off capability, the state §7 R7
-    rejects inertness to avoid. Direction 2: the bit is on and the grant reaches none of the
-    tool's verbs — an enabled capability with nothing behind it. Both bite here, and the
-    rule carries no exception at any site.
-
-    DIRECTION 1 IS PINNED AT THE POLICY BUILD AND NOT THROUGH A STAGE, and that is now a
-    consequence of a decision rather than an avoidance. Read literally the rule fails the
-    adversarial judge's stage, which builds with the capability off from the one definition
-    whose grant names ticket verbs — half the learning loop stops building. §7 R7's amendment
-    resolves that in the CONFIGURATION and not in the rule: the same runtime `replace()` that
-    sets the capability bit scopes the grant beside it, so a build with the tool off is handed
-    the empty deny-all and the disagreement cannot arise at a stage at all. The demand for
-    that correction is the adversarial-stage test beside this one; without it, an implementer
-    satisfies this test and finds the malicious judge no longer builds.
-
-    THE RULE IS PINNED ON THE PRODUCTION BIND PATH, not only on the operator-facing wrapper.
-    `bind` compiles its policy directly; the wrapper is a second door onto the same builder.
-    A check installed in the wrapper alone satisfies every assertion written through it while
-    running on NO real build — every shipped agent would bind with a grant its capability bit
-    contradicts, and the demand's whole content is that this state cannot be built. The bind
-    drive below uses a NON-judge role for the second half of the same reason: a check that
-    names the judge as an exception passes every judge-shaped case in this test and fails
-    exactly there. One rule, no carve-out, on the path production takes.
-
-    THE LAST BLOCK DRIVES THE JUDGE'S OWN STAGE BUILD, and it is the half that pins the
-    wiring rather than the seam. Handing an effective ToolSet in from a test body proves the
-    parameter EXISTS; it does not prove the stage passes it. An implementation that accepts
-    the parameter, satisfies both directions above and still compiles its policy from
-    `JUDGE_DEF.tools` ships the refuted condition intact in production — which is the shape
-    the previous pass's repair moved one site over instead of closing. The disagreement is
-    constructed through the seam the stage already has: the registry the stage is built with
-    carries the role's grant, so a registry scoped by a grant that reaches NO ticket verb,
-    driven against the benign wiring whose scope switches `closed_tickets` ON, is direction 2
-    assembled entirely by production code. Nothing raises unless the runtime-set bit reached
-    the policy build — `JUDGE_DEF.tools` declares that bit OFF, and an off bit beside a grant
-    that names nothing is no disagreement at all."""
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-
-    judge_grant = grant_of(JUDGE_DEF_ROLE, BENIGN_JUDGE_PAIRS)
-
-    switched_off = replace(JUDGE_DEF.tools, closed_tickets=False)
-    with pytest.raises(GrantError):
-        compile_policy_for(replace(JUDGE_DEF, verb_grant=judge_grant), run_dir,
-                           tools=switched_off)
-
-    switched_on = replace(JUDGE_DEF.tools, closed_tickets=True)
-    with pytest.raises(GrantError):
-        compile_policy_for(replace(JUDGE_DEF, verb_grant=DENY_ALL), run_dir, tools=switched_on)
-
-    # The agreeing pair is the positive control: the same dynamic bit, with a grant that
-    # reaches the tool's verbs, compiles — so the two failures above are the disagreement
-    # and not the `tools=` seam refusing everything handed to it.
-    ok = compile_policy_for(replace(JUDGE_DEF, verb_grant=judge_grant), run_dir,
-                            tools=switched_on)
-    assert ok.verb_allow is judge_grant
-
-    # The statically declared direction still fails too — one rule, not a judge carve-out.
-    with pytest.raises(GrantError):
-        compile_policy_for(replace(MAIN_DEF, verb_grant=grant_of("main", (("elastic", "query"),))),
-                           run_dir)
-
-    # ON THE PRODUCTION BIND PATH, for a role that is not the judge. `bind` compiles its
-    # policy directly and does NOT go through the operator-facing wrapper above, so a check
-    # installed only in that wrapper never runs on any real build — every assertion above
-    # passes while every shipped agent binds with a grant its capability bit contradicts. And
-    # driving it on a NON-judge role is what closes the other half: a check that exempts the
-    # judge by name satisfies the judge-shaped cases above and fails here.
-    for defn, grant in (
-        # a grant naming verbs behind switched-off verb-bearing capabilities. BOTH bits go
-        # off, not just `query`: since #900 gather also holds `list_verbs`, which reads the
-        # grant to decide what it may name and so counts toward the same agreement. Switching
-        # off only one would leave a verb-bearing bit ON and describe an AGREEING pair — the
-        # setup would stop expressing the condition this loop exists to refuse.
-        (replace(GATHER_DEF, tools=replace(GATHER_DEF.tools, query=False, list_verbs=False)),
-         grant_of("gather", (("elastic", "query"),))),
-        # the capability on, and a grant that reaches none of its verbs
-        (GATHER_DEF, DENY_ALL),
-    ):
-        with pytest.raises(GrantError):
-            bind(replace(defn, verb_grant=grant), run_dir)
-
-    # The agreeing pair at the same site: the real definition, its real grant, its real bit.
-    assert bind(GATHER_DEF, run_dir) is not None, \
-        "the bind path refuses the shipped agreeing configuration — the check is not the rule"
-
-    # Through the judge's REAL stage build, where the bit is set by the runtime replace().
-    starved = VerbRecorder()
-    with pytest.raises(GrantError):
-        _drive(tmp_path / "stage-disagrees", [JUDGE_DONE],
-               registry=scoped_ticket_registry(starved, ()))
-    assert starved.calls == [], "the stage reached a ticket verb behind a disagreeing grant"
-
-    # The agreeing pair at the same site: the stage's own bit, a grant that reaches the
-    # tool's verbs, and the run completes with the tool registered — so the failure above is
-    # the disagreement and not the stage build refusing every grant it is handed.
-    agreeing = VerbRecorder()
-    run = _drive(tmp_path / "stage-agrees", [_list(label=None), JUDGE_DONE],
-                 registry=scoped_ticket_registry(agreeing, BENIGN_JUDGE_PAIRS))
-    assert TOOL_LIST in run.tool_names(), "the agreeing stage build registered no closed-ticket tool"
-    # #683 (landed on main after this spec was written) added the case-opened recency
-    # boundary lookup ahead of list-tickets; the intent this assertion pins — no extraneous
-    # verb call reached the store — still holds, widened to admit that lookup.
-    assert [c.verb for c in agreeing.calls] == ["case-opened-at", "list-tickets"]
 
 
-def test_the_adversarial_judge_stage_builds_with_its_grant_scoped_off_beside_the_bit(
-    tmp_path: Path,
-):
-    """The adversarial judge's stage BUILDS, and reaches no ticket verb: a stage that switches
-    its verb capability OFF is handed an empty deny-all grant, scoped by the same runtime
-    `replace()` that sets the bit.
-
-    THIS IS A CORRECTION TO THE SHIPPED CONFIGURATION, and it is the price of R7's first
-    direction carrying no exception. There is one judge definition and one grant on it, and
-    that grant names the benign judge's ticket verbs. The adversarial stage builds from the
-    same definition with `closed_ticket_read` off — so a grant naming verbs for a switched-off
-    tool is not a hypothetical the rule forbids, it is what production ships, and the rule
-    applied as written stops half the learning loop building. §7 R7 was amended rather than
-    softened: the disagreement is real and the configuration is what is wrong. The grant still
-    LIVES on the role definition — that is where the capability-on build reads it from — but
-    the effective grant a build compiles is scoped to the capability the build actually has.
-
-    What makes this falsifiable rather than a restatement: the two drives differ ONLY in the
-    stage's capability bit, and they are handed the SAME grant — the one that names the ticket
-    verbs, exactly as the shipped definition does. Off: the stage builds, offers the model no
-    closed-ticket tool, and no ticket verb is reached. On: the same grant, the tools registered,
-    the verb reached. An implementation that passes the definition's grant through unscoped
-    raises on the first drive; one that scopes it off unconditionally fails the second."""
-    off = VerbRecorder()
-    adversarial = _drive(tmp_path / "adversarial", [JUDGE_DONE], benign=False,
-                         registry=scoped_ticket_registry(off, BENIGN_JUDGE_PAIRS))
-
-    assert adversarial.tool_names(), "the adversarial stage never called the model"
-    assert TOOL_LIST not in adversarial.tool_names(), \
-        "the capability-off stage offered the closed-ticket tool"
-    assert TOOL_GET not in adversarial.tool_names()
-    assert off.calls == [], "a ticket verb was reached from the capability-off stage"
-
-    on = VerbRecorder()
-    benign = _drive(tmp_path / "benign", [_list(label=None), JUDGE_DONE], benign=True,
-                    registry=scoped_ticket_registry(on, BENIGN_JUDGE_PAIRS))
-
-    assert TOOL_LIST in benign.tool_names(), \
-        "the grant was scoped off for the capability-ON stage too — the bit is not read"
-    # #683 (landed on main after this spec was written) added the case-opened recency
-    # boundary lookup ahead of list-tickets; the intent this assertion pins — no extraneous
-    # verb call reached the store — still holds, widened to admit that lookup.
-    assert [c.verb for c in on.calls] == ["case-opened-at", "list-tickets"]
 
 
-def test_the_shipped_grants_name_exactly_the_censused_verbs():
-    """The shipped verb_grant entries name exactly gather's 21 read verbs plus health-check
-    and the benign judge's 3 read verbs — no `rw` entry, and neither `cmdb.list-roles` nor
-    `identity.list-authorized-hosts`, which no template and no run exercises. The grant is
-    derived from the committed templates plus 20 runs of history, and it partitions the 25
-    non-health-check verbs exactly, with no residue (g4).
-
-    rejected: deriving the grant from the registry, which would grant everything and
-    reproduce the status quo with ceremony; and deriving it mechanically from run history,
-    which names five verbs that do not exist (c19)."""
-    gather = {(s, v) for s, v, _ in GATHER_DEF.verb_grant.entries}
-    systems = {s for s, _ in GATHER_PAIRS}
-
-    assert {(s, v) for s, v in gather if v != HEALTH_CHECK} == set(GATHER_PAIRS)
-    assert {s for s, v in gather if v == HEALTH_CHECK} == systems, \
-        "health-check is granted per system rather than uniformly across gather's systems"
-    assert all(k == "r" for _, _, k in GATHER_DEF.verb_grant.entries), "a shipped entry is not `r`"
-
-    judge = {(s, v) for s, v, _ in JUDGE_DEF.verb_grant.entries if v != HEALTH_CHECK}
-    assert judge == set(BENIGN_JUDGE_PAIRS)
-
-    for pair in UNGRANTED_PAIRS:
-        assert pair not in gather, f"{pair} is granted to nobody but appears in gather's grant"
-        assert pair not in judge, f"{pair} is granted to nobody but appears in the judge's grant"
 
 
 def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):

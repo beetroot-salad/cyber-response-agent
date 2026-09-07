@@ -1,10 +1,12 @@
-"""Is there a docker daemon this process can actually use — and the ambient engine keys.
+"""Is there a docker daemon this process can actually use.
 
-Two facts several suites need before they can decide whether to run at all, and which had
-been hand-copied four times (the daemon probes) and twice (the key seeding) across the e2e
-tree and the top-level tree. Neutral home rather than either harness's, because the
-callers straddle both: `e2e/_box665`, `e2e/_spec771`, `e2e/test_540_box_boundary` and
-`tests/test_store_boundary_705` all ask the same question.
+The fact several suites need before they can decide whether to run at all, and which had
+been hand-copied four times across the e2e tree and the top-level tree. Neutral home rather
+than either harness's, because the callers straddle both: `e2e/_box665`, `e2e/_spec771`,
+`e2e/test_540_box_boundary` and `tests/test_store_boundary_705` all ask the same question.
+
+It also carried an ambient-engine-key primer, for the run cycle #922 deleted; the primer went
+with its one caller.
 
 What deliberately does NOT live here: the pytest MARKERS built on these predicates. Those
 differ genuinely between suites — one skips on no-daemon-or-DooD, one on no-daemon alone,
@@ -48,28 +50,3 @@ def is_dood() -> bool:
     )
     root = probe.stdout.strip()
     return probe.returncode == 0 and bool(root) and not Path(root).exists()
-
-
-def satisfy_engine_keys(monkeypatch, disposition: str = "inconclusive") -> None:
-    """An ambient provider key per model the run cycle will touch.
-
-    Without it `run_one`'s `_prepare_engines_for` raises `FatalConfigError` during key
-    sourcing, before the seam any of these tests is actually about. `setenv`, never
-    `setattr` — the env is the sanctioned seam and the monkeypatch gate enforces it.
-    """
-    from defender.learning.core.config import oracle_model
-    from defender.learning.core.directions import BY_NAME
-    from defender.learning.core.run_cycle import _directions_for
-    from defender.runtime import providers
-
-    models = {oracle_model()}
-    for name in _directions_for(disposition):
-        d = BY_NAME[name]
-        models.add(d.judge_wiring.model)
-        models.add(d.actor_model)
-    for model in models:
-        try:
-            var = providers.provider_for(model).api_key_var
-        except Exception:  # noqa: BLE001 — best-effort; a red test does not depend on it
-            continue
-        monkeypatch.setenv(var, "spec-test-key")

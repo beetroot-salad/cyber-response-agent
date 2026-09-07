@@ -110,7 +110,7 @@ def run_stage(
     # context verbatim, and learning run dirs are SHARED — both legs of an `inconclusive` case
     # run concurrently against one dir, and a re-LEARN reopens it. The gray-box actor reads
     # that root with NO shape filter, so a judge trace at the root would hand it the
-    # UNREDACTED payload exemplars (`judge/compare.unredacted_exemplar`) that `decide_read`'s
+    # UNREDACTED payload exemplars (the old pipeline judge's) that `decide_read`'s
     # gather_raw deny withholds. `files.names_wire_log_dir` refuses the read; this puts the
     # file where it can.
     logger = observe.RequestLogger(

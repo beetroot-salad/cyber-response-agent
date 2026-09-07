@@ -730,7 +730,7 @@ def _conclude_value(conclude: dict[str, Any], key: str) -> Any:
 #: `ceiling_test` has two spellings and only one of them is real. The shipped authoring surface
 #: (`skills/invlang/SKILL.md` §`:T conclude`), eleven checked-in lessons, and every `:T conclude`
 #: block on disk write it as a REPEATED FLAT ROW naming one unreachable check each — the shape
-#: `_CONCLUDE_LISTS` carries and `render_synthesis` puts in front of the judge. The sub-table is
+#: `_CONCLUDE_LISTS` carries and a synthesis render puts in front of a reader. The sub-table is
 #: from `docs/dense-investigation-format.md`, a document whose own status line reads "Not
 #: implemented", and its `kind` enum appears in no vocabulary and no document.
 #:

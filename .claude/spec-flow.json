@@ -41,9 +41,7 @@
       "ticket_store": {
         "writers": [
           "defender/scripts/case_history/ticket_writer.py::open_case_ticket",
-          "defender/scripts/case_history/ticket_writer.py::close_case_ticket",
-          "defender/scripts/case_history/ticket_writer.py::annotate_case_ticket",
-          "defender/scripts/case_history/ticket_writer.py::enrich_case_resolution"
+          "defender/scripts/case_history/ticket_writer.py::close_case_ticket"
         ],
         "readers": [
           "defender/scripts/adapters/ticket_adapter.py::list_tickets",
@@ -71,8 +69,7 @@
       "learning_queue": {
         "writers": [
           "defender/learning/core/persist.py::_rewrite_queue",
-          "defender/learning/core/persist.py::append_findings",
-          "defender/learning/core/persist.py::_append_observations",
+          "defender/learning/judge/enqueue.py::append_rows",
           "defender/learning/core/persist.py::append_pitfalls",
           "defender/learning/author/drain.py::retire",
           "defender/learning/author/drain.py::_record_stuck",
@@ -81,8 +78,7 @@
         "readers": [
           "defender/learning/author/drain.py::_tick",
           "defender/learning/core/persist.py::read_pitfalls",
-          "defender/learning/core/drains.py::_pending_queue_count",
-          "defender/learning/author/verify_forward/shared.py::load_observation"
+          "defender/learning/core/drains.py::_pending_queue_count"
         ],
         "grep": [
           "findings.jsonl",
@@ -95,7 +91,7 @@
           "stuck.jsonl",
           "_pending/findings.jsonl"
         ],
-        "note": "ADDED BY #921's GROUNDING: `evals/harness.py::materialize` is a writer of this sink's shape that no import-following census sees — it `shutil.copy`s a scenario's own findings.jsonl into `<tmp>/defender/learning/_pending/findings.jsonl` and copytrees a `runs/` fixture beside it, then runs the real author against that tree. It is a HARNESS edge, not a loop edge, and it is the reason a row-shape change has a second consumer. Also worth pinning for the next census: the findings channel has ONE gate (`CorpusAuthorConfig.gate`, wired to `learning/author/lessons/run.py::_gate_findings`), called once per tick over EVERY keyed row of findings.jsonl — so two directions in one file share one gate and one batch, and the gate indexes entry['finding_id'|'run_id'|'direction'] directly inside drain's stuck-recording guard, where a missing key takes the whole tick's batch to `<channel>.stuck.jsonl`. `QUEUEABLE_FINDING_TYPES` has NO production consumer: the only membership test on a finding `type` is over ALL_FINDING_TYPES inside `core/validate.py::_validate_finding`, which validates the OLD pipeline judge's YAML doc and never sees a queue row."
+        "note": "ADDED BY #921's GROUNDING: `evals/harness.py::materialize` is a writer of this sink's shape that no import-following census sees — it `shutil.copy`s a scenario's own findings.jsonl into `<tmp>/defender/learning/_pending/findings.jsonl` and copytrees a `runs/` fixture beside it, then runs the real author against that tree. It is a HARNESS edge, not a loop edge, and it is the reason a row-shape change has a second consumer. Also worth pinning for the next census: the findings channel has ONE gate (`CorpusAuthorConfig.gate`, wired to `learning/author/lessons/run.py::_gate_findings`), called once per tick over EVERY keyed row of findings.jsonl — so two directions in one file share one gate and one batch, and the gate indexes entry['finding_id'|'run_id'|'direction'] directly inside drain's stuck-recording guard, where a missing key takes the whole tick's batch to `<channel>.stuck.jsonl`. UPDATED BY #922: `QUEUEABLE_FINDING_TYPES` is now the ONLY finding-`type` vocabulary left, and `learning/judge/enqueue.py::_validate_row` is its one production consumer. The set it used to be shadowed by — the pipeline judge's document validator in `core/validate.py` — was deleted with that judge."
       },
       "session_store": {
         "writers": [
@@ -132,26 +128,13 @@
         ]
       },
       "learning_run_dir": {
-        "writers": [
-          "defender/learning/core/persist.py::persist_run",
-          "defender/learning/core/persist.py::_copy_shared_inputs",
-          "defender/learning/core/persist.py::_write_source_refs",
-          "defender/learning/core/run_cycle.py::_write_leg_status",
-          "defender/learning/pipeline/malicious_actor/run.py::invoke_actor",
-          "defender/learning/pipeline/judge/compare.py::write_comparison_files"
-        ],
-        "readers": [
-          "defender/learning/core/directions.py::artifact_names",
-          "defender/scripts/visualize/visualize_judge.py::active_views",
-          "defender/learning/pipeline/judge/run.py::_cited_policy_read_body",
-          "defender/learning/core/persist.py::_source_run_dir"
-        ],
+        "writers": [],
+        "readers": [],
         "grep": [
           "learning_run_dir",
-          "source_refs.yaml",
-          "artifact_names",
           "paths.runs_dir"
-        ]
+        ],
+        "note": "RE-GROUND BEFORE USE (#922). Every writer and reader this census listed was the old learning pipeline's — the per-case cycle that minted the dir, the actor that wrote its story, the judge that wrote its comparison, the direction table and judge visualizer that read them — and all of them are deleted. The PATH is still live: `learning_run_dir` is a field on every `StageContext`, and the surviving stages (the findings curator, the forward-check, the lead author, the family judge) each write under one. But the shape of what lands there changed with the pipeline, so the honest census is empty rather than a stale list, and the next spec that touches this sink has to take it fresh. The two grep terms that named the retired functions' own artifacts left with them."
       },
       "runs_base": {
         "writers": [
@@ -199,11 +182,9 @@
         "readers": [
           "defender/runtime/scrub.py::scrub",
           "defender/run_common.py::cross_check_tables",
-          "defender/run_common.py::enqueue_learning",
           "defender/learning/lead_repository.py::joined",
           "defender/_run_paths.py::contained_payload",
-          "defender/runtime/lead_zero/_capture.py::_rows_for",
-          "defender/evals/oracle_golden/build_case.py::main"
+          "defender/runtime/lead_zero/_capture.py::_rows_for"
         ],
         "grep": [
           "tool_trace.jsonl",

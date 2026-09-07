@@ -54,7 +54,7 @@ _FULL_INVESTIGATION = (
 
 
 def _seed_session_store(run: Path, messages: list[dict]) -> None:
-    """`render_runtime_page`/`render_judge_page` now open the run's own session store
+    """`render_runtime_page` now opens the run's own session store
     (R4/#705) — this fixture predates the store, so give it a real one seeded from the
     same `messages` it already writes to the wire log, rather than fabricating a
     run dir the new render path cannot resolve."""

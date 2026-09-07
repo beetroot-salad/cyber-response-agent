@@ -50,19 +50,25 @@ def test_947_questioner_role_and_definition_are_registered():
     assert set(AGENTS.keys()) == set(AgentRole)
 
 
-def test_947_every_hand_maintained_role_census_counts_eleven():
-    """Every hand-maintained role census agrees the roster is eleven — the two hardcoded counts
-    and BOTH enumerations, including the compiled-policy sweep whose omission is silent rather
-    than red."""
+def test_947_every_hand_maintained_role_census_agrees_on_the_roster():
+    """Every hand-maintained role census agrees on the roster — the two hardcoded counts and
+    BOTH enumerations, including the compiled-policy sweep whose omission is silent rather
+    than red.
+
+    EIGHT SINCE #922, down from eleven: the actor, oracle and judge definitions went with the
+    pipeline they were the only callers of, and their enum keys went with them rather than
+    staying behind as names nothing answers to. `judge` returns in #1008 bound to the family
+    judge, and this count moves with it — which is the whole reason the census is spelled in
+    four places and checked here rather than trusted to stay in step on its own."""
     AgentRole = T.sym("runtime.agent_role", "AgentRole")
     AGENTS = T.sym("agents", "AGENTS")
-    assert len(AgentRole) == 11
-    assert len(AGENTS) == 11
+    assert len(AgentRole) == 8
+    assert len(AGENTS) == 8
     src = (T.DEFENDER / "tests" / "test_bind_sole_seam_551.py").read_text(encoding="utf-8")
-    assert "== 11" in src, "the bind-case count still reads ten"
+    assert "== 8" in src, "the bind-case count was not moved with the roster"
     assert "QUESTIONER_DEF" in src, "the bind-case enumeration was not moved"
     grant = (T.DEFENDER / "tests" / "test_grant_gate_575.py").read_text(encoding="utf-8")
-    assert "len(AGENTS) == 11" in grant, "the grant gate's hardcoded count was not moved"
+    assert "len(AGENTS) == 8" in grant, "the grant gate's hardcoded count was not moved"
     assert '"questioner"' in grant, "_all_policies never compiles the questioner's policy"
 
 

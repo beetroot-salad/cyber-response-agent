@@ -9,7 +9,7 @@ below asserts the SAME thing in its own lane — a refusal the caller can act on
 propagating exception — plus the positive control that keeps "refuse everything" from passing.
 
 They share a file because none is large enough to own one, and the roll-up issue is the record
-they trace back to (the `test_hardening_776.py` precedent).
+they trace back to (the #776 hardening precedent).
 
 | Ref  | Site                        | The raise that escaped                              |
 | F-07 | `runtime/box.py:113`        | `encode_request` -> bare `ValueError` out of the box |

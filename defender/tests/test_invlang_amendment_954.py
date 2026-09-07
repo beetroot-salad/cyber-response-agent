@@ -1247,24 +1247,6 @@ def test_the_compaction_fold_sees_the_first_wins_bucket_not_a_blend():
     assert fold_boundary(FOLD_REPEAT_DOC) == 1
 
 
-def test_the_judge_comparison_sees_the_first_wins_bucket_not_a_blend(tmp_path):
-    """`judge_compare`'s companion read — the third of O3's named sites — returns the first
-    row's lead bucket for a document carrying a within-block repeat (D21).
-
-    The judge parses the run's committed `investigation_md` without validating and swallows
-    every exception, so a fused lead reaches the classification silently; there is no channel
-    by which the run could learn it was judged on a row the author overwrote.
-    """
-    from defender.learning.pipeline.judge.compare import parse_investigation_companion
-
-    run = tmp_path / "run"
-    run.mkdir()
-    (run / "investigation.md").write_text(REPEAT_DOC, encoding="utf-8")
-
-    lead = parse_investigation_companion(run)["findings"][0]
-    assert lead["name"] == "alpha"
-    assert lead["loop"] == 1
-    assert lead["query_details"]["system"] == "cmdb"
 
 
 def test_a_precedent_case_carrying_the_repeated_id_warning_is_not_loaded_as_clean(tmp_path):
@@ -1531,40 +1513,3 @@ def test_a_legacy_document_holding_a_repeat_is_refused_at_every_write_verb(tmp_p
     assert repair_row in _inv(run3)
 
 
-def test_a_legacy_repeat_is_refused_at_the_learning_intake(tmp_path):
-    """A closed run whose committed document holds a within-block repeat is refused at the
-    learning intake's own gate — the error-partition copy path — and nothing is staged (D35).
-
-    The fourth F-L premise. The intake validates the investigation on the copy path with the
-    same error-severity partition the write gate uses, so the uniform outcome reaches past the
-    verbs the runtime drives.
-
-    WHAT IS OBSERVED IS THE REFUSAL AND THE ABSENCE, not the routing. The demand's own prose
-    used to add "the run lands in the failed queue for a human" — one grain above what this
-    test drives, which is `_copy_shared_inputs` raising `RunUnprocessable` and staging nothing.
-    Where an unprocessable run then goes is the drain's business and no claim in this graph
-    covers it, so the sentence is narrowed rather than asserted: the observable is that the
-    defective document does not reach the loop, and the control is that a repeat-free run does.
-    """
-    from defender.learning.core.config import RunUnprocessable
-    from defender.learning.core.persist import _copy_shared_inputs
-
-    run = tmp_path / "run"
-    run.mkdir()
-    (run / "alert.json").write_text('{"rule": {"id": "R-1"}}', encoding="utf-8")
-    (run / "report.md").write_text(
-        "---\ndisposition: benign\n---\n\nbody\n", encoding="utf-8"
-    )
-    (run / "investigation.md").write_text(LEGACY_DOC, encoding="utf-8")
-    staged = tmp_path / "staged"
-
-    with pytest.raises(RunUnprocessable) as exc:
-        _copy_shared_inputs(run, staged)
-    assert "invlang validation" in str(exc.value)
-    assert not (staged / "investigation.md").exists()
-
-    # The control: the same run with the repeat removed stages cleanly.
-    (run / "investigation.md").write_text(REPAIRED_DOC, encoding="utf-8")
-    staged2 = tmp_path / "staged2"
-    _copy_shared_inputs(run, staged2)
-    assert (staged2 / "investigation.md").exists()

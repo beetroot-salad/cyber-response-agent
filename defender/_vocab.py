@@ -45,15 +45,19 @@ from __future__ import annotations
 # the investigating model: `inconclusive` keeps that meaning and stays the model's own "I could
 # not settle this", now priced (`skills/invlang/validate/_gating.py`). No code path may hand a
 # model-authored close this member; see `HOST_ONLY_DISPOSITION` below and its refusal at every
-# authoring surface (the close tool, the invlang document, the ticket resolution line).
+# authoring surface (the close tool, the invlang document, the ticket resolution line, and a
+# branched world's declared disposition).
 DISPOSITION_VALUES: tuple[str, ...] = (
     "benign", "false-positive", "inconclusive", "malicious", "unresolved",
 )
 DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
 
 #: The member ONLY the host may commit — never a model-authored close, an invlang document's
-#: own `conclude.disposition`, or an analyst's hand-typed ticket resolution. Named once here so
-#: the three authoring surfaces that refuse it share one spelling rather than three literals.
+#: own `conclude.disposition`, an analyst's hand-typed ticket resolution, or a branched world's
+#: `disposition_declared`. Named once here so the four authoring surfaces that refuse it share
+#: one spelling rather than four literals. The fourth arrived with #920 and was found by
+#: `test_923_authoring_surfaces.py`'s census, not by this comment — keep it a pointer to that
+#: census rather than a list someone has to remember to grow.
 HOST_ONLY_DISPOSITION = "unresolved"
 
 # What a surface shows where a disposition should be and none could be read. Beside the

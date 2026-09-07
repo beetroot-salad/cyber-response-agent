@@ -14,14 +14,14 @@
 | **the gate** / **permissions** | `runtime/permission/` — the single in-process deny-by-default gate (bash + file reads/writes). Design notes: `docs/runtime-gates.md`. Audit CLI: `scripts/policy_cli.py` (`defender-policy show\|explain`, operator-only) |
 | **the review gate** / **the reviewer** | `runtime/challenge_gate.py` (harness + routing) + `runtime/review/` (projections, role prompts, reply contract), dispatched from `runtime/close_tool.py`. **Not a loop phase** — a write-time gate every *confident* close passes before it commits; `inconclusive` and the host's own `unresolved` both bypass it. Two blind lenses (`support`, `ablation`) + a `composer`, roster in `REVIEW_ROLES`. Fails closed |
 | **gather** | the per-lead data-access subagent — `skills/gather/` (prompt + query templates), dispatched from `runtime/tools.py`, calls the typed `query` tool (`runtime/query_tool.py`) |
-| **the actor** (malicious / benign) | `learning/pipeline/malicious_actor/`, `learning/pipeline/benign_actor/` — adversarial / FP-hunting story writers |
-| **the oracle** | `learning/pipeline/oracle/` — synthesizes the telemetry the actor's story would have produced |
-| **the judge** | `learning/pipeline/judge/` — classifies outcome (`caught\|survived\|undecidable\|incoherent\|skip-passthrough`), emits findings; prompts `malicious.md`/`benign.md` |
-| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons (`author/lessons/`, `author/malicious_actor/`, `author/benign_actor/`), each gated by the **forward-check** (`author/verify_forward/`) |
+| **the branch** / **the episode** | `learning/branch/` — forks a finished run at a chosen message and runs a family of sibling worlds from it; `cli.py` is the composition root, `estate/` is what a sibling's queries are answered from |
+| **the questioner** | `learning/branch/questioner/` — a deny-all role that authors the family manifest: sibling worlds differing by one deliberate fact. Runs no tools; its whole input is inlined by the host |
+| **the judge** | `learning/judge/` — grades an archived episode (`gradable\|discard\|corpus-contradiction`) and enqueues its findings. Runs under the questioner's definition until #1008 gives it its own role |
+| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons (`author/lessons/`), gated by the **forward-check** (`author/verify_forward/`) |
 | **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
-| **lessons** | `defender/lessons/` (+ `lessons-actor/`, `lessons-environment/`) — authored by the loop, retrieved by two pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, and the `append_block`/`fix_row` block keyed on the invlang frontier (`scripts/lessons/lessons_frontier.py`, #919). Grep, no index |
+| **lessons** | `defender/lessons/` — authored by the loop, retrieved by two pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, and the `append_block`/`fix_row` block keyed on the invlang frontier (`scripts/lessons/lessons_frontier.py`, #919). Grep, no index |
 | **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
-| **the frontend** / **the visualizations** | rendered HTML, not a web app: `scripts/visualize/` emits `transcript.html` (judge view) + `runtime.html` (run inspection) per run; `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
+| **the frontend** / **the visualizations** | rendered HTML, not a web app: `scripts/visualize/` emits `transcript.html` (the run's alert, report card and model transcript) + `runtime.html` (run inspection) per run; `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
 | **evals** | `defender/evals/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric (the frozen-actor replay and the judge A/B are retired); see `evals/README.md` |
 
 ## Layout (one line each)
@@ -29,7 +29,7 @@
 ```
 defender/
   SKILL.md          # runtime agent spec (the loop's system prompt)
-  run.py            # entrypoint: investigate one alert; post-steps render HTML + enqueue learning
+  run.py            # entrypoint: investigate one alert; post-steps render HTML + enqueue catalog curation
   agents.py         # agent registry
   run_common.py     # shared run-dir + post-step helpers
   runtime/          # in-process PydanticAI engine: driver, tools, permission/, providers/, bash_exec, observe, orient, compaction
@@ -38,11 +38,13 @@ defender/
   hooks/            # gate LOGIC imported as libraries (lead claim, descriptors, budget, lesson-load) — no longer Claude Code hooks
   skills/           # invlang, gather, handbook, advisory + per-system references (elastic/ identity/ cmdb/ ticket/ change-mgmt/ threat-intel/ host-state/)
   scripts/          # adapters/, gather_tools/, visualize/, lessons/, case_history/, policy_cli.py, pricing.py, workspace_map.py
-  learning/         # offline loop: loop.py (orchestrator CLI), lead_repository.py (THE read/join surface),
+  learning/         # offline loop: loop.py (the two authoring stages), lead_repository.py (THE read/join surface),
                     #   _prompt.py + _pydantic_stage.py (the shared stage-assembly pair, used by every engine),
-                    #   pipeline/, author/, core/, leads/, branch/, tickets/, ops/, frontend/
-                    #   branch/ is the turn-N branch (#920): ledger.py records every response the estate served
-                    #   with the decision behind it; estate/ is what a sibling world queries through
+                    #   branch/, judge/, author/, core/, leads/, tickets/, ops/, frontend/
+                    #   branch/ forks a finished run at turn N and runs a family of worlds from it:
+                    #   ledger.py records every response the estate served with the decision behind it;
+                    #   estate/ is what a sibling world queries through. judge/ grades the archived episode.
+                    #   The four-stage actor/oracle/judge pipeline that used to live here was deleted (#922)
   evals/            # metrics + harness-on-the-harness (scenarios/)
   lessons/          # checked-in lesson corpus
   fixtures/         # alert.json (+ optional gather_raw payloads) used as runtime inputs
@@ -61,8 +63,9 @@ The runtime agent has no unit tests — it's evaluated by running real alerts th
 
 ```bash
 cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'   # bootstrap (entrypoints re-exec into .venv themselves)
-python3 defender/run.py <alert.json>                 # one investigation → run dir under /tmp/defender-runs/; --no-learn skips enqueue
-python3 defender/learning/loop.py <run_dir>          # LEARN one run; --learn-drain / --author-drain / --lead-author-drain are the workers
+python3 defender/run.py <alert.json>                 # one investigation → run dir under /tmp/defender-runs/; --no-learn skips curation enqueue
+python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>   # fork a finished run into a family of worlds and grade it
+python3 defender/learning/loop.py --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
 ```
 
 **Running the suite as root fails four tests that are not broken.** The
@@ -86,7 +89,34 @@ The single read/join surface is `learning/lead_repository.py` (`joined` / `actor
 
 ## Learning loop (the headlining experiment)
 
-Off-process: `run.py` enqueues a marker; workers drain independently, each committing from its own git worktree off `origin/main` with one PR per batch — the loop is the sole committer, spawned agents run no git. Per case: disposition selects direction (`benign` → hunt the FN, `malicious` → hunt the FP, `inconclusive` → both, `false-positive` → neither: it is a verdict about the rule, not the entity, so it trains nothing, and `unresolved` → neither either: it is the HOST's own verdict for a run cut short without a settled finding, evidence about the run rather than about the world — both in `directions.UNTRAINED_DISPOSITIONS`) → **actor** writes a candidate story (may SKIP) → **oracle** synthesizes its telemetry → **judge** classifies + emits findings → queued findings accumulate until the **curators** fold them into lessons, each edit gated by the same-case **forward-check** regression (BAD = the lesson would flip a correctly-resolved case → revert). Lessons feed back into the runtime twice: at PLAN time via `defender-lessons`, and on every write that moves the investigation's open set via `scripts/lessons/lessons_frontier.py`.
+Off-process and operator-initiated. A finished run is not fed anywhere automatically; it is a
+**starting point** someone picks up later by naming it.
+
+`learning/branch/cli.py` forks that run at a chosen message — keeping what the defender had
+observed, discarding what it had concluded — and the **questioner** authors a family of sibling
+worlds that differ by one deliberate fact. Each world's corpus is staged into its own namespace,
+and that staged estate is what the siblings' queries are answered from. Every world is replayed
+against the capture first: one that contradicts it, or whose declared difference no query could
+reach, ends the whole episode before any sibling runs. The accepted worlds then run as their own
+`run.py --resume` processes, and the **judge** grades the archived episode and appends its
+findings to `_pending/findings.jsonl`.
+
+From there it is unchanged, and that queue is the joint the cutover swung on: findings accumulate
+until the **curator** folds them into `defender/lessons/`, each edit gated by the same-case
+**forward-check** regression (BAD = the lesson would flip a correctly-resolved case → revert).
+Each worker commits from its own git worktree off `origin/main`, one PR per batch — the loop is
+the sole committer, and spawned agents run no git. Lessons feed back into the runtime twice: at
+PLAN time via `defender-lessons`, and on every write that moves the investigation's open set via
+`scripts/lessons/lessons_frontier.py`.
+
+**What this replaced (#922).** Until the cutover the loop authored its own material: an actor
+invented a story about the alert, an oracle invented the telemetry that story would have
+produced, and a judge graded the defender against both — so everything it learned from was
+imagined. The disposition selected which direction(s) ran, and two further corpora
+(`lessons-actor/`, `lessons-environment/`) carried the actor-side observations. All of it is
+deleted: the pipeline, the direction routing, the three extra queues and their curators, and the
+`actor`/`oracle`/`judge` roles. `judge` returns in #1008 bound to the family judge, which until
+then runs under the questioner's definition. See `docs/learning-loop-cutover.md`.
 
 ## Where to make changes
 
@@ -96,7 +126,8 @@ Off-process: `run.py` enqueues a marker; workers drain independently, each commi
 | Per-system reference (what data a system holds, sample queries) | `defender/skills/{system}/SKILL.md` |
 | Gather subagent behavior, query templates, raw payload contract | `defender/skills/gather/` |
 | How the two tables are read/joined | `defender/learning/lead_repository.py` |
-| Actor / oracle / judge prompts + drivers | `defender/learning/pipeline/<stage>/` (each holds `prompt.md` + `run.py`) |
+| Questioner prompts + driver | `defender/learning/branch/questioner/` (`role.md`, `family.md`, `world.md` + `__init__.py`) |
+| Judge prompt + driver | `defender/learning/judge/` (`role.md` + `run.py`) |
 | Curator / forward-check prompts + drivers | `defender/learning/author/<curator>/` |
 | Lessons corpus | `defender/lessons/*.md` (hand-edits fine if they match the schema) |
 | Eval metrics / scenarios | `defender/evals/` |

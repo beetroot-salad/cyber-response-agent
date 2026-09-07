@@ -53,15 +53,12 @@ pytest.importorskip("pydantic_ai")
 
 from defender._paths import PATHS  # noqa: E402
 from defender.agents import (  # noqa: E402
-    ACTOR_DEF,
     AGENTS,
     COMPOSER_DEF,
     CORPUS_AUTHOR_DEF,
     GATHER_DEF,
-    JUDGE_DEF,
     LEAD_AUTHOR_DEF,
     MAIN_DEF,
-    ORACLE_DEF,
     QUESTIONER_DEF,
     SUPPORT_DEF,
     VERIFY_DEF,
@@ -71,13 +68,10 @@ from defender.learning.author.curator_engine import (  # noqa: E402
     CuratorDeps,
     ForwardCheckConfig,
 )
-from defender.learning.core import config  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
-    RunScope,
     bind,
     compile_policy_for,
-    effective_tools_for,
 )
 from defender.runtime.permission import (  # noqa: E402
     OPENS_NOTHING,
@@ -86,16 +80,11 @@ from defender.runtime.permission import (  # noqa: E402
     Route,
     under,
 )
-from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 
 _DEFENDER = PATHS.defender_dir
 _POLICY_CLI = _DEFENDER / "bin" / "defender-policy"
 
-_ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
-_ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
-_ACTOR_DIR = config.LESSONS_ACTOR_DIR
-_ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
 
 
 @pytest.fixture
@@ -138,29 +127,8 @@ def _read(env, path, which="gather"):
     return permission.decide_read(Path(path), run_dir=env.run, defender_dir=env.dfn, policy=pol)
 
 
-def _judge(env):
-    """The judge's policy via `compile_policy_for`, not the bare `bind` seam (#632).
-    `JUDGE_DEF`'s static `closed_tickets` bit stays False (only the per-leg `replace()` in
-    `_run_judge_pydantic` turns it on, together with the effective grant, d73) while its
-    `verb_grant` is the real non-empty census grant — a bare `bind(JUDGE_DEF, ...)` therefore
-    always disagrees under §7 R7's check. That's not a gap in the rule: a bare, unreplaced
-    `bind()` was never a real judge build to begin with, benign or adversarial, so this policy
-    probe states the effective ToolSet its bash-grant audit actually wants — the benign leg's
-    shape, matching the grant `JUDGE_DEF` already carries — the same way the real builder does."""
-    cmp_dir = env.tmp / "cmp"
-    cmp_dir.mkdir(exist_ok=True)
-    scope = RunScope(add_dirs=(cmp_dir,))
-    effective = effective_tools_for(JUDGE_DEF)
-    return compile_policy_for(JUDGE_DEF, env.run, scope=scope, defender_dir=env.dfn, tools=effective)
 
 
-def _actor(env):
-    return bind(
-        ACTOR_DEF, env.run,
-        scope=RunScope(scripts=(_ENV_RETRIEVE, _ACTOR_INDEX),
-                       read_confine=(_ACTOR_DIR, _ENV_DIR)),
-        defender_dir=env.dfn,
-    ).policy
 
 
 def _lead_author(env):
@@ -188,9 +156,6 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
     return {
         "main": env.main,
         "gather": env.gather,
-        "judge": _judge(env),
-        "actor": _actor(env),
-        "oracle": compile_policy_for(ORACLE_DEF, run_dir=env.run, defender_dir=env.dfn),
         "verify": compile_policy_for(VERIFY_DEF, run_dir=env.run, defender_dir=env.dfn),
         "lead_author": _lead_author(env),
         "corpus_author": _curator(env),
@@ -437,7 +402,7 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     # roles, so a deliberately added or retired role moves it; what the test checks is the
     # table property below. #947 added the eleventh, QUESTIONER — one more deny-all role, and
     # (like SUPPORT) one claimed by more calls than it has keys.
-    assert len(AGENTS) == 11
+    assert len(AGENTS) == 8
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
     assert "corpus_author" in pols
     for name, pol in pols.items():
@@ -725,41 +690,8 @@ def test_d6_denylist_still_applies_inside_scope(env):
 
 
 
-def test_e1_judge_grants_no_ticket_shape_on_either_leg(env):
-    """e1 (#672 — retires the old `_ticket_grant` closed-only-lookahead tests): the benign
-    judge's closed-ticket read is a typed host-side tool now, not a bash grant, so BOTH legs
-    compile the identical bash lane and NO ticket command clears it. The old
-    `<py> <cli> {list,get}-ticket … --require-closed` grant — and its answer-key security
-    property (`--require-closed` mandatory) — is gone; the property now lives in the tool
-    (closed-only by construction, no model-facing param). The store is unreachable through bash
-    on either leg, not merely by flag."""
-    pol = _judge(env)
-    py, cli = "python3", env.dfn / "scripts" / "adapters" / "ticket_adapter.py"
-    assert not _bash(env, f"{py} {cli} get-ticket case-1 --require-closed", pol).allow
-    assert not _bash(env, f"{py} {cli} list-tickets --require-closed", pol).allow
-    assert not any(
-        "ticket" in g.program or "ticket" in g.pattern.pattern for g in pol.bash_allow
-    ), "a ticket shape survives on the judge's bash lane"
-    assert {g.program for g in pol.bash_allow} == {"cat", SQL_SHIM}
 
 
-def test_e4_actor_script_and_lead_author_rm_survive(env):
-    """e4: the other two exempt grants still work and still contain. The actor's pinned
-    `python3 <script>` ALLOWs while `python3 /etc/evil.py` DENIES; the lead author's
-    `rm {skills}/{system}/_draft/<name>.md` ALLOWs while `rm {skills}/../../etc/passwd` DENIES
-    (rm unlinks the LINK, not the target — resolve() is the wrong operand model for it, which is
-    why it stays a pattern).
-
-    The allowed spelling gained its `{system}/` segment in #772: the grant used to accept any
-    depth and any filename under `skills/`, including `skills/gather/SKILL.md`, which the commit
-    gate then refused by discarding the batch. `_draft/` under a DECLARED system is the only
-    removal the prompt gives this lane."""
-    actor = _actor(env)
-    assert _bash(env, f"python3 {_ENV_RETRIEVE} --tags", actor).allow
-    assert not _bash(env, "python3 /etc/evil.py", actor).allow
-    la = _lead_author(env)
-    assert _bash(env, f"rm {env.dfn}/skills/elastic/_draft/x.md", la).allow
-    assert not _bash(env, f"rm {env.dfn}/skills/../../etc/passwd", la).allow
 
 
 
@@ -782,17 +714,6 @@ def test_f1_bash_decision_carries_the_single_parse_and_no_adapter_route(env):
     assert _cat_grant(env.gather).route is Route.PLAIN
 
 
-def test_f2_judge_ticket_command_is_unreachable_through_bash(env):
-    """f2 (#672 — retires the adapter-classification-ordering test whose subject was the deleted
-    judge ticket grant): the judge's old adapter-shaped ticket read `python3 <adapter> …` is no
-    longer claimed by any grant, so it DENIES on both legs — the closed-ticket read moved off bash
-    into a typed tool, and the store is unreachable through the judge's bash lane. The judge grants
-    exactly cat + defender-sql, neither of which is python3 or adapter-shaped."""
-    pol = _judge(env)
-    py, cli = "python3", env.dfn / "scripts" / "adapters" / "ticket_adapter.py"
-    d = _bash(env, f"{py} {cli} list-tickets --require-closed", pol)
-    assert not d.allow
-    assert {g.program for g in pol.bash_allow} == {"cat", SQL_SHIM}
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
@@ -856,8 +777,8 @@ def test_f5_runtime_imports_no_learning_private_and_enumerates_no_agent(env):
     assert not (runtime_dir / "agents.py").exists()
     reg = ast.parse((_DEFENDER / "agents.py").read_text())
     imported = {a.name for n in ast.walk(reg) if isinstance(n, ast.ImportFrom) for a in n.names}
-    assert {"JUDGE_DEF", "ACTOR_DEF", "ORACLE_DEF", "VERIFY_DEF", "LEAD_AUTHOR_DEF",
-            "CORPUS_AUTHOR_DEF"} <= imported
+    assert {"VERIFY_DEF", "LEAD_AUTHOR_DEF", "CORPUS_AUTHOR_DEF",
+            "QUESTIONER_DEF"} <= imported
 
 
 
@@ -907,23 +828,6 @@ def test_g1_no_deny_reason_or_hint_names_a_program_the_agent_cannot_run(env):
     assert "ls" not in {g.program for g in _all_policies(env)["main"].bash_allow}
 
 
-def test_g2_overflow_hint_reaches_the_right_branch_through_the_real_seam(env):
-    """g2: `_overflow_filter_hint` still reaches the `jq` branch for main/gather (`cat <path> | jq
-    '<filter>'`), the `defender-sql` branch for the judge, and the read-tool fold for the rest.
-    `tools._lane_admits` (`tools.py:58-62`) probes with `p.fullmatch(probe)` over `policy.bash_allow`
-    — an AttributeError IN PRODUCTION once that tuple holds `Grant`s (a Grant has no `.fullmatch`).
-    It must go through the REAL decide seam, so the hint can never disagree with the gate."""
-    path = f"{env.run}/gather_raw/l-001/0.json"
-    for which in ("main", "gather"):
-        hint = tools._overflow_filter_hint(path, getattr(env, which))
-        assert f"cat {path} | defender-sql" in hint, which
-        assert "jq" not in hint, which
-    jhint = tools._overflow_filter_hint(path, _judge(env))
-    assert "defender-sql" in jhint
-    assert "jq" not in jhint
-    ahint = tools._overflow_filter_hint(path, _actor(env), read_tool="read_file")
-    assert "read_file" in ahint
-    assert "pattern=" in ahint
 
 
 
@@ -1007,7 +911,14 @@ def test_i1_policy_show_prints_grants_and_never_a_misleading_empty_scope(env):
         assert word in out
     assert str(env.run) in out
     assert "ls" not in _named_programs(out)
-    j = _cli("show", "judge", "--run-dir", str(env.run))
+    # THE SECOND AGENT WAS THE JUDGE, and it is deleted (#922). The demand needs two agents,
+    # not that one: what it states is that `show` answers for more than the role it was first
+    # written against, and that a role's ticket lane never leaks into the printed grant. The
+    # curator is the surviving learning role with a `cat` lane, and the ticket assertions carry
+    # over unchanged — no surviving role holds a ticket verb, so they are now a claim about the
+    # whole roster rather than about one leg's scoping.
+    j = _cli("show", "corpus_author", "--run-dir", str(env.run),
+             "--defender-dir", str(env.dfn), "--corpus-name", "lessons")
     assert j.returncode == 0, j.stderr
     assert "cat" in j.stdout
     assert "bash" in j.stdout

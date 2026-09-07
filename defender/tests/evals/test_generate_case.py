@@ -170,7 +170,7 @@ def test_control_offsets_are_settable_because_a_default_window_can_be_dead():
 
 
 def test_the_offsets_reach_controls_py(tmp_path, monkeypatch):
-    """The flag is worthless if main does not forward it."""
+    """The flag is worthless if the recruiter does not forward it."""
     seen = []
     monkeypatch.setattr(generate_case, "_run",
                         lambda cmd, **kw: seen.append([str(c) for c in cmd]) or "")
@@ -179,7 +179,13 @@ def test_the_offsets_reach_controls_py(tmp_path, monkeypatch):
     (tmp_path / "run" / "meta.json").write_text(json.dumps(META), encoding="utf-8")
     monkeypatch.setattr(generate_case, "wait_for_alert", lambda *a, **k: None)
     monkeypatch.setattr(generate_case, "investigate", lambda *a, **k: tmp_path / "rundir")
-    generate_case.main([
+    # The assemble step raises since #922 deleted its implementation, and controls.py runs
+    # AFTER it. Stubbed like every other seam above rather than dropped, because the property
+    # here is the flag's forwarding, not the assembler's existence.
+    monkeypatch.setattr(  # lint-monkeypatch: ok — same module-function seam as the four
+        # stubs above, which the baseline already carries; the recruiter takes no deps object.
+        generate_case, "_assemble", lambda *a, **k: None)
+    generate_case._recruit([
         "--scenario", "persistence-authorized-keys", "--case-id", "case-x",
         "--split", "dev", "--activity-family", "persistence/T1098.004",
         "--cases-dir", str(tmp_path / "cases"), "--offsets-days", "14,21,28"])
@@ -270,7 +276,7 @@ def test_the_guard_runs_before_the_stack_is_touched(catalog, tmp_path, monkeypat
     # `main` reads the module-level CATALOG at call time, which is what the patch above
     # replaces — the guard takes its catalog as a required argument precisely so a
     # default bound at import time cannot outlive it.
-    rc = generate_case.main(["--scenario", "local-only", "--target", "db-1",
+    rc = generate_case._recruit(["--scenario", "local-only", "--target", "db-1",
                              "--case-id", "case-x", "--split", "dev",
                              "--activity-family", "persistence/T1098.004",
                              "--cases-dir", str(tmp_path / "cases")])
@@ -322,7 +328,7 @@ def test_source_alone_autofills_the_target_in_main(catalog, tmp_path, monkeypatc
     monkeypatch.setattr(generate_case, "CATALOG", catalog)
     monkeypatch.setattr(generate_case, "fire", fake_fire)
     with pytest.raises(SystemExit):
-        generate_case.main(["--scenario", "local-only", "--source", "db-1",
+        generate_case._recruit(["--scenario", "local-only", "--source", "db-1",
                             "--case-id", "case-src", "--split", "dev",
                             "--activity-family", "persistence/T1098.004",
                             "--cases-dir", str(tmp_path / "cases")])
@@ -407,7 +413,7 @@ def test_the_occupancy_guard_precedes_every_side_effect(tmp_path, catalog, monke
     monkeypatch.setattr(generate_case, "fire", explode)
     cases = tmp_path / "cases"
     (cases / "case-x" / "hidden").mkdir(parents=True)
-    rc = generate_case.main(["--scenario", "retargetable", "--case-id", "case-x",
+    rc = generate_case._recruit(["--scenario", "retargetable", "--case-id", "case-x",
                              "--split", "dev", "--activity-family", "f",
                              "--cases-dir", str(cases)])
     assert rc == 2

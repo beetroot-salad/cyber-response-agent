@@ -174,8 +174,8 @@ def test_two_same_named_siblings_get_distinct_fingerprints(tmp_path):
 
 def test_the_validator_construction_is_not_flagged(tmp_path):
     """The cure, not the disease: the parse is consumed by the check in ONE expression, so the
-    raw value is never bound, never deref'd, never returned. This is the shape
-    `learning/core/run_cycle._validate_judge_yaml` uses with an injected `Callable`."""
+    raw value is never bound, never deref'd, never returned. This is the shape the retired
+    run cycle's judge-YAML check used with an injected `Callable`."""
     assert _scan_src(tmp_path, _NARROWED_BY_VALIDATOR) == []
 
 
@@ -184,15 +184,15 @@ def test_an_isinstance_guard_is_not_flagged(tmp_path):
 
 
 def test_a_first_party_validator_call_is_not_flagged(tmp_path):
-    """`learning/core/validate.parse_judge_verdict`'s shape: the raw doc is bound, but what
-    reaches `return` is the first-party validator's result, not the raw doc."""
+    """The retired judge-verdict parser's shape: the raw doc is bound, but what reaches
+    `return` is the first-party validator's result, not the raw doc."""
     assert _scan_src(tmp_path, (
         "from defender._yaml import safe_load\n"
-        "from defender.learning.core.validate import validate_judge_doc\n"
+        "from defender.learning.core.validate import validate_doc\n"
         "\n"
         "def parse_verdict(text) -> dict:\n"
         "    doc = safe_load(text)\n"
-        "    validated = validate_judge_doc(doc)\n"
+        "    validated = validate_doc(doc)\n"
         "    return validated\n"
     )) == []
 

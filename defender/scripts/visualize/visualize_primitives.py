@@ -5,17 +5,13 @@ import json
 import re
 from pathlib import Path
 
-import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-from defender._yaml import safe_load  # noqa: E402
 from defender._report import ReportRead, read_report  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
-from defender.learning.core import config as _loop_config  # noqa: E402
-from defender.learning.core.directions import Direction  # noqa: E402
 
 
 
@@ -42,15 +38,6 @@ def esc_untrusted(s) -> str:
     # literal rewrites `ONERROR=` to `on\u200bERROR=`, silently case-folding text this page
     # exists to show verbatim. `m.group(0)` splits the match, casing preserved.
     return _EVENT_HANDLER_RE.sub(lambda m: m.group(0) + "\u200b", esc(s))
-
-
-def load_yaml(path: Path) -> dict | list | None:
-    if not path.is_file():
-        return None
-    try:
-        return safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
-        return None
 
 
 def block(kind: str, title: str, body: str, *, open_: bool = False, anchor: str | None = None) -> str:
@@ -136,13 +123,8 @@ def parse_report(run_dir: Path) -> ReportRead:
     return read_report(RunPaths(run_dir).report)
 
 
-def _learning_run_dir(run_id: str) -> Path:
-    return _loop_config.learning_run_paths(run_id).run_dir
 
 
-def load_judge_doc(run_id: str, direction: Direction) -> dict | None:
-    data = load_yaml(_learning_run_dir(run_id) / direction.judge_name)
-    return data if isinstance(data, dict) else None
 
 
 def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec-alert") -> str:

@@ -37,74 +37,26 @@ def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Ro
 
 
 
-def test_seed_eligible_outcomes_subset_of_outcome_enum():
-    from defender.learning.core.config import OUTCOME_ENUM
-
-    assert case_ticket._SEED_ELIGIBLE_OUTCOMES <= OUTCOME_ENUM
 
 
 
 
-def _enrichment_comment(outcome: str) -> dict:
-    return {"author": "learning", "body": case_ticket.enrichment_to_comment(outcome)["body"]}
-
-
-@pytest.mark.parametrize(
-    ("outcome", "eligible"),
-    [("caught", True), ("skip-passthrough", True),
-     ("survived", False), ("undecidable", False), ("incoherent", False)],
-)
-def test_enrichment_roundtrip_and_polarity(outcome: str, eligible: bool):
-    comments = [_enrichment_comment(outcome)]
-    assert case_ticket.parse_survival_from_comments(comments) is eligible
-
-
-def test_parse_survival_absent_is_none_not_false():
-    assert case_ticket.parse_survival_from_comments([]) is None
-    assert case_ticket.parse_survival_from_comments(None) is None
-
-
-def test_parse_survival_ignores_runtime_close_comment():
-    close_comment = {"author": "defender", "body": "Disposition: benign (confidence: high)."}
-    assert case_ticket.parse_survival_from_comments([close_comment]) is None
-
-
-def test_parse_survival_latest_flag_wins():
-    comments = [_enrichment_comment("survived"), _enrichment_comment("caught")]
-    assert case_ticket.parse_survival_from_comments(comments) is True
-
-
-def test_parse_survival_tolerates_malformed_comment_entries():
-    assert case_ticket.parse_survival_from_comments(
-        [None, {"no_body": 1}, {"body": 42}, _enrichment_comment("caught")]
-    ) is True
 
 
 
 
-def test_ticket_accessors():
-    ticket = {
-        "key": "case-7",
-        "created": "2026-06-01T00:00:00+00:00",
-        "labels": ["sig:5710", "evt:2026-05-30T09:00:00+00:00"],
-        "resolution": "benign — nightly vuln scan",
-        "comments": [_enrichment_comment("caught")],
-    }
-    assert case_ticket.ticket_key(ticket) == "case-7"
-    assert case_ticket.ticket_created(ticket) == "2026-06-01T00:00:00+00:00"
-    assert case_ticket.ticket_event_time(ticket) == "2026-05-30T09:00:00+00:00"
-    assert case_ticket.ticket_disposition(ticket) == "benign"
-    assert case_ticket.ticket_reason(ticket) == "nightly vuln scan"
-    assert case_ticket.ticket_seed_eligible(ticket) is True
 
 
-def test_ticket_accessors_on_foreign_ticket():
-    ticket = {"key": "h-1", "resolution": "Closed by analyst.", "comments": []}
-    assert case_ticket.ticket_disposition(ticket) is None
-    assert case_ticket.ticket_reason(ticket) is None
-    assert case_ticket.ticket_seed_eligible(ticket) is None
-    assert case_ticket.ticket_event_time(ticket) is None
-    assert case_ticket.ticket_key("not-a-dict") is None
+
+
+
+
+
+
+
+
+
+
 
 
 def test_signature_label_matches_open_label():

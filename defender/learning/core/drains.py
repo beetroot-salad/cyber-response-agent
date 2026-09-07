@@ -22,7 +22,6 @@ from defender import _git
 from defender.runtime import box as box_mod
 from defender.learning.author import drain
 from defender.learning.author import shared as _author_shared
-from defender.learning.core.directions import BY_NAME
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
 from defender.learning.core.markers import (
@@ -98,9 +97,6 @@ _CURATOR_MODULES = {
     "lead_author": "defender.learning.leads.lead_author",
     "pitfalls_curator": "defender.learning.leads.pitfalls_curator",
     "author": "defender.learning.author.lessons.run",
-    "author_actor": "defender.learning.author.malicious_actor.run",
-    "author_actor_benign": "defender.learning.author.benign_actor.run",
-    "author_actor_env": "defender.learning.author.benign_actor.env",
 }
 
 
@@ -114,11 +110,16 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
 
 
 def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
-    checks = [(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD")]
-    for direction in BY_NAME.values():
-        for t in (direction.obs_trigger, *direction.extra_obs_triggers):
-            checks.append((t.pending_file(paths), t.threshold_env))
-    return checks
+    """The queues whose depth can wake this drain: the findings channel, and nothing else.
+
+    NAMED, not derived. Until #922 this walked the direction table and added each direction's
+    observation triggers, which made the OLD LOOP'S DISPATCH TABLE the registry for a stage
+    that outlives it — so deleting the table would have narrowed this list to its one literal
+    silently, with no error and no failing test. The three observation channels lost their
+    producer in the same change (the family judge writes findings rows only), so the honest
+    shape is one channel spelled once. A second channel returning is an edit here, in a diff,
+    which is the property the loop did not have."""
+    return [(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD")]
 
 
 def _pending_queue_count(pending_file: Path) -> int:
@@ -157,15 +158,12 @@ def _drain_curators(
     *,
     box: Any = None,
 ) -> None:
+    # ONE curator, named — see `_curator_queue_checks` for why this is no longer a walk of the
+    # direction table. The channel this fires for is the same one the wake gate answers for,
+    # spelled the same way in both places so they cannot disagree about what work exists.
     trigger_author(
         paths, paths.pending_file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending", box=box,
     )
-    for direction in BY_NAME.values():
-        for t in (direction.obs_trigger, *direction.extra_obs_triggers):
-            trigger_author(
-                paths, t.pending_file(paths), t.threshold_env, t.module_name, t.pending_label,
-                box=box,
-            )
 
 
 def _discard_worktree_changes(repo_root: Path) -> None:
@@ -328,51 +326,25 @@ def _validate_merge_mode() -> None:
     merge_mode()
 
 
-# Trigger module → the LoopPaths attribute that already owns that curator's corpus dir. The
-# directory NAMES live in `DefenderPaths` alone (`_paths.py`); re-spelling them here would let
-# a rename there turn every drain box into an absent-bind-source create failure.
-_CORPUS_ATTR_FOR_TRIGGER_MODULE = {
-    "author_actor": "lessons_actor_dir",
-    "author_actor_benign": "lessons_environment_dir",
-    "author_actor_env": "lessons_environment_dir",
-}
-
-
-def _drain_triggered_corpora(paths: LoopPaths) -> tuple[Path, ...]:
-    """Which corpora this batch may write: the base lessons corpus always (it is what
-    `author_drain`'s has_work gate answers for), plus each actor/environment sibling whose own
-    threshold independently fires. Evaluated once, before `_run_worktree_batch` composes the
-    drain box's mount set — never a static union of all three.
-
-    Corpus dirs come off `paths`, so pass the WORKTREE-rooted LoopPaths: `with_repo_root`
-    preserves `state_root`, so the queue counts are the same files either way."""
-    triggered = [paths.lessons_dir]
-    for direction in BY_NAME.values():
-        for t in (direction.obs_trigger, *direction.extra_obs_triggers):
-            threshold = env_int(t.threshold_env, 5)
-            if _pending_queue_count(t.pending_file(paths)) >= threshold:
-                attr = _CORPUS_ATTR_FOR_TRIGGER_MODULE.get(t.module_name)
-                if attr is None:
-                    continue
-                corpus_dir = getattr(paths, attr)
-                if corpus_dir not in triggered:
-                    triggered.append(corpus_dir)
-    return tuple(triggered)
-
-
 def _drain_box_request(
     wt: Path, batch_id: str, label: str, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
     """The drain box's geography: ro over the whole worktree leaf (it carries `<wt>/defender`
     and is both drain roles' cwd_anchor), rw ONLY over what this batch actually needs — the
-    triggered lesson corpora for `author_drain`, `<wt>/defender/skills` for
-    `lead_author_drain` — never a static union, never anything outside the leaf."""
+    lessons corpus for `author_drain`, `<wt>/defender/skills` for `lead_author_drain` — never
+    a static union, never anything outside the leaf.
+
+    `author_drain`'s one rw mount is NAMED here rather than derived. Until #922 it came from a
+    walk of the direction table, which added an actor or environment corpus whenever that
+    direction's observation queue was over threshold; deleting the table would have shrunk the
+    mount set to its single literal with nothing saying so. Those corpora and their queues went
+    with the table, so the box now gets exactly the corpus the wake gate answered for."""
     wt_paths = paths.with_repo_root(wt)
     mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
     if label == "lead_author_drain":
         rw_dirs: tuple[Path, ...] = (wt_paths.skills_dir,)
     else:
-        rw_dirs = _drain_triggered_corpora(wt_paths)
+        rw_dirs = (wt_paths.lessons_dir,)
     for d in rw_dirs:
         mounts.append(box_mod.Mount(source=d, target=d, writable=True))
     return box_mod.BoxRequest(

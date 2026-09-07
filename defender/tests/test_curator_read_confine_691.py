@@ -30,7 +30,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender._paths import PATHS  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
@@ -41,7 +40,6 @@ from _curator_691_harness import (  # noqa: E402
     confine,
     corpus,
     curator_deps,
-    forward_check_gate,
     make_worktree,
     pending_run_dir,
     read_decision,
@@ -62,27 +60,8 @@ def _cats(deps, path: str) -> bool:
 
 # O6 / R4 — the read confine
 
-def test_the_curator_declares_requires_confine_over_the_three_corpora(tmp_path):
-    """The curator's read reach is the three-corpus confine, not the whole tree: a read of a
-    sibling corpus lesson ALLOWs while a read of ``defender/docs`` and ``defender/SKILL.md`` — real
-    files INSIDE the tree but outside every lesson corpus — DENYs. RED today: ``for_run``'s policy
-    carries ``read_confine=()``, so the wide ``defender_dir`` base admits docs/SKILL."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    assert _reads(deps, rel("lessons-actor", "sib.md"))          # confine spans the three
-    assert not _reads(deps, "defender/docs/design.md")           # outside the confine → DENY
-    assert not _reads(deps, "defender/SKILL.md")                 # outside the confine → DENY
 
 
-def test_the_read_view_must_span_three_corpora_while_the_shell_view_stays_at_one(tmp_path):
-    """One spawn, two surfaces required to DISAGREE: ``lesson_read`` of a sibling-corpus lesson is
-    ALLOW (the confine spans all three corpora), but ``cat`` of that SAME path is DENY (the bash
-    scope is own-corpus only). The read view and the shell view are deliberately different reaches."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    sib = rel("lessons-actor", "sib.md")
-    assert _reads(deps, sib)          # lesson_read spans the confine
-    assert not _cats(deps, sib)       # cat stays at one corpus
 
 
 def test_a_read_inside_the_spawns_tree_but_outside_every_lesson_corpus(tmp_path):
@@ -98,53 +77,12 @@ def test_a_read_inside_the_spawns_tree_but_outside_every_lesson_corpus(tmp_path)
     assert _reads(deps, str(rd / "note.md"))                     # positive control: own run dir
 
 
-def test_two_spawns_in_one_batch_reach_into_each_others_corpora(tmp_path):
-    """Cross-corpus READS between same-batch spawns are intended and allowed; cross-corpus WRITES
-    stay refused. Spawn-A (corpus ``lessons``) may ``lesson_read`` a ``lessons-actor`` lesson, but a
-    ``write_file`` into ``lessons-actor`` is denied (ModelRetry). The read widened, the write did not."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    a = curator_deps(wt, rd, "lessons")
-    assert _reads(a, rel("lessons-actor", "peer.md"))            # cross-corpus read ALLOW
-    with pytest.raises(ModelRetry):                               # cross-corpus write DENY
-        write_file(a, rel("lessons-actor", "evil.md"), "body\n")
-    assert not (corpus(wt, "lessons-actor") / "evil.md").exists()  # nothing landed cross-corpus
 
 
-def test_the_committed_reachability_difference_between_the_read_surface_and_the_shell_surface(tmp_path):
-    """The committed #559 property, R6-repaired to be discriminating on a REAL sibling path: the
-    lesson-read surface reaches the sibling corpus (ALLOW) while the shell (``cat``) surface does not
-    (DENY). Both halves survive R4 — the divergence is the point, not an accident of an empty read."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    (corpus(wt, "lessons-environment") / "real.md").write_text("lesson\n", encoding="utf-8")
-    deps = curator_deps(wt, rd, "lessons")
-    sib = rel("lessons-environment", "real.md")
-    assert _reads(deps, sib)          # read surface: reaches the sibling
-    assert not _cats(deps, sib)       # shell surface: does not
 
 
-def test_a_lesson_corpus_is_added_to_the_tree_after_the_scope_was_written(tmp_path):
-    """The confine is a STATIC three-name declaration: a FOURTH lesson-shaped dir added to the tree
-    (``defender/lessons-extra``) is DENIED even though it looks like a corpus — the gate (the static
-    confine) and the matcher (a new dir on disk) diverge. Positive control: a read inside one of the
-    three declared corpora ALLOWs. RED today: the wide ``defender_dir`` base admits the fourth dir."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    (wt / "defender" / "lessons-extra").mkdir(parents=True, exist_ok=True)
-    deps = curator_deps(wt, rd, "lessons")
-    assert not _reads(deps, "defender/lessons-extra/x.md")       # fourth corpus DENY (static confine)
-    assert _reads(deps, rel("lessons-actor", "in.md"))           # control: a declared corpus ALLOW
 
 
-def test_read_allow_stays_single_corpus_after_r4_and_the_confine_carries_the_narrowing(tmp_path):
-    """``read_allow`` (the cat scope) stays SINGLE-corpus and untouched while the CONFINE carries the
-    reach-narrowing on the roots half — the two are independent axes, neither re-derived from the
-    other. Observable: sibling ``cat`` DENY (the single-corpus cat scope) yet sibling ``lesson_read``
-    ALLOW (the three-corpus confine on the roots half). NOT pinned: read_allow gaining the corpus
-    shape (c17/g10 refuted)."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    sib = rel("lessons-actor", "s.md")
-    assert not _cats(deps, sib)       # cat scope: own corpus only (single)
-    assert _reads(deps, sib)          # confine (roots half): spans the three
 
 
 def test_a_spawn_reads_the_queue_it_was_spawned_over(tmp_path):
@@ -156,28 +94,8 @@ def test_a_spawn_reads_the_queue_it_was_spawned_over(tmp_path):
     assert _reads(deps, str(rd / "queued.json"))
 
 
-def test_corpus_name_names_no_corpus_among_the_three_shipped_lesson_corpora(tmp_path):
-    """The READ reach is the SAME fixed three-corpus confine for EVERY curator spawn regardless of
-    its own name (promoted P64): a spawn named ``lessons`` and a spawn named ``lessons-actor`` both
-    ALLOW a read of ``lessons-environment`` and both DENY a read of ``defender/docs`` — the confine
-    is the same set, not a per-spawn own-corpus reach. RED today for the docs half (wide base)."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    for name in ("lessons", "lessons-actor"):
-        deps = curator_deps(wt, rd, name)
-        assert _reads(deps, rel("lessons-environment", "z.md"))  # same confine for every spawn
-        assert not _reads(deps, "defender/docs/x.md")            # and it excludes docs, for every spawn
 
 
-def test_the_forward_checks_own_lesson_gate_after_the_read_scope_widens(tmp_path):
-    """The forward_check tool's own lesson gate (``_gate_lesson_path`` → ``decide_write``) still
-    REFUSES a sibling-corpus operand — it rides the write gate, which R4 does not touch. An own-corpus
-    operand is admitted (returns a Path); a sibling operand raises ModelRetry. Unchanged by the read
-    widening (x4)."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    assert forward_check_gate(deps, rel("lessons", "own.md"))    # own corpus: admitted
-    with pytest.raises(ModelRetry):                               # sibling: refused
-        forward_check_gate(deps, rel("lessons-actor", "sib.md"))
 
 
 def test_the_curator_reads_no_longer_reach_defender_docs(tmp_path):
@@ -230,34 +148,7 @@ def test_defender_dir_is_the_main_checkout_paths_value(tmp_path):
         _bind_no_tree(wt, rd, PATHS.defender_dir)
 
 
-def test_an_operator_runs_a_curator_entrypoint_against_the_working_checkout(tmp_path):
-    """An operator invoking a curator entrypoint against the working checkout (the MAIN tree) is
-    refused at bind — "requires an explicit NON-PATHS defender_dir" — instead of silently proceeding
-    into the main checkout (a-P9). Control: the in-worktree drain path authors unchanged."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    with pytest.raises(ValueError, match=_EXPLICIT_TREE):
-        _bind_no_tree(wt, rd, PATHS.defender_dir)
-    write_file(curator_deps(wt, rd, "lessons-actor"), rel("lessons-actor", "d.md"), "b\n")  # drain OK
 
 
-def test_the_drain_path_still_authors_after_the_entrypoints_break(tmp_path):
-    """SURVIVAL (c5): the drain supplies an explicit worktree tree and keeps authoring unchanged —
-    the positive control for R2's accepted entrypoint breakage. The in-worktree ``for_run`` deps
-    admits an in-corpus ``.md`` write; a sibling-corpus write is still refused."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons-environment")
-    write_file(deps, rel("lessons-environment", "authored.md"), "body\n")     # authors
-    assert (corpus(wt, "lessons-environment") / "authored.md").read_text() == "body\n"
-    with pytest.raises(ModelRetry):
-        write_file(deps, rel("lessons", "x.md"), "body\n")                     # still scoped
 
 
-def test_every_curator_spawn_reports_the_same_run_identity(tmp_path):
-    """All four spawn configs (two of them naming ``lessons-environment``) share ONE run identity:
-    ``run_id == "_pending"`` and one run dir, while each authors its own corpus. The per-spawn corpus
-    name is NOT a run identifier (P4) — the shared ``_pending`` sink is the R2 shared-sink territory."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    spawn_corpora = ("lessons", "lessons-actor", "lessons-environment", "lessons-environment")
-    deps = [curator_deps(wt, rd, name) for name in spawn_corpora]
-    assert all(d.run_id == "_pending" for d in deps)             # one run identity for every spawn
-    assert len({d.run_dir for d in deps}) == 1                   # one shared run dir

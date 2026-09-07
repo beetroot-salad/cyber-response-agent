@@ -41,7 +41,12 @@ from defender._run_id import (
     is_case_stable_id,
     is_valid_run_id,
 )
-from defender._vocab import DISPOSITION_ENUM, normalized_disposition
+from defender._vocab import (
+    DISPOSITION_ENUM,
+    DISPOSITION_VALUES,
+    HOST_ONLY_DISPOSITION,
+    normalized_disposition,
+)
 from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameable_world
 
 #: The manifest's filename inside an episode directory. Named once: the launcher writes it, the
@@ -330,12 +335,32 @@ def _check_disposition(raw: Any, at: str) -> str:
     report's headline is, authored by a model reading attacker-influenced data, and `_vocab`
     owns what one MEANS — including the zero-width strip a borrowed `in DISPOSITION_ENUM`
     silently loses (#785: one parser, six interpreters, three of which disagreed).
+
+    AN AUTHORING SURFACE, which is why the host-only member is refused with its own clause.
+    `disposition_declared` is raw model-authored manifest text — the questioner writes it
+    (`SEAT_AUTHORED_FIELDS`), and #921's judge grades a world by comparing it against what that
+    world's run actually concluded. So this is a door a disposition is AUTHORED through, and
+    `unresolved` is a member of the shipped tuple: the normalizer admits it for free, exactly as
+    the invlang document's vocabulary check did before #923 gave it a clause of its own. A world
+    may not declare the verdict only the host records — a family graded against it would score
+    the questioner's guess about a gate overrule.
+
+    Model-facing, because the author is one: the questioner's own `world.md` roster already
+    stops at the four, so a manifest carrying this member came from a model that went outside
+    its roster and the message says which member to use instead.
     """
     disposition = normalized_disposition(raw)
     if disposition is None:
         raise FamilyError(
             f"{at}.disposition_declared is {raw!r}, outside the shipped disposition "
             f"vocabulary {sorted(DISPOSITION_ENUM)}")
+    if disposition == HOST_ONLY_DISPOSITION:
+        allowed = ", ".join(d for d in DISPOSITION_VALUES if d != HOST_ONLY_DISPOSITION)
+        raise FamilyError(
+            f"{at}.disposition_declared is {HOST_ONLY_DISPOSITION!r}, which the host records "
+            f"when it terminates a run without a settled finding — a world may not declare it. "
+            f"A world whose investigator should not be able to settle the case declares "
+            f"`inconclusive`. Declare one of: {allowed}.")
     return disposition
 
 

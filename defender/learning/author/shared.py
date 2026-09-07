@@ -90,20 +90,8 @@ def flock_or_skip(path: Path) -> Iterator[bool]:
         release_flock(fh)
 
 
-def _generation_count(trailer_label: str, *, repo_root: Path) -> int:
-    return _git.git_rev_list_count(repo_root, grep=f"^{trailer_label}:") + 1
 
 
-def actor_generation_count(repo_root: Path) -> int:
-    return _generation_count("Actor-Model", repo_root=repo_root)
-
-
-def benign_generation_count(repo_root: Path) -> int:
-    return _generation_count("Benign-Actor-Model", repo_root=repo_root)
-
-
-def actor_env_generation_count(repo_root: Path) -> int:
-    return _generation_count("Actor-Env-Model", repo_root=repo_root)
 
 
 def without_consumed_category(rec: dict) -> dict:

@@ -177,7 +177,6 @@ from defender.runtime.verbs import (  # noqa: E402
     declared_verb_names,
     verb_class_of,
 )
-from defender.tests._closed_ticket_672 import _ticket_registry  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,
@@ -234,7 +233,6 @@ WITHHELD_FROM_GATHER: tuple[tuple[str, str], ...] = (
     ("ticket", "get-ticket"), ("ticket", "key-pattern"), *UNGRANTED_PAIRS,
 )
 HEALTH_CHECK = "health-check"
-JUDGE_ROLE = "judge"
 GATHER_ROLE = "gather"
 
 # The store's real list envelope. `list_tickets` answers `{"total", "tickets"}` and the
@@ -360,24 +358,19 @@ def shipped_grants() -> dict[str, VerbGrant]:
 
     Built from the shipped definitions rather than from literals, because what this mapping
     must cover is "every role with a roster on disk" — a literal list would go stale the
-    first time a third role gets one, and the audit would then score that role's roster
-    against gather's grant and report an offence that is not one."""
-    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
+    first time a second role gets one, and the audit would then score that role's roster
+    against gather's grant and report an offence that is not one.
+
+    ONE ENTRY SINCE #922. The judge was the second role with a grant and a committed roster;
+    both went with the pipeline, and `skills/judge/verb-roster.md` — which advertised three
+    ticket verbs to a reader after nothing could dispatch them — went with it. Gather is the
+    only verb-bearing role that ships, so this mapping has one key. The derivation is kept
+    exactly because it is what makes a second key appear on its own when one returns."""
     from defender.runtime.driver import GATHER_DEF
 
-    return {GATHER_ROLE: GATHER_DEF.verb_grant, JUDGE_ROLE: JUDGE_DEF.verb_grant}
+    return {GATHER_ROLE: GATHER_DEF.verb_grant}
 
 
-def scoped_ticket_registry(rec: VerbRecorder, pairs, **kw) -> ScopedFakeVerbs:
-    """The #672 ticket verb table, rescoped by a real `VerbGrant` — the same declared param
-    surfaces the executed probe found, so the judge's real tools still bind their real params.
-    `**kw` reaches the #672 fake's own fault-spec (e.g. `declare_key_pattern=False`, the
-    misconfigured-store shape).
-
-    This is the seam through which the judge's grant reaches its stage build: the stage takes
-    its verb registry as an argument, and a registry carries the grant it was scoped by."""
-    fake = _ticket_registry(rec, **kw)
-    return ScopedFakeVerbs({"ticket": dict(fake.verbs("ticket"))}, grant_of(JUDGE_ROLE, pairs))
 
 
 class ScopedFakeVerbs(VerbRegistry):
@@ -558,7 +551,6 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
 
 __all__ = [
     "ADAPTERS_DIR",
-    "BENIGN_JUDGE_PAIRS",
     "COLLIDING_VERB",
     "EVIDENCE_SURFACE",
     "GATHER_ROLE",
@@ -574,7 +566,6 @@ __all__ = [
     "GRANTED_COLLIDING_PAIR",
     "GrantError",
     "HEALTH_CHECK",
-    "JUDGE_ROLE",
     "LEAD",
     "PAYLOAD",
     "SALT",
@@ -599,6 +590,5 @@ __all__ = [
     "recording_table",
     "roster_pairs",
     "run_gather",
-    "scoped_ticket_registry",
     "verb_class_of",
 ]

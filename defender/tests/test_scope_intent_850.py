@@ -43,21 +43,12 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender import _run_paths  # noqa: E402
-from defender.agents import ACTOR_DEF, GATHER_DEF, JUDGE_DEF, MAIN_DEF  # noqa: E402
+from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import CLAIMED, LEAD_ID_RE, claim_lead  # noqa: E402
 from defender.learning.core import persist  # noqa: E402
-from defender.learning.core.config import (  # noqa: E402
-    LESSONS_ACTOR_DIR,
-    LESSONS_ACTOR_INDEX_SCRIPT,
-    LESSONS_ENV_RETRIEVE_SCRIPT,
-    LESSONS_ENVIRONMENT_DIR,
-)
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
-    RunScope,
-    bind,
     compile_policy_for,
-    effective_tools_for,
 )
 from defender.scripts.gather_tools.record_query import persist_payload  # noqa: E402
 
@@ -99,24 +90,8 @@ def _gather(env):
     return compile_policy_for(GATHER_DEF, run_dir=env.run, defender_dir=env.dfn)
 
 
-def _actor(env, run_dir):
-    """The gray-box actor, through its real front door. Its confine is the lesson corpora it is
-    allowed; its run dir is the LEARNING run dir, which is what persist stages into."""
-    return bind(
-        ACTOR_DEF, run_dir,
-        scope=RunScope(scripts=(LESSONS_ENV_RETRIEVE_SCRIPT, LESSONS_ACTOR_INDEX_SCRIPT),
-                       read_confine=(LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR)),
-        defender_dir=env.dfn,
-    ).policy
 
 
-def _judge(env, run_dir):
-    """The judge's effective (benign-leg) policy — the same shape `_run_judge_pydantic` builds,
-    since `JUDGE_DEF`'s static `closed_tickets` bit disagrees with its verb grant until the
-    per-leg `replace()` turns it on."""
-    return compile_policy_for(
-        JUDGE_DEF, run_dir, defender_dir=env.dfn, tools=effective_tools_for(JUDGE_DEF),
-    )
 
 
 # F-09 — the payload shape and the lead-id validators are ONE alphabet
@@ -197,88 +172,14 @@ def _staged(env, run_dir):
     return run_dir
 
 
-def test_f19_the_actor_cannot_read_the_case_it_is_written_against(env, tmp_path):
-    """Every artifact the loop stages into the actor's own root is denied it — the reasoning, the
-    disposition, and the query record behind them. The dir IS a read root (that is the layout,
-    unchanged); the confine is what makes these four files not its business."""
-    learning_run = _staged(env, tmp_path / "learning" / "case-1")
-    actor = _actor(env, learning_run)
-
-    for name in sorted(_run_paths.CASE_ANSWER_KEY_NAMES):
-        staged = learning_run / name
-        assert staged.is_file(), f"the fixture must actually stage {name}"
-        decision = _read(env, staged, actor, run_dir=learning_run)
-        assert not decision.allow, f"the gray-box actor read the staged {name} (#850 F-19)"
-        assert "answer" in decision.reason.lower(), decision.reason
-        assert str(learning_run) not in decision.reason, (
-            "the reason must not spell the layout back — the actor is never handed the path, "
-            f"and this one would tell it: {decision.reason}")
 
 
-def test_f19_the_deny_survives_a_symlink_and_a_dot_dot_spelling(env, tmp_path):
-    """The deny compares RESOLVED paths, so neither an alias planted at another name nor a `..`
-    walk back into the root re-opens it. `decide_read` resolves the operand and the run dir
-    together, which is what makes this hold."""
-    learning_run = _staged(env, tmp_path / "learning" / "case-2")
-    actor = _actor(env, learning_run)
-
-    (learning_run / "sub").mkdir()
-    alias = learning_run / "notes.md"
-    alias.symlink_to(learning_run / "investigation.md")
-    assert not _read(env, alias, actor, run_dir=learning_run).allow, (
-        "an alias resolving onto the staged investigation is the same read")
-    assert not _read(env, learning_run / "sub" / ".." / "report.md", actor,
-                     run_dir=learning_run).allow
 
 
-def test_f19_the_actor_keeps_everything_its_role_is_given(env, tmp_path):
-    """The control. A confine that denied the actor its own inputs would be a broken stage, not a
-    tight one: the alert is the case INPUT it is handed in its user message, `actor_input.yaml`
-    is the redacted lead view built for it, and the lesson corpora ARE its confine."""
-    learning_run = _staged(env, tmp_path / "learning" / "case-3")
-    actor = _actor(env, learning_run)
-
-    (learning_run / "actor_input.yaml").write_text("leads: []\n", encoding="utf-8")
-    assert _read(env, learning_run / "alert.json", actor, run_dir=learning_run).allow, (
-        "alert.json is the case input, not its answer — denying it breaks the stage")
-    assert _read(env, learning_run / "actor_input.yaml", actor, run_dir=learning_run).allow
-
-    lesson = next(iter(LESSONS_ENVIRONMENT_DIR.glob("*.md")), None)
-    if lesson is not None:
-        assert _read(env, lesson, actor, run_dir=learning_run).allow, (
-            "the confine is what the actor MAY read")
 
 
-def test_f19_a_lesson_named_report_md_is_not_collateral(env, tmp_path):
-    """The deny is keyed on the run-dir ROOT, not on a basename anywhere. A corpus file that
-    happens to carry one of the four names is a lesson, and the actor reads its corpus."""
-    learning_run = _staged(env, tmp_path / "learning" / "case-4")
-    corpus = env.dfn / "corpus"
-    corpus.mkdir()
-    decoy = corpus / "report.md"
-    decoy.write_text("# a lesson that happens to be called report.md\n", encoding="utf-8")
-    actor = bind(
-        ACTOR_DEF, learning_run,
-        scope=RunScope(scripts=(LESSONS_ENV_RETRIEVE_SCRIPT,), read_confine=(corpus,)),
-        defender_dir=env.dfn,
-    ).policy
-    assert _read(env, decoy, actor, run_dir=learning_run).allow, (
-        "a basename test would make this lesson unreadable with a reason about answer keys")
-    assert not _read(env, learning_run / "report.md", actor, run_dir=learning_run).allow
 
 
-def test_f19_the_judge_still_reads_the_case_it_grades(env, tmp_path):
-    """The positive control the deny must not break, driven on the dir it would break in. The
-    judge binds on the SAME `learning_run_dir` the actor does (`_run_judge_pydantic`), so a deny
-    keyed on the layout would have taken the staged case away from the one role that is handed it
-    on purpose. It is keyed on `read_confine` instead, and the judge declares none — it is not the
-    agent being tested, it is the one grading."""
-    learning_run = _staged(env, tmp_path / "learning" / "case-5")
-    judge = _judge(env, learning_run)
-    assert judge.read_confine == (), "the judge declares no confine — that is the key"
-    for name in sorted(_run_paths.CASE_ANSWER_KEY_NAMES):
-        assert _read(env, learning_run / name, judge, run_dir=learning_run).allow, (
-            f"the judge must still read the staged {name} it grades against")
 
 
 def test_f19_main_still_reads_its_own_run_artifacts(env):

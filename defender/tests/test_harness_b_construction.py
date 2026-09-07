@@ -2,7 +2,7 @@
 
 The PydanticAI runtime ("Harness B") builds its agents at three near-duplicate
 `Agent(...)` sites today (`driver.build_agent` MAIN, `driver._build_subagent`
-GATHER, `engine_pydantic.build_judge_agent` JUDGE). #493 collapsed them onto one
+GATHER, and the deleted pipeline judge its own). #493 collapsed them onto one
 `build_agent_core(...)` site + the single `settings_for_effort(effort_for_role(role))`
 path; **#538 then folded the per-agent config into an `AgentDefinition`** — so
 `build_agent_core` now takes an `AgentDefinition` (its `ToolSet` drives registration),
@@ -24,7 +24,9 @@ Resolved design forks (see issue #493 comment thread):
   - SETTINGS IDENTITY = **value-equality**. The collapsed path builds fresh settings
     objects; the cross-role `is`-identity guarantee is downgraded to `==` (the existing
     `test_anthropic_settings_are_the_cache_and_role_invariant` is retargeted to `==`).
-  - build_judge_agent stays a **thin wrapper** delegating to build_agent_core.
+  - the per-role wrappers stay **thin**, delegating to build_agent_core. The judge's own
+    wrapper was this demand's third witness and went with the pipeline (#922); MAIN's and
+    GATHER's carry it.
 
 Observability note: pydantic-ai exposes NO public capabilities surface — a
 `ProcessHistory` capability does NOT appear in `agent.history_processors` (it lands in
@@ -50,9 +52,7 @@ from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-from defender.learning.core.config import StageWiring  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
-from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.runtime import challenge_gate, driver, observe, providers  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
@@ -427,19 +427,3 @@ def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
     assert isinstance(on[0], driver.ProcessHistory)
 
 
-def test_build_judge_agent_thin_wrapper_still_applies_per_leg_effort(monkeypatch, logger):
-    """The judge stays a thin wrapper over build_agent_core (Fork 3), building its spec
-    from per-DIRECTION-LEG config: two legs at different efforts produce two independent
-    agents with distinct anthropic_effort — no shared role env can carry two values.
-    Uses the real build_for_effort (a fake key keeps it hermetic; settings make no call)."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    prompt = Path(__file__)
-    malicious = engine_pydantic.build_judge_agent(
-        StageWiring(prompt_path=prompt, model="claude-sonnet-4-6", effort="low",
-                    trace_name="judge_trace.jsonl", label="judge-malicious"), logger)
-    benign = engine_pydantic.build_judge_agent(
-        StageWiring(prompt_path=prompt, model="claude-sonnet-4-6", effort="high",
-                    trace_name="judge_benign_trace.jsonl", label="judge-benign"), logger)
-    assert malicious.model_settings["anthropic_effort"] == "low"
-    assert benign.model_settings["anthropic_effort"] == "high"
-    assert list(malicious._function_toolset.tools) == ["bash", "read_file"]

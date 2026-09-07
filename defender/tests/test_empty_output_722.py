@@ -47,7 +47,7 @@ from defender.learning._pydantic_stage import (  # noqa: E402
     _last_response_is_empty_text,
     run_stage,
 )
-from defender.learning.pipeline.oracle_engine import _run_oracle_pydantic  # noqa: E402
+from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 from defender.runtime import observe  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
@@ -93,17 +93,29 @@ def _prompt(tmp_path: Path) -> Path:
     return p
 
 
-def _oracle(tmp_path: Path, text: str, tag: str) -> str:
-    """The REAL shipped oracle stage (require_output defaulted True) on a scripted final."""
+def _reader_stage(tmp_path: Path, text: str, tag: str) -> str:
+    """A REAL shipped `require_output=True` stage on a scripted final.
+
+    THE ORACLE WAS THIS WITNESS AND IS DELETED (#922). It was a pure-prediction stage — one
+    model call, no tools, output required — and the questioner is the surviving stage of
+    exactly that shape, so the abort predicate is observed on it instead. The pairing this file
+    is about is unchanged: a stage whose output IS the product (aborts on a content-less final)
+    against a writer stage whose product is on disk (`_lead_author`, `require_output=False`).
+    """
     lrd = tmp_path / "learning_run"
     lrd.mkdir(exist_ok=True)
     with override_allow_model_requests(False):
-        return _run_oracle_pydantic(
-            StageWiring(
+        return run_stage(
+            stage="questioner",
+            wiring=StageWiring(
                 prompt_path=_prompt(tmp_path), model="glm-5.2", effort="none",
-                trace_name=f"oracle-{tag}.trace.jsonl", label=f"oracle:{tag}",
+                trace_name=f"questioner-{tag}.trace.jsonl", label=f"questioner:{tag}",
             ),
-            user="project this lead", learning_run_dir=lrd,
+            ctx=StageContext(
+                learning_run_dir=lrd, user="author this family", request_limit=1,
+                wall_clock_timeout=config.subagent_timeout(),
+            ),
+            deps=QuestionerDeps(),
             make_model=_fake_model(_replay(text)),
         )
 
@@ -156,22 +168,22 @@ def _logged(tmp_path: Path, parts, tag: str) -> list[dict]:
 # run_stage's tail guard — the content-driven abort
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=[t for t, _ in CONTENT_LESS])
-def test_oracle_stage_aborts_on_any_content_less_final(tmp_path, tag, text):
+def test_reader_stage_aborts_on_any_content_less_final(tmp_path, tag, text):
     """A final the reader would see as nothing — of ANY spelling, on either side of
     isspace() — is "empty output", so the stage aborts instead of handing the caller a
     blank verdict. Before #722 the zero-width half of this table (U+200B, U+FEFF,
     U+00AD, U+2060, NUL, tag characters) was returned as real oracle output."""
     with pytest.raises(RunUnprocessable, match="returned empty output"):
-        _oracle(tmp_path, text, tag)
+        _reader_stage(tmp_path, text, tag)
 
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT, ids=[t for t, _ in CONTENT])
-def test_oracle_stage_returns_real_output_verbatim(tmp_path, tag, text):
+def test_reader_stage_returns_real_output_verbatim(tmp_path, tag, text):
     """The controls, and the guard's blast radius: one visible character is content, and
     the stage's output crosses the guard BYTE-FOR-BYTE. The guard classifies; it never
     rewrites — a BOM-prefixed or zero-width-joined real verdict is not silently mangled,
     and NBSP padding does not cost the payload it wraps."""
-    assert _oracle(tmp_path, text, tag) == text
+    assert _reader_stage(tmp_path, text, tag) == text
 
 
 def test_the_abort_is_the_same_predicate_on_both_sides_of_isspace(tmp_path):
@@ -181,7 +193,7 @@ def test_the_abort_is_the_same_predicate_on_both_sides_of_isspace(tmp_path):
     is exactly the fork attacker-influenced text could pick between."""
     for tag, text in (("nbsp", " "), ("zwsp", "​")):
         with pytest.raises(RunUnprocessable, match="returned empty output"):
-            _oracle(tmp_path, text, tag)
+            _reader_stage(tmp_path, text, tag)
 
 
 def test_content_less_classifies_by_rendering_not_by_isspace():

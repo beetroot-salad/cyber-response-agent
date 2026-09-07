@@ -22,7 +22,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._frames680 import assert_one_frame
 
 from _box665 import (  # noqa: E402
     DEFENDER,
@@ -31,8 +30,6 @@ from _box665 import (  # noqa: E402
     DockerFault,
     Mount,
     RecordingDocker,
-    ScriptedTransport,
-    framed,
     make_run_dir,
     reaped_after_create,
     start_box_request,
@@ -41,13 +38,8 @@ from _box665 import (  # noqa: E402
 pytest.importorskip("pydantic_ai")
 
 
-from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.runtime import box as box_mod  # noqa: E402
-from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.tools import _format_bash_result  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -711,110 +703,11 @@ def test_sandboxed_is_derived_not_settable(tmp_path):
     assert unattached.sandboxed is False, "an unattached box claimed it was sandboxed"
 
 
-# The return contract (demand #0 / F0 / F12 / SB-return → R9)
-def _judge_deps(run_dir: Path, box):
-    """Judge deps (a learning role) through the REAL bind, carrying an injected box.
-
-    Binds the benign leg's effective ToolSet (#632, §7 R7): JUDGE_DEF's static
-    `closed_tickets` bit stays False (only the per-leg replace() in _run_judge_pydantic turns
-    it on, together with the effective grant, d73), so a bare bind() always disagrees with
-    the definition's own non-empty verb_grant. This probe is about the box transport, not the
-    verb grant."""
-    from dataclasses import replace
-    benign = replace(JUDGE_DEF, tools=replace(JUDGE_DEF.tools, closed_tickets=True))
-    return bind(benign, run_dir, defender_dir=DEFENDER, box=box)
 
 
-# return_contract (R9) — the executed→WRAP half of the split return contract. An EXECUTED
-# command's rc/out/err come back as `_format_bash_result(rc,out,err)` inside the untrusted #0
-# frame, matching the runtime boxed lane byte-for-byte modulo the wrap. The transport→RAISE
-# half is test_bash_lane_transport_fault_raises_not_wrapped, below. Each row drives the REAL
-# _tool_bash for the judge over an injected transport.
-@pytest.mark.parametrize(("case", "rc", "out_bytes", "err_bytes", "fragment"), [
-    ("granted-command-returns-output", 0, b"hello\n", b"", None),
-
-    # RF-D1 / SB-return: a NON-ZERO exit is still a completed exec — the runtime lane wraps
-    # _format_bash_result for ANY exit code, so this returns rather than raising.
-    ("nonzero-exit-is-still-wrapped", 3, b"partial\n", b"boom\n", "exit=3"),
-
-    # F12: the judge, whose job is to consume its boxed output as a VERDICT input, gets the
-    # identical untrusted wrap as every other learning role (byte-uniform #0 shape).
-    ("judge-output-wrap-is-the-same-zero-shape", 0, b"verdict-evidence\n", b"", None),
-], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and " " not in v else "")
-def test_an_executed_boxed_command_returns_the_wrapped_envelope(
-    tmp_path, case, rc, out_bytes, err_bytes, fragment
-):
-    """Whatever the command exited with, a learning role reads its output through one shape:
-    the canonical `_format_bash_result` inside a single untrusted frame."""
-    run_dir = make_run_dir(tmp_path)
-    box = box_mod.BoxExecutor(transport=ScriptedTransport(framed(rc, out_bytes, err_bytes)))
-    deps = _judge_deps(run_dir, box)
-    out = runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
-    assert_one_frame(
-        out, _format_bash_result(rc, out_bytes.decode(), err_bytes.decode()), "untrusted"
-    )
-    if fragment is not None:
-        assert fragment in out, "the exit code was not carried inside the #0 envelope"
 
 
-def test_bash_lane_transport_fault_raises_not_wrapped(tmp_path):
-    """test_bash_lane_transport_fault_raises_not_wrapped (RF-D1 / SB-return → R9) — a TRANSPORT
-    fault (container gone / undeliverable exec — the box could not run the command at all) is
-    NOT wrapped into the #0 envelope: it RAISES ModelRetry, exactly as the runtime boxed lane
-    does (BoxFault→ModelRetry). Learning roles inherit that raise free (M4) — the learning
-    agent-run loop catches ModelRetry natively (pydantic_ai wraps a tool's ModelRetry into a
-    retry prompt for every agent). Only an EXECUTED command's rc/out/err is wrapped. Negative:
-    the transport fault raises. Positive control: a healthy transport's executed command returns
-    the wrapped envelope, so the observation channel distinguishes raise from return."""
-    run_dir = make_run_dir(tmp_path)
-    faulted = _judge_deps(
-        run_dir, box_mod.BoxExecutor(transport=ScriptedTransport(box_mod.BoxFault("container gone"))),
-    )
-    with pytest.raises(ModelRetry):  # transport fault raises — never wrapped over-read
-        runtime_tools._tool_bash(faulted, f"cat {run_dir / 'alert.json'}")
-    healthy = _judge_deps(
-        run_dir, box_mod.BoxExecutor(transport=ScriptedTransport(framed(0, b"ok\n", b""))),
-    )
-    out = runtime_tools._tool_bash(healthy, f"cat {run_dir / 'alert.json'}")
-    assert_one_frame(out, _format_bash_result(0, "ok\n", ""), "untrusted"), \
-        "the executed-command positive control did not return the wrapped envelope"
 
 
-def test_box_becomes_unreachable_mid_batch(tmp_path):
-    """test_box_becomes_unreachable_mid_batch (RF-D1 → R9) — a box that passed startup stops
-    responding partway through a batch: the call BEFORE returned its WRAPPED output; the call
-    AFTER hits a TRANSPORT fault and RAISES ModelRetry (the runtime lane's BoxFault→ModelRetry,
-    inherited free per M4 — pydantic_ai catches the raised ModelRetry in the learning agent-run
-    loop), NOT wrapped into the #0 envelope (only an executed command is wrapped). Positive
-    control: the pre-fault executed call returns its wrapped output."""
-    run_dir = make_run_dir(tmp_path)
-    box = box_mod.BoxExecutor(
-        transport=ScriptedTransport(framed(0, b"ok\n", b""), box_mod.BoxFault("unreachable")),
-    )
-    deps = _judge_deps(run_dir, box)
-    first = runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
-    assert "ok" in first, "the pre-fault executed call did not return its wrapped output"
-    with pytest.raises(ModelRetry):  # the mid-batch transport fault raises, it is not wrapped
-        runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
 
 
-def test_learning_role_bash_call_receives_a_response_the_transport_cannot_parse(tmp_path):
-    """test_learning_role_bash_call_receives_a_response_the_transport_cannot_parse (RF-D1 → R9)
-    — the box transport hands back stdout carrying NO well-formed frame; the REAL framing codec
-    raises BoxFault (transport reused unchanged), which surfaces as a raised ModelRetry for a
-    learning role (BoxFault→ModelRetry, inherited free per M4), NEVER as unframed bytes wrapped
-    into the #0 envelope and handed on as program output. Negative: the unparseable response
-    raises. Positive control: a well-framed response is decoded and returned wrapped."""
-    run_dir = make_run_dir(tmp_path)
-    unframed = _judge_deps(
-        run_dir,
-        box_mod.BoxExecutor(transport=ScriptedTransport(box_mod.RawExec(rc=0, stdout=b"not a frame", stderr=b""))),
-    )
-    with pytest.raises(ModelRetry):  # the unframed reply raises BoxFault→ModelRetry, never wraps
-        runtime_tools._tool_bash(unframed, f"cat {run_dir / 'alert.json'}")
-    framed_deps = _judge_deps(
-        run_dir, box_mod.BoxExecutor(transport=ScriptedTransport(framed(0, b"ok\n", b""))),
-    )
-    out = runtime_tools._tool_bash(framed_deps, f"cat {run_dir / 'alert.json'}")
-    assert "ok" in out, "the framed positive control did not return the decoded program output"
-    assert "not a frame" not in out, "unframed daemon bytes reached the model as program output"

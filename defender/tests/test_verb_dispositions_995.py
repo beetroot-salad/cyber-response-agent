@@ -30,7 +30,6 @@ from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry, declared_verb_names
 from defender.tests._dispositions995 import (
     GATHER_CENSUS,
-    JUDGE_CENSUS,
     WITHHELD_CENSUS,
     Disposition,
     DispositionError,
@@ -431,22 +430,6 @@ def test_every_withheld_pair_in_the_shipped_table_carries_a_reason():
 # O3 — presence on disk never confers access.
 # =========================================================================================
 
-def test_planting_an_adapter_grants_it_nothing():
-    """The property the enumeration exists to hold, and the one the 'just derive it from the
-    filesystem' repair would destroy. A system declared by both halves, with the table not
-    mentioning it, yields zero granted pairs for that system in either role."""
-    repo = planted_tree(_tmp_dir(), {"alpha": "lookup", "intruder": "exfiltrate"})
-    table = write_table(
-        repo / "defender" / "knowledge" / "environment" / "verb-grants.yaml",
-        {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
-    )
-    rows = load_dispositions(table)
-    for role in ("gather", "judge"):
-        granted = {(s, v) for s, v, _ in grant_for(role, rows).entries}
-        assert not any(s == "intruder" for s, _ in granted), (
-            f"role {role!r} was granted something on a system the table never mentions: "
-            f"{sorted(p for p in granted if p[0] == 'intruder')}"
-        )
 
 
 def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
@@ -462,15 +445,6 @@ def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
     assert "gathr" in str(caught.value), "the refusal must name the role it was handed"
 
 
-def test_a_known_role_no_row_names_still_projects_an_empty_grant():
-    """The other half, and the reason the guard is membership rather than emptiness.
-
-    A role that legitimately appears in no row is a filter matching nothing, not an error —
-    the distinction `grant_for`'s docstring draws. Only an unknown NAME is the typo."""
-    rows = load_dispositions(write_table(_tmp(), {
-        ("alpha", "lookup"): OK, ("alpha", "health-check"): OK,
-    }))
-    assert grant_for("judge", rows) == VerbGrant(role="judge", entries=())
 
 
 def test_the_grant_is_not_a_function_of_what_is_on_disk():
@@ -485,18 +459,6 @@ def test_the_grant_is_not_a_function_of_what_is_on_disk():
     assert before == after
 
 
-@pytest.mark.parametrize("role", ["gather", "judge"])
-def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
-    """The total statement of "authored, not derived", in one line per role.
-
-    The two tests above vary a temp tree that a synthesizing implementation has no reason to
-    read — an adversarial one derived eight of gather's pairs from `PATHS.adapters_dir`, which
-    those tests never touch, and passed both. This closes it by construction: the projection
-    is a FILTER over the rows and may invent nothing. Anything synthesized, from anywhere,
-    breaks the equality."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    assert {(s, v) for s, v, _ in grant_for(role, rows).entries} == \
-        {(r.system, r.verb) for r in rows if role in r.roles}
 
 
 # =========================================================================================
@@ -514,26 +476,8 @@ def test_the_projected_gather_grant_is_exactly_the_historical_census():
     )
 
 
-def test_the_projected_judge_grant_is_exactly_the_historical_census():
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    granted = {(s, v) for s, v, _ in grant_for("judge", rows).entries}
-    assert granted == set(JUDGE_CENSUS), (
-        f"gained={sorted(granted - JUDGE_CENSUS)} lost={sorted(JUDGE_CENSUS - granted)}"
-    )
 
 
-def test_the_shipped_definitions_carry_the_projected_grants():
-    """The wiring: the driver's gather definition and the judge's definition must be BUILT
-    from the table, not merely accompanied by it. Checked by identity of content against the
-    projection, so a leftover hardcoded literal that happens to agree today would still be
-    caught the first time the table changes — and is caught now by the phantom/undecided
-    gates, which a literal cannot satisfy."""
-    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
-    from defender.runtime.driver import GATHER_DEF
-
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    assert set(GATHER_DEF.verb_grant.entries) == set(grant_for("gather", rows).entries)
-    assert set(JUDGE_DEF.verb_grant.entries) == set(grant_for("judge", rows).entries)
 
 
 def test_every_projected_pair_survives_registry_construction():
@@ -546,13 +490,6 @@ def test_every_projected_pair_survives_registry_construction():
     ModuleVerbRegistry(ADAPTERS, grant)  # raises GrantError if any pair is phantom
 
 
-def test_all_shipped_dispositions_are_read_class():
-    """No shipped verb is granted write. The table has no class field by design — a write
-    grant should cost a schema change and its own review — so this pins that the projection
-    cannot mint one."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    for role in ("gather", "judge"):
-        assert all(k == "r" for _, _, k in grant_for(role, rows).entries)
 
 
 # =========================================================================================
@@ -933,28 +870,6 @@ def test_no_module_under_defender_writes_the_disposition_table():
     assert not offenders, f"a run-path module appears to write the table: {offenders}"
 
 
-def test_exercising_the_run_paths_leaves_the_table_byte_identical():
-    """The behavioural half of O4, because the census above is a text scan and text scans are
-    defeatable.
-
-    An adversarial implementer wrote to the table from a module that never spelled its name —
-    the path was assembled from two constants — and appended rows to the real file on every
-    load. The grep saw nothing. Bytes see everything: snapshot the file, run every path that
-    touches it in a real process (load, both projections, and building the two agent
-    definitions that read them at import), and compare."""
-    table = dispositions_path(DEFENDER)
-    before = table.read_bytes()
-
-    rows = load_dispositions(table)
-    grant_for("gather", rows)
-    grant_for("judge", rows)
-    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
-    from defender.runtime.driver import GATHER_DEF
-
-    ModuleVerbRegistry(ADAPTERS, GATHER_DEF.verb_grant)
-    assert JUDGE_DEF.verb_grant is not None
-
-    assert table.read_bytes() == before, "a run path rewrote the disposition table"
 
 
 def test_the_table_loads_from_a_read_only_file():

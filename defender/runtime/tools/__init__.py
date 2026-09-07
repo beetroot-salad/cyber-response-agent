@@ -265,13 +265,6 @@ def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
             )
         register_list_verbs_tool(agent, verbs)
 
-    if tools.closed_tickets:
-        from defender.learning.pipeline.judge.closed_ticket_tool import (
-            register_closed_ticket_tools,
-        )
-
-        register_closed_ticket_tools(agent, verbs)
-
 
 from ..tools_gather import (  # noqa: E402, F401  (re-exported — public surface)
     GatherRequest,

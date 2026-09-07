@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -10,18 +9,11 @@ from defender.learning import loop
 
 RunUnprocessable = loop.RunUnprocessable
 LoopPaths = loop.LoopPaths
-dump_oracle_doc = loop.dump_oracle_doc
-append_actor_observations = loop.append_actor_observations
 
-from defender.learning.pipeline.judge import compare as comparison  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning.core import directions as directions  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning.pipeline.oracle import sample as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core import drains as drains  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core import markers as markers  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning.core import run_cycle as run_cycle  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
 from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning.pipeline.judge import run as subagents  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
 
 
@@ -41,247 +33,68 @@ def _jl(lead_id="l-001", goal=None, wts=(), queries=()):
 
 
 
-def test_sanitize_wtc_relativizes_iso_and_clock_times():
-    assert oracle_mod.sanitize_wtc(
-        "the login at 2026-06-02T17:08:19Z from host x"
-    ) == "the login at <alert-time> from host x"
-    assert oracle_mod.sanitize_wtc("a connection at 17:08:19Z") == (
-        "a connection at <alert-time>"
-    )
-    assert oracle_mod.sanitize_wtc("the event at 14:08Z") == "the event at <alert-time>"
-
-
-def test_sanitize_wtc_leaves_relative_spans_untouched():
-    for item in ("within +/-5 minutes of the alert", "a few minutes later", "no times here"):
-        assert oracle_mod.sanitize_wtc(item) == item
-
-
-def test_sanitize_wtc_leaves_non_utc_clock_times_untouched():
-    for item in (
-        "session lasted 1:30:00",
-        "window 2026-06-07 16:00:00 to 2026-06-07 18:00:00",
-        "top 12:34:56 talkers",
-    ):
-        assert oracle_mod.sanitize_wtc(item) == item
 
 
 
 
-def test_redact_exemplar_scrubs_values_keeps_shape():
-    payload = (
-        "### Raw Sample Events (first 3)\n\n"
-        "```json\n"
-        '[{"host": "db-07", "port": 22, "ok": true, "nested": {"user": "alice"}}]\n'
-        "```\n"
-    )
-    out = oracle_mod.redact_exemplar(payload)
-    assert "db-07" not in out
-    assert "alice" not in out
-    assert '"<host>"' in out
-    assert '"<user>"' in out
-    assert '"port": 0' in out
-    assert '"ok": false' in out
+
+
+
+
 
 
 def _esql_sample(body: str) -> str:
     return f"### Raw Sample Events (first 3)\n\n```json\n{body}\n```\n"
 
 
-def test_redact_exemplar_keeps_the_field_names_of_a_COLUMNAR_esql_payload():
-    """The skeleton's whole job is "what fields does this lead's telemetry have".
-
-    ES|QL states its field names once in `columns` and its rows as bare arrays (#834), so a
-    pure type-walk scrubs the names as string VALUES and the oracle is handed a skeleton with
-    no field names at all — where the pre-#834 per-row dicts kept them as keys. The names must
-    survive; the ROW must not, because that is the data.
-    """
-    out = oracle_mod.redact_exemplar(_esql_sample(json.dumps({
-        "query": "FROM logs-* | STATS failed = COUNT(*) BY host.name",
-        "columns": [{"name": "host.name", "type": "keyword"},
-                    {"name": "failed", "type": "long"},
-                    {"name": "source.ip", "type": "ip"}],
-        "row_count": 2,
-        "values": [["web-01", 12, "10.1.1.5"], ["web-02", 3, "10.1.1.9"]],
-    })))
-
-    for name in ("host.name", "failed", "source.ip"):
-        assert f'"{name}"' in out, f"the skeleton lost the field name {name!r}"
-    for es_type in ("keyword", "long", "ip"):
-        assert f'"{es_type}"' in out, f"the declared ES type {es_type!r} went with them"
-    for leaked in ("web-01", "web-02", "10.1.1.5", "10.1.1.9"):
-        assert leaked not in out, f"a ROW value survived the scrub: {leaked!r}"
-    assert '"<query>"' in out, "the query text is data and is still scrubbed"
-
-
-def test_the_columns_passthrough_does_not_unscrub_a_document_that_merely_has_that_key():
-    """Passing `columns` through is licensed by it being ES|QL's SCHEMA block, not by its
-    name. A document with a `columns` key that is not that block — no `values` list beside
-    it, or entries that are not `{name, type}` descriptors — is data, and an attacker who
-    could get a field named `columns` into an index would otherwise have bought themselves
-    an unscrubbed region of the oracle's prompt."""
-    not_an_envelope = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
-        {"columns": [{"name": "secret-host", "type": "keyword"}], "values": "not-a-list"})))
-    assert "secret-host" not in not_an_envelope, "scrubbing was skipped without a `values` list"
-
-    wrong_shape = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
-        {"columns": [{"label": "secret-host"}], "values": [[1]]})))
-    assert "secret-host" not in wrong_shape, "scrubbing was skipped on a non-descriptor entry"
-
-    nested_name = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
-        {"user": {"name": "alice"}, "host": {"name": "db-07"}})))
-    for leaked in ("alice", "db-07"):
-        assert leaked not in nested_name, f"a `name` VALUE survived the scrub: {leaked!r}"
-
-
-def test_redact_exemplar_no_sample_block_is_placeholder():
-    assert oracle_mod.redact_exemplar("## Query Results\n(no raw block)\n").startswith("(")
-
-
-def test_redact_exemplar_empty_sample_block_is_placeholder():
-    out = oracle_mod.redact_exemplar("### Raw Sample Events\n\n```json\n[]\n```\n")
-    assert out.startswith("(")
-    assert "is empty" in out
-
-
-def test_lead_sample_text_reads_only_its_lead_subdir(tmp_path: Path):
-    gather = tmp_path / "gather_raw"
-    (gather / "l-010").mkdir(parents=True)
-    (gather / "l-010" / "0.json").write_text(
-        '### Raw Sample Events\n\n```json\n[{"host": "wrong-lead"}]\n```\n'
-    )
-    (gather / "l-001").mkdir(parents=True)
-    empty = gather / "l-001" / "0.json"
-    empty.write_text("### Raw Sample Events\n\n```json\n[]\n```\n")
-    lead = _jl("l-001", queries=[_qr("wazuh.x", seq=0, raw_ref=empty)])
-    out = oracle_mod.lead_sample_text(lead)
-    assert "wrong-lead" not in out
-    assert out.startswith("(")
 
 
 
 
-def test_parse_lead_events_accepts_events_mappings_markers_and_empty():
-    assert oracle_mod.parse_lead_events('events:\n  - {a: "b"}\n', 0) == [{"a": "b"}]
-    assert oracle_mod.parse_lead_events("events: []\n", 1) == []
-    assert oracle_mod.parse_lead_events(
-        'events:\n  - "<standard environment noise>"\n', 2
-    ) == ["<standard environment noise>"]
-    assert oracle_mod.parse_lead_events(
-        'events:\n  - "<suppressed: stopped auditd>"\n', 3
-    ) == ["<suppressed: stopped auditd>"]
-
-
-def test_parse_lead_events_rescues_unquoted_suppression_marker():
-    assert oracle_mod.parse_lead_events(
-        "events:\n  - <suppressed: stopped auditd before the probe>\n", 0
-    ) == ["<suppressed: stopped auditd before the probe>"]
-
-
-def test_parse_lead_events_rescues_unquoted_marker_with_multiple_colons():
-    assert oracle_mod.parse_lead_events(
-        "events:\n  - <suppressed: ran cmd: systemctl stop auditd>\n", 0
-    ) == ["<suppressed: ran cmd: systemctl stop auditd>"]
-    assert oracle_mod.parse_lead_events(
-        "events:\n  - <suppressed: cleared log: /var/log/auth>\n", 0
-    ) == ["<suppressed: cleared log: /var/log/auth>"]
-
-
-def test_parse_lead_events_keeps_single_field_placeholder_event():
-    assert oracle_mod.parse_lead_events(
-        'events:\n  - {"<c2-domain>": "<resolved-ip>"}\n', 0
-    ) == [{"<c2-domain>": "<resolved-ip>"}]
-
-
-def test_parse_lead_events_embeds_raw_reply_on_failure():
-    with pytest.raises(RunUnprocessable, match="UNPARSEABLE-MARKER"):
-        oracle_mod.parse_lead_events("events:\n  not-a-list: UNPARSEABLE-MARKER\n", 0)
-
-
-def test_parse_lead_events_strips_fence():
-    assert oracle_mod.parse_lead_events("```yaml\nevents: []\n```\n", 0) == []
-
-
-def test_parse_lead_events_rejects_missing_events_list():
-    with pytest.raises(RunUnprocessable, match="no `events` list"):
-        oracle_mod.parse_lead_events("projections: []\n", 0)
-
-
-def test_assemble_oracle_doc_preserves_lead_order():
-    doc = oracle_mod.assemble_oracle_doc(
-        [("l-001", [{"a": 1}]), ("l-002", []), ("l-003", ["<x>"])]
-    )
-    assert [p["lead_id"] for p in doc["projections"]] == ["l-001", "l-002", "l-003"]
-    assert doc["projections"][2]["events"] == ["<x>"]
-
-
-def test_assembled_doc_dumps_with_markers_inline():
-    doc = oracle_mod.assemble_oracle_doc(
-        [("l-001", [{"host": "h"}]), ("l-002", ["<standard environment noise>"])]
-    )
-    text = dump_oracle_doc(doc)
-    assert "projections:" in text
-    assert "<standard environment noise>" in text
 
 
 
 
-def test_build_lead_user_prompt_drops_goal_and_sanitizes_wtc():
-    lead = _jl(
-        "l-001",
-        goal="SECRET defender intent that must not leak",
-        wts=["the login at 2026-06-02T17:08:19Z"],
-        queries=[_qr("wazuh.auth-events", {"host": "h"})],
-    )
-    prompt = oracle_mod.build_lead_user_prompt(lead, "the story", "SAMPLE")
-    assert "SECRET defender intent" not in prompt
-    assert "<alert-time>" in prompt
-    assert "17:08:19Z" not in prompt
-    assert "wazuh.auth-events" in prompt
-    assert "the story" in prompt
-    assert "SAMPLE" in prompt
-
-
-def test_build_lead_user_prompt_handles_scalar_and_malformed_wtc():
-    scalar = oracle_mod.build_lead_user_prompt(
-        _jl("l-001", wts="auth events by host", queries=[_qr("wazuh.x", None)]),
-        "story", "SAMPLE",
-    )
-    assert "auth events by host" in scalar
-    assert "\n- a\n- u\n- t" not in scalar
-    assert "params: {}" in scalar
-    oracle_mod.build_lead_user_prompt(_jl("l-002", wts=[42, {"x": 1}]), "story", "S")
-
-
-def test_dump_oracle_doc_preserves_unicode():
-    doc = oracle_mod.assemble_oracle_doc([("l-001", [{"user": "Bjørn"}])])
-    text = dump_oracle_doc(doc)
-    assert "Bjørn" in text
-    assert "\\xF8" not in text
 
 
 
 
-def test_outcome_keyword_accepts_bare_enum():
-    assert loop._outcome_keyword("survived") == "survived"
 
 
-def test_outcome_keyword_tolerates_period_then_rationale():
-    fused = "survived. The defender's investigation returned results consistent with the oracle."
-    assert loop._outcome_keyword(fused) == "survived"
 
 
-def test_outcome_keyword_tolerates_block_scalar_newline_form():
-    assert loop._outcome_keyword("caught\nrationale follows…\n") == "caught"
 
 
-def test_outcome_keyword_rejects_unknown_first_token():
-    with pytest.raises(RunUnprocessable, match="not in"):
-        loop._outcome_keyword("definitely-survived. lots of detail")
 
 
-def test_outcome_keyword_rejects_non_string():
-    with pytest.raises(RunUnprocessable, match="not a string"):
-        loop._outcome_keyword({"survived": True})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -306,113 +119,28 @@ def _full_judge_doc(**overrides):
     return doc
 
 
-def test_validate_judge_doc_accepts_split_schema():
-    loop.validate_judge_doc(_full_judge_doc())
 
 
-def test_validate_judge_doc_omits_scaffolding_fields_is_accepted():
-    doc = _full_judge_doc()
-    for k in ("outcome_rationale", "encounter_analysis", "confidence"):
-        doc.pop(k, None)
-    loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_skip_passthrough_omits_analysis_and_confidence():
-    doc = {
-        "outcome": "skip-passthrough",
-        "defender_findings": [],
-    }
-    loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_requires_subject_anchor_and_topic():
-    for missing in ("subject_anchor", "subject_topic"):
-        doc = _full_judge_doc()
-        del doc["defender_findings"][0][missing]
-        with pytest.raises(RunUnprocessable, match=missing):
-            loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_accepts_apostrophe_in_subject_topic():
-    doc = _full_judge_doc()
-    doc["defender_findings"][0]["subject_topic"] = "actor's framing assumption"
-    loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_omitted_actor_observations_is_accepted():
-    doc = _full_judge_doc()
-    assert "actor_observations" not in doc
-    loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_accepts_well_formed_actor_observations():
-    doc = _full_judge_doc()
-    doc["actor_observations"] = [
-        {
-            "type": "misprediction",
-            "subject_anchor": "entry-vector",
-            "subject_topic": "ssh credential reuse",
-            "observation": "story underweighted reuse risk.",
-        }
-    ]
-    loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_rejects_non_list_actor_observations():
-    doc = _full_judge_doc()
-    doc["actor_observations"] = {"type": "misprediction"}
-    with pytest.raises(RunUnprocessable, match="actor_observations.*is not a list"):
-        loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_rejects_non_mapping_observation():
-    doc = _full_judge_doc()
-    doc["actor_observations"] = ["a bare string"]
-    with pytest.raises(RunUnprocessable, match=r"actor_observations\[0\] is not a mapping"):
-        loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_rejects_observation_missing_split_field():
-    for missing in ("type", "subject_anchor", "subject_topic", "observation"):
-        doc = _full_judge_doc()
-        obs = {
-            "type": "misprediction",
-            "subject_anchor": "entry-vector",
-            "subject_topic": "ssh credential reuse",
-            "observation": "underweighted reuse risk.",
-        }
-        del obs[missing]
-        doc["actor_observations"] = [obs]
-        with pytest.raises(RunUnprocessable, match=missing):
-            loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_rejects_empty_observation_field():
-    doc = _full_judge_doc()
-    doc["actor_observations"] = [
-        {
-            "type": "misprediction",
-            "subject_anchor": "entry-vector",
-            "subject_topic": "   ",
-            "observation": "underweighted reuse risk.",
-        }
-    ]
-    with pytest.raises(RunUnprocessable, match="subject_topic must be a non-empty string"):
-        loop.validate_judge_doc(doc)
 
 
-def test_validate_judge_doc_rejects_unknown_observation_type():
-    doc = _full_judge_doc()
-    doc["actor_observations"] = [
-        {
-            "type": "bogus-category",
-            "subject_anchor": "entry-vector",
-            "subject_topic": "ssh credential reuse",
-            "observation": "underweighted reuse risk.",
-        }
-    ]
-    with pytest.raises(RunUnprocessable, match="actor_observations\\[0\\].type="):
-        loop.validate_judge_doc(doc)
 
 
 
@@ -509,92 +237,20 @@ def _isolate(tmp_path: Path) -> tuple[object, Path]:
     return paths, learning_run_dir
 
 
-def test_append_actor_observations_writes_one_row_per_observation(tmp_path: Path):
-    paths, lrd = _isolate(tmp_path)
-    doc = _judge_doc("caught", [_obs(0), _obs(1)])
-
-    n = append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths)
-
-    assert n == 2
-    rows = _read_jsonl(paths.actor_observations.file)
-    assert [r["observation_id"] for r in rows] == ["case-x/0", "case-x/1"]
-    assert [r["observation_index"] for r in rows] == [0, 1]
-    assert all(r["run_id"] == "case-x" for r in rows)
-    assert all(r["alert_rule_key"] == "rule-5710" for r in rows)
-    assert all(r["judge_outcome"] == "caught" for r in rows)
-    assert all(
-        r["source_run_dir"] == "defender/learning/runs/case-x/" for r in rows
-    )
-    assert rows[0]["subject_anchor"] == "anchor-0"
-    assert rows[1]["observation"] == "observation paragraph 1\n"
 
 
-def test_append_actor_observations_dedupes_on_observation_id(tmp_path: Path):
-    paths, lrd = _isolate(tmp_path)
-    doc = _judge_doc("caught", [_obs(0), _obs(1)])
-
-    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 2
-    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert len(_read_jsonl(paths.actor_observations.file)) == 2
 
 
-def test_append_actor_observations_creates_lock_file(tmp_path: Path):
-    paths, lrd = _isolate(tmp_path)
-    doc = _judge_doc("caught", [_obs(0)])
-
-    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 1
-    assert paths.actor_observations.append_lock.is_file()
 
 
-def test_append_actor_observations_skips_passthrough_outcome(tmp_path: Path):
-    paths, lrd = _isolate(tmp_path)
-    doc = _judge_doc("skip-passthrough", [_obs(0)])
-
-    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert _read_jsonl(paths.actor_observations.file) == []
 
 
-def test_append_actor_observations_no_key_is_zero_rows(tmp_path: Path):
-    paths, lrd = _isolate(tmp_path)
-    doc = _judge_doc("caught", None)
-
-    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert not paths.actor_observations.file.exists()
-    assert not paths.pending_dir.exists()
 
 
-def test_append_actor_observations_empty_list_is_zero_rows(tmp_path: Path):
-    paths, lrd = _isolate(tmp_path)
-    doc = _judge_doc("caught", [])
-
-    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert not paths.actor_observations.file.exists()
-    assert not paths.pending_dir.exists()
 
 
-def test_append_actor_observations_dedupes_against_consumed_history(tmp_path: Path):
-    paths, lrd = _isolate(tmp_path)
-    doc = _judge_doc("caught", [_obs(0), _obs(1)])
-
-    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 2
-    paths.actor_observations.consumed.write_text(
-        paths.actor_observations.file.read_text()
-    )
-    paths.actor_observations.file.write_text("")
-
-    assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 0
-    assert _read_jsonl(paths.actor_observations.file) == []
 
 
-def test_append_actor_observations_queues_survived_outcomes(tmp_path: Path):
-    paths, lrd = _isolate(tmp_path)
-    doc = _judge_doc("survived", [_obs(0)])
-
-    n = append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths)
-
-    assert n == 1
-    rows = _read_jsonl(paths.actor_observations.file)
-    assert rows[0]["judge_outcome"] == "survived"
 
 
 
@@ -684,7 +340,9 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert triggered == [
-        "author", "author_actor", "author_actor_env", "author_actor_benign",
+        # ONE CURATOR SINCE #922 — the three observation channels lost their producer
+        # with the old pipeline's judge, and their curators went with them.
+        "author",
     ]
 
 
@@ -1057,249 +715,28 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
 
 
 
-def test_enqueue_for_learning_writes_marker(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-a"
-    run_dir.mkdir(parents=True)
-    markers.enqueue_for_learning(run_dir, paths)
-    spec = json.loads((paths.learn_queue_dir / "case-a.json").read_text())
-    assert spec == {"run_id": "case-a", "run_dir": str(run_dir.resolve())}
-
-
-def test_learn_drain_runs_run_one_renders_and_clears_marker(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-b"
-    run_dir.mkdir(parents=True)
-    markers.enqueue_for_learning(run_dir, paths)
-    events: list[tuple[str, Path]] = []
-    rc = run_cycle.learn_drain(
-        paths,
-        run_one_fn=lambda rd: events.append(("run_one", rd)) or 0,
-        render=lambda rd: events.append(("render", rd)),
-    )
-    assert rc == 0
-    assert events == [("run_one", run_dir.resolve()), ("render", run_dir.resolve())]
-    assert not (paths.learn_queue_dir / "case-b.json").exists()
-    assert not (paths.learn_queue_dir / "inflight" / "case-b.json").exists()
-
-
-def test_learn_drain_marks_artifact_missing(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    gone = tmp_path / "tmprun" / "case-gone"
-    markers.enqueue_for_learning(gone, paths)
-    learned: list[Path] = []
-    run_cycle.learn_drain(
-        paths,
-        run_one_fn=lambda rd: learned.append(rd) or 0,
-        render=lambda rd: None,
-    )
-    assert learned == []
-    assert not (paths.learn_queue_dir / "case-gone.json").exists()
-    assert not (paths.learn_queue_dir / "inflight" / "case-gone.json").exists()
-    failed = paths.learn_queue_dir / "failed" / "case-gone.json"
-    assert json.loads(failed.read_text())["failed"] == "artifact-missing"
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        "{not valid json",
-        "null",
-        '["case-broken"]',
-        '{"run_id": "case-broken", "run_dir": null}',
-        '{"run_id": "case-broken", "run_dir": 7}',
-        '{"run_id": "case-broken"}',
-    ],
-    ids=["torn", "null", "list", "run_dir-null", "run_dir-number", "run_dir-absent"],
-)
-def test_learn_drain_dead_letters_an_unservable_marker(tmp_path: Path, body: str):
-    """The learn queue dead-letters an unreadable marker, exactly as its sibling does.
-
-    This is the LEARN half of a property that only the lead-author queue had a test for.
-    Both queues run the same claim-and-serve protocol and both had the same forever-loop —
-    a marker that cannot be read is already claimed, so skipping it leaves it in `inflight/`
-    for the next tick's reclaim to hand back and fail on again — but the fix for it was
-    hand-carried into two copies and only one of them grew a test. Now that
-    `markers.claim_markers` owns the protocol, this pins the shared behaviour from the other
-    caller, so a regression in either queue has two chances to be caught rather than one.
-
-    Both unservable shapes: bytes that do not parse, and bytes that parse to something that
-    is not a mapping (`null`, a list) — the second still answers `spec.get("run_dir")` with
-    an AttributeError that unwinds the whole drain past every dead-letter path. The healthy
-    sibling in the same pass must still be served.
-    """
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-real"
-    run_dir.mkdir(parents=True)
-    markers.enqueue_for_learning(run_dir, paths)
-    paths.learn_queue_dir.mkdir(parents=True, exist_ok=True)
-    (paths.learn_queue_dir / "case-broken.json").write_text(body, encoding="utf-8")
-
-    learned: list[Path] = []
-    rc = run_cycle.learn_drain(
-        paths,
-        run_one_fn=lambda rd: learned.append(rd) or 0,
-        render=lambda rd: None,
-    )
-
-    assert rc == 0
-    assert learned == [run_dir.resolve()], "the healthy request in the same pass was not served"
-    assert not (paths.learn_queue_dir / "case-broken.json").exists()
-    assert not (paths.learn_queue_dir / "inflight" / "case-broken.json").exists(), \
-        "the unservable marker was left claimed — the next tick reclaims and re-fails on it"
-    failed = paths.learn_queue_dir / "failed" / "case-broken.json"
-    assert json.loads(failed.read_text())["failed"].startswith("unreadable")
-    assert json.loads(failed.read_text())["run_id"] == "case-broken", \
-        "the learn queue's dead letter must be keyed on run_id, not the curation queue's case_id"
-
-
-def test_learn_drain_quarantines_run_one_error(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-poison"
-    run_dir.mkdir(parents=True)
-    markers.enqueue_for_learning(run_dir, paths)
-
-    def boom(_rd: Path) -> int:
-        raise RuntimeError("run_one blew up")
-
-    rendered: list[Path] = []
-    run_cycle.learn_drain(paths, run_one_fn=boom, render=lambda rd: rendered.append(rd))
-    assert rendered == []
-    assert not (paths.learn_queue_dir / "inflight" / "case-poison.json").exists()
-    failed = paths.learn_queue_dir / "failed" / "case-poison.json"
-    assert json.loads(failed.read_text())["failed"].startswith("run-one-error")
-
-
-def test_learn_drain_reclaims_a_marker_already_in_inflight(tmp_path: Path):
-    """#791 P1: a marker sitting in `inflight/` is reclaimed rather than left forever — the
-    prior behaviour (never touching it again) is exactly the orphaned-claim bug #791 closes,
-    since nothing here distinguishes a crashed drain's leftover from one still being served
-    (no lock, no age-out) and the queue's own count line must not read zero while it exists."""
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-claimed"
-    run_dir.mkdir(parents=True)
-    markers.enqueue_for_learning(run_dir, paths)
-    inflight = paths.learn_queue_dir / "inflight"
-    inflight.mkdir(parents=True)
-    (paths.learn_queue_dir / "case-claimed.json").rename(inflight / "case-claimed.json")
-    learned: list[Path] = []
-    run_cycle.learn_drain(
-        paths,
-        run_one_fn=lambda rd: learned.append(rd) or 0,
-        render=lambda rd: None,
-    )
-    assert learned == [run_dir]
-    assert not (inflight / "case-claimed.json").exists()
-
-
-def test_learn_drain_skips_marker_lost_to_claim_race(tmp_path: Path, monkeypatch):
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-race"
-    run_dir.mkdir(parents=True)
-    markers.enqueue_for_learning(run_dir, paths)
-
-    def racing_replace(src, dst):
-        Path(src).unlink()
-        raise FileNotFoundError(src)
-
-    # The claim itself moved into `markers.claim_markers` — both drains share it now — so
-    # the race is injected where the `os.replace` actually happens.
-    monkeypatch.setattr(markers.os, "replace", racing_replace)
-    learned: list[Path] = []
-    run_cycle.learn_drain(
-        paths,
-        run_one_fn=lambda rd: learned.append(rd) or 0,
-        render=lambda rd: None,
-    )
-    assert learned == []
-
-
-def test_learn_drain_threads_paths_into_default_run_one(tmp_path: Path, monkeypatch):
-    paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-paths"
-    run_dir.mkdir(parents=True)
-    markers.enqueue_for_learning(run_dir, paths)
-    seen: dict = {}
-
-    def fake_run_one(rd, *, paths=None, agents=None):
-        seen["rd"] = rd
-        seen["paths"] = paths
-        return 0
-
-    monkeypatch.setattr(run_cycle, "run_one", fake_run_one)
-    run_cycle.learn_drain(paths, render=lambda rd: None)
-    assert seen["rd"] == run_dir.resolve()
-    assert seen["paths"] is paths
-
-
-def test_learn_drain_each_queued_marker_processed_once(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    runs = []
-    for name in ("case-1", "case-2", "case-3"):
-        rd = tmp_path / "tmprun" / name
-        rd.mkdir(parents=True)
-        markers.enqueue_for_learning(rd, paths)
-        runs.append(rd.resolve())
-    learned: list[Path] = []
-    run_cycle.learn_drain(
-        paths,
-        run_one_fn=lambda rd: learned.append(rd) or 0,
-        render=lambda rd: None,
-    )
-    assert sorted(learned) == sorted(runs)
-    learned2: list[Path] = []
-    run_cycle.learn_drain(
-        paths,
-        run_one_fn=lambda rd: learned2.append(rd) or 0,
-        render=lambda rd: None,
-    )
-    assert learned2 == []
 
 
 
 
-def test_source_run_dir_absolute_when_state_dir_out_of_repo(tmp_path: Path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    state = tmp_path / "state"
-    paths = LoopPaths(repo_root=repo, state_dir=state)
-    assert paths.runs_dir == state / "runs"
-
-    learning_run_dir = paths.runs_dir / "case-x"
-    src = persist._source_run_dir(learning_run_dir, paths.repo_root)
-    assert src == str(learning_run_dir) + "/"
-    assert paths.repo_root / src.rstrip("/") == learning_run_dir
 
 
-def test_append_findings_survives_out_of_repo_state_dir(tmp_path: Path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    state = tmp_path / "state"
-    paths = LoopPaths(repo_root=repo, state_dir=state)
-    learning_run_dir = paths.runs_dir / "case-y"
-    learning_run_dir.mkdir(parents=True)
 
-    judge_doc = {
-        "outcome": "survived",
-        "defender_findings": [
-            {
-                "type": "lead-set",
-                "subject_anchor": "host-a",
-                "subject_topic": "missed lateral move",
-                "finding": "narrative",
-                "citations": [{"source": "investigation", "quote": "..."}],
-            }
-        ],
-    }
-    n = persist.append_findings(
-        judge_doc, "case-y", "rule-1", learning_run_dir,
-        direction="adversarial", paths=paths,
-    )
-    assert n == 1
-    rows = _read_jsonl(paths.pending_file)
-    assert rows[0]["source_run_dir"] == str(learning_run_dir) + "/"
-    assert paths.pending_file.is_relative_to(state)
-    assert not paths.pending_file.is_relative_to(repo)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1643,141 +1080,21 @@ _COMPANION = {
 }
 
 
-def test_build_comparison_joins_sample_and_invlang(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    comps = comparison.build_comparison(run, companion=_COMPANION)
-    assert len(comps) == 1
-    c = comps[0]
-    assert c.lead_id == "l-001"
-    assert not hasattr(c, "projected_events")
-    assert "dev.dana" in c.real_sample
-    assert c.resolutions
-    assert c.resolutions[0]["after"] == "--"
-    assert c.authz
-    assert c.authz[0]["verdict"] == "authorized"
 
 
-def test_real_sample_text_keeps_values_where_lead_sample_text_scrubs(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    lead = lr.joined(run)[0]
-    real = comparison.real_sample_text(lead)
-    redacted = oracle_mod.lead_sample_text(lead)
-    assert "dev.dana" in real
-    assert "dev.dana" not in redacted
-    assert "<user>" in redacted
 
 
-def test_build_comparison_monitor_run_is_empty(tmp_path: Path):
-    run = tmp_path / "run"
-    run.mkdir()
-    (run / "alert.json").write_text("{}")
-    comps = comparison.build_comparison(run)
-    assert comps == []
-    assert "monitor" in comparison.render_manifest(comps)
 
 
-def test_build_comparison_missing_payload_degrades_sample(tmp_path: Path):
-    run = _make_run_dir(tmp_path, with_payload=False)
-    comps = comparison.build_comparison(run)
-    assert comps[0].real_sample.startswith("(")
 
 
-def test_parse_investigation_companion_degrades_on_garbage(tmp_path: Path):
-    run = tmp_path / "run"
-    run.mkdir()
-    (run / "investigation.md").write_text("just prose, no invlang fences")
-    assert comparison.parse_investigation_companion(run) == {}
-    assert comparison.parse_investigation_companion(tmp_path / "nope") == {}
 
 
-def test_write_comparison_files_one_per_lead(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    comps = comparison.build_comparison(run, companion=_COMPANION)
-    out = tmp_path / "cmp"
-    paths = comparison.write_comparison_files(comps, out, run / "gather_raw")
-    assert [p.name for p in paths] == ["l-001.md"]
-    txt = paths[0].read_text()
-    assert "## Evidence" in txt
-    assert "## Defender reasoning" in txt
-    assert "gather_raw/l-001/0.json" in txt
-    assert "scripted automation" in txt
-    for line in txt.splitlines():
-        assert not line.rstrip().endswith("\\"), f"line-continuation in a taught command: {line!r}"
-    for line in txt.splitlines():
-        if "cat " in line and "defender-sql" in line:
-            operand = line.split("cat ", 1)[1].split(" |", 1)[0]
-            assert operand.startswith("/"), f"relative operand in a taught command: {operand!r}"
 
 
-def test_comparison_file_names_every_payload_seq(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    rows = [json.loads(line) for line in (run / "executed_queries.jsonl").read_text().splitlines()]
-    for seq in (1, 2):
-        (run / "gather_raw" / "l-001" / f"{seq}.json").write_text("[]")
-        rows.append({**rows[0], "seq": seq, "payload_path": f"gather_raw/l-001/{seq}.json"})
-    (run / "executed_queries.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-
-    comps = comparison.build_comparison(run, companion=_COMPANION)
-    txt = comparison.write_comparison_files(comps, tmp_path / "cmp", run / "gather_raw")[0].read_text()
-    for seq in (0, 1, 2):
-        assert str(run / "gather_raw" / "l-001" / f"{seq}.json") in txt, f"seq {seq} unnamed"
 
 
-def test_render_synthesis_includes_reasoning_and_conclude():
-    out = comparison.render_synthesis(_COMPANION)
-    assert "h-mal" in out
-    assert "scripted automation" in out
-    assert "benign" in out
-    assert comparison.render_synthesis({}).startswith("(")
 
 
-def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    story = tmp_path / "actor_story.md"
-    story.write_text("Attack story\nGoal\nBypass\n")
-    lrd = tmp_path / "lrd"
-    lrd.mkdir()
-
-    inv = subagents.build_judge_invocation(run, story, lrd)
-
-    assert (lrd / "comparison" / "l-001.md") in inv.comparison_paths
-    assert set(inv.add_dirs) == {run / "gather_raw", lrd / "comparison"}
-    assert re.search(r"<run-[0-9a-f]+-comparison_files>", inv.user_text)
-    assert "l-001.md" in inv.user_text
-    assert "disposition: benign" in inv.user_text
-    assert "scripted automation" not in inv.user_text
-    assert "comparison" in inv.user_text.lower()
 
 
-def test_invoke_judge_benign_is_grounded(tmp_path: Path):
-    run = _make_run_dir(tmp_path, disposition="malicious")
-    story = tmp_path / "actor_benign_story.md"
-    story.write_text("1. Routine-activity story\n2. Benign grounding\n")
-    lrd = tmp_path / "lrd"
-    lrd.mkdir()
-
-    captured: dict = {}
-
-    def _fake_judge_fn(wiring, *, user, scope, **kwargs):
-        captured.update(
-            prompt_path=wiring.prompt_path, model=wiring.model, label=wiring.label, user=user,
-            add_dir=scope.add_dir, closed_ticket_read=scope.closed_ticket_read,
-        )
-        return "outcome: survived\ndefender_findings: []\n"
-
-    out = subagents.invoke_judge(
-        directions.BENIGN_WIRING, run, story, lrd,
-        judge_fn=_fake_judge_fn, box=None,
-    )
-
-    assert out.startswith("outcome:")
-    assert (lrd / "comparison_benign" / "l-001.md").is_file()
-    assert set(captured["add_dir"]) == {run / "gather_raw", lrd / "comparison_benign"}
-    assert captured["closed_ticket_read"] is True
-    assert captured["prompt_path"] == directions.BENIGN_WIRING.prompt_path
-    assert captured["model"] == directions.BENIGN_WIRING.model
-    assert captured["label"] == "judge-benign"
-    assert "<investigation>" not in captured["user"]
-    assert "<lead_sequence>" not in captured["user"]
-    assert "disposition: malicious" in captured["user"]
-    assert re.search(r"<run-[0-9a-f]+-comparison_files>", captured["user"])

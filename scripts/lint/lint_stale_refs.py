@@ -8,8 +8,18 @@ Catches the recurring "rename refactor missed a callsite" class:
 - b77a276: `_prior_recall` import path broken in hook contexts
 - 8ef005f: test glob still matched old pre-suffix filename pattern
 
+WHAT IS COMPARED, AND AGAINST WHAT. The diff runs from `merge-base($STALE_REF_BASE, HEAD)` to
+the WORKING TREE — not to HEAD. Both halves of this gate then read one tree: the reference half
+is `git grep`, which has always read the working tree, so a removal half reading HEAD made the
+gate answer about a tree that does not exist. Uncommitted deletions donated no identifiers while
+the references the same edit added were fully visible, so the ordinary run-then-commit workflow
+verified the wrong tree and reported clean (#922 shipped two rounds of stale references that
+way). On a clean tree — CI's, always — the two bases are identical, so this narrows nothing
+there; on a dirty one it reports on the work in it, as every other lint here already does.
+
 Algorithm:
-  1. Diff against `$STALE_REF_BASE` (default `origin/main`).
+  1. Diff from `merge-base($STALE_REF_BASE, HEAD)` (default base `origin/main`) to the
+     working tree.
   2. Collect identifiers removed by `-`-side lines:
        - `def NAME(` / `class NAME`
        - top-level `NAME =` (uppercase constants)
@@ -96,6 +106,10 @@ BASELINE_PATH = Path(__file__).with_name("lint_stale_refs_baseline.json")
 # Maximum total hits before we declare an ident too common to be signal.
 HIT_CAP = 50
 
+# Patterns per `git grep` call. See `_grep_lines`: the matcher degrades superlinearly in the
+# pattern count, so batching cuts the TOTAL cost rather than merely spreading it.
+_GREP_BATCH = 200
+
 REMOVED_DEF = re.compile(r"^-\s*(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
 REMOVED_ASSIGN = re.compile(r"^-\s*([A-Z][A-Z0-9_]{3,})\s*=")
 REMOVED_PY_IMPORT = re.compile(
@@ -104,8 +118,15 @@ REMOVED_PY_IMPORT = re.compile(
 )
 
 # Identifiers that are never project-specific stale-ref signal.
+#
+# The second line is the ordinary-English class, and it is a real shape rather than a
+# convenience: a deleted test's local double is routinely `def successful(...)` or
+# `def interrupted(...)`, and the name then condemns every ordinary use of the word in the live
+# tree — 57 of them on #922, including one inside a captured postgres log line. A word this
+# common cannot carry a rename, so a hit on it is noise by construction.
 GENERIC_NAMES = {
     "main", "handle", "author", "format_output",
+    "successful", "interrupted",
     "Callable", "Iterable", "Iterator", "Optional", "Union", "Any",
     "typing", "dataclass", "field", "Path", "List", "Dict",
 }
@@ -125,7 +146,14 @@ _ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "spec-f
 # commit donates hundreds of identifiers and every unrelated mention of the word in the live
 # tree reads as a stale reference. Excluded from the removal DIFF rather than from the grep,
 # because it is the `-` side that manufactures them.
-NON_SOURCE_DIRS = ("seam-harness",)
+#
+# `experiments` is here for a second reason that makes it structural rather than a judgement
+# call: it is also an `_ARCHIVAL_DIRS` entry, so a name surviving only there may not vouch for
+# itself. Deleting ONE file under it therefore donated the path component `experiments` as a
+# removed identifier that nothing could clear — and every ordinary mention of the word in the
+# live tree (34 of them on #922) read as a stale reference. Any tree in both lists has that
+# shape; these two are the trees that are in both.
+NON_SOURCE_DIRS = ("seam-harness", "experiments")
 
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
@@ -149,6 +177,19 @@ EXCLUDED_GREP_DIRS = (
     # prefix, which would silently swallow any future `defender/tests-*` sibling.
     "defender/fixtures-e2e",
     "defender/lessons-environment",
+    # The judge-alignment dataset: human-labelled samples of what a judge emitted, batch by
+    # batch. Same class as the lesson corpora above — authored knowledge whose text quotes the
+    # code of its own moment, and #922 deleted the judge it was labelled against. Rewriting the
+    # samples to name today's vocabulary would falsify the labels, and deleting the dataset is
+    # the owner's call, not this gate's.
+    "defender/learning/judge-alignment",
+    # The golden CASE tree — the same class again. Each case is a captured record of one
+    # recruitment: `manifest.yaml` says which code path produced its artifacts, `expected.yaml`
+    # says how the expectation was derived, and `hidden/`/`oracle_visible/` are the payloads
+    # themselves. Naming the producing symbol is the record's job, and rewriting it to name
+    # today's code would falsify what was actually run. The eval CODE beside it
+    # (`score.py`, `controls.py`, `validate_cases.py`, …) is not excluded and is still scanned.
+    "defender/evals/oracle_golden/cases",
 )
 
 # Frozen spec graphs of merged issues: inert records, not code. Rewriting one to name
@@ -178,6 +219,34 @@ FRONTMATTER_NAME = re.compile(r"^\s*name:\s*(\S+)\s*$")
 # The textual FALLBACK, for a file with no AST to ask (see `_PyFacts`).
 DEF_SIGNATURE = re.compile(r"^\s*(?:async\s+)?def\s")
 
+# Every maximal word run on a line. Used to narrow "which of the removed identifiers could
+# this line possibly be about" from a scan of all of them to a set lookup, which is what keeps
+# the two per-hit loops below off an idents x hits product (#922 removes 1526 identifiers and
+# the grep returns 23k lines — 35M regex searches per loop).
+#
+# EXACT for a word-shaped name, not an approximation: such a name is itself a `\w+` run, and
+# `\b` is defined off the same `\w` class, so `re.search(rf"\b{ident}\b", line)` is true exactly
+# when `ident` is one of this line's maximal runs. `\w+` rather than an identifier pattern for
+# the same reason — `1foo` must yield `1foo`, not `foo`, because `\bfoo\b` does not match
+# inside it. Names that are NOT one run — the path stems, which carry `-` and `.` — cannot come
+# back from this and are matched one regex each; there are a handful, so the product they cost
+# is not the one this exists to avoid.
+WORD_RUN = re.compile(r"\w+")
+
+
+def _referencing(content: str, word_idents: set[str], other: dict[str, re.Pattern]) -> set[str]:
+    """Which of the removed identifiers this line mentions, as `\b<ident>\b` would answer."""
+    found = set(WORD_RUN.findall(content)) & word_idents
+    found.update(i for i, pat in other.items() if pat.search(content))
+    return found
+
+
+def _split_idents(idents: Sequence[str]) -> tuple[set[str], dict[str, re.Pattern]]:
+    """`(word-shaped, {the rest: its \b-anchored pattern})` — the two lookup strategies above."""
+    word = {i for i in idents if WORD_RUN.fullmatch(i)}
+    other = {i: re.compile(rf"\b{re.escape(i)}\b") for i in idents if i not in word}
+    return word, other
+
 
 @dataclass(frozen=True)
 class _PyFacts:
@@ -199,6 +268,9 @@ class _PyFacts:
     bindings: frozenset[tuple[int, str]]
     params: frozenset[tuple[int, str]]
     loads: frozenset[tuple[int, str]]
+    #: `bindings` inverted to `lineno -> names`. Derived, never a second source of truth: it
+    #: answers "which names does THIS line bind" without a scan over every removed identifier.
+    bindings_by_line: dict[int, frozenset[str]]
 
 
 def _collect_py_facts(tree: ast.AST) -> _PyFacts:
@@ -229,7 +301,13 @@ def _collect_py_facts(tree: ast.AST) -> _PyFacts:
             loads.add((node.lineno, node.attr))
         elif isinstance(node, ast.keyword) and node.arg:
             loads.add((node.lineno, node.arg))
-    return _PyFacts(frozenset(bindings), frozenset(params), frozenset(loads))
+    by_line: dict[int, set[str]] = {}
+    for lineno, name in bindings:
+        by_line.setdefault(lineno, set()).add(name)
+    return _PyFacts(
+        frozenset(bindings), frozenset(params), frozenset(loads),
+        {ln: frozenset(names) for ln, names in by_line.items()},
+    )
 
 
 class _PySources:
@@ -319,21 +397,43 @@ def _base_ref_error(repo_root: Path, base_ref: str) -> str | None:
     if not _git_ok(["merge-base", base_ref, "HEAD"], cwd=repo_root):
         return (
             f"`{base_ref}` resolves but has NO merge-base with HEAD — a shallow/grafted "
-            f"clone. `git diff {base_ref}...HEAD` (three-dot) needs a common ancestor and "
-            f"fails without one, so the gate would check nothing (#618). Give the job's "
+            f"clone. The diff is taken FROM that merge-base, so without one there is nothing "
+            f"to diff and the gate would check nothing (#618). Give the job's "
             f"actions/checkout `fetch-depth: 0`; fetching the base ref at `--depth=N` "
             f"creates the ref but NOT an ancestor — the graft remains."
         )
     return None
 
 
-def _changed_files(repo_root: Path, base_ref: str) -> set[str]:
-    out = _git(["diff", "--name-only", f"{base_ref}...HEAD"], cwd=repo_root)
+def _diff_base(repo_root: Path, base_ref: str) -> str:
+    """The commit every diff below is taken FROM — `merge-base(base_ref, HEAD)`, resolved once.
+
+    THE DIFF RUNS AGAINST THE WORKING TREE, NOT AGAINST HEAD, and that is the whole point of
+    naming the base separately. `git diff A...HEAD` is `git diff $(git merge-base A HEAD) HEAD`;
+    passing the merge-base with NO second revision diffs it against the working tree instead —
+    index and unstaged edits included.
+
+    The two halves of this gate have to read the SAME tree or it answers a question about a tree
+    that does not exist. The reference half is `git grep`, which reads the WORKING TREE; the
+    removal half read HEAD. Uncommitted work was therefore invisible on the removal side and
+    fully visible on the reference side, so a deletion sitting in the working tree donated no
+    identifiers and the gate reported clean on it — while reporting on every reference the same
+    edit had added. Running it before committing verified the wrong tree, and it took two
+    rounds of CI on #922 to notice, because CI's tree is always clean and the two bases agree
+    there. They still agree there: this changes nothing about what CI checks.
+
+    A dirty tree therefore now reports on the work in it, which is what every other lint in this
+    repo already does — this one was the odd one out."""
+    return _git(["merge-base", base_ref, "HEAD"], cwd=repo_root).strip()
+
+
+def _changed_files(repo_root: Path, diff_base: str) -> set[str]:
+    out = _git(["diff", "--name-only", diff_base], cwd=repo_root)
     return {line.strip() for line in out.splitlines() if line.strip()}
 
 
-def _collect_removed_idents(repo_root: Path, base_ref: str) -> set[str]:
-    diff = _git(["diff", "--unified=0", f"{base_ref}...HEAD", "--", ".",
+def _collect_removed_idents(repo_root: Path, diff_base: str) -> set[str]:
+    diff = _git(["diff", "--unified=0", diff_base, "--", ".",
                  *(f":(exclude){d}" for d in NON_SOURCE_DIRS)], cwd=repo_root)
     idents: set[str] = set()
     for line in diff.splitlines():
@@ -366,7 +466,7 @@ def _collect_removed_idents(repo_root: Path, base_ref: str) -> set[str]:
 
 
 def _renamed_or_deleted_paths(
-    repo_root: Path, base_ref: str
+    repo_root: Path, diff_base: str
 ) -> tuple[set[str], set[str]]:
     """`(gone, deleted)` — every path the diff removed from its old location, and the
     subset that was DELETED outright rather than renamed.
@@ -376,7 +476,7 @@ def _renamed_or_deleted_paths(
     to that name is stale. A RENAMED `a/foo_helper.py` -> `b/foo_helper.py` does not: the
     module still exists under the same name, and collecting its stem would flag every
     importer of a module that merely moved."""
-    out = _git(["diff", "--name-status", f"{base_ref}...HEAD", "--", ".",
+    out = _git(["diff", "--name-status", diff_base, "--", ".",
                 *(f":(exclude){d}" for d in NON_SOURCE_DIRS)], cwd=repo_root)
     gone: set[str] = set()
     deleted: set[str] = set()
@@ -421,16 +521,31 @@ def _grep_lines(repo_root: Path, idents: Sequence[str]) -> list[str]:
     `defender/fixtures*` and `experiments/` trees are most of the repo's bytes and none of
     them is a reference source. The 60s budget is left where it is deliberately: it is a real
     ceiling, and raising it to fit a grep that reads trees this gate ignores would hide the
-    next regression instead of failing on it."""
+    next regression instead of failing on it.
+
+    BATCHED, and that is what keeps the ceiling honest on a retirement an order of magnitude
+    larger. `grep -F` with many patterns is not linear in the pattern count: measured on #922
+    (1526 removed identifiers) the one-shot call took 120s, while 800 of the same patterns
+    took 44s, 400 took 5.7s and 100 took 0.1s. Chunking is therefore a real reduction in TOTAL
+    work — the same 1526 patterns in batches of `_GREP_BATCH` run in a few seconds — and not a
+    per-call bound quietly bought by spending more of them. Every batch still carries the same
+    60s ceiling, so one stalled call still names itself; a bigger diff now costs more CALLS,
+    which is bounded and visible, rather than a superlinear single one that hits the ceiling
+    and reports blindness."""
     if not idents:
         return []
-    cmd = ["grep", "-n", "-w", "-F"]
-    for ident in idents:
-        cmd.extend(["-e", ident])
-    cmd.append("--")
-    cmd.extend(f":(exclude){d}" for d in EXCLUDED_GREP_DIRS)
-    out = _git(cmd, cwd=repo_root, timeout=60, ok_codes=(0, 1))
-    return out.splitlines()
+    lines: list[str] = []
+    for start in range(0, len(idents), _GREP_BATCH):
+        cmd = ["grep", "-n", "-w", "-F"]
+        for ident in idents[start:start + _GREP_BATCH]:
+            cmd.extend(["-e", ident])
+        cmd.append("--")
+        cmd.extend(f":(exclude){d}" for d in EXCLUDED_GREP_DIRS)
+        # The union of the batches is the one-shot answer: every consumer reads these lines as
+        # an unordered bag keyed on (path, ident), so the batch a line came back in is not
+        # observable. Duplicates cannot arise — an ident appears in exactly one batch.
+        lines.extend(_git(cmd, cwd=repo_root, timeout=60, ok_codes=(0, 1)).splitlines())
+    return lines
 
 
 def _hits(lines: Sequence[str]) -> list[tuple[str, int, str]]:
@@ -486,6 +601,10 @@ def _batch_grep(
     Word-boundary (`-w`) so a removed `_by_id` doesn't match `template_path_by_id`;
     the attribution below is `\\b`-anchored for the same reason."""
     by_ident: dict[str, list[str]] = {i: [] for i in idents}
+    # Position in `idents`, so the narrowed candidate set below can be walked in the SAME
+    # order the full scan walked — "first ident it references" has to mean the same thing.
+    order = {ident: i for i, ident in enumerate(idents)}
+    word_idents, other_idents = _split_idents(idents)
     for rel, lineno, content in hits:
         if rel in exclude_files or _is_excluded_path(rel):
             continue
@@ -493,9 +612,9 @@ def _batch_grep(
             continue
         # Attribute the line to the first ident it REFERENCES. A declaration is skipped
         # rather than breaking the loop: one line can declare `a` and still call `b`.
-        for ident in idents:
-            if not re.search(rf"\b{re.escape(ident)}\b", content):
-                continue
+        candidates = sorted(
+            _referencing(content, word_idents, other_idents), key=order.__getitem__)
+        for ident in candidates:
             if _is_declaration(py.facts(rel), lineno, content, ident):
                 continue
             by_ident[ident].append(f"{rel}:{lineno}:{content}"[:200])
@@ -521,8 +640,18 @@ def _is_binding(
 
 @lru_cache(maxsize=1)
 def _tracked_paths(repo_root: Path) -> frozenset[str]:
-    """Every git-tracked path, repo-relative. Cached — `_module_named` is called per ident."""
-    return frozenset(_git(["ls-files"], cwd=repo_root).splitlines())
+    """Every git-tracked path that is STILL ON DISK, repo-relative. Cached — `_module_named` is
+    called per ident.
+
+    The existence filter is the same working-tree agreement `_diff_base` is about, one level
+    down: these paths are what may VOUCH that a name survives, and `git ls-files` reads the
+    INDEX. A file deleted with a plain `rm` is gone from the tree and still in the index, so
+    without the filter it would vouch for its own name right after being deleted — the gate
+    saying a module survives while the grep reads a tree where it does not."""
+    return frozenset(
+        rel for rel in _git(["ls-files"], cwd=repo_root).splitlines()
+        if rel and (repo_root / rel).exists()
+    )
 
 
 def _module_named(repo_root: Path, ident: str) -> bool:
@@ -603,14 +732,26 @@ def _still_defined(
     and a name on its own line of a list literal, both read as a bare `name,` — the same
     text a multi-line import member has. The one binding the AST cannot answer for is a
     MODULE's, whose binding site is a file — see `_module_named`."""
+    word_idents, other_idents = _split_idents(idents)
+    wanted = set(idents)
     defined: set[str] = set()
     for rel, lineno, content in hits:
+        if not wanted:
+            break
         if _is_excluded_path(rel):
             continue
         facts = py.facts(rel)
-        for ident in idents:
-            if ident not in defined and _is_binding(facts, lineno, content, ident):
+        # The candidates, and only they. With an AST the line's bindings are already indexed
+        # by line, and `_is_binding` reduces to that membership — so the index IS the answer.
+        # Without one, every arm of the textual fallback requires the name on the line, so the
+        # names the line mentions are the complete candidate set. Neither narrowing can change
+        # a verdict; both are what keep this off an idents x hits product.
+        candidates = (facts.bindings_by_line.get(lineno, frozenset()) if facts is not None
+                      else _referencing(content, word_idents, other_idents))
+        for ident in candidates & wanted:
+            if _is_binding(facts, lineno, content, ident):
                 defined.add(ident)
+        wanted -= defined
     if repo_root is not None:
         defined.update(i for i in idents if i not in defined and _module_named(repo_root, i))
         defined.update(i for i in idents if i not in defined and _path_named(repo_root, i))
@@ -637,9 +778,13 @@ def _hit_file(hit: str) -> str:
 def _scan(
     repo_root: Path, base_ref: str, *, exclude_files: frozenset[str] = frozenset()
 ) -> list[Finding]:
-    changed = _changed_files(repo_root, base_ref) | set(exclude_files)
-    idents = _collect_removed_idents(repo_root, base_ref)
-    removed_paths, deleted_paths = _renamed_or_deleted_paths(repo_root, base_ref)
+    # Resolved ONCE and threaded, so the three diffs below cannot drift onto different bases —
+    # and, since `_diff_base` diffs it against the WORKING TREE, so they read the same tree the
+    # grep does. See `_diff_base`.
+    diff_base = _diff_base(repo_root, base_ref)
+    changed = _changed_files(repo_root, diff_base) | set(exclude_files)
+    idents = _collect_removed_idents(repo_root, diff_base)
+    removed_paths, deleted_paths = _renamed_or_deleted_paths(repo_root, diff_base)
 
     for p in removed_paths:
         for component in Path(p).parts:
@@ -682,7 +827,8 @@ def _scan(
         print("No specific removed identifiers in the diff.")
         return []
 
-    print(f"Scanning {len(specific)} specific removed identifier(s) (base={base_ref})")
+    print(f"Scanning {len(specific)} specific removed identifier(s) "
+          f"(base={base_ref}, against the working tree)")
     results = _batch_grep(specific, changed, grep_hits, py)
 
     findings: list[Finding] = []

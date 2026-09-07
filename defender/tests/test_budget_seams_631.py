@@ -34,7 +34,6 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 
 from defender._env import FatalConfigError  # noqa: E402
-from defender.agents import AGENTS  # noqa: E402
 from defender.hooks.budget_enforcer import (  # noqa: E402
     DEFAULT_LIMITS,
     BudgetKill,
@@ -234,43 +233,6 @@ def _drive_gather_query(run_dir: Path, registry):
 
 
 
-def test_enforcement_keys_on_declared_bit(tmp_path):
-    """The refusal and the kill read a declared budget-posture bit on the agent
-    DEFINITION, carried through deps.policy to the hook closure; role is never
-    branched on, so a new agent must state its posture rather than inheriting one.
-
-    SC8: `requires_confine`, `requires_explicit_tree` and `bindable` are already
-    per-role safe-by-construction DATA bits checked generically in `bind` with no role
-    branch — this bit has direct precedent. The observation is the WIRING, not the
-    field: two definitions of the SAME role, differing only in the bit, produce
-    different observable outcomes over the identical script."""
-    assert "budget_enforced" in {f.name for f in
-                                 __import__("dataclasses").fields(MAIN_DEF)}
-    assert MAIN_DEF.budget_enforced is True
-    assert AGENTS[AgentRole.JUDGE].budget_enforced is False
-
-    deps = bind(MAIN_DEF, _run_dir(tmp_path, "p"), defender_dir=DEFENDER)
-    assert deps.policy.budget_enforced is True
-
-    limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
-    on_dir = _run_dir(tmp_path, "enf-on")
-    open_budget(on_dir, "r")
-    on_script = [[("bash", {"command": f"echo {i}"})] for i in range(3)]
-    result_on, _ = drive_agent(MAIN_DEF, on_dir, on_script, limits=limits, enforce=True)
-
-    off_dir = _run_dir(tmp_path, "enf-off")
-    open_budget(off_dir, "r")
-    off_script = [[("bash", {"command": f"echo {i}"})] for i in range(3)]
-    result_off, _ = drive_agent(MAIN_DEF, off_dir, off_script, limits=limits,
-                                enforce=False)
-
-    on_text = str(result_on.all_messages())
-    off_text = str(result_off.all_messages())
-    assert "BUDGET" in on_text.upper(), "the declared-True agent was never refused"
-    assert "BUDGET" not in off_text.upper(), (
-        "the declared-False agent of the SAME role was refused — enforcement keyed "
-        "on the role, not on the declared bit"
-    )
 
 
 def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_path):
@@ -315,33 +277,6 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
     assert "limits" in core_sig.parameters
 
 
-def test_learning_stages_are_accounting_only(tmp_path):
-    """The learning-loop agents built through _pydantic_stage — actor, judge, oracle,
-    lead author, both curators — observe no refusal and no kill however far over the
-    caps a run runs; their accounting is unchanged and their counters still advance.
-
-    Q1 (executed) established the pools never overlap under any shipped configuration
-    — a SHARED FACTORY OVER DISJOINT KEYS IS NOT A SHARED POOL — and
-    test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir asserts the
-    disjointness rather than assuming it. The positive control is
-    test_budget_trip_returns_summary_and_writes_trace (e2e): an ENFORCED agent under
-    the identical injected caps IS stopped, so this negative cannot pass by
-    enforcement being dead everywhere."""
-    for role, defn in AGENTS.items():
-        if role in (AgentRole.MAIN, AgentRole.GATHER):
-            continue
-        assert defn.budget_enforced is False, f"{role} declares itself enforced"
-
-    run_dir = _run_dir(tmp_path, "learn")
-    open_budget(run_dir, "stage-1")
-    limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
-    judge = AGENTS[AgentRole.JUDGE]
-    script = [[("read_file", {"path": str(run_dir / "alert.json")})]] * 4
-    result, _ = drive_agent(judge, run_dir, script, limits=limits)
-
-    assert "BUDGET" not in str(result.all_messages()).upper()
-    state = json.loads((run_dir / "budget.json").read_text())
-    assert state["tool_calls"] >= 4, "the unenforced stage stopped being accounted for"
 
 
 
@@ -572,46 +507,6 @@ def test_enforce_flag_unrecognized_token(monkeypatch):
         driver.enforcement_enabled()
 
 
-def test_enforcement_flag_diverges_across_a_process_boundary(monkeypatch, tmp_path):
-    """The enforcement flag set once near the top of a run's process chain is read
-    identically by every later hop: it is inherited WHOLESALE across every known
-    process boundary — run.py's execv re-exec, plus (when SC25 ran) the two
-    os.environ.copy() hops in evals/_pipeline.py, since retired with the frozen-actor
-    metric — so a later hop that reads the environment on its own does not diverge
-    from the hop that set it.
-
-    NAME NOTE (blind reader R16): the function name reads "diverges" but the asserted —
-    and correct, per the 3/3 consensus — property is the OPPOSITE, wholesale
-    inheritance with NO divergence. The name is the demand's original framing (the
-    question "can it diverge?"), and the answer this pins is "no". SC25 (search)
-    established the three specific hops (execv, two os.environ.copy()); this arm drives
-    a real child to exercise the environment-inheritance mechanism they all rely on,
-    rather than re-reading the source — which is why retiring two of the three hops
-    leaves the demand and this witness untouched. The bash-lane child is included because FF21
-    records the bash child env is dict(os.environ) minus provider keys — the flag is
-    VISIBLE there and unwritable by the model."""
-    monkeypatch.setenv(FLAG, "true")
-    child = subprocess.run(
-        [sys.executable, "-c",
-         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-         "from defender.runtime import driver;"
-         "print(driver.enforcement_enabled())"],
-        capture_output=True, text=True,
-        env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
-    )
-    assert child.returncode == 0, child.stderr
-    assert child.stdout.strip() == "True", child.stdout
-
-    monkeypatch.setenv(FLAG, "false")
-    child = subprocess.run(
-        [sys.executable, "-c",
-         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-         "from defender.runtime import driver;"
-         "print(driver.enforcement_enabled())"],
-        capture_output=True, text=True,
-        env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
-    )
-    assert child.stdout.strip() == "False"
 
 
 def test_ci_runs_the_suite_with_enforcement_on(monkeypatch):
@@ -734,46 +629,8 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
 
 
 
-def test_the_runtime_skips_the_learning_enqueue_for_a_truncated_run(tmp_path, monkeypatch):
-    """The runtime itself skips the learning enqueue for a run marked
-    truncated_by: "budget" — no queue marker is dropped — rather than relying on
-    downstream report.md validation to reject it.
-
-    One auditable check the runtime OWNS, versus a validation-layer contract it does
-    not: if that gate is ever weakened, the loop trains on truncated investigations.
-    The positive control is test_a_completed_run_is_still_enqueued_for_learning."""
-    from defender import run_common
-
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learn"))
-    run_dir = _run_dir(tmp_path, "trunc")
-    alert = run_dir / "alert.json"
-    before = _markers(tmp_path / "learn")
-    assert run_common.enqueue_learning(run_dir, alert, truncated_by="budget") is False
-    assert _markers(tmp_path / "learn") == before, "a truncated run dropped a learn-queue marker"
 
 
-def test_a_completed_run_is_still_enqueued_for_learning(tmp_path, monkeypatch):
-    """An untruncated run is still enqueued for learning under the same harness — the
-    control that keeps the suppression demand from passing by killing the learning
-    loop outright.
-
-    `truncated_by` absent is an untruncated run and falsy_valid is true, which is the
-    `x or DEFAULT` swallow shape: an implementation that treated "no mark" and "a mark
-    I could not read" alike would suppress learning for EVERY run.
-
-    #771 §7 D9: enqueue also requires a completed reap-scan verdict on the tree — the same
-    thing `stop_and_scrub` always leaves behind for a real completed run before `run.py` ever
-    reaches this call. The scrub below is that real production walk, run over a tree with
-    nothing planted, so it completes clean and writes `ran: true`."""
-    from defender import run_common
-    from defender.runtime import scrub
-
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learn"))
-    run_dir = _run_dir(tmp_path, "ok")
-    scrub.scrub(run_dir)
-    alert = run_dir / "alert.json"
-    assert run_common.enqueue_learning(run_dir, alert, truncated_by=None) is True
-    assert _markers(tmp_path / "learn"), "the completed run dropped no marker"
 
 
 def _markers(root: Path) -> set[str]:

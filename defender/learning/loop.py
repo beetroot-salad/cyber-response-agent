@@ -22,65 +22,36 @@ from defender.learning.core.config import (  # noqa: E402
     StageAbort,
     LoopPaths,
 )
-from defender.learning.core.directions import (  # noqa: E402
-    ADVERSARIAL_WIRING,
-    BENIGN_WIRING,
-)
 from defender.learning.core.cli import main  # noqa: E402
 from defender.learning.core.drains import (  # noqa: E402
     author_drain,
     lead_author_drain,
 )
-from defender.learning.core.markers import enqueue_for_learning  # noqa: E402
-from defender.learning.core.run_cycle import (  # noqa: E402
-    learn_drain,
-    run_one,
-    _directions_for,
-    _prepare_engines_for,
-)
 from defender.learning.core.persist import (  # noqa: E402
-    append_actor_environment_observations,
-    append_actor_observations,
-    append_environment_observations,
-    append_findings,
     derive_alert_rule_key,
-    _anchor_with_case_key,
 )
-from defender.learning.core.subagents import (  # noqa: E402
-    InProcessSubagents,
-    Subagents,
-    is_skip_story,
-)
-from defender.learning.pipeline.malicious_actor.run import invoke_actor  # noqa: E402
-from defender.learning.pipeline.benign_actor.run import invoke_actor_benign  # noqa: E402
-from defender.learning.pipeline.oracle.run import invoke_oracle  # noqa: E402
-from defender.learning.pipeline.judge.run import invoke_judge  # noqa: E402
 from defender.learning.core.validate import (  # noqa: E402
-    dump_oracle_doc,
     normalize_disposition,
     normalize_judge_yaml,
     strip_yaml_fence,
-    validate_judge_benign_doc,
-    validate_judge_doc,
-    _outcome_keyword,
 )
 from defender.learning.core.prologue import extract_case_entities  # noqa: E402
 
+#: THE TWO AUTHORING STAGES AND THE NAMES THEIR CALLERS ALREADY IMPORT FROM HERE.
+#:
+#: This module is a facade, and #922 is most of it leaving. It used to re-export the per-case
+#: cycle (`run_one`, `learn_drain`), the four stage entry points, both judge wirings, the
+#: subagent protocol, the judge/oracle document validators and the four queue appenders —
+#: every one of which was the old pipeline's, and every one of which is deleted. What is left
+#: is what still has a caller: the two drains, the CLI, and the handful of helpers other
+#: packages read through this name rather than reaching into `core/`.
 __all__ = [
     "DEFAULT_PATHS", "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
-    "InProcessSubagents", "Subagents",
-    "run_one", "author_drain", "lead_author_drain", "learn_drain", "enqueue_for_learning",
+    "author_drain", "lead_author_drain",
     "main",
     "normalize_disposition", "strip_yaml_fence", "normalize_judge_yaml",
-    "dump_oracle_doc",
-    "validate_judge_doc", "validate_judge_benign_doc",
-    "append_findings", "append_actor_observations", "append_environment_observations",
-    "append_actor_environment_observations",
     "derive_alert_rule_key", "extract_case_entities",
-    "invoke_actor", "invoke_actor_benign", "invoke_oracle",
-    "invoke_judge", "ADVERSARIAL_WIRING", "BENIGN_WIRING", "_prepare_engines_for",
-    "is_skip_story", "lead_repository",
-    "_outcome_keyword", "_directions_for", "_anchor_with_case_key",
+    "lead_repository",
 ]
 
 

@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from pathlib import Path
 
-from defender._io import read_jsonl_rows
 
 
 def parse_verdict(text: str, *, error_prefix: str) -> str:
@@ -18,13 +16,3 @@ def parse_verdict(text: str, *, error_prefix: str) -> str:
         f"{error_prefix}: no VERDICT line found in verifier output:\n" + text[-1000:]
     )
 
-
-def load_observation(observation_id: str, pending: Path, *, error_prefix: str) -> dict:
-    if not pending.is_file():
-        raise SystemExit(f"{error_prefix}: pending queue not found at {pending}")
-    for row in read_jsonl_rows(pending):
-        if row.get("observation_id") == observation_id:
-            return row
-    raise SystemExit(
-        f"{error_prefix}: observation_id {observation_id!r} not found in {pending}"
-    )

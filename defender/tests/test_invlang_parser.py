@@ -200,22 +200,6 @@ ceiling_test           none
     assert "ceiling_test" not in body["conclude"]
 
 
-def test_ceiling_test_reaches_the_judge_prompt():
-    """The point of recording it: the stage that grades a benign close can now see what the run
-    could not reach. `render_synthesis` dumps the conclude dict, so this needs no other plumbing
-    — and before this commit the rows existed in 49 files and reached nothing."""
-    from defender.learning.pipeline.judge.compare import render_synthesis
-
-    text = """\
-```invlang
-:T conclude
-disposition            benign
-ceiling_test           "authorized_keys FIM on web-1 (auditd write events) not retrieved"
-```
-"""
-    body, _warnings = parse_dense_companion(text)
-    rendered = render_synthesis(body)
-    assert "authorized_keys FIM on web-1" in rendered
 
 
 def test_conclude_row_spanning_two_lines_warns_instead_of_truncating():

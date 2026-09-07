@@ -1019,8 +1019,8 @@ class _Projector:
         entry. Opening them eagerly makes a table whose only row is the empty-ARRAY marker
         project as `conclude = {"deferred_predictions": []}`, and every reader that asks "did
         this run conclude" by presence or truthiness then answers yes for a document that
-        recorded nothing: `corpus._load_one` admits the case as complete, `render_synthesis`
-        puts `deferred_predictions: []` in front of the judge as the conclusion, and
+        recorded nothing: `corpus._load_one` admits the case as complete, a synthesis render
+        puts `deferred_predictions: []` in front of a reader as the conclusion, and
         `validate._is_closing` needs a bespoke subtraction to say otherwise. `:T
         conclude.surviving` is the deliberate exception one method up — present-and-empty
         there is the CLAIM that nothing survived, and `_check_hypothesis_persistence` reads it

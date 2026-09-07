@@ -50,7 +50,6 @@ from defender.learning.leads import (  # noqa: E402
     lead_neighbors,
     pitfalls_curator,
 )
-from defender.learning.pipeline.judge import compare  # noqa: E402
 from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
 from defender.scripts.adapters import cmdb_adapter, elastic_adapter  # noqa: E402
 from defender.scripts.visualize import visualize_runtime  # noqa: E402
@@ -613,28 +612,6 @@ def test_executed_lead_carries_verb(tmp_path):
     assert lead.verb == r.row()["verb"] == "alerts"
 
 
-def test_coverage_manifest_and_compare_surface_verb(tmp_path):
-    """coverage_manifest_and_compare_surface_verb — the judge's coverage_manifest
-    (render_joined_yaml) and compare.py's per-query line surface `verb` alongside query_id, so
-    the judge can tell elastic.query (events) from elastic.alerts (signals) — query_id is
-    model-coined and spoofable; verb is the real executed fact."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
-        q("elastic", "alerts", {"native_query": "x"}, query_id="elastic.sig"), DONE,
-    ])
-    manifest = lead_repository.render_joined_yaml(r.run_dir)
-    query = yaml.safe_load(manifest)["leads"][0]["queries"][0]
-    assert query.get("verb") == "alerts", "the coverage_manifest does not carry verb"
-
-    qr = lead_repository.QueryRow(
-        lead_id=LEAD, seq=0, system="elastic", verb="alerts", query_id="elastic.sig",
-        params={"native_query": "x"}, raw_command="", exit_code=0, error_class=None,
-        payload_status="ok", payload_digest="d", raw_ref=None)
-    c = compare.LeadComparison(
-        lead_id=LEAD, goal="g", orphan=False, queries=[qr],
-        real_sample="{}")
-    rendered = compare._render_lead_file(c, gather_raw=tmp_path / "gather_raw")
-    assert "alerts" in rendered, "compare.py's per-query line does not surface verb"
 
 
 def test_actor_view_stays_id_and_params_only(tmp_path):

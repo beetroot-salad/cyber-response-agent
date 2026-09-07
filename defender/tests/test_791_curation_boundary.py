@@ -40,13 +40,11 @@ from defender import run_common  # noqa: E402
 from defender.learning.core import drains  # noqa: E402
 from defender.runtime import scrub as scrub_mod  # noqa: E402
 from defender.tests._spec791 import (  # noqa: E402
-    RUN_COMMON_PY,
     SCRUB_PROPERTY_TEST,
     TAIL_SEAM,
     SpecBranch,
     SpecTail,
     author_markers,
-    call_order,
     drive_tail,
     fn_node,
     loop_paths,
@@ -294,56 +292,6 @@ def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, s
         "the render, so its failure can no longer be the last word"
 
 
-def test_791_both_enqueues_consult_the_same_refusal_predicate(tmp_path, state):
-    """refusals_have_one_owner_across_both_enqueues — the learning enqueue and the curation
-    enqueue consult ONE refusal predicate, so the corpus protection cannot diverge from the
-    thing that documents it.
-
-    A copied guard drifts; a shared predicate cannot. This is the load-bearing demand of the
-    spec (PR5: every protection the committed catalog has is upstream at the enqueue — today at
-    two, after the change at one).
-
-    OWNERSHIP IS PINNED STRUCTURALLY, not by behaviour, because R3's words are "extract a shared
-    predicate, NOT A COPY". Two hand-copied guards behave identically on the day they are
-    written and drift from each other afterwards — the precise failure the resolution names —
-    so a matrix of matching outcomes is satisfied by exactly the implementation it rejects.
-    Both enqueue bodies must CALL the one predicate, and that is the first assertion below.
-
-    The per-condition matrix stays as the second half: three refusals across two enqueues, plus
-    the control that both enqueue a clean run — proof the shared owner is consulted for its
-    answer rather than merely called."""
-    for enqueue in ("enqueue_learning", "enqueue_curation"):
-        called = call_order(RUN_COMMON_PY, enqueue)
-        assert "learning_refusal_gate" in called, (
-            f"{enqueue} does not call the shared refusal predicate (it calls {called}) — its "
-            "guards are a copy, and a copy is what R3 rejected"
-        )
-
-    fixtures = _held_out_set(tmp_path, HELD_OUT_ALERT)
-    clean = _certified_run(tmp_path, name="clean")
-    held_out = _certified_run(tmp_path, name="held-out-copy", alert_bytes=HELD_OUT_ALERT)
-    unverified = make_run_dir(tmp_path, name="unverified", disposition="benign")
-
-    conditions = {
-        "truncated": (clean, {"truncated_by": "budget"}),
-        "held-out-alert-copy": (held_out, {}),
-        "unverified-tree": (unverified, {}),
-    }
-    for label, (run_dir, kw) in conditions.items():
-        reason = run_common.learning_refusal_gate(
-            run_dir, run_dir / "alert.json", fixtures_dir=fixtures, **kw
-        )
-        assert reason, f"{label}: the shared predicate refuses nothing"
-        for enqueue in (run_common.enqueue_learning, run_common.enqueue_curation):
-            assert enqueue(run_dir, run_dir / "alert.json", fixtures_dir=fixtures, **kw) is False, \
-                f"{label}: {enqueue.__name__} does not honour the shared predicate"
-
-    assert run_common.learning_refusal_gate(
-        clean, clean / "alert.json", fixtures_dir=fixtures
-    ) is None, "the predicate refuses a clean run — the refusals above carry no information"
-    for enqueue in (run_common.enqueue_learning, run_common.enqueue_curation):
-        assert enqueue(clean, clean / "alert.json", fixtures_dir=fixtures) is True, \
-            f"{enqueue.__name__} refuses a run nothing should refuse"
 
 
 def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):

@@ -68,13 +68,14 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
     fails. The tail then shows the channel is not wedged: with git repaired the same rows
     author normally, which also proves the corpus was restored rather than left dirty."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    rows = [h.row_for("actor_observations", "a/0")]
+    ch = h.channel_of(paths, "findings")
+    rows = [h.row_for("findings", "a/0")]
+    h.write_source_refs(paths, "a")
     h.seed(ch, rows)
 
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.committing("probe", also=lambda r, b, c: _break_index(c.repo_root)),
     )
@@ -94,7 +95,7 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
     _repair_index(paths.repo_root)
     author_shared.assert_clean_corpus_dir(paths.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel)
     recovered = h.cfg_for(
-        paths, "actor_observations", max_attempts=1, invoke_agent=h.committing("after")
+        paths, "findings", max_attempts=1, invoke_agent=h.committing("after")
     )
     assert drain.run_batch(cfg=recovered) == 0, "the channel stayed wedged after the probe fault"
     assert h.pending(ch) == []
@@ -119,8 +120,9 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
     `finished_within` rather than a bare call: the pre-fix behaviour is a HANG, and a
     regression that hangs should fail this test rather than stall the suite."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    rows = [h.row_for("actor_observations", "a/0")]
+    ch = h.channel_of(paths, "findings")
+    rows = [h.row_for("findings", "a/0")]
+    h.write_source_refs(paths, "a")
     h.seed(ch, rows)
 
     appender = h.Holder(ch.append_lock)
@@ -131,7 +133,7 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
 
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=1,
         repo_lock_wait_seconds=1,
         invoke_agent=h.committing("retire-wait"),
@@ -171,14 +173,15 @@ def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tm
     The second tick is the discriminating half. Before the fix it AUTHORED, because the
     stray had become baseline; the row rotated out and the guard never spoke again."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    rows = [h.row_for("actor_observations", "a/0")]
+    ch = h.channel_of(paths, "findings")
+    rows = [h.row_for("findings", "a/0")]
+    h.write_source_refs(paths, "a")
     h.seed(ch, rows)
     stray = paths.repo_root / "scratch.txt"
 
     cfg = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=5,
         invoke_agent=h.committing(
             "stray", also=lambda r, b, c: stray.write_text("written outside the corpus\n")
@@ -215,8 +218,9 @@ def test_a_git_failure_after_the_commit_lands_does_not_delete_the_committed_less
     commit surviving in history is not enough — the working tree has to still hold the files
     that commit names, or the next tick sees deletions."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "environment_observations")
-    h.seed(ch, [h.row_for("environment_observations", "b/0")])
+    h.write_source_refs(paths, "b")
+    ch = h.channel_of(paths, "findings")
+    h.seed(ch, [h.row_for("findings", "b/0")])
 
     def commit_then_fail_reading_head(message, cfg):
         author_shared.commit_corpus(cfg.repo_root, cfg.corpus_dir, message)
@@ -224,7 +228,7 @@ def test_a_git_failure_after_the_commit_lands_does_not_delete_the_committed_less
 
     cfg = h.cfg_for(
         paths,
-        "environment_observations",
+        "findings",
         max_attempts=1,
         invoke_agent=h.committing("landed"),
         commit_fn=commit_then_fail_reading_head,

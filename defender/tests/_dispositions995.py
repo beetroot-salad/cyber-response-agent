@@ -142,17 +142,26 @@ GATHER_CENSUS: frozenset[tuple[str, str]] = frozenset(
     (*_GATHER_READ, *((s, "health-check") for s in _GATHER_SYSTEMS))
 )
 
-JUDGE_CENSUS: frozenset[tuple[str, str]] = frozenset((
-    ("ticket", "get-ticket"), ("ticket", "key-pattern"), ("ticket", "list-tickets"),
-))
+#: EMPTY SINCE #922 — the judge held these three and the role is gone. Kept as a named empty
+#: rather than deleted: what it enumerates is "the verbs one role holds alone", and the next
+#: role to hold a private surface should find the shape here rather than invent it.
+JUDGE_CENSUS: frozenset[tuple[str, str]] = frozenset()
 
 #: Declared by an adapter and granted to NOBODY. Each needs a written reason in the table;
 #: `ticket.case-opened-at` is the one the old code never named at all — it was ungranted by
 #: omission, which is precisely the state #995 makes unrepresentable.
+#:
+#: `get-ticket` and `key-pattern` JOINED THEM IN #922. They were the judge's closed-ticket
+#: surface and it was their only grantee; the role went with the old pipeline. Their rows stay
+#: in the table carrying `roles: []` and a reason rather than being deleted — which is this
+#: file's whole point: a verb granted to nobody is a recorded decision, and deleting the row
+#: would return them to ungranted-by-omission, the state #995 exists to make unrepresentable.
 WITHHELD_CENSUS: frozenset[tuple[str, str]] = frozenset((
     ("cmdb", "list-roles"),
     ("identity", "list-authorized-hosts"),
     ("ticket", "case-opened-at"),
+    ("ticket", "get-ticket"),
+    ("ticket", "key-pattern"),
 ))
 
 

@@ -38,7 +38,6 @@ flagged in the PR.
 from __future__ import annotations
 
 import ast
-import dataclasses
 import importlib
 import importlib.util
 import json
@@ -47,7 +46,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from defender.tests._by_path import load_module, load_trace_lesson
+from defender.tests._by_path import load_trace_lesson
 
 import pytest
 
@@ -148,36 +147,6 @@ def _records(view: dict) -> list[dict]:
 
 
 
-def test_d0_iter_lessons_yields_a_frozen_lesson_dataclass(tmp_path):
-    """demand: d0 — ``iter_lessons`` yields exactly one FROZEN ``Lesson(path, fm, raw, body)`` per
-    well-formed lesson, and ``Lesson`` is defined IN ``defender/_corpus.py`` itself.
-
-    The ``with_raw`` flag is gone with both tuple shapes: one call, one shape, always populated
-    (``raw`` and ``body`` are slices of text the function has already read, so materializing them
-    unconditionally is free). Where it must live is not cosmetic — ``test_c4`` computes the
-    transitive ``defender.*`` module-level import closure of ``lessons_actor_index.py`` and asserts
-    every module is mirrored into ``test_author_actor::_index_cli_runner``'s fake tree, so a
-    ``Lesson`` parked in a NEW ``defender.*`` module reds it; and any yaml-backed module reached at
-    import time breaks the actor's bash lane live under the system interpreter.
-
-    Frozen because the four fields are a READ of a file on disk: a consumer that mutated
-    ``lesson.fm`` in place would corrupt what the next consumer in the same walk sees."""
-    mod = importlib.import_module("defender._corpus")
-    corpus = _corpus_of(tmp_path, "good")
-
-    yielded = list(mod.iter_lessons(corpus))
-    assert len(yielded) == 1
-    lesson = yielded[0]
-
-    assert type(lesson) is mod.Lesson
-    assert dataclasses.is_dataclass(lesson)
-    assert [f.name for f in dataclasses.fields(lesson)] == ["path", "fm", "raw", "body"]
-    assert mod.Lesson.__module__ == "defender._corpus"
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        lesson.fm = {}  # type: ignore[misc]
-
-    with pytest.raises(TypeError):
-        mod.iter_lessons(corpus, with_raw=True)
 
 
 def test_d1_lesson_is_not_unpackable(tmp_path):
@@ -386,22 +355,6 @@ def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, capsys)
         assert err.count(name) == 1, f"{name} warned more than once"
 
 
-def test_d8_undecodable_bytes_are_warn_skipped(tmp_path, capsys):
-    """demand: d8 (domain-outcome, R4) — a lesson with undecodable bytes is warn-skipped and NAMED;
-    siblings survive.
-
-    The read sits INSIDE the guard because ``UnicodeDecodeError`` is a ``ValueError`` and NOT an
-    ``OSError``: a guard around the parse alone lets it escape and takes the whole caller down —
-    the actor's ``lessons_actor_index`` / ``lessons_env_retrieve`` run this on their bash lane
-    mid-run, and the curator drain runs it in-process. Re-pinned here because the fold rewrites the
-    body of exactly that ``try``."""
-    mod = importlib.import_module("defender._corpus")
-    corpus = _corpus_of(tmp_path, "good")
-    _undecodable(corpus)
-
-    yielded = [lesson.path.stem for lesson in mod.iter_lessons(corpus)]
-    assert yielded == ["good"]
-    assert "undecodable.md" in capsys.readouterr().err
 
 
 def test_d9_oserror_members_are_warn_skipped(tmp_path, capsys):
@@ -442,31 +395,6 @@ def test_d10_discovery_rules_are_unchanged(tmp_path, capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_d11_custom_warn_label_still_reaches_the_warn_line(tmp_path):
-    """demand: d11 — the default ``warn_label`` stays ``p.name``, and a CUSTOM one still reaches the
-    warn line. ``lessons_actor_index`` is the one consumer passing a repo-relative label, and its
-    stderr is streamed to the ADVERSARIAL ACTOR mid-run on its bash lane, so the label is part of
-    what the model reads.
-
-    Driven through the real CLI in a mirrored tree (``_index_cli_runner``): over a corpus with a
-    malformed lesson, the warn carries ``defender/lessons-actor/bad.md``, not the bare ``bad.md``.
-
-    Rejected: asserting the substring ``bad.md`` — it is present under BOTH labels, so the assertion
-    is vacuous exactly where it has to discriminate. The prefix is the assertion."""
-    from defender.tests.test_author_actor import _index_cli_runner, _isolate
-
-    ctx = _isolate(tmp_path)
-    _index_cli_runner(ctx)
-    corpus = ctx["lessons"]
-    (corpus / "bad.md").write_text("no fence at all\n")
-
-    proc = subprocess.run(
-        [sys.executable, str(ctx["repo"] / "defender" / "scripts" / "lessons" / "lessons_actor_index.py")],
-        capture_output=True, text=True,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert "defender/lessons-actor/bad.md" in proc.stderr
-    assert "corpus manifest" not in proc.stderr
 
 
 
@@ -712,35 +640,6 @@ def test_d19_on_disk_oracle_is_rebuilt_on_iter_lessons():
 
 
 
-def test_d20_trace_lesson_gains_a_lessons_dir_seam(tmp_path, capsys):
-    """demand: d20 (seam) — ``trace_lesson.main`` gains ``--lessons-dir`` (``type=Path``,
-    ``default=LESSONS_DIR`` set IN the ``add_argument`` call, mirroring the existing ``--runs-dir``
-    and ``lessons_env_retrieve``'s ``--corpus``), so ``--all`` can be driven against a fixture
-    corpus at all.
-
-    The default is anchored at the BOUNDARY, not re-defaulted in the body: ``ns.lessons_dir or
-    LESSONS_DIR`` is precisely the shape ``defender/CLAUDE.md``'s anchor-a-default convention and
-    the ``lint_unanchored_default`` CI gate forbid. Both halves are pinned observably — the flag
-    reaches the walk (only the fixture's lessons are listed), and OMITTING it still resolves to the
-    real corpus.
-
-    Rejected: rebinding ``mod.LESSONS_DIR`` after ``spec_from_file_location`` — monkeypatch wearing a
-    different hat. It mutates module state a fixture never owns, and nothing forces production to
-    re-read the constant, so the test can go green against code that closed over the old value."""
-    tl = load_trace_lesson("trace_lesson_584")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    corpus = _corpus_of(tmp_path, "fixture-lesson")
-
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
-    listed = [ln.split("\t")[0] for ln in capsys.readouterr().out.splitlines() if ln.strip()]
-    assert listed == ["fixture-lesson"]
-
-    assert tl.main(["--all", "--runs-dir", str(runs)]) == 0
-    default_listed = {ln.split("\t")[0] for ln in capsys.readouterr().out.splitlines() if ln.strip()}
-    real = {p.stem for p in tl.LESSONS_DIR.glob("*.md") if not p.name.startswith("_")}
-    assert real, "the real corpus is empty — the default-resolution half would be vacuous"
-    assert default_listed == real
 
 
 def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
@@ -893,39 +792,6 @@ def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
 
 
 
-def test_d25_env_retrieve_stdout_shape(tmp_path, capsys):
-    """demand: d25 (shape, R1: the CAPTURED payload) — ``lessons_env_retrieve``'s stdout is PARSED as
-    ``<repo-rel path>\\t<relevance_criteria>`` by the curators' forward-check
-    (``author/verify_forward/env.py:64``) and streamed to the actor on its bash lane.
-
-    Driven over a fixture corpus through its existing ``--corpus`` seam: rc 0, and every stdout line
-    is EXACTLY two tab-separated fields whose first resolves to the lesson file — no extra column, no
-    reordering — with warns on stderr only.
-
-    Rejected: skipping this because "the migration cannot change stdout". The migration rewrites the
-    DESTRUCTURE at this loop's header, and a swapped field would print the frontmatter DICT into the
-    criteria column, which the forward-check would happily ingest as a string — a corrupted signal
-    reaching an LLM, with no exception anywhere."""
-    mod = load_module(ENV_RETRIEVE, name="lessons_env_retrieve_584")
-    corpus = tmp_path / "lessons-environment"
-    corpus.mkdir()
-    (corpus / "vpn-egress.md").write_text(
-        "---\nsubject: vpn-egress\nalert_rule_ids: [rule-x]\nstatus: live\n"
-        "relevance_criteria: egress from the corp VPN range is expected\n---\nbody\n"
-    )
-    (corpus / "unfenced.md").write_text("no fence at all\n")
-
-    assert mod.main(["prog", "--corpus", str(corpus)]) == 0
-    captured = capsys.readouterr()
-    lines = [ln for ln in captured.out.splitlines() if ln.strip()]
-    assert len(lines) == 1
-
-    fields = lines[0].split("\t")
-    assert len(fields) == 2
-    assert Path(fields[0]).resolve() == (corpus / "vpn-egress.md").resolve()
-    assert fields[1] == "egress from the corp VPN range is expected"
-    assert "unfenced.md" in captured.err
-    assert "unfenced" not in captured.out
 
 
 def test_d26_cmd_grep_still_greps_the_yaml_source(tmp_path, capsys):
@@ -988,19 +854,22 @@ def test_d27_cmd_tags_counts_are_unchanged(tmp_path, capsys):
 
 
 def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
-    """demand: d28 (survival) — the three IN-PROCESS consumers still work through the dataclass, and
+    """demand: d28 (survival) — the IN-PROCESS consumers still work through the dataclass, and
     still skip a bad lesson rather than crashing the curator drain (which would strand the whole
     batch, not one file).
 
     ``build_corpus_manifest`` renders its sections and warn-skips a malformed lesson by name;
-    ``existing_finding_ids`` and ``existing_observation_ids`` still collect their id sets and still
-    survive an undecodable lesson. These three are how a curator knows what the corpus already
-    contains — an id set that silently came back short means findings are re-authored as duplicate
-    lessons.
+    ``existing_finding_ids`` still collects its id set and still survives an undecodable lesson.
+    These are how a curator knows what the corpus already contains — an id set that silently came
+    back short means findings are re-authored as duplicate lessons.
 
     UPDATED by #590's rule (review of PR #608): the skipped lesson now claims a marker section in
-    the manifest (see test_m6) — the stem stays on the curator's menu."""
-    from defender.learning.author.curator import existing_observation_ids
+    the manifest (see test_m6) — the stem stays on the curator's menu.
+
+    THREE CONSUMERS UNTIL #922, now two: the third was the observation curator's own id
+    pre-flight, and it went with the curator. The lesson carrying observation provenance stays in
+    the corpus below on purpose — it is a file the surviving consumers must still walk past
+    without either claiming its ids or tripping on them."""
     from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
     from defender.learning.core.config import LoopPaths
 
@@ -1018,9 +887,8 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     assert "description: DESC" in manifest
 
     assert existing_finding_ids(cfg) == {"fid/0", "fid/1"}
-    assert existing_observation_ids(corpus) == {"obs-1"}
     err = capsys.readouterr().err
-    assert err.count("undecodable.md") == 3
+    assert err.count("undecodable.md") == 2
 
 
 def test_d29_test_corpus_split_folds_onto_the_iterator(tmp_path):
@@ -1050,41 +918,3 @@ def test_d29_test_corpus_split_folds_onto_the_iterator(tmp_path):
         _corpus(corpus)
 
 
-def test_d30_relocated_tree_survival(tmp_path):
-    """demand: d30 (survival) — the pinned lesson CLIs are driven from FOREIGN trees, and the fold
-    must not introduce a module-level anchor that resolves back to the ORIGINAL one.
-
-    Two such callers exist: ``replay_actor`` materializes a frozen-generation worktree with an OLDER
-    ``lessons-actor/`` and re-execs the actor, whose bash lane runs ``lessons_actor_index`` THERE;
-    and the eval harness copies lessons into a temp tree outside the repo and runs the curator over
-    it. Both resolve their corpus from the tree the script was copied INTO (``REPO_ROOT`` off
-    ``__file__``). If the fold parked the corpus root in a module constant captured at import — or
-    reached for ``DefenderPaths``/``REPO_ROOT`` inside ``iter_lessons`` — a replay would silently
-    index TODAY's corpus and the frozen-generation measurement would be meaningless while still
-    reporting a number.
-
-    Driven for real: the mirrored-tree actor-index CLI must index the FAKE tree's corpus (its stems,
-    its repo-relative labels), and ``existing_finding_ids`` over a temp ``LoopPaths`` root must not
-    see a single real checked-in finding id."""
-    from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
-    from defender.learning.core.config import LoopPaths
-    from defender.tests.test_author_actor import _index_cli_runner, _isolate
-
-    ctx = _isolate(tmp_path / "foreign")
-    run_index = _index_cli_runner(ctx)
-    (ctx["lessons"] / "relocated-lesson.md").write_text(
-        "---\ntechniques: [T1078]\nmutable: false\nrelevance_criteria: from the mirrored tree\n"
-        "---\nbody\n"
-    )
-
-    out = run_index(["--techniques", "T1078"])
-    lines = [ln for ln in out.splitlines() if ln.strip()]
-    assert [ln.split("\t")[0] for ln in lines] == ["defender/lessons-actor/relocated-lesson.md"]
-    assert (ctx["repo"] / lines[0].split("\t")[0]).is_file()
-    real_stems = {p.stem for p in (DEFENDER / "lessons-actor").glob("*.md")}
-    assert not any(stem in out for stem in real_stems)
-
-    cfg = build_author_config(LoopPaths(repo_root=tmp_path / "eval"))
-    cfg.corpus_dir.mkdir(parents=True)
-    _findings_lesson(cfg.corpus_dir, "temp-tree-lesson", finding_ids=("tmp/0",))
-    assert existing_finding_ids(cfg) == {"tmp/0"}

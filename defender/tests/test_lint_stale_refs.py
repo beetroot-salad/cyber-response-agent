@@ -676,3 +676,74 @@ def test_the_baseline_file_cannot_be_its_own_finding(tmp_path):
         work, "origin/main", exclude_files=GATE._self_reference(inside, work)
     )
     assert not any(f.fingerprint.startswith(rel) for f in findings)
+
+
+# --- the two halves must read the SAME tree ---------------------------------------------------
+
+
+def _pr_branch_with_nothing_removed(tmp_path: Path) -> Path:
+    """`main` defines a helper and a module, `pr` removes neither — so a committed-only scan of
+    the PR is legitimately clean and any finding below came from the working tree."""
+    up = tmp_path / "up"
+    up.mkdir()
+    _git(up, "init", "-q", "-b", "main")
+    _write(up, "mod.py", "def some_removed_helper():\n    return 1\n")
+    _write(up, "caller.py", "x = some_removed_helper()\n")
+    _write(up, "helper_module.py", "VALUE = 1\n")
+    _write(up, "notes.md", "The renderer reads `helper_module` for its defaults.\n")
+    _commit(up, "seed")
+    _git(up, "checkout", "-q", "-b", "pr")
+    _git(up, "commit", "-q", "--allow-empty", "-m", "a PR that has removed nothing yet")
+    return _clone(tmp_path, up)
+
+
+def test_a_deletion_living_only_in_the_working_tree_is_scanned(tmp_path):
+    """A symbol deleted on DISK but not yet committed is scanned, and its surviving reference
+    is reported.
+
+    THE GATE'S TWO HALVES READ ONE TREE OR IT ANSWERS ABOUT NO TREE. The reference half is
+    `git grep`, which reads the working tree. The removal half read `origin/main...HEAD`, which
+    is the last COMMIT. So the ordinary way to use this gate — run it, then commit — verified a
+    tree in which your own deletions had not happened: they donated no identifiers, while every
+    reference the same edit added was fully visible. It reported clean and the deletions went to
+    CI unchecked, which is exactly how #922 shipped two rounds of stale references.
+
+    Driven as the delta between two runs over ONE repo: the committed state is clean, the only
+    change is an unlinked file, and that alone turns the gate red. A test that asserted only the
+    red half would pass on a gate that reports on everything."""
+    work = _pr_branch_with_nothing_removed(tmp_path)
+
+    assert _run_gate(work, tmp_path) == 0, "the committed PR removes nothing — nothing to report"
+
+    (work / "mod.py").unlink()
+    # The tracked-path cache is per-process and keyed on the repo root, and this test moves the
+    # tree under it. A real run resolves it once against one tree; only a second run in the same
+    # process over a CHANGED tree can see the stale value.
+    GATE._tracked_paths.cache_clear()
+
+    assert _run_gate(work, tmp_path) == 1
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
+        "caller.py:some_removed_helper"
+    }
+
+
+def test_a_module_deleted_on_disk_no_longer_vouches_for_its_own_name(tmp_path):
+    """The same agreement one level down: a file removed with a plain `rm` is gone from the tree
+    and still in the INDEX, and the index is what `git ls-files` reports.
+
+    That set is what may VOUCH that a name survives — `_module_named` clears an identifier when
+    a tracked path still carries it — so reading it off the index let a module vouch for its own
+    name in the instant after being deleted. The grep, meanwhile, reads a tree where the module
+    is gone and its importers are dangling. Same failure as the diff basis, and it hides a
+    deletion rather than a reference."""
+    work = _pr_branch_with_nothing_removed(tmp_path)
+
+    (work / "helper_module.py").unlink()
+    GATE._tracked_paths.cache_clear()
+
+    assert "helper_module.py" not in GATE._tracked_paths(work), (
+        "a path that is gone from the tree is still offered as evidence the name survives"
+    )
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
+        "notes.md:helper_module"
+    }

@@ -85,16 +85,26 @@ dispositions:
 
   ticket:
     health-check: {roles: [gather]}
-    # The one pair two roles hold. Gather reads open tickets while investigating; the benign
-    # judge reads the closed-ticket store to score. Same verb, two independent reasons.
-    list-tickets: {roles: [gather, judge]}
-    # The judge's closed-ticket surface, withheld from gather on purpose: an investigation
-    # that could read how past cases were closed would be grading itself against the answer.
-    get-ticket: {roles: [judge]}
-    key-pattern: {roles: [judge]}
+    # Held by gather alone since #922. It was the one pair two roles held — the benign judge
+    # read the closed-ticket store to score — and that leg went with the old pipeline.
+    list-tickets: {roles: [gather]}
+    # The judge's closed-ticket surface, retired with the judge (#922) rather than deleted:
+    # the rows stay so the file still records that these verbs exist and are granted to
+    # nobody on purpose, which is what `case-opened-at` below established as this file's way
+    # of spelling an examined no. They were withheld from gather deliberately and still are —
+    # an investigation that could read how past cases were closed would be grading itself
+    # against the answer — so a future re-grant is a decision, not a restoration.
+    get-ticket:
+      roles: []
+      reason: "the benign judge was the only grantee; its closed-ticket leg retired with the old pipeline (#922). Still withheld from gather: reading how past cases closed would let an investigation grade itself against the answer"
+    key-pattern:
+      roles: []
+      reason: "screened get-ticket's key before the store was reached; ungranted with get-ticket itself (#922)"
     # Ungranted by OMISSION before #995 — it appeared in no grant and in no "granted to
     # nobody" note either, so nothing recorded whether that was a decision. Recorded now as
-    # one: no template and no run exercises it, and the judge scores from `get-ticket`.
+    # one: no template and no run exercises it. The original reason also said the judge reads
+    # open-time via `get-ticket`; that judge is gone (#922) and `get-ticket` is ungranted too,
+    # so the omission now rests on the first half alone.
     case-opened-at:
       roles: []
-      reason: "no template and no run exercises it; the judge reads open-time via get-ticket"
+      reason: "no template and no run exercises it"

@@ -307,39 +307,6 @@ def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
 
 
 
-def test_the_artifact_copy_path_does_not_land_unvalidated_investigation_md(tmp_path):
-    """Text the invlang validator REJECTS does not come to rest at a path named
-    investigation.md over the fs lane: the artifact-copy path either validates what it
-    copies or fails closed, so a source carrying rejected text does not silently
-    produce a validated-looking destination artifact.
-
-    PBW2 (executed) refuted the waiver this replaces: `_copy_shared_inputs`
-    (learning/core/persist.py:202-210) iterates `_SHARED_COPY_ARTIFACTS = ('alert',
-    'report', 'investigation')` and `shutil.copy2`'s each into the learning run dir,
-    so it AUTHORS a file named investigation.md — and the probe round-tripped,
-    byte-identical, text the api lane refuses with a named validator error.
-    `grep -c 'decide_write|invlang|validate_companion' persist.py` -> 0.
-
-    S1/S2 DO NOT CLOSE THIS: the fs lane never consults write_allow, so the positive
-    allow-list is invisible to it. This cell is not missing a constraint it declined
-    to take — it is missing the GATE THE CONSTRAINT LIVES INSIDE.
-
-    The positive control is test_a_valid_investigation_md_still_lands_through_every_
-    authoring_path."""
-    from defender.learning.core import persist
-
-    src = _run_dir(tmp_path, "src")
-    (src / "report.md").write_text(_report_text())
-    (src / "investigation.md").write_text(BAD_INVLANG)
-    assert validate_companion(BAD_INVLANG, None), "the fixture is no longer rejected"
-
-    dst = tmp_path / "learning-run"
-    dst.mkdir()
-    with pytest.raises(Exception):  # noqa: B017, PT011 — the demand pins "fails closed", not the exception type
-        persist._copy_shared_inputs(src, dst)
-    assert not (dst / "investigation.md").is_file(), (
-        "rejected text came to rest at a path named investigation.md over the fs lane"
-    )
 
 
 def test_a_write_through_an_alias_to_investigation_md_is_still_validated(tmp_path):
@@ -388,32 +355,6 @@ def test_a_write_through_an_alias_to_investigation_md_is_still_validated(tmp_pat
     )
 
 
-def test_a_valid_investigation_md_still_lands_through_every_authoring_path(tmp_path):
-    """A VALID investigation.md still lands through the api lane AND through the
-    artifact-copy path, and report.md is unaffected.
-
-    The positive control both W2 demands require, and the S2 lesson applied: without
-    it, an implementation that refused EVERY investigation.md — or that made the copy
-    path fail closed on all input — would satisfy both negatives perfectly while
-    destroying the artifact the run exists to produce."""
-    from defender.learning.core import persist
-
-    inv_text = (GOLDEN / "investigation.md").read_text()
-    assert validate_companion(inv_text, None) == []
-
-    run_dir = _run_dir(tmp_path, "src")
-    (run_dir / "report.md").write_text(_report_text())
-    policy = _main_policy(run_dir)
-    api = permission.decide_write(run_dir / "investigation.md", inv_text,
-                                  run_dir=run_dir, defender_dir=DEFENDER, policy=policy)
-    assert api.allow, api.reason
-    (run_dir / "investigation.md").write_text(inv_text)
-
-    dst = tmp_path / "learning-run"
-    persist._copy_shared_inputs(run_dir, dst)
-    assert (dst / "investigation.md").read_text() == inv_text
-    assert (dst / "report.md").read_text() == _report_text()
-    assert (dst / "alert.json").is_file()
 
 
 

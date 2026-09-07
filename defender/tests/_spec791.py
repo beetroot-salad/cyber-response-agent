@@ -6,12 +6,11 @@ keeps pytest from collecting it).
 named by that demand's `discharged_by`; this module holds only what more than one of them
 needs.
 
-RED AGAINST HEAD IS THE EXPECTED STATE. No implementation exists. The fakes below declare
-the DEMANDED shapes, not today's: `SpecSubagents.judge` takes no projected-telemetry path,
-because that parameter leaving the subagents protocol IS the seam demand
-(`judge_call_carries_no_projection`), and every hermetic fake in the tree implements that
-protocol (E7). A fake written to today's signature would let the change ship with the
-protocol unchanged and nothing red.
+The subagents doubles this module carried are GONE (#922). They implemented the learning
+cycle's stage protocol — the one whose judge parameter #791's seam demand was about — and that
+protocol, its cycle and its four roles are deleted, so the doubles had nothing left to stand
+in for. What survives here is the run.py TAIL machinery, which the four `test_791_*.py`
+modules still drive for real.
 
 Two seams are DEMANDED rather than described, because the design gives the dependency none
 and a demand with no executable witness discharges nothing:
@@ -24,13 +23,12 @@ and a demand with no executable witness discharges nothing:
   operator's flag", "curation is sited above the render step" and both ordering cells are
   observations of a run rather than readings of a statement sequence. A source read cannot
   fail when behaviour changes, which is the failure this flow exists to prevent.
-* the golden replay hardcodes its stage function; `oracle_fn=` is pinned as its seam.
 
 `call_order` survives for the one claim that is genuinely about source shape — which
 consumer names the shipped ordering property lists, an inline tuple inside another test —
 and for the composition claim over the learning CLI's own dispatch.
 
-The three fakes are declarative fault-injectors and nothing else: they carry canned
+The surviving fakes are declarative fault-injectors and nothing else: they carry canned
 content and record what they were handed. They classify nothing and decide no policy.
 Fault content that cites a real dependency's behaviour cites the ledger claim that
 observed it — see each fake's own comment.
@@ -44,7 +42,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from defender.tests._docker import satisfy_engine_keys  # noqa: F401 — re-exported: the four #791 suites reach it through their own harness
 
 import pytest
 
@@ -69,10 +66,13 @@ RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
 # every symbol live, because the secondary eval still projects (its own measurement, kept
 # deliberately) and the golden replay binds the per-lead seam. The design demand — this
 # change's deliberate dead code is ON RECORD — is about the corpses, wherever they fall.
+# #922 finished two of the original three off: `enqueue_learning` (the learning-queue write the  # lint-stale-ref: ok — naming the departed symbol IS the record this comment exists to keep
+# curation request replaced) and `parse_judge_verdict` (the A/B harness's verdict parser) are  # lint-stale-ref: ok — same
+# DELETED, not merely dead, so there is no baseline entry left to carry a reason. Deletion is the
+# strongest form of what this demand asks for, and a name that resolves to nothing cannot be
+# asserted about — the surviving sibling is what still has to carry its attribution.
 RETIRED_DEAD_SYMBOLS = (
-    "enqueue_learning",       # the learning-queue write the curation request replaced
-    "enqueue_for_authoring",  # its authoring-queue sibling
-    "parse_judge_verdict",    # the A/B harness's verdict parser, orphaned when it stopped judging
+    "enqueue_for_authoring",  # the authoring-queue write the curation request replaced
 )
 # The projected-telemetry writer bullet 3 deletes, as the project profile's shared-root
 # census spells it. A census row naming a symbol that resolves to nothing reads exactly
@@ -146,126 +146,6 @@ def noop_stop_box(_box, **_kw) -> None:
 
 def noop_scrub(_path, **_kw) -> None:
     pass
-
-
-class SubagentRecorder:
-    """The observation channel for the injected subagents: what each stage was HANDED.
-
-    A fake that only returns canned answers leaves the outbound channel unpinned, so every
-    scenario asserts against these records as well as against the run dir."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-        self.judge_kwargs: list[dict] = []
-
-    def record(self, stage: str, **kwargs: Any) -> None:
-        self.calls.append(stage)
-        if stage.startswith("judge"):
-            self.judge_kwargs.append(dict(kwargs))
-
-    def count(self, stage: str) -> int:
-        return sum(1 for c in self.calls if c == stage)
-
-
-class SpecSubagents:
-    """The injected `Subagents` double, in the DEMANDED shape.
-
-    `judge` takes no projected-telemetry path (the seam demand). `oracle` is still declared
-    — the retired stage survives in the tree for the surviving eval entry points (C10) — but
-    a learning run must never reach it, so it RECORDS rather than raises: a fake that raised
-    would make "the leg died early" and "the leg correctly declined to call the stage"
-    the same observation, which is exactly the vacuity R12 exists to close.
-
-    `judge_raw` is the canned judge reply. The malformed shapes it can carry cite the
-    ledger: an unparseable YAML body is the response class R5(c) promotes, and
-    `RunUnprocessable` is the loud failure the run cycle already raises for it.
-    """
-
-    def __init__(
-        self,
-        *,
-        story: str = "story body\n",
-        story_benign: str = "story body\n",
-        judge_raw: str = "outcome: caught\ndefender_findings: []\n",
-        judge_benign_raw: str = "outcome: survived\ndefender_findings: []\n",
-        actor_fault: BaseException | None = None,
-        judge_fault: BaseException | None = None,
-        recorder: SubagentRecorder | None = None,
-    ) -> None:
-        self._story = story
-        self._story_benign = story_benign
-        self._judge_raw = judge_raw
-        self._judge_benign_raw = judge_benign_raw
-        self._actor_fault = actor_fault
-        self._judge_fault = judge_fault
-        self.rec = recorder if recorder is not None else SubagentRecorder()
-
-    @property
-    def calls(self) -> list[str]:
-        return self.rec.calls
-
-    def actor(self, run_dir, learning_run_dir, *, box=None) -> str:
-        self.rec.record("actor", run_dir=run_dir, learning_run_dir=learning_run_dir)
-        if self._actor_fault is not None:
-            raise self._actor_fault
-        return self._story
-
-    def actor_benign(self, run_dir, learning_run_dir, alert_rule_key, *, box=None) -> str:
-        self.rec.record("actor_benign", run_dir=run_dir, learning_run_dir=learning_run_dir)
-        return self._story_benign
-
-    def oracle(self, run_dir, actor_story_path, learning_run_dir) -> str:
-        self.rec.record("oracle", run_dir=run_dir)
-        return "projections: []\n"
-
-    def judge(self, wiring, run_dir, actor_story_path, learning_run_dir, *, box=None) -> str:
-        from defender.learning.core import directions as _directions
-
-        benign = wiring is _directions.BENIGN_WIRING
-        self.rec.record(
-            "judge_benign" if benign else "judge",
-            wiring=wiring, run_dir=run_dir, actor_story_path=actor_story_path,
-            learning_run_dir=learning_run_dir,
-        )
-        if self._judge_fault is not None:
-            raise self._judge_fault
-        return self._judge_benign_raw if benign else self._judge_raw
-
-
-class GroundedJudgeSubagents(SpecSubagents):
-    """`SpecSubagents` whose judge drives the REAL `invoke_judge` with a faked model.
-
-    The model is the one dependency a hermetic run cannot drive (cost, nondeterminism);
-    everything below it — the comparison builder, the per-lead render, the manifest, the
-    prompt frames — is real, so a scenario that wants to assert on what the judge was SENT
-    gets the production payload rather than a second implementation of it."""
-
-    def __init__(self, **kw: Any) -> None:
-        super().__init__(**kw)
-        self.judge_user_texts: list[str] = []
-        self.judge_scopes: list[Any] = []
-
-    def judge(self, wiring, run_dir, actor_story_path, learning_run_dir, *, box=None) -> str:
-        from defender.learning.core import directions as _directions
-        from defender.learning.pipeline.judge.run import invoke_judge
-
-        benign = wiring is _directions.BENIGN_WIRING
-        self.rec.record(
-            "judge_benign" if benign else "judge",
-            wiring=wiring, run_dir=run_dir, actor_story_path=actor_story_path,
-            learning_run_dir=learning_run_dir,
-        )
-        raw = self._judge_benign_raw if benign else self._judge_raw
-
-        def judge_fn(_wiring, *, user, scope, **_kw):
-            self.judge_user_texts.append(user)
-            self.judge_scopes.append(scope)
-            return raw
-
-        return invoke_judge(
-            wiring, run_dir, actor_story_path, learning_run_dir,
-            judge_fn=judge_fn, box=None,
-        )
 
 
 class SpecBranch:
@@ -505,11 +385,6 @@ def plant_alert(tmp_path: Path, *, name: str = "alert.json",
         else json.dumps({"rule": {"id": "5710", "key": "spec.rule"}}).encode("utf-8")
     )
     return alert
-
-
-def learn_markers(paths) -> list[str]:
-    q = paths.learn_queue_dir
-    return sorted(p.name for p in q.glob("*.json")) if q.is_dir() else []
 
 
 def author_markers(paths) -> list[str]:

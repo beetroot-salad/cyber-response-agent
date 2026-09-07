@@ -40,40 +40,24 @@ from defender.runtime.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
 
 _ROLES = {r.name.lower(): r for r in AgentRole}
 
-# `actor` is ONE role bound by TWO legs with different scopes: the adversarial leg runs both
-# lesson scripts and reads both corpora, the FP-hunting benign leg binds strictly less. A bare
-# `actor` therefore names no single answer, so each leg gets its own CLI name and each leg
-# module owns the scope it actually binds (there is no copy here to drift).
-_ACTOR_LEGS = {
-    "actor": "defender.learning.pipeline.malicious_actor.run",
-    "actor_benign": "defender.learning.pipeline.benign_actor.run",
-}
-
-AGENT_NAMES = sorted(set(_ROLES) | set(_ACTOR_LEGS))
+# ONE CLI NAME PER ROLE SINCE #922. The actor was the one role bound by TWO legs with
+# different scopes — the adversarial leg ran both lesson scripts and read both corpora, the
+# FP-hunting benign leg bound strictly less — so a bare `actor` named no single answer and
+# each leg carried its own CLI name and its own refusal when none was given. The role and both
+# legs went with the old pipeline, and the leg table went with them rather than staying behind
+# as an empty map nothing can key: a role that binds two scopes has to reintroduce the
+# mechanism in a diff, which is the same rule the registry itself follows.
+AGENT_NAMES = sorted(_ROLES)
 
 
 def _role_for(agent: str) -> AgentRole:
-    return AgentRole.ACTOR if agent in _ACTOR_LEGS else _ROLES[agent]
+    return _ROLES[agent]
 
 
 def _scope_for(
     role: AgentRole, defender_dir: Path, corpus_name: str | None = None,
     *, agent: str | None = None,
 ) -> RunScope:
-    # `agent` is the CLI NAME and has no default anywhere on this path: a default would have to
-    # be one of the two legs, answering every caller that named none with the ADVERSARIAL leg's
-    # wider grants. `None` means "no leg was named" — for the actor role, a question with no
-    # answer rather than one with a default.
-    if role is AgentRole.ACTOR:
-        from importlib import import_module
-
-        if agent is None:
-            raise ValueError(
-                "the actor role is bound by two legs with different scopes — name one of "
-                f"{sorted(_ACTOR_LEGS)} rather than being answered with either"
-            )
-        leg = import_module(_ACTOR_LEGS[agent])
-        return RunScope(scripts=leg.ACTOR_SCRIPTS, read_confine=leg.ACTOR_READ_CONFINE)
     if role is AgentRole.CORPUS_AUTHOR:
         from defender.learning.author.curator_engine import SHIPPED_LESSON_CORPORA
         return RunScope(

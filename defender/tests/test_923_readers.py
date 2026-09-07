@@ -80,68 +80,6 @@ def _prose_files() -> list[Path]:
 
 # --- the unmoved consumers of the vocabulary ------------------------------------------------
 
-def _run_cycle_selects_no_direction(_tmp_path: Path) -> None:
-    """Asserted as the WHOLE routing table rather than as one empty list: the router returns an
-    empty list for any unrecognized string, so `== []` for one member is true on a build where
-    nothing moved. The table fails if the new member routes anywhere, and it also fails if an
-    existing member's routing shifted while the vocabulary grew."""
-    from defender._vocab import DISPOSITION_ENUM
-    from defender.learning.core.run_cycle import _directions_for
-
-    routing = {member: sorted(_directions_for(member)) for member in sorted(DISPOSITION_ENUM)}
-    assert routing == {
-        "benign": ["adversarial"],
-        "false-positive": [],
-        GAP_MEMBER: ["adversarial", "benign"],
-        "malicious": ["benign"],
-        MEMBER: [],
-    }, routing
-
-
-def _ticket_seeds_does_not_sample_it(_tmp_path: Path) -> None:
-    from datetime import UTC, datetime
-
-    from defender.learning.tickets import ticket_seeds
-    from defender.scripts.case_history import case_ticket
-
-    now = datetime(2024, 5, 5, tzinfo=UTC)  # inside the window for an `evt:2024-05-01` ticket
-
-    def _survived_comment() -> list[dict]:
-        # The eligibility marker `sample_seeds` actually reads (`ticket_seed_eligible` ->
-        # `parse_survival_from_comments`) — without it EVERY ticket in the pool is ineligible
-        # and the two assertions below pass on an empty list regardless of disposition, which
-        # is exactly the vacuous shape this test exists to rule out.
-        return [{"author": "learning", "body": case_ticket.enrichment_to_comment("caught")["body"]}]
-
-    def closed(_label):
-        return [
-            {"key": "case-a", "resolution": f"{MEMBER} — the host ended the run",
-             "labels": ["evt:2024-05-01T00:00:00Z"], "comments": _survived_comment()},
-            {"key": "case-b", "resolution": "benign — accounted for",
-             "labels": ["evt:2024-05-01T00:00:00Z"], "comments": _survived_comment()},
-        ]
-
-    # The pool carries a hand-written host-only resolution BESIDE a legitimate, EQUALLY ELIGIBLE
-    # one, because the refusal this change adds at the ticket AUTHORING surface must not turn
-    # this READ path into a crash path: the sampler walks every closed ticket a person could
-    # have edited, and a decoder that raises on one of them takes the whole benign-precedent
-    # pool with it. Both tickets carry the same window label and the same survival marker, so
-    # the ONLY thing that can separate them is the disposition decode — a pool that came back
-    # empty (both excluded on eligibility, not disposition) would pass the two assertions below
-    # for the wrong reason, which is why `seeds` is asserted non-empty first.
-    seeds = ticket_seeds.sample_seeds(
-        {"rule": {"id": "5710"}}, "case-self", "run-1", now=now,
-        list_closed_fn=closed, signature_label_fn=lambda _alert: "sig:5710",
-    )
-    assert seeds, "the equally-eligible benign precedent was not sampled either — the pool came " \
-        "back empty for an unrelated reason, and the disposition decode was never exercised"
-    assert all(seed.disposition == "benign" for seed in seeds)
-    assert not any(seed.case_id == "case-a" for seed in seeds), (
-        "a host-terminated case was sampled as a benign precedent — the sampler's pool is "
-        "evidence about the world and this run produced none"
-    )
-
-
 def _lessons_run_has_no_confident_ground_truth(_tmp_path: Path) -> None:
     """Asserted as the reader's answer for EVERY member including the new one, in both
     directions — not as the set of members it says yes to.
@@ -166,18 +104,6 @@ def _lessons_run_has_no_confident_ground_truth(_tmp_path: Path) -> None:
                         "false-positive": False, "malicious": False},
     }
     assert confident == expected, confident
-
-
-def _visualize_judge_selects_no_direction_view(_tmp_path: Path) -> None:
-    from defender.scripts.visualize.visualize_judge import VIEWS, active_views
-
-    assert active_views("run-923", MEMBER) == (), (
-        "the judge page renders direction sections for a run that trained nothing"
-    )
-    assert active_views("run-923", "not-a-disposition") == VIEWS, (
-        "the unreadable-headline fallback moved — an out-of-enum value must still show "
-        "everything, and the new member must not be taking that branch"
-    )
 
 
 def _invlang_queries_finds_the_case(_tmp_path: Path) -> None:
@@ -269,6 +195,23 @@ def _ticket_lane_reads_the_committed_verdict(tmp_path: Path) -> None:
     assert case_ticket.read_case_record(run_dir).disposition == MEMBER
 
 
+def _episode_verdicts_reads_the_archived_headline(tmp_path: Path) -> None:
+    """#920's archive reader answers for a host-terminated world instead of refusing it.
+
+    Driven over a REAL committed report moved into the archive layout, because that is what
+    `archive.py` puts there — one report per world, copied from the sibling that wrote it. The
+    member matters here more than at most readers: this reader refuses an out-of-vocabulary
+    headline for the whole episode, so admitting `unresolved` is what keeps ONE gate-overruled
+    world from making every sibling's readable headline unreachable."""
+    from defender.learning.branch.episode import verdicts
+
+    report = (finished_run(tmp_path, disposition=MEMBER) / "report.md").read_text(encoding="utf-8")
+    world = tmp_path / "episodes" / "ep-923" / "worlds" / "b"
+    world.mkdir(parents=True)
+    (world / "report.md").write_text(report, encoding="utf-8")
+    assert verdicts(world.parents[1]) == {"b": MEMBER}
+
+
 def _visualize_primitives_reads_the_committed_verdict(tmp_path: Path) -> None:
     from defender.scripts.visualize.visualize_primitives import parse_report
 
@@ -353,10 +296,7 @@ def _no_roster_states_a_stale_price_count(_tmp_path: Path) -> None:
 
 _READERS = {
     # the vocabulary's unmoved consumers
-    "run_cycle": _run_cycle_selects_no_direction,
-    "ticket_seeds": _ticket_seeds_does_not_sample_it,
     "lessons_run": _lessons_run_has_no_confident_ground_truth,
-    "visualize_judge": _visualize_judge_selects_no_direction_view,
     "invlang_queries": _invlang_queries_finds_the_case,
     "invlang_cli": _invlang_cli_accepts_it_as_a_filter,
     "ticket_lane->disposition": _ticket_lane_refuses_it_as_an_authored_resolution,
@@ -367,6 +307,7 @@ _READERS = {
     "trace_lesson": _trace_lesson_does_not_render_the_placeholder,
     "ticket_lane->report_md": _ticket_lane_reads_the_committed_verdict,
     "visualize_primitives": _visualize_primitives_reads_the_committed_verdict,
+    "episode->archived_headline": _episode_verdicts_reads_the_archived_headline,
     "run_paths->review_record": _the_review_record_has_no_consumer_outside_the_runtime_view,
     # newly in scope
     "visualize_runtime": _visualize_runtime_calls_it_unreviewed,

@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from defender._run_paths import contained_payload, resolve_run_bundle
 from defender.learning.lead_repository import load_queries, stage_tables
@@ -216,20 +215,6 @@ def test_a_link_inside_the_gather_tree_is_dropped_and_the_rest_still_stages(
                             run / "gather_raw" / LEAD / "0.json"}
 
 
-def test_a_symlinked_case_artifact_makes_the_run_unprocessable(tmp_path: Path) -> None:
-    """The three artifacts the actor and the judge read AS the case get the opposite posture
-    from a payload: substituting one substitutes the case, so persist refuses the run."""
-    from defender.learning.core.config import RunUnprocessable
-    from defender.learning.core.persist import _copy_shared_inputs
-
-    run = tmp_path / "runs" / "case-1"
-    run.mkdir(parents=True)
-    (run / "report.md").write_text("---\ndisposition: benign\n---\n", encoding="utf-8")
-    (run / "investigation.md").write_text(":L l-001\n", encoding="utf-8")
-    (run / "alert.json").symlink_to(_outside_secret(tmp_path))
-
-    with pytest.raises(RunUnprocessable, match="not a regular file"):
-        _copy_shared_inputs(run, tmp_path / "learning" / "case-1")
 
 
 def test_a_source_run_dir_that_is_not_a_string_is_a_missing_bundle(tmp_path: Path) -> None:

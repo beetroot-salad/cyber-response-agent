@@ -8,12 +8,17 @@ from pathlib import Path
 
 from defender._run_paths import RunPaths
 from defender.learning.core.config import REPO_ROOT
-from defender.learning.tickets import ticket_seeds
 
 HERE = Path(__file__).resolve().parent
 PROMPT_PATH = HERE / "forward.md"
 
-_TICKET_CLI = ticket_seeds._TICKET_CLI
+#: The ticket adapter, invoked as a subprocess for the one `get-ticket` this module makes.
+#: @owns _TICKET_CLI — spelled here since #922. It used to be borrowed from
+#: `learning/tickets/ticket_seeds.py`, which existed to sample closed tickets as benign-actor
+#: seeds; that actor and its sampler went with the old pipeline, and this module was the only
+#: thing still reaching into it — for a path, not for any of its behaviour. One definition,
+#: one reader, at the reader.
+_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_adapter.py"
 _POLICY_FETCH_TIMEOUT = 15
 _NO_CITED_POLICY = (
     "(no cited covering policy — none was offered, or the store is unreachable)"

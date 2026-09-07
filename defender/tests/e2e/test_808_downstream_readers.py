@@ -59,7 +59,6 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     hit,
     run,
 )
-from defender.tests.e2e._replay_harness import Turn  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -203,48 +202,6 @@ def test_main_can_cite_lead_zeros_evidence_without_an_undeclared_lead_error(tmp_
     assert L0 in errors[0], f"the refusal names some other lead: {errors}"
 
 
-def test_the_golden_case_builder_keeps_a_scoreable_lead_set(tmp_path):
-    """R7 `interacts(build_case->lead_id)` — a golden case rebuilt from a run that used lead-0
-    carries a lead set a projection can still match: the harness-authored leads are excluded
-    from the case's frozen `oracle_visible/leads.jsonl`, so the scorer's lead-set integrity
-    gate has nothing new to refuse.
-
-    P4a/P4b, executed: `build_case`'s `leads = lead_repository.joined(ns.run_dir)` is
-    unconditional and `joined`'s signature has NO lead-set parameter — the fix cannot be
-    discovering an unused filter argument, it has to be made in `build_case` explicitly or
-    upstream. And `score_case()` refuses a projection whose lead set differs, returning
-    `judged: False` with empty rows and never calling the judge model at all. Every rebuilt
-    case would fail integrity rather than score."""
-    from defender.evals.oracle_golden import build_case
-
-    res = run(tmp_path / "run", run_id="lz808-case", answer=answer_hits(DOCS),
-              main_turns=[
-                  Turn(tool_calls=[("gather", {
-                      "lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
-                      "what_to_summarize": ["auth events"]})]),
-                  Turn(text="Investigation complete."),
-              ])
-    story = tmp_path / "story.md"
-    story.write_text("the ground-truth story\n", encoding="utf-8")
-    controls = tmp_path / "controls.yaml"
-    controls.write_text("windows: []\n", encoding="utf-8")
-    out = tmp_path / "cases" / "lz808"
-
-    joined_ids = {lead.lead_id for lead in lead_repository.joined(res.run_dir)}
-    assert {L0, L3} <= joined_ids, (
-        f"the run dir carries no harness leads to filter ({sorted(joined_ids)}) — the "
-        "exclusion below would be green over an empty set, which is the vacuous negative"
-    )
-
-    assert build_case.main([str(res.run_dir), str(story), str(controls), str(out)]) == 0
-    captured = [json.loads(line) for line in
-                (out / "oracle_visible" / "leads.jsonl").read_text().splitlines() if line]
-    ids = {row["lead_id"] for row in captured}
-    assert ids, "the case captured no leads at all"
-    assert not (ids & {L0, L3}), (
-        f"the case froze the harness-authored leads into its expectation ({sorted(ids)}) — "
-        "every projection of this case now fails lead-set integrity instead of scoring"
-    )
 
 
 def test_main_is_told_the_reserved_ids_are_already_taken(tmp_path):

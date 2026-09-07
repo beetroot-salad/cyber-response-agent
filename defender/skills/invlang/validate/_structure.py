@@ -565,8 +565,8 @@ def _check_conclude_vocab(companion: CompanionBody) -> list[str]:
     `investigation.md` must be free to name it in prose without tripping THIS check, and the
     tuple is shared with the tool schema), so the ordinary membership test above admits it for
     free. It is refused with its own clause, right here, so the invlang document — one of the
-    THREE authoring surfaces the host-only verdict is refused at — cannot admit for free what
-    the close tool and the ticket resolution line both refuse."""
+    authoring surfaces the host-only verdict is refused at — cannot admit for free what the
+    close tool, the ticket resolution line and the family manifest all refuse."""
     disposition = (companion.get("conclude") or {}).get("disposition")
     errors = _check_vocab(
         disposition, vocab.DISPOSITION,

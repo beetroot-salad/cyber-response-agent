@@ -1,8 +1,8 @@
 """The judge's own appender: twelve-key rows into the existing findings queue (#921 M5).
 
-Never `persist.append_findings` — that writer's `_outcome_keyword` gates on the OLD pipeline's
-`OUTCOME_ENUM`, which this design's words (`survived`/`caught`/`undecidable`/`discard`/
-`corpus-contradiction`) are not all members of. Refuses a row missing `run_id`/`direction`
+Its own, and not the shared appender the old pipeline used: that writer gated the outcome word
+against the pipeline's own enum, which this design's words (`survived`/`caught`/`undecidable`/
+`discard`/`corpus-contradiction`) are not all members of. #922 deleted it; this is what is left. Refuses a row missing `run_id`/`direction`
 BEFORE it reaches the shared findings gate (P6: such a row raises a bare `KeyError` inside
 `_gate_findings` and stuck-records the WHOLE keyed batch), and refuses `discard`/
 `corpus-contradiction` outright — the family record is the artifact for those two (O7).
@@ -46,7 +46,7 @@ def _queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
     """The findings queue's file and its append lock — `(pending_file, lock_file)`.
 
     BOTH NAMES COME FROM THE CHANNEL THAT OWNS THEM. `LoopPaths.findings` is the `QueueChannel`
-    the drain and `persist.append_findings` both reach the queue through; spelling
+    the drain reaches the queue through; spelling
     `"findings.jsonl"` and `".findings.lock"` a third time here is how a rename or a lock-role
     change leaves this appender writing files nothing reads. Only the DIRECTORY is overridable
     — `queue_dir` relocates the channel, it does not rename it.

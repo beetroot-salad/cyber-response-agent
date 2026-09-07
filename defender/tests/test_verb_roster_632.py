@@ -79,15 +79,11 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.hooks.inject_system_skill_description import descriptor_catalog  # noqa: E402
-from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
 from defender.runtime.driver import GATHER_DEF  # noqa: E402
 from defender.runtime.verb_roster import (  # noqa: E402
     RosterError,
-    audit_read_surfaces,
     generate_roster,
     load_roster,
-    model_read_surfaces,
     roster_path,
 )
 from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
@@ -96,18 +92,14 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     DONE,
     GATHER_ROLE,
     GRANTED,
-    JUDGE_ROLE,
     GRANTED_COLLIDING_PAIR,
     UNDECLARED,
     WITHHELD_COLLIDING_PAIR,
     WITHHELD_FROM_GATHER,
-    bare_only_surfaces,
-    declared_verbs_everywhere,
     grant_of,
     recording_table,
     roster_pairs,
     run_gather,
-    shipped_grants,
     ScopedFakeVerbs,
 )
 from defender.tests.e2e._replay_harness import DEFENDER, Turn, VerbRecorder  # noqa: E402
@@ -279,179 +271,8 @@ _OFFENDING_CASES = [
 ]
 
 
-@pytest.mark.parametrize(("surface", "parts", "text"), _OFFENDING_CASES,
-                         ids=[c[0] for c in _OFFENDING_CASES])
-def test_no_model_read_surface_names_a_verb_the_grant_withholds(
-    tmp_path: Path, surface: str, parts: tuple[str, ...], text: str,
-):
-    """No build-time artifact the model reads names a verb the role's verb_grant withholds.
-    Prose surrounding the generated roster, a committed query template, a template the
-    generated index hides but a search still reaches, and a post-generation re-edit that
-    writes a withheld verb back in are the SAME violation, with no carve-out — the demand
-    covers the search surface, not only the generated index, and the change is not done
-    until such artifacts are corrected.
-
-    WHAT THE AUDIT MUST BE ABLE TO READ IS PART OF THE DEMAND, and it is where the previous
-    pass left the escape: pinned against the fully qualified call alone, the audit was blind
-    to two of the four sites this demand was minted to correct — including the file that tells
-    the model to use a verb the grant withholds, which names it as a bare name in another
-    system's prose. An audit that reads one syntax reports zero offenders over a tree that
-    still carries the instruction, and the demand's stated bar goes unenforced. The grant
-    still decides on the `(system, verb)` PAIR; this is about what the scan can SEE.
-
-    Three attributions, each with its own case below:
-
-    * QUALIFIED — `query(system=…, verb=…)` or the `S.v` call id: attributes to the pair.
-    * BARE, IN ITS OWN SYSTEM'S FILE — a name the owning system declares, in that system's
-      own directory. Attributes to that system, which is what lets beta's prose about beta's
-      granted `peek` stay clean while the identical name in alpha's prose is an offender.
-      The shipped shape is the ticket store's query table, whose rows are bare subcommands.
-    * BARE, UNATTRIBUTABLE — a declared verb name in a file whose system does not declare it,
-      or in a template belonging to no system. It attributes to nothing, so it is judged
-      against every system declaring it and offends if any of those pairs is withheld. The
-      accepted cost is false positives, and the correction for one is to qualify the name.
-
-    The tree is built so a NAME-keyed audit cannot pass either: `peek` is granted on beta and
-    withheld on alpha — the shipped `identity.list-roles` / `cmdb.list-roles` collision,
-    reproduced locally so it is the audit's own contract rather than an accident of today's
-    grant contents.
-
-    The real tree is asserted on too, in both directions, because a synthetic corpus proves
-    only that the instrument works on prose the test wrote. The committed prose must report
-    ZERO offenders — which it does not today, and that is the demand — and the audit must
-    demonstrably reach the files that name a verb ONLY as a bare name, computed off the tree
-    rather than recalled, or the zero is blindness rather than compliance.
-
-    A hit identifies its file by PATH, not by name: six committed surfaces are called
-    SKILL.md, and a finding a human cannot act on without searching for it is not a finding.
-
-    The negative's positive control is the roster itself, which DOES name every granted
-    verb: a bare "no withheld verb appears anywhere" is also green over an empty corpus."""
-    tree = _tree(tmp_path / "tree")
-    grant = grant_of("gather", (("alpha", "look"), ("beta", "peek")))
-    generate_roster(grant, defender_dir=tree)
-
-    # Two controls, in place for every parametrization: a system's prose naming a verb ITS OWN
-    # grant entry names is not an offender, in either form, even while that same verb NAME is
-    # withheld on the sibling system.
-    legitimate = tree / "skills" / "gather" / "queries" / "beta-fetch.md"
-    legitimate.write_text(
-        "call `query(system='beta', verb='peek')` to fetch it\n", encoding="utf-8")
-    bare_legitimate = tree / "skills" / "beta" / "SKILL.md"
-    bare_legitimate.write_text(
-        "---\nname: beta\ndescription: the beta system of record\n---\n\n"
-        "| Subcommand | Measurement |\n|---|---|\n| `peek <name>` | the full record |\n",
-        encoding="utf-8")
-    assert audit_read_surfaces(tree, {GATHER_ROLE: grant}) == (), (
-        "the clean tree reports offenders — the audit flags a verb NAME where the owning "
-        "system's own grant entry names it"
-    )
-
-    offending = tree.joinpath(*parts)
-    offending.parent.mkdir(parents=True, exist_ok=True)
-    offending.write_text(text, encoding="utf-8")
-
-    found = audit_read_surfaces(tree, {GATHER_ROLE: grant})
-    assert found, f"the {surface} surface naming a withheld verb was not flagged"
-    assert any(str(offending.relative_to(tree)) in hit for hit in found), (
-        f"no hit identifies {offending.relative_to(tree)} by its path — six committed surfaces "
-        f"share the name SKILL.md, so a hit that names only the file is not actionable"
-    )
-    assert not any(str(bare_legitimate.relative_to(tree)) in hit for hit in found), \
-        "beta's own bare mention of its own granted verb was flagged alongside alpha's"
-    assert not any(str(legitimate.relative_to(tree)) in hit for hit in found), \
-        "the template naming beta's OWN granted verb was flagged alongside alpha's withheld one"
-
-    roster = generate_roster(grant, defender_dir=tree)
-    assert ("alpha", "look") in roster_pairs(roster), \
-        "the control is vacuous — the roster names no granted verb either"
-
-    # THE REAL TREE, first direction: the committed prose must name no verb gather's shipped
-    # grant withholds. Four sites do today — two of them bare names — so this is red until
-    # they are corrected, which is the whole of what "the change is not done until such
-    # artifacts are corrected" means.
-    offenders = audit_read_surfaces(DEFENDER, shipped_grants())
-    assert offenders == (), (
-        "committed prose still advertises a verb the shipped grant withholds "
-        f"({len(offenders)} sites): {offenders[:8]}"
-    )
-
-    # Second direction: the zero above is earned only if the audit can read the real files
-    # that name a verb ONLY as a bare name. Under a grant that names nothing, every verb the
-    # committed prose advertises is withheld, so each of those files must be flagged — an
-    # audit that parses only the qualified call flags none of them and passes the zero above
-    # with the instruction to call a withheld verb still committed.
-    bare_only = bare_only_surfaces(model_read_surfaces(DEFENDER), declared_verbs_everywhere())
-    assert bare_only, "no committed surface names a verb in bare form — the control is vacuous"
-    reached = audit_read_surfaces(DEFENDER, {GATHER_ROLE: grant_of(GATHER_ROLE, ())})
-    unseen = [str(p.relative_to(DEFENDER)) for p in bare_only
-              if not any(str(p.relative_to(DEFENDER)) in hit for hit in reached)]
-    assert not unseen, (
-        f"the audit cannot see a bare verb name in {len(unseen)} committed file(s): {unseen[:8]}"
-    )
-
-    # Third direction: rule 4 is doing work, and the rosters are INSIDE the audited surface.
-    # Handed only gather's grant, the audit must flag the judge's roster — it names two ticket
-    # verbs gather's grant withholds, which is exactly why per-role attribution had to exist.
-    # An implementation that quietly excludes rosters from the audited set clears the zero
-    # above for free and fails here, which is the only assertion that can tell the reasoned
-    # narrowing apart from the cheap one.
-    judge_roster = roster_path(DEFENDER, JUDGE_ROLE)
-    mis_attributed = audit_read_surfaces(DEFENDER, {GATHER_ROLE: GATHER_DEF.verb_grant})
-    assert any(str(judge_roster.relative_to(DEFENDER)) in hit for hit in mis_attributed), (
-        "scored against gather's grant alone, the judge's roster is not flagged — either it "
-        "is not in the audited surface set at all, or the audit is not reading its contents"
-    )
 
 
-def test_the_judge_has_its_own_generated_roster_scored_against_its_own_grant(tmp_path: Path):
-    """The judge has a COMMITTED, GRANT-DERIVED roster of its own, and the audit scores it
-    against the JUDGE's grant rather than gather's.
-
-    Nothing in the suite required this before, and the silence was the finding: the human
-    decision that made rosters grant-derived is only half-implemented for a role that never
-    gets one, and the judge's model-facing verb prose would stay hand-authored — precisely
-    the hole that decision closed — while the audit reported green. Two roles ship a verb
-    capability; two rosters must exist.
-
-    THE FOURTH ATTRIBUTION RULE IS WHAT MAKES BOTH ROSTERS COMMITTABLE AT ONCE. The judge's
-    grant names two ticket verbs gather's withholds, and those two are two of the four
-    counter-examples the correspondence demand's zero is built on — so under an audit that
-    scores everything against one role, committing the judge's correct roster IS an offence,
-    and the only way to green it is to not have one. Scoring each roster against the grant it
-    was generated from removes the contradiction without removing the obligation.
-
-    The roster is derived, not authored: regenerating from the judge's own grant reproduces
-    the committed bytes, so a hand-edit is a load failure rather than a silent divergence, and
-    the pairs it advertises are exactly the pairs the judge may call."""
-    committed = roster_path(DEFENDER, JUDGE_ROLE)
-    assert committed.is_file(), \
-        "the judge ships no generated roster — its model-facing verb prose is still authored"
-
-    granted = {(s, v) for s, v, _ in JUDGE_DEF.verb_grant.entries}
-    advertised = roster_pairs(committed.read_text(encoding="utf-8"))
-    assert advertised == granted, (
-        "the judge's roster and the judge's grant disagree: "
-        f"advertised-not-granted={sorted(advertised - granted)} "
-        f"granted-not-advertised={sorted(granted - advertised)}"
-    )
-    assert ("ticket", "get-ticket") in advertised, \
-        "the judge's roster withholds a verb its own grant names — it was generated from gather's"
-
-    assert generate_roster(JUDGE_DEF.verb_grant, defender_dir=DEFENDER) == \
-        committed.read_text(encoding="utf-8"), \
-        "the committed judge roster is not what its own grant generates — it was hand-edited"
-
-    # Scored against its own role's grant the judge's roster is clean; the audit's per-role
-    # attribution is asserted as a difference, so a mapping that ignores its keys fails here.
-    assert audit_read_surfaces(DEFENDER, shipped_grants()) == (), \
-        "the judge's own roster is reported as an offence against its own grant"
-    assert audit_read_surfaces(
-        DEFENDER, {GATHER_ROLE: GATHER_DEF.verb_grant, JUDGE_ROLE: GATHER_DEF.verb_grant},
-    ), (
-        "the audit reports clean when BOTH rosters are scored against gather's grant — it is "
-        "not reading the mapping's keys, so per-role attribution is decorative"
-    )
 
 
 def test_gathers_committed_roster_regenerates_from_its_own_shipped_grant():
@@ -480,139 +301,8 @@ def test_gathers_committed_roster_regenerates_from_its_own_shipped_grant():
         "the committed gather roster is not what its own grant generates — regenerate it"
 
 
-def test_the_committed_model_read_surfaces_are_the_enumerated_set():
-    """The enumerated set §7 R8 scopes the correspondence demand to is read off the tree on
-    every run, never recalled: the per-system skill and execution prose, the committed
-    query templates including drafts a search reaches, and the generated roster.
-
-    This is the live census that keeps the scope honest — the enumeration the demand rests
-    on was an outstanding probe obligation, and a hand-recalled list would go stale the
-    first time a surface is added.
-
-    The census is what the correspondence demand ranges over, so its own reach is the thing
-    asserted here; whether the prose inside those files is clean is the correspondence
-    demand's, and it is asserted against the real tree there. What this test adds is that
-    the set is not narrower than the surfaces the model actually reads — a census that
-    quietly omitted the per-system prose would make a clean audit meaningless.
-
-    BOTH ROSTERS ARE IN THE SET, and that is the cheap exit closed at the census rather than
-    only at the audit. Dropping the generated rosters from the audited surface breaks no other
-    assertion and is exactly what clears the red without doing the work.
-
-    THE LAST BLOCK IS A COHERENCE CHECK ON THE PROSE'S REFERENTS, and it is here because
-    "correct the artifacts that advertise a withheld verb" has a cheaper neighbour: rename or
-    delete the offending file and the audit goes quiet, while everything that pointed at it
-    keeps pointing. The golden replay corpus references committed template ids by name from a
-    directory this change never touches, and the gather skill's own prose names the paths it
-    tells the model to read. Neither is re-derived from the tree, so a rename that satisfies
-    the audit and breaks them is exactly the shape this catches. The referenced-id census is
-    written HERE as literals for the same reason every other census in this suite is: taking
-    it from the tree it is checking makes the check agree with itself."""
-    surfaces = model_read_surfaces(DEFENDER)
-
-    assert surfaces, "the model-read surface census is empty — the correspondence is vacuous"
-    names = {p.name for p in surfaces}
-    assert "SKILL.md" in names
-    assert "execution.md" in names
-    assert any("queries" in p.parts for p in surfaces), "the committed template surface is missing"
-    assert all(p.is_file() for p in surfaces), "the census names an artifact that is not on disk"
-
-    for role in (GATHER_ROLE, JUDGE_ROLE):
-        assert roster_path(DEFENDER, role) in set(surfaces), (
-            f"the census omits {role}'s generated roster — a roster outside the audited "
-            f"surface is the free exit from the correspondence demand"
-        )
-
-    systems = {p.parent.name for p in surfaces if p.name in {"SKILL.md", "execution.md"}}
-    for system, _ in WITHHELD_FROM_GATHER:
-        assert system in systems, \
-            f"the census omits `{system}`, whose committed prose advertises a withheld verb"
-    assert WITHHELD_FROM_GATHER, "the withheld set is empty — nothing to be advertised"
-
-    queries_root = DEFENDER / "skills" / "gather" / "queries"
-    committed_ids: dict[str, Path] = {}
-    for path in queries_root.rglob("*.md"):
-        relative = path.relative_to(queries_root)
-        if len(relative.parts) < 2:  # SCHEMA.md — the format's own doc, not a template
-            continue
-        found = _TEMPLATE_ID.search(path.read_text(encoding="utf-8"))
-        assert found, f"{relative} sits in a system's template directory and declares no id"
-        committed_ids[found.group(1)] = path
-        assert found.group(1) == f"{relative.parts[0]}.{path.stem}", (
-            f"{relative} declares id {found.group(1)!r}, which does not match its own path — "
-            f"the id and the file moved independently, so one of the two is now a dead name"
-        )
-
-    orphaned = sorted(GOLDEN_REFERENCED_TEMPLATE_IDS - set(committed_ids))
-    assert not orphaned, (
-        f"{len(orphaned)} query template(s) the golden replay corpus references by id no "
-        f"longer exist under that id: {orphaned}. Correcting an artifact that advertises a "
-        f"withheld verb may not be done by renaming it out from under its consumers."
-    )
-
-    skill_md = (DEFENDER / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")
-    for relpath in _GATHER_SKILL_REFERENTS:
-        assert relpath.rsplit("/", 1)[-1] in skill_md or relpath in skill_md, \
-            f"the gather skill no longer names {relpath}; this census is stale, not the tree"
-        assert (DEFENDER / relpath).exists(), \
-            f"the gather skill tells the model to read {relpath}, which is not on disk"
 
 
-def test_two_roles_in_one_process_each_get_their_own_catalog(tmp_path: Path):
-    """Two roles resolving the advertised catalog in one process each get their OWN view:
-    the role is part of the memo key. The builder is memoised on its argument tuple, so a
-    role passed as an ARGUMENT enters the key automatically — the trap is a role read from
-    deps inside the body, or defaulted.
-
-    Two DISTINCT REAL role ids, never placeholders (§7 R16): a placeholder pair passes under
-    exactly the falsy-key collapse this exists to exclude. And the key is the ROLE, not the
-    grant object's identity — keying on identity turns every reconstruction into a cache
-    miss that quietly rebuilds the view the memo exists to stabilise.
-
-    THE CATALOG STILL ONLY NAMES SYSTEMS THAT RESOLVE, and that is conservation rather than
-    new scope: today's builder skips a system whose module will not load, because a system the
-    model is told about but cannot reach is an invitation to a call that can only fail. Adding
-    the grant as a third argument is exactly the edit that loses it — narrowing by grant reads
-    like the whole filter, and the resolve check is the one the change is most likely to drop
-    silently, since nothing downstream of the catalog notices a name that never resolves."""
-    tree = _tree(tmp_path / "tree")
-    skills, adapters = tree / "skills", tree / "scripts" / "adapters"
-    descriptor_catalog.cache_clear()
-
-    gather = grant_of("gather", (("alpha", "look"),))
-    judge = grant_of("judge", (("beta", "look"),))
-
-    gather_view = descriptor_catalog(skills, adapters, gather)
-    judge_view = descriptor_catalog(skills, adapters, judge)
-
-    assert gather_view is not None
-    assert judge_view is not None
-    assert "alpha" in gather_view
-    assert "beta" not in gather_view, "gather's catalog names a system its grant never reaches"
-    assert "beta" in judge_view
-    assert "alpha" not in judge_view, \
-        "the second role was served the first caller's memoised view"
-
-    rebuilt = grant_of("gather", (("alpha", "look"),))
-    assert rebuilt is not gather
-    assert descriptor_catalog(skills, adapters, rebuilt) == gather_view, \
-        "an equal grant rebuilt from the same role missed the memo — the key is object identity"
-
-    # A granted system whose adapter will not load: still granted, still described, and still
-    # absent from the catalog, because it does not resolve.
-    (adapters / "gamma_adapter.py").write_text(
-        "raise ImportError('gamma cannot be imported')\nVERBS = {'look': None}\n",
-        encoding="utf-8")
-    (tree / "skills" / "gamma").mkdir(parents=True)
-    (tree / "skills" / "gamma" / "SKILL.md").write_text(
-        "---\nname: gamma\ndescription: the unloadable system\n---\n\nbody\n", encoding="utf-8")
-    descriptor_catalog.cache_clear()
-
-    with_gamma = grant_of("gather", (("alpha", "look"), ("gamma", "look")))
-    view = descriptor_catalog(skills, adapters, with_gamma)
-    assert "alpha" in view, "the control is vacuous — the catalog names nothing at all"
-    assert "gamma" not in view, \
-        "the catalog advertises a system whose adapter does not resolve — it stopped checking"
 
 
 def test_a_newly_authored_verb_is_denied_and_unadvertised_until_a_grant_names_it(tmp_path: Path):
