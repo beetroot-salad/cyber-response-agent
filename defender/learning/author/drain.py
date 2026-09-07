@@ -131,6 +131,14 @@ class DrainOutcome:
     committed: list[dict]
     held: dict[str, list[dict]]
     consumed: dict[str, list[dict]]
+    #: The PRE-AUTHOR gate's holds, as its own field rather than a key in `held` (#881/O3).
+    #: `held` is the AUTHOR_RESULT buckets, keyed by bucket name — rows the agent returned a
+    #: verdict on. A gate hold never reached the agent, so folding it in there would report a
+    #: row the forward check never saw as a forward-check verdict. These are also the holds
+    #: that are PERMANENT: the bucket holds are one agent's opinion of one batch, while a gate
+    #: hold waits on a fact with no writer, so the operator's report needs them most and had
+    #: them not at all.
+    gate_held: list[dict]
 
 
 def retire(
@@ -400,7 +408,7 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
         cfg.post_rotate(
             DrainOutcome(
                 batch_id=batch_id, commit_sha=commit_sha, committed=committed,
-                held=bucket_held, consumed=bucket_consumed,
+                held=bucket_held, consumed=bucket_consumed, gate_held=held,
             ),
             cfg,
         )

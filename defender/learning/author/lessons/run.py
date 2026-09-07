@@ -231,17 +231,33 @@ def commit_lessons(message: str, cfg: AuthorConfig) -> str | None:
 
 
 def write_held_report(
-    cfg: AuthorConfig, *, batch_id: str, held_forward_bad: list[dict], skipped: list[dict]
+    cfg: AuthorConfig,
+    *,
+    batch_id: str,
+    held_forward_bad: list[dict],
+    skipped: list[dict],
+    gate_held: list[dict],
 ) -> None:
-    if not held_forward_bad and not skipped:
+    """@owns gate_held_ids — the operator's one written trace of a pre-author gate hold.
+
+    THREE REASONS UNDER THREE LABELS, never merged: a `forward_bad` hold is the forward
+    check's verdict on a lesson the agent wrote, a skip is terminal, and a `gate_held` row
+    never reached the agent at all and will be held again on every tick until a human moves
+    it (#881/O3). An operator reading one label for another reads the wrong recovery.
+
+    Nothing is written when the tick held and skipped nothing: a report that gains a line per
+    tick names nothing."""
+    if not held_forward_bad and not skipped and not gate_held:
         return
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     line = (
         f"{now_iso()} batch={batch_id} "
         f"forward_bad={len(held_forward_bad)} "
         f"skipped={len(skipped)} "
+        f"gate_held={len(gate_held)} "
         f"forward_bad_ids={[h.get('finding_id') for h in held_forward_bad]} "
-        f"skipped_ids={[s.get('finding_id') for s in skipped]}\n"
+        f"skipped_ids={[s.get('finding_id') for s in skipped]} "
+        f"gate_held_ids={[g.get('finding_id') for g in gate_held]}\n"
     )
     with cfg.held_report.open("a", encoding="utf-8") as fh:
         fh.write(line)
@@ -261,12 +277,17 @@ def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
     UNCONDITIONAL: the rows a tick held or skipped are the same rows whether or not other
     rows committed, and the operator's one written trace of a `forward_bad` verdict must
     not depend on how the tick's other rows went — least of all in a MIXED batch, the shape
-    a forward-check hold is most interesting in."""
+    a forward-check hold is most interesting in.
+
+    `outcome.gate_held` is the PRE-AUTHOR gate's own list, read off its own field rather
+    than out of `outcome.held` — which carries the AUTHOR_RESULT buckets, i.e. rows the
+    agent returned a verdict on. A gate hold never reached the agent (#881/O3)."""
     write_held_report(
         cfg,
         batch_id=outcome.batch_id,
         held_forward_bad=outcome.held.get("held_forward_bad", []),
         skipped=outcome.consumed.get("consumed_skip", []),
+        gate_held=outcome.gate_held,
     )
 
 
