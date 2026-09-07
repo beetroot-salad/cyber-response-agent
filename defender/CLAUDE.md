@@ -182,6 +182,7 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | One home for a helper, not the same `def` in two or more modules (jscpd's token-clone gate is structurally blind to 1–5 line copies) | `# lint-dup: ok` |
 | A render list and a key set spelled as two values (see below) | `# lint-keyset: ok` |
 | A value's SOLE PRODUCER declared as `@owns <field>` in its docstring, and only one function claiming it — the two-derivations-of-one-quantity class jscpd cannot see (#923) | `# lint-owns: ok` |
+| An AST check over shipped source resolving a name through `scripts/lint/_astlib.py`, not by matching the spelling — an alias, the attribute form or a local shadow each read right and mean something else | `# lint-ast-resolve: ok` |
 | A mixed collection classified exhaustively, with the residue reported (see below) | `# lint-selection: ok` |
 | Every writer of `investigation.md` / `report.md` to meet their schema (see below) | `# lint-artifact-gate: ok` |
 

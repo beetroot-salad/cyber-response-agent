@@ -1,6 +1,21 @@
 """Shared AST resolution for the lint gates — answer "where does this call COME FROM",
 not "how was it SPELLED".
 
+THIS MODULE OWNS THAT QUESTION, for gates and suites alike, and the ownership is enforced:
+`lint_hand_rolled_name_resolution.py` fails a module that parses shipped source, decides what
+a name refers to by matching the spelling, and never reaches here. Reach it from a gate by bare
+name (`from _astlib import callee`) and from a test through `tests/_by_path.import_lint_lib`.
+
+The declaration is here rather than as an `@owns` tag because that tag names a FIELD — a value
+with a sole producer — and this is a sole implementation of a DERIVATION. The rule is the same
+one (`lint_unowned_field.py`'s docstring states it: two pieces of code deriving one quantity by
+different means is this repo's recurring bug), and the cost of re-deriving it has now been paid
+four times: three lint gates that each went blind to an alias in a different way (#602, #594,
+below), and then #1008, where a test suite re-derived name resolution three times in three
+rounds of review and shipped a live policy hole on each. If you are about to write
+`node.func.id == "..."`, `alias.asname`, or a walk over `ast.ImportFrom` to decide a binding,
+that is this module's job — `callee()` and `origin()` are the two entry points.
+
 Three gates used to identify a banned call by its spelled dotted name:
 ``_receiver_root(call) == "re"`` (frontmatter), ``call.func.value.id == "json"``
 (jsonl), a ``subprocess.`` prefix and an opener-root skip-list (text-io). Each asked

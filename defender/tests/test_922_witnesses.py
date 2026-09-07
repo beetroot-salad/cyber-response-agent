@@ -369,7 +369,7 @@ def test_922_the_registrys_deny_all_roles_really_grant_nothing():
         assert not defn.verb_grant.entries, (
             f"{role.name}'s definition carries verb-grant entries with no verb-bearing bit")
     # The positive control: the iterator DOES report lanes when a role holds them, so the empty
-    # tuple above is a fact about the questioner and not about a broken iterator.
+    # tuples above are a fact about the swept deny-all roles and not about a broken iterator.
     assert tuple(effective_tools_for(AGENTS[AgentRole.MAIN])), (
         "positive control: ToolSet.__iter__ reports nothing even for MAIN")
 

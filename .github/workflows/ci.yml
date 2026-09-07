@@ -724,6 +724,16 @@ jobs:
       - name: Unguarded-verb-dispatch gate (fault seam encloses the dispatch — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unguarded_verb_dispatch.py
 
+      # An AST check that decides WHICH function or class a piece of shipped source refers to
+      # by matching the SPELLING, in a module that never reaches `scripts/lint/_astlib.py` —
+      # the declared owner of that question. An alias, the attribute form, or a function-local
+      # import shadowing an honest one each make the name read right and the object be another
+      # one. Three gates went blind to that in three different ways (#602/#594) and #1008's
+      # suite re-derived the same resolution three times in three review rounds, shipping a
+      # live policy hole on each. Baseline holds today's pre-existing sites, each annotated.
+      - name: Hand-rolled AST name resolution (ask _astlib — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_hand_rolled_name_resolution.py
+
       # The spec_graph checkers (lint/gate/binds/claims) ran only INSIDE write-tests, so a
       # graph merged with its findings intact — the mechanical no evaporated exactly when it
       # became durable. #774 shipped 24 claim-instrument findings, one of them the claim
