@@ -153,6 +153,13 @@ def _curator(env):
 def _all_policies(env) -> dict[str, permission.AgentPolicy]:
     """Every agent's compiled policy, through each role's REAL seam. The audit demands (a2/a4/
     b3/b8/g1) sweep this."""
+    # From `defender.agents`, the same source every other row above is imported from — so this
+    # row also witnesses that the registry module imports the definition (#1008 M4). Imported
+    # HERE rather than at module scope because it was written before the definition existed,
+    # and a missing name in the module-level import block fails COLLECTION, hiding every other
+    # test in this file behind one error.
+    from defender.agents import JUDGE_DEF
+
     return {
         "main": env.main,
         "gather": env.gather,
@@ -170,6 +177,11 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
         # compiled policy of its exists whether or not this dict looks at it. Its expected
         # shape is the empty one — the whole posture of the role is that it grants nothing.
         "questioner": compile_policy_for(QUESTIONER_DEF, run_dir=env.run, defender_dir=env.dfn),
+        # #1008's family judge, the second deny-all role and here for the same reason again.
+        # It has its OWN key rather than the questioner's (one deny-all key per package), so
+        # its policy — and above all its deny_reason, which g1 sweeps as prompt surface — is a
+        # second compiled object the audit would otherwise never look at.
+        "judge": compile_policy_for(JUDGE_DEF, run_dir=env.run, defender_dir=env.dfn),
     }
 
 
@@ -394,15 +406,17 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     #691). It is the one denylist-free lane, so an untabled (=ungated) program there is the worst
     place for the fail-open to hide."""
     pols = _all_policies(env)
-    # 10: #797 took it to 8 by retiring the review's three roles (CHALLENGER,
-    # COHERENCE_CHECKER, PROJECTION) with the stages that ran under them; #796 added three of
-    # its own (DISCRIMINATION, SUPPORT, COMPOSER); and DISCRIMINATION was then retired for
-    # producing nothing the composer could route, leaving two. SUPPORT is claimed by two
-    # calls, so roles and calls have not matched here since #796. This counts registered
-    # roles, so a deliberately added or retired role moves it; what the test checks is the
-    # table property below. #947 added the eleventh, QUESTIONER — one more deny-all role, and
-    # (like SUPPORT) one claimed by more calls than it has keys.
-    assert len(AGENTS) == 8
+    # 9, and the number has moved five times: #797 retired the review's three roles
+    # (CHALLENGER, COHERENCE_CHECKER, PROJECTION) with the stages that ran under them; #796
+    # added three of its own (DISCRIMINATION, SUPPORT, COMPOSER); DISCRIMINATION was then
+    # retired for producing nothing the composer could route; #947 added QUESTIONER; #922
+    # retired ACTOR, ORACLE and JUDGE with the pipeline they were the only callers of; and
+    # #1008 re-added JUDGE, bound to the FAMILY judge, which until then ran under the
+    # questioner's definition. SUPPORT is claimed by two calls and QUESTIONER by four, so
+    # roles and calls have not matched here since #796. This counts registered roles, so a
+    # deliberately added or retired role moves it; what the test checks is the table property
+    # below.
+    assert len(AGENTS) == 9
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
     assert "corpus_author" in pols
     for name, pol in pols.items():
