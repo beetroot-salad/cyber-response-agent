@@ -1,5 +1,10 @@
 # Learning-loop actor — design draft (2026-05-08)
 
+> **Status: historical — the stage this designs is deleted (#922,
+> `docs/learning-loop-cutover.md`), along with every artifact it names.** Kept
+> for the reasoning: the visibility question, the redaction argument and the A/B
+> that closed it, which the branched episode's own blinding rules inherit.
+
 Companion to `defender/docs/learning-loop.md` and
 `defender/docs/archive/learning-loop-experiments-2026-05-08.md`. Captures the
 actor-side decisions taken during design discussion and flags the one

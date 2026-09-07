@@ -20,7 +20,7 @@ writable scratch space.
   review_{role}_trace.jsonl  # one per review role: support, ablation, composer
   executed_queries.jsonl  # the QUERIES table — one row per executed query (FK lead_id)
   tool_trace.jsonl        # stream-json events captured by run.py
-  transcript.html         # judge view (run.py post-step)
+  transcript.html         # the run's alert, report card and model transcript (run.py post-step)
   runtime.html            # run inspection — phases, metrics, § Review gate
   gather_raw/
     {lead_id}.lead.json   # the LEADS table — dispatch goal + dimensions (record_lead.py)
@@ -47,8 +47,9 @@ writable scratch space.
 - **`report.md`** — the headline, written by `runtime/close_tool.py` and by
   nothing else (it is not in the agent's write scope). The body is
   **host-rendered from typed arguments** — no model-supplied prose reaches it,
-  because this file rides verbatim into the judge's prompt and out through the
-  ticket bridge's egress. Frontmatter is the load-bearing part: the
+  because this file rides verbatim into the judge's prompt (the family judge
+  reads each archived world's `report.md`) and out through the ticket bridge's
+  egress. Frontmatter is the load-bearing part: the
   learning-loop normalizer parses it, so a run with no frontmatter is unusable.
   `disposition` is a closed enum (`benign` | `false-positive` | `inconclusive`
   | `malicious` | `unresolved`); schema lives in `defender/SKILL.md` §REPORT.
@@ -91,8 +92,12 @@ writable scratch space.
   — see `content/runtime-loop.md`).
 - **`tool_trace.jsonl` / `transcript.html` / `runtime.html`** — written by
   `run.py` from the stream-json events; the two HTML pages are the post-run
-  inspection surface (`transcript.html` is the judge view, `runtime.html` the
-  run inspection, including § Review gate).
+  inspection surface. `transcript.html` carries the run's alert, its report card
+  and the model transcript; `runtime.html` is the run inspection, including
+  § Review gate. There is no judge view: the page that held one
+  (`visualize_judge.py`) rendered the retired pipeline's artifacts and was
+  deleted in #922, and the defender's own report card moved into
+  `transcript.html` rather than going with it.
 
 ## Two-table schema
 

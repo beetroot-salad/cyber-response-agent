@@ -1,5 +1,12 @@
 # Oracle calibration — the evaluation procedure
 
+> **Status: historical — the stage this calibrates is deleted.** #791 took the
+> oracle out of the loop and #922 deleted it, along with this suite's two drivers
+> (`docs/learning-loop-cutover.md`). The committed cases, audits and held-out
+> ledger under `evals/oracle_golden/` still read and stand as a record; a new
+> case cannot be recruited. That README carries the current state — the procedure
+> below describes how the committed cases were produced.
+
 How to measure whether the telemetry **oracle** is right, and what to do with the
 answer. Issue #693. The suite it produces lives at `defender/evals/oracle_golden/`;
 that directory's README is the **format reference** (file layout, tools, current

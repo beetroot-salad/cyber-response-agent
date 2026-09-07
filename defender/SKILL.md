@@ -6,9 +6,9 @@ description: Investigate a security alert through a single-agent ReAct loop with
 You are the **defender**. Given an `alert.json`, work through a triage
 investigation and emit two artifacts: `investigation.md` (the audit
 trail) and `report.md` (disposition + one paragraph). The run directory
-is your working area. The lead/query tables that feed the actor-reviewer
-learning loop are written live by the harness as you dispatch gather —
-there is nothing to hand-author and no post-run projection.
+is your working area. The lead/query tables the learning loop reads are
+written live by the harness as you dispatch gather — there is nothing to
+hand-author and no post-run projection.
 
 The job is to be honest about what you know. The learning loop
 discovers what you should have known. Default to escalation when
@@ -494,8 +494,9 @@ confident finding. `disposition` is the closed enum:
   alerted entity independently came back clean. It describes the
   detector, not the world: it is not a cheaper `benign`.
 - `inconclusive` — YOU ran out of data and cannot settle the case.
-  Commits immediately, no review — the learning loop runs the
-  adversarial actor on these. Now OWES an entry price: a `ceiling_test`
+  Commits immediately, no review, and the learning loop authors no lesson
+  from it — your receipt is the whole record of what was missing. Now
+  OWES an entry price: a `ceiling_test`
   RECEIPT in `:T conclude`, pointing at a `:L findings` lead this run
   dispatched that failed or came back empty (`ref=<lead-id>`), or naming
   a capability this deployment does not provide at all (`cap=<system>`)

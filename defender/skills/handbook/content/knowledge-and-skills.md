@@ -78,12 +78,17 @@ runtime agent reads** — the two ends of the feedback loop.
   before writing its `:H`/`:L` blocks.
 - **Authored by the loop.** The lessons curator (`learning/author/lessons/run.py`) folds
   queued findings into `lessons/` once `_pending` crosses the threshold (see
-  `content/learning-loop.md`). Hand-edits are fine if they match
-  `author.md`'s schema, but the corpus is meant to be loop-authored.
+  `content/learning-loop.md`). Hand-edits are fine if they match the schema in
+  `learning/author/lessons/prompt.md`, but the corpus is meant to be
+  loop-authored.
 
-There are companion corpora — `defender/lessons-actor/` and
-`defender/lessons-environment/` — that hold direction-specific material;
-`defender/scripts/lessons/lessons_*` index/retrieve over them.
+Two companion corpora — `defender/lessons-actor/` and
+`defender/lessons-environment/` — still sit in the tree, but they are **frozen
+archives**: their producers were the actor-side curators #922 deleted, nothing
+authors them and nothing reads them. Their index/retrieve CLIs went with the
+same change. They are shown as retired in the posture view
+(`learning/frontend/`) rather than deleted, so a lesson written there is still
+findable. Don't cite them as live knowledge, and don't add to them.
 
 Sources: `defender/CLAUDE.md`, `defender/SKILL.md` §Skills,
 `defender/docs/system-skill-shape.md`.

@@ -21,8 +21,8 @@ Both are first-class:
   in a run dir?", "where do lessons come from?", "why are there no
   validators?"
 - **An agent working on the defender** wants to ground its own changes —
-  confirming the lead-sequence contract before editing the projector,
-  checking what a hook actually does before touching it, finding the
+  confirming the two-table read/join contract before editing a consumer,
+  checking what a gate actually does before touching it, finding the
   canonical source for a phase.
 
 Either way the job is the same: pull the smallest slice of documentation
@@ -32,15 +32,15 @@ just need a crisp "here's the rule, here's the source file."
 ## When to use this skill
 
 - Understanding what the defender is, how it relates to `soc-agent/`, and
-  why its runtime carries almost no safety gates
+  which runtime gates it carries and why each one earned its place
 - Looking up the runtime loop (ORIENT → PLAN → GATHER → ANALYZE → REPORT)
   and the gather-dispatch discipline
 - Understanding the write-time **review gate** every confident close passes —
   why it is a gate and not a sixth phase, and what a `forced-inconclusive`
   or a `failure_kind` on a report means
-- Understanding the offline learning loop (actor → oracle → judge →
-  persist → author, with a forward-check gate at author time) and how
-  lessons feed back
+- Understanding the offline learning loop (fork a finished run → question
+  → stage → replay-review → run the family → judge → queue → curate, with a
+  forward-check gate at curation time) and how lessons feed back
 - Seeing the layout of a run dir — `investigation.md`, `report.md`,
   `executed_queries.jsonl`, `gather_raw/` — and the contracts each artifact carries
 - Understanding how skills, per-system references, and lessons compose at
@@ -68,9 +68,9 @@ Each file under `content/` is a standalone reference document.
 
 | File | Topic | Read when |
 |---|---|---|
-| `content/design.md` | What the defender is, the learning-loop-first philosophy, how it relates to `soc-agent/`, and why runtime safety gates are out of scope apart from two named exceptions | Overview question, or you need to ground a general answer about scope |
+| `content/design.md` | What the defender is, the learning-loop-first philosophy, how it relates to `soc-agent/`, and the roster of runtime gates it carries | Overview question, or you need to ground a general answer about scope |
 | `content/runtime-loop.md` | The ORIENT → PLAN → GATHER → ANALYZE → REPORT loop: what each phase writes, the gather-dispatch discipline (Haiku, Task-only, gather-raw isolation), the plumbing hooks that materialize harness contracts, and the write-time review gate on a confident close | Questions about phases, how gather is dispatched, why the main loop can't read raw payloads, what the hooks do, or why a confident close came back challenged or landed as `inconclusive` |
-| `content/learning-loop.md` | The offline pipeline: normalize → project → actor → oracle → judge → persist+queue → author (with a forward-check gate at author time). The MITRE actor menu, the forward-check gate, the `_pending` threshold, and how lessons land | Questions about how the defender learns, what the actor/oracle/judge do, why lessons are forward-checked before they land, or when the author fires |
+| `content/learning-loop.md` | The offline loop: fork a finished run → questioner → staged estate → review by replay → run the family → judge → queue → curate (with a forward-check gate at curation time). The branched episode, the forward-check gate, the `_pending` threshold, and how lessons land | Questions about how the defender learns, what the questioner and the judge do, why lessons are forward-checked before they land, or when the curator fires |
 | `content/run-artifacts.md` | Run-dir layout under `$DEFENDER_RUNS_BASE`, the contract each artifact carries, the two-table schema (leads + queries), and the `gather_raw/` by-ref payloads | Questions about what's in a run dir, where a file comes from, the two-table schema, or how to debug a run |
 | `content/knowledge-and-skills.md` | The on-disk skills (`invlang`, `gather`, per-system references, the `connect` onboarding skill), how knowledge is discovered on demand, and the `lessons/` corpus the runtime agent reads at PLAN time | Questions about how skills compose, where per-system knowledge lives, how a new system is onboarded (the `/connect` skill), or how lessons are consumed vs authored |
 | `content/invlang.md` | The dense invlang block surface (`:V`/`:E`/`:H`/`:L`/`:R`/`:T`), the enum/advisory/hypothesis-name CLI, `:H` discovery vs `??` refinement, and the authz-contract resolution shape | Questions about the blocks in `investigation.md`, the invlang CLI, or how legitimacy contracts resolve |
@@ -83,8 +83,9 @@ canonical sources each content file points back to:
 
 - Runtime loop shape and phase discipline → `defender/SKILL.md`
 - The two-table read/join surface → `defender/learning/lead_repository.py`
-- Learning-loop orchestration → `defender/learning/loop.py` (+ the paired
-  `*.md` prompts in `defender/learning/`)
+- Learning-loop orchestration → `defender/learning/branch/cli.py` (the episode)
+  and `defender/learning/loop.py` (the two authoring drains), plus the role
+  prompts beside each stage under `defender/learning/`
 - Design rationale → `defender/docs/` (notably `learning-loop.md`)
 - Architecture + run-dir contracts → `defender/CLAUDE.md`
 

@@ -17,7 +17,7 @@ The defender runs *alongside* the production plugin in `soc-agent/`. It
 shares some framings (the invlang on-disk shape, the `++/+/-/--` assessment
 vocabulary) and some tools (the SIEM/host adapters), but it has its own
 runtime loop and is **not loaded as a Claude Code plugin** — it is driven by
-`defender/run.py`, which runs the in-process PydanticAI driver (`runtime/driver.py`)
+`defender/run.py`, which runs the in-process PydanticAI driver (`runtime/driver/`)
 against `defender/SKILL.md`.
 
 ## The two loops
@@ -30,49 +30,59 @@ The defender is really two loops stacked:
    A **confident** close then passes a write-time review gate before it
    commits — not a sixth phase, a gate the investigator never occupies.
    See `content/runtime-loop.md`.
-2. **Learning loop** — the offline, self-improving pipeline that runs after
-   each investigation (unless `--no-learn`). It plays an adversarial actor
-   against the run's lead sequence, judges whether the investigation would
-   have caught the attack, forward-checks the lessons it distills, and folds
-   the confirmed ones into a `lessons/` corpus that feeds back into the runtime loop
-   at PLAN time. This is the headlining experiment. See
-   `content/learning-loop.md`.
+2. **Learning loop** — the offline, self-improving loop, and the headlining
+   experiment. It forks a finished investigation at a chosen turn and re-runs
+   it against a family of worlds that each differ by one authored fact, judges
+   which of those differences the defender's verdict actually tracked,
+   forward-checks the lessons it distills, and folds the confirmed ones into a
+   `lessons/` corpus that feeds back into the runtime loop at PLAN time. It is
+   **operator-initiated** — a finished run is a starting point someone names
+   later, never something a run feeds automatically. A run's one automatic
+   post-step is the gather-catalog curation enqueue, which `--no-learn` skips.
+   See `content/learning-loop.md`.
 
 The runtime loop generates signal; the learning loop turns that signal into
 durable lessons. The runtime agent reads those lessons next time.
 
-## Learning-loop-first philosophy
+## Learning-loop-first philosophy, and the gates that followed
 
-The defender deliberately **inverts the usual investment order.** A
-production triage agent spends most of its engineering on runtime
-reliability — hooks, validators, judge gates, state machines. The defender
-spends almost none, on purpose:
+The defender deliberately **inverted the usual investment order.** A
+production triage agent spends most of its engineering up front on runtime
+reliability — hooks, validators, semantic gates, state machines. The defender
+spent almost none, on purpose: gates were held out of scope until the learning
+loop had proven itself end-to-end on real cases, and gaps in the defender's
+runtime discipline were treated as **signal for the loop to find**, not as bugs
+to pre-empt.
 
-- Runtime reliability gates (safety hooks, report validators, semantic
-  judge gates, a phase state machine) are **out of scope** until the
-  learning loop has proven itself end-to-end on real cases.
-- "Should we add a hook / validator / safety gate to the defender runtime?"
-  → right now the answer is almost certainly **no.** That investment
-  belongs in `soc-agent/`.
-- Gaps in the defender's runtime discipline are **features of the
-  experiment, not bugs** — they are exactly the signal the learning loop
-  exists to discover and correct.
+**That blanket stance is lifted** (`defender/docs/runtime-gates.md`): the loop
+proved out, and gates were added one at a time, each with a named reason. The
+*ordering* was the principle, not the absence of gates — so "should we add a
+gate?" is now an ordinary design question. What runs today, and why:
 
-There are **two exceptions**, both narrow and both deliberate:
-
+- **The permission gate** (`runtime/permission/`) — one in-process,
+  deny-by-default gate over bash and file reads/writes, per agent. Not a
+  reliability gate: it is what makes it safe for a model to hold a shell at
+  all. See `defender/docs/runtime-gates.md`.
 - **Plumbing hooks that materialize harness contracts** — extraction shims
   that replace prompt instructions the model would otherwise have to
   remember, plus the discipline gate that forces all data-source queries
   through the gather subagent. These are not safety gates. See
   `content/runtime-loop.md` §Reliability gates.
 - **The write-time review gate** on every confident close
-  (`runtime/challenge_gate.py`). This one *is* a semantic gate of the kind
-  the stance above rules out, and it is the standing exception rather than a
-  softening of the stance: a confident disposition is the one output nothing
-  downstream re-checks in time to matter, and the learning loop's own signal
-  is only as good as the dispositions it trains on. It is scoped to the
-  close — no phase state machine, no per-write validator — and it fails
-  closed. See `content/runtime-loop.md` §The close is gated.
+  (`runtime/challenge_gate.py`) — the one semantic gate. A confident
+  disposition is the output nothing downstream re-checks in time to matter,
+  and the learning loop's own signal is only as good as the dispositions it
+  trains on. Scoped to the close, and fails closed. See
+  `content/runtime-loop.md` §The close is gated.
+- **The artifact schema** (`_artifact_schema.py`, applied by
+  `permission.decide_write`) — every write a *model* makes to
+  `investigation.md` / `report.md` has to meet the schema, which is what makes
+  "a committed investigation parses" true. The learning loop cannot read an
+  artifact that does not parse, so this is the one gate the loop bought
+  for itself.
+
+There is still **no phase state machine**: the loop's phases are prompt
+discipline, not enforced transitions.
 
 ## Relationship to soc-agent
 
@@ -81,8 +91,8 @@ There are **two exceptions**, both narrow and both deliberate:
 | Status | Production plugin (v3) | Experimental PoC |
 | Loaded as | Claude Code plugin | in-process PydanticAI driver via `run.py` |
 | Loop | CONTEXTUALIZE → [SCREEN] → PREDICT → GATHER → ANALYZE → REPORT | ORIENT → PLAN → GATHER → ANALYZE → REPORT, then the review gate on a confident close |
-| Safety | Three-layer report validation, state machine, invlang validator, budget enforcer | Learning-loop-first, so no phase state machine and no per-write validator — with one scoped exception: the fail-closed review gate on every confident close |
-| Learning | Post-mortem leads pipeline (slice-1) | The headlining experiment — full actor/judge/oracle loop |
+| Safety | Three-layer report validation, state machine, invlang validator, budget enforcer | Gates added one at a time after the loop proved out: the deny-by-default permission gate, the fail-closed review gate on every confident close, and the artifact schema on every model write. Still no phase state machine |
+| Learning | Post-mortem leads pipeline (slice-1) | The headlining experiment — the branched-episode loop (questioner → family → judge → lessons) |
 | Archetypes / precedents / permissions / act-mode | Yes | No |
 
 If a question is about archetype catalogs, precedent snapshots,
@@ -112,9 +122,10 @@ Those live in `soc-agent/`.
 ## Where the rationale lives
 
 This handbook describes how the defender works *now*. For *why* it's shaped
-this way — the RL / evolutionary-algorithms framing the learning loop
-borrows from, the actor-visibility A/B, the lessons-schema iterations —
-read `defender/docs/`, starting with `docs/learning-loop.md`. When a doc and
-the code disagree, the code wins; the docs are design context, not spec.
+this way — the RL / ablation-study framing the learning loop borrows from,
+the lessons-schema iterations, and (in `docs/learning-loop-cutover.md`) the
+four-role pipeline that was deleted in #922 and why — read `defender/docs/`,
+starting with `docs/learning-loop.md`. When a doc and the code disagree, the
+code wins; the docs are design context, not spec.
 
 Sources: `defender/CLAUDE.md`, `defender/SKILL.md`, `defender/docs/learning-loop.md`.

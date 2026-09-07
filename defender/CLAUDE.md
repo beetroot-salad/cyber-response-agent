@@ -4,13 +4,13 @@
 
 `defender/` is the alert-triage agent: a runtime loop that investigates one alert end-to-end (`run.py`, driven by the in-process PydanticAI driver — not a Claude Code plugin), plus an offline **learning loop** under `defender/learning/` where most iteration happens. It runs against the `playground-v2/` environment; per-system knowledge lives under `defender/skills/`. Investigations record reasoning in the invlang on-disk format (`++/+/-/--` vocabulary; `skills/invlang/`).
 
-**`defender/SKILL.md` is the runtime spec.** Design rationale lives in `defender/docs/` — start with `learning-loop.md` before changing the loop shape, the actor/judge/oracle prompts, or the lessons mechanism. When a doc and the code disagree, **the code wins**.
+**`defender/SKILL.md` is the runtime spec.** Design rationale lives in `defender/docs/` — start with `learning-loop.md` before changing the loop shape, the questioner/judge/curator prompts, or the lessons mechanism. `learning-loop-cutover.md` records the four-role pipeline that came before it and why it went. When a doc and the code disagree, **the code wins**.
 
 ## Vocabulary — what the shorthand refers to
 
 | Term | Meaning / home |
 |---|---|
-| **the runtime** / **the driver** / **the main loop** | `runtime/driver.py` — the main-agent loop (ORIENT → PLAN → GATHER → ANALYZE → REPORT), tools in `runtime/tools.py` |
+| **the runtime** / **the driver** / **the main loop** | `runtime/driver/` — the main-agent loop (ORIENT → PLAN → GATHER → ANALYZE → REPORT), tools in `runtime/tools.py` |
 | **the gate** / **permissions** | `runtime/permission/` — the single in-process deny-by-default gate (bash + file reads/writes). Design notes: `docs/runtime-gates.md`. Audit CLI: `scripts/policy_cli.py` (`defender-policy show\|explain`, operator-only) |
 | **the review gate** / **the reviewer** | `runtime/challenge_gate.py` (harness + routing) + `runtime/review/` (projections, role prompts, reply contract), dispatched from `runtime/close_tool.py`. **Not a loop phase** — a write-time gate every *confident* close passes before it commits; `inconclusive` and the host's own `unresolved` both bypass it. Two blind lenses (`support`, `ablation`) + a `composer`, roster in `REVIEW_ROLES`. Fails closed |
 | **gather** | the per-lead data-access subagent — `skills/gather/` (prompt + query templates), dispatched from `runtime/tools.py`, calls the typed `query` tool (`runtime/query_tool.py`) |
@@ -40,7 +40,7 @@ defender/
   scripts/          # adapters/, gather_tools/, visualize/, lessons/, case_history/, policy_cli.py, pricing.py, workspace_map.py
   learning/         # offline loop: loop.py (the two authoring stages), lead_repository.py (THE read/join surface),
                     #   _prompt.py + _pydantic_stage.py (the shared stage-assembly pair, used by every engine),
-                    #   branch/, judge/, author/, core/, leads/, tickets/, ops/, frontend/
+                    #   branch/, judge/, author/, core/, leads/, ops/, frontend/
                     #   branch/ forks a finished run at turn N and runs a family of worlds from it:
                     #   ledger.py records every response the estate served with the decision behind it;
                     #   estate/ is what a sibling world queries through. judge/ grades the archived episode.

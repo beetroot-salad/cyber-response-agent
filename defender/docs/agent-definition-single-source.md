@@ -1,5 +1,10 @@
 # The agent definition: one source of truth for an agent's tools + permissions
 
+> **Roster note (post-#922).** The seam is live; the roster below is not.
+> `judge`, `actor` and `oracle` left `AgentRole` with the pipeline that was their
+> only caller. Today's eight are in `runtime/agent_role.py`; the tool-free-
+> predictor case now applies to `verifier` and `questioner`.
+
 **Status:** design — implemented (step two: #545 / PR #546; step three: #551 / PR #555,
 which made `bind` the sole policy seam and retired the parallel factory path — see
 [[agent-definition-consolidation-step-three.md]]). **Decision:** collapse the two

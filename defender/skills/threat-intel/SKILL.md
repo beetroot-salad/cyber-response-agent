@@ -9,7 +9,7 @@ container). It mirrors VT/OTX shape: `/lookup/{value}` always
 returns a record, even on miss.
 
 This file is split by audience. **Visibility surface** is read by
-the defender, the author skill, and the actor-reviewer judge.
+the defender and the lead-author skill.
 **Execution** is read only by code paths that dispatch queries.
 
 ## Visibility surface

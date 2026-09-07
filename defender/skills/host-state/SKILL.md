@@ -14,7 +14,7 @@ cross-time-window observations from different captures. Read
 always the moment you asked: trust the field over the wall clock.
 
 This file is split by audience. **Visibility surface** is read by
-the defender, the author skill, and the actor-reviewer judge.
+the defender and the lead-author skill.
 **Execution** is read only by code paths that dispatch queries.
 
 ## Visibility surface

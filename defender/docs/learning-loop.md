@@ -2,579 +2,360 @@
 
 ## Status
 
-**Implementation cache; code wins on conflict.** The loop described
-here exists under `defender/learning/` as orchestrator (`loop.py`) →
-actor (`actor.md`) → telemetry oracle (`footprint.md` → `_oracle_router.py`) → judge
-(`judge.md`) → author (`author.md`/`author.py`) with a per-lesson
-forward-check gate (`verify_forward.{md,py}`) → lessons corpus
-(`defender/lessons/*.md`). This doc is not the source of truth, but it
-should track the implementation closely enough that a reader can
-orient without reopening every file.
+**Implementation cache; code wins on conflict.** The loop exists under
+`defender/learning/` as branched episode (`branch/cli.py`) → questioner
+(`branch/questioner/`) → staged estate (`branch/estate/`) → review by replay
+(`branch/review.py`) → the family as `run.py --resume` processes → judge
+(`judge/`) → findings queue → lessons curator (`author/lessons/`) with a
+per-lesson forward-check (`author/verify_forward/`) → `defender/lessons/*.md`.
 
-This document describes an **offline learning mechanism** that mines completed
-investigations for reusable lessons and writes them into
-`defender/lessons/*.md`. The current implementation commits lesson edits
-locally; PR wrapping and CI review remain design/deferred work. The loop is
-not a real-time guard.
+**Rewritten for #922.** This doc used to describe a four-role pipeline — two
+actors, a telemetry oracle, a judge — that invented the material it learned
+from. `docs/learning-loop-cutover.md` is the account of the swap;
+`docs/archive/learning-loop-experiments-2026-05-08.md` keeps the empirical
+findings from the old shape.
 
-The live investigation path is unchanged: a single investigator. A same-context
-self-evaluation loop is described below as a future enhancement, not as a
-current runtime stage.
-
-The previous version of this doc bundled live review and cross-case learning
-together and proposed a heavyweight schema (multi-axis subjective rewards,
-canonical taxonomy, anti-scope fields, addendum library, retrieval algorithm).
-That scope was wrong for where we are. This version replaces it with a much
-lighter artifact pipeline and a checked-in lessons corpus.
-
-## Inspirations
-
-The defender + learning-loop architecture is closer in spirit to
-classical ML training regimes than to "an LLM agent with a better
-prompt." It helps to read the components through that lens — both
-because the analogies suggest concrete techniques to import, and
-because they flag known failure modes early.
-
-**Reinforcement learning.** The runtime defender is the *policy*. Its
-trajectory through ORIENT → PLAN → GATHER → ANALYZE → REPORT is an
-*episode* — one the write-time review gate can extend (a challenged close
-buys further turns) or whose terminal action it can override (a confident
-disposition forced to `inconclusive`). The judge therefore grades the
-*committed* disposition, which is not always the one the policy chose.
-The judge's outcome (`caught | survived | undecidable | ...`)
-is a sparse, per-episode *reward signal* — and like all sparse rewards,
-it's hard to credit-assign back to the specific decision that earned it.
-The lessons corpus is a low-bandwidth *policy update*: instead of
-gradient steps on weights, we get curated text injected at PLAN time.
-Things to borrow from RL practice:
-
-- *Reward shaping over outcome-only rewards.* The judge's findings are
-  intermediate signal — "this lead set missed authorization
-  context" — that we credit-assign by hand into a lesson. Without it,
-  we'd be trying to learn from `caught/survived` alone, which is
-  exactly the regime RL practitioners avoid when they can.
-- *Off-policy replay.* The actor + telemetry oracle let us evaluate
-  counterfactuals against a completed run without re-executing the
-  defender. Each real run amortizes into many synthetic adversarial
-  evaluations.
-- *Distribution shift.* Lessons authored from yesterday's cases bias
-  the policy on today's cases. The same drift pathology that haunts
-  offline-RL haunts us — keep an eye on whether lessons that helped
-  on past fixtures hurt on new ones, and prefer a held-out eval set
-  the curator has never seen.
-- *Reward hacking.* If the judge's outcome rubric has a loophole, the
-  defender will find it. The forward-check gate
-  (`verify_forward.{md,py}`) is the structural answer for promotion:
-  a candidate lesson has to keep the source case on its ground-truth
-  disposition before it is committed. The judge's prompt is part of
-  the reward function and should be audited as such.
-
-**Evolutionary / population-based methods.** The lessons corpus is a
-*population* of candidate behaviors. Authoring a new lesson is
-*mutation*; the curator's merge / supersede / skip decisions are
-*selection*. The defender at runtime samples from this population
-(reads the lesson bodies whose descriptions look relevant). Things
-to borrow:
-
-- *Diversity matters.* A monoculture of similar lessons covers one
-  failure mode well and misses the rest. The curator's job is partly
-  diversity preservation — supersede when a new lesson genuinely
-  obsoletes an old one, otherwise keep both.
-- *Niching by relevance description.* Lessons compete for PLAN-time
-  attention. The frontmatter `description` is the niche tag — the
-  defender only reads the body if the description fires on the
-  current alert shape. This makes the corpus scale sublinearly with
-  size, but only if descriptions are crisp.
-- *Fitness ≠ proxy fitness.* The proxy fitness we optimize is "judge
-  outcome on synthetic adversarial cases." True fitness is "triage
-  quality on real production alerts." Periodically sanity-check that
-  the proxy still tracks.
-
-**Self-play and curriculum.** The actor is adversarial against the
-defender's *prior* runs. As the defender improves (lessons accumulate),
-the actor's job gets harder — the surviving stories have to slip
-through tighter lead sets. This is a form of *autocurriculum*. The
-risk: if the actor gets stuck producing the same shape of attack, the
-defender overfits to that shape. Watch for actor-story diversity.
-
-**Where the analogy breaks.** We are not running gradient descent.
-There is no continuous parameter space, no smooth loss surface, no
-guarantee that "more lessons" monotonically improves anything. The
-update mechanism is text edits curated by an LLM, with all the
-discontinuity that implies. Expect non-monotonic improvement and
-budget for regression-detection accordingly.
-
-## References
-
-- Sutton & Barto, *Reinforcement Learning: An Introduction* — for the
-  policy / reward / credit-assignment vocabulary used above.
-- Lehman & Stanley, *Abandoning Objectives: Evolution Through the
-  Search for Novelty Alone* — the diversity-preservation argument.
-- Silver et al., self-play in AlphaGo / AlphaZero — actor-vs-prior-defender
-  is a coarse cousin of self-play.
-- Sculley et al., *Hidden Technical Debt in Machine Learning Systems* —
-  for the failure modes of feedback loops in production ML; many
-  apply once a lesson corpus starts feeding back into the runtime.
+The loop is offline and operator-initiated. Each curator commits from its own
+git worktree off `origin/main` and opens one PR per batch.
 
 ## Purpose
 
-Improve investigation **correctness and efficiency** by sampling a
-counterfactual adversarial actor against completed cases and converting
-judge findings into compact pitfall lessons.
+Ask of a finished real investigation the question reading it cannot answer:
+**was the verdict driven by the evidence, or would it have survived evidence
+pointing somewhere else?**
 
-The implemented mode is **gray-box adversarial-defender**: could a competent
-adversary have survived this exact lead sequence, and what defender pitfall did
-that encounter expose? Benign-defender review and live self-evaluation remain
-future enhancements.
+The mechanism is a **counterfactual re-run, not a counterfactual story.** The
+investigation is stopped at a chosen turn and restarted several times — one
+sibling against the world as it was, the others against worlds differing by one
+authored fact. Every sibling shares the same history, alert and partial
+reasoning up to the branch point, and diverges only in what the evidence says.
+Comparing their conclusions localizes the failure: a defender reaching the same
+verdict in a world where the deciding fact is *different* was not reading that
+fact, and the comparison says where it lost it — never queried the system
+holding it, queried at the wrong scope, received it and reasoned past it, or
+established it and did not let it move the verdict.
+
+That last distinction is why the loop was rebuilt. The old pipeline graded
+against telemetry a model had imagined, so a finding could never be stronger
+than the imagination behind it.
+
+## Inspirations
+
+**Reinforcement learning.** The runtime defender is the *policy*; its ORIENT →
+PLAN → GATHER → ANALYZE → REPORT trajectory is an *episode* the review gate can
+extend or whose terminal action it can override — so the judge grades the
+*committed* disposition, not always the one the policy chose. The judge's
+outcome is a sparse per-episode *reward*, hard to credit-assign. The lessons
+corpus is a low-bandwidth *policy update*: curated text at PLAN time instead of
+gradient steps. What to borrow:
+
+- *Reward shaping.* The judge's findings are intermediate signal — "this lead
+  set never reached the system holding the deciding fact" — credit-assigned by
+  hand into a lesson. Without it we learn from `caught/survived` alone.
+- *Counterfactual credit assignment, not off-policy replay.* The old loop's
+  claim here was off-policy evaluation: score a counterfactual without
+  re-executing. That is exactly the claim the oracle could not support, because
+  the counterfactual's observations were invented. The branched episode gives up
+  the cheapness, **re-executes**, and buys an intervention whose effect is
+  attributable — one fact changed, and the estate ledger records every answer
+  served under it.
+- *Distribution shift.* Lessons from yesterday's cases bias today's. Prefer a
+  held-out set the curator has never seen (`evals/held_out.py`).
+- *Reward hacking.* The forward-check is the structural answer for promotion: a
+  lesson must keep its source case on its ground-truth disposition. The judge's
+  prompt is part of the reward function; audit it as such.
+
+**Ablation studies** — the sharper analogy. A family is a control plus one-axis
+interventions, measuring the defender's *sensitivity* to each axis. One axis per
+arm, or a changed answer says nothing about either. A control that is genuinely
+the same, or "same verdict in both worlds" cannot be told from "the branch
+perturbed the run". And a refused arm invalidates the *experiment*, not just the
+arm — a family with a broken arm is a comparison over an unknown baseline.
+
+**What the cutover gave up: self-play.** The old actor was adversarial against
+the defender's prior runs, making the loop a one-sided autocurriculum. The
+branched episode has no adversary; its difficulty comes from the case
+distribution. A deliberate trade — an autocurriculum over invented material
+advances against a proxy nobody can audit.
+
+**Where the analogy breaks.** No gradient descent, no continuous parameter
+space, no guarantee that "more lessons" improves anything. Expect non-monotonic
+improvement and budget for regression detection.
+
+References: Sutton & Barto (policy/reward vocabulary); Pearl, *Causality* (the
+intervention-vs-observation distinction the family turns on — a `do()` on one
+fact, not a story about it); Lehman & Stanley (diversity preservation); Sculley
+et al. (feedback-loop debt, which starts accruing once lessons feed back).
 
 ## Design Principles
 
-1. **Offline only.** No live latency cost. No production gating.
-2. **One encounter outcome.** The judge emits one outcome keyword
-   (`caught | survived | undecidable | incoherent | skip-passthrough`) plus
-   a small set of grounded findings. There is no additive scoring model.
-3. **Concrete observables only.** A lesson must name a specific field,
-   artifact, system-of-record query, or analysis discipline failure. Abstract
-   advice is rejected by the author or forward-check gate.
-4. **Git history as the audit trail.** The author edits only
-   `defender/lessons/*.md`, commits those edits, and rotates the queue
-   atomically. PR review can wrap that flow later, but it is not in the
-   current scripts.
-5. **No addendum library, no index, no service.** The lesson corpus is flat
-   markdown, and retrieval is grep over frontmatter — there is no index to
-   build and nothing to keep in sync. Two pushes read it: the PLAN-time
-   signature block (`runtime/orient.py`), and — since #919 — the FRONTIER
-   block on the write that moved the document's open set
-   (`scripts/lessons/lessons_frontier.py`, keyed on the optional
-   `frontier_nodes` / `frontier_edges` selectors). Both walk the same flat
-   corpus on demand.
+1. **Offline only.** A finished run is not fed anywhere automatically; it is a
+   starting point someone names later.
+2. **Learn from evidence a run actually received.** Every observation the judge
+   reads was served to a real `run.py` process and recorded in that world's
+   ledger. Nothing in the loop authors telemetry.
+3. **One outcome per episode, one bucket per world.** No additive scoring.
+4. **Concrete observables only.** A lesson names a field, artifact, query, or
+   analysis-discipline failure. Abstract advice is rejected by the curator or
+   the forward-check.
+5. **Git history as the audit trail.** The loop is the sole committer; spawned
+   agents run no git.
+6. **No index, no service.** Flat markdown, grep over frontmatter. Two pushes
+   read it: the PLAN-time signature block (`runtime/orient.py`) and the #919
+   frontier block on a write that moved the open set
+   (`scripts/lessons/lessons_frontier.py`).
 
 ## Loop Shape
 
 ```text
-Completed run dir
-(alert.json + investigation.md + report.md + lead_sequence.yaml + gather_raw/)
+Completed run dir (alert.json + investigation.md + report.md
+                   + executed_queries.jsonl + gather_raw/)
         │
         ▼
-defender/learning/loop.py <run_dir>
+defender/learning/branch/cli.py <run_dir> <branch_message_id>
+        ├── 1. preflight        — everything that can refuse before anything is spent
+        ├── 2. questioner       — family.yaml: a control world + one-axis counterfactuals
+        ├── 3. staging          — each world's corpus into its own namespace
+        ├── 4. review by replay — any rejection ends the EPISODE; no sibling starts
+        ├── 5. the family       — each accepted world as its own `run.py --resume`
+        ├── 6. archive          — episodes/<id>/worlds/<label>/, self-contained
+        └── 7. judge            — judge.yaml + findings → learning/_pending/findings.jsonl
         │
-        ├── normalize disposition from report.md
-        ├── project actor_input.yaml
-        ├── actor_story.md (or SKIP)
-        ├── projected_telemetry.yaml from telemetry oracle
-        ├── judge_findings.yaml from judge
-        ├── persist under defender/learning/runs/<run_id>/
-        └── append queueable findings to defender/learning/_pending/findings.jsonl
-                       │
-                       ▼
-defender/learning/author.py (when threshold is reached)
-        │
+        ▼
+defender/learning/loop.py --author-drain   (at LEARNING_AUTHOR_THRESHOLD)
         ├── lock + clean-scope + idempotency + ground-truth gates
         ├── new/fold/skip lesson edits under defender/lessons/
-        ├── verify_forward.py per candidate edit
-        └── commit lesson edits + rotate queue / hold findings
+        ├── forward-check per candidate edit
+        └── commit from a worktree + open one PR + rotate the queue
 ```
 
-## Adversarial-Defender Mode
+`--lead-author-drain` is the sibling stage on the same shape, curating the
+gather query catalog and per-system skills from its own queues.
 
-### Goal
+## The Branched Episode
 
-The adversary's objective is to pass as benign through the actual lead
-sequence the investigator pursued. The defender's objective is for the lead
-sequence to break the adversary's story.
+`branch/cli.py` is the composition root: the operator names a source run and a
+message to branch at, and this module decides the ORDER everything else happens
+in — the part no seam can enforce about itself.
 
-### Implemented Variant
+**1. Preflight.** Everything that can refuse before anything is spent, in one
+place: branch point in range, source alert a plain file, corpus patterns able to
+carry a view name, write door reaching the cluster, namespace sweep complete,
+every role holding a usable model.
 
-Only **gray-box: query-only reveal** is implemented. The actor sees
-`alert.json` plus the ordered lead projection containing only
-`position` and `queries[].id` / `queries[].params`. It does not see lead
-descriptions, result references, or investigation results. It emits either a
-plain-markdown attack story (`Attack story`, `Goal`, `Bypass`) or a single
-`SKIP:` line.
+**2. The questioner** (`branch/questioner/`) is a **deny-all** role — no tools,
+its whole input inlined by the host, its whole output one YAML manifest. It
+authors the **discriminator** (the fact the verdict turns on, the system holding
+it, the query that would establish it — a discriminator no single query could
+settle makes the episode unreadable however good the worlds are) and the
+**family** (world A, the capture unchanged, plus one-axis counterfactuals).
 
-The actor does **not** self-reflect after results are revealed. The telemetry
-oracle translates the actor story into per-lead projected events, and the judge
-does the projected-vs-actual comparison. Direct-review and black-box variants
-remain design ideas, not current code paths.
+**3. Staging** (`branch/staging.py`, `estate/`) writes each world's corpus into
+its own namespace, every name write-ahead-recorded in `staged.yaml` *before* it
+is created, so teardown finds what a crashed run left behind. `branch/ledger.py`
+records every response the estate served with the decision behind it — what
+makes the difference between worlds checkable rather than asserted.
 
-### Lead set projection
+> **The namespace prefix is deliberately not spelled in this tree, and must not
+> be added.** A sibling is a real investigation whose model can read
+> `defender/docs/`; the isolation guarantee is that the fault channel is the
+> *only* way that scheme could be learned, because a world that knows it is
+> staged is not answering the question the family was built to ask.
+> `tests/test_947_triplet_isolation.py` sweeps `defender/{docs,skills,knowledge}`
+> for the prefix, the label template and world labels on every run.
 
-The "lead set" is the ordered set of defender→gather dispatches used in
-the investigation, not a loose prose summary of what the investigator did.
-Each entry pairs the free-form lead description the defender sent gather
-(goal + what to characterize) with the **queries** gather actually ran.
-The cross-case join key is `(query.id, query.params)` — not a lead slug.
-The defender does not pick from a slugged lead catalog; gather picks (or
-authors) a query template per dispatch, and the template id is what makes
-a lead addressable across cases.
+**4. Review by replay** asks two questions per world before any sibling runs.
+*Does this world contradict the capture?* World A — the control — replays
+**first**, and the keys it mismatches on are the estate's own drift since the
+source run; those are subtracted from every other world's result, so what is
+left is a difference the *world* made. Without that subtraction, ordinary drift
+reads as contradiction and rejects healthy episodes. *Is the declared difference
+observable at all?* An injection nothing retrieves, a patch applying to nothing,
+an exclusion removing no document — each is a world that is not the world it
+claims. Either failure **rejects the whole episode**.
 
-The source run materializes that ordered contract as **two live tables**
-(no post-run projection), joined by `defender/learning/lead_repository.py`:
+The comparison is **blind by signature** (`branch/comparator.py`): two payloads
+and an axis, nothing else. It cannot see which side is the base or what a world
+declared — a comparator that could would have a verdict predictable from the
+label, and the label is what the measurement must be independent of. The same
+function serves the review and `delta_o` on the read side.
 
-- **leads** — `gather_raw/{lead_id}.lead.json` (`{goal, what_to_summarize}`),
-  written by the `record_lead.py` PreToolUse hook from the gather dispatch
-  block, keyed on the `:L` invlang row id (`l-001`).
-- **queries** — `executed_queries.jsonl`, one row per executed query
-  (`{lead_id, seq, system, query_id, params, payload_status, payload_digest,
-  payload_sha256, payload_path, …}`), written by the `record_query.py` capture wrapper;
-  raw payloads land by-ref at `gather_raw/{lead_id}/{seq}.json`.
+**5. The family as processes.** Each accepted world runs as its own `run.py
+--resume` **child process**, started together under `{episode_dir}/runs/`. The
+launcher drives no investigation in its own process and has no path to one:
+being a process is what gets a sibling the box lifecycle, the reap scan, its own
+role preflight and its own provenance stamp.
 
-Consumers call `lead_repository.joined(run_dir)` / `actor_view(run_dir)`;
-the cross-case join key is `(query_id, params)`. `seq` disambiguates
-N-queries-per-lead (no flat `{position}.json` / `{a..z}` scheme). Templates
-authored during a run are written back to the per-system catalog
-(`defender/skills/gather/queries/{system}/`), so the catalog grows organically
-with usage; early near-duplicates are accepted and normalized downstream when
-patterns stabilize.
+**6. Archive** (`branch/archive.py`) copies each world into
+`episodes/<id>/worlds/<label>/` so later readers answer from the episode
+directory alone — sibling run dirs are disposable. Every sibling's scrub verdict
+and provenance stamp is checked; agreeing stamps write the family stamp, and
+anything else marks the episode `incomplete` — a modelled outcome with a reason,
+not a missing file. The derived readers (`branch/episode.py`) refuse an
+`incomplete` episode, so "no differences" and "no comparison was possible" stay
+different answers.
 
-**Not every row in the queries table is a query.** The `∅.`-prefixed **sentinel**
-ids (`record_query.RESERVED_QUERY_ID_PREFIX` — the repeat guard's trip row, the
-rows written above its placement, a failed reducer shim) are writer-only records
-of things that never reached a system, kept in the table because it is the run's
-only append-only surface. `joined` therefore projects each lead in two parts
-(#841): `JoinedLead.queries` — the queries the defender actually ran, and what
-the actor, the oracle and the judge are each shown — and
-`JoinedLead.sentinels`, which the pitfalls residue
-(`collect_general_failures`) reaches through `JoinedLead.rows`, the seq-ordered
-remerge. The filter is deliberately NOT in `load_queries`: dropping the rows at
-the reader would delete the lead-author's one view of a failed reduce, which is
-the whole of #823.
+## The Judge
 
-For gray-box adversarial runs, the actor sees `alert.json` plus an
-**answer-and-intent-redacted** projection of the lead sequence:
+`learning/judge/` grades one archived episode, running under the questioner's
+definition with an `agent_id` prefix of `judge:` (#1008 gives it its own role).
 
-```yaml
-case_id: <run id>
-alert_ref: alert.json
-entries:
-  - position: 0
-    queries:
-      - id: wazuh.auth-events
-        params: {srcip: 172.22.0.10, window: 7d}
-```
+1. **Mechanical pass** (`judge/family.py`) — five facts per non-control world,
+   read off *that world's own* archived record: its own ledger, report and
+   investigation document, plus the manifest. Never a sibling's, never a
+   comparator call. A manifest fault refuses the whole pass; a fault in one
+   world's archive marks that world `ungradable` and its siblings still grade.
 
-This projection is emitted as
-`defender/learning/runs/<run_id>/actor_input.yaml`. It discards
-`lead_description` and `result_ref` at projection time. If the dispatch
-contract cannot be projected cleanly, the learning run is rejected rather than
-asking the actor to infer the lead set from prose.
+   The bucket, per non-control world, where H is the validated holding system:
 
-### Artifact Schemas
+   | condition | bucket |
+   |---|---|
+   | no row on H at all | `lead-set` |
+   | rows on H, none `staged`/`patched`, no `refused` row on H | `lead-quality` |
+   | a `refused`/`fault`-adjacent H interaction, nothing doctored served | no bucket |
+   | doctored answer served, verdict == declared | no bucket |
+   | doctored answer served, no resolution moved, verdict != declared | `analyze-discipline` |
+   | doctored answer served, a resolution moved, verdict != declared | `decision-discipline` |
 
-The current implementation uses three model-authored artifacts, not a single
-`adversarial_run` record.
+   These are the four places a verdict can lose the deciding fact.
 
-**Actor output** (`actor_story.md`) is plain markdown with exactly three
-numbered sections (`Attack story`, `Goal`, `Bypass`) or a single `SKIP:` line.
+2. **Model pass** — one call per graded world per draw (`JUDGE_DRAWS`, default
+   **1**) into `worlds/<X>/judge/<n>.yaml`. A failed draw does not unwind the
+   pass.
 
-**Oracle** is two-stage — generation and coverage-matching are decoupled so
-the matching can be deterministic:
+3. **Episode outcome** — `gradable`, `discard` (measurement spoilt) or
+   `corpus-contradiction` (archive disagrees with itself). `discard` is decided
+   mechanical-first and before any world's contradiction, so the answer does not
+   depend on manifest order.
 
-- **Stage A — footprint** (`footprint.md`, LLM). Sees only the alert + actor
-  story (no leads), and enumerates the events the activity writes into telemetry,
-  each with its *true native attributes* (`data_source`, `host`, `container_id`,
-  `source_ip`, `rule`, `when`, …). With no leads in view there is no per-lead
-  generation pressure, so nothing to overload.
-- **Stage B — router** (`_oracle_router.py`, deterministic). Places each
-  footprint event under the lead positions whose query it satisfies, by plain
-  containment over each query's structured `filters` block (`index`, `window`,
-  locator `predicates`). No query-language parsing: the filters are recovered
-  upstream (`scripts/lead_filters.py`) from the template that produced each query,
-  so routing is vendor-neutral.
+4. **Enqueue** (`judge/enqueue.py`) — for `gradable` only, one row per surviving
+   finding. `discard`/`corpus-contradiction` enqueue nothing: the family record
+   is the artifact. A finding with an empty anchor is dropped and named on the
+   report rather than discarding its siblings' good ones.
 
-**Oracle output** (`projected_telemetry.yaml`) is a single YAML document:
+5. **`judge.yaml`** — written **last**, carrying enqueued row count and per-world
+   completed draws, so its presence certifies the whole pass.
 
-```yaml
-projections:
-  - position: 0
-    events:
-      - {data_source: "logs-falco.alerts", container_id: "ffbff…", rule: "…", when: "…"}
-  - position: 1
-    events: []
-uncovered:                 # footprint events no lead's filter caught — the
-  - {data_source: "logs-system.syslog", note: "authorized_keys write"}   # mechanical coverage-gap signal
-unrouted_leads:            # positions with no structured filter (ad-hoc / un-promoted
-  - {position: 2, queries: [{id: elastic.some-coined-id, params: {…}}]}  # template); judge assesses from raw query
-```
-
-Placement is by containment, so an out-of-envelope event (a sidecar's *different*
-container id) lands in `uncovered`, never overloaded into the nearest lead. The
-judge reads `uncovered` as a `lead-set` / `no-lead-exists` survival signal, modulo
-the `unrouted_leads` it must check by hand.
-
-**Judge output** (`judge_findings.yaml`) is a single YAML document:
-
-```yaml
-outcome: |
-  caught | survived | undecidable | incoherent | skip-passthrough
-  <short rationale>
-encounter_analysis: |
-  <lead-by-lead projected-vs-actual analysis>
-defender_findings:
-  - type: lead-set | lead-quality | analyze-discipline | observability | detection-confirmed
-    subject: <specific lead position, no-lead gap, or system path>
-    finding: |
-      <grounded finding>
-    citations:
-      - {source: investigation | actor | alert | projected_telemetry, quote: "<verbatim span>"}
-actor_observations:
-  - type: misprediction | framing-choice | discarded-class
-    subject: <story aspect>
-    observation: |
-      <optional actor-side note>
-confidence: |
-  <short confidence note>
-```
-
-`actor_observations` is optional and is not queued into the defender lesson
-corpus today. `detection-confirmed` findings are retained in
-`judge_findings.yaml` but filtered out of `_pending/findings.jsonl` as
-audit-only. Queueable finding types are `lead-set`, `lead-quality`,
-`analyze-discipline`, and `observability`.
+Queueable types: `lead-set`, `lead-quality`, `analyze-discipline`,
+`observability`, `decision-discipline` (`core/config.py`).
 
 ## Lesson Delivery
 
-### Pipeline
+1. **Threshold** — at `LEARNING_AUTHOR_THRESHOLD` (default 5) the drain invokes
+   `author/lessons/run.py`. `core/drains.py` `_curator_queue_checks` is the one
+   place wakeable channels are named, and since #922 it names **one**.
+2. **Pre-flight** — queue lock, `defender/lessons/` git-clean, findings already
+   authored filtered by `source_finding_ids`, and findings whose source carries
+   no ground truth **held** (the forward-check needs one).
+3. **Curator** — decides `new`, `fold`, or `skip` over flat markdown with `name`,
+   `description`, `source_finding_ids`, `created_at`.
+4. **Forward-check** — re-runs the candidate lesson against its source-case
+   transcript and ground-truth disposition: would the agent, with the lesson
+   loaded at PLAN, *still* reach that disposition? `GOOD` keeps, `BAD` reverts
+   and holds the finding.
+5. **Commit + post-flight** — commits from its own worktree and opens a PR. Every
+   file left CHANGED must be **attributable** — citing an id from this batch's
+   committed set (#852) — because the commit is pathspec-wide, so without it a
+   forward-check-rejected lesson rides in on a batch-mate that passed. A file
+   whose provenance list is byte-identical to HEAD's is exempt: a supersede's
+   `status: stale` flip and a reverted fold claim no new source. Then the queue
+   rotates atomically, consumed rows append to `consumed.jsonl`, and held/skip
+   batches log to `findings.held_report.log`.
 
-1. **Run** — `defender/learning/loop.py <run_dir>` handles one completed case.
-   It persists artifacts under `defender/learning/runs/<run_id>/` and appends
-   queueable judge findings as JSONL to
-   `defender/learning/_pending/findings.jsonl`.
-2. **Threshold** — when pending count reaches `LEARNING_AUTHOR_THRESHOLD`
-   (default 5), `loop.py` calls `author.run_batch()`. `author.py` can also be
-   run directly.
-3. **Pre-flight** — `author.py` takes `_pending/.lock`, requires
-   `defender/lessons/` to be git-clean, filters already-authored findings via
-   lesson `source_finding_ids`, and holds findings whose source disposition is
-   not `benign` (currently `inconclusive` or missing ground truth).
-4. **Author agent** — `author.md` receives the remaining findings, enumerates
-   existing `defender/lessons/*.md`, and decides `new`, `fold`, or `skip`.
-   Lesson files are flat markdown with frontmatter: `name`, `description`,
-   `source_finding_ids`, `created_at`.
-5. **Forward-check** — after each new or folded lesson edit, the author runs
-   `verify_forward.py <lesson_path> <run_id>`. `GOOD` keeps the edit; `BAD`
-   reverts it and leaves the finding held for later review.
-6. **Commit + post-flight** — the author commits lesson edits if any survived.
-   `author.py` verifies that the claimed `commit_sha` is HEAD, that HEAD
-   touches only `defender/lessons/*.md`, and that the lessons dir is clean.
-   Before the commit, every file this tick left CHANGED in the corpus must also
-   be **attributable**: it has to cite at least one id from this batch's
-   committed set under the channel's own `source_finding_ids` /
-   `source_observation_ids` (#852). The commit is pathspec-wide, so without that
-   a lesson the forward-check rejected rode into history on a batch-mate that
-   passed. An already-committed file whose provenance list is byte-identical to
-   HEAD's is exempt — a supersede's `status: stale` flip and a reverted
-   forward-BAD fold claim no new source, so they vouch for nothing and need no
-   voucher.
-   Then it atomically rotates `_pending/findings.jsonl`, appends consumed
-   findings to `_pending/consumed.jsonl`, and logs held/skip batches
-   to `_pending/findings.held_report.log` — on every tick that held or skipped
-   a row, whether or not the same tick also committed.
+Findings are grounded against the archived episode and the anchor is checked
+before queueing. The durable lesson-to-source link is `source_finding_ids` plus
+the consumed queue record.
 
-### Why Lessons, Not an Addendum Library
+## One corpus, one queue
 
-- Git history is the audit trail. No separate `runs/_lessons/lessons.yaml` to
-  maintain.
-- Lessons land in the same `defender/lessons/` corpus the runtime investigator
-  already reads. No retrieval service and no index — the two pushes (PLAN-time
-  signature, and the #919 frontier block on a write that moved the open set)
-  are both a walk of that flat corpus, composed by the runtime at the moment
-  they fire.
-- A future PR wrapper can review the committed lesson diff and add CI replay
-  before merge, but the current local transaction is intentionally smaller.
+The old loop ran two directions into three corpora. Only `defender/lessons/` has
+a producer now, fed by **one** queue and drained by **one** curator (plus the
+lead-author lane, which curates the catalog and system skills).
 
-### Citation requirement
+`defender/lessons-actor/` and `defender/lessons-environment/` remain on disk as
+**frozen archives** — nothing produces them, nothing reads them. The posture view
+(`learning/frontend/`) marks them retired rather than deleting or hiding them.
 
-Each judge finding carries `citations`, each a `{source, quote}` pair with
-`source ∈ {investigation, actor, alert, projected_telemetry}`. The author can
-rewrite the lesson for future use, but should not invent evidence. The durable
-lesson-to-source link is the `source_finding_ids` frontmatter list plus the
-consumed queue record.
+Canonical enumeration: `core/config.py` and `core/drains.py`.
 
 ## Sampling Policy
 
-There is no scheduler or sampling layer today. The API is manual:
-`defender/learning/loop.py <run_dir>`.
+Manual. **Which runs get branched** is an operator choice — the disposition
+routes nothing now, the direction table having gone with the pipeline. **Which
+turn to branch at** is the measurement's main lever (`runtime/branch.py` decides
+which messages may be branched from). **Curator promotion** proceeds only for
+findings whose source case has a ground truth.
 
-Current disposition behavior:
-
-- The disposition selects which direction(s) run through actor/oracle/judge:
-  `benign` → adversarial only (FN hunt), `malicious` → benign only (FP hunt),
-  `inconclusive` → both. (`core/directions.py` `directions_for`, gating on the
-  `dispositions` field each `Direction` declares — the one home for the mapping,
-  read by the loop's dispatch and the judge transcript alike.)
-- Author promotion only proceeds for findings whose source disposition is
-  `benign`; `inconclusive` findings are held as no-ground-truth because the
-  forward-check gate needs a ground-truth disposition.
-
-The older counter-disposition/random-bucket policy remains a future sampling
-design, not current behavior.
-
-## Run Artifacts
+## Artifacts
 
 ```text
-defender/learning/runs/{run_id}/
-  alert.json                  # copied from source run
-  report.md                   # copied from source run
-  investigation.md            # copied from source run
-  lead_sequence.yaml          # copied after projection
-  actor_input.yaml            # redacted actor-facing lead sequence
-  actor_story.md              # actor markdown or SKIP line
-  projected_telemetry.yaml    # oracle output, absent on actor SKIP
-  projected_telemetry.raw.txt # optional raw fenced/bad oracle output
-  judge_findings.yaml         # judge output, absent on actor SKIP
-  judge_findings.raw.txt      # optional raw fenced/bad judge output
-  source_refs.yaml            # source paths, normalized_disposition, alert_rule_key
+$DEFENDER_EPISODES_BASE/<episode_id>/
+  family.yaml                 # the questioner's manifest — every sibling re-parses it
+  staged.yaml                 # write-ahead record of every staged name, for teardown
+  review.yaml                 # per-world accept/reject + the episode's recorded outcome
+  provenance.json             # the family stamp, only when every sibling's agrees
+  served/base.jsonl           # the capture, primed before staging
+  served/<world_token>.jsonl  # every response served that world, with its decision
+  worlds/<label>/
+    report.md  investigation.md  alert.json  provenance.json
+    executed_queries.jsonl  gather_raw/  gather_summaries/
+    lessons_loaded.jsonl  scrub_verdict.json  run_dir   # a text pointer, not a link
+    judge/<n>.yaml            # one per judge draw
+  runs/                       # the siblings' live run dirs (disposable)
+  judge.yaml                  # written last; its presence certifies the pass
 
-defender/learning/_pending/
-  findings.jsonl              # queueable findings
-  consumed.jsonl              # consumed committed/idempotent/skipped findings
-  findings.held_report.log    # held/skip summaries per tick (findings channel)
-
-defender/lessons/
-  *.md                        # committed pitfall lessons read at PLAN time
+defender/learning/_pending/{findings,consumed}.jsonl + findings.held_report.log
+defender/lessons/*.md         # committed lessons read at PLAN time
 ```
 
-The source run dir also contains or receives `lead_sequence.yaml`; the loop
-copies canonical artifacts into `defender/learning/runs/<run_id>/`.
-
-## MVP
-
-Implemented:
-
-1. Lead-sequence projection from defender run artifacts.
-2. Gray-box adversarial actor.
-3. Telemetry oracle with schema-only exemplar redaction.
-4. Judge output validation and queueable finding extraction.
-5. Pending JSONL queue, consumed queue, held-report surface.
-6. Lesson author with clean-scope/idempotency/ground-truth gates.
-7. Per-lesson forward-check gate before commit.
-8. Flat `defender/lessons/*.md` corpus and PLAN-time retrieval contract.
-
-Deferred:
-
-1. Benign-defender mode and live self-evaluation / self-review loop.
-2. Scheduling and statistical sampling policy.
-3. PR wrapper and automatic CI gating.
-4. Holdout replay / inverse-failure measurement.
-5. Actor-side learning corpus.
+**`learning/runs/` is an orphan.** It holds per-case directories the deleted
+pipeline's persist step wrote, and `ops/trace_lesson.py` still scans it to answer
+"which cases was this lesson in context for" — so that answer covers only
+pre-cutover cases and silently stops growing. Re-pointing the tracer at
+`episodes/` is unfinished work, not a decision.
 
 ## Evaluation
 
-- **Queue yield**: findings appended per run, by `outcome` and finding `type`.
-- **Detection-confirmed audit rate**: caught encounters that produced
-  audit-only `detection-confirmed` findings but no queued lesson.
-- **Citation validity**: fraction of finding `citations` whose quotes resolve
-  to the claimed artifact and support the finding.
-- **Forward-check pass rate**: candidate lesson edits marked `GOOD` vs `BAD`
-  by `verify_forward.py`, with manual review of BAD holds.
-- **Author disposition**: committed vs folded vs skipped vs held-forward-bad vs
-  held-no-ground-truth.
-- **Inverse failure (deferred)**: replay merged lesson commits against a
-  held-out fixture set; measure correct-disposition runs that the lesson would
-  have made worse.
+- **Queue yield** per episode, by bucket.
+- **Episode disposition** and the rejection rate at review-by-replay — a family
+  that rarely survives its own replay means the questioner is authoring
+  unreachable differences.
+- **Draw agreement** across `JUDGE_DRAWS`. At the default of one draw this is not
+  measured; raising it is how you learn whether a grade was stable.
+- **Forward-check pass rate**, with manual review of BAD holds.
+- **North star**: `evals/held_out.py`. The frozen-actor replay and judge A/B
+  retired with the pipeline they measured.
 
 ## Future Enhancements
 
-### Benign-defender mode
+**Live self-evaluation.** A same-context pre-commit self-review asking "what
+counter-disposition story explains the same observations, and is there one cheap
+missing check?" Separate from offline learning, which must keep running against
+the investigation as it actually happened. Keep it small: surface a missing check
+or force an escalation, don't become a second investigator.
 
-Benign-defender remains a useful design idea but is **not implemented**. There
-is no benign actor prompt, no `benign_run` schema, and no current sampling
-path that routes malicious cases to a benign-mode reviewer.
+**Automated branch-point selection.** The operator's choice of turn largely
+determines what an episode can measure. A cheap heuristic — the turn at which the
+open set last narrowed, say — would make the loop schedulable without giving up
+forking a real run.
 
-The mental model:
-
-> The defender calls the operator (or the service-account owner). The operator
-> answers, then washes them: "you could have verified this yourself by doing
-> XYZ." XYZ is a concrete query against a system of record.
-
-If built, this mode should name a query against an actual system of record
-present in the environment. "The operator would have told you" without a
-system query should remain rejected as post-hoc rationalization. The useful
-reward signal is whether the minimum resolving query was already present in
-the lead set, and if so whether it appeared early enough to avoid unnecessary
-work.
-
-### Live self-evaluation loop
-
-The live investigator may eventually run a same-context self-review before
-commit that asks: "what counter-disposition story explains the same
-observations, and is there one cheap missing check?" This is separate from the
-offline learning loop. Offline learning should continue to run against the
-investigation as it actually happened, regardless of whether live
-self-evaluation fired.
-
-Keep this future loop small: it should surface a missing check or force an
-escalation when the case is underdetermined, not become a second full
-investigator or a source of post-hoc rationalization.
-
-### Learning actor (true co-evolution)
-
-Today's autocurriculum is **one-sided**: the defender accumulates
-lessons and improves; the actor is a fixed prompt. Over time, this
-biases the corpus toward defending against whatever attack shapes the
-current actor prompt happens to generate well. Failure modes the
-actor doesn't think to write — novel pivots, environment-specific
-abuse paths, attack chains the prompt under-samples — never enter the
-training signal.
-
-A **learning actor** mirrors the defender's improvement mechanism on
-the adversarial side: a corpus of attack-pattern lessons (or
-exemplars) the actor reads when generating counterfactual stories,
-authored from cases where the actor *failed* to slip past the
-defender's lead set or where the judge marked the story `incoherent`.
-
-Sketch of the loop, symmetric to the defender's:
-
-- **Signal source.** Cases where the actor's story was `caught` by
-  the defender's existing leads, *or* cases the actor `SKIP`-ed when
-  in fact a competent adversary could have produced a survivable
-  story (the latter requires a separate "missed-skip" detector —
-  potentially the judge itself, given the run + the SKIP rationale).
-- **Curator.** A counterpart to `author.py` that folds these into
-  attack-pattern lessons under (e.g.) `defender/learning/actor_lessons/`.
-- **Retrieval.** The actor enumerates lesson frontmatter at
-  story-generation time, same shape as the defender's PLAN-time
-  retrieval; loads bodies whose description fires on the alert
-  surface.
-- **Diversity guard.** Critical here — a monoculture of attack
-  patterns is exactly the failure mode this enhancement is supposed
-  to fix. The curator must enforce niching across (TTP, target
-  surface, pivot mechanism), and the eval harness should track
-  actor-story diversity as a first-class metric.
-
-This gets us closer to genuine self-play: each side's lessons make
-the other side's job harder, and the curriculum advances on its own.
-Caveats from the RL/evo literature apply double — co-evolution is
-notoriously prone to **cycling** (defender learns to beat actor v3,
-actor v4 rediscovers v1's tricks), to **arms-race drift** away from
-realistic alerts, and to **Red Queen dynamics** where both sides get
-more capable on synthetic cases without either gaining on real ones.
-Mitigations to design in from day one:
-
-- Hold a fixed set of historical actor stories as a regression suite;
-  the live actor must continue to surface them, not just the ones
-  the live curator currently rewards.
-- Periodically re-run the defender against a *frozen* prior actor to
-  detect overfitting to the current one.
-- Anchor on real production alerts as ground truth — the proxy
-  fitness ("can our actor beat our defender") must continue to track
-  true fitness ("does our defender triage real cases correctly").
-
-**Prerequisite.** Don't build this until the one-sided loop is
-demonstrably moving the needle on real cases. A learning actor adds
-a second moving part to a system whose first moving part isn't yet
-proven; debugging compound feedback loops is much harder than
-debugging one. Ship the defender-side learning, validate it, then
-revisit.
+**Co-evolution.** If an adversary returns it should author *worlds* (staged
+corpora the defender must still read correctly), not stories, so its output stays
+executable. Co-evolution is prone to cycling, arms-race drift, and Red Queen
+dynamics where both sides improve on synthetic cases and neither on real ones —
+so hold a fixed set of historical families as a regression suite, periodically
+re-run against a frozen prior adversary, and anchor on real alerts. Prerequisite:
+the one-sided loop demonstrably moving the needle first.
 
 ## Open Questions
 
-- Where does shared knowledge live when a lesson recurs across signatures?
-  The current answer is still a flat `defender/lessons/` file that broadens
-  its `description`; if that becomes too coarse, do we add tags or subdirs?
-- Should the lesson-author agent see prior accepted lesson commits as exemplars? If
-  yes, how to avoid drift toward a single editing style.
-- For benign mode, how strict should "system of record actually queryable"
-  be enforced? Hard-fail in the schema, or accept and flag in held metadata /
-  future PR wrapper metadata?
+- Where does shared knowledge live when a lesson recurs across signatures? Today
+  a flat file broadening its `description`; if that goes coarse, tags or subdirs?
+- Should the curator see prior accepted lesson commits as exemplars, and how to
+  avoid drift toward one editing style?
+- How many worlds is a family worth? Three ships. More arms buy more axes but
+  multiply run cost and the chance one arm rejects and voids the episode.
+- `JUDGE_MODEL` / `JUDGE_EFFORT` are read by two unrelated judges — this one and
+  the golden-case eval judge (`evals/oracle_golden/judge.py`) — so setting either
+  retargets both. Inherited, not designed; separating them means a knob name of
+  this judge's own.

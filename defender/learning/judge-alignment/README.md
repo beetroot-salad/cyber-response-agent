@@ -1,5 +1,12 @@
 # Judge-alignment dataset
 
+> **Status: historical — the judge this calibrates is deleted**, along with the
+> artifacts every sample bundles (#922, `defender/docs/learning-loop-cutover.md`).
+> The outcome enum below is that judge's, not the family judge's. **The family
+> judge has no calibration set**, and this cannot be re-pointed: it grades a
+> comparison between sibling worlds, not a story against a projection. Kept for
+> the labeling method, which is reusable.
+
 Synthetic judge inputs for validating `defender/learning/pipeline/judge/malicious.md` against human
 labels. Each batch (`batch_NN.md`) is a self-contained markdown file with 3
 samples; each sample bundles the four artifacts the judge sees (alert,

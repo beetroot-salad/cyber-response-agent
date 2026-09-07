@@ -11,8 +11,8 @@ user appearing in `/etc/passwd` on a host is necessary but not
 sufficient evidence of authorization; the identity stub's
 `can_access` answer is.
 
-This file is the **visibility surface** — read by the defender, the
-author skill, and the actor-reviewer judge. Execution details
+This file is the **visibility surface** — read by the defender and
+the lead-author skill. Execution details
 (transport, exit codes, param value constraints) live in
 `execution.md`, read only by gather; the verb roster and each verb's
 params come from the `list_verbs` tool. The defender treats this system as a question

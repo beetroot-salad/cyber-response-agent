@@ -15,6 +15,15 @@ first draft and are no longer proposals:
   story and the run's own executed evidence." §The diagnosis below is therefore a
   post-mortem, not a critique of a running system.
 
+**The redesign has since shipped, and this doc is now its rationale rather than its
+plan.** The turn-N branch is `runtime/branch.py` (#920), the questioner and the family
+are `learning/branch/` (#947), the family judge is `learning/judge/` (#921), and #922
+deleted the pipeline this argues against — the two actors, the oracle and the pipeline
+judge, along with the direction routing and `run_cycle.py` itself. Read the sections below
+as the case that was made, not as a description of code that is waiting to be written; the
+shipped shape is `docs/learning-loop.md`, and `docs/learning-loop-cutover.md` records the
+deletion. Where this doc uses the future tense about the branch, the answer is: it exists.
+
 **What this revision changes.** The first draft proposed generating a base world from
 scratch. That design is replaced by the **turn-N branch**: fork a real investigation at
 the moment its evidence is in hand, and propose a pair of worlds consistent with that

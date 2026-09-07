@@ -1,5 +1,10 @@
 # Lessons success scoring — design draft (2026-05-30)
 
+> **Status: historical — designs a signal for deleted stages.** The actors, the
+> oracle, the pipeline judge and the two corpora this scores retrieval against
+> all went in #922 (`docs/learning-loop-cutover.md`). The live analogue of "did
+> this lesson help?" is the forward-check plus `evals/held_out.py`.
+
 Companion to `defender/learning/actor_benign.md` / `actor.md`,
 `defender/scripts/lessons/lessons_env_retrieve.py` / `lessons_actor_index.py`,
 and the task `docs/decisions/benign-actor-success-retrieval.md`. Captures the
