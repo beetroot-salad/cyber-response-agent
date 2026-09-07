@@ -2,10 +2,9 @@
 
 > **Status: historical — the corpus this schemas is frozen.** `lessons-actor/`
 > and `lessons-environment/` lost their producers in #922
-> (`docs/learning-loop-cutover.md`): the directories and their authored lessons
-> are left in place, but nothing writes them, nothing reads them, and the index
-> CLIs this doc references are deleted. Read as the record of a schema, not as
-> one to author against.
+> (`docs/learning-loop-cutover.md`); the files remain, nothing writes or reads
+> them, and the index CLIs below are deleted. A record of a schema, not one to
+> author against.
 
 **Status: v2 implemented; v2.1 simplification applied 2026-05-15; v2.2 env-fact split applied 2026-06-15.** v2 (flat corpus, multi-key index) is live under `defender/lessons-actor/*.md` and is what `defender/learning/author_actor.md` and `defender/learning/actor.md` target. The v2.1 delta drops two fields the empirical N=5 retrieval probe showed had no retrieval value. When this doc and the code disagree, the code wins.
 

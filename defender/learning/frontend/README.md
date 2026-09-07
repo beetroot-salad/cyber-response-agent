@@ -9,13 +9,12 @@ A read-only view of the learning loop's current posture. First panel:
 | Actor lessons | `defender/lessons-actor/` | **retired** — producer deleted in #922 |
 | Environment lessons | `defender/lessons-environment/` | **retired** — producer deleted in #922 |
 
-The two retired corpora are **frozen archives**: their files and authored lessons
-are left in place, but nothing writes them and nothing reads them. They are shown
-badged and dimmed rather than deleted or hidden — this is an author-facing view,
-and a lesson that was learned should stay findable even after its channel closed.
-See `defender/docs/learning-loop-cutover.md`. The page's headline counts live and
-archived lessons separately, so the number a reader takes as "the loop's posture"
-does not include a corpus nothing produces.
+The two retired corpora are **frozen archives**: files left in place, nothing
+writing or reading them. Badged and dimmed rather than hidden — this is an
+author-facing view, and a lesson that was learned should stay findable after its
+channel closes (`defender/docs/learning-loop-cutover.md`). The headline counts
+live and archived separately, so "the loop's posture" excludes what nothing
+produces.
 
 ## Build
 

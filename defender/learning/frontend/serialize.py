@@ -80,16 +80,12 @@ class GroupSpec(TypedDict):
     label: str
     dir: str
     blurb: str
-    #: Is anything still authoring this corpus? A retired group is one whose PRODUCER is
-    #: gone while its files remain — the view must say so, because a reader cannot tell a
-    #: corpus nothing writes from one nothing has written to lately, and "the loop's
-    #: current output" is exactly the claim this page makes. Declared per group rather
-    #: than inferred from a lesson's `status: stale`: staleness is a property of one
-    #: lesson its author set, retirement is a property of the channel.
+    #: Has this corpus lost its PRODUCER while its files remain? A reader cannot tell that
+    #: from one nothing has written to lately, and "the loop's current output" is what this
+    #: page claims. Per group, not inferred from a lesson's `status: stale` — staleness is
+    #: one lesson's property, retirement is the channel's. `retired_note` says why, beside
+    #: the badge; a retired group without one renders a badge nobody can act on.
     retired: bool
-    #: Why it is retired, in one sentence, rendered beside the badge. Empty for a live
-    #: group. Not optional-by-absence: a group that declares `retired` and no reason
-    #: renders a badge nobody can act on.
     retired_note: str
     title_keys: list[str]
     desc_key: str

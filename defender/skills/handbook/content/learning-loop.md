@@ -25,11 +25,9 @@ exists; neither do the `actor`, `oracle` and `judge` agent roles, nor the
 disposition→direction routing, nor the actor-side curators and the queues that
 fed them.
 
-The two corpora those curators wrote — `defender/lessons-actor/` and
-`defender/lessons-environment/` — are the one exception: the directories and
-their authored lessons are **left in place as frozen archives**. Nothing
-produces them and nothing reads them. The posture view marks them retired
-rather than hiding them.
+One exception: `defender/lessons-actor/` and `defender/lessons-environment/`
+are **left in place as frozen archives** — nothing produces or reads them, and
+the posture view marks them retired rather than hiding them.
 
 What runs now branches a **real** investigation instead of inventing one.
 
@@ -57,12 +55,12 @@ What runs now branches a **real** investigation instead of inventing one.
    out `gradable`, `discard` (the measurement was spoilt) or
    `corpus-contradiction` (the archive disagrees with itself).
 
-   The mechanical pass reads each world's *own* archived record and assigns at
-   most one bucket, which is the four places a verdict can lose the fact the
-   family varied: never queried the system holding it (`lead-set`), queried it
-   at the wrong scope (`lead-quality`), received the changed answer and reached
-   the same verdict anyway (`analyze-discipline`), or moved a resolution on it
-   and still reached the same verdict (`decision-discipline`).
+   The mechanical pass reads each world's *own* record and assigns at most one
+   bucket — the four places a verdict can lose the fact the family varied: never
+   queried the system holding it (`lead-set`), queried at the wrong scope
+   (`lead-quality`), got the changed answer and concluded the same anyway
+   (`analyze-discipline`), or moved a resolution on it and still concluded the
+   same (`decision-discipline`).
 7. **Enqueue** — a gradable episode's surviving findings are appended to
    `_pending/findings.jsonl`, the same queue the curators have always read.
 
@@ -122,10 +120,9 @@ online path could never pay.
 (`harness.py` + `scenarios/`). `defender/tests/` covers learning-loop
 invariants.
 
-`learning/judge-alignment/` is **not** a live calibration set: it holds
-synthetic inputs for the retired pipeline judge, and its batches are written
-in that judge's artifact vocabulary. Read it as history, not as a fixture for
-the family judge.
+`learning/judge-alignment/` is **not** a live calibration set — synthetic inputs
+for the retired pipeline judge, in that judge's vocabulary. History, not a
+fixture for the family judge.
 
 Sources: `defender/CLAUDE.md` §Learning loop, `defender/learning/branch/cli.py`,
 `defender/learning/judge/`, `defender/learning/core/drains.py`,

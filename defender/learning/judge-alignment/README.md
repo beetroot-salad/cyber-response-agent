@@ -1,15 +1,11 @@
 # Judge-alignment dataset
 
-> **Status: historical — the judge this calibrates is deleted.** The prompt it
-> validated (`learning/pipeline/judge/malicious.md`) went with the four-role
-> pipeline in #922 (`defender/docs/learning-loop-cutover.md`), and so did the
-> artifacts every sample bundles: the actor story and the oracle's projected
-> telemetry. The outcome enum below is that judge's, not the family judge's
-> (`gradable | discard | corpus-contradiction`, plus `caught | survived |
-> undecidable` on a world's row). **The family judge has no calibration set
-> yet** — this is not it, and re-pointing it is not possible, because it grades
-> a comparison between sibling worlds rather than a story against a projection.
-> Kept for the labeling method below, which is reusable.
+> **Status: historical — the judge this calibrates is deleted**, along with the
+> artifacts every sample bundles (#922, `defender/docs/learning-loop-cutover.md`).
+> The outcome enum below is that judge's, not the family judge's. **The family
+> judge has no calibration set**, and this cannot be re-pointed: it grades a
+> comparison between sibling worlds, not a story against a projection. Kept for
+> the labeling method, which is reusable.
 
 Synthetic judge inputs for validating `defender/learning/pipeline/judge/malicious.md` against human
 labels. Each batch (`batch_NN.md`) is a self-contained markdown file with 3

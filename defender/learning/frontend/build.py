@@ -45,9 +45,8 @@ section.stage-defender { --accent-group: var(--accent-defender); }
 section.stage-actor    { --accent-group: var(--accent-actor); }
 section.stage-oracle   { --accent-group: var(--accent-oracle); }
 section.stage .blurb { font-size: 12px; color: var(--text-dim); margin: 0 0 4px; max-width: 760px; }
-/* A retired group's PRODUCER is gone while its files remain. Dimmed and badged rather than
-   hidden: the lessons are still findable, but the page must not read as if the loop is
-   still authoring them. */
+/* Retired: producer gone, files remain. Dimmed and badged rather than hidden — still
+   findable, but the page must not read as if the loop is authoring them. */
 section.stage.is-retired { opacity: 0.66; }
 section.stage.is-retired .lesson-card { border-left-color: var(--border-2); }
 section.stage .retired-note {
@@ -197,8 +196,8 @@ function renderGroup(name){
   const g = DATA.groups[name];
   const stale = g.lessons.filter(l => l.status === "stale").length;
   const pill = g.lessons.length + " lesson" + (g.lessons.length === 1 ? "" : "s") + (stale ? " · " + stale + " stale" : "");
-  // An empty LIVE group is "nothing authored yet"; an empty RETIRED one is "nothing was
-  // left behind". Different facts, so they get different sentences.
+  // Empty-and-live is "nothing authored yet"; empty-and-retired is "nothing was left
+  // behind" — different facts, different sentences.
   const cards = g.lessons.length
     ? '<div class="lesson-grid">' + g.lessons.map(l => renderCard(l, g.fields)).join("") + '</div>'
     : '<div class="empty">' + (g.retired ? 'This retired corpus is empty.' : 'No ' + escHtml(name) + ' lessons yet.') + '</div>';
@@ -214,9 +213,8 @@ function renderGroup(name){
 
 document.getElementById("root").innerHTML = ORDER.map(renderGroup).join("");
 
-// COUNTED SEPARATELY, because one total over live and retired groups is the claim this
-// page used to make and it is no longer true: only the live corpora are the loop's current
-// output. A retired lesson still renders — it just does not count as posture.
+// SEPARATE TOTALS: one number over live and retired was the claim this page used to make,
+// and only the live corpora are the loop's output. Retired lessons render, but aren't posture.
 const live = ORDER.filter(n => !DATA.groups[n].retired)
                   .reduce((a, n) => a + DATA.groups[n].lessons.length, 0);
 const archived = ORDER.filter(n => DATA.groups[n].retired)

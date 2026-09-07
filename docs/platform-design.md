@@ -2,16 +2,13 @@
 
 **Version:** 0.3 · **Status:** Draft — design record, not yet implemented · **Date:** June 2026
 
-> **Learning-stage note (post-#922).** Everything below about the *platform* stands. What it
-> assumes about the learning stages does not: the `actor → oracle → judge` chain it names, the
-> `lead_sequence.yaml` artifact it puts in the manifest, and `learning/replay_actor.py` (its
-> worked example of the replay seam) were all deleted with the four-role pipeline — see
-> `defender/docs/learning-loop-cutover.md`. The shape that replaced them is a *branched
-> episode* (`defender/docs/learning-loop.md`), which changes two things this design would have
-> to absorb: a learning job now spawns **several sibling investigations of its own**, so it is
-> no longer a cheap LLM chain that can be throttled beside an investigation, and the artifact
-> it consumes is a self-contained **episode directory**, not a projection of one run dir. The
-> findings queue → serial author seam (§4.3, §4.4) is unaffected and still the joint.
+> **Learning-stage note (post-#922).** The *platform* argument stands; what it assumes about
+> the learning stages does not. The `actor → oracle → judge` chain, `lead_sequence.yaml`, and
+> `learning/replay_actor.py` were deleted (`defender/docs/learning-loop-cutover.md`). The
+> *branched episode* that replaced them changes two things this design must absorb: a learning
+> job now spawns **several sibling investigations of its own**, so it is not a cheap LLM chain
+> to throttle beside an investigation; and it consumes a self-contained **episode directory**,
+> not a projection of one run dir. The findings queue → serial author seam is unaffected.
 
 A design record for productionising the defender agent: turning today's manual Python scripts (which
 render local investigation-artifact directories) into a system with APIs, a frontend, a real data layer,

@@ -1,11 +1,10 @@
 # Error disposition types: `RunUnprocessable` vs `StageAbort`
 
-> **Path note (post-#922).** The two disposition types and the stage boundary
-> they draw are live. Several of the call sites named below are not:
-> `core/run_cycle.py`, `core/runner.py` and `pipeline/oracle/sample.py` were
-> deleted with the old learning pipeline (`docs/learning-loop-cutover.md`).
-> `RunUnprocessable` is raised or re-tagged today in `core/validate.py`,
-> `core/cli.py`, `core/config.py`, `_pydantic_stage.py`, `author/curator_engine.py`,
+> **Path note (post-#922).** The two types and the stage boundary are live; some
+> call sites below are not — `core/run_cycle.py`, `core/runner.py` and
+> `pipeline/oracle/sample.py` went with the old pipeline. `RunUnprocessable` is
+> raised or re-tagged today in `core/{validate,cli,config}.py`,
+> `_pydantic_stage.py`, `author/curator_engine.py`,
 > `leads/lead_author_engine.py` and `judge/__init__.py`.
 
 **Status:** design — implemented. Completes the arc #438 → #441

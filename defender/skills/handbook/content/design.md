@@ -54,13 +54,10 @@ loop had proven itself end-to-end on real cases, and gaps in the defender's
 runtime discipline were treated as **signal for the loop to find**, not as bugs
 to pre-empt.
 
-**That blanket stance is lifted** (`defender/docs/runtime-gates.md`). The loop
-proved out, and gates were then added deliberately, one at a time, each with a
-named reason. It is the *ordering* that was the principle, not the absence of
-gates — so "should we add a gate to the defender runtime?" is now an ordinary
-design question, answered on the merits, rather than a near-automatic no.
-
-What runs today, and why each one earned its place:
+**That blanket stance is lifted** (`defender/docs/runtime-gates.md`): the loop
+proved out, and gates were added one at a time, each with a named reason. The
+*ordering* was the principle, not the absence of gates — so "should we add a
+gate?" is now an ordinary design question. What runs today, and why:
 
 - **The permission gate** (`runtime/permission/`) — one in-process,
   deny-by-default gate over bash and file reads/writes, per agent. Not a
