@@ -256,6 +256,64 @@ def test_three_different_undeclared_systems_are_three_calls_not_one_repeat(tmp_p
             "a model-authored system string became the value of a queries-table column"
 
 
+def test_the_grant_checks_writer_mints_its_own_identity_too(tmp_path):
+    """The fix has TWO writers and the arms above reach the threshold through only one of
+    them. `_bad_args` fails the pydantic argument schema, so its rows come from
+    `wrap_tool_validate`; a well-formed call naming a system the registry does not declare
+    gets past the schema and is turned back by the GRANT CHECK's unresolvable branch instead,
+    which records its own row from its own argument surface. A `system_key` computed at the
+    first placement and left `""` at the second fixes #871 for half the surface and leaves
+    the other half exactly as it was — and every other test in this file stays green, because
+    one grant-path rejection among two schema-path ones can never reach the count.
+
+    So: three DISTINCT undeclared systems, all three driven through the grant check, and a
+    corrected call that must execute. The trip control is the test below, which reaches the
+    threshold through the schema placement — between them the two placements are both bound
+    in both directions.
+
+    `_above_guard` cannot tell the two writers apart (both rows carry the same sentinel
+    `query_id`), so the discriminator is the TURN SHAPE: `q(...)` is schema-valid by
+    construction, which is what routes it past `wrap_tool_validate`."""
+    rec = VerbRecorder()
+    r = _run(tmp_path, run_id="d871-grantpath", verbs=elastic_ok(rec), turns=[
+        q("ghostone", "query", PARAMS), q("ghosttwo", "query", PARAMS),
+        q("ghostthree", "query", PARAMS), q("elastic", "query", PARAMS), DONE,
+    ])
+
+    rows = _above_guard(r)
+    assert len(rows) == 3, "the three grant-path rejections did not all leave their rows"
+    assert {row["system"] for row in rows} == {""}, "a phantom name reached the table"
+    keys = {row["system_key"] for row in rows}
+    assert len(keys) == 3, \
+        f"the grant check's writer minted no distinct identities: {keys}"
+    assert "" not in keys, \
+        "a grant-path rejection was recorded unfingerprinted, so it keys as every other one"
+    assert len(rec.calls) == 1, "the corrected call never reached the backend"
+    assert not _dead_end(r), \
+        "three distinct ghosts ended the lead through the grant check — #871 is unfixed there"
+
+
+def test_the_grant_checks_writer_is_still_bounded_on_a_repeat(tmp_path):
+    """The control for the test above, at the same placement: the grant check's writer must
+    not buy O1 by minting a FRESH identity per call. The same undeclared name three times
+    through the grant check still ends the lead, and the fourth turn must not execute."""
+    rec = VerbRecorder()
+    r = _run(tmp_path, run_id="d871-grantpath-repeat", verbs=elastic_ok(rec), turns=[
+        q("ghostone", "query", PARAMS), q("ghostone", "query", PARAMS),
+        q("ghostone", "query", PARAMS), q("elastic", "query", PARAMS), DONE,
+    ])
+
+    rows = _above_guard(r)
+    assert len(rows) == 3, "the loop ran past the threshold — the guard stopped counting"
+    assert {row["system_key"] for row in rows} == {
+        record_query.system_fingerprint("ghostone", "")}, \
+        "one name was recorded under more than one identity, so no repeat can ever be seen"
+    assert _dead_end(r), "one ghost named three times no longer bounds the lead"
+    assert rec.calls == [], "the lead ran on past its dead end"
+    assert "ghostone" not in _summary(r), \
+        "the model's own string crossed into main's context on a refusal path"
+
+
 def test_the_same_undeclared_system_named_three_times_still_ends_the_lead(tmp_path):
     """The control that stops the test above being satisfied by "stop counting undeclared
     rows", stated at the same address as its own claim rather than only at
