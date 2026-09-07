@@ -123,9 +123,9 @@ Those live in `soc-agent/`.
 
 This handbook describes how the defender works *now*. For *why* it's shaped
 this way — the RL / ablation-study framing the learning loop borrows from,
-the lessons-schema iterations, and (in `docs/learning-loop-cutover.md`) the
-four-role pipeline that was deleted in #922 and why — read `defender/docs/`,
-starting with `docs/learning-loop.md`. When a doc and the code disagree, the
+the lessons-schema iterations, and the four-role pipeline #922 deleted (whose
+reasoning is in `git show e9e11a48`) — read `defender/docs/`, starting with
+`docs/learning-loop.md`. When a doc and the code disagree, the
 code wins; the docs are design context, not spec.
 
 Sources: `defender/CLAUDE.md`, `defender/SKILL.md`, `defender/docs/learning-loop.md`.

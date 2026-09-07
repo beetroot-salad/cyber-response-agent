@@ -99,9 +99,9 @@ each finished run, imagining the counterfactual rather than executing it: it aut
 projected the telemetry that story would have produced, and graded itself against both. It is
 deleted, along with the learn queue, its drain, and the two sibling corpora it fed
 (`lessons-actor/`, `lessons-environment/`, whose authored lessons are left in place and read by
-nothing). `defender/docs/learning-loop-cutover.md` is the account of the swap and the list of
-names not to go looking for; the design docs that describe the old pipeline carry a status
-banner pointing at it. When a doc and the code disagree, the code wins.
+nothing). `git show e9e11a48` is the account of the deletion; the design docs that describe
+the old pipeline carry a status banner saying so. When a doc and the code disagree, the code
+wins.
 
 Design rationale lives in `defender/docs/` — start with `defender/docs/learning-loop.md` (the
 RL / ablation-study framing the architecture borrows from).

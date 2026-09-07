@@ -11,9 +11,22 @@ per-lesson forward-check (`author/verify_forward/`) → `defender/lessons/*.md`.
 
 **Rewritten for #922.** This doc used to describe a four-role pipeline — two
 actors, a telemetry oracle, a judge — that invented the material it learned
-from. `docs/learning-loop-cutover.md` is the account of the swap;
+from. `git show e9e11a48` is the account of the deletion and its reasoning;
 `docs/archive/learning-loop-experiments-2026-05-08.md` keeps the empirical
-findings from the old shape.
+findings from the old shape. Two things that change how a *current* file reads,
+so they are recorded here rather than left in the commit:
+
+- **The `lessons-actor/` and `lessons-environment/` corpora were not deleted,
+  only their producers were.** The directories and their authored lessons stay
+  on disk as frozen archives — see §One corpus, one queue.
+- **The defender's own report card moved rather than went.** It lived inside the
+  deleted judge visualizer, so `transcript.html` still carries it and there is no
+  judge view.
+
+Dead names from that pipeline (`actor_story.md`, `projected_telemetry.yaml`,
+`run_cycle.py`, `lead_sequence.yaml`, …) still appear in superseded design docs,
+the judge-alignment corpus and old run-visualization dirs. Each of those files
+carries a status banner; the names resolve to nothing in shipping code.
 
 The loop is offline and operator-initiated. Each curator commits from its own
 git worktree off `origin/main` and opens one PR per batch.

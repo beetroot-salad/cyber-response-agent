@@ -4,7 +4,7 @@
 
 `defender/` is the alert-triage agent: a runtime loop that investigates one alert end-to-end (`run.py`, driven by the in-process PydanticAI driver — not a Claude Code plugin), plus an offline **learning loop** under `defender/learning/` where most iteration happens. It runs against the `playground-v2/` environment; per-system knowledge lives under `defender/skills/`. Investigations record reasoning in the invlang on-disk format (`++/+/-/--` vocabulary; `skills/invlang/`).
 
-**`defender/SKILL.md` is the runtime spec.** Design rationale lives in `defender/docs/` — start with `learning-loop.md` before changing the loop shape, the questioner/judge/curator prompts, or the lessons mechanism. `learning-loop-cutover.md` records the four-role pipeline that came before it and why it went. When a doc and the code disagree, **the code wins**.
+**`defender/SKILL.md` is the runtime spec.** Design rationale lives in `defender/docs/` — start with `learning-loop.md` before changing the loop shape, the questioner/judge/curator prompts, or the lessons mechanism. When a doc and the code disagree, **the code wins**.
 
 ## Vocabulary — what the shorthand refers to
 
@@ -116,7 +116,7 @@ imagined. The disposition selected which direction(s) ran, and two further corpo
 (`lessons-actor/`, `lessons-environment/`) carried the actor-side observations. All of it is
 deleted: the pipeline, the direction routing, the three extra queues and their curators, and the
 `actor`/`oracle`/`judge` roles. `judge` returns in #1008 bound to the family judge, which until
-then runs under the questioner's definition. See `docs/learning-loop-cutover.md`.
+then runs under the questioner's definition. `git show e9e11a48` is the deletion itself.
 
 ## Where to make changes
 

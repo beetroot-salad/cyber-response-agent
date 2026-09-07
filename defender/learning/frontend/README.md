@@ -12,7 +12,7 @@ A read-only view of the learning loop's current posture. First panel:
 The two retired corpora are **frozen archives**: files left in place, nothing
 writing or reading them. Badged and dimmed rather than hidden — this is an
 author-facing view, and a lesson that was learned should stay findable after its
-channel closes (`defender/docs/learning-loop-cutover.md`). The headline counts
+channel closes (#922, `e9e11a48`). The headline counts
 live and archived separately, so "the loop's posture" excludes what nothing
 produces.
 

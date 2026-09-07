@@ -9,8 +9,8 @@ python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>
 ```
 
 For the *why* — the RL / ablation-study framing — read
-`defender/docs/learning-loop.md`. For what changed and when, read
-`defender/docs/learning-loop-cutover.md`.
+`defender/docs/learning-loop.md`. For the deletion that got us here, `git show
+e9e11a48`.
 
 ## What replaced what (#922)
 
@@ -126,4 +126,4 @@ fixture for the family judge.
 
 Sources: `defender/CLAUDE.md` §Learning loop, `defender/learning/branch/cli.py`,
 `defender/learning/judge/`, `defender/learning/core/drains.py`,
-`defender/docs/learning-loop.md`, `defender/docs/learning-loop-cutover.md`.
+`defender/docs/learning-loop.md`.
