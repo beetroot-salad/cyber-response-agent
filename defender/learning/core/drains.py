@@ -82,9 +82,17 @@ def _maybe_trigger_author(
     box: Any = None,
 ) -> None:
     threshold = env_int(threshold_env, 5)
-    pending_count = _pending_queue_count(pending_file)
+    # HELD IS LOGGED BESIDE AUTHORABLE, off the same single read. Since #881 this count is
+    # authorable rows and not queue depth, so a queue of a hundred permanently-held rows logs
+    # `pending=0` — and the held report, the only other trace of those rows, is written from
+    # inside a tick that this very gate is what stops from running. An operator asking "why
+    # has the curator not run in a week" would read that the queue is empty.
+    pending_count, held_count = _pending_queue_counts(pending_file)
     if pending_count < threshold:
-        _log(f"{pending_label}={pending_count} threshold={threshold} — {module_name} not invoked")
+        _log(
+            f"{pending_label}={pending_count} held={held_count} threshold={threshold} "
+            f"— {module_name} not invoked"
+        )
         return
     _log(f"step={module_name} {pending_label}={pending_count} threshold={threshold}")
     rc = _run_curator_module(
@@ -145,8 +153,17 @@ def _pending_queue_count(pending_file: Path) -> int:
     empty batch, and that rotation rewrites the file from the rows it can read. Returning
     early instead left the junk counted and uncleared, which is this function's own defect
     wearing the other mask: the gate fired on the same bytes every tick, forever."""
+    return _pending_queue_counts(pending_file)[0]
+
+
+def _pending_queue_counts(pending_file: Path) -> tuple[int, int]:
+    """`(authorable, held)` off ONE read of the queue — the count the wake gate compares, and
+    the count that explains it when it comes back low. They are answered together because the
+    second only ever needs saying when the first is what stopped a tick, and re-reading the
+    file to say it would parse the whole queue twice on the commonest path there is."""
     rows, unreadable = read_jsonl_rows_report(pending_file)
-    return sum(1 for row in rows if not row.get("held_reason")) + unreadable
+    held = sum(1 for row in rows if row.get("held_reason"))
+    return len(rows) - held + unreadable, held
 
 
 def _has_curator_work(paths: LoopPaths) -> bool:

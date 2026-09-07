@@ -339,7 +339,15 @@ def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_
     )
 
     # The control: the same retirement, uncontended, is ordinary work and records nothing.
-    uncontended = h.cfg_for(paths, "findings", repo_lock_wait_seconds=1)
+    # A FAKE AGENT even though this half cannot reach one: with an all-unkeyable batch
+    # `to_author` is empty and `_author_and_rotate` short-circuits, so the default config's
+    # REAL `invoke_agent` (the curator subagent stage) is unreached only by accident. A gate
+    # that starts emitting a row here would turn a unit test into a live model call that
+    # hangs to `author_timeout` and fails as a timeout rather than as its own assertion.
+    uncontended = h.cfg_for(
+        paths, "findings", repo_lock_wait_seconds=1,
+        invoke_agent=h.recording(h.committing("881-o4-control")),
+    )
     assert drain.run_batch(cfg=uncontended) == 0
     assert h.pending(ch) == [], "the uncontended retirement did not clear the row"
     assert len(h.graveyard(ch)) == 2, "the uncontended retirement did not graveyard the row"

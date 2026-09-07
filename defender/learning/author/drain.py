@@ -37,7 +37,6 @@ classifications, by channel: deliberate, and left for a follow-up.
 """
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import uuid
@@ -309,13 +308,19 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         # graveyarded — there is no row to write — but the closing rotation rewrites this
         # file from the rows it CAN read, so falling through is what clears it. Said out
         # loud, because that rotation is otherwise a silent deletion.
-        log(f"{unreadable} unreadable line(s) in the queue — the closing rotation drops them")
+        # "WILL drop", not "drops": several exits sit between here and that rotation — a
+        # fault in the retirement, in the gate, or in the authoring region — and on each of
+        # them the lines are still there next tick, printing this same line again. This is
+        # the only trace the deletion leaves, so it must not claim to be one.
+        log(
+            f"{unreadable} unreadable line(s) in the queue — the closing rotation, if this "
+            "tick reaches it, will drop them"
+        )
 
     keyed: list[dict] = []
     unkeyable: list[dict] = []
     for row in batch:
-        rid = row.get(key)
-        (keyed if isinstance(rid, str) and rid else unkeyable).append(row)
+        (keyed if _row_id(row, key) else unkeyable).append(row)
     # ONE stuck-recording guard around the whole tick body, with `stuck_rows` naming the rows
     # the phase in flight is stuck on. It was three copies of one handler, and the copy the
     # unkeyable retirement never got is #881/O4: that retirement takes the append lock again
@@ -358,8 +363,16 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
             # WRITER's `OSError` — the real fault surviving only as `__context__`, and the
             # `raise` below never reached. `Exception`, not `BaseException`, so an interrupt
             # arriving mid-record still leaves at once.
-            with contextlib.suppress(Exception):
+            #
+            # LOGGED, NOT SWALLOWED. A silent suppression voids this module's own contract
+            # that a non-`RETIRE_SET` fault is "always visible somewhere": the record is the
+            # only external trace of a stuck row, so a channel that cannot write one — an
+            # unwritable queue dir, or a defect inside the recorder itself — must still say
+            # so, or it wedges in exactly the silence O4 was filed against.
+            try:
                 _record_stuck(channel, e, stuck_rows)
+            except Exception as unrecorded:  # noqa: BLE001 — see above; never replaces `e`
+                log(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
         raise
 
 
@@ -651,6 +664,18 @@ def _retire_unkeyable(
     )
 
 
+def _row_id(row: dict, key: str) -> str | None:
+    """This row's id under its channel's key, or `None` where it has none.
+
+    THE ONE PREDICATE. `_tick` splits the batch on it and `_stuck_row_ids` names rows by it,
+    and the two disagreeing is not cosmetic: a bare `if rid:` says yes to a truthy non-string
+    id, so a row filed as unkeyable on one side is named as though it had a real id on the
+    other — the fold collision `_stuck_row_ids`' fingerprint exists to prevent, by a route
+    no test takes."""
+    rid = row.get(key)
+    return rid if isinstance(rid, str) and rid else None
+
+
 def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
     """@owns row_ids — how a stuck record names the rows a tick is stuck on.
 
@@ -666,13 +691,13 @@ def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
     prefixed so a fingerprint can never be mistaken for a real id."""
     named: list[str] = []
     for row in rows:
-        rid = row.get(channel.id_key)
-        # THE SAME PREDICATE `_tick` SPLIT ON, not a second spelling of it. `if rid:` said
-        # yes to a truthy non-string id — a row `_tick` had already filed as unkeyable — and
-        # named it `str(rid)`: unprefixed, indistinguishable from a real id, and identical
-        # for two different rows that happen to share it, which is the fold collision the
-        # fingerprint below exists to prevent.
-        if isinstance(rid, str) and rid:
+        # `_row_id`, the SAME function `_tick` split on, not a second spelling of it. A
+        # second spelling said yes to a truthy non-string id — a row `_tick` had already
+        # filed as unkeyable — and named it `str(rid)`: unprefixed, indistinguishable from a
+        # real id, and identical for two different rows that happen to share it, which is the
+        # fold collision the fingerprint below exists to prevent.
+        rid = _row_id(row, channel.id_key)
+        if rid is not None:
             named.append(rid)
             continue
         digest = hashlib.sha256(
@@ -691,12 +716,17 @@ def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -
     path = stuck_report_file(channel)
     previous = read_jsonl_rows(path)
     consecutive = 1
-    # NEVER FOLD ON AN EMPTY LIST. `_stuck_row_ids` names every row it is handed, but the
-    # authoring leg is handed `to_author`, which is `[]` on any tick whose gate held or
-    # consumed the whole batch — and `[] == []` reads to this comparison as "the same rows
-    # as last time", folding two unrelated ticks into one count that looks like one problem
-    # getting worse. With no rows named, this tick cannot claim to be the previous one.
-    if previous and ids:
+    # AN EMPTY LIST IS A ROW SET, not a missing one. `_stuck_row_ids` names every row it is
+    # handed — a keyless one by its fingerprint — so `ids == []` now means one thing only:
+    # the phase that faulted had NO rows in flight. That is the authoring leg on a tick whose
+    # gate held or consumed the whole batch, and two such ticks failing with one fault class
+    # ARE the same problem recurring, which is what `consecutive_ticks` exists to say.
+    # Refusing to fold there pinned the count at 1 forever for exactly the queue this issue
+    # is about — a permanently gate-held one — so an operator paging on "stuck for N ticks"
+    # saw N one-off faults and never fired. The collapse that guard was reaching for is the
+    # one the fingerprint above already closed: two DIFFERENT poison rows reading as the same
+    # rows, which cannot happen once every row is named.
+    if previous:
         last = previous[-1]
         same_ids = sorted(str(i) for i in (last.get("row_ids") or [])) == ids
         if last.get("fault_class") == fault_class and same_ids:

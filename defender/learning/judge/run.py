@@ -196,19 +196,8 @@ def _parse_finding(raw: Any, index: int) -> Finding:
 
 
 def validate_reply(text: str) -> JudgeReply:
-    """Parse `text` LENIENTLY (a fence with prose BEFORE it, AFTER it, or both, recovers
-    cleanly — C12) and validate STRICTLY: nothing is read off the reply before this returns.
-
-    "Around" was the claim and only the leading half was true: until #881/O1 a fence
-    followed by a closing sentence was stripped by no rule in `strip_yaml_fence` and refused
-    here as invalid YAML — one draw lost, and at the default draw count that is the whole
-    world's grade. Both halves are now enumerated in the parser's own test, so the sentence
-    and the behaviour fail together.
-
-    ONE fence, though. A reply carrying two fenced documents — a draft the model then
-    corrected, an example beside the answer — is refused here rather than guessed at:
-    `strip_yaml_fence` declines to pick, because picking the first records an abandoned
-    draft as the grade and a refusal only costs the draw."""
+    """Parse `text` LENIENTLY (a fence with prose around it recovers cleanly — C12) and
+    validate STRICTLY: nothing is read off the reply before this returns."""
     import yaml
 
     from defender._yaml import safe_load
