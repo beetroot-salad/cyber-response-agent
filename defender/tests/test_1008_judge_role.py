@@ -55,6 +55,16 @@ from defender.tests import _triplet_947 as T
 GRANT_KEYWORDS = ("tools", "bash_shapes", "write_shapes", "verb_grant",
                   "read_allow_override", "corpus_dirs")
 
+#: The functions and classes the source checks below resolve calls against, by their real
+#: dotted names. Spelled once: a check comparing against a bare identifier is a check that an
+#: alias defeats, which is the hole this file reopened twice.
+RUN_STAGE = "defender.learning._pydantic_stage.run_stage"
+AGENT_DEFINITION = "defender.runtime.agent_definition.AgentDefinition"
+JUDGE_DEPS = "defender.learning.judge.run.JudgeDeps"
+QUESTIONER_DEPS = "defender.learning.branch.questioner.QuestionerDeps"
+JUDGE_MODEL_ACCESSOR = "defender.learning.core.config.judge_model"
+JUDGE_EFFORT_ACCESSOR = "defender.learning.core.config.judge_effort"
+
 JUDGE_RUN = T.DEFENDER / "learning" / "judge" / "run.py"
 JUDGE_PKG = T.DEFENDER / "learning" / "judge" / "__init__.py"
 JUDGE_ROLE_PROMPT = T.DEFENDER / "learning" / "judge" / "role.md"
@@ -105,27 +115,41 @@ def _grant_gate():
 # ---------------------------------------------------------------------------------------
 
 
+def _astlib():
+    """The gates' own scope-aware AST resolver, IMPORTED the way the gates reach it.
+
+    Hand-rolled name matching is what this file kept getting wrong, three rounds running: a
+    bare-name match missed the attribute form, an attribute match missed an aliased import, and
+    a hand-written binding sweep missed a function-local shadow and a `for` target. Each miss
+    was a live exploit — the name read right and the object was another class.
+
+    `_astlib.module_env` builds the real scope tree and `callee`/`origin` resolve a name the
+    way PYTHON would, against the innermost scope that binds it. It is the declared owner of
+    this question (its module docstring says so, and `lint_hand_rolled_name_resolution.py` is
+    the gate); a second resolver here is a second thing to get wrong.
+    """
+    from defender.tests._by_path import import_lint_lib
+
+    return import_lint_lib("_astlib")
+
+
 def _function(tree: ast.AST, name: str) -> ast.FunctionDef | None:
     return next((n for n in ast.walk(tree)
                  if isinstance(n, ast.FunctionDef) and n.name == name), None)
 
 
-def _calls(node: ast.AST, callee: str) -> list[ast.Call]:
-    """Every `callee(...)` call under `node` — bare name AND attribute form.
+def _calls(node: ast.AST, dotted: str, tree: ast.AST | None = None) -> list[ast.Call]:
+    """Every call under `node` whose callee RESOLVES to `dotted`, however it is spelled.
 
-    Parsed rather than grepped: a substring scan of a whole file cannot tell a constructor's own
-    keyword from the same word in a docstring, in a comment, or at another call — and a check
-    that fails when the prose changes is not the check that fails when a grant is added.
-
-    BOTH SPELLINGS, because a census that reads one of them is not a census. Matching only
-    `ast.Name` left `_pydantic_stage.run_stage(...)` invisible — and that attribute form is
-    how the judge's own module already spells every cross-module call it makes, so a second,
-    widening call written the way its neighbours are written would not have been counted.
+    `run_stage(...)`, `_pydantic_stage.run_stage(...)` and `from ... import run_stage as _rs`
+    then `_rs(...)` are one call to one function; a census that reads the spelling counts a
+    different number for each, and the widening call goes in whichever spelling is uncounted.
+    `tree` is the module the scope tree is built from — pass it when `node` is a subtree.
     """
+    A = _astlib()
+    env = A.module_env(tree if tree is not None else node)
     return [n for n in ast.walk(node)
-            if isinstance(n, ast.Call)
-            and ((isinstance(n.func, ast.Name) and n.func.id == callee)
-                 or (isinstance(n.func, ast.Attribute) and n.func.attr == callee))]
+            if isinstance(n, ast.Call) and A.callee(n, env) == dotted]
 
 
 def _keywords(call: ast.Call) -> dict[str, str]:
@@ -143,118 +167,124 @@ def _splats(call: ast.Call) -> int:
     return sum(1 for kw in call.keywords if kw.arg is None)
 
 
-def _bindings_of(tree: ast.AST, name: str) -> set[tuple[str, str]]:
-    """EVERY binding of `name` anywhere in the module, at any scope, as (kind, origin) pairs.
+def _origin_of(tree: ast.AST, node: ast.expr) -> str | None:
+    """Where the name at `node` actually came from, resolved in ITS OWN scope.
 
-    THE NAME IS NOT THE BINDING, and that gap is the whole reason this exists. A seam whose
-    source reads `deps=JudgeDeps()` runs the questioner's deps if the name was bound by
-    `from ...questioner import QuestionerDeps as JudgeDeps` — the source check reads exactly
-    what it expects and every draw still compiles the wrong definition.
-
-    EVERY binding, not "is there an honest one somewhere", which is the narrower question this
-    helper first asked and which is not the same question at all. Python resolves a name at the
-    site that uses it, so an honest module-level import satisfies an any() sweep while a
-    function-local import of a different class SHADOWS it at the one line that constructs the
-    deps. Collecting every binding and demanding they agree makes a rebinding at ANY scope
-    visible, without this test having to model Python's scope rules to decide which one wins:
-    if they all name the same origin, no site can resolve to anything else.
-
-    An `import a.b.c` (plain, not from-) binds the ROOT name only, so it cannot bind a class
-    name and is not collected; anything else that binds the name — an assignment, a def, a
-    class, a for target — is reported as its own kind, which is enough to fail the equality.
+    THE NAME IS NOT THE BINDING, and every version of that mistake this file has shipped is
+    closed by asking the resolver instead of the source text: an aliased import at module
+    scope, a function-local import shadowing an honest one, a `for` target, a `with ... as`, a
+    tuple unpack. Each spells the expected name and binds something else; each answers with a
+    different origin here, or None when the name is bound to a value rather than an import.
     """
-    found: set[tuple[str, str]] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                bound = alias.asname or alias.name
-                if bound == name:
-                    kind = "import" if alias.asname is None else "aliased-import"
-                    found.add((kind, f"{node.module}.{alias.name}"))
-        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for t in targets:
-                if isinstance(t, ast.Name) and t.id == name:
-                    found.add(("assignment", ast.unparse(node)))
-        elif (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-              and node.name == name):
-            found.add(("definition", node.name))
-    return found
+    A = _astlib()
+    return A.origin(node, A.module_env(tree))
 
 
-def _binds_only(tree: ast.AST, name: str, module: str) -> bool:
-    """Whether every binding of `name` in the module is the unaliased import from `module`."""
-    return _bindings_of(tree, name) == {("import", f"{module}.{name}")}
+def _keyword_node(call: ast.Call, name: str) -> ast.expr | None:
+    return next((kw.value for kw in call.keywords if kw.arg == name), None)
+
+
+def _called_origin(tree: ast.AST, call: ast.Call, keyword: str) -> str | None:
+    """The origin of the CLASS or FUNCTION invoked by `call`'s `keyword=` argument.
+
+    `deps=JudgeDeps()` -> where `JudgeDeps` came from; `effort=judge_effort()` -> where
+    `judge_effort` came from. None when the argument is not a call, or when the name resolves
+    to something that is not an import.
+    """
+    node = _keyword_node(call, keyword)
+    if not isinstance(node, ast.Call):
+        return None
+    return _origin_of(tree, node.func)
 
 
 def _self_test_the_extractor() -> None:
-    """The extractor's own positive control, run at every site that uses it.
+    """The resolver's own positive control, run at every site that uses it.
 
     An AST check whose parse silently found NOTHING passes for the wrong reason forever. This
-    proves, on synthetic source, that the walk locates a call, reads its keyword names, and
-    would REPORT a grant keyword if one were written — so a green result upstream means the
-    keyword is absent, not that the checker is blind.
+    proves, on synthetic source carrying every evasion this file has actually shipped, that the
+    walk locates calls by what they RESOLVE to, reads their keyword names, sees a `**mapping`,
+    and reports a shadowed or rebound name as something other than the origin a caller demands.
     """
     source = (
+        "from a.b import AgentDefinition\n"
         "from a.b import SomeDeps\n"
-        "from c.d import OtherDeps as Aliased\n"
-        "def helper():\n"
-        "    return stage_mod.run_stage(stage='h', deps=SomeDeps(), tools=T)\n"
-        "def seam():\n"
-        "    from x.y import OtherDeps as Shadowed\n"
+        "from c.d import OtherDeps as SomeDepsAliased\n"
+        "from e.f import run_stage\n"
+        "from e.f import run_stage as _rs\n"
+        "import e.f as stage_mod\n"
+        "def bare():\n"
+        "    return run_stage(stage='b', deps=SomeDeps(), tools=T)\n"
+        "def attribute():\n"
+        "    return stage_mod.run_stage(stage='a', deps=SomeDeps())\n"
+        "def aliased():\n"
+        "    return _rs(stage='x', deps=SomeDeps())\n"
+        "def shadowed():\n"
+        "    from g.h import OtherDeps as SomeDeps\n"
+        "    return run_stage(stage='s', deps=SomeDeps())\n"
+        "def looped():\n"
+        "    for SomeDeps in (1, 2):\n"
+        "        pass\n"
+        "    return run_stage(stage='l', deps=SomeDeps())\n"
+        "def defs():\n"
         "    D = AgentDefinition(role=R, model=m, tools=ToolSet(), deps_cls=X)\n"
         "    S = AgentDefinition(role=R, **SURFACES)\n"
-        "    return run_stage(stage='s', deps=SomeDeps(), tools=T)\n"
+        "    return D, S\n"
     )
     tree = ast.parse(source)
-    seam = _function(tree, "seam")
-    assert seam is not None, "the extractor cannot find a function it was handed by name"
-    defn_call, splatted = _calls(seam, "AgentDefinition")
+    assert _function(tree, "bare") is not None, "the walk cannot find a function by name"
+
+    # 1. THREE SPELLINGS, ONE FUNCTION. A census that reads source text counts one of these
+    #    three; the widening call then lives in either of the other two.
+    assert len(_calls(tree, "e.f.run_stage")) == 5, (
+        "the call census does not resolve every spelling of one callee — bare name, attribute "
+        "form and aliased import are the three this file has shipped a miss on")
+
+    # 2. Keyword reading, and the `**mapping` a keyword sweep cannot see.
+    defn_call, splatted = _calls(_function(tree, "defs"), "a.b.AgentDefinition", tree)
     assert set(_keywords(defn_call)) == {"role", "model", "tools", "deps_cls"}
-    assert "tools" in _keywords(defn_call), "the extractor would not report a grant keyword"
+    assert "tools" in _keywords(defn_call), "the reader would not report a grant keyword"
     assert _splats(defn_call) == 0
-    (stage_call,) = _calls(seam, "run_stage")
-    assert _keywords(stage_call)["deps"] == "SomeDeps()"
-    assert "tools" in _keywords(stage_call)
-
-    # The three blind spots every check below has to close, proved on source that HAS them.
-    #
-    # 1. A splatted mapping carries grant keywords `_keywords` never reports.
     assert set(_keywords(splatted)) == {"role"}, "the splat leaked into the named keywords"
-    assert _splats(splatted) == 1, "the extractor cannot see a `**mapping` argument at all"
-    # 2. An ATTRIBUTE-form call is a call. The module census must find `helper`'s as well as
-    #    the seam's, or a widening call spelled the way its neighbours are is uncounted.
-    assert len(_calls(tree, "run_stage")) == 2, (
-        "the call census reads only bare-name calls, so an attribute-form one is invisible")
-    # 3. A binding sweep that asks "is there an honest import somewhere" passes a module whose
-    #    honest module-level import is SHADOWED at the site that uses the name.
-    assert _binds_only(tree, "SomeDeps", "a.b")
-    assert not _binds_only(tree, "Aliased", "c.d"), (
-        "the binding sweep accepts an ALIASED binding — one thing it exists to refuse")
-    assert not _binds_only(tree, "SomeDeps", "wrong.module")
-    assert _bindings_of(tree, "Shadowed") == {("aliased-import", "x.y.OtherDeps")}, (
-        "the binding sweep does not descend into function scope, where a shadowing import "
-        "lives — the other thing it exists to refuse")
+    assert _splats(splatted) == 1, "the reader cannot see a `**mapping` argument at all"
+
+    # 3. THE NAME IS NOT THE BINDING. Every one of these spells `deps=SomeDeps()`; only the
+    #    first three construct `a.b.SomeDeps`. A function-local shadow and a `for` target are
+    #    two ways to write the same betrayal, and each has to answer differently here or the
+    #    seam checks below are reading decoration.
+    resolved = {name: _called_origin(tree, _calls(_function(tree, name), "e.f.run_stage",
+                                                  tree)[0], "deps")
+                for name in ("bare", "attribute", "aliased", "shadowed", "looped")}
+    assert resolved["bare"] == "a.b.SomeDeps"
+    assert resolved["attribute"] == "a.b.SomeDeps"
+    assert resolved["aliased"] == "a.b.SomeDeps"
+    assert resolved["shadowed"] == "g.h.OtherDeps", (
+        "a function-local import shadowing the module-level one resolves to the module's "
+        "binding — the resolver is not scope-aware, and the seam checks prove nothing")
+    assert resolved["looped"] is None, (
+        "a `for` target rebinding the name resolves to the import it shadows")
+
+    # And an alias does not HIDE an origin either — the same fact from the other side: a seam
+    # that imports the wrong class under the right name answers with the wrong origin.
+    assert _origin_of(tree, ast.parse("SomeDepsAliased", mode="eval").body) == "c.d.OtherDeps"
 
 
-def _assert_sole_unwidened_seam(path, fn_name: str, deps_call: str, deps_module: str) -> None:
+def _assert_sole_unwidened_seam(path, fn_name: str, deps_origin: str) -> None:
     """One production seam drives ONE `run_stage`, with these deps and no call-time widening.
 
     ONE HELPER FOR BOTH SEAMS, because the two copies of this check drifted inside a single
     commit: the mirror written for the questioner's seam dropped the widening assertion and the
-    call-identity pair that the judge's own copy calls load-bearing. Two seams, one body — then
-    a hole closed on one side cannot stay open on the other.
+    call-identity pair the judge-side copy calls load-bearing.
 
-    Each assertion answers a way the shipped call can betray the definition it is supposed to
-    run under:
+    Each assertion answers a way the shipped call can betray the definition it runs under:
       * the deps class IS the mechanism — `build_stage_agent` reads `type(deps).role`, so a
         seam handing the other role's deps runs every call under the other role's definition,
         whatever the registry says and whatever the `role=` kwarg declares;
-      * the NAME is not the binding — an aliased or shadowing import spells the right class and
-        constructs the wrong one;
-      * ONE call, counted over the whole MODULE — scoped to the function, this reads whichever
-        call sits inside it, and a second one in a module-level helper the seam delegates to can
-        hand `tools=` to a role that grants nothing while the body reads clean;
+      * the NAME is not the binding — so the deps class is checked by RESOLVED ORIGIN, which an
+        alias, a function-local shadow or a `for` target each answer differently;
+      * ONE call, counted over the whole MODULE and by resolved callee — scoped to the function
+        it reads whichever call sits inside it, and matched by spelling it misses the attribute
+        form and the aliased import, each of which has carried a live `tools=ToolSet(read=True)`
+        past this check;
       * `run_stage(tools=…, verbs=…)` WIDENS the registered definition at call time
         (`learning/_pydantic_stage.py`), so either keyword is a grant from outside the
         definition — and a `**mapping` is both keywords, unread.
@@ -266,27 +296,23 @@ def _assert_sole_unwidened_seam(path, fn_name: str, deps_call: str, deps_module:
         f"{path} declares no `{fn_name}` — the production seam moved, and this check would "
         "otherwise pass by finding nothing")
 
-    module_calls = _calls(tree, "run_stage")
-    seam_calls = _calls(seam, "run_stage")
+    module_calls = _calls(tree, RUN_STAGE)
+    seam_calls = _calls(seam, RUN_STAGE, tree)
     assert len(module_calls) == 1, (
-        f"{path} makes {len(module_calls)} `run_stage(` calls; this seam drives exactly one, "
-        "and a second is a lane this check does not read")
-    moved = (f"the module's one `run_stage(` call is not inside `{fn_name}` — the shipped call "
+        f"{path} makes {len(module_calls)} calls that resolve to {RUN_STAGE}; this seam drives "
+        "exactly one, and a second is a lane this check does not read")
+    moved = (f"the module's one `run_stage` call is not inside `{fn_name}` — the shipped call "
              "moved out of the seam this check inspects")
     assert len(seam_calls) == 1, moved
     assert seam_calls[0] is module_calls[0], moved
 
     call = module_calls[0]
     spelled = _keywords(call)
-    deps_name = deps_call.removesuffix("()")
-    assert spelled.get("deps") == deps_call, (
-        f"{path.name}'s seam builds with deps={spelled.get('deps')}, not {deps_call} — the deps "
-        "class is what selects the definition, so this is the line that decides the role")
-    assert _binds_only(tree, deps_name, deps_module), (
-        f"the seam spells `{deps_call}` but the module does not bind `{deps_name}` to "
-        f"{deps_module} and nothing else — an aliased import, at module scope or shadowing one "
-        f"inside the seam, reads exactly like this line and builds another class entirely. "
-        f"Bound by: {sorted(_bindings_of(tree, deps_name))}")
+    assert _called_origin(tree, call, "deps") == deps_origin, (
+        f"{path.name}'s seam builds deps that resolve to "
+        f"{_called_origin(tree, call, 'deps')}, not {deps_origin} — the deps class is what "
+        f"selects the definition, so this is the line that decides the role. (It is spelled "
+        f"{spelled.get('deps')}, which is why the SPELLING is not what is checked.)")
     widened = sorted(set(spelled) & {"tools", "verbs"})
     assert widened == [], (
         f"{path.name}'s seam passes {widened} to `run_stage`, which overrides the registered "
@@ -484,7 +510,14 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
     # actually was. Two texts that are each other's template share a long contiguous run; two
     # texts written about different roles do not. The judge's and the questioner's share 11
     # characters today, and the substituted draft shared 48.
-    overlap = difflib.SequenceMatcher(None, questioner_reason, policy.deny_reason)
+    # autojunk=False, and it is load-bearing rather than tidy. With the default, any character
+    # appearing more than len(b)//100+1 times in a b of 200+ is dropped from the index — and
+    # the judge's reason is 373 — so a shared run made of ordinary letters has no seed to
+    # anchor on and `find_longest_match` UNDER-REPORTS it. Measured: the questioner's verbatim
+    # 47-character clause inside a judge-length reason reads as 12 with autojunk on and 48 with
+    # it off, so the guard below passed on the exact case it names.
+    overlap = difflib.SequenceMatcher(None, questioner_reason, policy.deny_reason,
+                                      autojunk=False)
     longest = overlap.find_longest_match(
         0, len(questioner_reason), 0, len(policy.deny_reason))
     shared = questioner_reason[longest.a:longest.a + longest.size]
@@ -590,7 +623,7 @@ def test_1008_the_definition_spells_no_grant_keyword_at_all():
     """
     _self_test_the_extractor()
     tree = ast.parse(JUDGE_RUN.read_text(encoding="utf-8"))
-    calls = _calls(tree, "AgentDefinition")
+    calls = _calls(tree, AGENT_DEFINITION)
     assert len(calls) == 1, (
         f"{JUDGE_RUN} holds {len(calls)} `AgentDefinition(` calls; the judge's definition is "
         "declared there and exactly once — this check has nothing to inspect otherwise")
@@ -626,11 +659,21 @@ def test_1008_the_definition_spells_no_grant_keyword_at_all():
     JUDGE_DEF = _judge_def()
     assert JUDGE_DEF.model is config.judge_model, (
         f"the definition's model thunk is {JUDGE_DEF.model!r}, not the judge's own knob reader")
-    assert spelled["model"] == "judge_model", (
-        f"the definition is built with model={spelled['model']}, not the judge's knob reader")
-    assert spelled["effort"] == "judge_effort()", (
-        f"the definition is built with effort={spelled['effort']} — the questioner's accessor "
-        "has the same default, so nothing at runtime can tell the two apart")
+
+    # BY RESOLVED ORIGIN, not by the name in the source. `effort=judge_effort()` reads right
+    # over `from ...questioner import questioner_effort as judge_effort`, and there is no
+    # runtime backstop for it the way `model` has one: the accessor already ran at import, and
+    # both roles default to "medium", so no value comparison can tell them apart. Checking the
+    # spelling here was the same defect this file shipped twice at the seam.
+    model_node = _keyword_node(calls[0], "model")
+    assert _origin_of(tree, model_node) == JUDGE_MODEL_ACCESSOR, (
+        f"the definition's model accessor resolves to {_origin_of(tree, model_node)}, not "
+        f"{JUDGE_MODEL_ACCESSOR} — it is spelled {spelled['model']}, which is why the spelling "
+        "is not what is checked")
+    assert _called_origin(tree, calls[0], "effort") == JUDGE_EFFORT_ACCESSOR, (
+        f"the definition's effort accessor resolves to "
+        f"{_called_origin(tree, calls[0], 'effort')}, not {JUDGE_EFFORT_ACCESSOR} — spelled "
+        f"{spelled['effort']}, and nothing at runtime can tell the two accessors apart")
 
 
 def test_1008_the_default_seam_hands_run_stage_the_judges_deps_and_widens_nothing():
@@ -645,8 +688,7 @@ def test_1008_the_default_seam_hands_run_stage_the_judges_deps_and_widens_nothin
     forbidden here. `test_921_judge_call.py` checks the INJECTED seam's kwargs, which is a
     different object entirely.
     """
-    _assert_sole_unwidened_seam(
-        JUDGE_PKG, "_default_judge_seam", "JudgeDeps()", "defender.learning.judge.run")
+    _assert_sole_unwidened_seam(JUDGE_PKG, "_default_judge_seam", JUDGE_DEPS)
 
 
 # ---------------------------------------------------------------------------------------
@@ -751,8 +793,7 @@ def test_1008_the_questioners_own_seam_still_builds_with_the_questioners_deps():
     committed once.
     """
     _assert_sole_unwidened_seam(
-        T.DEFENDER / "learning" / "branch" / "seams.py", "model_seam",
-        "QuestionerDeps()", "defender.learning.branch.questioner")
+        T.DEFENDER / "learning" / "branch" / "seams.py", "model_seam", QUESTIONER_DEPS)
 
 
 def test_1008_no_shipped_prose_still_says_the_judge_runs_as_the_questioner():
@@ -901,9 +942,17 @@ def test_1008_the_judges_deps_carry_nothing_but_the_role():
     assert not issubclass(deps_cls, QuestionerDeps), (
         "the judge's deps INHERIT the questioner's — a subclass carries every field and every "
         "future field of the class it is supposed to be independent of")
-    assert deps_cls.__mro__[1:] == (object,), (
-        f"the judge's deps inherit {[c.__name__ for c in deps_cls.__mro__[1:-1]]} — this class "
-        "carries its role and nothing else, which means it derives from nothing else")
+    # NARROWED to the questioner, deliberately. `__mro__[1:] == (object,)` was the first
+    # spelling and it refuses too much: it also fails a shared zero-field deny-all BASE, which
+    # is the obvious de-duplication for a family that now has two members and would give the
+    # registry-wide sweep in `test_922_witnesses.py` a positive marker to derive from. What
+    # this obligation is about is not inheriting ANYTHING; it is not inheriting the OTHER
+    # deny-all role's class — so that is what it says, with the zero fields above carrying the
+    # rest.
+    assert QuestionerDeps not in deps_cls.__mro__, (
+        f"the judge's deps inherit {[c.__name__ for c in deps_cls.__mro__[1:-1]]}, which "
+        "includes the questioner's — a subclass carries every field and every future field of "
+        "the class it is supposed to be independent of")
 
 
 def test_1008_bind_refuses_the_judges_definition_by_its_deps_type_name(tmp_path):
