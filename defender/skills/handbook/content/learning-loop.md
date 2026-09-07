@@ -68,8 +68,10 @@ What runs now branches a **real** investigation instead of inventing one.
 
 Unchanged by the cutover, and it is the joint the whole thing swings on. The
 runtime-facing output is the `defender/lessons/` corpus. Once the findings
-queue reaches `LEARNING_AUTHOR_THRESHOLD` (default **5**), the lessons
-curator folds the queued rows into `defender/lessons/*.md`:
+queue holds `LEARNING_AUTHOR_THRESHOLD` (default **5**) rows it could
+AUTHOR — a row already stamped `held_reason` stays queued and counts for
+nothing (#881) — the lessons curator folds the queued rows into
+`defender/lessons/*.md`:
 
 ```
 python3 defender/learning/loop.py --author-drain

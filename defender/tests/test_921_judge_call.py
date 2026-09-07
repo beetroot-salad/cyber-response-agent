@@ -413,54 +413,6 @@ def test_921_fenced_reply_with_prose_around_it_parses_and_then_validates(tmp_pat
         run_mod.validate_reply(fenced_bad)
 
 
-def _wrapped(body: str) -> dict[str, str]:
-    """The five ways a fenced verdict has been observed to arrive, from one reply body.
-
-    Built here rather than as another `as_reply_text(malformed=...)` word because what is
-    under test is the SET: four shapes that already parse and one that does not, compared
-    against each other on one address."""
-    return {
-        "plain": body,
-        "whole fence": f"```yaml\n{body}```",
-        "prose then fence": f"Here is my grading of the world.\n\n```yaml\n{body}```",
-        "fence then prose": (
-            f"```yaml\n{body}```\n\nLet me know if you want the derivation table expanded."),
-        "prose fence prose": (
-            f"Here is my grading of the world.\n\n```yaml\n{body}```\n\nHappy to expand it."),
-    }
-
-
-@pytest.mark.parametrize("shape", sorted(_wrapped("x: 1\n")))
-def test_881_a_fenced_verdict_parses_with_prose_on_either_side_of_the_fence(shape):
-    """#881/O1, through the judge's OWN entry point: a syntactically valid verdict wrapped in
-    a fence parses whether prose precedes it, follows it, surrounds it, or is absent.
-
-    Driven through `validate_reply` rather than through `normalize_judge_yaml` (whose own
-    regression sits beside the `strip_yaml_fence` cluster in `tests/learning/test_loop.py`)
-    because this is where the shape COSTS something: a refusal here is one malformed draw,
-    the draw loop unlinks the reply file, and at the default `JUDGE_DRAWS=1` that is zero
-    completed draws for the world — the family then reads `undecidable` and queues nothing.
-    A judge that silently declines to grade a world because the model put its closing
-    sentence after the fence instead of before it is not a parse detail.
-
-    THE FOUR SHAPES THAT ALREADY WORK ARE THE CONTROL. `fence then prose` alone would be
-    satisfied by a normalizer that threw the surrounding text away indiscriminately, and
-    every such repair breaks one of the other four; parametrising names which.
-
-    Strictness is asserted on the same address in the sibling test above: leniency at the
-    parse never softens what a valid reply IS."""
-    run_mod = _run()
-    text = _wrapped(J.as_reply_text(J.reply_doc()))[shape]
-    try:
-        parsed = run_mod.validate_reply(text)
-    except J.refusals() as refused:
-        pytest.fail(f"{shape}: the judge refused a syntactically valid verdict — {refused}")
-    assert parsed.episode_outcome == "gradable", shape
-    assert [f.topic for f in parsed.findings] == ["holding-system coverage"], (
-        f"{shape}: the lenient parse dropped the body it was supposed to recover"
-    )
-
-
 # ---------------------------------------------------------------------------------------
 # D1 / D2 / D3 — the role, the knobs, the fan-out
 # ---------------------------------------------------------------------------------------

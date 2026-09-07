@@ -196,8 +196,16 @@ def _parse_finding(raw: Any, index: int) -> Finding:
 
 
 def validate_reply(text: str) -> JudgeReply:
-    """Parse `text` LENIENTLY (a fence with prose around it recovers cleanly — C12) and
-    validate STRICTLY: nothing is read off the reply before this returns."""
+    """Parse `text` LENIENTLY (a fence with prose BEFORE it recovers cleanly — C12) and
+    validate STRICTLY: nothing is read off the reply before this returns.
+
+    "Around" was the claim and only the leading half is true. A fence FOLLOWED by a closing
+    sentence is stripped by no rule in `strip_yaml_fence` and refused here as invalid YAML —
+    one draw lost, and at the default draw count that is the whole world's grade. Left
+    standing deliberately: three attempts at the obvious repair each silently returned the
+    WRONG fenced block as the verdict on some other shape, which is worse than the refusal,
+    and what a reply carrying several fenced blocks means has never been settled. Tracked as
+    its own issue rather than guessed at here."""
     import yaml
 
     from defender._yaml import safe_load
