@@ -70,9 +70,10 @@ class AgentDefinition:
     bash_shapes: tuple[Callable[[ResolvedRoots], tuple[Grant, ...]], ...] = ()
     write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...] = ()
     #: The deps type `bind` builds for this role. Normally an `AgentDeps` subtype; typed
-    #: loosely for the one shape that cannot be one — a role holding NO grant and no run-scoped
-    #: state at all (#947's questioner), whose deps carry only their `role` ClassVar. `AgentDeps`
-    #: IS the run scope (run dir, policy, box, anchors), so a deps type with none of that cannot
+    #: loosely for the shape that cannot be one — a role holding NO grant and no run-scoped
+    #: state at all, whose deps carry only their `role` ClassVar. Two of those now: #947's
+    #: questioner, and the family judge that took a key of its own in #1008. `AgentDeps` IS the
+    #: run scope (run dir, policy, box, anchors), so a deps type with none of that cannot
     #: inherit it; `bind` refuses such a def loudly rather than reaching for a `_for_run` that
     #: is not there.
     deps_cls: type[Any] | None = None
