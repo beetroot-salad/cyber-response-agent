@@ -354,7 +354,7 @@ def _drop_refused_dispatch(
 def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path) -> set[str]:
     """Which gather leads the run held by `branch_message_id`.
 
-    THE LEAD IS THE JOIN, because there is no other. `append_query_row` writes thirteen frozen
+    THE LEAD IS THE JOIN, because there is no other. `append_query_row` writes fourteen frozen
     keys and not one of them is a timestamp or a message id, so a query row cannot be dated
     against the session directly. What it does carry is `lead_id`, and every lead enters through
     a `gather` call/return pair in MAIN's own transcript — so the session dates the

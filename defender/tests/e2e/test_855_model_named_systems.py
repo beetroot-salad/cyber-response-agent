@@ -325,11 +325,14 @@ def test_only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest(tmp_path):
                 f"{row['system']!r} kept its system AND took a fingerprint"
     values = [value for row in r.rows for value in row.values()]
     assert "elastic" in values, "the negative below is quantified over nothing"
-    assert "ghostone" not in values and "ghosttwo" not in values, \
+    assert "ghostone" not in values, \
+        "the fourteenth column put the model's string back on the table"
+    assert "ghosttwo" not in values, \
         "the fourteenth column put the model's string back on the table"
 
     digests = {k for k in keys if k}
-    assert digests and not any(row["system"] in digests for row in r.rows), \
+    assert digests, "no digest was minted, so the negative below is quantified over nothing"
+    assert not any(row["system"] in digests for row in r.rows), \
         "a digest reached the `system` column, which `_build_pitfalls_handoffs` spends "\
         "verbatim as `defender/skills/<system>/execution.md` — and it is name-shaped enough "\
         "to pass `is_system_name` on the way"
@@ -363,7 +366,8 @@ def test_the_tables_second_writer_grows_the_column_too(tmp_path):
     assert len(rows) == 1, "the second writer left no row, so the contract below is vacuous"
     assert set(rows[0]) == ROW_KEYS, \
         "the two writers disagree about the row's keys — one file, two shapes"
-    assert rows[0]["system"] and rows[0]["system_key"] == "", \
+    assert rows[0]["system"], "item 1's row names no system, so the claim below is vacuous"
+    assert rows[0]["system_key"] == "", \
         "item 1 dispatches a system of record; nothing was coarsened, so nothing is keyed"
 
 
@@ -387,7 +391,9 @@ def test_the_replay_of_the_recorded_table_agrees_with_the_live_run(tmp_path):
         _bad_args("ghostone"), _bad_args("ghostone"), _bad_args("ghostone"), DONE,
     ])
 
-    assert len(rec.calls) == 1 and not _dead_end(distinct), \
+    assert len(rec.calls) == 1, \
+        "the corrected call never executed, so the parity below is over the wrong table"
+    assert not _dead_end(distinct), \
         "the live run did not run on, so the parity below is over the wrong table"
     assert _replay_rejections(distinct.rows) == [], \
         "the replay refuses a lead the live run let run on"
@@ -425,8 +431,10 @@ def test_calls_with_no_readable_system_at_all_are_still_one_group(tmp_path):
     assert _dead_end(blank), "three unreadable calls are one mistake and no longer bounded"
 
     control = {row["system_key"] for row in _above_guard(readable)}
-    assert len(control) == 3 and "" not in control, \
+    assert len(control) == 3, \
         f"the control minted no distinct digests either, so `blank`'s says nothing: {control}"
+    assert "" not in control, \
+        f"a readable ghost went unfingerprinted, so `blank`'s says nothing: {control}"
     assert not _dead_end(readable)
 
 

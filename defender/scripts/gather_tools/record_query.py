@@ -72,6 +72,31 @@ def payload_sha256(payload_text: str) -> str:
     return hashlib.sha256(payload_text.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
+def system_fingerprint(raw_system: str, recorded_system: str) -> str:
+    """@owns system_key — the row's `system_key` column, and the ONLY value derived from a
+    model-authored system string that is allowed to leave the writer's frame.
+
+    `""` is "this row's identity needs no fingerprint", and it is the answer in both cases
+    where the row already separates the call by itself: a DECLARED system (`recorded_system`
+    is the model's own string, so `_request_key` discriminates on it already) and a system
+    argument with nothing readable in it (`_as_str` coarsens a non-string to `""` at the
+    schema placement, and "no readable system at all" is ONE mistake — two such calls stay
+    one repeat group).
+
+    Otherwise: a fixed 16 hex characters of `sha256` over the raw string. TRUNCATED on
+    purpose — the column exists to tell two ghosts apart within one lead, not to be reversed,
+    and a shorter fixed width is a smaller channel out of a table the gather agent can read.
+    `sha256` and the width are pinned rather than left to `hash()`, whose per-process salt
+    would make a replay over a recorded table disagree with the run that wrote it.
+
+    The digest IS name-shaped — `is_system_name` accepts 16 hex characters — which is exactly
+    why it lives in its own column instead of being folded into `system`: the corpus-path
+    consumer reads `system`, and nothing reads this."""
+    if recorded_system or not raw_system.strip():
+        return ""
+    return hashlib.sha256(raw_system.encode("utf-8", errors="surrogatepass")).hexdigest()[:16]
+
+
 def _request_key(system: Any, verb: Any, params: Any) -> str:
     return json.dumps(
         [system, verb, params if isinstance(params, dict) else {}],
@@ -124,15 +149,21 @@ def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | N
 def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the caller must decide
     run_dir: Path, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
-    payload_digest: str,
+    payload_digest: str, system_key: str,
 ) -> dict:
     """THE append to the queries table: allocate this lead's next seq, persist the payload
-    sidecar, assemble the thirteen frozen keys, append one line.
+    sidecar, assemble the fourteen frozen keys, append one line.
 
     THE one writer for both callers (`QueryCapture._record` and the gather bash lane), so the row
     shape has a single place to drift. `error_class` is DERIVED here from `exit_code` rather than
     accepted from the caller: a writer that could disagree with `error_class_for_exit` is exactly
     the divergence the offline loop's `agent-fixable` filter cannot see.
+
+    `system_key` is REQUIRED and not defaulted, like every other column the caller decides:
+    `""` is a real answer here (this row's `system` already identifies the call), so a default
+    would let a writer that OUGHT to fingerprint silently skip it and be indistinguishable from
+    one that correctly has nothing to fingerprint. Unlike `error_class` and `payload_sha256`
+    it cannot be derived here — the string it fingerprints is by design absent from the row.
 
     ATOMICITY IS BY THREAD-CONFINEMENT, not by a lock — the two callers guard differently
     (`_record` holds `QueryCapture._seq_lock`, the bash lane holds nothing). What keeps
@@ -161,6 +192,11 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         # DERIVED here, like `error_class`: a caller-supplied hash could disagree with the bytes
         # just persisted, which is the divergence this column exists to close.
         "payload_sha256": payload_sha256(payload_text),
+        # #871: the rejection guard's identity for a row whose `system` was coarsened to `""`.
+        # PASSED IN rather than derived, because the raw string it fingerprints is exactly what
+        # this row must not carry — `system_fingerprint` owns the value, at the two writers that
+        # still hold the string.
+        "system_key": system_key,
     }
     write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
     return row
@@ -445,19 +481,36 @@ class GatherDeadEnd(Exception):
         self.escape = escape
 
 
+def _system_key_of(value: Any) -> str:
+    """A row's or a call's `system_key`, coerced. LOAD-BEARING on both sides of the comparison:
+    every row recorded before #871 added the column, and every hand-built fixture row that
+    lists the keys literally, has no `system_key` at all — and a live call reconstructed from
+    such a row passes `None`. Read either as anything but `""` and each of those rows stops
+    matching the next one, which silently un-bounds the rejection loop #826 item 4 closed."""
+    return value if isinstance(value, str) else ""
+
+
 def _trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, threshold: int,
-    in_domain,
+    in_domain, system_key: Any = "",
 ) -> RepeatTrip | None:
     """The ONE counting loop both guards drive, over the domain `in_domain` selects. Two
     hand-written loops over the same `(lead_id, system, verb, canonical(params))` would be one
     normalisation fix away from disagreeing about what a repeat is; only the DOMAIN is ever
-    meant to differ."""
-    key = _request_key(system, verb, _json_safe_params(params))
+    meant to differ.
+
+    `system_key` EXTENDS that identity rather than replacing any of it (#871): it is `""` for
+    every call whose `system` names itself, so it changes nothing for the first guard, and it
+    is what separates two calls that named two different UNDECLARED systems — which the row's
+    own `system` cannot do, because it deliberately holds `""` for both."""
+    key = (_request_key(system, verb, _json_safe_params(params)), _system_key_of(system_key))
     matches = [
         r for r in rows
         if isinstance(r, dict) and r.get("lead_id") == lead and in_domain(r)
-        and _request_key(r.get("system"), r.get("verb"), r.get("params")) == key
+        and (
+            _request_key(r.get("system"), r.get("verb"), r.get("params")),
+            _system_key_of(r.get("system_key")),
+        ) == key
     ]
     occurrence = len(matches) + 1
     if occurrence < threshold:
@@ -468,22 +521,27 @@ def _trip(
 
 def repeat_trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any,
-    threshold: int = REPEAT_THRESHOLD,
+    threshold: int = REPEAT_THRESHOLD, system_key: Any = "",
 ) -> RepeatTrip | None:
     """`None` below `threshold` occurrences of this request in `rows`, else the `RepeatTrip`
     naming the earliest matching row's seq. `params` is the LIVE call's, normalised to the stored
     form before keying, so this is the same predicate `repeat_note` and a replay over a recorded
     table both drive. `rows` need not be pre-filtered to `lead` — the identity `(lead_id, system,
-    verb, canonical(params))` is checked here."""
+    verb, canonical(params))` is checked here.
+
+    Its callers pass no `system_key` and behave exactly as they did before #871: a row this
+    guard counts reached the backend, so its `system` is a system the run declared and its
+    `system_key` is `""` on both sides of the comparison."""
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
+        system_key=system_key,
         in_domain=lambda r: r.get("query_id") != ABOVE_GUARD_QUERY_ID,
     )
 
 
 def rejection_trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any,
-    threshold: int = REPEAT_THRESHOLD,
+    threshold: int = REPEAT_THRESHOLD, system_key: Any = "",
 ) -> RepeatTrip | None:
     """The COMPANION guard's predicate — `repeat_trip` over the complementary domain: the
     rejections that never reached `wrap_tool_execute`'s placement at all.
@@ -498,9 +556,16 @@ def rejection_trip(
     row counts only when it is `agent-fixable`. `_grant_check`'s adapter-load-error rows are
     `infra` (exit 2) and their repeat is ALREADY owned end to end by `circuit_breaker` — two
     failures mark the system down and the third call gets the down-message. Counting them here
-    would give one shape two owners and turn an infra outage into a lead-level dead end."""
+    would give one shape two owners and turn an infra outage into a lead-level dead end.
+
+    `system_key` (#871) is the identity half the ROW cannot carry: above the guard a
+    model-named undeclared system is coarsened to `""` before it is recorded, so without it
+    three rejections naming three different phantoms key the same and the third ends a lead
+    the guard promised never to end for calls that DIFFER. The caller computes it with
+    `system_fingerprint`, from the raw string it still holds."""
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
+        system_key=system_key,
         in_domain=lambda r: (
             r.get("query_id") == ABOVE_GUARD_QUERY_ID
             and r.get("error_class") == AGENT_FIXABLE_ERROR_CLASS

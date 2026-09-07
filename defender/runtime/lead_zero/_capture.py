@@ -192,7 +192,7 @@ _UNMAPPED_FAULT_EXIT = 2
 def _record_manual_row(
     deps: _CaptureDeps, verb: str, params: dict, payload: Any, *, exit_code: int,
 ) -> None:
-    """Write a queries-table row with the SAME thirteen-key shape `QueryCapture._record` writes
+    """Write a queries-table row with the SAME fourteen-key shape `QueryCapture._record` writes
     — including `error_class`/`payload_status` DERIVED the same way
     (`circuit_breaker.error_class_for_exit`, `query_tool._payload_status`'s rule) rather than
     hardcoded, since a hardcoded `error_class="infra"` mis-files an agent-fixable capped-path
@@ -245,6 +245,11 @@ def _record_manual_row(
         # byte-identity on. Derived rather than defaulted, so this second writer's rows can
         # never read as "no payload evidence" beside `_record`'s.
         "payload_sha256": payload_sha256(text),
+        # `""` and not a fingerprint (#871): `ITEM1_SYSTEM` is the host's own constant, so this
+        # row's `system` identifies its call already. Written rather than omitted because this
+        # writer assembles the row itself instead of going through `append_query_row`, and a
+        # key it skips is a key the frozen contract loses.
+        "system_key": "",
     }
     write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
 

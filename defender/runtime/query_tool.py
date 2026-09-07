@@ -47,6 +47,7 @@ from defender.scripts.gather_tools.record_query import (
     repeat_note,
     repeat_trip,
     repeat_trip_detail,
+    system_fingerprint,
 )
 
 from . import circuit_breaker
@@ -235,10 +236,14 @@ class QueryCapture(AbstractCapability[Any]):
         Spent on the rejection guard's identity as well as on the row, never one without the
         other: the guard recovers its count from the rows it wrote.
 
-        THE IDENTITY CONSEQUENCE: every undeclared system keys the SAME, so three rejections
-        naming three ghost systems under one verb and params are one repeat group and the third
-        ends the lead. `_undeclared_target` is why the dead-end message says "an undeclared
-        system" rather than naming one."""
+        THE IDENTITY CONSEQUENCE, and what #871 did about it: coarsening alone made every
+        undeclared system key the SAME, so three rejections naming three ghost systems under
+        one verb and params were one repeat group and the third ended a lead the guard promises
+        never to end for calls that differ. `system_fingerprint` now carries the distinction
+        the row cannot — a hash of the raw string in `system_key`, beside this `""` and never
+        instead of it. The dead-end message still says "an undeclared system"
+        (`_undeclared_target`): the guard can tell the ghosts apart, and main still must not
+        be told their names."""
         try:
             declared = self._registry.systems()
         except CONTROL_FLOW_EXCEPTIONS:
@@ -275,18 +280,22 @@ class QueryCapture(AbstractCapability[Any]):
             )
         return None
 
-    def _rejection_guard(self, deps, system: str, verb: str, params: dict) -> RepeatTrip | None:
+    def _rejection_guard(
+        self, deps, system: str, verb: str, params: dict, *, system_key: str,
+    ) -> RepeatTrip | None:
         """The companion repeat guard, shared by the two placements that reject a call ABOVE
         `wrap_tool_execute`'s guard: the argument schema, and the grant check's
         unresolvable-verb branch. Its counted domain (`rejection_trip`) is the complement of
         the first guard's, so the two can never both own one call. The identity is extracted at
         the CALLER, because the two placements read different argument surfaces — raw
-        pre-validation arguments at the schema, validated ones at the grant check."""
+        pre-validation arguments at the schema, validated ones at the grant check — and
+        `system_key` for the same reason: each placement holds the RAW string this coarsened
+        `system` was made from, and only there can `system_fingerprint` still see it."""
         if deps.lead_id is None:
             return None
         return rejection_trip(
             lead_rows(deps.run_dir, deps.lead_id), deps.lead_id,
-            system=system, verb=verb, params=params,
+            system=system, verb=verb, params=params, system_key=system_key,
         )
 
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
@@ -304,12 +313,13 @@ class QueryCapture(AbstractCapability[Any]):
             # this row's `system` steers an offline corpus write (`_system_of_record`).
             raw_system = _as_str(raw.get("system"))
             system = self._system_of_record(raw_system)
+            system_key = system_fingerprint(raw_system, system)
             verb = _as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
-            trip = self._rejection_guard(ctx.deps, system, verb, params)
+            trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
             await self._record(
                 ctx.deps,
-                system=system, verb=verb,
+                system=system, verb=verb, system_key=system_key,
                 query_id=ABOVE_GUARD_QUERY_ID,
                 params=params,
                 payload=None,
@@ -369,10 +379,13 @@ class QueryCapture(AbstractCapability[Any]):
             # entitled to become a `skills/<system>/` path; a REAL system with an unknown verb
             # still records itself.
             recorded_system = self._system_of_record(system)
-            trip = self._rejection_guard(deps, recorded_system, verb, params)
+            system_key = system_fingerprint(system, recorded_system)
+            trip = self._rejection_guard(
+                deps, recorded_system, verb, params, system_key=system_key,
+            )
             refusal = decision.refusal or "unresolvable"
             await self._record(
-                deps, system=recorded_system, verb=verb,
+                deps, system=recorded_system, verb=verb, system_key=system_key,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
                 detail=(
@@ -481,10 +494,14 @@ class QueryCapture(AbstractCapability[Any]):
         return self._model_view(deps, row, text, exit_code, detail)
 
 
-    async def _record(
+    async def _record(  # noqa: PLR0913 — one parameter per ROW COLUMN, as `append_query_row`
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
-        payload: Any, exit_code: int, detail: str,
+        payload: Any, exit_code: int, detail: str, system_key: str = "",
     ) -> tuple[dict, str]:
+        """`system_key` defaults to `""` HERE and nowhere below: every path through this
+        method other than the two above-guard rejections records a `system` the run declared,
+        which identifies the call by itself. `append_query_row` keeps it required, so the
+        default stops at this frame rather than reaching the row writer."""
         if deps.lead_id is None:
             raise RuntimeError("internal: query reached capture without a dispatched lead_id")
 
@@ -517,6 +534,7 @@ class QueryCapture(AbstractCapability[Any]):
                     payload_digest(text, "", 0) if exit_code == 0
                     else f"exit={exit_code}; {redact_model_visible(detail).strip()[:160]}"
                 ),
+                system_key=system_key,
             )
 
         circuit_breaker.record_outcome(run_dir, system, exit_code)
