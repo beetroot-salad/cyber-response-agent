@@ -171,9 +171,11 @@ def effective_tools_for(defn: AgentDefinition) -> ToolSet:
 
     Today this is `defn.tools` for every role, and the function is kept rather than inlined
     because what it exists to absorb is a role whose real capability is switched on PAST the
-    registry. The judge was the one such role — its closed-ticket bit was flipped per LEG by a
-    runtime `replace()` well after `AGENTS` — and #922 retired both the leg and the bit, so
-    there is no longer any role whose static shape understates it. A consumer still asks this
+    registry. The OLD PIPELINE's judge was the one such role — its closed-ticket bit was flipped
+    per LEG by a runtime `replace()` well after `AGENTS` — and #922 retired both the leg and the
+    bit, so there is no longer any role whose static shape understates it. (`AgentRole.JUDGE`
+    exists again since #1008 and is NOT that role: it is the family judge, which registers no
+    tool at all and switches nothing on at runtime.) A consumer still asks this
     question rather than reading `defn.tools` directly, because the next role that switches a
     capability at runtime must have exactly one place to declare it (N4 — the operator surface
     must not carry its own map of typed capabilities to attack)."""

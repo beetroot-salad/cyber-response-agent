@@ -43,7 +43,8 @@ from defender.learning.judge import run as run_mod  # noqa: E402
 #: one would be unsettable, matching `QUESTIONER_EFFORT`'s own convention). MODEL and EFFORT are
 #: deliberately NOT spelled here: they are `config.judge_model`/`judge_effort`'s knobs and this
 #: module reads them through those accessors, so a second constant naming the same env var would
-#: be a second place for one name to live. See `run.py`'s docstring on the sharing.
+#: be a second place for one name to live. `run.py`'s docstring records who ELSE reads those
+#: two names — the collision did not leave with the old pipeline judge.
 DRAWS_KNOB = "JUDGE_DRAWS"
 CAP_KNOB = "JUDGE_PAYLOAD_CAP"
 
@@ -57,8 +58,10 @@ NOT_GRADED = "not-graded"
 def _judge_model() -> str:
     """The judge's model, through `config`'s accessor rather than a second reading of the same
     env var. `config.judge_model()` IS `env_str("JUDGE_MODEL", "kimi-k3")` — spelling that here
-    made a byte-identical copy, so the two judges could drift to different DEFAULTS while still
-    being impossible to configure APART. See `run.py`'s docstring on why they are one knob."""
+    made a byte-identical copy, so a reader of this name could drift to a different DEFAULT
+    while still being impossible to configure APART. That caveat outlived the old pipeline
+    judge it was written about: `evals/oracle_golden/judge.py` reads the same two env vars with
+    its own defaults. `run.py`'s docstring carries the collision."""
     from defender.learning.core.config import judge_model
 
     return judge_model()

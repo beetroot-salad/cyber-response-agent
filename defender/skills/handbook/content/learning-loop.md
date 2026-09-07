@@ -21,9 +21,11 @@ Everything the loop learned from was therefore imagined, and the judge was
 grading a world no system had ever answered for.
 
 That pipeline is **deleted**. Nothing under `defender/learning/pipeline/`
-exists; neither do the `actor`, `oracle` and `judge` agent roles, nor the
+exists; neither do the `actor` and `oracle` agent roles, nor the
 disposition→direction routing, nor the actor-side curators and the queues that
-fed them.
+fed them. The `judge` role went with them and then came back under a different
+owner (#1008): it now belongs to the **family judge** described below, which is
+a live stage, not to the pipeline judge described above, which is gone.
 
 One exception: `defender/lessons-actor/` and `defender/lessons-environment/`
 are **left in place as frozen archives** — nothing produces or reads them, and

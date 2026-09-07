@@ -7,18 +7,43 @@ admits one definition per key (`agent_definition.build_registry`) and the key wa
 OLD pipeline's judge, so a second definition could not register beside it. #922 retired that
 pipeline and freed the word; the family judge is a different role that wanted the same one.
 
-WHAT THE OWN KEY BUYS, given both policies compile to the identical empty object. Two things a
-shared key cannot give: a refusal in this judge's own words rather than a judge being told it
-is the questioner, and a diff in which a grant added to the questioner CANNOT silently reach
-the judge. `agent_id` partitions traces, never policies (`runtime/agent_role.py` states that
-rule), so the separation had to be the key. The enum's own comment carries the general form:
-one deny-all key per PACKAGE, which is why the branch package's comparator stays under
-QUESTIONER while this package holds its own.
+WHAT THE OWN KEY BUYS, stated carefully because the easy version of this sentence is false.
+The two policies are NOT identical: they are empty on every grant surface and differ in
+`deny_reason`. But that one differing field has a single runtime reader — the bash gate — and
+a role registering no tools never produces a gate decision at all, so the refusal text is a
+fact about the compiled object rather than something this judge will ever be shown.
+
+The benefit that actually holds is PROSPECTIVE: a grant added to `QUESTIONER_DEF` cannot reach
+the judge, and the diff that would grant the judge something has to say so in the judge's own
+file. `agent_id` partitions traces, never policies (`runtime/agent_role.py` states that rule),
+so the separation had to be the key. The enum's own comment carries the general form: one
+deny-all key per PACKAGE, which is why the branch package's comparator stays under QUESTIONER
+while this package holds its own.
 
 Model and effort come from `learning.core.config.judge_model()`/`judge_effort()` — read at call
 time in `learning/judge/__init__.py` and threaded into the `StageWiring` the orchestration
-builds, never from `questioner_model()`. The definition names the same two accessors, so a
-definition built outside that wiring still reaches the judge's knobs rather than a default.
+builds, never from `questioner_model()`. `JUDGE_DEF` names the same two accessors so that a
+build made OUTSIDE that wiring reaches the judge's knobs rather than another role's; but only
+`model` is a thunk. `effort` is a plain string field, so `judge_effort()` runs once at import
+and a later `JUDGE_EFFORT` cannot move it — which is why the wiring, not the definition, is
+what the driven path reads, and why the definition's effort is a default for out-of-band
+readers rather than a live one.
+
+`JUDGE_MODEL` AND `JUDGE_EFFORT` ARE NOT THIS JUDGE'S ALONE, and the collision is live rather
+than historical. #922 retired the OLD pipeline judge that used to share them, but
+`evals/oracle_golden/judge.py` still reads both env vars directly, with DIFFERENT defaults
+(`claude-opus-5` / `high` against this module's `kimi-k3` / `medium`) and folds the resolved
+model into the tag it scores golden cases under. So setting either knob for this judge re-tags
+that harness's scores, and setting it for the harness retargets this judge.
+
+Registering this definition widened that blast radius one step further, and it is worth knowing
+before touching either name: `run.py`'s all-roles preflight iterates EVERY registered
+definition's model config at INVESTIGATION startup, so a `JUDGE_MODEL` naming a model no
+provider routes now exits an ordinary alert run — and every `--resume` sibling — with rc 2,
+before any judge is reached. That is a property of registration, shared with `QUESTIONER_MODEL`
+and not new in kind; what IS new is that this knob has a second reader outside the loop.
+Separating them means a knob NAME of this judge's own, which is a deliberate change with
+fixtures behind it, not a side effect of reading the env twice.
 """
 
 from __future__ import annotations
@@ -49,11 +74,18 @@ from defender.runtime.agent_role import AgentRole
 #: A deny reason is PROMPT SURFACE, so it names no program: a reason mentioning a command this
 #: lane denies teaches a dead command and the agent burns turns on it. The grant gate sweeps
 #: every registered policy for exactly that (g1, in the #575 gate suite).
+#:
+#: AND IT IS WRITTEN, not derived from the questioner's by substitution. The first draft of this
+#: constant was that role's sentence with three noun phrases swapped and the closing clauses
+#: left byte-identical — which passes every "is it the same string" check while being, in the
+#: only sense that matters, the same refusal. What this one says is true of THIS role and of no
+#: other: the whole episode is already in the prompt, so there is nothing left to reach for.
 _JUDGE_DENY_REASON = (
-    "Blocked: the family judge is a pure grading projection — the archived episode it grades "
-    "is joined and inlined in the user prompt by the host, and its entire output is one YAML "
-    "verdict document. It runs no tools: no data-source adapters, no archive reads of its own, "
-    "no writes, no shell. Emit the document directly."
+    "Blocked: nothing is reachable from a judge draw. This episode was archived before the "
+    "call began, and every world's record — the manifest, the ledger, the responses the estate "
+    "served, the sibling run dirs — was joined and framed into the prompt you already hold. "
+    "No query would add to it and no path resolves from here. Answer from the prompt, as one "
+    "YAML verdict document."
 )
 
 

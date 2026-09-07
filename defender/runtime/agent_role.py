@@ -29,17 +29,18 @@ class AgentRole(Enum):
     # ONE DENY-ALL KEY PER PACKAGE — not per grant, and not per "kind of call". The
     # questioner's THREE authoring calls plus the comparator's judging call all run under this
     # ONE key because all four are the branch package's own machinery; what keeps them apart is
-    # their `agent_id` — `questioner`, `questioner:b`, `questioner:c`, `compare` — which is what
-    # the wire log and the per-id trace are partitioned on.
+    # their `agent_id` — `questioner`, `questioner:b`, `questioner:c` and the comparator's
+    # `comparator:<n>` — which is what the wire log and the per-id trace are partitioned on.
     QUESTIONER = "questioner"
     # The same rule, drawing the other side of the line: the family judge (`learning/judge/`)
     # is its own package with its own orchestration, so it holds its own key even though its
-    # compiled policy is identical to the questioner's — empty. That is deliberate rather than
-    # waste. A grant added to the questioner later would otherwise reach the judge with nothing
-    # in the diff saying so, and the reviewer of that diff has no way to see it: `agent_id`
-    # separates traces, never policies. Reading the rule as "one key per grant" would have
-    # collapsed these two, and reading it as "one key per kind of call" invites a future
-    # `everything that judges` role spanning packages — which is what the per-PACKAGE wording
+    # compiled policy is empty on every grant surface, exactly as the questioner's is. The two
+    # differ only in their refusal text. That is deliberate rather than waste, and the reason is
+    # PROSPECTIVE rather than present: a grant added to the questioner would otherwise reach the
+    # judge with nothing in the diff saying so, and the reviewer of that diff has no way to see
+    # it — `agent_id` separates traces, never policies. Reading the rule as "one key per grant"
+    # would have collapsed these two, and reading it as "one key per kind of call" invites a
+    # future `everything that judges` role spanning packages, which the per-PACKAGE wording
     # forecloses.
     JUDGE = "judge"
 

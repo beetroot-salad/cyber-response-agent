@@ -210,7 +210,7 @@ def test_a1_shape_and_scope_both_required(env):
 
 def test_a2_no_unmarked_grant_pattern_embeds_a_path(env):
     """a2 (negative): NO UNMARKED grant's `pattern` embeds a path. Sweep every compiled Grant of
-    all 8 defs: a pattern carrying a literal/escaped run_dir, defender_dir or script path MUST
+    all 9 defs: a pattern carrying a literal/escaped run_dir, defender_dir or script path MUST
     carry `pins_path=True` (the R1 exemption). Positive control: the two exempt grants (actor
     python3-script, lead-author/curator rm) DO embed a path — so the audit can tell the two
     classes apart — and the SCOPE patterns DO carry the anchored roots (that is where a path
@@ -406,7 +406,7 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     #691). It is the one denylist-free lane, so an untabled (=ungated) program there is the worst
     place for the fail-open to hide."""
     pols = _all_policies(env)
-    # 9, and the number has moved five times: #797 retired the review's three roles
+    # 9, and the number has moved six times: #797 retired the review's three roles
     # (CHALLENGER, COHERENCE_CHECKER, PROJECTION) with the stages that ran under them; #796
     # added three of its own (DISCRIMINATION, SUPPORT, COMPOSER); DISCRIMINATION was then
     # retired for producing nothing the composer could route; #947 added QUESTIONER; #922

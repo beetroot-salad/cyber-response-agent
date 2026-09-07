@@ -22,8 +22,9 @@ from defender.runtime.review_roles import COMPOSER_DEF, SUPPORT_DEF
 # support lens and its ablation), so there are two definitions and three calls. The questioner
 # is the same shape one turn further out: one definition, three authoring calls and the
 # comparator's. The family judge does NOT join that key, and the enum says why: one deny-all
-# key per PACKAGE. Two definitions here compile to an identical empty policy, and that is the
-# intended cost — it is what keeps a grant added to one from arriving silently at the other.
+# key per PACKAGE. Two definitions here compile to policies that are empty on every grant
+# surface and differ only in their refusal text, and that near-duplication is the intended
+# cost — it is what keeps a grant added to one from arriving silently at the other.
 AGENTS: dict[AgentRole, AgentDefinition] = build_registry(
     (MAIN_DEF, GATHER_DEF, VERIFY_DEF, LEAD_AUTHOR_DEF,
      CORPUS_AUTHOR_DEF, SUPPORT_DEF, COMPOSER_DEF, QUESTIONER_DEF, JUDGE_DEF)
