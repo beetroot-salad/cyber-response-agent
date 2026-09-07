@@ -29,19 +29,18 @@ from __future__ import annotations
 
 import dataclasses
 import re
-import threading
-import time
+from collections.abc import Callable
 from pathlib import Path
 
 import _drain719 as h
 from _drain719 import drain  # noqa: F401 — the target; the shim keeps collection alive
 
-#: How long a summoned appender is given to reach its blocking `flock` call while the drain
-#: holds the queue open. It is a grace period over a gap of microseconds — thread start plus
-#: one `open()` — and it is spent while the drain is STOPPED inside its own batch read, so it
-#: races nothing. Losing it would leave the tick to complete normally, which fails the test
-#: loudly rather than greening it.
-_APPENDER_REACHES_THE_LOCK = 0.3
+#: The suffix `drain.graveyard_file` derives the channel's graveyard path with. Deriving it is
+#: the FIRST thing `_retire_unkeyable` does after `_tick` released the append lock, and the
+#: last before its rotation asks for that lock again — which is what makes it the one instant
+#: an appender can arrive with no race to lose. Spelled here because `_QueueFileThatLetsAn
+#: AppenderIn` must let every other suffix (`.stuck.jsonl`) through untouched.
+_GRAVEYARD_SUFFIX = ".deadletter.jsonl"
 
 
 def _held_report(paths) -> Path:
@@ -125,14 +124,25 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
 
 
 class _QueueFileThatLetsAnAppenderIn:
-    """The queue file, plus one callback fired when the drain reads its batch.
+    """The queue file, plus one callback fired at the single instant an appender can arrive
+    with no race to lose.
 
-    Delegates every path operation to the real `Path` and adds exactly one behaviour: the
-    drain's batch read — the step that holds the channel's append lock — returns only after
-    `on_read` has run. That is the seam this scenario needs and the code has no other: the
-    unkeyable retirement runs BEFORE `cfg.gate` and `cfg.invoke_agent`, so the
-    `commit_fn`-shaped hook `tests/test_drain719_hardening.py` uses to let an appender in
-    mid-tick lands too late.
+    That instant is the graveyard path's derivation. `_retire_unkeyable` evaluates
+    `graveyard_file(channel)` — this object's `with_suffix(".deadletter.jsonl")` — as the
+    argument to its graveyard append, and that sits AFTER `_tick` released the append lock
+    (the batch read is over) and BEFORE `persist.rotate_queue_locked` asks for it again. So
+    nothing holds the lock when the callback runs and the appender can take it
+    SYNCHRONOUSLY: `Holder.__enter__` returns only once it OWNS the lock, so when the drain
+    resumes the lock is already held. No thread, no interval to guess at, nothing to lose
+    under load.
+
+    The read-side hook this replaced fired while the drain HELD the lock, which left the
+    appender able only to queue as a waiter behind it — and "has it queued yet" is not
+    observable, so the ordering rested on a sleep and lost it under `-n auto`.
+
+    This is the seam because the code has no earlier one: the unkeyable retirement runs
+    BEFORE `cfg.gate` and `cfg.invoke_agent`, so the `commit_fn`-shaped hook
+    `tests/test_drain719_hardening.py` uses to let an appender in mid-tick lands too late.
 
     Nothing about the contention is faked. The appender takes the real `flock` on the real
     lock path with the appender's own blocking discipline (`persist.queue_lock`, no
@@ -140,20 +150,25 @@ class _QueueFileThatLetsAnAppenderIn:
     bounded wait. What the hook decides is only WHEN the appender arrives — the same thing
     the hardening suite's `commit_then_appender_takes_the_lock` decides.
 
+    Every other suffix is passed straight through, `.stuck.jsonl` above all: `stuck_report_
+    file` derives the report these tests then read the same way, and it is derived AFTER the
+    fault, when the appender is already in. Every other path operation is the real `Path`'s
+    and answers with real `Path` objects.
+
     It enters through `dataclasses.replace(cfg.channel, file=...)`, the config seam, not
     through `monkeypatch.setattr`."""
 
-    def __init__(self, real: Path, on_read) -> None:
+    def __init__(self, real: Path, on_graveyard_path: Callable[[], None]) -> None:
         self._real = real
-        self._on_read = on_read
+        self._on_graveyard_path = on_graveyard_path
         self._fired = False
 
-    def read_text(self, *args, **kwargs) -> str:
-        text = self._real.read_text(*args, **kwargs)
-        if not self._fired:
+    def with_suffix(self, suffix: str) -> Path:
+        derived = self._real.with_suffix(suffix)
+        if suffix == _GRAVEYARD_SUFFIX and not self._fired:
             self._fired = True
-            self._on_read()
-        return text
+            self._on_graveyard_path()
+        return derived
 
     def __fspath__(self) -> str:
         return str(self._real)
@@ -162,9 +177,8 @@ class _QueueFileThatLetsAnAppenderIn:
         return str(self._real)
 
     def __getattr__(self, name):
-        # Everything else — `is_file`, `parent`, `with_suffix` (which is how the graveyard
-        # and stuck-report paths are derived) — is the real path's, and answers with real
-        # `Path` objects.
+        # Everything else — `is_file`, `read_text`, `parent` — is the real path's, and
+        # answers with real `Path` objects.
         return getattr(object.__getattribute__(self, "_real"), name)
 
 
@@ -172,21 +186,20 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseExce
     """One real `run_batch` whose unkeyable retirement — and only that — meets a held append
     lock. Returns whatever escaped the tick.
 
-    The ordering is the whole trick and it is deterministic: the appender is summoned while
-    the drain is inside its batch read, so it queues as a KERNEL waiter behind the lock the
-    drain is holding. `_flock.take` blocks outright with no deadline for an appender and
-    polls under one for the drain, so on release the waiting appender takes the lock and the
-    retire rotation's bounded wait is the one that expires. `repo_lock_wait_seconds=1` is the
+    The ordering is exact rather than probable: the appender acquires the lock in the
+    foreground, from inside the drain's own call stack, in the window the retirement opens
+    between releasing the lock and asking for it again (see
+    `_QueueFileThatLetsAnAppenderIn`). By the time the rotation runs the lock is held, so its
+    bounded wait is the only thing that can expire. `repo_lock_wait_seconds=1` is that
     deadline, as in `tests/test_drain719_hardening.py`.
     """
     appender = h.Holder(ch.append_lock)
 
     def _an_appender_arrives() -> None:
-        # `Holder.__enter__` blocks until it OWNS the lock, and the drain is holding it right
-        # now — so it is started on its own thread and only given time to get as far as
-        # asking. It acquires the moment the drain's read releases.
-        threading.Thread(target=appender.__enter__, daemon=True).start()
-        time.sleep(_APPENDER_REACHES_THE_LOCK)
+        # Synchronous, and it must be: `Holder.__enter__` returns only once the appender
+        # OWNS the lock, which is the whole guarantee. Nothing holds it at this point in the
+        # tick, so it returns at once.
+        appender.__enter__()
 
     watched = dataclasses.replace(
         ch, file=_QueueFileThatLetsAnAppenderIn(ch.file, _an_appender_arrives)
@@ -203,6 +216,10 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseExce
             "lock with no deadline, holding the repo lock while it does"
         )
     finally:
+        assert appender.acquired is True, (
+            "the appender never took the append lock, so the rotation was never contended "
+            "and this tick proves nothing"
+        )
         appender.__exit__()
     assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
         "the tick reached the author; the fault under test is the one BEFORE the gate"
@@ -222,9 +239,10 @@ def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_
 ):
     """#881/O4: the tick's THIRD fault-bearing region is inside the guard the other two are.
 
-    The reproduction is the real one. An appender arrives while the drain has the queue open
-    — an ordinary append, on the real lock, with the appender's own no-deadline discipline —
-    and the unkeyable retirement's rotation then expires against it. `TimeoutError` is
+    The reproduction is the real one. An appender arrives in the window the retirement itself
+    opens between releasing the append lock and asking for it again — an ordinary append, on
+    the real lock, with the appender's own no-deadline discipline — and the retirement's
+    rotation then expires against it. `TimeoutError` is
     deliberately outside `RETIRE_SET` (a busy lock is not the batch's fault), so nothing
     retires and the row stays queued; the stuck report is by construction the ONLY external
     trace such a tick can leave.
