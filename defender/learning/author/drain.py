@@ -37,6 +37,8 @@ classifications, by channel: deliberate, and left for a follow-up.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -110,7 +112,11 @@ def stuck_report_file(channel: QueueChannel) -> Path:
     """The channel's stuck-row record — the only externally visible trace of a fault whose
     class is NOT in `RETIRE_SET`, since such a row stays queued and never reaches the
     graveyard. One record per non-retiring tick, naming the fault class, the stalled rows
-    and how many consecutive ticks they have been stuck."""
+    and how many consecutive ticks they have been stuck.
+
+    A stalled row with no id under its channel's key is named by a content fingerprint —
+    `_stuck_row_ids` owns that spelling — so the keyless leg's records are still tellable
+    apart from one another."""
     return channel.file.with_suffix(".stuck.jsonl")
 
 
@@ -292,7 +298,20 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
     for row in batch:
         rid = row.get(key)
         (keyed if isinstance(rid, str) and rid else unkeyable).append(row)
-    _retire_unkeyable(channel, unkeyable, log, cfg.repo_lock_wait_seconds)
+    # INSIDE the stuck-recording guard, like the two regions below it. The retirement takes
+    # the append lock again for its own rotation — after `_tick` released it ten lines up —
+    # so an ordinary appender arriving in that window makes the rotation raise `TimeoutError`.
+    # That class is deliberately outside `RETIRE_SET` (a busy lock is not the batch's fault),
+    # so nothing retires, the row stays queued, and from here the fault escaped `run_batch`
+    # leaving neither a graveyard entry nor a stuck record: the channel wedged in silence,
+    # against this module's own contract that a non-`RETIRE_SET` fault is always visible
+    # somewhere (#881/O4).
+    try:
+        _retire_unkeyable(channel, unkeyable, log, cfg.repo_lock_wait_seconds)
+    except BaseException as e:
+        if not isinstance(e, RETIRE_SET):
+            _record_stuck(channel, e, unkeyable)
+        raise
 
     # The gate is INSIDE the stuck-recording guard: it reads per-row fields the queue's own
     # key check cannot vouch for (`run_id`, `direction`), so it is a live source of
@@ -613,12 +632,38 @@ def _retire_unkeyable(
     )
 
 
+def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
+    """@owns row_ids — how a stuck record names the rows a tick is stuck on.
+
+    A row's own id where it has one. A row that has NONE is named by a fingerprint of its
+    content instead, because the alternative is naming nothing: the unkeyable leg (#881/O4)
+    hands this function rows whose whole defect is a missing id, and dropping them left the
+    record with an empty list — which reads to `_record_stuck`'s dedup as "the same rows as
+    last time" for every keyless tick, folding two unrelated poison rows into one count that
+    looks like one problem getting worse, and leaving the operator no way to tell WHICH rows
+    the channel is stuck on.
+
+    Canonical JSON so the same row fingerprints the same across ticks and processes, and
+    prefixed so a fingerprint can never be mistaken for a real id."""
+    named: list[str] = []
+    for row in rows:
+        rid = row.get(channel.id_key)
+        if rid:
+            named.append(str(rid))
+            continue
+        digest = hashlib.sha256(
+            json.dumps(row, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        named.append(f"unkeyed:{digest[:16]}")
+    return sorted(named)
+
+
 def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
     """The operator signal for a stuck tick. The count is per TICK, not per row — a
     non-retiring row must stay byte-identical, so the counter cannot live on it the way
     `attempts` does, which is why the last record is read back before appending."""
     fault_class = type(exc).__name__
-    ids = sorted(str(r[channel.id_key]) for r in rows if r.get(channel.id_key))
+    ids = _stuck_row_ids(channel, rows)
     path = stuck_report_file(channel)
     previous = read_jsonl_rows(path)
     consecutive = 1
