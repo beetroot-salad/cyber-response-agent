@@ -1,9 +1,13 @@
 # The agent definition: one source of truth for an agent's tools + permissions
 
-> **Roster note (post-#922).** The seam is live; the roster below is not.
-> `judge`, `actor` and `oracle` left `AgentRole` with the pipeline that was their
-> only caller. Today's eight are in `runtime/agent_role.py`; the tool-free-
-> predictor case now applies to `verifier` and `questioner`.
+> **Roster note (post-#922, updated #1008).** The seam is live; the roster below
+> is not. `actor` and `oracle` left `AgentRole` with the pipeline that was their
+> only caller, and so did `judge` — but `judge` came BACK in #1008 under a
+> different owner, so the row below is stale in the more dangerous direction: the
+> NAME is live and the grants beside it are the deleted pipeline judge's. Today's
+> role is the family judge (`learning/judge/`), which holds no tool at all.
+> Today's nine are in `runtime/agent_role.py`; the tool-free-predictor case now
+> applies to `verifier`, `questioner` and `judge`.
 
 **Status:** design — implemented (step two: #545 / PR #546; step three: #551 / PR #555,
 which made `bind` the sole policy seam and retired the parallel factory path — see
@@ -135,7 +139,7 @@ The six agents, in this shape:
 |---|---|---|
 | main | `read=True`, `bash=BashGrammar(shims, viewers)`, `write=True` | `RunPaths` + corpus (per-run after #535) |
 | gather | `read=True`, `bash=BashGrammar(viewers, adapters=True, adapter_sql_pipe=True)` | `RunPaths` + corpus (per-run after #535) |
-| judge | `read=True`, `bash=BashGrammar(operand_gated=True, raw_reads=True)` | + comparison dir (via `scope`) |
+| ~~judge~~ — the PIPELINE judge, deleted in #922. NOT `AgentRole.JUDGE`, which since #1008 is the family judge and holds nothing | `read=True`, `bash=BashGrammar(operand_gated=True, raw_reads=True)` | + comparison dir (via `scope`) |
 | actor | `read=True`, `bash=BashGrammar()` | + confine + pinned scripts (via `scope`) |
 | **oracle** | **`ToolSet()`** — nothing | — |
 | **verify** | **`ToolSet()`** — nothing | — |

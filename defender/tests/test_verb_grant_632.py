@@ -141,7 +141,7 @@ def test_the_compiled_policy_answers_what_this_role_may_do_with_verbs_beside_bas
 
 def test_a_role_definition_without_a_grant_gets_an_empty_deny_all(tmp_path: Path):
     """A role definition that names no verb_grant gets an explicit EMPTY DENY-ALL, never
-    `None` and never an absent field (§7 R7). Six of the eight agent definitions get no
+    `None` and never an absent field (§7 R7). Eight of the nine agent definitions get no
     grant; an absent default would either break their construction or reopen the `None`
     fallback D1 exists to close. Inertness is rejected: a `None` grant is the state in
     which re-enabling a capability bit later silently grants everything a stale grant

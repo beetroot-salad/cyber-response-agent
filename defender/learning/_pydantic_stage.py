@@ -25,13 +25,13 @@ from pydantic_ai.usage import UsageLimits
 class RoleDeps(Protocol):
     """What this module actually needs of a deps object: a TYPE that names its role.
 
-    `AgentDeps` was the annotation, and it is too narrow by exactly one role. `AgentDeps` IS the
-    run scope — run dir, compiled policy, box executor, cwd anchor — and #947's questioner
-    deliberately carries none of it: its whole input is inlined in one user message by the host,
-    so a deps object with eleven handles on a tree it may not touch is the thing that class
-    exists not to be. Nothing below reads any of those fields. `build_stage_agent` reads
-    `deps_type.role` to find the definition, and `agent.run` hands the object to tools this role
-    does not have.
+    `AgentDeps` was the annotation, and it is too narrow for the deny-all roles — #947's
+    questioner, and the family judge that took its own key in #1008. `AgentDeps` IS the run
+    scope — run dir, compiled policy, box executor, cwd anchor — and both of those deliberately
+    carry none of it: their whole input is inlined in one user message by the host, so a deps
+    object with eleven handles on a tree it may not touch is the thing those classes exist not
+    to be. Nothing below reads any of those fields. `build_stage_agent` reads `deps_type.role`
+    to find the definition, and `agent.run` hands the object to tools these roles do not have.
 
     So the annotation says that and no more. Every existing caller still satisfies it — each
     `AgentDeps` subclass declares `role` — and a deps class that names no role is refused at the

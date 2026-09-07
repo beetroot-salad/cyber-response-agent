@@ -256,8 +256,8 @@ def test_922_bind_is_still_the_sole_seam_for_every_registered_role(tmp_path):
       * refused -> a carve-out `bind` states itself, and the front-door rule does not apply.
 
     The carve-outs are CORPUS_AUTHOR (`CuratorDeps.for_run`, the #556 per-spawn writer whose
-    policy needs a worktree corpus dir `RunScope` cannot carry) and QUESTIONER (deps type with
-    no run scope at all). Neither is named here — they are whatever `bind` refuses — so a role
+    policy needs a worktree corpus dir `RunScope` cannot carry) and the two deps types with no
+    run scope at all — QUESTIONER, and JUDGE since #1008. None is named here — they are whatever `bind` refuses — so a role
     that stops being exempt is held to the rule automatically, and one that starts being exempt
     shows up as a shrinking bound set rather than as silence.
     """
@@ -341,18 +341,35 @@ def test_922_the_registrys_deny_all_roles_really_grant_nothing():
     `tuple(tools) == ()` is the whole deny-all claim over every lane that exists now or is
     added later — a hand-written check states it by NOT mentioning a bit it forgot.
 
-    The questioner is the deny-all role the family judge borrows today (D4/C3), and it is the
-    role #1008 will fork. Asserting the emptiness through the iterator rather than field by
-    field is what keeps this true across that fork.
+    EVERY deny-all role, DERIVED — which this had to become when #1008 made there be two of
+    them. It swept the questioner alone, on the true-at-the-time ground that the family judge
+    compiled against it; the judge now has a definition of its own, and a lane added THERE was
+    caught by nothing this file asserts. The set is derived rather than listed, from the marker
+    the field's own docstring gives: a deps type outside the `AgentDeps` hierarchy is exactly a
+    role holding no grant and no run scope. So a third such role is swept the day it registers.
+
+    Asserting the emptiness through the iterator rather than field by field is what keeps this
+    true as lanes are added to `ToolSet`.
     """
-    questioner = AGENTS[AgentRole.QUESTIONER]
-    assert tuple(effective_tools_for(questioner)) == (), (
-        f"the questioner's definition grants {tuple(effective_tools_for(questioner))} — the "
-        "family judge compiles against it (C3), so a lane added here is a lane the judge holds")
-    assert not questioner.verb_grant.entries, (
-        "the questioner's definition carries verb-grant entries with no verb-bearing bit")
+    # DERIVED FROM `bind`'s OWN REFUSAL, not from "deps_cls is not an AgentDeps subtype".
+    # That spelling had to skip `deps_cls is None` to avoid a TypeError, and None is the FIELD
+    # DEFAULT — `build_registry` never requires one — so the easiest deny-all role to write,
+    # one that simply omits it, fell out of the sweep entirely and could hold a lane while
+    # this test passed. `_for_run` is what `bind` itself looks for (`agent_definition.bind`),
+    # it is absent on None, and it does not raise on a deps FACTORY.
+    deny_all = {role: defn for role, defn in AGENTS.items()
+                if not hasattr(defn.deps_cls, "_for_run")}
+    assert {AgentRole.QUESTIONER, AgentRole.JUDGE} <= set(deny_all), (
+        f"the derived deny-all set is {sorted(r.name for r in deny_all)} — it lost a role this "
+        "guard is named for, so the sweep below covers less than it claims")
+    for role, defn in deny_all.items():
+        assert tuple(effective_tools_for(defn)) == (), (
+            f"{role.name}'s definition grants {tuple(effective_tools_for(defn))} — this role "
+            "holds no run scope at all, so a lane here is a lane nothing can bound")
+        assert not defn.verb_grant.entries, (
+            f"{role.name}'s definition carries verb-grant entries with no verb-bearing bit")
     # The positive control: the iterator DOES report lanes when a role holds them, so the empty
-    # tuple above is a fact about the questioner and not about a broken iterator.
+    # tuples above are a fact about the swept deny-all roles and not about a broken iterator.
     assert tuple(effective_tools_for(AGENTS[AgentRole.MAIN])), (
         "positive control: ToolSet.__iter__ reports nothing even for MAIN")
 

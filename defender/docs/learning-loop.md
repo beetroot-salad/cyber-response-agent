@@ -210,8 +210,9 @@ different answers.
 
 ## The Judge
 
-`learning/judge/` grades one archived episode, running under the questioner's
-definition with an `agent_id` prefix of `judge:` (#1008 gives it its own role).
+`learning/judge/` grades one archived episode under its own `AgentRole.JUDGE`
+definition (#1008), with an `agent_id` prefix of `judge:`. It borrowed the
+questioner's definition until then, which is why some older prose pairs the two.
 
 1. **Mechanical pass** (`judge/family.py`) — five facts per non-control world,
    read off *that world's own* archived record: its own ledger, report and

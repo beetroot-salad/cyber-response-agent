@@ -43,7 +43,8 @@ from defender.learning.judge import run as run_mod  # noqa: E402
 #: one would be unsettable, matching `QUESTIONER_EFFORT`'s own convention). MODEL and EFFORT are
 #: deliberately NOT spelled here: they are `config.judge_model`/`judge_effort`'s knobs and this
 #: module reads them through those accessors, so a second constant naming the same env var would
-#: be a second place for one name to live. See `run.py`'s docstring on the sharing.
+#: be a second place for one name to live. `run.py`'s docstring records who ELSE reads those
+#: two names — the collision did not leave with the old pipeline judge.
 DRAWS_KNOB = "JUDGE_DRAWS"
 CAP_KNOB = "JUDGE_PAYLOAD_CAP"
 
@@ -57,8 +58,10 @@ NOT_GRADED = "not-graded"
 def _judge_model() -> str:
     """The judge's model, through `config`'s accessor rather than a second reading of the same
     env var. `config.judge_model()` IS `env_str("JUDGE_MODEL", "kimi-k3")` — spelling that here
-    made a byte-identical copy, so the two judges could drift to different DEFAULTS while still
-    being impossible to configure APART. See `run.py`'s docstring on why they are one knob."""
+    made a byte-identical copy, so a reader of this name could drift to a different DEFAULT
+    while still being impossible to configure APART. That caveat outlived the old pipeline
+    judge it was written about: `evals/oracle_golden/judge.py` reads the same two env vars with
+    its own defaults. `run.py`'s docstring carries the collision."""
     from defender.learning.core.config import judge_model
 
     return judge_model()
@@ -281,7 +284,7 @@ def _run_world_draws(
         reply_text: str | None = None
         doc: dict[str, Any]
         try:
-            reply_text = judge(prompt, role=AgentRole.QUESTIONER, agent_id=agent_id,
+            reply_text = judge(prompt, role=AgentRole.JUDGE, agent_id=agent_id,
                                wiring=wiring)
         # EVERY class the seam can raise, not `RunUnprocessable` alone — which is what this
         # loop's own docstring already claims ("a failed call writes a draw record naming its
@@ -391,9 +394,19 @@ def _majority_outcome(documents: dict[int, dict[str, Any]], n_completed: int,
 
 def _default_judge_seam(episode_dir: Path) -> Any:
     """The production `(prompt, *, role, agent_id, wiring) -> str` for every judge call, built
-    the way `seams.model_seam` builds the questioner's — `run_stage` under the SAME
-    `QuestionerDeps`/`AgentRole.QUESTIONER` key (D2), differing only in that the judge's own
-    `wiring` (model/effort/trace name) arrives from the caller rather than being built here.
+    the way `seams.model_seam` builds the questioner's — `run_stage` under a deny-all key —
+    but under the judge's OWN one since #1008: `JudgeDeps`, and therefore
+    `AgentRole.JUDGE`'s definition (D2). It differs from the questioner's seam in that the
+    judge's `wiring` (model/effort/trace name) arrives from the caller rather than being built
+    here.
+
+    THE DEPS CLASS IS WHAT DECIDES THE ROLE, not the `role` kwarg above it. `build_stage_agent`
+    reads `type(deps).role` and looks the definition up in `AGENTS`
+    (`learning/_pydantic_stage.py`), so `deps=JudgeDeps()` is the line that makes a draw run as
+    the judge; the kwarg is the caller's declaration, and every production seam in the tree
+    ignores it. Nothing is passed to `run_stage` besides `deps` and the wiring — in particular
+    no `tools=` and no `verbs=`, either of which would widen the registered definition at call
+    time and hand a grant to a role whose whole posture is holding none.
 
     THE IMPORTS ARE INSIDE `invoke`, not out here. `_pydantic_stage` imports `pydantic_ai` at
     module scope, and this seam is built for every `grade_episode` call that was handed no
@@ -406,8 +419,8 @@ def _default_judge_seam(episode_dir: Path) -> Any:
     def invoke(prompt: str, *, role: Any = None, agent_id: str = "judge", wiring: Any = None,
               **_kw: Any) -> str:
         from defender.learning._pydantic_stage import run_stage
-        from defender.learning.branch.questioner import QuestionerDeps
         from defender.learning.core.config import StageContext, subagent_timeout
+        from defender.learning.judge.run import JudgeDeps
 
         # `wiring` IS REQUIRED, and the default is what makes the signature honest about it.
         # `run_stage`'s first statement is `label = wiring.label`, so a caller following the
@@ -422,7 +435,7 @@ def _default_judge_seam(episode_dir: Path) -> Any:
             stage="judge", wiring=wiring,
             ctx=StageContext(learning_run_dir=Path(episode_dir), user=prompt, request_limit=1,
                              wall_clock_timeout=subagent_timeout()),
-            deps=QuestionerDeps(),
+            deps=JudgeDeps(),
         )
 
     return invoke
