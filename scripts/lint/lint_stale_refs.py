@@ -8,8 +8,18 @@ Catches the recurring "rename refactor missed a callsite" class:
 - b77a276: `_prior_recall` import path broken in hook contexts
 - 8ef005f: test glob still matched old pre-suffix filename pattern
 
+WHAT IS COMPARED, AND AGAINST WHAT. The diff runs from `merge-base($STALE_REF_BASE, HEAD)` to
+the WORKING TREE — not to HEAD. Both halves of this gate then read one tree: the reference half
+is `git grep`, which has always read the working tree, so a removal half reading HEAD made the
+gate answer about a tree that does not exist. Uncommitted deletions donated no identifiers while
+the references the same edit added were fully visible, so the ordinary run-then-commit workflow
+verified the wrong tree and reported clean (#922 shipped two rounds of stale references that
+way). On a clean tree — CI's, always — the two bases are identical, so this narrows nothing
+there; on a dirty one it reports on the work in it, as every other lint here already does.
+
 Algorithm:
-  1. Diff against `$STALE_REF_BASE` (default `origin/main`).
+  1. Diff from `merge-base($STALE_REF_BASE, HEAD)` (default base `origin/main`) to the
+     working tree.
   2. Collect identifiers removed by `-`-side lines:
        - `def NAME(` / `class NAME`
        - top-level `NAME =` (uppercase constants)
@@ -387,21 +397,43 @@ def _base_ref_error(repo_root: Path, base_ref: str) -> str | None:
     if not _git_ok(["merge-base", base_ref, "HEAD"], cwd=repo_root):
         return (
             f"`{base_ref}` resolves but has NO merge-base with HEAD — a shallow/grafted "
-            f"clone. `git diff {base_ref}...HEAD` (three-dot) needs a common ancestor and "
-            f"fails without one, so the gate would check nothing (#618). Give the job's "
+            f"clone. The diff is taken FROM that merge-base, so without one there is nothing "
+            f"to diff and the gate would check nothing (#618). Give the job's "
             f"actions/checkout `fetch-depth: 0`; fetching the base ref at `--depth=N` "
             f"creates the ref but NOT an ancestor — the graft remains."
         )
     return None
 
 
-def _changed_files(repo_root: Path, base_ref: str) -> set[str]:
-    out = _git(["diff", "--name-only", f"{base_ref}...HEAD"], cwd=repo_root)
+def _diff_base(repo_root: Path, base_ref: str) -> str:
+    """The commit every diff below is taken FROM — `merge-base(base_ref, HEAD)`, resolved once.
+
+    THE DIFF RUNS AGAINST THE WORKING TREE, NOT AGAINST HEAD, and that is the whole point of
+    naming the base separately. `git diff A...HEAD` is `git diff $(git merge-base A HEAD) HEAD`;
+    passing the merge-base with NO second revision diffs it against the working tree instead —
+    index and unstaged edits included.
+
+    The two halves of this gate have to read the SAME tree or it answers a question about a tree
+    that does not exist. The reference half is `git grep`, which reads the WORKING TREE; the
+    removal half read HEAD. Uncommitted work was therefore invisible on the removal side and
+    fully visible on the reference side, so a deletion sitting in the working tree donated no
+    identifiers and the gate reported clean on it — while reporting on every reference the same
+    edit had added. Running it before committing verified the wrong tree, and it took two
+    rounds of CI on #922 to notice, because CI's tree is always clean and the two bases agree
+    there. They still agree there: this changes nothing about what CI checks.
+
+    A dirty tree therefore now reports on the work in it, which is what every other lint in this
+    repo already does — this one was the odd one out."""
+    return _git(["merge-base", base_ref, "HEAD"], cwd=repo_root).strip()
+
+
+def _changed_files(repo_root: Path, diff_base: str) -> set[str]:
+    out = _git(["diff", "--name-only", diff_base], cwd=repo_root)
     return {line.strip() for line in out.splitlines() if line.strip()}
 
 
-def _collect_removed_idents(repo_root: Path, base_ref: str) -> set[str]:
-    diff = _git(["diff", "--unified=0", f"{base_ref}...HEAD", "--", ".",
+def _collect_removed_idents(repo_root: Path, diff_base: str) -> set[str]:
+    diff = _git(["diff", "--unified=0", diff_base, "--", ".",
                  *(f":(exclude){d}" for d in NON_SOURCE_DIRS)], cwd=repo_root)
     idents: set[str] = set()
     for line in diff.splitlines():
@@ -434,7 +466,7 @@ def _collect_removed_idents(repo_root: Path, base_ref: str) -> set[str]:
 
 
 def _renamed_or_deleted_paths(
-    repo_root: Path, base_ref: str
+    repo_root: Path, diff_base: str
 ) -> tuple[set[str], set[str]]:
     """`(gone, deleted)` — every path the diff removed from its old location, and the
     subset that was DELETED outright rather than renamed.
@@ -444,7 +476,7 @@ def _renamed_or_deleted_paths(
     to that name is stale. A RENAMED `a/foo_helper.py` -> `b/foo_helper.py` does not: the
     module still exists under the same name, and collecting its stem would flag every
     importer of a module that merely moved."""
-    out = _git(["diff", "--name-status", f"{base_ref}...HEAD", "--", ".",
+    out = _git(["diff", "--name-status", diff_base, "--", ".",
                 *(f":(exclude){d}" for d in NON_SOURCE_DIRS)], cwd=repo_root)
     gone: set[str] = set()
     deleted: set[str] = set()
@@ -608,8 +640,18 @@ def _is_binding(
 
 @lru_cache(maxsize=1)
 def _tracked_paths(repo_root: Path) -> frozenset[str]:
-    """Every git-tracked path, repo-relative. Cached — `_module_named` is called per ident."""
-    return frozenset(_git(["ls-files"], cwd=repo_root).splitlines())
+    """Every git-tracked path that is STILL ON DISK, repo-relative. Cached — `_module_named` is
+    called per ident.
+
+    The existence filter is the same working-tree agreement `_diff_base` is about, one level
+    down: these paths are what may VOUCH that a name survives, and `git ls-files` reads the
+    INDEX. A file deleted with a plain `rm` is gone from the tree and still in the index, so
+    without the filter it would vouch for its own name right after being deleted — the gate
+    saying a module survives while the grep reads a tree where it does not."""
+    return frozenset(
+        rel for rel in _git(["ls-files"], cwd=repo_root).splitlines()
+        if rel and (repo_root / rel).exists()
+    )
 
 
 def _module_named(repo_root: Path, ident: str) -> bool:
@@ -736,9 +778,13 @@ def _hit_file(hit: str) -> str:
 def _scan(
     repo_root: Path, base_ref: str, *, exclude_files: frozenset[str] = frozenset()
 ) -> list[Finding]:
-    changed = _changed_files(repo_root, base_ref) | set(exclude_files)
-    idents = _collect_removed_idents(repo_root, base_ref)
-    removed_paths, deleted_paths = _renamed_or_deleted_paths(repo_root, base_ref)
+    # Resolved ONCE and threaded, so the three diffs below cannot drift onto different bases —
+    # and, since `_diff_base` diffs it against the WORKING TREE, so they read the same tree the
+    # grep does. See `_diff_base`.
+    diff_base = _diff_base(repo_root, base_ref)
+    changed = _changed_files(repo_root, diff_base) | set(exclude_files)
+    idents = _collect_removed_idents(repo_root, diff_base)
+    removed_paths, deleted_paths = _renamed_or_deleted_paths(repo_root, diff_base)
 
     for p in removed_paths:
         for component in Path(p).parts:
@@ -781,7 +827,8 @@ def _scan(
         print("No specific removed identifiers in the diff.")
         return []
 
-    print(f"Scanning {len(specific)} specific removed identifier(s) (base={base_ref})")
+    print(f"Scanning {len(specific)} specific removed identifier(s) "
+          f"(base={base_ref}, against the working tree)")
     results = _batch_grep(specific, changed, grep_hits, py)
 
     findings: list[Finding] = []
