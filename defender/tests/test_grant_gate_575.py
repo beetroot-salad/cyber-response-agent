@@ -163,7 +163,9 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
     return {
         "main": env.main,
         "gather": env.gather,
-        "verify": compile_policy_for(VERIFY_DEF, run_dir=env.run, defender_dir=env.dfn),
+        # Keyed by the ROLE VALUE (`verifier`, not `verify`): b3 now asserts this dict covers
+        # the registry, and it can only do that if the keys are the roster's own names.
+        "verifier": compile_policy_for(VERIFY_DEF, run_dir=env.run, defender_dir=env.dfn),
         "lead_author": _lead_author(env),
         "corpus_author": _curator(env),
         # #796's review roles. They are here for the same reason every other role is: b3
@@ -417,6 +419,16 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     # deliberately added or retired role moves it; what the test checks is the table property
     # below.
     assert len(AGENTS) == 9
+    # ...AND `_all_policies` covers every one of them. The count alone does not say so: this
+    # dict is hand-enumerated, and its own note says a role registered in AGENTS but absent
+    # here is "a compiled policy the audit never looks at" — a2/a4/b3/b8/g1 all sweep THIS,
+    # so a forgotten row is a policy, and above all a `deny_reason`, that nothing audits. The
+    # only tie before was a substring check in another file that any comment would satisfy.
+    roster = {defn.role.value for defn in AGENTS.values()}
+    assert set(pols) == roster, (
+        f"`_all_policies` is missing {sorted(roster - set(pols))} — "
+        "every audit demand in this file sweeps that dict, so an absent role is a compiled "
+        "policy no demand here has ever looked at")
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
     assert "corpus_author" in pols
     for name, pol in pols.items():
@@ -771,7 +783,8 @@ def test_f5_runtime_imports_no_learning_private_and_enumerates_no_agent(env):
     `agent_definition.py:275,278,285`), and nothing under `runtime/` enumerates agents (the registry
     moves out to `defender/agents.py`). Each engine hangs its OWN `bash_shapes` builder on its OWN
     def, which inverts the dependency.
-    Positive control: the relocated `defender/agents.py` DOES import the 6 `*_DEF`s — proof the scan
+    Positive control: the relocated `defender/agents.py` DOES import every `*_DEF` it registers
+    (derived from the registry tuple, so the roster's size cannot drift away from it) — proof the scan
     SEES such an import when one is present (a scan that finds nothing because it looks in the wrong
     place is the failure mode this control kills)."""
     runtime_dir = _DEFENDER / "runtime"
@@ -789,10 +802,25 @@ def test_f5_runtime_imports_no_learning_private_and_enumerates_no_agent(env):
                         offenders.append(f"{py.name}: import {alias.name}")
     assert offenders == [], offenders
     assert not (runtime_dir / "agents.py").exists()
+    # DERIVED FROM THE REGISTRY TUPLE, not a hand-kept subset of it. This listed four of the
+    # (then) six names and its prose said six; #1008 made it nine and the list did not move,
+    # which is the failure mode the control is supposed to be immune to. Every name
+    # `build_registry` is handed must be a name this module imports — that is the property,
+    # and it is what makes "the scan is not blind" true of the whole roster.
     reg = ast.parse((_DEFENDER / "agents.py").read_text())
     imported = {a.name for n in ast.walk(reg) if isinstance(n, ast.ImportFrom) for a in n.names}
-    assert {"VERIFY_DEF", "LEAD_AUTHOR_DEF", "CORPUS_AUTHOR_DEF",
-            "QUESTIONER_DEF"} <= imported
+    registered = {
+        arg.id
+        for call in ast.walk(reg)
+        if isinstance(call, ast.Call) and getattr(call.func, "id", None) == "build_registry"
+        for arg in ast.walk(call) if isinstance(arg, ast.Name) and arg is not call.func
+    }
+    assert len(registered) == len(AGENTS), (
+        f"the AST walk resolved {sorted(registered)} for {len(AGENTS)} registered roles — it "
+        "is not reading the registry tuple, so the check below means nothing")
+    assert registered <= imported, (
+        f"agents.py registers {sorted(registered - imported)} without importing the name — "
+        "the scan below cannot be proving what it claims about the roster")
 
 
 

@@ -12,7 +12,7 @@ sys.path.insert(0, "/workspace")
 sys.path.insert(0, str(HERE / "variants"))
 import contexts  # noqa: E402
 from defender.learning._pydantic_stage import run_stage  # noqa: E402
-from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
+from defender.learning.judge.run import JudgeDeps  # noqa: E402
 from defender.learning.core.config import StageContext, StageWiring, subagent_timeout  # noqa: E402
 
 DEFAULT_FAMILY = HERE / "family" / "episode" / "family.yaml"
@@ -52,7 +52,11 @@ def main() -> int:
                            label=f"judge921:{ns.arm}:{ns.fixture}:t{ns.trial}"),
         ctx=StageContext(learning_run_dir=trial_dir, user=prompt, request_limit=1,
                          wall_clock_timeout=subagent_timeout()),
-        deps=QuestionerDeps(),
+        # The JUDGE's deps, so this arm compiles the definition production compiles. It ran
+        # on `QuestionerDeps()` until #1008 gave the family judge a key of its own — the same
+        # object then and not now — and an A/B whose arm is not what ships is measuring the
+        # wrong agent the moment the two deny-all roles diverge at all.
+        deps=JudgeDeps(),
     )
     (trial_dir / "reply.raw.md").write_text(reply, encoding="utf-8")
     blocks = _FENCE.findall(reply)

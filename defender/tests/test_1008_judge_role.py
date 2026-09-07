@@ -35,6 +35,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import difflib
+import re
 
 import pytest
 
@@ -756,61 +757,97 @@ def test_1008_the_questioners_own_seam_still_builds_with_the_questioners_deps():
 
 def test_1008_no_shipped_prose_still_says_the_judge_runs_as_the_questioner():
     """Every trusted sentence that DESCRIBES the borrowed key is gone, because each is now
-    false — across all nine files that carried one, not the four the design happened to name.
+    false — across all THIRTEEN files that carried one.
 
     A REPLAY OF THE DECK'S #700 SHAPE, which is why it is a test rather than a review note:
     when a change moves what an arrangement IS, every sentence describing the old arrangement
-    stays byte-identical and green. Nothing else in this suite can fail on a sentence — it pins
-    registry identity, compiled policy shape and two source CALLS.
+    stays byte-identical and green. Nothing else in this suite can fail on a sentence.
 
-    THE FIRST VERSION OF THIS TEST ENUMERATED THE DESIGN'S FOUR FILES AND SHIPPED GREEN over
-    five more, which is the same failure one turn out: a hand-listed sweep covers the list, not
-    the property. The rows below are what a review of the merged tree actually found, and the
-    two that matter most are the ones no design mechanism named — a MODEL-LOADABLE skill page
-    telling a reader the judge role does not exist, one section from a live description of the
-    judge; and the questioner's own module, the file an author adding the next deny-all role
-    reads, still stating the rule this change refutes.
+    THIS TEST HAS NOW MISSED TWICE, AND BOTH MISSES ARE DESIGNED OUT HERE.
+
+    * It first listed the four files the design named and shipped green over five more. The
+      rows are what reviews of the merged tree actually found, and the two that mattered were
+      surfaces no mechanism named: a MODEL-LOADABLE handbook page saying the judge role does
+      not exist, and the questioner's own module — what an author adding the next deny-all
+      role reads first — still stating the rule this change refutes.
+    * Then one row was INERT: a phrase transcribed from a sentence that is LINE-WRAPPED at
+      exactly that point, so it matched nothing anywhere and the row could not fail however
+      stale the file got. Both sides are whitespace-normalized now, so a wrap cannot hide a
+      match — and every row carries its own ANCHOR, a phrase that must still be present in
+      the same file, so a mis-transcribed or mis-pathed row raises instead of passing. The
+      old version had three anchors for eight paths, which is what let the inert row through.
 
     Each row is a phrase the shipped tree ASSERTED and this change refutes — not a wording
-    preference. Positive control below: the same reader finds phrases that ARE still there, so
-    a mistyped path or an unreadable file cannot pass as a row of absences.
+    preference.
     """
-    handbook = T.DEFENDER / "skills" / "handbook" / "content" / "learning-loop.md"
-    questioner_mod = T.DEFENDER / "learning" / "branch" / "questioner" / "__init__.py"
-    refuted = [
-        (T.DEFENDER / "runtime" / "agent_role.py",
+    def flat(text: str) -> str:
+        """One line, with the markers that only exist because of WRAPPING taken out.
+
+        A sentence is one sentence whether it fits on a line or not. Collapsing whitespace
+        alone is not enough: a wrapped Python comment carries a `#` at each continuation and a
+        wrapped Markdown blockquote a `>`, so the flattened text has a marker sitting in the
+        middle of the phrase and the match fails for a reason that has nothing to do with what
+        the file says. Both are stripped per line before the join.
+        """
+        lines = [re.sub(r"^\s*[#>]\s?", "", line) for line in text.splitlines()]
+        return " ".join(" ".join(lines).split())
+
+    D = T.DEFENDER
+    rows = [
+        (D / "runtime" / "agent_role.py",
          "a second key would be a second compiled policy over the same empty one",
+         "ONE DENY-ALL KEY PER PACKAGE",
          "the judge's key IS a second one over an equally empty policy, and deliberately"),
         (JUDGE_RUN, "runs under `AgentRole.QUESTIONER`'s existing definition",
+         "WHAT THE OWN KEY BUYS",
          "it runs under its own, declared in this very file"),
-        (JUDGE_RUN, "THE TWO JUDGES SHARE THOSE KNOBS",
+        (JUDGE_RUN, "THE TWO JUDGES SHARE THOSE KNOBS", "WHAT THE OWN KEY BUYS",
          "the other judge was deleted with the pipeline in #922"),
-        (T.DEFENDER / "agents.py", "until then runs under the questioner's definition",
+        (D / "agents.py", "until then runs under the questioner's definition",
+         "one deny-all key per PACKAGE",
          "'until then' is the past, and this line sits above the registration that ended it"),
         (JUDGE_PKG, "`QuestionerDeps`/`AgentRole.QUESTIONER` key",
+         "THE IMPORTS ARE INSIDE `invoke`",
          "the seam below now builds with the judge's own deps"),
-        (handbook, "neither do the `actor`, `oracle` and `judge` agent roles",
+        (D / "skills" / "handbook" / "content" / "learning-loop.md",
+         "neither do the `actor`, `oracle` and `judge` agent roles",
+         "That pipeline is **deleted**.",
          "a MODEL reads this page to ground which roles exist, and `judge` is one of them"),
-        (questioner_mod,
-         "A second role key would buy a second compiled policy over the",
+        (D / "learning" / "branch" / "questioner" / "__init__.py",
+         "A second role key would buy a second compiled policy over the same (empty) grant",
+         "WHY THREE CALLS SHARE ONE ROLE KEY",
          "this is the rule #1008 refutes, in the file an author adding the next deny-all role "
          "reads first"),
-        (T.DEFENDER / "runtime" / "agent_definition.py", "The judge was the one such role",
+        (D / "runtime" / "agent_definition.py", "The judge was the one such role",
+         "no longer any role whose static shape understates it",
          "`AgentRole.JUDGE` names a live role again, and it is not that one"),
-        (T.DEFENDER / "tests" / "test_922_witnesses.py", "the role #1008 will fork",
+        (D / "tests" / "test_922_witnesses.py", "and it is the role #1008 will fork",
+         "EVERY deny-all role, DERIVED",
          "future tense of a landed change, on the guard that had to grow to cover it"),
+        (D / "docs" / "learning-loop.md", "running under the questioner's definition",
+         "## The Judge",
+         "`CLAUDE.md` names this doc the FIRST read before changing the judge"),
+        (D / "docs" / "agent-definition-single-source.md", "Today's eight are in",
+         "Roster note (post-#922, updated #1008)",
+         "the roster is nine and `judge` is one of them, so this banner is stale in the "
+         "direction that makes the live-looking grant row below read as authoritative"),
+        (D / "evals" / "oracle_golden" / "judge.py",
+         "two different env vars that happen to rhyme",
+         "THE ENV VARS ARE THE SAME TWO NAMES",
+         "they are the same two names, and the tree carried the correction and this "
+         "refutation of it at once"),
+        (D.parent / "experiments" / "judge-context-921" / "run_judge.py",
+         "from defender.learning.branch.questioner import QuestionerDeps",
+         "deps=JudgeDeps()",
+         "the arm the judge's prompt is measured in must compile what production compiles"),
     ]
-    for path, phrase, why in refuted:
+    for path, phrase, anchor, why in rows:
         text = path.read_text(encoding="utf-8")
-        assert phrase not in text, f"{path.name} still says {phrase!r} — {why}"
-
-    for path, still_there in (
-            (JUDGE_PKG, "THE IMPORTS ARE INSIDE `invoke`"),
-            (handbook, "That pipeline is **deleted**."),
-            (questioner_mod, "WHY THREE CALLS SHARE ONE ROLE KEY")):
-        assert still_there in path.read_text(encoding="utf-8"), (
-            f"positive control: the reader cannot find {still_there!r} in {path.name}, which "
-            "IS present — so the absences above prove nothing about the prose")
+        assert flat(anchor) in flat(text), (
+            f"positive control: {path.name} does not contain {anchor!r}, which it should — "
+            "this row is mis-pathed or mis-transcribed, so its absence check below proves "
+            "nothing about the prose")
+        assert flat(phrase) not in flat(text), f"{path.name} still says {phrase!r} — {why}"
 
 
 # ---------------------------------------------------------------------------------------

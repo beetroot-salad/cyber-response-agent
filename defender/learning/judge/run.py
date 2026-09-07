@@ -66,26 +66,35 @@ from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
 from defender.runtime.agent_definition import AgentDefinition
 from defender.runtime.agent_role import AgentRole
 
-#: What this judge is told when it reaches for something it does not hold. In ITS OWN words —
-#: the whole observable difference an own role key buys, since both compiled policies are
-#: empty. The borrowed one opened "the questioner is a pure authoring projection", which is a
-#: judge being told it is a different agent.
+#: The judge's refusal text, carried on its compiled policy.
 #:
-#: A deny reason is PROMPT SURFACE, so it names no program: a reason mentioning a command this
-#: lane denies teaches a dead command and the agent burns turns on it. The grant gate sweeps
-#: every registered policy for exactly that (g1, in the #575 gate suite).
+#: WHO READS THIS, stated plainly because the comment here used to imply the model does. It
+#: does not: `deny_reason` reaches only `AgentPolicy` and from there the bash gate, which a
+#: role registering no bash tool never invokes. The module docstring above says the same. So
+#: this string is a property of the compiled object and of the operator surface that prints
+#: it — which is why the judge holding its OWN is worth having, and also why its benefit is
+#: prospective rather than something a draw will ever be shown.
 #:
-#: AND IT IS WRITTEN, not derived from the questioner's by substitution. The first draft of this
-#: constant was that role's sentence with three noun phrases swapped and the closing clauses
-#: left byte-identical — which passes every "is it the same string" check while being, in the
-#: only sense that matters, the same refusal. What this one says is true of THIS role and of no
-#: other: the whole episode is already in the prompt, so there is nothing left to reach for.
+#: A deny reason is PROMPT SURFACE wherever it IS shown, so it names no program and no
+#: capability this role lacks: a reason mentioning a command or a tool this lane denies
+#: teaches a dead one. The grant gate sweeps every registered policy for the program half
+#: (g1, in the #575 gate suite); the tool half it cannot see, so it is a rule kept by hand.
+#:
+#: AND IT IS WRITTEN, not derived from the questioner's by substitution. An earlier draft was
+#: that role's sentence with three noun phrases swapped and the closing clauses byte-identical
+#: — which passes every "is it the same string" check while being, in the only sense that
+#: matters, the same refusal.
+#:
+#: WHAT IT CLAIMS IS WHAT THE PROMPT ACTUALLY HOLDS. A draft said "every world's record ... the
+#: sibling run dirs" were framed into the prompt; `render.render` builds the input for ONE
+#: non-control world plus the control it is compared against, so the wider claim was false in
+#: the very string whose purpose is to stop the model reaching for more.
 _JUDGE_DENY_REASON = (
     "Blocked: nothing is reachable from a judge draw. This episode was archived before the "
-    "call began, and every world's record — the manifest, the ledger, the responses the estate "
-    "served, the sibling run dirs — was joined and framed into the prompt you already hold. "
-    "No query would add to it and no path resolves from here. Answer from the prompt, as one "
-    "YAML verdict document."
+    "call began, and the world under grading — with the control it is compared against — was "
+    "rendered into the prompt you already hold. There is no path left to resolve and no "
+    "system left to ask, and a grade that reached for more would be grading something other "
+    "than what was served. Answer from the prompt, as one YAML verdict document."
 )
 
 
@@ -482,4 +491,5 @@ def _build_prompt(judge_input: JudgeInput) -> str:
     return task + body
 
 
-__all__ = ["Finding", "JudgeReply", "_build_prompt", "validate_reply"]
+__all__ = ["JUDGE_DEF", "Finding", "JudgeDeps", "JudgeReply", "_build_prompt",
+           "validate_reply"]

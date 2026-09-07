@@ -351,10 +351,14 @@ def test_922_the_registrys_deny_all_roles_really_grant_nothing():
     Asserting the emptiness through the iterator rather than field by field is what keeps this
     true as lanes are added to `ToolSet`.
     """
-    from defender.runtime.tools import AgentDeps
-
+    # DERIVED FROM `bind`'s OWN REFUSAL, not from "deps_cls is not an AgentDeps subtype".
+    # That spelling had to skip `deps_cls is None` to avoid a TypeError, and None is the FIELD
+    # DEFAULT — `build_registry` never requires one — so the easiest deny-all role to write,
+    # one that simply omits it, fell out of the sweep entirely and could hold a lane while
+    # this test passed. `_for_run` is what `bind` itself looks for (`agent_definition.bind`),
+    # it is absent on None, and it does not raise on a deps FACTORY.
     deny_all = {role: defn for role, defn in AGENTS.items()
-                if defn.deps_cls is not None and not issubclass(defn.deps_cls, AgentDeps)}
+                if not hasattr(defn.deps_cls, "_for_run")}
     assert {AgentRole.QUESTIONER, AgentRole.JUDGE} <= set(deny_all), (
         f"the derived deny-all set is {sorted(r.name for r in deny_all)} — it lost a role this "
         "guard is named for, so the sweep below covers less than it claims")
