@@ -2,7 +2,7 @@
 
 > **Status: historical — designs a signal for deleted stages.** The actors, the
 > oracle, the pipeline judge and the two corpora this scores retrieval against
-> all went in #922 (`docs/learning-loop-cutover.md`). The live analogue of "did
+> all went in #922 (`e9e11a48`). The live analogue of "did
 > this lesson help?" is the forward-check plus `evals/held_out.py`.
 
 Companion to `defender/learning/actor_benign.md` / `actor.md`,

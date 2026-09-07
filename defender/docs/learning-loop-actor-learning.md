@@ -1,8 +1,8 @@
 # Actor-learning workstream — design (2026-05-11)
 
 > **Status: historical — never implemented, and its subject is deleted.** This
-> designs self-learning for an adversary #922 removed
-> (`docs/learning-loop-cutover.md`), so nothing here has a subject. Its
+> designs self-learning for an adversary #922 removed (`e9e11a48`), so nothing
+> here has a subject. Its
 > co-evolution caveats are carried forward in `docs/learning-loop.md` §Future
 > Enhancements — look there before proposing an adversary again.
 

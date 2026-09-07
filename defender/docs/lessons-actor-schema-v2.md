@@ -1,8 +1,8 @@
 # Lessons-actor schema v2 — design + v2.1 / v2.2 deltas
 
 > **Status: historical — the corpus this schemas is frozen.** `lessons-actor/`
-> and `lessons-environment/` lost their producers in #922
-> (`docs/learning-loop-cutover.md`); the files remain, nothing writes or reads
+> and `lessons-environment/` lost their producers in #922 (`e9e11a48`); the
+> files remain, nothing writes or reads
 > them, and the index CLIs below are deleted. A record of a schema, not one to
 > author against.
 

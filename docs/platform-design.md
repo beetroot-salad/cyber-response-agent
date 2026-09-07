@@ -4,7 +4,7 @@
 
 > **Learning-stage note (post-#922).** The *platform* argument stands; what it assumes about
 > the learning stages does not. The `actor → oracle → judge` chain, `lead_sequence.yaml`, and
-> `learning/replay_actor.py` were deleted (`defender/docs/learning-loop-cutover.md`). The
+> `learning/replay_actor.py` were deleted (#922, `e9e11a48`). The
 > *branched episode* that replaced them changes two things this design must absorb: a learning
 > job now spawns **several sibling investigations of its own**, so it is not a cheap LLM chain
 > to throttle beside an investigation; and it consumes a self-contained **episode directory**,

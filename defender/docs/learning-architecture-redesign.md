@@ -21,8 +21,7 @@ are `learning/branch/` (#947), the family judge is `learning/judge/` (#921), and
 deleted the pipeline this argues against — the two actors, the oracle and the pipeline
 judge, along with the direction routing and `run_cycle.py` itself. Read the sections below
 as the case that was made, not as a description of code that is waiting to be written; the
-shipped shape is `docs/learning-loop.md`, and `docs/learning-loop-cutover.md` records the
-deletion. Where this doc uses the future tense about the branch, the answer is: it exists.
+shipped shape is `docs/learning-loop.md`, and `git show e9e11a48` is the deletion. Where this doc uses the future tense about the branch, the answer is: it exists.
 
 **What this revision changes.** The first draft proposed generating a base world from
 scratch. That design is replaced by the **turn-N branch**: fork a real investigation at
