@@ -156,6 +156,24 @@ def test_strip_yaml_fence_strips_yaml_code_fence():
     assert loop.strip_yaml_fence(fenced) == "outcome: caught"
 
 
+def test_strip_yaml_fence_strips_a_fence_a_closing_sentence_follows():
+    """#881/O1 at THIS function, not at `normalize_judge_yaml` above it.
+
+    The bug was one guard here — `and not s.startswith("```")` — switching off the only rule
+    that reduces a fence found mid-string, in exactly the case that rule exists for: the
+    anchored whole-string rule cannot match once prose follows the closing fence, and the
+    unanchored one was disabled because the fence starts at position 0.
+
+    Pinned on the SHARED function because `normalize_judge_yaml` is not its only consumer.
+    `learning/branch/questioner/__init__.py` normalizes the questioner's replies through
+    `strip_yaml_fence` too, and `_as_document` aborts the whole episode on a parse failure —
+    a wider blast radius than the judge's one lost draw. A repair made in the judge's wrapper
+    would leave that consumer exactly as broken as it was, and this assertion is what says so.
+    """
+    text = "```yaml\noutcome: caught\nconfidence: high\n```\n\nLet me know if you want more.\n"
+    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+
+
 def test_strip_yaml_fence_strips_trailing_close_tag():
     text = "outcome: caught\nconfidence: high\n</content>\n"
     assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"

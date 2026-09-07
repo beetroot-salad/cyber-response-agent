@@ -522,23 +522,41 @@ _HELD_REASONS = (
     "no_ground_truth(direction='adversarial', disposition=None)",
     "no_family_ground_truth(judge_outcome=None)",
     "forward_bad: the lesson flips a correctly-resolved case",
+    # THE FOURTH IS THE POINT, and the other three are nearly a trap. Enumerate only the
+    # spellings in the tree and the fixture becomes a lookup table an implementation can
+    # match prefixes against — which greens while answering "pending" for every reason it
+    # does not recognise. That is not a hypothetical reader: the design's own corrected
+    # premise says the rows this defect strands are LEGACY ones from a deployed queue,
+    # written by a gate that may since have been reworded or deleted. The field is the
+    # contract; its value is the holder's prose.
+    "held_by_something_that_does_not_exist_yet",
 )
+
+#: One held row whose reason no gate in the tree spells — see `_HELD_REASONS`.
+_UNRECOGNISED_HOLD = _HELD_REASONS[-1]
 
 
 def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
     """#881/O2: `_pending_queue_count` counts what a tick could take, not file lines.
 
-    Four cases on one address, so no single mis-reading satisfies it:
+    Five cases on one address, so no single mis-reading satisfies it:
 
     * five HELD rows count as zero — the defect. Each carries `held_reason`, which is the
       field the gate itself writes, so the count needs no second rule and no queue change.
     * five otherwise identical rows WITHOUT the field count as five. This is the control that
       makes the first case mean something: a counter that answered 0 for every queue would
       pass the first assertion and pin the drain shut instead of open.
+    * A ROW HELD FOR A REASON NO GATE IN THIS TREE SPELLS counts as zero too. The count keys
+      on the FIELD, never on the reason's prose: a reader matching the three strings the tree
+      writes today answers "pending" for a hold written by a gate since reworded or deleted,
+      which is precisely the row this defect strands — the design's corrected premise says
+      the trigger is legacy rows left in a deployed queue by a writer that is gone.
     * a blank line still counts as nothing (the behaviour that is already right).
-    * an UNPARSABLE line still counts as ONE. It is work — the drain's unkeyable path retires
-      exactly such a row — so a count that skipped every line it could not read as a held-less
-      row would strand a queue full of junk below the threshold, unretired and invisible.
+    * A LINE THAT IS NOT A ROW still counts as ONE, and there are two kinds of those: one
+      that is not JSON, and one that is JSON but not an object. Both are work — the drain's
+      unkeyable path retires exactly such a line — and the second is the sharper: a reader
+      that only guarded `json.loads` greens here and then raises `AttributeError` on
+      `row.get(...)` on every tick, a class no drain guard names.
     """
     paths = LoopPaths(repo_root=tmp_path)
     held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
@@ -553,12 +571,27 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
         "the same five rows without `held_reason` are authorable and must be counted"
     )
 
+    _seed_queue(paths, [_row("legacy/0", held_reason=_UNRECOGNISED_HOLD)])
+    assert drains._pending_queue_count(paths.pending_file) == 0, (
+        f"a row held for {_UNRECOGNISED_HOLD!r} was counted as pending work; the count is "
+        "reading the reason's prose rather than the field, so any hold whose wording it "
+        "does not recognise — a legacy row, a reworded gate — reads as authorable"
+    )
+
     _seed_queue(paths, ["", _row("h/0"), "   ", ""])
     assert drains._pending_queue_count(paths.pending_file) == 1, "a blank line is not a row"
 
-    _seed_queue(paths, [*held, "{not json at all"])
-    assert drains._pending_queue_count(paths.pending_file) == 1, (
-        "an unreadable line is work for the drain's unkeyable retirement, so it counts"
+    # One held row (0) + five lines that are not rows (5) + one authorable row (1). The four
+    # JSON-but-not-an-object lines are the ones a `json.loads`-only reader lets through.
+    _seed_queue(paths, [
+        _row("legacy/0", held_reason=_UNRECOGNISED_HOLD),
+        "[1,2]", "null", '"x"', "3", "{not json at all",
+        _row("c/0"),
+    ])
+    assert drains._pending_queue_count(paths.pending_file) == 6, (
+        "a line that is not a row is work for the drain's unkeyable retirement and must be "
+        "counted — whether it failed to parse at all, or parsed to a list, a null, a string "
+        "or a number, none of which is a row"
     )
 
 
@@ -567,7 +600,7 @@ def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_agai
 ):
     """#881/O2: `_has_curator_work` answers for rows that can be AUTHORED.
 
-    Three positions, each with its complement on the same address:
+    Four positions, each with its complement on the same address:
 
     * five held rows do NOT trip a threshold of five — today they do, and the drain spins up
       every tick, takes the repo lock, re-holds the same five rows and writes nothing.
@@ -576,6 +609,9 @@ def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_agai
       half: a gate that merely subtracted "some" held rows, or that special-cased an
       all-held queue, still answers True for 5+1 while only ONE row is authorable. Adding
       four more clean rows trips it, which is the arithmetic stated in the other direction.
+    * five rows held for a reason no gate in this tree spells do not trip it either — the
+      legacy queue this defect actually strands, whose holder's wording the gate cannot be
+      allowed to depend on. See `_HELD_REASONS`.
 
     The threshold is set explicitly rather than left to `env_int`'s default so the test says
     what number the counts are being judged against.
@@ -603,4 +639,11 @@ def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_agai
     _seed_queue(paths, [*held, *(_row(f"c/{i}") for i in range(5))])
     assert drains._has_curator_work(paths) is True, (
         "five authorable rows are five rows of work however many held ones sit beside them"
+    )
+
+    _seed_queue(paths, [_row(f"legacy/{i}", held_reason=_UNRECOGNISED_HOLD) for i in range(5)])
+    assert drains._has_curator_work(paths) is False, (
+        f"the wake gate fired for five rows held for {_UNRECOGNISED_HOLD!r}; it is reading "
+        "the reason's wording rather than the field, so the legacy rows this defect strands "
+        "— held by a writer that no longer exists — pin it open exactly as before"
     )

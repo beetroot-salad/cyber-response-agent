@@ -1,36 +1,42 @@
-"""#881 — two pieces of the author drain's plumbing that lose a row in silence.
+"""#881 — two pieces of the author drain's plumbing that lost a row in silence.
 
-O3 — **every row the gate holds leaves a written trace in the findings held report.** The
-report exists precisely so an operator can see what the drain declined to author, and it is
-handed only the forward-check bucket's holds (`author/drain.py:395-403` fills
-`DrainOutcome.held` from the AUTHOR_RESULT buckets). The PRE-AUTHOR gate's holds —
-`no_ground_truth(...)` and `no_family_ground_truth(...)`, the ones that stay queued forever
-because the fact they are waiting on has no writer any more — reach the queue and nothing else.
+O3 — **every row the pre-author gate holds leaves a written trace in the findings held
+report.** The report exists so an operator can see what the drain declined to author, and it
+was handed only the forward-check bucket's holds: `DrainOutcome.held` is filled from the
+AUTHOR_RESULT buckets, i.e. rows the agent returned a verdict on. The gate's holds — BOTH
+arms, `no_ground_truth(...)` and `no_family_ground_truth(...)` — never reached the agent, are
+permanent because the facts they wait on have no writer any more, and reached the queue and
+nothing else. So the rows that will be there forever were the ones nothing said anything
+about.
 
 O4 — **a non-`RETIRE_SET` fault anywhere in a tick leaves exactly one stuck record naming the
-fault class.** Two of the tick's three fault-bearing regions are wrapped
-(`author/drain.py:292-296` for the gate, `:314-317` for authoring); the unkeyable-row
-retirement at `:287` runs before both, so a `TimeoutError` out of its rotation escapes
-`run_batch` with an empty stuck report. Retirement is not reachable for it either
-(`TimeoutError` is not in `RETIRE_SET`), so there is no graveyard trace of the tick and no
-stuck trace of it: the operator's only signal that the channel is wedged is that nothing
-happens.
+fault class.** The gate and the authoring region were wrapped; the unkeyable-row retirement,
+which runs before both, was not — so a fault anywhere in it escaped `run_batch` leaving
+neither a graveyard entry nor a stuck record. The demand is a guard round the STEP, so the
+tests below fault it at two different seams with two different classes: a `TimeoutError` from
+its rotation's own bounded wait under a genuinely contended append lock, and an
+`IsADirectoryError` from the graveyard append that precedes it. Its stuck records must also
+fold by ROW, which for a keyless row means by its content — an empty id list, or any key
+coarser than the row, reads two unrelated poison rows as one problem getting worse.
 
-RED against `main` @ `b740b9ec`, which is what a spec written before its implementation looks
-like. The two obligations whose homes the design names elsewhere — O1's fence-then-prose
-regression (`tests/learning/test_loop.py`, `tests/test_921_judge_call.py`) and O2's wake-gate
-accounting (`tests/test_orchestrate_thresholds.py`) — are not repeated here.
+The two obligations whose homes the design names elsewhere — O1's fence-then-prose regression
+(`tests/learning/test_loop.py`, `tests/test_921_judge_call.py`) and O2's wake-gate accounting
+(`tests/test_orchestrate_thresholds.py`) — are not repeated here.
 
 Project idioms, because CI ratchets them: fakes enter through `dataclasses.replace` on the
-config, never `monkeypatch.setattr`; the fault under O4 is a REAL contended `flock`, not an
-injected exception; every negative case is paired with its control on the same address.
+config, never `monkeypatch.setattr`; every fault is a real one met at a real seam — a
+contended `flock`, an obstructed path — never an injected exception; and every negative case
+is paired with its control on the same address.
 """
 from __future__ import annotations
 
 import dataclasses
+import json
 import re
 from collections.abc import Callable
 from pathlib import Path
+
+import pytest
 
 import _drain719 as h
 from _drain719 import drain  # noqa: F401 — the target; the shim keeps collection alive
@@ -62,57 +68,99 @@ def _ids_in(line: str, label: str) -> str:
 def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_report(tmp_path):
     """#881/O3, through the real `run_batch` on the real findings channel.
 
-    An adversarial finding whose run has no resolvable `source_refs.yaml` is HELD by
-    `_gate_findings` with `held_reason=no_ground_truth(...)`. It is a permanent hold — the
-    writer of that file went with the #922 cutover — so it will sit in the queue on every
-    tick from now on. The tick must say so once, in the one place an operator reads.
+    BOTH ARMS OF THE GATE HOLD, and both must be named. An adversarial finding whose run has
+    no resolvable `source_refs.yaml` is held with `no_ground_truth(...)`; a `direction:
+    family` row whose `judge_outcome` is not a word the family partition knows is held with
+    `no_family_ground_truth(...)`. Both are permanent — the facts they wait on have no writer
+    any more — so they sit in the queue on every tick from now on, and a report that names
+    one arm and not the other is silent about exactly the rows an operator has to move by
+    hand. Naming one reason prefix is not naming the gate's holds.
 
-    THE PAIRED CONTROL IS THE SECOND HALF, on the same address under the complementary
-    condition: the same row, once its ground truth exists, is authored and committed, and the
-    report gains NOTHING. Without it a writer that appended a line every tick would pass the
-    first half while making the report unreadable — which is the same as not having one.
+    THE FIRST TICK IS MIXED — two held rows and one authorable one — because that is the
+    shape `_write_held_report_after_rotate` calls itself UNCONDITIONAL for. A report written
+    only when the tick committed nothing is invisible on every batch that did any work, which
+    is most of them; the batch where a row was declined WHILE its neighbours were authored is
+    the one an operator most needs. The agent's captured batch is asserted to be exactly the
+    authorable row, so "mixed" is a fact about the tick and not about the seeding.
 
-    The id is also asserted NOT to be inside `forward_bad_ids=[...]` or `skipped_ids=[...]`.
-    `DrainOutcome.held` is typed as the AUTHOR_RESULT bucket holds and the report already
-    distinguishes its reasons by prefix, so folding the gate's holds into that bucket would
-    report a row the forward check never saw as a forward-check verdict. What the label IS is
-    the implementation's to choose; that it is not one of those two is the demand.
+    THE SECOND TICK HOLDS A DIFFERENT ROW, and the first tick's line must still be there. The
+    report is an append-only ledger; a writer that opened it `"w"` would satisfy every
+    single-tick assertion above while destroying the record of the tick before — and a
+    control that only asserts the file is UNCHANGED cannot see that, because the tick it
+    checks never opens the file at all.
+
+    THE THIRD TICK IS THE PAIRED CONTROL, on the same address under the complementary
+    condition: it holds nothing, and the report gains nothing. Without it a writer that
+    appended a line every tick would pass everything above while making the report
+    unreadable — which is the same as not having one.
+
+    Each held id is also asserted NOT to be inside `forward_bad_ids=[...]` or
+    `skipped_ids=[...]`. `DrainOutcome.held` is typed as the AUTHOR_RESULT bucket holds, so
+    folding the gate's holds into that bucket would report a row the forward check never saw
+    as a forward-check verdict, and a skip is terminal where a hold is forever. What the
+    third label IS is the implementation's to choose; that it is neither of those two is the
+    demand.
     """
     paths = h.make_paths(tmp_path)
     ch = h.channel_of(paths, "findings")
-    row = h.row_for("findings", "a/0")
-    h.seed(ch, [row])
+    legacy = h.row_for("findings", "a/0")
+    family = h.row_for("findings", "f/0", direction="family", judge_outcome="not-a-word")
+    authorable = h.row_for("findings", "z/0")
+    h.write_source_refs(paths, "z")
+    h.seed(ch, [legacy, family, authorable])
     agent = h.recording(h.committing("881-o3"))
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
+    report = _held_report(paths)
 
     assert drain.run_batch(cfg=cfg) == 0
-    assert agent.calls == [], "the held row was handed to the author anyway"
-    assert [r.get("held_reason") for r in h.pending(ch)] == [
-        "no_ground_truth(direction='adversarial', disposition=None)"
-    ], "the tick did not hold the row this test is about"
+    assert [[r["finding_id"] for r in call["rows"]] for call in agent.calls] == [["z/0"]], (
+        "the tick did not author exactly the one authorable row, so it is not the mixed "
+        "batch this test is about"
+    )
+    assert {r["finding_id"]: r.get("held_reason") for r in h.pending(ch)} == {
+        "a/0": "no_ground_truth(direction='adversarial', disposition=None)",
+        "f/0": "no_family_ground_truth(judge_outcome='not-a-word')",
+    }, "the tick did not hold the two rows this test is about"
 
-    report = _held_report(paths)
     assert report.is_file(), (
-        "the tick held a row and wrote no held report at all — the gate's holds are the "
+        "the tick held two rows and wrote no held report at all — the gate's holds are the "
         "permanent ones, and they are the ones with no written trace"
     )
-    text = report.read_text(encoding="utf-8")
-    assert "a/0" in text, f"the held row is not named in the report: {text!r}"
-    for line in text.splitlines():
-        assert "a/0" not in _ids_in(line, "forward_bad_ids"), (
-            "a pre-author gate hold was reported as a forward-check verdict; the forward "
-            f"check never saw this row: {line!r}"
+    first_tick = report.read_text(encoding="utf-8")
+    for held_id, arm in (("a/0", "no_ground_truth"), ("f/0", "no_family_ground_truth")):
+        assert held_id in first_tick, (
+            f"the row held on the {arm} arm is not named in the report, although the tick "
+            f"committed a row alongside it: {first_tick!r}"
         )
-        assert "a/0" not in _ids_in(line, "skipped_ids"), (
-            f"a held row was reported as a skip — a hold is not terminal: {line!r}"
-        )
+        for line in first_tick.splitlines():
+            assert held_id not in _ids_in(line, "forward_bad_ids"), (
+                "a pre-author gate hold was reported as a forward-check verdict; the "
+                f"forward check never saw this row: {line!r}"
+            )
+            assert held_id not in _ids_in(line, "skipped_ids"), (
+                f"a held row was reported as a skip — a hold is not terminal: {line!r}"
+            )
 
-    # The control: the same row, now with ground truth, is authored — and holds nothing.
-    before = text
-    h.write_source_refs(paths, "a")
+    # A second HOLDING tick: the report is a ledger, so it grows by a line and keeps the one
+    # it had. `"w"` instead of `"a"` fails here and nowhere else.
+    h.seed(ch, [h.row_for("findings", "b/0")])
+    assert drain.run_batch(cfg=cfg) == 0
+    second_tick = report.read_text(encoding="utf-8")
+    assert "b/0" in second_tick, "the second tick's hold is not named in the report"
+    assert first_tick in second_tick, (
+        "the second tick's report TRUNCATED the first tick's line rather than appending to "
+        f"it; the record of every earlier hold is gone: {second_tick!r}"
+    )
+    assert len(second_tick.splitlines()) == 2, (
+        f"the report is a ledger and must have grown by exactly one line: {second_tick!r}"
+    )
+
+    # The paired control: a tick that holds nothing writes nothing.
+    h.seed(ch, [h.row_for("findings", "c/0")])
+    h.write_source_refs(paths, "c")
     assert drain.run_batch(cfg=cfg) == 0
     assert h.pending(ch) == [], "the row was not authored on the tick that could author it"
-    assert report.read_text(encoding="utf-8") == before, (
+    assert report.read_text(encoding="utf-8") == second_tick, (
         "a tick that held nothing appended to the held report anyway; a report that grows "
         "on every tick names nothing"
     )
@@ -227,11 +275,17 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseExce
     return tick.error
 
 
-def _unkeyable(rid: str) -> dict:
+def _unkeyable(rid: str, **body) -> dict:
     """A well-formed findings row with its id field removed — the shape `_retire_unkeyable`
-    exists for. `run_id` still differs per row, which is what gives two such rows different
-    content without giving either one an id."""
-    return {k: v for k, v in h.row_for("findings", rid).items() if k != "finding_id"}
+    exists for.
+
+    `body` overrides ordinary content fields, which is how two such rows are made to differ
+    in their BODY while sharing a `run_id`. Deriving the difference from `rid` instead would
+    move `run_id` and `source_run_dir` too, and a fold keyed on the run would then be
+    indistinguishable from one keyed on the row."""
+    return {
+        k: v for k, v in h.row_for("findings", rid, **body).items() if k != "finding_id"
+    }
 
 
 def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_record(
@@ -294,6 +348,74 @@ def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_
     )
 
 
+def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded_too(
+    tmp_path: Path,
+):
+    """#881/O4 at the retirement's OTHER seams — the demand is a GUARD ROUND THE STEP, not a
+    clause round its last line.
+
+    The retirement crosses several seams before it reaches the rotation: it derives the
+    graveyard path, appends the retiring rows to it, and logs. A guard wrapped round the
+    rotation alone — or one that names only `TimeoutError`, the class the sibling test
+    injects — passes that test and leaves every earlier seam exactly as it was: the fault
+    escapes `run_batch`, nothing is graveyarded, nothing is recorded, and the channel is
+    wedged in silence. That is the shape this suite has shipped before (PR #678: a catch-all
+    fault demand discharged at one seam and believed of the whole region).
+
+    The fault is a real one, met at a real seam: the graveyard path is a DIRECTORY, so
+    `append_jsonl`'s `open(path, "a")` raises `IsADirectoryError` — a genuine filesystem
+    condition on the very file the retirement exists to write, not an injected exception,
+    and not in `RETIRE_SET`, so nothing retires and the row stays queued.
+
+    THE PAIRED CONTROL is the second half: with the obstruction removed the same retirement
+    completes, graveyards its row and records nothing further — so the guard cannot be
+    satisfied by recording every retirement, and the channel is shown to be recoverable
+    rather than merely loud.
+    """
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of(paths, "findings")
+    rows = [_unkeyable("a/0")]
+    h.seed(ch, rows)
+    graveyard = drain.graveyard_file(ch)
+    graveyard.mkdir(parents=True)
+    cfg = h.cfg_for(
+        paths, "findings", repo_lock_wait_seconds=1,
+        invoke_agent=h.recording(h.committing("881-o4-seams")),
+    )
+
+    with pytest.raises(IsADirectoryError):
+        drain.run_batch(cfg=cfg)
+
+    assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
+        "the tick reached the author; the fault under test is the one BEFORE the gate"
+    )
+    assert list(graveyard.iterdir()) == [], "nothing can have been graveyarded"
+    assert h.pending(ch) == rows, "the row must stay queued — `IsADirectoryError` retires nothing"
+    records = h.stuck_records(ch)
+    assert len(records) == 1, (
+        "a fault the drain cannot retire escaped the tick with no operator signal, because "
+        "the guard covers the rotation and not the whole retirement"
+    )
+    assert records[0]["fault_class"] == "IsADirectoryError", (
+        "the record does not name the fault class, or the guard names only the one class "
+        f"the sibling test injects: {records[0]}"
+    )
+    assert records[0]["row_ids"], (
+        "the record names no rows, so the guard was handed the wrong batch — the rows this "
+        "tick is stuck on are the unkeyable ones"
+    )
+
+    # The paired control: unobstructed, the same retirement is ordinary work.
+    graveyard.rmdir()
+    assert drain.run_batch(cfg=cfg) == 0
+    assert h.pending(ch) == [], "the retirement did not clear the row once unobstructed"
+    assert len(h.graveyard(ch)) == 1, "the retirement did not graveyard the row"
+    assert len(h.stuck_records(ch)) == 1, (
+        "an ordinary unkeyable retirement wrote a stuck record; the report then names every "
+        "bad row rather than every wedged tick"
+    )
+
+
 def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_list(
     tmp_path: Path,
 ):
@@ -307,8 +429,15 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
     different poison rows as one problem that has been going on for a while; splitting the
     first would reset the count on every tick and never let a stuck queue look stuck.
 
+    THE TWO DIFFERENT ROWS SHARE A `run_id` AND DIFFER ONLY IN THEIR BODY. A row's other
+    fields are the obvious place to reach for a stand-in id, and `run_id` is the nearest to
+    hand — but one run yields many findings, so a key built on it folds two unrelated poison
+    rows from the same run into one rising count: the exact misreading this test exists to
+    prevent, wearing a different name. Only the row's own content tells them apart.
+
     Written as one test over two repos because neither half is an oracle alone — the pair is
-    what discriminates a content fingerprint from an empty id list.
+    what discriminates a content fingerprint from an empty id list, or from any key coarser
+    than the row.
     """
     same = h.make_paths(tmp_path / "same")
     same_ch = h.channel_of(same, "findings")
@@ -325,14 +454,23 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
 
     different = h.make_paths(tmp_path / "different")
     diff_ch = h.channel_of(different, "findings")
-    for rid in ("b/0", "c/0"):
-        h.seed(diff_ch, [_unkeyable(rid)])
+    poison = [
+        _unkeyable("a/0", subject="the holding system was never re-queried"),
+        _unkeyable("a/1", subject="the lead was closed on a stale enrichment"),
+    ]
+    assert {json.dumps(row.get("run_id")) for row in poison} == {'"a"'}, (
+        "the two poison rows must share a run so that a run-keyed fold is distinguishable "
+        "from a content-keyed one"
+    )
+    for row in poison:
+        h.seed(diff_ch, [row])
         escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(different, diff_ch)
-        assert isinstance(escaped, TimeoutError), f"{rid} ended as {escaped!r}"
+        assert isinstance(escaped, TimeoutError), f"{row['subject']!r} ended as {escaped!r}"
     records = h.stuck_records(diff_ch)
     assert [r["consecutive_ticks"] for r in records] == [1, 1], (
-        "two ticks over DIFFERENT unkeyable rows folded into one rising count; a keyless "
-        f"row contributes no id, so an ids-only key cannot tell them apart: {records}"
+        "two ticks over DIFFERENT unkeyable rows from the SAME run folded into one rising "
+        "count; a keyless row contributes no id, so neither an ids-only key nor one built "
+        f"on the row's run can tell them apart — only its content can: {records}"
     )
     for record in records:
         assert record["row_ids"], (
