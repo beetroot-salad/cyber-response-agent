@@ -275,9 +275,10 @@ def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
     lessons-local decoration, even though only this direction populates it.
 
     UNCONDITIONAL: the rows a tick held or skipped are the same rows whether or not other
-    rows committed, and the operator's one written trace of a `forward_bad` verdict must
-    not depend on how the tick's other rows went — least of all in a MIXED batch, the shape
-    a forward-check hold is most interesting in.
+    rows committed, and the operator's one written trace of what the tick declined — a
+    `forward_bad` verdict, a skip, or a pre-author gate hold — must not depend on how the
+    tick's other rows went, least of all in a MIXED batch, the shape a hold is most
+    interesting in.
 
     `outcome.gate_held` is the PRE-AUTHOR gate's own list, read off its own field rather
     than out of `outcome.held` — which carries the AUTHOR_RESULT buckets, i.e. rows the
