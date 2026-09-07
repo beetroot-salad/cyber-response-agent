@@ -66,6 +66,7 @@ defender/.venv/bin/python3 -m pytest defender/tests/test_lessons_frontend.py -v
 
 ## Not yet built (future panels)
 
-Findings-queue depth vs `LEARNING_AUTHOR_THRESHOLD` (`learning/_pending/findings.jsonl`),
+Findings-queue AUTHORABLE depth vs `LEARNING_AUTHOR_THRESHOLD` — rows carrying `held_reason`
+are queued but do not count (`learning/_pending/findings.jsonl`) —
 episode history (the branched episodes under `$DEFENDER_EPISODES_BASE`, with each
 family's verdicts and the judge's buckets), and the consumed/audit trail.

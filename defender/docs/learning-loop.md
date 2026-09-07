@@ -254,8 +254,10 @@ Queueable types: `lead-set`, `lead-quality`, `analyze-discipline`,
 
 ## Lesson Delivery
 
-1. **Threshold** — at `LEARNING_AUTHOR_THRESHOLD` (default 5) the drain invokes
-   `author/lessons/run.py`. `core/drains.py` `_curator_queue_checks` is the one
+1. **Threshold** — at `LEARNING_AUTHOR_THRESHOLD` (default 5) AUTHORABLE queued
+   findings the drain invokes `author/lessons/run.py`. Rows the pre-author gate
+   has held carry `held_reason` and are not counted (#881): a hold is permanent,
+   so counting it woke the drain every tick to hold the same rows again. `core/drains.py` `_curator_queue_checks` is the one
    place wakeable channels are named, and since #922 it names **one**.
 2. **Pre-flight** — queue lock, `defender/lessons/` git-clean, findings already
    authored filtered by `source_finding_ids`, and findings whose source carries

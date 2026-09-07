@@ -85,9 +85,9 @@ flowchart TD
 
 The branch is the point: instead of imagining a counterfactual, the episode RE-RUNS the case
 from a real fork point and grades the family of outcomes against each other, so the judge is
-reading evidence a run actually produced. The lessons curator fires once `_pending` reaches
-`LEARNING_AUTHOR_THRESHOLD` (default 5), folds the queued findings into the corpus and opens a
-PR; the lead author drains its own queue on the same discipline.
+reading evidence a run actually produced. The lessons curator fires once `_pending` holds
+`LEARNING_AUTHOR_THRESHOLD` (default 5) findings it could actually author — a row the gate has
+held stays queued and counts for nothing — folds them into the corpus and opens a PR; the lead author drains its own queue on the same discipline.
 
 `defender/learning/loop.py --author-drain` and `--lead-author-drain` are the two entry points.
 
