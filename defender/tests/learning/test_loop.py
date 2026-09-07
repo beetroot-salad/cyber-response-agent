@@ -166,7 +166,7 @@ def test_strip_yaml_fence_strips_a_fence_a_closing_sentence_follows():
 
     Pinned on the SHARED function because `normalize_judge_yaml` is not its only consumer.
     `learning/branch/questioner/__init__.py` normalizes the questioner's replies through
-    `strip_yaml_fence` too, and `_as_document` aborts the whole episode on a parse failure —
+    `strip_yaml_fence` too, and `_reply_document` aborts the whole episode on a parse failure —
     a wider blast radius than the judge's one lost draw. A repair made in the judge's wrapper
     would leave that consumer exactly as broken as it was, and this assertion is what says so.
     """

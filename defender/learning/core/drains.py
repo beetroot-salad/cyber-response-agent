@@ -138,9 +138,13 @@ def _pending_queue_count(pending_file: Path) -> int:
     it, to re-hold the same five rows; and the first genuinely authorable row arrived at a
     count already over threshold, so the curator got a batch of one against a documented five.
 
-    AN UNREADABLE LINE COUNTS AS ONE. It is work — the drain's unkeyable path retires exactly
-    such a row — and a count that skipped what it could not parse would strand a queue full of
-    junk below the threshold, unretired and invisible."""
+    AN UNREADABLE LINE COUNTS AS ONE, and the tick it wakes is what clears it: a count that
+    skipped what it could not parse would strand a queue full of junk below the threshold,
+    invisible. It is NOT retired — there is no row to graveyard — so `drain._tick` runs
+    through to its closing rotation on an all-unreadable queue rather than returning on the
+    empty batch, and that rotation rewrites the file from the rows it can read. Returning
+    early instead left the junk counted and uncleared, which is this function's own defect
+    wearing the other mask: the gate fired on the same bytes every tick, forever."""
     rows, unreadable = read_jsonl_rows_report(pending_file)
     return sum(1 for row in rows if not row.get("held_reason")) + unreadable
 

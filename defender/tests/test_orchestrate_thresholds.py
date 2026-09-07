@@ -497,8 +497,11 @@ def test_run_stage_maps_giterror_to_exit_2():
 # ---------------------------------------------------------------------------------------
 #
 # `held_reason` is the drain's own "this row is held" marker: both gates stamp it on the copy
-# they hold (`author/lessons/run.py:335`, `:382`), the forward-check bucket writes it (`:223`),
-# and the closing rotation writes those stamped copies back (`author/drain.py:388`). So a row
+# they hold (`author/lessons/run.py::_gate_family` and `::_gate_findings`), the forward-check
+# bucket writes it (`FINDINGS_BUCKETS`' `held_forward_bad`, `reason_field="held_reason"`), and
+# the closing rotation writes those stamped copies back (`author/drain.py::_author_and_rotate`
+# -> `persist.rotate_queue_locked`). Cited by SYMBOL: the line numbers this comment first
+# carried were `main`'s, and the same commit that wrote them moved every one. So a row
 # carrying it is one the drain has already looked at and declined to author — it is not work,
 # and counting it wakes the drain forever for a batch it will hold again.
 #

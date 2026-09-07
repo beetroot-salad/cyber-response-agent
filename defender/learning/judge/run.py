@@ -203,7 +203,12 @@ def validate_reply(text: str) -> JudgeReply:
     followed by a closing sentence was stripped by no rule in `strip_yaml_fence` and refused
     here as invalid YAML — one draw lost, and at the default draw count that is the whole
     world's grade. Both halves are now enumerated in the parser's own test, so the sentence
-    and the behaviour fail together."""
+    and the behaviour fail together.
+
+    ONE fence, though. A reply carrying two fenced documents — a draft the model then
+    corrected, an example beside the answer — is refused here rather than guessed at:
+    `strip_yaml_fence` declines to pick, because picking the first records an abandoned
+    draft as the grade and a refusal only costs the draw."""
     import yaml
 
     from defender._yaml import safe_load

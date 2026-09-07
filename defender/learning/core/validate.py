@@ -35,6 +35,37 @@ def _unprocessable_reason(read: ReportRead, report_path: Path) -> str:
 
 
 
+#: One fenced block: its opening marker on a line of its own, its body, its closing marker.
+#: `MULTILINE` so successive blocks are found in order, `DOTALL` so a body spans lines, and
+#: non-greedy so each match ends at its OWN closing marker rather than the reply's last one.
+_FENCE_BLOCK = re.compile(
+    r"^```(?:yaml|yml)?[^\S\n]*\n(.*?)\n```[^\S\n]*$", re.DOTALL | re.MULTILINE
+)
+
+
+def _is_document(text: str) -> bool:
+    """Does `text` load as a YAML MAPPING — the one shape both consumers of
+    `strip_yaml_fence` go on to require (`normalize_judge_yaml` -> `validate_reply`, and the
+    questioner's `_reply_document`)? Asked here so the fence rules can tell a verdict from
+    the prose, log excerpt or code sample a model fences beside it."""
+    try:
+        return isinstance(safe_load(text), dict)
+    except (yaml.YAMLError, RecursionError):
+        return False
+
+
+def _fenced_document(s: str) -> str | None:
+    """The body of the reply's ONE fenced document, or `None` when there is not exactly one.
+
+    Zero means every fence holds something else — a quoted log, a code sample — and the
+    document, if there is one, is outside them: reducing to a fence would throw it away.
+    Two or more means the model wrote a document, then wrote another; nothing here can say
+    which one it meant, and picking the first records an abandoned draft as the verdict."""
+    bodies = [m.group(1).strip() for m in _FENCE_BLOCK.finditer(s)]
+    documents = [body for body in bodies if _is_document(body)]
+    return documents[0] if len(documents) == 1 else None
+
+
 def strip_yaml_fence(text: str) -> str:
     s = text.strip()
     m = re.search(r"</[a-zA-Z_][\w-]*?think[a-zA-Z_]*>\s*\n", s) or re.search(
@@ -45,16 +76,23 @@ def strip_yaml_fence(text: str) -> str:
     m = re.match(r"\A```(?:yaml|yml)?\s*\n(.*?)\n```\s*\Z", s, re.DOTALL)
     if m:
         s = m.group(1).strip()
-    # UNGUARDED, and the guard it lost was `not s.startswith("```")` — which switched this
-    # rule off in exactly the case it exists for. A verdict shaped "whole fence, then a
-    # closing sentence" is matched by neither rule: the anchored rule above fails on the
-    # trailing prose, and this one was disabled because the fence starts at position 0. The
-    # reply then reached `yaml.safe_load` with its backticks intact and the case was refused
-    # (#881/O1). For a fence that DOES span the whole string the rule above has already
-    # reduced it, so this search is a no-op on that result and the guard bought nothing.
-    m = re.search(r"^```(?:yaml|yml)?\s*\n(.*?)\n```", s, re.DOTALL | re.MULTILINE)
-    if m:
-        s = m.group(1).strip()
+    else:
+        # ONLY WHEN THE ANCHORED RULE DID NOT FIRE, and only when the reply offers exactly
+        # one fenced block that is a document.
+        #
+        # The guard this replaces was `not s.startswith("```")`, which switched the rule off
+        # in the case it exists for: a verdict shaped "whole fence, then a closing sentence"
+        # matched neither rule, reached `yaml.safe_load` with its backticks intact, and the
+        # draw was refused (#881/O1). But dropping the guard outright let an unanchored,
+        # leftmost `re.search` claim the FIRST fence in the reply whatever it held — an
+        # abandoned draft the model then corrected, a quoted log, an example block inside an
+        # outer fence — and silently return it as the verdict. A wrong grade recorded with no
+        # error is worse than the refusal it replaced, so the rule declines to guess: when
+        # nothing or more than one thing here is a document, `s` is left as it stands, which
+        # is the loud refusal both consumers already handle.
+        _reduced = _fenced_document(s)
+        if _reduced is not None:
+            s = _reduced
     m = re.match(r"\A<([a-zA-Z_][\w-]*)\s*>\s*\n(.*?)\n\s*</\1>\s*\Z", s, re.DOTALL)
     if m:
         s = m.group(2).strip()

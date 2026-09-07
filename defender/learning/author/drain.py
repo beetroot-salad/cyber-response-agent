@@ -37,6 +37,7 @@ classifications, by channel: deliberate, and left for a follow-up.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import uuid
@@ -55,6 +56,7 @@ from defender._io import (
     append_jsonl,
     guarded_mkdir,
     read_jsonl_rows,
+    read_jsonl_rows_report,
     read_text_utf8,
     write_guarded,
 )
@@ -109,10 +111,16 @@ def graveyard_file(channel: QueueChannel) -> Path:
 
 
 def stuck_report_file(channel: QueueChannel) -> Path:
-    """The channel's stuck-row record — the only externally visible trace of a fault whose
-    class is NOT in `RETIRE_SET`, since such a row stays queued and never reaches the
-    graveyard. One record per non-retiring tick, naming the fault class, the stalled rows
-    and how many consecutive ticks they have been stuck.
+    """The channel's stuck-row record — the externally visible trace of a fault whose class
+    is NOT in `RETIRE_SET`, since such a row stays queued. One record per non-retiring tick,
+    naming the fault class, the stalled rows and how many consecutive ticks they have been
+    stuck.
+
+    "Never reaches the graveyard" holds for every leg but one: `_retire_unkeyable` appends
+    its dead letters BEFORE the rotation that removes them from the queue, so a fault in
+    that rotation leaves a row both graveyarded AND queued — and a further duplicate dead
+    letter on every stuck tick after it. The stuck record is what says the two files
+    disagree on purpose.
 
     A stalled row with no id under its channel's key is named by a content fingerprint —
     `_stuck_row_ids` owns that spelling — so the keyless leg's records are still tellable
@@ -286,48 +294,53 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         log("append lock held by an appender past the deadline — skipping this tick")
         return 0
     try:
-        batch = read_jsonl_rows(channel.file)
+        batch, unreadable = read_jsonl_rows_report(channel.file)
     finally:
         author_shared.release_flock(append_fh)
-    if not batch:
+    if not batch and not unreadable:
         log("queue empty — nothing to author")
         return 0
+    if unreadable:
+        # NOT an early return, and that is the whole point. The wake gate counts an
+        # unreadable line as work (`core/drains._pending_queue_count`), so returning here
+        # left it counted and uncleared: the gate re-fired on the same junk every tick,
+        # fetching, minting a worktree and starting a box to read the same unparseable
+        # bytes, forever. A line the tolerant reader could not turn into a row cannot be
+        # graveyarded — there is no row to write — but the closing rotation rewrites this
+        # file from the rows it CAN read, so falling through is what clears it. Said out
+        # loud, because that rotation is otherwise a silent deletion.
+        log(f"{unreadable} unreadable line(s) in the queue — the closing rotation drops them")
 
     keyed: list[dict] = []
     unkeyable: list[dict] = []
     for row in batch:
         rid = row.get(key)
         (keyed if isinstance(rid, str) and rid else unkeyable).append(row)
-    # INSIDE the stuck-recording guard, like the two regions below it. The retirement takes
-    # the append lock again for its own rotation — after `_tick` released it ten lines up —
-    # so an ordinary appender arriving in that window makes the rotation raise `TimeoutError`.
-    # That class is deliberately outside `RETIRE_SET` (a busy lock is not the batch's fault),
-    # so nothing retires, the row stays queued, and from here the fault escaped `run_batch`
-    # leaving neither a graveyard entry nor a stuck record: the channel wedged in silence,
-    # against this module's own contract that a non-`RETIRE_SET` fault is always visible
-    # somewhere (#881/O4).
+    # ONE stuck-recording guard around the whole tick body, with `stuck_rows` naming the rows
+    # the phase in flight is stuck on. It was three copies of one handler, and the copy the
+    # unkeyable retirement never got is #881/O4: that retirement takes the append lock again
+    # for its own rotation — after `_tick` released it ten lines up — so an ordinary appender
+    # arriving in that window makes the rotation raise `TimeoutError`, a class deliberately
+    # outside `RETIRE_SET` (a busy lock is not the batch's fault). Nothing retired, the row
+    # stayed queued, and the fault escaped `run_batch` leaving no stuck record: the channel
+    # wedged in silence, against this module's own contract that a non-`RETIRE_SET` fault is
+    # always visible somewhere. A guard the next phase added here has to REMEMBER is the
+    # shape that produced that hole, so there is no longer a per-phase guard to forget — and
+    # the two lines between the gate and the authoring region, which no copy covered, are
+    # inside it now too.
+    stuck_rows = unkeyable
     try:
         _retire_unkeyable(channel, unkeyable, log, cfg.repo_lock_wait_seconds)
-    except BaseException as e:
-        if not isinstance(e, RETIRE_SET):
-            _record_stuck(channel, e, unkeyable)
-        raise
-
-    # The gate is INSIDE the stuck-recording guard: it reads per-row fields the queue's own
-    # key check cannot vouch for (`run_id`, `direction`), so it is a live source of
-    # non-retiring faults, which must not escape with neither a graveyard nor a stuck record.
-    try:
+        # The gate reads per-row fields the queue's own key check cannot vouch for
+        # (`run_id`, `direction`), so it is a live source of non-retiring faults.
+        stuck_rows = keyed
         held, consumed_pre, to_author = cfg.gate(keyed, cfg)
-    except BaseException as e:
-        if not isinstance(e, RETIRE_SET):
-            _record_stuck(channel, e, keyed)
-        raise
-    batch_id = uuid.uuid4().hex[:12]
-    log(
-        f"batch={batch_id} total={len(batch)} to_author={len(to_author)} "
-        f"held={len(held)} pre_consumed={len(consumed_pre)} unkeyable={len(unkeyable)}"
-    )
-    try:
+        batch_id = uuid.uuid4().hex[:12]
+        log(
+            f"batch={batch_id} total={len(batch)} to_author={len(to_author)} "
+            f"held={len(held)} pre_consumed={len(consumed_pre)} unkeyable={len(unkeyable)}"
+        )
+        stuck_rows = to_author
         return _author_and_rotate(
             cfg=cfg,
             log=log,
@@ -340,7 +353,13 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         )
     except BaseException as e:
         if not isinstance(e, RETIRE_SET):
-            _record_stuck(channel, e, to_author)
+            # The recorder must never REPLACE the fault it records. It appends to a file, so
+            # a full disk or an unwritable queue dir would otherwise hand the caller the
+            # WRITER's `OSError` — the real fault surviving only as `__context__`, and the
+            # `raise` below never reached. `Exception`, not `BaseException`, so an interrupt
+            # arriving mid-record still leaves at once.
+            with contextlib.suppress(Exception):
+                _record_stuck(channel, e, stuck_rows)
         raise
 
 
@@ -648,8 +667,13 @@ def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
     named: list[str] = []
     for row in rows:
         rid = row.get(channel.id_key)
-        if rid:
-            named.append(str(rid))
+        # THE SAME PREDICATE `_tick` SPLIT ON, not a second spelling of it. `if rid:` said
+        # yes to a truthy non-string id — a row `_tick` had already filed as unkeyable — and
+        # named it `str(rid)`: unprefixed, indistinguishable from a real id, and identical
+        # for two different rows that happen to share it, which is the fold collision the
+        # fingerprint below exists to prevent.
+        if isinstance(rid, str) and rid:
+            named.append(rid)
             continue
         digest = hashlib.sha256(
             json.dumps(row, sort_keys=True, default=str).encode("utf-8")
@@ -667,7 +691,12 @@ def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -
     path = stuck_report_file(channel)
     previous = read_jsonl_rows(path)
     consecutive = 1
-    if previous:
+    # NEVER FOLD ON AN EMPTY LIST. `_stuck_row_ids` names every row it is handed, but the
+    # authoring leg is handed `to_author`, which is `[]` on any tick whose gate held or
+    # consumed the whole batch — and `[] == []` reads to this comparison as "the same rows
+    # as last time", folding two unrelated ticks into one count that looks like one problem
+    # getting worse. With no rows named, this tick cannot claim to be the previous one.
+    if previous and ids:
         last = previous[-1]
         same_ids = sorted(str(i) for i in (last.get("row_ids") or [])) == ids
         if last.get("fault_class") == fault_class and same_ids:

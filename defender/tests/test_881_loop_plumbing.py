@@ -49,11 +49,6 @@ from _drain719 import drain  # noqa: F401 — the target; the shim keeps collect
 _GRAVEYARD_SUFFIX = ".deadletter.jsonl"
 
 
-def _held_report(paths) -> Path:
-    """The lessons direction's operator report, spelled as `build_author_config` spells it."""
-    return paths.pending_dir / "findings.held_report.log"
-
-
 def _ids_in(line: str, label: str) -> str:
     """The contents of one `<label>=[...]` list on a held-report line, or `""` if absent."""
     found = re.search(rf"{label}=\[(.*?)\]", line)
@@ -110,7 +105,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
     h.seed(ch, [legacy, family, authorable])
     agent = h.recording(h.committing("881-o3"))
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
-    report = _held_report(paths)
+    report = cfg.held_report
 
     assert drain.run_batch(cfg=cfg) == 0
     assert [[r["finding_id"] for r in call["rows"]] for call in agent.calls] == [["z/0"]], (
@@ -264,11 +259,17 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseExce
             "lock with no deadline, holding the repo lock while it does"
         )
     finally:
-        assert appender.acquired is True, (
-            "the appender never took the append lock, so the rotation was never contended "
-            "and this tick proves nothing"
-        )
+        # CLEANUP ONLY. An assertion here replaces whatever diagnosis the block above was
+        # about to raise, and — because it raises BEFORE the release — leaves a real `flock`
+        # parked for `Holder`'s 60s wait and the drain worker unjoined, so the next call to
+        # this helper on the same channel contends with the last one's corpse. Release
+        # first so a tick still waiting on the lock can finish, then join it.
         appender.__exit__()
+        tick.__exit__()
+    assert appender.acquired is True, (
+        "the appender never took the append lock, so the rotation was never contended "
+        "and this tick proves nothing"
+    )
     assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
         "the tick reached the author; the fault under test is the one BEFORE the gate"
     )
