@@ -32,6 +32,8 @@ class AgentRole(Enum):
     # the four apart is their `agent_id` — `questioner`, `questioner:b`, `questioner:c`,
     # `compare` — which is what the wire log and the per-id trace are partitioned on.
     QUESTIONER = "questioner"
+    # #1008: one deny-all key per PACKAGE. The family judge is its own package.
+    JUDGE = "judge"
 
 
 #: The `agent_id` namespaces the run's ONE wire log (`llm_requests.jsonl`) is partitioned by:

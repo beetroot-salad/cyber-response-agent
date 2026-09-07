@@ -23,15 +23,44 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from defender._run_paths import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
-from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
+from defender.learning.core.config import (
+    QUEUEABLE_FINDING_TYPES,
+    judge_effort,
+    judge_model,
+)
 from defender.learning.core.validate import normalize_judge_yaml
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
+from defender.runtime.agent_definition import AgentDefinition
+from defender.runtime.agent_role import AgentRole
+
+_JUDGE_DENY_REASON = (
+    "Blocked: the family judge is a pure reading projection — the archived episode it grades "
+    "is inlined in the user prompt by the host, and its entire output is one judgement "
+    "document. It runs no tools: no adapters, no episode reads, no writes, no shell. Emit the "
+    "document directly."
+)
+
+
+@dataclass(frozen=True)
+class JudgeDeps:
+    """Frozen, and carrying NOTHING but its role — zero fields, deliberately."""
+
+    role: ClassVar[AgentRole] = AgentRole.JUDGE
+
+
+JUDGE_DEF = AgentDefinition(
+    role=AgentRole.JUDGE,
+    model=judge_model,
+    effort=judge_effort(),
+    deps_cls=JudgeDeps,
+    deny_reason=_JUDGE_DENY_REASON,
+)
 
 #: The judge's own reply-level outcome vocabulary — NOT `_vocab.JUDGE_OUTCOME_ENUM`. That
 #: vocabulary is the FAMILY's word (`caught|survived|undecidable|discard|corpus-contradiction`,

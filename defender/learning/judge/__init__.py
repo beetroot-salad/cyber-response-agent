@@ -281,7 +281,7 @@ def _run_world_draws(
         reply_text: str | None = None
         doc: dict[str, Any]
         try:
-            reply_text = judge(prompt, role=AgentRole.QUESTIONER, agent_id=agent_id,
+            reply_text = judge(prompt, role=AgentRole.JUDGE, agent_id=agent_id,
                                wiring=wiring)
         # EVERY class the seam can raise, not `RunUnprocessable` alone — which is what this
         # loop's own docstring already claims ("a failed call writes a draw record naming its
@@ -406,7 +406,7 @@ def _default_judge_seam(episode_dir: Path) -> Any:
     def invoke(prompt: str, *, role: Any = None, agent_id: str = "judge", wiring: Any = None,
               **_kw: Any) -> str:
         from defender.learning._pydantic_stage import run_stage
-        from defender.learning.branch.questioner import QuestionerDeps
+        from defender.learning.judge.run import JudgeDeps
         from defender.learning.core.config import StageContext, subagent_timeout
 
         # `wiring` IS REQUIRED, and the default is what makes the signature honest about it.
@@ -422,7 +422,7 @@ def _default_judge_seam(episode_dir: Path) -> Any:
             stage="judge", wiring=wiring,
             ctx=StageContext(learning_run_dir=Path(episode_dir), user=prompt, request_limit=1,
                              wall_clock_timeout=subagent_timeout()),
-            deps=QuestionerDeps(),
+            deps=JudgeDeps(),
         )
 
     return invoke
