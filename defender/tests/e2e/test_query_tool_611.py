@@ -1156,11 +1156,17 @@ ROW_KEYS = {
     # reads. Derived by the writer from the text it persists, so no caller can disagree with
     # the sidecar it just wrote.
     "payload_sha256",
+    # #871: the identity of a call whose `system` column deliberately does NOT carry the name
+    # the model used. A HASH, never the string — this table is in the gather agent's read
+    # scope and `_build_pitfalls_handoffs` spends `system` verbatim as a corpus path — and
+    # `""` on every row that kept its dispatched system, which is all of them but the
+    # above-guard rejections #855 coarsened.
+    "system_key",
 }
 
 
 def test_row_contract_frozen(tmp_path):
-    """row_contract_frozen — the thirteen-key queries row: params keyed by the REGISTRY's real param
+    """row_contract_frozen — the fourteen-key queries row: params keyed by the REGISTRY's real param
     names (not arg0/arg1), verb holding the tool's REAL verb (the column has zero production
     readers today and finally becomes honest), raw_command a derived audit string."""
     rec = VerbRecorder()

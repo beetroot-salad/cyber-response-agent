@@ -334,6 +334,9 @@ def seed_executed_query(
         run_dir, lead_id=lead_id, system=system, verb=verb, query_id=query_id,
         params={"query": "FROM logs"}, raw_command=f"{system} {verb}",
         payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",
+        # `system` is the dispatched name on every row this fixture writes, so the row keys as
+        # itself and the #871 fingerprint column is empty — as it is for every below-guard row.
+        system_key="",
     )
 
 

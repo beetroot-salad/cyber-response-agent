@@ -265,10 +265,10 @@ def test_shim_row_keeps_the_frozen_twelve_key_contract(tmp_path):
     #807's own sentinel was required to live inside them for the same reason.
 
     The NAME keeps #823's count because it is the identifier `spec_graph_823.yaml` discharges
-    this obligation through; the set itself is thirteen keys since #877 F-9 added
-    `payload_sha256` — a column every writer fills, which is the opposite of the per-writer key
-    this test refuses. The assertion imports `ROW_KEYS` rather than restating it, so it tracks
-    the contract instead of the number."""
+    this obligation through; the set itself is fourteen keys since #877 F-9 added
+    `payload_sha256` and #871 added `system_key` — columns every writer fills, which is the
+    opposite of the per-writer key this test refuses. The assertion imports `ROW_KEYS` rather
+    than restating it, so it tracks the contract instead of the number."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     r = _run(tmp_path, run_dir=run_dir, run_id="d823-keys", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,

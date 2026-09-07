@@ -335,7 +335,14 @@ def _replay_rejections(
     The trip row is accumulated BEFORE the stop, unlike `_replay`: the companion guard's
     rejection row is written for every call including its last, so the recorded table holds
     exactly `threshold` matching rows at a trip, and an oracle that withheld the last one would
-    disagree with the table the live run actually left."""
+    disagree with the table the live run actually left.
+
+    `system_key` (#871) is read off the row the same way `system` is, and for the same reason:
+    it is HALF the identity of an above-guard rejection — the half a coarsened `system=""` row
+    cannot carry — so an oracle that dropped it would fold two undeclared systems back into one
+    group and report a trip no live run since #871 can produce. `.get` is `None` on every row
+    recorded before the column existed, which is the archived-table shape this oracle is
+    pointed at, so the predicate has to read that as the `""` those rows mean."""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
     trips: list[tuple[str, int]] = []
@@ -347,6 +354,7 @@ def _replay_rejections(
         hit = rejection_trip(
             prior, lead, system=row.get("system"), verb=row.get("verb"),
             params=row.get("params"), threshold=threshold,
+            system_key=row.get("system_key"),
         )
         prior.append(row)
         if hit is not None:
@@ -804,8 +812,9 @@ def test_trip_row_conforms_to_the_frozen_row_contract(tmp_path):
     frozen keys as any other queries row: no key of its own, no amendment to
     `test_row_contract_frozen`. Every downstream reader written against the frozen set still
     reads it, and the key set is imported from the existing contract rather than restated, so
-    the two cannot drift. (The set is thirteen keys since #877 F-9 added `payload_sha256` for
-    every writer alike; the argument below is about a key only ONE writer would fill.)"""
+    the two cannot drift. (The set is fourteen keys: #877 F-9 added `payload_sha256` and #871
+    added `system_key`, both for every writer alike; the argument below is about a key only ONE
+    writer would fill.)"""
     # rejected: a key of the trip row's own (e.g. `refusal_kind`) — typed and unambiguous, but
     #   it breaks `test_row_contract_frozen` and every reader written against the frozen set;
     #   that is a deliberate contract amendment this issue did not propose. F-I option 2 puts the
@@ -1357,9 +1366,9 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert [row["exit_code"] for row in rows[:2]] == [64, 64]
     assert rows[0]["params"] == params, "P-a's shape changed: the rejection row lost the key it collides on"
     assert set(rows[0]) == ROW_KEYS, \
-        "the validate-path row's sentinel identity was added as a thirteenth key"
+        "the validate-path row's sentinel identity was added as a key of its own"
     assert set(rows[1]) == ROW_KEYS, \
-        "the validate-path row's sentinel identity was added as a thirteenth key"
+        "the validate-path row's sentinel identity was added as a key of its own"
     assert rows[2]["exit_code"] == 0, "a call the argument schema turned back was counted as an occurrence"
     assert len(rejected_rec.calls) == 1, "the genuine third call never reached the backend"
     assert INCOMPLETE_IDIOM not in rejected.summary()
@@ -1384,7 +1393,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert [row["exit_code"] for row in grant_rows] == [64, 64, 64]
     assert [row["verb"] for row in grant_rows] == ["nosuch-verb"] * 3
     assert all(set(row) == ROW_KEYS for row in grant_rows), \
-        "the above-M2 sentinel identity was added as a thirteenth key"
+        "the above-M2 sentinel identity was added as a key of its own"
     assert grant_rec.calls == [], "an unresolvable verb reached the backend"
     assert _replay(grant_rows) == [], \
         "M2's oracle trips on a repeat M2 can never refuse — live and replay disagree"
@@ -1721,7 +1730,7 @@ def test_trip_row_detail_names_the_repetition(tmp_path):
         "the detail does not say which earlier call the trip counted"
     assert len(trip["payload_digest"]) <= len("exit=64; ") + 160, \
         "the detail is truncated at 160 chars by _record; it must fit"
-    assert set(trip) == ROW_KEYS, "the repetition was named by adding a thirteenth key"
+    assert set(trip) == ROW_KEYS, "the repetition was named by adding a key of its own"
 
 
 def test_repeat_of_a_failing_request_still_trips(tmp_path):
