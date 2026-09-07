@@ -381,8 +381,10 @@ def test_1008_the_definition_spells_no_grant_keyword_at_all():
         "declared there and exactly once — this check has nothing to inspect otherwise")
 
     spelled = _keywords(calls[0])
-    assert "role" in spelled and "deps_cls" in spelled and "deny_reason" in spelled, (
-        f"the located call is not the judge's definition: {sorted(spelled)}")
+    located = f"the located call is not the judge's definition: {sorted(spelled)}"
+    assert "role" in spelled, located
+    assert "deps_cls" in spelled, located
+    assert "deny_reason" in spelled, located
     assert spelled["role"].endswith("JUDGE"), f"the definition declares role={spelled['role']}"
     assert spelled["deps_cls"] == "JudgeDeps"
     granting = sorted(set(spelled) & set(GRANT_KEYWORDS))
@@ -576,9 +578,10 @@ def test_1008_bind_refuses_the_judges_definition_by_its_deps_type_name(tmp_path)
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError, match="not bindable") as caught:
         bind(JUDGE_DEF, run_dir, defender_dir=T.DEFENDER)
     message = str(caught.value)
     assert "JudgeDeps" in message, (
         f"the refusal does not name the deps type it refused: {message}")
-    assert "not bindable" in message and "JUDGE_DEF" in message
+    assert "JUDGE_DEF" in message, (
+        f"the refusal does not name the definition it refused: {message}")

@@ -14,9 +14,9 @@ class AgentRole(Enum):
     # definition behind it is a live grant nothing claims — a retired stage retires its key.
     # `judge`, `actor` and `oracle` left under #922 for exactly that reason: the pipeline that
     # was their only caller was deleted, and `set(AGENTS.keys()) == set(AgentRole)` is asserted,
-    # so leaving the keys behind would have been red rather than merely wrong. `judge` comes
-    # back in #1008 bound to the family judge — a different role that wants the same word, which
-    # is why it is re-added there rather than held open here.
+    # so leaving the keys behind would have been red rather than merely wrong. `judge` came
+    # BACK in #1008 (below) bound to the family judge — a different role that wanted the same
+    # word, which is why it was re-added with its owner rather than held open here.
     #
     # TWO roles, THREE calls: the ablation lens reuses SUPPORT rather than holding a key of
     # its own, because its whole purpose is to be the support lens under a narrower
@@ -26,12 +26,22 @@ class AgentRole(Enum):
     # own trace file and agent id; neither of those is keyed on the role.
     SUPPORT = "support"
     COMPOSER = "composer"
-    # The same rule again, one level out: the questioner's THREE authoring calls plus the
-    # comparator's judging call all run under this ONE key, because none of them holds a grant
-    # and a second key would be a second compiled policy over the same empty one. What keeps
-    # the four apart is their `agent_id` — `questioner`, `questioner:b`, `questioner:c`,
-    # `compare` — which is what the wire log and the per-id trace are partitioned on.
+    # ONE DENY-ALL KEY PER PACKAGE — not per grant, and not per "kind of call". The
+    # questioner's THREE authoring calls plus the comparator's judging call all run under this
+    # ONE key because all four are the branch package's own machinery; what keeps them apart is
+    # their `agent_id` — `questioner`, `questioner:b`, `questioner:c`, `compare` — which is what
+    # the wire log and the per-id trace are partitioned on.
     QUESTIONER = "questioner"
+    # The same rule, drawing the other side of the line: the family judge (`learning/judge/`)
+    # is its own package with its own orchestration, so it holds its own key even though its
+    # compiled policy is identical to the questioner's — empty. That is deliberate rather than
+    # waste. A grant added to the questioner later would otherwise reach the judge with nothing
+    # in the diff saying so, and the reviewer of that diff has no way to see it: `agent_id`
+    # separates traces, never policies. Reading the rule as "one key per grant" would have
+    # collapsed these two, and reading it as "one key per kind of call" invites a future
+    # `everything that judges` role spanning packages — which is what the per-PACKAGE wording
+    # forecloses.
+    JUDGE = "judge"
 
 
 #: The `agent_id` namespaces the run's ONE wire log (`llm_requests.jsonl`) is partitioned by:

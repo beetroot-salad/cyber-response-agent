@@ -1,37 +1,96 @@
 """The judge's model call: the correlating prompt, lenient parse / strict validate, evidence
 grounding, and one write per (world, draw) (#921 M2, D2, D3, D4, O1, O8, O9).
 
-D2 — the judge runs under `AgentRole.QUESTIONER`'s existing definition, with `agent_id`
-prefix `"judge:"`. `AgentRole.JUDGE` was bound to the old pipeline's judge, and the registry
-admits one definition per key (`agent_definition.build_registry`), so a second definition could
-not register beside it. #922 has since freed the key; #1008 is where this role claims it.
+D2 — the judge runs under ITS OWN `AgentRole.JUDGE`, declared here as `JUDGE_DEF` with
+`agent_id` prefix `"judge:"`. It borrowed the questioner's definition until #1008: the registry
+admits one definition per key (`agent_definition.build_registry`) and the key was held by the
+OLD pipeline's judge, so a second definition could not register beside it. #922 retired that
+pipeline and freed the word; the family judge is a different role that wanted the same one.
+
+WHAT THE OWN KEY BUYS, given both policies compile to the identical empty object. Two things a
+shared key cannot give: a refusal in this judge's own words rather than a judge being told it
+is the questioner, and a diff in which a grant added to the questioner CANNOT silently reach
+the judge. `agent_id` partitions traces, never policies (`runtime/agent_role.py` states that
+rule), so the separation had to be the key. The enum's own comment carries the general form:
+one deny-all key per PACKAGE, which is why the branch package's comparator stays under
+QUESTIONER while this package holds its own.
 
 Model and effort come from `learning.core.config.judge_model()`/`judge_effort()` — read at call
 time in `learning/judge/__init__.py` and threaded into the `StageWiring` the orchestration
-builds, never from `questioner_model()`.
-
-THE TWO JUDGES SHARE THOSE KNOBS, and that is a limitation rather than a design. `JUDGE_MODEL`
-and `JUDGE_EFFORT` already name the OLD pipeline judge's model, so setting either retargets
-both; this module went through `config`'s accessors rather than spelling the same
-`env_str("JUDGE_MODEL", …)` a second time, because two copies of one default is drift waiting
-to happen and buys no separation at all. Separating them means a knob NAME of this judge's own,
-which the spec's fixtures pin to the shared spelling — so it is a change to make deliberately,
-not a side effect of reading the env twice.
+builds, never from `questioner_model()`. The definition names the same two accessors, so a
+definition built outside that wiring still reaches the judge's knobs rather than a default.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from defender._run_paths import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
-from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
+from defender.learning.core.config import (
+    QUEUEABLE_FINDING_TYPES,
+    judge_effort,
+    judge_model,
+)
 from defender.learning.core.validate import normalize_judge_yaml
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
+from defender.runtime.agent_definition import AgentDefinition
+from defender.runtime.agent_role import AgentRole
+
+#: What this judge is told when it reaches for something it does not hold. In ITS OWN words —
+#: the whole observable difference an own role key buys, since both compiled policies are
+#: empty. The borrowed one opened "the questioner is a pure authoring projection", which is a
+#: judge being told it is a different agent.
+#:
+#: A deny reason is PROMPT SURFACE, so it names no program: a reason mentioning a command this
+#: lane denies teaches a dead command and the agent burns turns on it. The grant gate sweeps
+#: every registered policy for exactly that (g1, in the #575 gate suite).
+_JUDGE_DENY_REASON = (
+    "Blocked: the family judge is a pure grading projection — the archived episode it grades "
+    "is joined and inlined in the user prompt by the host, and its entire output is one YAML "
+    "verdict document. It runs no tools: no data-source adapters, no archive reads of its own, "
+    "no writes, no shell. Emit the document directly."
+)
+
+
+@dataclass(frozen=True)
+class JudgeDeps:
+    """Frozen, and carrying NOTHING but its role — zero fields, on purpose.
+
+    Modelled on `QuestionerDeps` and for the same reason: a field here would be a channel. An
+    episode dir, a world label or an archived trajectory reachable from inside a deny-all call
+    is exactly the state this role is defined not to have — everything the judge reads is
+    joined and inlined in one user message by the host before the call is made. `role` is a
+    `ClassVar`, so it is not a field either; it is how `build_stage_agent` finds the definition
+    (`learning/_pydantic_stage.py`) and how the trace names the call.
+
+    It does NOT subclass `AgentDeps`, and that departure is the point. `AgentDeps` IS the run
+    scope — run dir, compiled policy, box executor, cwd anchor — so inheriting it would hand
+    this role a handle on every tree it may not touch. Nothing binds it either:
+    `bind(JUDGE_DEF, ...)` refuses BY NAME (`agent_definition.bind`), because there is no run
+    for a role whose entire input arrived in one prompt.
+    """
+
+    role: ClassVar[AgentRole] = AgentRole.JUDGE
+
+
+#: The family judge's whole policy. Every grant surface `AgentDefinition` carries is an
+#: OMISSION over its deny-all default — no tool set, no bash shape, no write shape, no verb
+#: grant — rather than an empty grant line, which a one-word edit reopens while the diff still
+#: reads as a tweak. That includes the tool set, which the questioner does spell out as an
+#: empty one: the field default already IS empty, so spelling it buys nothing but a place to
+#: type a capability into.
+JUDGE_DEF = AgentDefinition(
+    role=AgentRole.JUDGE,
+    model=judge_model,
+    effort=judge_effort(),
+    deps_cls=JudgeDeps,
+    deny_reason=_JUDGE_DENY_REASON,
+)
 
 #: The judge's own reply-level outcome vocabulary — NOT `_vocab.JUDGE_OUTCOME_ENUM`. That
 #: vocabulary is the FAMILY's word (`caught|survived|undecidable|discard|corpus-contradiction`,
