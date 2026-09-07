@@ -17,7 +17,6 @@ import subprocess
 from pathlib import Path
 
 
-from defender.learning.author import curator  # type: ignore[import-not-found]
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]
 
@@ -59,9 +58,13 @@ def tracked_files() -> list[Path]:
 
 
 def drain_modules() -> dict[str, Path]:
-    import defender.learning.author.curator as _c  # type: ignore[import-not-found]
+    """The drain modules the fold spans. Four of the six #719 named are gone (#922 deleted the
+    two actor authors, the observation curator between them, and the direction table above
+    them); the names stay so a reader can see which side of the fold each finding is about, and
+    every caller below skips a path that is not there."""
+    import defender.learning.author.drain as _d  # type: ignore[import-not-found]
 
-    author_dir = Path(_c.__file__).resolve().parent
+    author_dir = Path(_d.__file__).resolve().parent
     return {
         "curator.py": author_dir / "curator.py",
         "lessons/run.py": author_dir / "lessons" / "run.py",
@@ -116,12 +119,17 @@ def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path:
 
 
 def test_gates_carry_direction_specific_names(tmp_path: Path):
-    """A3's resolution, stated: the two gates stay SEPARATE functions — they are policies, not
-    flags (C11) — but under direction-specific names, because the shared name was a collision
-    rather than debt. `_gate_observations` in the observation builder, `_gate_findings` in the
-    findings one, and `_partition_pre_author` nowhere."""
+    """A3's resolution, stated: a gate is a SEPARATE function — they are policies, not flags
+    (C11) — under a direction-specific name, because the shared name was a collision rather than
+    debt. `_gate_findings` in the findings builder, and `_partition_pre_author` nowhere.
+
+    HALF THIS PROPERTY LOST ITS WITNESS IN #922. A3 was about TWO gates not collapsing into one
+    flagged function, and the second was `_gate_observations` in the observation builder — a
+    direction that no longer exists, so the collision the rename resolved cannot recur while one
+    direction is left. What still holds and is still checked: the surviving gate is a named
+    function rather than a parameter, and the shared name A3 banned is defined nowhere. Restore
+    the other half with the second direction, if a second one ever returns."""
     mods = drain_modules()
-    assert "_gate_observations" in module_level_defs(mods["curator.py"])
     assert "_gate_findings" in module_level_defs(mods["lessons/run.py"])
     for name, path in mods.items():
         if path.exists():
@@ -160,9 +168,19 @@ def test_curator_no_longer_re_exports_the_shared_git_helpers(tmp_path: Path):
     at all.
 
     Asserted as absence of the re-export, paired with the control that the shared module still
-    provides each one, so the deletion cannot be satisfied by removing the behaviour."""
-    for name in DELEGATORS:
-        assert not hasattr(curator, name), f"curator still re-exports {name}"
+    provides each one, so the deletion cannot be satisfied by removing the behaviour.
+
+    #922 deleted `curator.py` itself, and a module that is not there re-exports nothing — which
+    would make the absence half vacuous if it still named that module. Re-pointed at the drain
+    modules that DID survive the fold: the demand was never about one file, it was that a drain
+    module reaches the shared git helpers by importing the shared module rather than by
+    re-exporting them, and that is checkable wherever a drain module lives."""
+    for name, path in drain_modules().items():
+        if not path.exists():
+            continue
+        defs = module_level_defs(path)
+        stale = sorted(d for d in DELEGATORS if d in defs)
+        assert stale == [], f"{name} re-defines the shared git helpers: {stale}"
     for name in ("git_head_sha", "commit_corpus", "verify_agent_state"):
         assert hasattr(author_shared, name), f"shared lost {name}"
 

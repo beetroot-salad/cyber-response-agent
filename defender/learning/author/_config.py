@@ -31,10 +31,12 @@ class BucketSpec:
 class CorpusAuthorConfig:
     """What every corpus-authoring drain needs, in one shape.
 
-    Both drains — `author/curator.py` (the actor/environment curators) and
-    `author/lessons/run.py` (the lessons curator) — feed the same batch envelope. Where
-    they differ (pre-author gate, buckets, id field, append lock, commit trailers, the
-    lessons-only held report) is a FIELD here rather than a second copy of the batch driver.
+    It had two subclasses — the observation curators' config and `author/lessons/run.py`'s —
+    feeding the same batch envelope, and where they differed (pre-author gate, buckets, id
+    field, append lock, commit trailers, the lessons-only held report) is a FIELD here rather
+    than a second copy of the batch driver. #922 retired the observation directions, so one
+    subclass is left; the base stays because the fields are the batch driver's contract with
+    whatever authors a corpus, not a generalisation over two callers.
 
     Subclassed rather than composed, for the reason `LoopPaths(DefenderPaths)` gives: an
     attribute read (`cfg.repo_root`) keeps answering for the whole set, so the shared fields

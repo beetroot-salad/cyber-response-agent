@@ -43,8 +43,9 @@ is a fork silently re-opened:
   per member over the WHOLE vocabulary rather than as the set of members that skip: a yes-set
   cannot fail when a sixth member joins the enum and the branch never learns about it, which is
   the drift the resolution's owed clause was written for.
-* **All THREE authoring surfaces refuse the host-only verdict** — the close tool argument, the
-  invlang document keyword, and the analyst-editable ticket resolution line. The ticket refusal
+* **Every authoring surface refuses the host-only verdict** — the close tool argument, the
+  invlang document keyword, the analyst-editable ticket resolution line, and (since #920, found
+  by the census rather than by this list) a branched world's `disposition_declared`. The ticket refusal
   is written FOR A PERSON, and `person_facing_refusal_defects` is that clause's oracle: an
   analyst who typed a word into a field needs to be told which field, what it may say instead,
   and by whom the refused verdict IS written — none of which a model's tool-argument diagnostic

@@ -21,7 +21,6 @@
     "evals/oracle_golden/story_from_run.py:main": "",
     "learning/author/branch.py:revert_lesson_pr": "",
     "learning/author/branch.py:start_batch": "",
-    "learning/author/curator.py:invoke_curator_agent": "",
     "learning/author/lessons/run.py:invoke_agent": "",
     "learning/author/lessons/run.py:write_held_report": "",
     "learning/author/shared.py:assert_clean_corpus_dir": "",

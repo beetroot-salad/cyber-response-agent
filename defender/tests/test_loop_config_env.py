@@ -110,7 +110,6 @@ _STAGE_MODULES = (
 # import, exactly as surely as doing it inside an engine.
 _WIRING_SITES = _STAGE_MODULES + (
     "learning/leads/_lead_spine.py",
-    "learning/author/curator.py",
     "learning/author/lessons/run.py",
 )
 
@@ -186,7 +185,6 @@ def test_no_module_level_stage_wiring_or_context(rel):
 # `run_curator_stage` / `run_author_stage` derive the trace name for it; since #713 each
 # builds the wiring itself, so the uniqueness now depends on each one reaching `for_batch`.
 _BATCH_SPAWN_SITES = (
-    "learning/author/curator.py",
     "learning/author/lessons/run.py",
     "learning/leads/_lead_spine.py",
 )

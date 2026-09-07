@@ -854,19 +854,22 @@ def test_d27_cmd_tags_counts_are_unchanged(tmp_path, capsys):
 
 
 def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
-    """demand: d28 (survival) — the three IN-PROCESS consumers still work through the dataclass, and
+    """demand: d28 (survival) — the IN-PROCESS consumers still work through the dataclass, and
     still skip a bad lesson rather than crashing the curator drain (which would strand the whole
     batch, not one file).
 
     ``build_corpus_manifest`` renders its sections and warn-skips a malformed lesson by name;
-    ``existing_finding_ids`` and ``existing_observation_ids`` still collect their id sets and still
-    survive an undecodable lesson. These three are how a curator knows what the corpus already
-    contains — an id set that silently came back short means findings are re-authored as duplicate
-    lessons.
+    ``existing_finding_ids`` still collects its id set and still survives an undecodable lesson.
+    These are how a curator knows what the corpus already contains — an id set that silently came
+    back short means findings are re-authored as duplicate lessons.
 
     UPDATED by #590's rule (review of PR #608): the skipped lesson now claims a marker section in
-    the manifest (see test_m6) — the stem stays on the curator's menu."""
-    from defender.learning.author.curator import existing_observation_ids
+    the manifest (see test_m6) — the stem stays on the curator's menu.
+
+    THREE CONSUMERS UNTIL #922, now two: the third was the observation curator's own id
+    pre-flight, and it went with the curator. The lesson carrying observation provenance stays in
+    the corpus below on purpose — it is a file the surviving consumers must still walk past
+    without either claiming its ids or tripping on them."""
     from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
     from defender.learning.core.config import LoopPaths
 
@@ -884,9 +887,8 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     assert "description: DESC" in manifest
 
     assert existing_finding_ids(cfg) == {"fid/0", "fid/1"}
-    assert existing_observation_ids(corpus) == {"obs-1"}
     err = capsys.readouterr().err
-    assert err.count("undecodable.md") == 3
+    assert err.count("undecodable.md") == 2
 
 
 def test_d29_test_corpus_split_folds_onto_the_iterator(tmp_path):

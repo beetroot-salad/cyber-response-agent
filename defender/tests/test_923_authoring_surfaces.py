@@ -4,11 +4,18 @@ Every test here is one demand of `spec-flow/specs/spec_graph_923-inconclusive.ya
 that demand's `discharged_by`. RED against HEAD is the expected state.
 
 THE HOST OWNS `unresolved`, AND THAT IS A UNIVERSAL RATHER THAN TRUE-AT-ONE-DOOR. The design
-placed the refusal at the close tool alone. There are THREE surfaces from which the verdict can
+placed the refusal at the close tool alone. There are FOUR surfaces from which the verdict can
 be authored — the close tool's argument, the invlang document's `conclude.disposition` keyword,
-and the analyst-editable ticket resolution line, which decodes by bare enum membership and would
-accept an analyst who typed the word by hand, indistinguishably from a host-forced close. All
-three refuse it.
+the analyst-editable ticket resolution line, which decodes by bare enum membership and would
+accept an analyst who typed the word by hand, indistinguishably from a host-forced close, and a
+branched world's `disposition_declared` in the family manifest, which #920 added after this
+design was written. All four refuse it.
+
+THE FOURTH IS WHAT THE CENSUS WAS FOR. It arrived with #920 and was never classified, and it
+admitted the host's own verdict exactly the way the invlang document did before #923 gave that
+one a clause: the manifest validator asks the owner's normalizer whether the value is a member,
+and `unresolved` is. The census below is what found it — which is the whole argument for
+picking subjects by resolved reference rather than by a list someone maintains.
 
 This design's bookkeeping has now been found wrong FIVE times on one fault shape — a count or a
 requirement stated at a precision its own list does not support — so a fourth authoring surface
@@ -60,6 +67,12 @@ _AUTHORING_SURFACES = {
     # A model supplies the value.
     "runtime/close_tool.py",                    # the close tool's `disposition` argument
     "skills/invlang/validate/_structure.py",    # `conclude.disposition` in investigation.md
+    # A model supplies the value, one branch removed: the QUESTIONER authors a world's
+    # `disposition_declared` into the family manifest (`SEAT_AUTHORED_FIELDS`), and #921's judge
+    # grades the world by comparing that declaration against what its run concluded. Authoring,
+    # not reading — the value originates here rather than being read back from a committed
+    # report. Arrived with #920, unclassified until the census below caught it.
+    "runtime/branch/_family.py",                # a world's declared disposition in family.yaml
     # An ANALYST supplies the value — the only surface whose writer is neither the host nor
     # the investigating model.
     "scripts/case_history/case_ticket.py",      # the ticket's resolution line, decoded back
@@ -78,6 +91,13 @@ _VOCABULARY_READERS = {
     # it owes an in-or-out verdict and nothing else — and it gives one: a value outside the
     # vocabulary makes that world `ungradable`, named on the record, never coerced.
     "learning/judge/family.py",                 # the family judge's mechanical pass
+    # READER, and the counterpart of the manifest surface above: #920's archive reader takes
+    # each world's headline from that world's OWN committed `report.md` — written by the host's
+    # report gate, never by this module — and asks the owner whether it is in the vocabulary. A
+    # value outside it refuses and the refusal names the world; a host-terminated world reads
+    # back as the member it is, which is what keeps one gate overrule from making a whole
+    # episode unreadable.
+    "learning/branch/episode.py",               # the archived worlds' headlines
 }
 _VOCABULARY_OWNER_NAMES = frozenset({
     "DISPOSITION_ENUM", "DISPOSITION_VALUES", "DISPOSITION", "normalized_disposition",
@@ -98,6 +118,7 @@ _AUTHORING_ENTRY_POINTS = {
     "runtime/close_tool.py::_close_investigation_async",
     "skills/invlang/validate/_structure.py::_check_conclude_vocab",
     "scripts/case_history/case_ticket.py::parse_disposition_from_resolution",
+    "runtime/branch/_family.py::_check_disposition",
 }
 
 
@@ -310,8 +331,15 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
     model's tool-argument vocabulary. A refusal whose whole text is `unresolved` fails three of
     those; the close tool's own retry text fails three of them.
 
+    * **a branched world's `disposition_declared`** — refused at the family manifest's
+      validator. The questioner authors that field, and the manifest's check is the owner's own
+      normalizer, which admits the member for free — the invlang document's exact shape one
+      design later. A world declaring it would have #921's judge grade the questioner's guess
+      about a gate overrule against what the world's run actually concluded. Model-facing, like
+      the close tool's and unlike the ticket line's: the author here is the questioner.
+
     Each surface is driven and each verdict is asserted AT THAT SURFACE — a check that the
-    vocabulary "refuses it somewhere" is green when two of three moved."""
+    vocabulary "refuses it somewhere" is green when three of four moved."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.scripts.case_history import case_ticket
@@ -350,6 +378,28 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
     # The control, on the same decoder: an analyst closing a case in the ordinary vocabulary is
     # not refused, so the refusal above is the host-only verdict and not a decoder that broke.
     assert case_ticket.parse_disposition_from_resolution("benign — duplicate of CASE-12") == "benign"
+
+    # The fourth surface: a world entry declaring the host's verdict, refused at the manifest.
+    from defender.runtime.branch._family import FamilyError, parse_world
+
+    def _world(disposition: str) -> dict:
+        return {"world_id": "b", "role": "b", "story": "a sibling's story",
+                "axis": "an axis", "disposition_declared": disposition}
+
+    with pytest.raises(FamilyError) as world_refusal:
+        parse_world(_world(MEMBER))
+    world_message = str(world_refusal.value)
+    assert MEMBER in world_message, (
+        f"the manifest refusal does not name the value it refused: {world_message!r}")
+    assert "disposition_declared" in world_message, (
+        f"the manifest refusal does not name the field it was typed into: {world_message!r}")
+    assert GAP_MEMBER in world_message, (
+        "the refusal offers no member to use instead — the questioner is told no and not what "
+        f"to write: {world_message!r}"
+    )
+    # The control, on the same validator: an ordinary declaration still parses, so the refusal
+    # above is the host-only verdict rather than a validator that stopped admitting anything.
+    assert parse_world(_world(GAP_MEMBER)).disposition_declared == GAP_MEMBER
 
 
 def test_a_fourth_authoring_surface_cannot_appear_unnoticed():

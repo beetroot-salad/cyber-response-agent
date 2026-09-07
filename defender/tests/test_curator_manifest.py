@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 
 import defender.learning.author.shared as _shared  # noqa: E402
-import defender.learning.author.curator as _curator_mod  # noqa: E402
+import defender.learning.author.lessons.run as _lessons_run  # noqa: E402
 from defender.learning.author.shared import build_curator_user_prompt  # noqa: E402
 from defender.learning.author.lessons.run import build_user_prompt  # noqa: E402
 
@@ -319,19 +319,27 @@ def test_p3_manifest_from_abs_dir_rel_is_display_only(tmp_path):
 
 
 def test_p4_both_callers_forward_the_abs_corpus_path(tmp_repo, tmp_path):
-    """demand: P4 — both thin callers forward the abs corpus Path they hold: findings
-    ``build_user_prompt`` → cfg.corpus_dir (behavioral); actor ``invoke_curator_agent`` →
-    cfg.corpus_dir (it passes ``corpus_dir=`` into build_curator_user_prompt)."""
+    """demand: P4 — the thin caller forwards the abs corpus Path it holds: findings
+    ``build_user_prompt`` → cfg.corpus_dir, asserted BOTH ways.
+
+    P4 said "both callers" because there were two — the findings wrapper and the observation
+    curator's ``invoke_curator_agent``, whose arm was the AST one because it forwards rather
+    than returning anything a caller can read. #922 deleted the observation curator, so one
+    caller is left and it keeps both arms: the prompt it builds carries the corpus (behavioural)
+    AND it reaches the builder with ``corpus_dir=`` rather than letting the builder default
+    (structural). The structural arm is not redundant with the behavioural one — a wrapper that
+    dropped the keyword would still render this corpus, because the builder's own default
+    resolves to the same directory in a tmp_repo."""
     _findings_lesson(tmp_repo.cfg.corpus_dir, "wrapper-lesson")
     prompt = build_user_prompt(_ROWS, "batch-1", tmp_repo.cfg)
     assert "## wrapper-lesson" in prompt
     assert tmp_repo.cfg.corpus_dir_rel in prompt
-    tree = ast.parse(Path(_curator_mod.__file__).read_text())
+    tree = ast.parse(Path(_lessons_run.__file__).read_text())
     fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.FunctionDef) and n.name == "invoke_curator_agent")
+              if isinstance(n, ast.FunctionDef) and n.name == "build_user_prompt")
     calls = [c for c in ast.walk(fn) if isinstance(c, ast.Call) and (
         (isinstance(c.func, ast.Attribute) and c.func.attr == "build_curator_user_prompt")
         or (isinstance(c.func, ast.Name) and c.func.id == "build_curator_user_prompt"))]
-    assert calls, "invoke_curator_agent no longer calls build_curator_user_prompt"
+    assert calls, "build_user_prompt no longer calls build_curator_user_prompt"
     assert any(any(kw.arg == "corpus_dir" for kw in c.keywords) for c in calls), \
-        "invoke_curator_agent must forward corpus_dir=cfg.corpus_dir into build_curator_user_prompt"
+        "build_user_prompt must forward corpus_dir=cfg.corpus_dir into build_curator_user_prompt"

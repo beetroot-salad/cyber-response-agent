@@ -195,6 +195,23 @@ def _ticket_lane_reads_the_committed_verdict(tmp_path: Path) -> None:
     assert case_ticket.read_case_record(run_dir).disposition == MEMBER
 
 
+def _episode_verdicts_reads_the_archived_headline(tmp_path: Path) -> None:
+    """#920's archive reader answers for a host-terminated world instead of refusing it.
+
+    Driven over a REAL committed report moved into the archive layout, because that is what
+    `archive.py` puts there — one report per world, copied from the sibling that wrote it. The
+    member matters here more than at most readers: this reader refuses an out-of-vocabulary
+    headline for the whole episode, so admitting `unresolved` is what keeps ONE gate-overruled
+    world from making every sibling's readable headline unreachable."""
+    from defender.learning.branch.episode import verdicts
+
+    report = (finished_run(tmp_path, disposition=MEMBER) / "report.md").read_text(encoding="utf-8")
+    world = tmp_path / "episodes" / "ep-923" / "worlds" / "b"
+    world.mkdir(parents=True)
+    (world / "report.md").write_text(report, encoding="utf-8")
+    assert verdicts(world.parents[1]) == {"b": MEMBER}
+
+
 def _visualize_primitives_reads_the_committed_verdict(tmp_path: Path) -> None:
     from defender.scripts.visualize.visualize_primitives import parse_report
 
@@ -290,6 +307,7 @@ _READERS = {
     "trace_lesson": _trace_lesson_does_not_render_the_placeholder,
     "ticket_lane->report_md": _ticket_lane_reads_the_committed_verdict,
     "visualize_primitives": _visualize_primitives_reads_the_committed_verdict,
+    "episode->archived_headline": _episode_verdicts_reads_the_archived_headline,
     "run_paths->review_record": _the_review_record_has_no_consumer_outside_the_runtime_view,
     # newly in scope
     "visualize_runtime": _visualize_runtime_calls_it_unreviewed,

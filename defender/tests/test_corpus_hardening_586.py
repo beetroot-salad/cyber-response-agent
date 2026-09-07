@@ -14,10 +14,16 @@ as approved.
    the read bug, one direction over.
 
 2. **The curator's cache signature restated the discovery rule and dropped its robustness.**
-   ``existing_observation_ids`` kept a hand-rolled glob for its mtime signature, whose ``stat()``
-   was unguarded where the walk's read is guarded — so a dangling symlink (a distinguished member
-   of the corpus domain in #584's OWN spec graph, which demands it be warn-skipped) crashed the
-   whole curator drain before the agent ever ran.
+   The observation curator's id pre-flight kept a hand-rolled glob for its mtime signature, whose
+   ``stat()`` was unguarded where the walk's read is guarded — so a dangling symlink (a
+   distinguished member of the corpus domain in #584's OWN spec graph, which demands it be
+   warn-skipped) crashed the whole curator drain before the agent ever ran.
+
+   THE CACHE ITSELF LEFT WITH #922: that pre-flight belonged to the retired observation curator,
+   and the surviving findings pre-flight never had one — it walks `iter_lessons` and nothing
+   else. What the case below still pins is the half that outlived the cache and is the reason
+   the cache was a bug: the pre-flight must tolerate exactly what the walk tolerates. A future
+   cache added to the survivor arrives against a case that already refuses the old shape.
 
 3. **``iter_lessons`` re-derived the parser's fence offsets** to slice ``Lesson.raw``, the one
    duplicate of the frontmatter parse the "one walk, one reader" fold left in place.
@@ -32,7 +38,8 @@ from defender.tests._by_path import load_trace_lesson
 
 from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._frontmatter import parse_frontmatter, split_frontmatter
-from defender.learning.author.curator import existing_observation_ids
+from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
+from defender.learning.core.config import LoopPaths
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -110,13 +117,18 @@ def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsy
     sitting beside it must not CRASH on one. Its mtime cache signature stat'ed the corpus
     unguarded, so a dangling symlink — a member of the corpus domain #584's own spec graph says
     must be warn-skipped — raised ``FileNotFoundError`` out of the curator drain, before the agent
-    ever ran. Exercised on the pre-flight, not on the helper, so it pins the drain's survival."""
-    d = tmp_path / "lessons"
-    d.mkdir()
-    (d / "good.md").write_text("---\nname: good\nsource_observation_ids: [o-1]\n---\nbody\n")
+    ever ran. Exercised on the pre-flight, not on the helper, so it pins the drain's survival.
+
+    Re-pointed by #922 onto the surviving findings pre-flight, the only one left. Its provenance
+    key differs (`source_finding_ids`, from the findings channel's own `id_key`) and it holds no
+    cache; the tolerance demand is the same one."""
+    cfg = build_author_config(LoopPaths(repo_root=tmp_path))
+    d = cfg.corpus_dir
+    d.mkdir(parents=True)
+    (d / "good.md").write_text("---\nname: good\nsource_finding_ids: [o-1]\n---\nbody\n")
     (d / "dangling.md").symlink_to(d / "never-existed.md")
 
-    ids = existing_observation_ids(d)
+    ids = existing_finding_ids(cfg)
 
     assert ids == {"o-1"}
     assert [lesson.path.name for lesson in iter_lessons(d)] == ["good.md"]
