@@ -211,6 +211,7 @@ def _record_manual_row(
         _next_seq,
         payload_digest,
         payload_sha256,
+        system_fingerprint,
     )
 
     seq = _next_seq(deps.run_dir, deps.lead_id)
@@ -245,11 +246,13 @@ def _record_manual_row(
         # byte-identity on. Derived rather than defaulted, so this second writer's rows can
         # never read as "no payload evidence" beside `_record`'s.
         "payload_sha256": payload_sha256(text),
-        # `""` and not a fingerprint (#871): `ITEM1_SYSTEM` is the host's own constant, so this
-        # row's `system` identifies its call already. Written rather than omitted because this
-        # writer assembles the row itself instead of going through `append_query_row`, and a
-        # key it skips is a key the frozen contract loses.
-        "system_key": "",
+        # DERIVED through the column's owner, like `error_class` and `payload_sha256` above and
+        # for the same reason (#871): `ITEM1_SYSTEM` is the host's own constant, so this row's
+        # `system` identifies its call already and the answer is `""` — but spelling that `""`
+        # by hand would make the two writers agree by coincidence rather than by construction,
+        # and this writer assembles the row itself instead of going through `append_query_row`.
+        # Written rather than omitted, because a key it skips is a key the frozen contract loses.
+        "system_key": system_fingerprint(ITEM1_SYSTEM, ITEM1_SYSTEM),
     }
     write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
 

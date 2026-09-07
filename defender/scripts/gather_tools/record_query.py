@@ -72,7 +72,34 @@ def payload_sha256(payload_text: str) -> str:
     return hashlib.sha256(payload_text.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
-def system_fingerprint(raw_system: str, recorded_system: str) -> str:
+def names_something_readable(raw_system: str) -> bool:
+    """Does `raw_system` name anything a reader could tell apart from an empty argument?
+
+    PUBLIC because it is asked at two seams that must never disagree: this module's N5 class
+    (which calls of no readable system are ONE repeat group) and `query_tool._undeclared_target`
+    (whether the dead-end message may say "an undeclared system" or must say the arguments were
+    unreadable). A group the guard FOLDS is a group the message DESCRIBES, so two spellings of
+    the question let the sentence MAIN receives be decided by whichever member of the group
+    landed last — the "the coarsening may not make the dead end LIE" property, lost to turn
+    order.
+
+    NOT `raw_system.strip()`, which is the same question asked of `str.isspace` alone and gets
+    it wrong in the direction that matters. `.strip()` folds the ASCII and Unicode SPACES —
+    U+00A0, U+3000, U+000B — but leaves every zero-width and format codepoint standing:
+    U+200B, U+200C/D, U+2060, U+FEFF, U+00AD and the C0 controls (`\\x00` included) are all
+    `isspace() == False`, so each of them, and each of their unbounded concatenations, would
+    mint a digest of its own while rendering as exactly the empty argument beside it. That is
+    the same unbounded supply of distinct identities this function refuses `str(raw)` for, one
+    codepoint class over — and it is worse than the `str(raw)` case, because no reader of the
+    row, the summary or the table can see which of the invisible strings a call used.
+
+    A codepoint counts when it is printable and not whitespace: Python reads "printable" off
+    the Unicode database as "not Other, not Separator" (with the ASCII space the one exception),
+    which is exactly the class of things that leave a mark."""
+    return any(ch.isprintable() and not ch.isspace() for ch in raw_system)
+
+
+def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     """@owns system_key — the row's `system_key` column, and the ONLY value derived from a
     model-authored system string that is allowed to leave the writer's frame.
 
@@ -81,7 +108,12 @@ def system_fingerprint(raw_system: str, recorded_system: str) -> str:
     is the model's own string, so `_request_key` discriminates on it already) and a system
     argument with nothing readable in it (`_as_str` coarsens a non-string to `""` at the
     schema placement, and "no readable system at all" is ONE mistake — two such calls stay
-    one repeat group).
+    one repeat group; `names_something_readable` decides which strings are in it).
+
+    `raw_system` is COERCED rather than trusted, like every other value on this path
+    (`_as_str`, `_as_dict`, `_system_key_of`): both call sites run inside a rejection handler
+    that has no `try` of its own, so a raise here would replace the rejection — no row for the
+    guard to count, and the fault unwinds past the lead's own catch.
 
     Otherwise: a fixed 16 hex characters of `sha256` over the raw string. TRUNCATED on
     purpose — the column exists to tell two ghosts apart within one lead, not to be reversed,
@@ -92,7 +124,9 @@ def system_fingerprint(raw_system: str, recorded_system: str) -> str:
     The digest IS name-shaped — `is_system_name` accepts 16 hex characters — which is exactly
     why it lives in its own column instead of being folded into `system`: the corpus-path
     consumer reads `system`, and nothing reads this."""
-    if recorded_system or not raw_system.strip():
+    if not isinstance(raw_system, str) or recorded_system:
+        return ""
+    if not names_something_readable(raw_system):
         return ""
     return hashlib.sha256(raw_system.encode("utf-8", errors="surrogatepass")).hexdigest()[:16]
 
@@ -372,11 +406,13 @@ def _next_seq(run_dir: Path, lead: str) -> int:
 # The repeat circuit breaker.
 #
 # `repeat_trip` is the predicate: a lead that issues the SAME request (`lead_id`, `system`,
-# `verb`, canonical `params`) `REPEAT_THRESHOLD` times has stopped producing reasoning, and the
-# third identical call is refused before it reaches the backend. The count is derived per call
-# from `lead_rows` — no new persisted state — over exactly the rows the guard itself could have
-# refused: a row answered ABOVE the guard's placement in `QueryCapture.wrap_tool_execute` is
-# never an occurrence, live or on replay.
+# `verb`, canonical `params`, and since #871 `system_key`) `REPEAT_THRESHOLD` times has stopped
+# producing reasoning, and the third identical call is refused before it reaches the backend.
+# The count is derived per call from `lead_rows` — no new persisted state — over exactly the
+# rows the guard itself could have refused: a row answered ABOVE the guard's placement in
+# `QueryCapture.wrap_tool_execute` is never an occurrence, live or on replay. `system_key` is
+# `""` on every row in THIS guard's domain, so the fifth element changes nothing here; it is
+# the companion guard (`rejection_trip`) whose rows carry it.
 
 REPEAT_THRESHOLD = 3
 
@@ -481,6 +517,11 @@ class GatherDeadEnd(Exception):
         self.escape = escape
 
 
+# lint-dup: ok — the same two lines as `query_tool._as_str`, deliberately NOT one home. That one
+# coarsens a MODEL TOOL ARGUMENT before it is spent as a system name; this one reads a STORED
+# column back. They are equal today by coincidence of shape, and the day either contract moves
+# (a tool argument that accepts a non-string, a stored key that must tell absent from empty) the
+# other must not move with it.
 def _system_key_of(value: Any) -> str:
     """A row's or a call's `system_key`, coerced. LOAD-BEARING on both sides of the comparison:
     every row recorded before #871 added the column, and every hand-built fixture row that
@@ -492,7 +533,7 @@ def _system_key_of(value: Any) -> str:
 
 def _trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, threshold: int,
-    in_domain, system_key: Any = "",
+    in_domain, system_key: Any,
 ) -> RepeatTrip | None:
     """The ONE counting loop both guards drive, over the domain `in_domain` selects. Two
     hand-written loops over the same `(lead_id, system, verb, canonical(params))` would be one
@@ -502,15 +543,22 @@ def _trip(
     `system_key` EXTENDS that identity rather than replacing any of it (#871): it is `""` for
     every call whose `system` names itself, so it changes nothing for the first guard, and it
     is what separates two calls that named two different UNDECLARED systems — which the row's
-    own `system` cannot do, because it deliberately holds `""` for both."""
-    key = (_request_key(system, verb, _json_safe_params(params)), _system_key_of(system_key))
+    own `system` cannot do, because it deliberately holds `""` for both. REQUIRED and not
+    defaulted here, for the reason `append_query_row` gives the column: a guard that could
+    silently skip the key would key every call alike, which is the pre-#871 defect.
+
+    The KEY HALF IS COMPARED FIRST, and that is a cost decision, not a semantic one: the pair
+    is an `and`, so either order selects the same rows, but `_request_key` is a `json.dumps`
+    per row and `_system_key_of` is an `isinstance`. #871 is precisely the change that fills a
+    lead with rows whose cheap half already differs (one per distinct undeclared system), so
+    the expensive half is the one that must not run on them."""
+    key_request = _request_key(system, verb, _json_safe_params(params))
+    key_system = _system_key_of(system_key)
     matches = [
         r for r in rows
         if isinstance(r, dict) and r.get("lead_id") == lead and in_domain(r)
-        and (
-            _request_key(r.get("system"), r.get("verb"), r.get("params")),
-            _system_key_of(r.get("system_key")),
-        ) == key
+        and _system_key_of(r.get("system_key")) == key_system
+        and _request_key(r.get("system"), r.get("verb"), r.get("params")) == key_request
     ]
     occurrence = len(matches) + 1
     if occurrence < threshold:
@@ -527,7 +575,7 @@ def repeat_trip(
     naming the earliest matching row's seq. `params` is the LIVE call's, normalised to the stored
     form before keying, so this is the same predicate `repeat_note` and a replay over a recorded
     table both drive. `rows` need not be pre-filtered to `lead` — the identity `(lead_id, system,
-    verb, canonical(params))` is checked here.
+    verb, canonical(params), system_key)` is checked here.
 
     Its callers pass no `system_key` and behave exactly as they did before #871: a row this
     guard counts reached the backend, so its `system` is a system the run declared and its

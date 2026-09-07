@@ -37,6 +37,7 @@ from defender.scripts.gather_tools.record_query import (
     dead_end_reason,
     is_reserved_query_id,
     lead_rows,
+    names_something_readable,
     payload_digest,
     # Re-exported under its old private name: `_spec771` measures the site
     # `query_tool._persist_payload` by that name.
@@ -260,13 +261,32 @@ class QueryCapture(AbstractCapability[Any]):
             return ""
         return system if system in declared else ""
 
+    def _coarsen(self, raw_system: str) -> tuple[str, str]:
+        """THE above-guard pair, minted once: `(system of record, system_key)`.
+
+        `_system_of_record`'s own docstring says the coarsening is "spent on the rejection
+        guard's identity as well as on the row, NEVER one without the other" — and before this
+        helper that was a rule two placements each kept by hand, in mirrored spellings whose
+        `system_fingerprint(raw, recorded)` arguments read in opposite orders. Both arguments
+        are `str` and only one of them is hashed, so a transposition returns `""` for every
+        ghost, fixes nothing, raises nothing, and is caught only by a test that drives that
+        one placement to the threshold. Returned as a pair, the two halves cannot be computed
+        from different inputs, ordered wrongly, or handed on one without the other."""
+        recorded = self._system_of_record(raw_system)
+        return recorded, system_fingerprint(raw_system, recorded)
+
     @staticmethod
     def _undeclared_target(recorded: str, raw: str) -> str:
         """What the dead-end message calls the request's target. The coarsened `""` makes
         `rejection_dead_end_reason` say "system/verb unreadable in the call's own arguments",
         false for a call that named a system readably but not one that exists; and the raw
-        string cannot be echoed, being unbounded model text on a path into MAIN's context."""
-        return recorded or ("an undeclared system" if raw.strip() else "")
+        string cannot be echoed, being unbounded model text on a path into MAIN's context.
+
+        "Readable" is `names_something_readable`, THE SAME predicate `system_fingerprint` folds
+        the N5 group with, and not a second spelling of it: this message describes a whole
+        repeat GROUP, so the two must answer alike or the sentence MAIN receives is chosen by
+        whichever member of the group happened to land third."""
+        return recorded or ("an undeclared system" if names_something_readable(raw) else "")
 
     def _forbidden_reject(self, model_query_id: Any) -> str | None:
         # The message names the WHOLE screen, not just its path half: `_QID_FORBIDDEN` reaches
@@ -312,8 +332,7 @@ class QueryCapture(AbstractCapability[Any]):
             # the same way when the registry does not declare it, and for a stronger reason:
             # this row's `system` steers an offline corpus write (`_system_of_record`).
             raw_system = _as_str(raw.get("system"))
-            system = self._system_of_record(raw_system)
-            system_key = system_fingerprint(raw_system, system)
+            system, system_key = self._coarsen(raw_system)
             verb = _as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
             trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
@@ -358,6 +377,13 @@ class QueryCapture(AbstractCapability[Any]):
                 deps, system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=DEFAULT_FAULT_EXIT, detail=load_error,
+                # `""`, and NOT because nothing was named: this is the THIRD above-guard
+                # writer, and the only one that records the model's own string in `system`
+                # un-coarsened. Its rows are `infra` (exit 2), which puts them outside
+                # `rejection_trip`'s domain entirely — so there is no count for a fingerprint
+                # to separate. Written out rather than defaulted so that changing this row's
+                # exit code cannot silently enrol it in a guard it was never keyed for.
+                system_key="",
             )
             return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
 
@@ -378,8 +404,7 @@ class QueryCapture(AbstractCapability[Any]):
             # unresolvable call reached no system by that name and its string is the one least
             # entitled to become a `skills/<system>/` path; a REAL system with an unknown verb
             # still records itself.
-            recorded_system = self._system_of_record(system)
-            system_key = system_fingerprint(system, recorded_system)
+            recorded_system, system_key = self._coarsen(system)
             trip = self._rejection_guard(
                 deps, recorded_system, verb, params, system_key=system_key,
             )
@@ -419,7 +444,7 @@ class QueryCapture(AbstractCapability[Any]):
                 deps, system=system, verb=verb,
                 query_id=resolve_query_id(system, verb, None),
                 params=params, payload=None,
-                exit_code=USAGE_EXIT_CODE, detail=reason,
+                exit_code=USAGE_EXIT_CODE, detail=reason, system_key="",
             )
             raise ModelRetry(reason)
 
@@ -459,6 +484,7 @@ class QueryCapture(AbstractCapability[Any]):
             await self._record(
                 deps, system=system, verb=verb, query_id=REPEAT_TRIP_QUERY_ID, params=params,
                 payload=None, exit_code=USAGE_EXIT_CODE, detail=repeat_trip_detail(trip),
+                system_key="",
             )
             executed = sum(1 for r in rows if r.get("exit_code") == 0)
             raise GatherDeadEnd(
@@ -489,19 +515,23 @@ class QueryCapture(AbstractCapability[Any]):
 
         row, text = await self._record(
             deps, system=system, verb=verb, query_id=query_id, params=params,
-            payload=payload, exit_code=exit_code, detail=detail,
+            payload=payload, exit_code=exit_code, detail=detail, system_key="",
         )
         return self._model_view(deps, row, text, exit_code, detail)
 
 
     async def _record(  # noqa: PLR0913 — one parameter per ROW COLUMN, as `append_query_row`
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
-        payload: Any, exit_code: int, detail: str, system_key: str = "",
+        payload: Any, exit_code: int, detail: str, system_key: str,
     ) -> tuple[dict, str]:
-        """`system_key` defaults to `""` HERE and nowhere below: every path through this
-        method other than the two above-guard rejections records a `system` the run declared,
-        which identifies the call by itself. `append_query_row` keeps it required, so the
-        default stops at this frame rather than reaching the row writer."""
+        """`system_key` is REQUIRED here for the reason `append_query_row` requires it, and the
+        reason binds HARDER at this frame: every real writer of the column reaches the row
+        through `_record`, never through `append_query_row` directly, so a default here would
+        satisfy the column's requirement on the writer's behalf and leave the discipline
+        protecting nothing. `""` is a real answer at four of the six call sites and each says
+        so in its own argument list; the three above-guard writers (`wrap_tool_validate`, and
+        BOTH of `_grant_check`'s row-writing branches) are the ones a reader has to check, and
+        a required keyword is what puts a fourth one in front of that reader."""
         if deps.lead_id is None:
             raise RuntimeError("internal: query reached capture without a dispatched lead_id")
 

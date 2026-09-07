@@ -500,6 +500,53 @@ def test_a_call_with_no_readable_system_inherits_no_ghosts_count():
         "two unreadable calls stopped being one mistake (N5), so the negative above is vacuous"
 
 
+def test_an_invisible_system_string_is_no_more_readable_than_an_empty_one():
+    """N5's equivalence class is "nothing a reader could tell apart from an empty argument",
+    and `.strip()` is not that question. It folds the SPACES — U+00A0, U+3000, U+000B — and
+    leaves every zero-width and format codepoint standing: U+200B, U+200C/D, U+2060, U+FEFF,
+    U+00AD and the C0 controls are `isspace() == False`, so under a `.strip()` test each of
+    them, and each of their unbounded concatenations, mints a digest of its own.
+
+    That is the unbounded supply of distinct identities
+    `..._no_readable_system_at_all_are_still_one_group` refuses `str(raw)` for, reached one
+    codepoint class over — and worse than the `str(raw)` case, because the row, the summary
+    and the table all render these calls identically, so nothing downstream can even see that
+    three "different" systems were named. A model repeating one invisible string with one more
+    zero-width space each turn would never reach `REPEAT_THRESHOLD`.
+
+    The positive control is the last arm: a string with ONE readable character in it is still
+    fingerprinted, so this is not satisfied by "stop fingerprinting anything unusual"."""
+    invisible = ["\u200b", "\u200b\u200b", "\ufeff", "\u200c\u200d", "\u2060", "\u00ad",
+                 "\x00", "\x00\x00"]
+    for raw in invisible:
+        assert rq.system_fingerprint(raw, "") == "", \
+            f"{raw!r} renders as an empty system argument and was given an identity anyway"
+
+    params = {"native_query": "FROM logs"}
+    rows = [dict(_above(0, system=""), system_key=rq.system_fingerprint(invisible[0], "")),
+            dict(_above(1, system=""), system_key=rq.system_fingerprint(invisible[1], ""))]
+    assert rq.rejection_trip(rows, LEAD, system="", verb="query", params=params,
+                             system_key=rq.system_fingerprint(invisible[2], "")) is not None, \
+        "three indistinguishable invisible strings were three repeat groups, so the loop " \
+        "they make is bounded by nothing"
+
+    assert rq.system_fingerprint("\u200bg", "") != "", \
+        "a string carrying one readable character stopped being fingerprinted"
+
+
+def test_a_non_string_system_is_coerced_rather_than_raising():
+    """The type axis of the same argument
+    `..._an_unencodable_system_string_is_fingerprinted_rather_than_raising` makes on the
+    encoding axis: both above-guard call sites compute this INSIDE a rejection handler with no
+    `try` of its own, so a raise here replaces the rejection outright — no row is written, the
+    table loses the call the guard is counting, and the fault unwinds past the lead's own
+    catch. `_system_key_of`, the other half of the same comparison, already coerces; the two
+    halves of one contract must not disagree about what a non-string means."""
+    for raw in (None, 12345, True, {"n": 1}, ["ghost"], b"ghost"):
+        assert rq.system_fingerprint(raw, "") == "", \
+            f"a non-string system argument ({raw!r}) was fingerprinted or raised"
+
+
 def test_a_row_written_before_the_fourteenth_column_existed_still_counts():
     """THE COERCION, and it is load-bearing: `_row` above builds the row keys LITERALLY and
     carries no `system_key`, which is exactly the shape of every row already on disk from a

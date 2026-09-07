@@ -32,8 +32,12 @@ implementation that spells it otherwise makes `check_binds` skip the concept sil
     able to drive it. It is also the third copy of the read+filter loop `_next_seq` and
     `repeat_note` already carry, which `lint_duplicate_helpers` would flag (G20).
 
-`repeat_trip(rows, lead, *, system, verb, params, threshold=REPEAT_THRESHOLD) -> RepeatTrip | None`
-    THE predicate, over queries-table ROWS, keyed `(lead_id, system, verb, canonical(params))`
+`repeat_trip(rows, lead, *, system, verb, params, threshold=REPEAT_THRESHOLD, system_key="") -> RepeatTrip | None`
+    THE predicate, over queries-table ROWS, keyed `(lead_id, system, verb, canonical(params),
+    system_key)`. #871 added the fifth element: it is `""` on every row in THIS guard's domain
+    (an executed row's `system` is the dispatched name, which identifies it already), and it is
+    what tells two UNDECLARED systems apart in the COMPANION guard's, where the `system` column
+    deliberately holds `""` for both
     — so O1/O3's replay oracle drives the production predicate over a recorded run with no
     live agent (`repeat_trip_predicate_seam`). It normalises its incoming `params` to the
     STORED form (`_json_safe_params`, then `record_query._request_key`) before keying, so the

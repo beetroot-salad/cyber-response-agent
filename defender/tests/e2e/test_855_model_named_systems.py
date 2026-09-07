@@ -79,10 +79,27 @@ def _bad_args(system: Any, params: dict = PARAMS) -> Turn:
 
 
 def _dead_end(r: _Res) -> bool:
-    """Whether the lead ended on the guard, read off the SUMMARY main receives — the only
-    place the verdict is observable from outside the gather agent, and the one main's context
-    is composed from."""
+    """Whether the lead ended EARLY, read off the SUMMARY main receives — the only place a
+    verdict is observable from outside the gather agent, and the one main's context is
+    composed from.
+
+    NOT "the guard tripped". `_run_gather` writes this same idiom for all four of its
+    terminators (`GatherDeadEnd`, `UsageLimitExceeded`, `UnexpectedModelBehavior` from
+    exhausted tool retries, `StoreError`), and #871 is precisely the change that makes retry
+    exhaustion a reachable end for a rejection loop — a lead naming a fresh ghost each turn
+    now runs to `DEFAULT_TOOL_RETRIES` instead of stopping at three. So every POSITIVE use of
+    this helper is paired with `_trip_row_written`, which reads the guard's own row; a
+    NEGATIVE use is safe on its own only while the lead under it makes fewer than ten
+    rejections, and an arm that drives more must assert the run-on some other way."""
     return "Treat this lead as incomplete" in _summary(r)
+
+
+def _trip_row_written(r: _Res) -> bool:
+    """Whether the COMPANION GUARD is what ended the lead, read off the table rather than the
+    summary: `rejection_trip_detail` leads the last rejection row's digest, and no other
+    terminator writes it."""
+    rows = _above_guard(r)
+    return bool(rows) and "turned back at seq" in rows[-1]["payload_digest"]
 
 
 def _summary(r: _Res) -> str:
@@ -309,6 +326,9 @@ def test_the_grant_checks_writer_is_still_bounded_on_a_repeat(tmp_path):
         record_query.system_fingerprint("ghostone", "")}, \
         "one name was recorded under more than one identity, so no repeat can ever be seen"
     assert _dead_end(r), "one ghost named three times no longer bounds the lead"
+    assert _trip_row_written(r), \
+        "the lead ended, but not on the guard — the summary idiom is shared with the request " \
+        "limit and with exhausted tool retries, so it alone certifies nothing"
     assert rec.calls == [], "the lead ran on past its dead end"
     assert "ghostone" not in _summary(r), \
         "the model's own string crossed into main's context on a refusal path"
@@ -457,6 +477,9 @@ def test_the_replay_of_the_recorded_table_agrees_with_the_live_run(tmp_path):
         "the replay refuses a lead the live run let run on"
 
     assert _dead_end(same), "the live run did not trip, so the parity below is over the wrong table"
+    assert _trip_row_written(same), \
+        "the live run ended on something other than the guard, so the parity below is over " \
+        "the wrong table"
     assert _replay_rejections(same.rows) == [(LEAD, 2)], \
         "the replay misses the trip the live run took, on the table that run wrote"
 
@@ -487,6 +510,9 @@ def test_calls_with_no_readable_system_at_all_are_still_one_group(tmp_path):
     assert {row["system_key"] for row in rows} == {""}, \
         "an unreadable system argument was fingerprinted, so each shape is its own group"
     assert _dead_end(blank), "three unreadable calls are one mistake and no longer bounded"
+    assert _trip_row_written(blank), \
+        "the lead ended on something other than the guard, so the bound above is not the " \
+        "guard's"
 
     control = {row["system_key"] for row in _above_guard(readable)}
     assert len(control) == 3, \
