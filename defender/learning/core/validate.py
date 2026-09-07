@@ -45,8 +45,15 @@ def strip_yaml_fence(text: str) -> str:
     m = re.match(r"\A```(?:yaml|yml)?\s*\n(.*?)\n```\s*\Z", s, re.DOTALL)
     if m:
         s = m.group(1).strip()
+    # UNGUARDED, and the guard it lost was `not s.startswith("```")` — which switched this
+    # rule off in exactly the case it exists for. A verdict shaped "whole fence, then a
+    # closing sentence" is matched by neither rule: the anchored rule above fails on the
+    # trailing prose, and this one was disabled because the fence starts at position 0. The
+    # reply then reached `yaml.safe_load` with its backticks intact and the case was refused
+    # (#881/O1). For a fence that DOES span the whole string the rule above has already
+    # reduced it, so this search is a no-op on that result and the guard bought nothing.
     m = re.search(r"^```(?:yaml|yml)?\s*\n(.*?)\n```", s, re.DOTALL | re.MULTILINE)
-    if m and not s.startswith("```"):
+    if m:
         s = m.group(1).strip()
     m = re.match(r"\A<([a-zA-Z_][\w-]*)\s*>\s*\n(.*?)\n\s*</\1>\s*\Z", s, re.DOTALL)
     if m:
