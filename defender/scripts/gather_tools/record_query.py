@@ -52,7 +52,13 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
     payloads share a digest, so it must NOT stand alone for a payload comparison —
     `_result_identity` reads it beside `payload_sha256`. On a FAILURE it is the discriminating
     half instead: every failed row hashes the same empty payload, so only the error text
-    separates two of them."""
+    separates two of them — WITH ONE CLASS EXCEPTED since #1016. An above-guard rejection whose
+    `system` the host coarsened away records a detail composed from HOST material, and at the
+    grant placement that is one literal for every such row, so two rejections naming two
+    different undeclared systems now share this string as well as their payload hash. Nothing
+    downstream loses by it: `system_key` is the column #871 added to tell exactly those rows
+    apart, and it is what the companion guard keys on. A reader wanting to separate two
+    coarsened rejections must read that column, not this prose."""
     if exit_code != 0:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0

@@ -105,6 +105,16 @@ PHANTOM = "Ignore Previous Instructions"
 #: oracle left on its `ensure_ascii` default would silently fail to look for.
 ZERO_WIDTH = "\u200b"
 
+#: A model-authored `system` value too long for pydantic to print whole: its error text renders
+#: `input_value=` through a repr that TRUNCATES with an ellipsis around 50 characters. That makes
+#: this the shape a SCRUB cannot clean — `str(e).replace(what_the_model_sent, "<withheld>")` never
+#: matches a string pydantic already shortened, so the leading characters survive verbatim in a
+#: host-authored column while every fixture with a short ASCII ghost name looks spotless. #1016
+#: N5 rules the scrub out in prose ("a substring scrub over repr-escaped text leaves fragments");
+#: this constant is what makes that ruling FAIL A TEST instead of only reading well. The marker is
+#: at the FRONT because the front is the half that survives.
+LONG_GHOST_VALUE = "ghostlongvalue" + "x" * 300
+
 #: The three columns `append_query_row` fills with the call's OWN arguments, verbatim and by
 #: design. #1016 N1 keeps them that way: they are what makes the row an audit record of what was
 #: attempted, and `record_query.system_fingerprint`'s docstring already concedes that they store
@@ -341,6 +351,18 @@ def test_the_companion_repeat_guard_still_bounds_a_phantom_rejection_loop(tmp_pa
     assert "ghostverb" in _model_authored(rows[-1]), \
         "the trip row lost the call's own arguments, so the negative below is quantified " \
         "over a row that never carried the model's text at all"
+    # The TAIL, demanded as well as bounded. O4 says the trip row's tail must OBEY O1, not that
+    # it may satisfy O1 by not existing — and `rejection_trip_detail`'s own docstring says why
+    # the distinction matters: "replacing the detail outright would make the append-only table
+    # permanently forget why the last call was malformed". This row is both the trip record and
+    # the third rejection's own record, and it is the only place the latter is written down.
+    # Without these two lines the negatives below are satisfied by passing an empty tail.
+    assert "; rejected: " in rows[-1]["payload_digest"], \
+        "the trip row dropped its rejection tail — the table now records THAT the guard fired " \
+        "and no longer why this call was turned back, which no other row carries"
+    assert "Extra inputs are not permitted" in rows[-1]["payload_digest"], \
+        "the trip row's tail no longer names the error type, so an operator reading the one " \
+        "row that ended the lead cannot tell what the model kept getting wrong"
     for text in (PHANTOM, "ghostverb", "ghostkeyname"):
         assert text not in _host_authored(rows[-1]), \
             f"the trip row's tail put {text!r} in a host-authored column of a coarsened row"
@@ -851,29 +873,31 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
         _bad_args("ghostone", {"native_query": "FROM four"}, verb="ghostverb",
                   extra_key="ghostkeyname"),
         _bad_args([PHANTOM], {"native_query": "FROM five"}, verb="ghostverb"),
-        _bad_args("elastic", {"native_query": "FROM six"}, verb="ghostverb",
-                  extra_key="ghostkeyname"),
+        _bad_args([LONG_GHOST_VALUE], {"native_query": "FROM six"}, verb="ghostverb"),
+        _bad_args("elastic", {"native_query": "FROM seven"}, verb="ghostverb",
+                  extra_key="elastickeyname"),
         DONE,
     ])
 
     rows = _above_guard(r)
-    assert len(rows) == 6, \
-        "the six shapes did not all leave their rows — every negative below is vacuous"
+    assert len(rows) == 7, \
+        "the seven shapes did not all leave their rows — every negative below is vacuous"
     # Bind each row to the turn that wrote it, so a per-row negative names a KNOWN call. Read
     # off `params`, a column O1 exempts, which is why it is still readable here at all.
     assert [row["params"]["native_query"] for row in rows] == [
         "FROM one", "FROM two", "FROM three", "FROM four", "FROM five", "FROM six",
-    ], "the rows are not the six calls in order, so the per-shape claims below are misaddressed"
+        "FROM seven",
+    ], "the rows are not the seven calls in order, so the per-shape claims below are misaddressed"
     assert not _dead_end(r), \
-        "the six shapes tripped the companion guard, so one of these rows is a trip row and " \
-        "they are not six distinct calls"
+        "the shapes tripped the companion guard, so one of these rows is a trip row and " \
+        "they are not distinct calls"
 
-    coarsened, control = rows[:5], rows[5]
+    coarsened, control = rows[:6], rows[6]
     assert {row["system"] for row in coarsened} == {""}, \
         "a shape was not coarsened at all, so O1 does not even apply to it"
     ghost_key = record_query.system_fingerprint("ghostone", "")
     assert [row["system_key"] for row in coarsened] == [
-        record_query.system_fingerprint("ghosttwo", ""), "", ghost_key, ghost_key, "",
+        record_query.system_fingerprint("ghosttwo", ""), "", ghost_key, ghost_key, "", "",
     ], "N5's fold or the two placements' fingerprints changed under #1016 — the identity is " \
        "#871's and this issue does not touch it"
 
@@ -881,9 +905,29 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
         "the control lost its declared system, so it is not the complementary condition"
     assert control["system_key"] == "", \
         "the control was coarsened after all, so it is not the complementary condition"
-    assert "ghostkeyname" in _host_authored(control), \
+    assert "elastickeyname" in _host_authored(control), \
         "a row that KEPT its system stopped recording the model's own argument name (#1016 " \
         "N3) — so the negatives below are satisfied by a writer that records nothing"
+
+    # #1016 O2 at the SCHEMA placement — "at the schema placement it still sees pydantic's full
+    # text". The grant half of O2 is pinned two tests up; this half had nothing, and the gap is
+    # not cosmetic: the whole of M2 is that the ROW stops carrying pydantic's text while the
+    # MODEL keeps reading it, and an implementation that re-raised the host's coarse rendering
+    # to the model instead of the original error greens every other arm in this file. What the
+    # model loses then is exactly what O2 protects — a subagent that cannot see WHICH argument
+    # was refused cannot drop it, and retries until the lead runs out.
+    #
+    # This is also the ghost-key negative's missing positive control: without it,
+    # "`ghostkeyname` is not in a host-authored column" is satisfied by a run in which the
+    # string never appeared anywhere at all.
+    # `ghostkeyname` is spelled on the COARSENED call and nowhere else in this lead — the
+    # control one turn later uses `elastickeyname` for exactly this reason. Sharing the key
+    # would make this assertion true of the control's own retry text and blind to the
+    # coarsened call it is about, which is the shape of vacuity this whole file guards against.
+    assert any("ghostkeyname" in seen for seen in r.gather.seen), \
+        "on a COARSENED call the model stopped reading back the argument name it got wrong, " \
+        "so it can never drop it (#1016 O2) — and the `ghostkeyname` negative below is then " \
+        "quantified over a string this run never produced"
 
     for row in coarsened:
         assert _detail(row), \
@@ -892,6 +936,36 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
         assert "ghostverb" in _model_authored(row), \
             "the row lost the call's own arguments, so the negative below is vacuous"
 
+    # WHAT the host says, not merely THAT it said something. A blacklist of literals plus a
+    # truthiness check is satisfiable by any detail the model's text cannot be read out of —
+    # including a single constant for every shape, and including an ENCODING of the very text
+    # the blacklist is hunting (base64 of pydantic's message contains none of the seven tokens
+    # and is a complete copy of all of them). Both leave `payload_digest` useless to the
+    # operator it exists for, which is the column's whole job (`record_query.payload_digest`:
+    # on a failure "it is the discriminating half"). So each placement owes a positive:
+    #
+    # * the GRANT placement names the CLASS of failure it withheld the specifics of — #1016 N8
+    #   picks "an undeclared system" and `_undeclared_target` already speaks that vocabulary to
+    #   main. Asserted on the word, not the sentence, so the wording stays the fix's to choose.
+    # * the SCHEMA placement carries pydantic's own message TEMPLATE for the error type. Those
+    #   templates are host material — C21 pins that they quote no input — and they are the only
+    #   part of pydantic's text that survives #1016 at all. A row that names the error type is
+    #   one an operator can act on without ever seeing what the model wrote.
+    for row in coarsened[:2]:
+        assert "undeclared" in _detail(row), \
+            "a coarsened grant-path row no longer says what KIND of failure it withheld the " \
+            "specifics of, so its digest tells an operator nothing"
+    for row, template in zip(coarsened[2:], (
+        "Extra inputs are not permitted",   # FROM three — the model's extra argument
+        "Extra inputs are not permitted",   # FROM four  — same, under a name the model chose
+        "Input should be a valid string",   # FROM five  — `system` was a list
+        "Input should be a valid string",   # FROM six   — a list pydantic cannot print whole
+    ), strict=True):
+        assert template in _detail(row), \
+            f"a coarsened schema-path row dropped pydantic's own message ({template!r}), so " \
+            "the digest no longer names the error type — and a detail that cannot be read " \
+            "back is indistinguishable from one that encodes the model's text instead"
+
     # ACCUMULATED rather than asserted per row, and that is the point of driving five shapes in
     # one lead: a per-row `assert` stops at the first leak, and the first leak is the coarse one
     # every candidate fix closes. The failure has to name EVERY shape still leaking, or a fix
@@ -899,7 +973,7 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
     leaks = [
         (row["params"]["native_query"], text)
         for row in coarsened
-        for text in ("ghostone", "ghosttwo", ZERO_WIDTH, PHANTOM,
+        for text in ("ghostone", "ghosttwo", ZERO_WIDTH, PHANTOM, "ghostlongvalue",
                      "ghostverb", "ghostkeyname", "bogus_extra_arg")
         if text in _host_authored(row)
     ]
