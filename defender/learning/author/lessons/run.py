@@ -217,10 +217,17 @@ FINDINGS_BUCKETS: tuple[BucketSpec, ...] = (
         formatter=str,
     ),
     # The one genuinely direction-specific bucket: a lesson the forward check says would
-    # flip a correctly-resolved case is HELD, not consumed, and its reason is prefixed so
-    # an operator can tell it from an ordinary hold.
+    # flip a correctly-resolved case is HELD, not consumed.
+    #
+    # ITS OWN FIELD, not `held_reason`. This hold is RETRYABLE — `_gate_findings` re-admits
+    # the row on the next tick, and the forward check gets another verdict once the corpus
+    # has moved — while a `held_reason` hold waits on a fact that has no writer and never
+    # moves. #881/O2 made `held_reason` the wake gate's "not work" marker, and with one field
+    # carrying both meanings that gate stopped waking for these rows: never retried, never
+    # consumed, sitting in the queue invisible. One field, one meaning; the prefix stays for
+    # an operator reading the row.
     BucketSpec(
-        name="held_forward_bad", disposition="held", reason_field="held_reason",
+        name="held_forward_bad", disposition="held", reason_field="forward_bad_reason",
         formatter=_forward_bad_reason,
     ),
 )
@@ -367,7 +374,16 @@ def _gate_findings(
     truth an adversarial/benign finding needs before it can become a lesson.
 
     `to_author` is derived HERE by subtraction, so both directions return the same 3-tuple
-    even though the policies are not one policy parameterised."""
+    even though the policies are not one policy parameterised.
+
+    AN EMPTY BATCH ANSWERS WITHOUT READING THE CORPUS. `existing_finding_ids` walks and
+    frontmatter-parses every lesson in `defender/lessons/`, which is the most expensive
+    non-agent step in a tick — and since #881 `_tick` runs the whole tick body for a queue
+    that is nothing but unreadable lines, purely to reach a rotation that clears them. There
+    is no partition of no rows, so the walk would be paid for an answer that is three empty
+    lists whatever the corpus holds."""
+    if not batch:
+        return [], [], []
     # THE SAME PREDICATE THE ROUTE USES, not a second spelling of it. `skips_forward_check`
     # already decides which rows are family rows for `queued_ids` above; re-deriving
     # `entry["direction"] == "family"` here gives one rule two homes, and the duplicate-helper

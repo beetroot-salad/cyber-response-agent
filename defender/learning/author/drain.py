@@ -115,11 +115,13 @@ def stuck_report_file(channel: QueueChannel) -> Path:
     naming the fault class, the stalled rows and how many consecutive ticks they have been
     stuck.
 
-    "Never reaches the graveyard" holds for every leg but one: `_retire_unkeyable` appends
-    its dead letters BEFORE the rotation that removes them from the queue, so a fault in
-    that rotation leaves a row both graveyarded AND queued — and a further duplicate dead
-    letter on every stuck tick after it. The stuck record is what says the two files
-    disagree on purpose.
+    "Never reaches the graveyard" holds for every leg but the two that retire. BOTH
+    `_retire_unkeyable` and `retire` append their dead letters BEFORE the rotation that
+    removes the rows from the queue, and both release the append lock between the two — so a
+    rotation that expires against an appender arriving in that window leaves a row both
+    graveyarded AND queued, plus a further duplicate dead letter on every stuck tick after
+    it. (`retire`'s own docstring names the same window from the crash side.) The stuck
+    record is what says the two files disagree on purpose.
 
     A stalled row with no id under its channel's key is named by a content fingerprint —
     `_stuck_row_ids` owns that spelling — so the keyless leg's records are still tellable
@@ -301,20 +303,25 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         return 0
     if unreadable:
         # NOT an early return, and that is the whole point. The wake gate counts an
-        # unreadable line as work (`core/drains._pending_queue_count`), so returning here
+        # unreadable line as work (`core/drains._pending_queue_counts`), so returning here
         # left it counted and uncleared: the gate re-fired on the same junk every tick,
         # fetching, minting a worktree and starting a box to read the same unparseable
         # bytes, forever. A line the tolerant reader could not turn into a row cannot be
-        # graveyarded — there is no row to write — but the closing rotation rewrites this
-        # file from the rows it CAN read, so falling through is what clears it. Said out
-        # loud, because that rotation is otherwise a silent deletion.
-        # "WILL drop", not "drops": several exits sit between here and that rotation — a
+        # graveyarded — there is no row to write — but every rotation rewrites this file from
+        # the rows it CAN read, so falling through is what clears it. Said out loud, because
+        # that rewrite is otherwise a silent deletion.
+        # THE NEXT ROTATION, not the closing one: `persist._rewrite_queue` re-reads through
+        # the same tolerant reader whoever calls it, so `_retire_unkeyable`'s own rotation —
+        # which runs before the gate — drops these lines too, as does `retire`'s on the
+        # retiring leg. Naming one of the three would send an operator looking for bytes a
+        # different one had already taken.
+        # "WILL drop", not "drops": several exits sit between here and every rotation — a
         # fault in the retirement, in the gate, or in the authoring region — and on each of
         # them the lines are still there next tick, printing this same line again. This is
         # the only trace the deletion leaves, so it must not claim to be one.
         log(
-            f"{unreadable} unreadable line(s) in the queue — the closing rotation, if this "
-            "tick reaches it, will drop them"
+            f"{unreadable} unreadable line(s) in the queue — the next rotation this tick "
+            "reaches, if it reaches one, will drop them"
         )
 
     keyed: list[dict] = []
@@ -345,7 +352,15 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
             f"batch={batch_id} total={len(batch)} to_author={len(to_author)} "
             f"held={len(held)} pre_consumed={len(consumed_pre)} unkeyable={len(unkeyable)}"
         )
-        stuck_rows = to_author
+        # `to_author` NAMES THE AUTHORING REGION, but this same call also runs the closing
+        # rotation, which writes the gate's held rows back — and on a tick the gate held or
+        # consumed whole, `to_author` is `[]`. An empty list is a foldable dedup key in
+        # `_record_stuck`, so a rotation that expires against a busy appender there would
+        # record `row_ids: []`: none of the rows actually stuck named, and every such tick
+        # folding into one rising count whatever queue it was about. `keyed` is what is still
+        # in flight when nothing was admitted — the rows the rotation was writing — so the
+        # record names them instead of nothing.
+        stuck_rows = to_author or keyed
         return _author_and_rotate(
             cfg=cfg,
             log=log,

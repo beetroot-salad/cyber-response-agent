@@ -19,9 +19,12 @@ its rotation's own bounded wait under a genuinely contended append lock, and an
 fold by ROW, which for a keyless row means by its content — an empty id list, or any key
 coarser than the row, reads two unrelated poison rows as one problem getting worse.
 
-The two obligations whose homes the design names elsewhere — O1's fence-then-prose regression
-(`tests/learning/test_loop.py`, `tests/test_921_judge_call.py`) and O2's wake-gate accounting
-(`tests/test_orchestrate_thresholds.py`) — are not repeated here.
+O2's wake-gate accounting lives in `tests/test_orchestrate_thresholds.py` and is not repeated
+here. O1 — the fence-then-prose regression — was BACKED OUT of this change and has no test
+anywhere: `learning/core/validate.py` is byte-identical to the branch base, the judge keeps
+today's behaviour (a reply that OPENS with a fence and closes with a sentence costs one draw),
+and what a reply carrying several fenced blocks means is left to its own issue. Do not read the
+files the design named for it as coverage; they hold none.
 
 Project idioms, because CI ratchets them: fakes enter through `dataclasses.replace` on the
 config, never `monkeypatch.setattr`; every fault is a real one met at a real seam — a
@@ -50,9 +53,20 @@ _GRAVEYARD_SUFFIX = ".deadletter.jsonl"
 
 
 def _ids_in(line: str, label: str) -> str:
-    """The contents of one `<label>=[...]` list on a held-report line, or `""` if absent."""
-    found = re.search(rf"{label}=\[(.*?)\]", line)
-    return found.group(1) if found else ""
+    """The contents of one `<label>=[...]` list on a held-report line.
+
+    A MISSING LABEL FAILS HERE rather than answering `""`. The two assertions this feeds are
+    negative — a gate hold must appear in neither `forward_bad_ids` nor `skipped_ids` — so an
+    absent label made them vacuously true: rename the field, drop an empty list, or move the
+    line to JSON, and the whole "never merged under one label" demand passes without reading
+    anything. `re.escape` for the same reason: a label carrying a regex metacharacter would
+    silently match nothing."""
+    found = re.search(rf"{re.escape(label)}=\[(.*?)\]", line)
+    assert found is not None, (
+        f"the held-report line carries no {label}=[...] list, so asserting a row is absent "
+        f"from it asserts nothing: {line!r}"
+    )
+    return found.group(1)
 
 
 # ---------------------------------------------------------------------------------------
@@ -489,3 +503,128 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
     assert records[0]["row_ids"] != records[1]["row_ids"], (
         "two different bad rows are named identically in the stuck report"
     )
+
+
+# ---------------------------------------------------------------------------------------
+# O2's other half, in the drain — a tick does not return early on a queue it cannot parse
+# ---------------------------------------------------------------------------------------
+
+
+def test_881_a_queue_of_only_unreadable_lines_is_cleared_by_the_tick_it_wakes(tmp_path: Path):
+    """#881/O2 at the drain end: `_tick` must NOT return on an empty batch while unreadable
+    lines remain.
+
+    The two halves of this contract live in two modules and only one of them was pinned.
+    `core/drains._pending_queue_counts` counts an unreadable line as work — so the wake gate
+    fires for a queue of nothing but junk — and the tick it wakes is the only thing that can
+    clear it, because a line the tolerant reader could not turn into a row has no id, cannot
+    be matched, and cannot be graveyarded. A tick that returned early on `not batch` would
+    leave the junk counted and uncleared: the gate re-firing on the same bytes every pass,
+    fetching, minting a worktree and starting a box to read them again, forever. That is
+    #881/O2's own defect wearing the other mask, and restoring the early return is the
+    obvious cleanup for anyone who reads "run a whole tick for no rows" as waste.
+
+    THE PAIRED CONTROL is a genuinely empty queue on the same address: it returns without
+    reaching the author, so "falls through" is a fact about the junk and not about `_tick`
+    having stopped short-circuiting at all.
+
+    The agent is asserted UNREACHED on both halves. There are no rows to author either way,
+    and a fall-through that started handing the curator an empty batch would spend a real
+    model call on nothing.
+    """
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of(paths, "findings")
+    ch.file.parent.mkdir(parents=True, exist_ok=True)
+    ch.file.write_text('{not json at all\n[1,2]\nnull\n', encoding="utf-8")
+    cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o2-junk")))
+
+    assert drain.run_batch(cfg=cfg) == 0
+    assert ch.file.read_text(encoding="utf-8") == "", (
+        "the tick returned on the empty batch and left the unreadable lines queued; the wake "
+        "gate counts them as work, so it will fire on the same bytes on every pass forever"
+    )
+    assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
+        "the tick handed the curator a batch with no rows in it"
+    )
+
+    # The control: an empty queue is not the same as an unreadable one.
+    empty = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o2-empty")))
+    assert drain.run_batch(cfg=empty) == 0
+    assert empty.invoke_agent.calls == [], (  # type: ignore[attr-defined]
+        "an empty queue reached the author"
+    )
+
+
+def test_881_unreadable_lines_beside_a_real_row_do_not_take_it_with_them(tmp_path: Path):
+    """The mixed queue: the rotation that drops the junk rewrites the file from the rows it
+    CAN read, so a well-formed row sharing the queue with a torn line must survive it.
+
+    Without this the sibling above is satisfied by a tick that simply truncates the queue,
+    which would delete every queued finding the moment one appender tore a line."""
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of(paths, "findings")
+    keep = h.row_for("findings", "a/0")
+    ch.file.parent.mkdir(parents=True, exist_ok=True)
+    ch.file.write_text(json.dumps(keep) + "\n{torn\n", encoding="utf-8")
+    cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o2-mixed")))
+
+    assert drain.run_batch(cfg=cfg) == 0
+    survivors = h.pending(ch)
+    assert [r["finding_id"] for r in survivors] == ["a/0"], (
+        "the rotation that dropped the unreadable line took the readable row with it"
+    )
+
+
+def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sticks(
+    tmp_path: Path,
+):
+    """#881/O4's guard has to NAME the rows the phase in flight is stuck on, and the phase
+    the wide guard covers last is not the authoring one.
+
+    `_author_and_rotate` runs the closing rotation and the held-report write after the agent
+    region, and on a tick the gate held whole there is no agent region at all — the rows in
+    flight are the gate's holds, which that rotation is what writes back. Labelling the whole
+    call with `to_author` names `[]` for exactly that tick: none of the stuck rows reported,
+    and — because `_record_stuck` folds on `(fault_class, row_ids)` and an empty list is a
+    foldable key — every such tick on every queue merging into one rising `consecutive_ticks`.
+    An operator paging on "stuck for N ticks" would read one problem where there are several,
+    and could not say which rows any of them is about.
+
+    The fault is a real one at a real seam: the held report's path is a DIRECTORY, so
+    `write_held_report`'s `open(path, "a")` raises `IsADirectoryError` — not in `RETIRE_SET`,
+    so nothing retires. It fires only because the gate held something, which is the same
+    condition that empties `to_author`, so the two halves cannot be separated by the fixture.
+
+    THE PAIRED CONTROL is the same tick unobstructed: it holds the same rows, writes its
+    report, and records nothing — so the guard cannot be satisfied by naming rows on every
+    tick that holds anything.
+    """
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of(paths, "findings")
+    held = [h.row_for("findings", f"a/{i}") for i in range(3)]
+    h.seed(ch, held)
+    cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o4-rotate")))
+    cfg.held_report.parent.mkdir(parents=True, exist_ok=True)
+    cfg.held_report.mkdir()
+
+    with pytest.raises(IsADirectoryError):
+        drain.run_batch(cfg=cfg)
+
+    assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
+        "the gate admitted a row, so this is not the held-whole tick the test is about"
+    )
+    records = h.stuck_records(ch)
+    assert len(records) == 1, f"the fault left no stuck record: {records}"
+    assert sorted(records[0]["row_ids"]) == ["a/0", "a/1", "a/2"], (
+        "the stuck record names none of the rows the tick is stuck on — the guard was "
+        f"handed the authoring leg's empty batch instead of the rows in flight: {records[0]}"
+    )
+
+    # The control: unobstructed, the same tick holds the same rows and records nothing more.
+    cfg.held_report.rmdir()
+    assert drain.run_batch(cfg=cfg) == 0
+    assert len(h.stuck_records(ch)) == 1, (
+        "an ordinary holding tick wrote a stuck record; the report then names every tick "
+        "that declined a row rather than every wedged one"
+    )
+    assert cfg.held_report.is_file(), "the held report was not written once unobstructed"

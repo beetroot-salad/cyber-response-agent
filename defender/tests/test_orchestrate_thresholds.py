@@ -28,6 +28,7 @@ from defender.learning.core.config import (  # type: ignore[import-not-found]
     LoopPaths,
 )
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
+from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]  # noqa: E501
 
 
 
@@ -524,8 +525,13 @@ def _row(fid: str, **extra) -> str:
 _HELD_REASONS = (
     "no_ground_truth(direction='adversarial', disposition=None)",
     "no_family_ground_truth(judge_outcome=None)",
-    "forward_bad: the lesson flips a correctly-resolved case",
-    # THE FOURTH IS THE POINT, and the other three are nearly a trap. Enumerate only the
+    # NO `forward_bad:` REASON HERE, and its absence is a demand. That hold is RETRYABLE —
+    # `_gate_findings` re-admits the row next tick — so it is not "already declined" and must
+    # not be subtracted from the wake gate's count. It carries `forward_bad_reason`, a
+    # different field, for exactly that reason (#881/O2); a fixture listing it here would pin
+    # the regression this test exists to forbid. `test_881_a_retryable_forward_check_hold_...`
+    # below is the positive statement of the same rule.
+    # THE THIRD IS THE POINT, and the other two are nearly a trap. Enumerate only the
     # spellings in the tree and the fixture becomes a lookup table an implementation can
     # match prefixes against — which greens while answering "pending" for every reason it
     # does not recognise. That is not a hypothetical reader: the design's own corrected
@@ -540,12 +546,12 @@ _UNRECOGNISED_HOLD = _HELD_REASONS[-1]
 
 
 def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
-    """#881/O2: `_pending_queue_count` counts what a tick could take, not file lines.
+    """#881/O2: `_pending_queue_counts` counts what a tick could take, not file lines.
 
-    Five cases on one address, so no single mis-reading satisfies it:
+    Six cases on one address, so no single mis-reading satisfies it:
 
     * five HELD rows count as zero — the defect. Each carries `held_reason`, which is the
-      field the gate itself writes, so the count needs no second rule and no queue change.
+      PERMANENT hold's field, so the count needs no second rule about what held means.
     * five otherwise identical rows WITHOUT the field count as five. This is the control that
       makes the first case mean something: a counter that answered 0 for every queue would
       pass the first assertion and pin the drain shut instead of open.
@@ -554,6 +560,12 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
       writes today answers "pending" for a hold written by a gate since reworded or deleted,
       which is precisely the row this defect strands — the design's corrected premise says
       the trigger is legacy rows left in a deployed queue by a writer that is gone.
+    * A ROW HELD WITH NO WORDING AT ALL — `held_reason: ""`, or `null` — counts as zero too.
+      This is the same demand one step sharper, and the step a truthiness test fails: "the
+      field is the contract, its value is the holder's prose" is not satisfied by a reader
+      that asks whether the prose is non-empty. A legacy or hand-edited row stamped by a
+      writer that had no sentence to give is exactly the row this defect strands, and it
+      would have pinned the gate open on every tick.
     * a blank line still counts as nothing (the behaviour that is already right).
     * A LINE THAT IS NOT A ROW still counts as ONE, and there are two kinds of those: one
       that is not JSON, and one that is JSON but not an object. Both are work — the drain's
@@ -565,24 +577,33 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
     held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
 
     _seed_queue(paths, held)
-    assert drains._pending_queue_count(paths.pending_file) == 0, (
+    assert drains._pending_queue_counts(paths.pending_file)[0] == 0, (
         "five rows the gate has already held were counted as pending work"
     )
 
     _seed_queue(paths, [_row(f"h/{i}") for i in range(5)])
-    assert drains._pending_queue_count(paths.pending_file) == 5, (
+    assert drains._pending_queue_counts(paths.pending_file)[0] == 5, (
         "the same five rows without `held_reason` are authorable and must be counted"
     )
 
     _seed_queue(paths, [_row("legacy/0", held_reason=_UNRECOGNISED_HOLD)])
-    assert drains._pending_queue_count(paths.pending_file) == 0, (
+    assert drains._pending_queue_counts(paths.pending_file)[0] == 0, (
         f"a row held for {_UNRECOGNISED_HOLD!r} was counted as pending work; the count is "
         "reading the reason's prose rather than the field, so any hold whose wording it "
         "does not recognise — a legacy row, a reworded gate — reads as authorable"
     )
 
+    for wordless in ("", None):
+        _seed_queue(paths, [_row(f"legacy/{i}", held_reason=wordless) for i in range(5)])
+        assert drains._pending_queue_counts(paths.pending_file) == (0, 5), (
+            f"five rows stamped held_reason={wordless!r} were counted as pending work; the "
+            "count is testing whether the reason is TRUTHY rather than whether the field is "
+            "there, so a holder that had no wording to give leaves its rows waking the drain "
+            "on every tick — O2's own defect, by the one route no gate in the tree spells"
+        )
+
     _seed_queue(paths, ["", _row("h/0"), "   ", ""])
-    assert drains._pending_queue_count(paths.pending_file) == 1, "a blank line is not a row"
+    assert drains._pending_queue_counts(paths.pending_file)[0] == 1, "a blank line is not a row"
 
     # One held row (0) + five lines that are not rows (5) + one authorable row (1). The four
     # JSON-but-not-an-object lines are the ones a `json.loads`-only reader lets through.
@@ -591,11 +612,62 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
         "[1,2]", "null", '"x"', "3", "{not json at all",
         _row("c/0"),
     ])
-    assert drains._pending_queue_count(paths.pending_file) == 6, (
+    assert drains._pending_queue_counts(paths.pending_file)[0] == 6, (
         "a line that is not a row is work for the drain's unkeyable retirement and must be "
         "counted — whether it failed to parse at all, or parsed to a list, a null, a string "
         "or a number, none of which is a row"
     )
+
+
+def test_881_a_retryable_forward_check_hold_still_counts_as_work(tmp_path, monkeypatch):
+    """#881/O2: subtracting a RETRYABLE hold from the wake gate strands it forever.
+
+    Two holders write a "held" row and they do not mean the same thing. The pre-author gate
+    holds a row whose ground truth it cannot read — a fact with no writer left, so the hold
+    never moves and the row is not work. The forward check holds a lesson that would flip a
+    correctly-resolved case — and `_gate_findings` re-admits that row on the very next tick,
+    because the check's verdict depends on a corpus that moves. That row IS work.
+
+    They were one field. Counting on it answered "not work" for both, so a forward-check hold
+    stopped waking the drain the day #881 landed: never retried, never consumed, sitting in
+    the queue invisible — the failure this whole issue is named for, reintroduced by its own
+    fix. `_curator_queue_checks` names this queue as the only wake source, so nothing else
+    can raise them.
+
+    Driven on the real `BucketSpec` the drain projects through, not on a literal, so the two
+    fields cannot drift apart without this failing: if the forward-check bucket is ever
+    pointed back at `held_reason`, the row it stamps stops counting and this goes red.
+
+    The PAIRED CONTROL is a permanent hold on the same address in the same queue: it must
+    still count zero, or "count everything" would satisfy the first half.
+    """
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
+    paths = LoopPaths(repo_root=tmp_path)
+    forward_bucket = next(
+        b for b in lessons_run.FINDINGS_BUCKETS if b.name == "held_forward_bad"
+    )
+    assert forward_bucket.reason_field != "held_reason", (
+        "the forward check stamps the permanent hold's field again, so every lesson it "
+        "rejects is subtracted from the wake gate and never retried"
+    )
+    stamped = {forward_bucket.reason_field: forward_bucket.formatter("flips a resolved case")}
+
+    _seed_queue(paths, [_row(f"fb/{i}", **stamped) for i in range(5)])
+    assert drains._pending_queue_counts(paths.pending_file)[0] == 5, (
+        "a forward-check hold was subtracted from the wake gate; the next tick would have "
+        "re-admitted it, so it is work and the drain must still wake for it"
+    )
+    assert drains._has_curator_work(paths) is True, (
+        "five retryable holds left the wake gate shut, so they are never retried and never "
+        "consumed — queued and invisible"
+    )
+
+    # The control: the permanent hold on the same address still counts for nothing.
+    _seed_queue(paths, [_row(f"h/{i}", held_reason=_HELD_REASONS[0]) for i in range(5)])
+    assert drains._pending_queue_counts(paths.pending_file)[0] == 0, (
+        "a permanent hold counted as work, so the count now subtracts nothing at all"
+    )
+    assert drains._has_curator_work(paths) is False
 
 
 def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_again(

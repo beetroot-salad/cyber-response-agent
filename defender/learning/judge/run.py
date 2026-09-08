@@ -199,13 +199,16 @@ def validate_reply(text: str) -> JudgeReply:
     """Parse `text` LENIENTLY (a fence with prose BEFORE it recovers cleanly — C12) and
     validate STRICTLY: nothing is read off the reply before this returns.
 
-    "Around" was the claim and only the leading half is true. A fence FOLLOWED by a closing
-    sentence is stripped by no rule in `strip_yaml_fence` and refused here as invalid YAML —
-    one draw lost, and at the default draw count that is the whole world's grade. Left
-    standing deliberately: three attempts at the obvious repair each silently returned the
-    WRONG fenced block as the verdict on some other shape, which is worse than the refusal,
-    and what a reply carrying several fenced blocks means has never been settled. Tracked as
-    its own issue rather than guessed at here."""
+    "Around" was the claim and it is true of every shape but ONE: a reply whose FIRST
+    character is the fence and that then adds a closing sentence. `strip_yaml_fence`'s
+    unanchored rule is guarded by `not s.startswith("```")`, so leading prose is what arms it
+    — a fence with prose on BOTH sides recovers, and a fence at position 0 with prose after it
+    is stripped by no rule and refused here as invalid YAML. One draw lost, and at the default
+    draw count that is the whole world's grade. Left standing deliberately: three attempts at
+    the obvious repair each silently returned the WRONG fenced block as the verdict on some
+    other shape, which is worse than the refusal, and what a reply carrying several fenced
+    blocks means has never been settled. Tracked as its own issue rather than guessed at
+    here — and no test pins the shape, so the sentence above is prose, not a gate."""
     import yaml
 
     from defender._yaml import safe_load
