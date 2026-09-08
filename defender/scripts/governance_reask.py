@@ -91,15 +91,23 @@ def asked_governance_about(run_dir: Path, name: str) -> bool:
 
     Never raises on a run dir. A run that died before its first gather writes no log; a live
     tree's last line can be torn mid-append (which is why the read goes through the tolerant
-    ``read_jsonl_rows`` and not a hand-rolled loop). Both are False, not an exception, because
-    the caller is scoring a batch of runs and one bad tree must not take the batch down.
+    ``read_jsonl_rows`` and not a hand-rolled loop); a log can be unreadable outright. All three
+    are False, not an exception, because the caller is scoring a BATCH of runs and one bad tree
+    must not take the batch down. The ``OSError`` catch follows the decision the neighbouring
+    reader of this same file already made (``record_query.lead_rows``: "reading this table must
+    never be what starts crashing the query tool") — ``read_jsonl_rows`` screens a missing path
+    and a non-file, and lets a permission fault through.
     """
     wanted = name.strip().casefold()
     if not wanted:
         # An unresolved name must not report that governance was asked — otherwise the
         # cheapest possible harness bug reads as a perfect score.
         return False
-    for row in read_jsonl_rows(RunPaths(Path(run_dir)).executed_queries):
+    try:
+        rows = read_jsonl_rows(RunPaths(Path(run_dir)).executed_queries)
+    except OSError:
+        return False
+    for row in rows:
         if row.get("system") not in GOVERNANCE_SYSTEMS:
             continue
         if any(value.strip().casefold() == wanted for value in _param_values(row.get("params"))):

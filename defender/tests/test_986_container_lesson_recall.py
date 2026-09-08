@@ -264,3 +264,103 @@ def test_the_shipped_open_ident_selector_still_fires():
     assert LESSON in _recall(OPEN_CONTAINER_IDENT, top_k=ALL_HITS), (
         "the open-ident selector no longer reaches a container declared with an unresolved ident"
     )
+
+
+# ADVERSARY-CLOSED (#986 red-team pass). Below this line: holes where an edit to the shipped
+# lesson greened everything above while changing what the lesson is or where it can be reached.
+
+
+#: A second process shape, differing from `PROCESS_ATTR` ONLY in the vertex's class. `sudo` is
+#: not decorative: census C8 puts `process attrs.container` in baseline/t3/t8 and says nothing
+#: about the process classes there, and #986's alert is an off-hours sudo.
+PROCESS_ATTR_OTHER_CLASS = _doc(
+    HOST, ROOT, "v-003|process|sudo|sudo[pid=4242]|container=e5b0213bd690"
+)
+
+
+def test_the_process_selector_is_not_scoped_to_one_process_class():
+    """CLAIM: the process selector fires on the CELL, whatever the process is.
+
+    M3 spells `{type: process, slot: attrs.container}` with no `class`, and a class-scoped
+    selector is a strictly narrower one. Every process-side assertion above uses a single
+    fixture whose vertex is classed `bash`, so `{type: process, class: bash, slot:
+    attrs.container}` satisfies them all — and then silently misses the `sudo`, `curl` or
+    `python` process carrying the identical cell. (`_class_pins` scores a class match HIGHER,
+    so the narrowing does not even cost rank to give itself away.)
+
+    The compute side needs no twin of this test: `IDENT_IS_THE_ID_PLUS_ATTR` and
+    `NAME_ATTR_PLUS_ID` already put the id cell on a differently-classed vertex."""
+    assert LESSON in _recall(PROCESS_ATTR_OTHER_CLASS), (
+        "the lesson missed a container id on a `sudo` process while reaching the same cell on "
+        "a `bash` one — the selector is scoped to a class M3 does not name"
+    )
+
+
+def _lesson():
+    """The shipped lesson as PRODUCTION reads it.
+
+    Through `defender._corpus.iter_lessons` rather than a hand-rolled frontmatter split, so
+    these assertions are about the document the retrieval path actually sees — and so a
+    malformed edit reaches them as a skipped lesson (a `StopIteration` here) rather than as a
+    hand-parsed dict that happens to still work."""
+    from defender._corpus import iter_lessons
+
+    return next(le for le in iter_lessons(CORPUS) if le.path.stem == LESSON)
+
+
+def test_m3_does_not_re_aim_the_lesson_off_the_alert_it_is_reachable_on_today():
+    """CLAIM (O5): `source_signature` is untouched by M3.
+
+    `source_signature` gates the OTHER retrieval — `runtime/orient.py`'s PLAN-time grep — and
+    nothing in this file's frontier lane reads it, which is exactly why re-aiming it at #986's
+    own alert (`v2-off-hours-sudo`) greens every test above. That edit LOOKS like progress and
+    is a silent regression: it removes the lesson from the falco alert it was authored from and
+    is reachable on today, to chase a lane M3 does not use.
+
+    O5 says no frontier replay goes red; this is the half of O5 that no replay could catch."""
+    assert "v2-falco-suspicious-network-tool" in _lesson().fm["source_signature"], (
+        "the lesson's PLAN-time signature was changed by a frontier-lane edit — M3 adds an "
+        "`observed_nodes` lane and touches nothing else"
+    )
+
+
+def test_the_lesson_the_frontier_pushes_still_carries_its_advice():
+    """CLAIM: what is retrieved is the LESSON, not a file with the right stem.
+
+    Every assertion above reads `Hit.name`, and `match_loaded` falls back to `path.stem` when
+    the `name` key is absent — so a document gutted to its selectors satisfies all of them.
+    `render()` hands MAIN the `description` and tells it to "judge each from its description,
+    Read only the bodies that fit", so the description and the body ARE the payload; a lesson
+    that reaches the right runs and says nothing is a retrieval success and an advice failure.
+
+    Asserted as floors on the shipped document rather than as pinned prose, so the lesson stays
+    editable — what must not happen is it becoming an empty shell."""
+    lesson = _lesson()
+
+    assert len(lesson.fm.get("description", "")) > 60, (
+        "the description is what MAIN triages the hit by — an empty or stub one makes the "
+        "retrieval worthless even when it fires on exactly the right records"
+    )
+    assert len(lesson.body.split()) > 100, "the lesson body was reduced to a stub"
+
+
+def test_the_lesson_speaks_to_the_records_m3_makes_it_reach():
+    """CLAIM: the lesson's own prose covers the case M3 newly routes to it.
+
+    THE ONE FINDING THAT LANDED ON THE HONEST IMPLEMENTATION. Before M3 this lesson was reached
+    only through `frontier_nodes` — a container whose `ident` is OPEN — and its text is written
+    for exactly that: "Falco ... reports `name=<NA>` or `image=<NA>` for the triggering
+    container". M3 routes it to a new and opposite shape: a record carrying a RESOLVED container
+    id and no name, on any alert, through the settled lane. An analyst who follows the pushed
+    lesson to a `name=NA` paragraph on a record that has an id concludes the lesson is not about
+    their run, and the advice is lost precisely where M3 just spent its effort delivering it.
+
+    Pinning reach without pinning the prose that describes the reach is how a document keeps a
+    claim its selectors have outgrown."""
+    description = _lesson().fm.get("description", "").lower()
+    assert "container id" in description, (
+        "M3 routes this lesson to records whose only container trace is a resolved ID, and the "
+        "DESCRIPTION is the surface MAIN triages a pushed hit by. Today it offers only the "
+        "`name=NA` / `image=NA` shape, so an analyst on an id-carrying record reads the push as "
+        "not about their run and the advice is lost exactly where M3 spent its effort."
+    )

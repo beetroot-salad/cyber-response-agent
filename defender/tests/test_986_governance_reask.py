@@ -371,3 +371,162 @@ def test_a_malformed_row_is_skipped_and_never_counts_as_an_ask(tmp_path):
     assert _asked(run, "soc-playground") is True, (
         "positive control: the well-formed row AFTER all four degeneracies still answers"
     )
+
+
+# ADVERSARY-CLOSED (#986 red-team pass). Each test below closes a hole where an
+# implementation greened the suite above while violating a claim this file already made.
+
+
+def test_the_exported_vocabulary_is_the_designs_four_and_only_those():
+    """CLAIM: `GOVERNANCE_SYSTEMS` IS the design's set — asserted on the symbol, not inferred
+    from behaviour.
+
+    The module docstring named `audit_judge.STATE_SYSTEMS` as the trap and then left the surface
+    it lands on untested: every test above drives `asked_governance_about`, so an implementation
+    could export the borrowed set and keep a private correct one beside it. The export is a
+    public name an `experiments/` harness reads; two spellings of the vocabulary that disagree
+    is the same defect as two spellings of the predicate."""
+    from defender.scripts.governance_reask import GOVERNANCE_SYSTEMS
+
+    assert frozenset(GOVERNANCE) == GOVERNANCE_SYSTEMS, (
+        "the exported set is not the design's four — a consumer reading this name and a "
+        "consumer calling the function would report different baselines"
+    )
+    assert not GOVERNANCE_SYSTEMS & frozenset(NOT_GOVERNANCE), (
+        "the exported set carries a system that must not count"
+    )
+
+
+def test_a_params_key_is_not_a_params_value_at_any_depth(tmp_path):
+    """CLAIM: the key/value distinction holds inside nested containers too.
+
+    `test_a_params_key_is_not_a_params_value` pins it at the top level only, so a walk that
+    recurses by flattening `dict.items()` — keys and values alike — passes it and still reads a
+    NESTED map keyed by hostname as a question about that host. `params` is model-authored JSON
+    of arbitrary depth, and a relationship or tag map keyed by CI name is an ordinary shape for
+    one, so this is reachable input rather than a contrived one. A FALSE POSITIVE: it scores an
+    ask the run never made."""
+    run = _run(
+        tmp_path,
+        _row("cmdb", {"ci_name": "soc-playground", "filter": {"db-1": "depends_on"}}),
+    )
+    assert _asked(run, "db-1") is False, (
+        "`db-1` is a key one level down — the walk must recurse into values, not into items"
+    )
+    assert _asked(run, "depends_on") is True, (
+        "positive control on the same row: the nested VALUE is a value"
+    )
+    assert _asked(run, "soc-playground") is True, "positive control: the top-level value"
+
+
+def test_the_case_fold_holds_at_every_depth(tmp_path):
+    """CLAIM: nested leaves fold case exactly as top-level ones do.
+
+    `test_the_name_matches_a_params_value_case_insensitively` uses a FLAT row and every nested
+    fixture above is spelled in the same case as the name queried, so an implementation that
+    folds at depth 0 and compares nested leaves raw passes both. A FALSE NEGATIVE, and the
+    direction that matters most here: it scores a real re-ask as a miss, which reads as "the
+    intervention did nothing" on the very comparison O1 is measured by."""
+    run = _run(
+        tmp_path,
+        _row("change-mgmt", {"cis": ["web-2", "DB-1"]}, lead_id="l-002"),
+        _row("identity", {"filter": {"scope": {"host": "App-3"}}}, lead_id="l-003"),
+    )
+    assert _asked(run, "db-1") is True, "a shouted name inside a params list is the same machine"
+    assert _asked(run, "app-3") is True, "and so is one inside a nested params object"
+    assert _asked(run, "web-3") is False, "negative control: a name neither row carries"
+
+
+def test_a_params_value_that_is_a_substring_of_the_name_is_not_an_ask(tmp_path):
+    """CLAIM: the whole-value rule holds in BOTH directions.
+
+    `test_a_params_value_matches_whole_and_never_by_substring` pins only value ⊃ name (`db-11`,
+    `prod-db-1-replica`), leaving `leaf in name` — containment the other way — untouched. A
+    governance row carrying a shorter string (a site code, a short CI name, an environment
+    token) would then score as an ask about every longer machine name containing it."""
+    run = _run(
+        tmp_path,
+        _row("cmdb", {"host": "db"}, lead_id="l-002"),
+        _row("identity", {"scope": "prod"}, lead_id="l-003"),
+    )
+    assert _asked(run, "db-1") is False, "`db` is a substring of the name and not the subject"
+    assert _asked(run, "prod-db-1") is False, "nor is `prod` an ask about `prod-db-1`"
+    assert _asked(run, "db") is True, "positive control: the value the first row carried"
+    assert _asked(run, "prod") is True, "positive control on the second row"
+
+
+def test_a_refused_governance_call_counts_as_an_ask(tmp_path):
+    """CLAIM: the oracle reads `system` and `params` and NOTHING about the call's outcome — a
+    policy-denied, screen-refused or repeat-guarded governance row counts.
+
+    THIS PINS THE DESIGN'S LETTER, AND THE DESIGN MAY BE WRONG. M4 says "some row ... has the
+    name among its `params` values" and says nothing about outcome. But `runtime/query_tool.py`
+    writes a row for calls that never executed — `_grant_check` stamps a policy denial with
+    `query_id="<empty>.above-repeat-guard"` and a non-zero exit, `_screen` keeps the ordinary
+    `query_id` and stamps `USAGE_EXIT_CODE` — each keeping `system` and `params` verbatim. So on
+    the three fields M4 names, a CMDB call that was REFUSED is indistinguishable from one that
+    was ANSWERED, and a run of twelve denied calls scores 12/12.
+
+    Whether that is right turns on what O1 measures: "the run ASKS the governance systems about
+    that machine" reads as the act, which a refused call performed, and counting only answered
+    calls would score a policy misconfiguration as a failure of the skill-text intervention.
+    Counting refusals, though, lets a broken estate manufacture a rate.
+
+    The question is raised on the issue rather than settled here. This test exists so the
+    behaviour is VISIBLE and a later flip has to edit a test that explains itself, instead of
+    being a silent change to what the experiment's numbers mean."""
+    run = _run(
+        tmp_path,
+        _row(
+            "cmdb",
+            {"host": "db-1"},
+            query_id="∅.above-repeat-guard",
+            exit_code=2,
+            payload_status="absent",
+            payload_path=None,
+        ),
+    )
+    assert _asked(run, "db-1") is True, (
+        "the design's letter counts this row; if that changed, change this test and say so"
+    )
+
+
+def test_a_query_log_that_is_a_directory_answers_false_rather_than_raising(tmp_path):
+    """CLAIM: a non-file at the log's path is a False, like an absent one.
+
+    Assumption 6's enumeration stops at "missing", but the same read crosses more faults than
+    that. This one is separated from its chmod sibling below deliberately: that test cannot run
+    as root, and folding the two together let a skip carry this assertion away with it."""
+    as_dir = tmp_path / "log-is-a-dir"
+    (as_dir / "executed_queries.jsonl").mkdir(parents=True)
+    assert _asked(as_dir, "db-1") is False, "a directory where the log should be must answer False"
+
+
+def test_an_unreadable_query_log_answers_false_rather_than_raising(tmp_path):
+    """CLAIM: an `OSError` reading the log is a False, not an exception.
+
+    A chmod-000 log raises `PermissionError` from the read, which `Path.is_file()` does not
+    screen. The repo's neighbouring reader of this exact file already decided the question —
+    `record_query.lead_rows` catches `OSError` because "reading this table must never be what
+    starts crashing the query tool" — and the oracle scores a BATCH of runs, where one
+    unreadable tree must not take the batch down.
+
+    SKIPS AS ROOT, which is how CI runs, so this test is a local-only guard and the `OSError`
+    catch it asks for is not held up by CI. Named here so that is a known limit rather than a
+    surprise."""
+    import os
+
+    import pytest
+
+    blocked = _run(tmp_path, _row("cmdb", {"host": "db-1"}), name="blocked")
+    log = blocked / "executed_queries.jsonl"
+    os.chmod(log, 0o000)
+    try:
+        if os.access(log, os.R_OK):
+            pytest.skip("cannot make a file unreadable as this user (running as root?)")
+        assert _asked(blocked, "db-1") is False, "an unreadable log raised instead of answering"
+    finally:
+        os.chmod(log, 0o644)
+    assert _asked(blocked, "db-1") is True, (
+        "positive control on the same path: readable again, the answer moves"
+    )
