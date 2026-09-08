@@ -91,6 +91,7 @@ __all__ = [
     "Disposition",
     "DispositionError",
     "DispositionWarning",
+    "CORRELATION_CENSUS",
     "GATHER_CENSUS",
     "JUDGE_CENSUS",
     "WITHHELD_CENSUS",
@@ -107,10 +108,11 @@ __all__ = [
 # ---------------------------------------------------------------------------------------
 # The census, written INDEPENDENTLY of the shipped table.
 #
-# These three tuples are transcribed from the grants as they stood BEFORE #995 moved them
-# out of code (`driver/_build.py:GATHER_PAIRS` plus its per-system health-check, and
-# the judge's inline `JUDGE_TICKET_PAIRS` tuple, since retired), so the suite can assert
-# that moving the table to config changed WHO MAY CALL WHAT not at all. Held as literals for
+# These tuples are transcribed from the grants as they stood BEFORE the move out of code
+# (`driver/_build.py:GATHER_PAIRS` plus its per-system health-check and the judge's inline
+# `JUDGE_TICKET_PAIRS` tuple for #995, both since retired; `lead_zero/_spec.py`'s
+# `VerbGrant` literal for #999), so the suite can assert that moving each of them into the
+# table changed WHO MAY CALL WHAT not at all. Held as literals for
 # the same reason `_verb_authorization_632.py` holds its copy: an expected value re-derived
 # from the file under test cannot disagree with it.
 #
@@ -146,6 +148,14 @@ GATHER_CENSUS: frozenset[tuple[str, str]] = frozenset(
 #: rather than deleted: what it enumerates is "the verbs one role holds alone", and the next
 #: role to hold a private surface should find the shape here rather than invent it.
 JUDGE_CENSUS: frozenset[tuple[str, str]] = frozenset()
+
+#: The turn-zero correlation lead's grant, transcribed from the `VerbGrant` literal
+#: `lead_zero/_spec.py` held before #999 moved it into the table. Two pairs on one system is
+#: the whole safety case for a lead the harness dispatches on its own, and the move must
+#: change it by nothing.
+CORRELATION_CENSUS: frozenset[tuple[str, str]] = frozenset((
+    ("elastic", "alerts"), ("elastic", "health-check"),
+))
 
 #: Declared by an adapter and granted to NOBODY. Each needs a written reason in the table;
 #: `ticket.case-opened-at` is the one the old code never named at all — it was ungranted by

@@ -17,6 +17,13 @@ from __future__ import annotations
 
 import re
 
+from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER
+from defender.runtime.verb_dispositions import (
+    HEALTH_CHECK,
+    Disposition,
+    grant_for,
+    shipped_dispositions,
+)
 from defender.runtime.verb_grant import GrantError, VerbGrant
 
 
@@ -25,39 +32,62 @@ L3 = "l-00c"
 RESERVED_LEAD_IDS = (L0, L3)
 CORRELATION_REQUEST_LIMIT = 8
 
-#: Item 3's grant, at module scope so it is the SINGLE authored home for the vendor name on the
-#: correlation path. `CORRELATION_SYSTEM` derives from it rather than being spelled again in
-#: `GatherRequest` and the `:L findings` row, so the dispatched system cannot drift away from
-#: the grant that actually confines the lead: the grant is the authority (it is what `decide`
-#: consults), and `system` is only ever a rendering/routing key.
-CORRELATION_GRANT = VerbGrant(
-    role="lead-zero-correlation",
-    entries=(("elastic", "alerts", "r"), ("elastic", "health-check", "r")),
-)
+
+def correlation_grant(rows: tuple[Disposition, ...]) -> VerbGrant:
+    """Item 3's grant: the verb-disposition table's projection for the correlation lead.
+
+    Until #999 this was a `VerbGrant` literal here — the one grant the table could neither
+    widen nor withdraw, so a withholding written in the table was honoured by item 1 and every
+    model-dispatched lead and ignored by item 3. Now it is `grant_for`'s filter over the rows,
+    which invents nothing (#995's standing property), and the two pairs are AUTHORED in the
+    table under `CORRELATION_GRANT_HOLDER` and nowhere else.
+
+    A function over rows, not only the constant below, because `shipped_dispositions` is
+    cached per process: a test that plants a table hands its rows here.
+    """
+    return grant_for(CORRELATION_GRANT_HOLDER, rows)
+
+
+def correlation_system(grant: VerbGrant) -> str | None:
+    """The one system item 3 is dispatched against, or `None` when there is nothing to dispatch.
+
+    `None`, not a raise, when the grant holds no verb other than `health-check`: that is the
+    table WITHHOLDING the lead's query verb — a decision an author wrote down with a reason —
+    and it degrades the run (item 3 is neither claimed nor dispatched, and ORIENT says so)
+    rather than stopping it. The predecessor raised on an empty grant, which made "skip, do
+    not die" impossible. Health-check alone is not a target either: a lead whose template
+    index is empty spends its whole budget discovering that.
+
+    Two systems is unreachable past `load_dispositions`, which refuses a table naming them for
+    this holder; the raise stays as this function's own contract for a grant that did not
+    come through the loader. The choice is deliberate authoring (it selects the template
+    index's on-target tier and the prompt-cache lane), never `sorted(...)[0]` at run time.
+    """
+    systems = sorted({s for s, v, _ in grant.entries if v != HEALTH_CHECK})
+    if not systems:
+        return None
+    if len(systems) != 1:
+        raise GrantError(
+            f"the correlation grant for role {grant.role!r} reaches {len(systems)} systems "
+            f"({systems}) — the dispatched system is derived from it and only a single-system "
+            "grant determines one."
+        )
+    return systems[0]
+
+
+#: Item 3's grant and its dispatched system, projected ONCE at import from the table the rest
+#: of the runtime already reads (`driver/_build.py` loads and caches it before this package is
+#: ever imported, so a bad table stops the run there, not here). The grant is the authority —
+#: it is what `decide` consults — and `system` is only ever a rendering/routing key derived
+#: from it, so the two cannot drift. `None` means the table withheld the lead.
+CORRELATION_GRANT = correlation_grant(shipped_dispositions())
+CORRELATION_SYSTEM: str | None = correlation_system(CORRELATION_GRANT)
 
 #: The catalog template item 3's contract names outright. The grant admits exactly one query
 #: verb (`alerts`), and every other elastic template binds `esql` or `query` — so without this
 #: template grant ∩ catalog is empty and the dispatch renders `_INDEX_NONE_GRANTED`, leaving a
 #: lead to spend its whole budget discovering why nothing is runnable.
 CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
-
-
-def _sole_system(grant: VerbGrant) -> str:
-    """The one system a single-system grant reaches. Raises rather than picking, because a
-    two-system correlation grant is an authoring change whose dispatched-system choice must be
-    made deliberately (it selects the template index's on-target tier and the prompt-cache
-    lane), not silently resolved by `sorted(...)[0]` at run time."""
-    systems = sorted(grant.systems)
-    if len(systems) != 1:
-        raise GrantError(
-            f"the correlation grant for role {grant.role!r} reaches {len(systems)} systems "
-            f"({systems}) — `system` is derived from it and only a single-system grant "
-            "determines one. Name the dispatched system explicitly if this is intended."
-        )
-    return systems[0]
-
-
-CORRELATION_SYSTEM = _sole_system(CORRELATION_GRANT)
 
 #: Item 1's OWN system, and deliberately not `CORRELATION_SYSTEM`. Every backend call item 1
 #: issues names this string directly — `_capture_issue`'s `args`, `_record_manual_row`'s row +

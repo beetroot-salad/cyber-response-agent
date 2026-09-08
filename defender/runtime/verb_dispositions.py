@@ -31,6 +31,17 @@ are features: the shipped runtime stops carrying vendor names, and a product wit
 grants nothing. The second is only safe because `load_dispositions` REFUSES an absent or
 empty table rather than returning one — every refusal below is a raise.
 
+WHO A ROW MAY NAME. `roles:` carries GRANT HOLDERS, and a holder is a role that projects a
+grant — gather, and gather alone since #922 retired the judge — or ONE named narrowing of a
+role: `lead-zero-correlation`, the turn-zero correlation lead (#999). That lead is not a role
+(it runs under gather's key; see `agent_role.CORRELATION_GRANT_HOLDER`), but it holds its own,
+narrower projection, and before #999 that projection was a `VerbGrant` literal in Python that
+no row here could widen or withdraw — the two-statements-one-honoured defect this file exists
+to end, surviving in the one grant the census could not see. Naming the lead here is what
+makes the table total over GRANTS and not only over adapters. `_refuse_incoherent_narrowing`
+holds the three rules that keep "narrowing" true: the lead never holds a pair gather does not,
+reaches one system, and holds one query verb.
+
 WHY NO `verb_class` FIELD. Every shipped verb is read-class and the projection hardcodes `r`.
 That is deliberate under-expression: a write grant should cost a schema change and its own
 review, not a one-word edit to a data file. Adding `rw` here later is a change to this
@@ -47,7 +58,7 @@ from pathlib import Path
 import yaml
 
 from defender import _yaml
-from defender.runtime.agent_role import AgentRole
+from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER, AgentRole
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import is_system_name
 
@@ -61,13 +72,16 @@ _REL_TO_DEFENDER = Path("knowledge") / "environment" / "verb-grants.yaml"
 #: vendor names legitimately live.
 DISPOSITIONS_REL = f"defender/{_REL_TO_DEFENDER.as_posix()}"
 
-#: The roles a row may name. Sourced from `AgentRole` rather than respelled, so a role that is
-#: renamed cannot leave a table silently granting to a name nothing answers to. `judge` left
-#: this set in #922 with the role itself; every row that named it now carries `roles: []` and a
-#: reason, so the verbs are still described and still granted to nobody. When #1008 re-adds the
-#: role for the family judge it does NOT come back here by default — the family judge holds no
-#: verb grant, and a row may only name a role that some caller actually claims.
-KNOWN_ROLES: frozenset[str] = frozenset({AgentRole.GATHER.value})
+#: The names a row's `roles:` may carry — the grant holders (module docstring, "WHO A ROW MAY
+#: NAME"). Sourced from `agent_role` rather than respelled, so a name that is renamed cannot
+#: leave a table silently granting to a name nothing answers to. `judge` left this set in #922
+#: with the role itself; every row that named it now carries `roles: []` and a reason, so the
+#: verbs are still described and still granted to nobody. #1008 re-added the ROLE for the
+#: family judge, and deliberately not this name: the family judge holds no verb grant, and a
+#: row may only name a holder some caller actually claims.
+KNOWN_ROLES: frozenset[str] = frozenset({
+    AgentRole.GATHER.value, CORRELATION_GRANT_HOLDER,
+})
 
 #: Every shipped disposition is read-class. See the module docstring for why this is not a
 #: field in the file.
@@ -284,8 +298,72 @@ def load_dispositions(path: Path) -> tuple[Disposition, ...]:
         for verb_name, body in sorted(verbs.items(), key=lambda kv: str(kv[0])):
             rows.append(_disposition_row(path, system, verb_name, body))
     out = tuple(rows)
+    _refuse_incoherent_narrowing(path, out)
     _warn_unhealth_checkable(path, out)
     return out
+
+
+def _refuse_incoherent_narrowing(path: Path, rows: tuple[Disposition, ...]) -> None:
+    """Refuse a table under which the correlation lead is not a narrowing of gather (#999).
+
+    Three rules, and all three RAISE rather than warn, because each is a table no coherent
+    grant can be built from — the standard every other refusal in this module meets:
+
+    * The lead never holds a pair gather does not. It is bound from `GATHER_DEF` — gather's
+      compiled policy, gather's tools, gather's trace — so a pair only the lead holds is a
+      grant reaching a lead whose own role cannot. Withholding a pair from BOTH holders, or
+      from the lead alone, is fine: those are withholdings, and a withholding degrades the run
+      rather than stopping it (`lead_zero._spec`).
+    * The lead's rows reach at most one system. It is dispatched against exactly one — the
+      system selects the template index's on-target tier and the prompt-cache lane — so a
+      table naming two is an authoring ambiguity. Refused here, where the rows are and
+      naming both systems, rather than as a `GrantError` out of `lead_zero` at import.
+    * The lead holds at most ONE query verb. This is the rule that keeps the safety case a
+      table edit cannot quietly widen. The lead is dispatched by the HARNESS, with no model
+      choosing to spend it, and whether its reads are index-confined is a property of WHICH
+      verb it holds — an adapter's search verbs go through its confinement helper and its
+      native-query verb does not. The subset-of-gather rule cannot see that, because the
+      wider verb IS granted to gather: adding the lead to that row passes the first two rules
+      and hands a harness-dispatched lead an unconfined read, for a one-word edit. Before
+      #999 that widening cost a Python change; this is what keeps the cost. The lead's own
+      contract binds ONE template and makes one kind of call
+      (`lead_zero._spec.CORRELATION_TEMPLATE`), so one query verb is also all it can spend.
+
+    `health-check` is excluded from the last two rules on purpose. It is never a dispatch
+    target and never selects one — `lead_zero._spec.correlation_system` filters it out before
+    deriving the system — so counting it would refuse a table whose dispatch target is
+    perfectly unambiguous, which is not what a raise in this module means.
+    """
+    gather = AgentRole.GATHER.value
+    for d in rows:
+        if CORRELATION_GRANT_HOLDER in d.roles and gather not in d.roles:
+            raise DispositionError(
+                f"{path}: {d.system}.{d.verb} is granted to {CORRELATION_GRANT_HOLDER!r} and "
+                f"not to {gather!r}. The correlation lead runs under {gather}'s policy and "
+                f"holds a narrowing of its grant, so it may not hold a pair {gather} does "
+                "not — grant the pair to both, or withhold it from both."
+            )
+    queries = [
+        d for d in rows
+        if CORRELATION_GRANT_HOLDER in d.roles and d.verb != HEALTH_CHECK
+    ]
+    systems = sorted({d.system for d in queries})
+    if len(systems) > 1:
+        raise DispositionError(
+            f"{path}: {CORRELATION_GRANT_HOLDER!r} reaches {len(systems)} systems "
+            f"({systems}). The correlation lead is dispatched against ONE system, and which "
+            "one is a deliberate authoring choice — grant the lead rows on that system alone."
+        )
+    if len(queries) > 1:
+        named = sorted(f"{d.system}.{d.verb}" for d in queries)
+        raise DispositionError(
+            f"{path}: {CORRELATION_GRANT_HOLDER!r} holds {len(queries)} query verbs "
+            f"({named}). The correlation lead is dispatched by the harness, binds ONE "
+            "template and makes one kind of call, and its index confinement is a property of "
+            "which verb that is — a second one widens a lead no model chose to spend past "
+            "the pair its contract was written for. Grant it one query verb plus "
+            f"{HEALTH_CHECK!r}, or withhold it from every row and let the lead be skipped."
+        )
 
 
 def _warn_unhealth_checkable(path: Path, rows: tuple[Disposition, ...]) -> None:
