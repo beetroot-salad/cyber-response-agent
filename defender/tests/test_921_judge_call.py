@@ -13,9 +13,11 @@ TWO §7 RESOLUTIONS ARE APPLIED HERE AS SETTLED:
 * **J6** — a draw that fails at any stage writes a draw record carrying its failure reason,
   because a silent absence is indistinguishable from a draw never requested.
 
-RED against `d1b8b06a`: `learning/judge/run.py` does not exist, and `JUDGE_DEF` still holds
-`AgentRole.JUDGE` (the registry admits one definition per key, which is why this judge runs
-under the questioner's key instead until #922 frees it).
+RED against `d1b8b06a`: `learning/judge/run.py` does not exist. This judge ran under the
+QUESTIONER's key at first — `AgentRole.JUDGE` was the old pipeline judge's, and the registry
+admits one definition per key — then #922 retired that pipeline and freed the word, and #1008
+claimed it for this judge with a `JUDGE_DEF`, a `JudgeDeps` and a deny-all policy of its own
+(pinned in `test_1008_judge_role.py`).
 """
 from __future__ import annotations
 
@@ -424,7 +426,13 @@ def test_921_fenced_reply_with_prose_around_it_parses_and_then_validates(tmp_pat
 
 def test_921_judge_call_is_zero_grant_and_deny_all(tmp_path):
     """The judge's model call holds NO tools, NO bash shapes, NO write shapes and NO verb grant
-    — each an OMISSION over deny-all defaults, and `bind(QUESTIONER_DEF, …)` refuses BY NAME.
+    — each an OMISSION over deny-all defaults, and `bind(JUDGE_DEF, …)` refuses BY NAME.
+
+    THE DEPS CLASS IS THE JUDGE'S OWN (#1008). It was fetched here as `QuestionerDeps` while
+    this judge borrowed the questioner's key, which made the field check pass whatever the judge
+    did — the questioner's deps were field-free for the questioner's own reasons. It reads the
+    class off `JUDGE_DEF` instead, so a field added to the deps the judge actually calls with
+    fails here.
 
     Positive control: the call still reaches the model and returns a reply, so "no grant" cannot
     pass on a judge that never calls anything.
@@ -440,7 +448,7 @@ def test_921_judge_call_is_zero_grant_and_deny_all(tmp_path):
             assert not kw.get(forbidden), (
                 f"the judge's call carries {forbidden}; every one of them is an omission over a "
                 "deny-all default")
-    deps = J.mod("learning.branch.questioner").QuestionerDeps
+    deps = J.sym("learning.judge.run", "JUDGE_DEF").deps_cls
     import dataclasses
     assert not dataclasses.fields(deps), (
         "the deps the judge calls with gained a field, and a field here is a channel")

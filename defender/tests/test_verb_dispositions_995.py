@@ -431,7 +431,6 @@ def test_every_withheld_pair_in_the_shipped_table_carries_a_reason():
 # =========================================================================================
 
 
-
 def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
     """A misspelled role at a CALL SITE is the deny-all-by-accident state, one level up.
 
@@ -443,8 +442,6 @@ def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
     with pytest.raises(DispositionError) as caught:
         grant_for("gathr", rows)
     assert "gathr" in str(caught.value), "the refusal must name the role it was handed"
-
-
 
 
 def test_the_grant_is_not_a_function_of_what_is_on_disk():
@@ -459,6 +456,18 @@ def test_the_grant_is_not_a_function_of_what_is_on_disk():
     assert before == after
 
 
+@pytest.mark.parametrize("role", ["gather", "lead-zero-correlation"])
+def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
+    """The total statement of "authored, not derived", in one line per holder.
+
+    The two tests above vary a temp tree that a synthesizing implementation has no reason to
+    read — an adversarial one derived eight of gather's pairs from `PATHS.adapters_dir`, which
+    those tests never touch, and passed both. This closes it by construction: the projection
+    is a FILTER over the rows and may invent nothing. Anything synthesized, from anywhere,
+    breaks the equality."""
+    rows = load_dispositions(dispositions_path(DEFENDER))
+    assert {(s, v) for s, v, _ in grant_for(role, rows).entries} == \
+        {(r.system, r.verb) for r in rows if role in r.roles}
 
 
 # =========================================================================================
@@ -476,8 +485,19 @@ def test_the_projected_gather_grant_is_exactly_the_historical_census():
     )
 
 
+def test_the_shipped_definitions_carry_the_projected_grants():
+    """The wiring: the driver's gather definition and the correlation lead's grant must be
+    BUILT from the table, not merely accompanied by it. Checked by identity of content against
+    the projection, so a leftover hardcoded literal that happens to agree today would still be
+    caught the first time the table changes — and is caught now by the phantom/undecided
+    gates, which a literal cannot satisfy."""
+    from defender.runtime.driver import GATHER_DEF
+    from defender.runtime.lead_zero import CORRELATION_GRANT
 
-
+    rows = load_dispositions(dispositions_path(DEFENDER))
+    assert set(GATHER_DEF.verb_grant.entries) == set(grant_for("gather", rows).entries)
+    # The second grant the table projects (#999): the turn-zero correlation lead's.
+    assert set(CORRELATION_GRANT.entries) == set(grant_for("lead-zero-correlation", rows).entries)
 
 
 def test_every_projected_pair_survives_registry_construction():
@@ -488,8 +508,6 @@ def test_every_projected_pair_survives_registry_construction():
     grant = grant_for("gather", rows)
     assert grant.entries, "an empty grant would pass every phantom check vacuously"
     ModuleVerbRegistry(ADAPTERS, grant)  # raises GrantError if any pair is phantom
-
-
 
 
 # =========================================================================================
@@ -868,8 +886,6 @@ def test_no_module_under_defender_writes_the_disposition_table():
         "spelled differently and this census is looking at nothing"
     )
     assert not offenders, f"a run-path module appears to write the table: {offenders}"
-
-
 
 
 def test_the_table_loads_from_a_read_only_file():

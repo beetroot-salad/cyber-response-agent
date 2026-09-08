@@ -16,7 +16,7 @@
 | **gather** | the per-lead data-access subagent — `skills/gather/` (prompt + query templates), dispatched from `runtime/tools.py`, calls the typed `query` tool (`runtime/query_tool.py`) |
 | **the branch** / **the episode** | `learning/branch/` — forks a finished run at a chosen message and runs a family of sibling worlds from it; `cli.py` is the composition root, `estate/` is what a sibling's queries are answered from |
 | **the questioner** | `learning/branch/questioner/` — a deny-all role that authors the family manifest: sibling worlds differing by one deliberate fact. Runs no tools; its whole input is inlined by the host |
-| **the judge** | `learning/judge/` — grades an archived episode (`gradable\|discard\|corpus-contradiction`) and enqueues its findings. Runs under the questioner's definition until #1008 gives it its own role |
+| **the judge** | `learning/judge/` — grades an archived episode (`gradable\|discard\|corpus-contradiction`) and enqueues its findings. Holds its own deny-all role since #1008 — one such role per package, so the branch package's comparator stays under the questioner's |
 | **the curators** / **authors** | `learning/author/` — fold queued findings into lessons (`author/lessons/`), gated by the **forward-check** (`author/verify_forward/`) |
 | **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
 | **lessons** | `defender/lessons/` — authored by the loop, retrieved by two pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, and the `append_block`/`fix_row` block keyed on the invlang frontier (`scripts/lessons/lessons_frontier.py`, #919). Grep, no index |
@@ -115,8 +115,8 @@ produced, and a judge graded the defender against both — so everything it lear
 imagined. The disposition selected which direction(s) ran, and two further corpora
 (`lessons-actor/`, `lessons-environment/`) carried the actor-side observations. All of it is
 deleted: the pipeline, the direction routing, the three extra queues and their curators, and the
-`actor`/`oracle`/`judge` roles. `judge` returns in #1008 bound to the family judge, which until
-then runs under the questioner's definition. `git show e9e11a48` is the deletion itself.
+`actor`/`oracle`/`judge` roles. `judge` came back in #1008 bound to the family judge, which
+until then ran on the questioner's definition. `git show e9e11a48` is the deletion itself.
 
 ## Where to make changes
 
@@ -182,6 +182,7 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | One home for a helper, not the same `def` in two or more modules (jscpd's token-clone gate is structurally blind to 1–5 line copies) | `# lint-dup: ok` |
 | A render list and a key set spelled as two values (see below) | `# lint-keyset: ok` |
 | A value's SOLE PRODUCER declared as `@owns <field>` in its docstring, and only one function claiming it — the two-derivations-of-one-quantity class jscpd cannot see (#923) | `# lint-owns: ok` |
+| An AST check over shipped source resolving a name through `scripts/lint/_astlib.py`, not by matching the spelling — an alias, the attribute form or a local shadow each read right and mean something else | `# lint-ast-resolve: ok` |
 | A mixed collection classified exhaustively, with the residue reported (see below) | `# lint-selection: ok` |
 | Every writer of `investigation.md` / `report.md` to meet their schema (see below) | `# lint-artifact-gate: ok` |
 

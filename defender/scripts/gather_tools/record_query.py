@@ -17,6 +17,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
+from defender._text import as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 
 _ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
@@ -58,6 +59,18 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
     return f"{len(stdout)} bytes, {lines} line(s)"
 
 
+def _sha256_hex(text: str) -> str:
+    """`sha256` over `text` under the ONE encoding contract both hash columns share.
+
+    `surrogatepass`, NOT the `replace` the transports decode vendor bytes with: `replace` maps
+    every unencodable codepoint to the SAME U+FFFD, so two distinct strings collide — which is
+    the one thing neither of the two callers may allow, `payload_sha256` because `repeat_note`
+    reads byte identity off it and `system_fingerprint` because telling two ghosts apart is the
+    whole of what it is for. One home, so a change to the contract cannot reach one and not the
+    other."""
+    return hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
 def payload_sha256(payload_text: str) -> str:
     """The row's CONTENT identity: `sha256` of the exact text persisted to the sidecar.
 
@@ -69,7 +82,90 @@ def payload_sha256(payload_text: str) -> str:
     every unencodable codepoint to the SAME U+FFFD, so two distinct payloads would collide and
     `repeat_note` would call them byte-identical. Moot while `ensure_ascii` is on at both
     writers; `surrogatepass` keeps it true the day that changes."""
-    return hashlib.sha256(payload_text.encode("utf-8", errors="surrogatepass")).hexdigest()
+    return _sha256_hex(payload_text)
+
+
+def names_something_readable(raw_system: Any) -> bool:
+    """Does `raw_system` name anything a reader could tell apart from an empty argument?
+
+    PUBLIC because it is asked at two seams that must never disagree: this module's N5 class
+    (which calls of no readable system are ONE repeat group) and `query_tool._undeclared_target`
+    (whether the dead-end message may say "an undeclared system" or must say the arguments were
+    unreadable). A group the guard FOLDS is a group the message DESCRIBES, so two spellings of
+    the question let the sentence MAIN receives be decided by whichever member of the group
+    landed last — the "the coarsening may not make the dead end LIE" property, lost to turn
+    order.
+
+    NOT `raw_system.strip()`, which is the same question asked of `str.isspace` alone and gets
+    it wrong in the direction that matters: `.strip()` folds the SPACES but leaves every
+    zero-width and format codepoint standing (U+200B, U+200C/D, U+2060, U+FEFF, U+00AD, the C0
+    controls), so each of them, and each of their unbounded concatenations, would mint a digest
+    of its own while rendering as exactly the empty argument beside it.
+
+    THE ANSWER IS `_text.is_content_less`, NEGATED, and not a third spelling of it. That module
+    exists for this question over model-produced text, argues the `.strip()` case in the same
+    words, and pins the category set `{Cc, Cf, Cs}` — which is what makes this predicate a
+    fixed function of the string rather than of the interpreter. `str.isprintable()` is the
+    spelling to avoid here: it reads Cn off the RUNNING interpreter's UCD, so an unassigned
+    codepoint folds into the N5 group today and mints a digest of its own after a Python
+    upgrade — the same across-processes disagreement `system_fingerprint` pins `sha256` over
+    `hash()` to prevent, one function earlier. It also answers Co (private use) as unreadable,
+    which would tell MAIN a call naming a glyph the reader can see was "unreadable".
+
+    A non-`str` is UNREADABLE rather than a raise, for the reason `system_fingerprint` coerces:
+    both seams that ask this run inside a rejection handler with no `try` of their own.
+
+    WHAT THIS DOES NOT CLOSE, stated so the next reader does not have to rediscover it: a
+    character that is ASSIGNED and in a visible category but renders blank in most fonts —
+    U+3164 HANGUL FILLER (Lo), U+2800 BRAILLE PATTERN BLANK (So), U+115F/U+1160, a lone
+    variation selector (Mn) — is readable here and mints a digest of its own, so those still
+    supply an unbounded family of identities that print as nothing. That is deliberate rather
+    than overlooked: they are real characters, "renders blank" is a property of the FONT and
+    not of the string, and a predicate that guessed at it would be neither stable nor
+    explainable. The containment for a lead that spends identities is a bound on the number of
+    above-guard rejections, not a cleverer notion of emptiness — #1015."""
+    return isinstance(raw_system, str) and not is_content_less(raw_system)
+
+
+def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
+    """@owns system_key — the row's `system_key` column, and the ONLY value derived from a
+    model-authored system string that is allowed to leave the writer's frame.
+
+    `""` is "this row's identity needs no fingerprint", and it is the answer in both cases
+    where the row already separates the call by itself: a DECLARED system (`recorded_system`
+    is the model's own string, so `_request_key` discriminates on it already) and a system
+    argument with nothing readable in it (`_text.as_str` coarsens a non-string to `""` at the
+    schema placement, and "no readable system at all" is ONE mistake — two such calls stay
+    one repeat group; `names_something_readable` decides which strings are in it).
+
+    `raw_system` is COERCED rather than trusted, like every other value on this path
+    (`_text.as_str`, `_as_dict`) — the coercion is `names_something_readable`'s,
+    so the two seams cannot disagree about what a non-`str` means. Both ABOVE-GUARD call sites
+    run inside a rejection handler that has no `try` of its own, so a raise here would replace
+    the rejection — no row for the guard to count, and the fault unwinds past the lead's own
+    catch. (`lead_zero._record_manual_row` is the third caller and is not in a handler; it
+    passes a host constant, so it can only ever be answered `""`.)
+
+    Otherwise: `sha256` over the raw string, at FULL width, exactly as `payload_sha256` spends
+    it on the neighbouring column of the same row. It is not truncated, and an earlier draft
+    that truncated it to 16 was carrying two reasons that do not survive being asked for
+    evidence — "harder to reverse" (a system name is low-entropy, so it is dictionary-open at
+    any width) and "a smaller channel out of a table the gather agent can read" (the agent
+    AUTHORED the string, and `verb`, `params` and `raw_command` on this same row store
+    unbounded model text verbatim). The repo's other truncations are all identifiers a person
+    reads or types; this one is compared machine-to-machine inside `_trip` and displayed
+    nowhere, so the readability that buys them their width buys this nothing.
+
+    `sha256` itself IS pinned, and against `hash()`, whose per-process salt would make a
+    replay over a recorded table disagree with the run that wrote it.
+
+    The digest is name-shaped at either width — `is_system_name` accepts a 64-character hex
+    run as readily as a 16-character one — which is why it lives in its own column instead of
+    being folded into `system`: the corpus-path consumer reads `system`, and nothing reads
+    this."""
+    if recorded_system or not names_something_readable(raw_system):
+        return ""
+    return _sha256_hex(raw_system)
 
 
 def _request_key(system: Any, verb: Any, params: Any) -> str:
@@ -124,15 +220,21 @@ def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | N
 def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the caller must decide
     run_dir: Path, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
-    payload_digest: str,
+    payload_digest: str, system_key: str,
 ) -> dict:
     """THE append to the queries table: allocate this lead's next seq, persist the payload
-    sidecar, assemble the thirteen frozen keys, append one line.
+    sidecar, assemble the fourteen frozen keys, append one line.
 
     THE one writer for both callers (`QueryCapture._record` and the gather bash lane), so the row
     shape has a single place to drift. `error_class` is DERIVED here from `exit_code` rather than
     accepted from the caller: a writer that could disagree with `error_class_for_exit` is exactly
     the divergence the offline loop's `agent-fixable` filter cannot see.
+
+    `system_key` is REQUIRED and not defaulted, like every other column the caller decides:
+    `""` is a real answer here (this row's `system` already identifies the call), so a default
+    would let a writer that OUGHT to fingerprint silently skip it and be indistinguishable from
+    one that correctly has nothing to fingerprint. Unlike `error_class` and `payload_sha256`
+    it cannot be derived here — the string it fingerprints is by design absent from the row.
 
     ATOMICITY IS BY THREAD-CONFINEMENT, not by a lock — the two callers guard differently
     (`_record` holds `QueryCapture._seq_lock`, the bash lane holds nothing). What keeps
@@ -161,6 +263,11 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         # DERIVED here, like `error_class`: a caller-supplied hash could disagree with the bytes
         # just persisted, which is the divergence this column exists to close.
         "payload_sha256": payload_sha256(payload_text),
+        # #871: the rejection guard's identity for a row whose `system` was coarsened to `""`.
+        # PASSED IN rather than derived, because the raw string it fingerprints is exactly what
+        # this row must not carry — `system_fingerprint` owns the value, and only the two
+        # above-guard placements that mint one still hold the string to give it.
+        "system_key": system_key,
     }
     write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
     return row
@@ -336,11 +443,13 @@ def _next_seq(run_dir: Path, lead: str) -> int:
 # The repeat circuit breaker.
 #
 # `repeat_trip` is the predicate: a lead that issues the SAME request (`lead_id`, `system`,
-# `verb`, canonical `params`) `REPEAT_THRESHOLD` times has stopped producing reasoning, and the
-# third identical call is refused before it reaches the backend. The count is derived per call
-# from `lead_rows` — no new persisted state — over exactly the rows the guard itself could have
-# refused: a row answered ABOVE the guard's placement in `QueryCapture.wrap_tool_execute` is
-# never an occurrence, live or on replay.
+# `verb`, canonical `params`, and since #871 `system_key`) `REPEAT_THRESHOLD` times has stopped
+# producing reasoning, and the third identical call is refused before it reaches the backend.
+# The count is derived per call from `lead_rows` — no new persisted state — over exactly the
+# rows the guard itself could have refused: a row answered ABOVE the guard's placement in
+# `QueryCapture.wrap_tool_execute` is never an occurrence, live or on replay. `system_key` is
+# `""` on every row in THIS guard's domain, so the fifth element changes nothing here; it is
+# the companion guard (`rejection_trip`) whose rows carry it.
 
 REPEAT_THRESHOLD = 3
 
@@ -447,17 +556,41 @@ class GatherDeadEnd(Exception):
 
 def _trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, threshold: int,
-    in_domain,
+    in_domain, system_key: Any,
 ) -> RepeatTrip | None:
     """The ONE counting loop both guards drive, over the domain `in_domain` selects. Two
     hand-written loops over the same `(lead_id, system, verb, canonical(params))` would be one
     normalisation fix away from disagreeing about what a repeat is; only the DOMAIN is ever
-    meant to differ."""
-    key = _request_key(system, verb, _json_safe_params(params))
+    meant to differ.
+
+    BOTH SIDES ARE COERCED THROUGH `as_str`, and that is load-bearing rather than defensive:
+    every row recorded before #871 added the column, and every hand-built fixture row that
+    lists the keys literally, has no `system_key` at all — while a live call reconstructed
+    from such a row (which is exactly what #807's replay oracle does) passes `None`. Read
+    either as anything but `""` and each of those rows stops matching the next one, silently
+    un-bounding the rejection loop #826 item 4 closed.
+
+    `system_key` EXTENDS that identity rather than replacing any of it (#871): it is `""` for
+    every call whose `system` names itself, so it changes nothing for the first guard, and it
+    is what separates two calls that named two different UNDECLARED systems — which the row's
+    own `system` cannot do, because it deliberately holds `""` for both. REQUIRED and not
+    defaulted here, for the reason `append_query_row` gives the column: a guard that could
+    silently skip the key would key every call alike, which is the pre-#871 defect.
+
+    The KEY HALF IS COMPARED FIRST, and that is a cost decision, not a semantic one: the pair
+    is an `and`, so either order selects the same rows, but `_request_key` is a `json.dumps`
+    per row and `as_str` is an `isinstance`. #871 is precisely the change that fills a
+    lead with rows whose cheap half already differs (one per distinct undeclared system), so
+    the expensive half is the one that must not run on them. The saving is `rejection_trip`'s
+    ALONE — every row in `repeat_trip`'s domain stores `""` and every one of its callers means
+    `""`, so there the cheap half never short-circuits and is pure added compare."""
+    key_request = _request_key(system, verb, _json_safe_params(params))
+    key_system = as_str(system_key)
     matches = [
         r for r in rows
         if isinstance(r, dict) and r.get("lead_id") == lead and in_domain(r)
-        and _request_key(r.get("system"), r.get("verb"), r.get("params")) == key
+        and as_str(r.get("system_key")) == key_system
+        and _request_key(r.get("system"), r.get("verb"), r.get("params")) == key_request
     ]
     occurrence = len(matches) + 1
     if occurrence < threshold:
@@ -468,21 +601,26 @@ def _trip(
 
 def repeat_trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any,
-    threshold: int = REPEAT_THRESHOLD,
+    threshold: int = REPEAT_THRESHOLD, system_key: Any = "",
 ) -> RepeatTrip | None:
     """`None` below `threshold` occurrences of this request in `rows`, else the `RepeatTrip`
     naming the earliest matching row's seq. `params` is the LIVE call's, normalised to the stored
     form before keying, so this is the same predicate `repeat_note` and a replay over a recorded
     table both drive. `rows` need not be pre-filtered to `lead` — the identity `(lead_id, system,
-    verb, canonical(params))` is checked here."""
+    verb, canonical(params), system_key)` is checked here.
+
+    Its callers pass no `system_key` and behave exactly as they did before #871: a row this
+    guard counts reached the backend, so its `system` is a system the run declared and its
+    `system_key` is `""` on both sides of the comparison."""
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
+        system_key=system_key,
         in_domain=lambda r: r.get("query_id") != ABOVE_GUARD_QUERY_ID,
     )
 
 
 def rejection_trip(
-    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any,
+    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, system_key: Any,
     threshold: int = REPEAT_THRESHOLD,
 ) -> RepeatTrip | None:
     """The COMPANION guard's predicate — `repeat_trip` over the complementary domain: the
@@ -498,9 +636,22 @@ def rejection_trip(
     row counts only when it is `agent-fixable`. `_grant_check`'s adapter-load-error rows are
     `infra` (exit 2) and their repeat is ALREADY owned end to end by `circuit_breaker` — two
     failures mark the system down and the third call gets the down-message. Counting them here
-    would give one shape two owners and turn an infra outage into a lead-level dead end."""
+    would give one shape two owners and turn an infra outage into a lead-level dead end.
+
+    `system_key` (#871) is the identity half the ROW cannot carry: above the guard a
+    model-named undeclared system is coarsened to `""` before it is recorded, so without it
+    three rejections naming three different phantoms key the same and the third ends a lead
+    the guard promised never to end for calls that DIFFER. The caller computes it with
+    `system_fingerprint`, from the raw string it still holds.
+
+    REQUIRED here and not defaulted, unlike `repeat_trip`'s — this is the one predicate whose
+    rows carry a real fingerprint, so a caller that omitted the keyword would silently get the
+    pre-#871 identity back: every ghost keying alike, no exception, no type error, and a guard
+    that can never trip on any recorded ghost table. `repeat_trip` keeps its default because
+    `""` is what every row in ITS domain stores and what every one of its callers means."""
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
+        system_key=system_key,
         in_domain=lambda r: (
             r.get("query_id") == ABOVE_GUARD_QUERY_ID
             and r.get("error_class") == AGENT_FIXABLE_ERROR_CLASS
@@ -543,7 +694,15 @@ def rejection_dead_end_reason(system: str, verb: str, trip: RepeatTrip) -> str:
     context on a refusal path."""
     # `system`/`verb` are the RAW arguments at the schema placement and coarsen to `""` when the
     # call did not supply them as strings, so the pair can be empty. Say that, not "( )".
-    target = f"{system} {verb}".strip() or "system/verb unreadable in the call's own arguments"
+    #
+    # `names_something_readable`, NOT `.strip()` — THE SAME predicate `_undeclared_target` uses
+    # to decide the system half. `.strip()` here is what made the two disagree: a verb of one
+    # zero-width codepoint is `.strip()`-truthy, so an empty system beside it kept this
+    # fallback from firing and MAIN was handed literally "the request ()" — the "( )" this
+    # branch exists to prevent, with an unbounded invisible model string inside the parens.
+    pair = f"{system} {verb}".strip()
+    target = pair if names_something_readable(pair) else (
+        "system/verb unreadable in the call's own arguments")
     return (
         f"the request ({target}) was rejected before it ran and repeats the one already "
         f"turned back at seq {trip.first_seq}; it has now been rejected "

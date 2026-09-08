@@ -265,15 +265,23 @@ def test_shim_row_keeps_the_frozen_twelve_key_contract(tmp_path):
     #807's own sentinel was required to live inside them for the same reason.
 
     The NAME keeps #823's count because it is the identifier `spec_graph_823.yaml` discharges
-    this obligation through; the set itself is thirteen keys since #877 F-9 added
-    `payload_sha256` — a column every writer fills, which is the opposite of the per-writer key
-    this test refuses. The assertion imports `ROW_KEYS` rather than restating it, so it tracks
-    the contract instead of the number."""
+    this obligation through; the set itself is fourteen keys since #877 F-9 added
+    `payload_sha256` and #871 added `system_key` — columns every writer fills, which is the
+    opposite of the per-writer key this test refuses. The assertion imports `ROW_KEYS` rather
+    than restating it, so it tracks the contract instead of the number."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     r = _run(tmp_path, run_dir=run_dir, run_id="d823-keys", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
     ])
     assert set(r.rows[1]) == ROW_KEYS
+    # #871 by VALUE, not just by name: this is the only place the shim lane's own answer for
+    # the fourteenth column is observed on a row this lane actually wrote. Its `system` is read
+    # off a payload path THIS RUN wrote, so no model-authored string was coarsened away and
+    # there is nothing to fingerprint — and a shim row sits inside `repeat_trip`'s counted
+    # domain (`BASH_SHIM_QUERY_ID` is not `ABOVE_GUARD_QUERY_ID`), where the live guard passes
+    # `""`, so a non-empty value here would make these rows match nothing.
+    assert r.rows[1]["system_key"] == "", \
+        "the bash lane fingerprinted a row whose system it derived itself"
 
 
 def test_succeeding_reducer_shim_writes_no_row(tmp_path):

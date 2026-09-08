@@ -883,7 +883,7 @@ def _invoke_queries_table(run_dir: Path) -> Any:
                    lead_id="l-001")
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
-        payload=[{"a": 1}], exit_code=0, detail="",
+        payload=[{"a": 1}], exit_code=0, detail="", system_key="",
     ))
 
 

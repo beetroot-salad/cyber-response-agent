@@ -21,9 +21,11 @@ Everything the loop learned from was therefore imagined, and the judge was
 grading a world no system had ever answered for.
 
 That pipeline is **deleted**. Nothing under `defender/learning/pipeline/`
-exists; neither do the `actor`, `oracle` and `judge` agent roles, nor the
+exists; neither do the `actor` and `oracle` agent roles, nor the
 disposition→direction routing, nor the actor-side curators and the queues that
-fed them.
+fed them. The `judge` role went with them and then came back under a different
+owner (#1008): it now belongs to the **family judge** described below, which is
+a live stage, not to the pipeline judge described above, which is gone.
 
 One exception: `defender/lessons-actor/` and `defender/lessons-environment/`
 are **left in place as frozen archives** — nothing produces or reads them, and
@@ -68,8 +70,10 @@ What runs now branches a **real** investigation instead of inventing one.
 
 Unchanged by the cutover, and it is the joint the whole thing swings on. The
 runtime-facing output is the `defender/lessons/` corpus. Once the findings
-queue reaches `LEARNING_AUTHOR_THRESHOLD` (default **5**), the lessons
-curator folds the queued rows into `defender/lessons/*.md`:
+queue holds `LEARNING_AUTHOR_THRESHOLD` (default **5**) rows it could
+AUTHOR — a row already stamped `held_reason` stays queued and counts for
+nothing (#881) — the lessons curator folds the queued rows into
+`defender/lessons/*.md`:
 
 ```
 python3 defender/learning/loop.py --author-drain

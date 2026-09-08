@@ -217,10 +217,17 @@ FINDINGS_BUCKETS: tuple[BucketSpec, ...] = (
         formatter=str,
     ),
     # The one genuinely direction-specific bucket: a lesson the forward check says would
-    # flip a correctly-resolved case is HELD, not consumed, and its reason is prefixed so
-    # an operator can tell it from an ordinary hold.
+    # flip a correctly-resolved case is HELD, not consumed.
+    #
+    # ITS OWN FIELD, not `held_reason`. This hold is RETRYABLE — `_gate_findings` re-admits
+    # the row on the next tick, and the forward check gets another verdict once the corpus
+    # has moved — while a `held_reason` hold waits on a fact that has no writer and never
+    # moves. #881/O2 made `held_reason` the wake gate's "not work" marker, and with one field
+    # carrying both meanings that gate stopped waking for these rows: never retried, never
+    # consumed, sitting in the queue invisible. One field, one meaning; the prefix stays for
+    # an operator reading the row.
     BucketSpec(
-        name="held_forward_bad", disposition="held", reason_field="held_reason",
+        name="held_forward_bad", disposition="held", reason_field="forward_bad_reason",
         formatter=_forward_bad_reason,
     ),
 )
@@ -231,17 +238,33 @@ def commit_lessons(message: str, cfg: AuthorConfig) -> str | None:
 
 
 def write_held_report(
-    cfg: AuthorConfig, *, batch_id: str, held_forward_bad: list[dict], skipped: list[dict]
+    cfg: AuthorConfig,
+    *,
+    batch_id: str,
+    held_forward_bad: list[dict],
+    skipped: list[dict],
+    gate_held: list[dict],
 ) -> None:
-    if not held_forward_bad and not skipped:
+    """@owns gate_held_ids — the operator's one written trace of a pre-author gate hold.
+
+    THREE REASONS UNDER THREE LABELS, never merged: a `forward_bad` hold is the forward
+    check's verdict on a lesson the agent wrote, a skip is terminal, and a `gate_held` row
+    never reached the agent at all and will be held again on every tick until a human moves
+    it (#881/O3). An operator reading one label for another reads the wrong recovery.
+
+    Nothing is written when the tick held and skipped nothing: a report that gains a line per
+    tick names nothing."""
+    if not held_forward_bad and not skipped and not gate_held:
         return
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     line = (
         f"{now_iso()} batch={batch_id} "
         f"forward_bad={len(held_forward_bad)} "
         f"skipped={len(skipped)} "
+        f"gate_held={len(gate_held)} "
         f"forward_bad_ids={[h.get('finding_id') for h in held_forward_bad]} "
-        f"skipped_ids={[s.get('finding_id') for s in skipped]}\n"
+        f"skipped_ids={[s.get('finding_id') for s in skipped]} "
+        f"gate_held_ids={[g.get('finding_id') for g in gate_held]}\n"
     )
     with cfg.held_report.open("a", encoding="utf-8") as fh:
         fh.write(line)
@@ -259,14 +282,20 @@ def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
     lessons-local decoration, even though only this direction populates it.
 
     UNCONDITIONAL: the rows a tick held or skipped are the same rows whether or not other
-    rows committed, and the operator's one written trace of a `forward_bad` verdict must
-    not depend on how the tick's other rows went — least of all in a MIXED batch, the shape
-    a forward-check hold is most interesting in."""
+    rows committed, and the operator's one written trace of what the tick declined — a
+    `forward_bad` verdict, a skip, or a pre-author gate hold — must not depend on how the
+    tick's other rows went, least of all in a MIXED batch, the shape a hold is most
+    interesting in.
+
+    `outcome.gate_held` is the PRE-AUTHOR gate's own list, read off its own field rather
+    than out of `outcome.held` — which carries the AUTHOR_RESULT buckets, i.e. rows the
+    agent returned a verdict on. A gate hold never reached the agent (#881/O3)."""
     write_held_report(
         cfg,
         batch_id=outcome.batch_id,
         held_forward_bad=outcome.held.get("held_forward_bad", []),
         skipped=outcome.consumed.get("consumed_skip", []),
+        gate_held=outcome.gate_held,
     )
 
 
@@ -345,7 +374,16 @@ def _gate_findings(
     truth an adversarial/benign finding needs before it can become a lesson.
 
     `to_author` is derived HERE by subtraction, so both directions return the same 3-tuple
-    even though the policies are not one policy parameterised."""
+    even though the policies are not one policy parameterised.
+
+    AN EMPTY BATCH ANSWERS WITHOUT READING THE CORPUS. `existing_finding_ids` walks and
+    frontmatter-parses every lesson in `defender/lessons/`, which is the most expensive
+    non-agent step in a tick — and since #881 `_tick` runs the whole tick body for a queue
+    that is nothing but unreadable lines, purely to reach a rotation that clears them. There
+    is no partition of no rows, so the walk would be paid for an answer that is three empty
+    lists whatever the corpus holds."""
+    if not batch:
+        return [], [], []
     # THE SAME PREDICATE THE ROUTE USES, not a second spelling of it. `skips_forward_check`
     # already decides which rows are family rows for `queued_ids` above; re-deriving
     # `entry["direction"] == "family"` here gives one rule two homes, and the duplicate-helper

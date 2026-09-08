@@ -70,9 +70,10 @@ class AgentDefinition:
     bash_shapes: tuple[Callable[[ResolvedRoots], tuple[Grant, ...]], ...] = ()
     write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...] = ()
     #: The deps type `bind` builds for this role. Normally an `AgentDeps` subtype; typed
-    #: loosely for the one shape that cannot be one — a role holding NO grant and no run-scoped
-    #: state at all (#947's questioner), whose deps carry only their `role` ClassVar. `AgentDeps`
-    #: IS the run scope (run dir, policy, box, anchors), so a deps type with none of that cannot
+    #: loosely for the shape that cannot be one — a role holding NO grant and no run-scoped
+    #: state at all, whose deps carry only their `role` ClassVar. Two of those now: #947's
+    #: questioner, and the family judge that took a key of its own in #1008. `AgentDeps` IS the
+    #: run scope (run dir, policy, box, anchors), so a deps type with none of that cannot
     #: inherit it; `bind` refuses such a def loudly rather than reaching for a `_for_run` that
     #: is not there.
     deps_cls: type[Any] | None = None
@@ -170,9 +171,11 @@ def effective_tools_for(defn: AgentDefinition) -> ToolSet:
 
     Today this is `defn.tools` for every role, and the function is kept rather than inlined
     because what it exists to absorb is a role whose real capability is switched on PAST the
-    registry. The judge was the one such role — its closed-ticket bit was flipped per LEG by a
-    runtime `replace()` well after `AGENTS` — and #922 retired both the leg and the bit, so
-    there is no longer any role whose static shape understates it. A consumer still asks this
+    registry. The OLD PIPELINE's judge was the one such role — its closed-ticket bit was flipped
+    per LEG by a runtime `replace()` well after `AGENTS` — and #922 retired both the leg and the
+    bit, so there is no longer any role whose static shape understates it. (`AgentRole.JUDGE`
+    exists again since #1008 and is NOT that role: it is the family judge, which registers no
+    tool at all and switches nothing on at runtime.) A consumer still asks this
     question rather than reading `defn.tools` directly, because the next role that switches a
     capability at runtime must have exactly one place to declare it (N4 — the operator surface
     must not carry its own map of typed capabilities to attack)."""

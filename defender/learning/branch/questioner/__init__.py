@@ -19,12 +19,18 @@ per-lead fan-out is (`pipeline/oracle/run.py`). A "diff tool" the model could ca
 new capability class inside a deny-all role (design N9); the seat structure — one family call,
 then one call per authored world — is a property of the experiment, so the host owns it.
 
-WHY THREE CALLS SHARE ONE ROLE KEY. `agent_role.py` states the rule: nothing about a call's
-identity is keyed on the role. A second role key would buy a second compiled policy over the
-same (empty) grant and a second place for the two to drift apart. What separates the calls is
-the `agent_id` they carry — `questioner`, `questioner:b`, `questioner:c` — which is what the
-wire log and the per-id trace partition on, so a duplicate id would silently overwrite a call's
-trace rather than fail.
+WHY THREE CALLS SHARE ONE ROLE KEY. `agent_role.py` states the rule, and it is ONE KEY PER
+PACKAGE — not one key per grant. These three calls plus the comparator's share this key because
+all four are the branch package's machinery, and nothing about a call's identity is keyed on
+the role. What separates them is the `agent_id` they carry — `questioner`, `questioner:b`,
+`questioner:c` — which is what the wire log and the per-id trace partition on, so a duplicate id
+would silently overwrite a call's trace rather than fail.
+
+The rule is NOT "a second deny-all key is waste", which is what this paragraph used to say and
+which #1008 refuted by taking one: the family judge is its own package and holds its own key
+even though its policy is empty in exactly the way this one is. Two empty policies are the
+intended cost — it is what stops a grant added HERE from silently reaching a role in another
+package.
 
 WHY EVERY INPUT IS WRAPPED, INCLUDING OUR OWN OUTPUT. The questioner's entire input is the
 CAPTURED PAST: joined leads, an alert and an investigation document, all written in a run dir

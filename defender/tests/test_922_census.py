@@ -32,10 +32,20 @@ from pathlib import Path
 
 from defender.agents import AGENTS
 from defender.runtime.agent_definition import effective_tools_for
+from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER, AgentRole
 from defender.runtime.verb_dispositions import (
     dispositions_path,
     load_dispositions,
 )
+
+#: The names a table row may carry that are NOT roles, mapped to the role whose registered
+#: definition actually makes their calls. One entry since #999: the turn-zero correlation lead
+#: is bound from `GATHER_DEF`, so gather's compiled policy and tools are what it dispatches
+#: through, and only its PROJECTION of the table is narrower. Spelled here rather than skipped,
+#: because the census's question — is there something behind this grant that can call a verb —
+#: has a real answer for such a holder, and skipping it would leave the one grant #999 added
+#: uncensused.
+NON_ROLE_HOLDERS = {CORRELATION_GRANT_HOLDER: AgentRole.GATHER}
 
 DEFENDER = Path(__file__).resolve().parents[1]
 
@@ -162,6 +172,10 @@ def test_922_every_role_the_grant_table_names_can_actually_dispatch_a_verb():
     A role granted verbs in the deployment table must hold one of the three verb-bearing bits
     (`query`, `list_verbs`, `closed_tickets`) on its registered definition — otherwise the
     deployment is granting a verb to something that cannot call one.
+
+    A name in `roles:` need not BE a role: since #999 the table also names the turn-zero
+    correlation lead, which dispatches through gather's definition. `NON_ROLE_HOLDERS` resolves
+    such a holder to that definition, so the same question is asked of it rather than skipped.
     """
     rows = shipped_table()
     named: set[str] = set()
@@ -171,7 +185,8 @@ def test_922_every_role_the_grant_table_names_can_actually_dispatch_a_verb():
 
     by_value = {role.value: defn for role, defn in AGENTS.items()}
     for value in sorted(named):
-        defn = by_value.get(value)
+        runs_as = NON_ROLE_HOLDERS.get(value)
+        defn = by_value.get(runs_as.value if runs_as else value)
         assert defn is not None, f"the table grants to {value!r}, which the registry does not define"
         lanes = set(effective_tools_for(defn))
         assert lanes & {"query", "list_verbs", "closed_tickets"}, (

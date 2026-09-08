@@ -117,7 +117,9 @@ def test_held_forward_bad_stays_in_queue(tmp_repo, helpers, monkeypatch):
         for line in tmp_repo.paths.pending_file.read_text().splitlines() if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-2/0"]
-    assert "forward_bad" in pending[0]["held_reason"]
+    # The retryable hold's own field — see the note in tests/test_queue_drains_852.py.
+    assert "forward_bad" in pending[0]["forward_bad_reason"]
+    assert "held_reason" not in pending[0]
     assert tmp_repo.cfg.held_report.is_file()
     assert "run-2/0" in tmp_repo.cfg.held_report.read_text()
 

@@ -280,14 +280,21 @@ def test_d1_no_factory_in_stage_modules():
     stage modules — every production deps site obtains AgentDeps via bind, not a co-located
     factory.
 
-    THREE OF THE FIVE MODULES LEFT WITH #922 (the judge's, the actor's and the oracle's
-    engines). The demand is about every SHIPPED stage module, not about those three, so the map
-    shrank with the roster rather than the property changing."""
+    THREE OF THE FIVE MODULES LEFT WITH #922 (the OLD pipeline judge's, the actor's and the
+    oracle's engines). The demand is about every SHIPPED stage module, not about those three, so
+    the map shrank with the roster rather than the property changing.
+
+    IT GREW AGAIN WITH #1008. `learning/judge/run.py` houses a definition and its deps class,
+    which is the exact shape this rule is about. The sibling census in `test_922_witnesses.py`
+    does NOT cover it: that one derives its partition from `bind`'s refusals and files a
+    run-scope-free deps type under `refused`, where the front-door rule is not applied — the
+    same exemption the questioner has, which is why the questioner is listed here too."""
     base = PATHS.repo_root / "defender" / "learning"
     modules = {
         "verifier": base / "author" / "verify_forward" / "engine.py",
         "lead_author": base / "leads" / "lead_author_engine.py",
         "questioner": base / "branch" / "questioner" / "__init__.py",
+        "judge": base / "judge" / "run.py",
     }
     for name, path in modules.items():
         src = path.read_text()
@@ -851,10 +858,12 @@ def test_the_registered_roster_is_the_size_the_hand_maintained_censuses_claim():
     other censuses are checked against (`test_947_triplet_questioner`'s cross-check reads this
     file for the literal).
 
-    EIGHT SINCE #922: the actor, oracle and judge left `AgentRole` with the definitions they
-    were the only callers of. `judge` returns in #1008 bound to the family judge, and this
-    number moves with it — which is exactly why it is asserted in more than one place."""
+    NINE SINCE #1008: #922 took it to eight, the actor, oracle and judge leaving `AgentRole`
+    with the definitions they were the only callers of; #1008 then re-added `judge`, bound to
+    the FAMILY judge — a different role that wanted the same word, and one that ran under the
+    questioner's definition until the key was free. This number moved with it, which is exactly
+    why it is asserted in more than one place."""
     from defender.agents import QUESTIONER_DEF
 
     assert QUESTIONER_DEF.role is AgentRole.QUESTIONER
-    assert len({role for role in AgentRole}) == 8
+    assert len({role for role in AgentRole}) == 9

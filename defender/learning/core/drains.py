@@ -20,6 +20,7 @@ from defender.learning.core.config import (
     pitfalls_threshold,
 )
 from defender import _git
+from defender._io import read_jsonl_rows_report
 from defender.runtime import box as box_mod
 from defender.learning.author import drain
 from defender.learning.author import shared as _author_shared
@@ -82,11 +83,24 @@ def _maybe_trigger_author(
     box: Any = None,
 ) -> None:
     threshold = env_int(threshold_env, 5)
-    pending_count = _pending_queue_count(pending_file)
+    # HELD IS LOGGED BESIDE AUTHORABLE ON BOTH ARMS, off the same single read. Since #881 this
+    # count is authorable rows and not queue depth, so a queue of a hundred permanently-held
+    # rows logs `pending=0`, and a batch of six authored beside two hundred held ones logs
+    # `pending=6` — neither number is the file's length, and the held report, those rows' only
+    # other trace, is written from inside a tick. `_has_curator_work` says the same pair
+    # earlier and more often: it is the gate that actually declines to run a tick, and this
+    # one is reached only after it has already answered yes.
+    pending_count, held_count = _pending_queue_counts(pending_file)
     if pending_count < threshold:
-        _log(f"{pending_label}={pending_count} threshold={threshold} — {module_name} not invoked")
+        _log(
+            f"{pending_label}={pending_count} held={held_count} threshold={threshold} "
+            f"— {module_name} not invoked"
+        )
         return
-    _log(f"step={module_name} {pending_label}={pending_count} threshold={threshold}")
+    _log(
+        f"step={module_name} {pending_label}={pending_count} held={held_count} "
+        f"threshold={threshold}"
+    )
     rc = _run_curator_module(
         module_name, lambda mod: mod.run_batch(hold_committed=True, paths=paths, box=box)
     )
@@ -131,17 +145,79 @@ def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
     ]
 
 
-def _pending_queue_count(pending_file: Path) -> int:
-    if not pending_file.is_file():
-        return 0
-    return sum(1 for line in pending_file.read_text(encoding="utf-8").splitlines() if line.strip())
+def _pending_queue_counts(pending_file: Path) -> tuple[int, int]:
+    """`(authorable, held)` — how many queued rows a tick could still author, and how many it
+    has already declined. NEITHER is how many lines the file has, which is why both are
+    answered here: the number the wake gate compares is meaningless to an operator without
+    the number that explains it, and re-reading the file to say the second would parse the
+    whole queue twice on the commonest path there is.
+
+    `held_reason` IS the answer, and it is the drain's own: both arms of the pre-author gate
+    stamp it on the copy they hold, and the closing rotation writes those stamped copies back
+    into this file. So the field this reads is the field the holder wrote, one source of
+    truth, and no second rule about what "held" means (#881/O2).
+
+    IT IS THE PERMANENT HOLD'S FIELD ALONE. The forward-check bucket used to write it too,
+    and that made this count answer "not work" for a hold the very next tick would have
+    RETRIED — `_gate_findings` re-admits a forward-check row, and the check gets another
+    verdict once the corpus has moved. Those rows were then never retried and never consumed:
+    queued, uncounted, invisible, which is this issue's own subject. That bucket writes
+    `forward_bad_reason` now, so one field carries one meaning.
+
+    PRESENCE, NOT TRUTHINESS. The field is the contract and its value is the holder's prose,
+    so a row stamped `held_reason: ""` (or `null`, by a writer that had no wording to give) is
+    held — a truthiness test reads it as authorable and the wake gate spins on it every tick,
+    which is O2's own defect by the one route no gate in the tree spells today.
+
+    Counting lines instead made a permanent hold look like pending work. A hold is permanent
+    by construction — the fact it waits on has no writer any more — so five of them pinned the
+    wake gate open forever: every tick fetched, added a worktree, started a box and scrubbed
+    it, to re-hold the same five rows; and the first genuinely authorable row arrived at a
+    count already over threshold, so the curator got a batch of one against a documented five.
+
+    AN UNREADABLE LINE COUNTS AS ONE, and the tick it wakes is what clears it: a count that
+    skipped what it could not parse would strand a queue full of junk below the threshold,
+    invisible. It is NOT retired — there is no row to graveyard — so `drain._tick` runs
+    through to a rotation on an all-unreadable queue rather than returning on the empty batch,
+    and every rotation rewrites the file from the rows it can read. Returning early instead
+    left the junk counted and uncleared, which is this function's own defect wearing the other
+    mask: the gate fired on the same bytes every tick, forever."""
+    rows, unreadable = read_jsonl_rows_report(pending_file)
+    held = sum(1 for row in rows if "held_reason" in row)
+    return len(rows) - held + unreadable, held
 
 
 def _has_curator_work(paths: LoopPaths) -> bool:
-    return any(
-        _pending_queue_count(pending_file) >= env_int(env, 5)
-        for pending_file, env in _curator_queue_checks(paths)
-    )
+    """Whether any wakeable queue holds a threshold's worth of AUTHORABLE rows.
+
+    THE COUNTS ARE SAID HERE, because this is the gate that actually stops the tick.
+    `_maybe_trigger_author` logs them too, but it is only reached once this has already
+    answered True on the same file against the same threshold — so on the queue the count
+    exists for (a hundred permanent holds, authorable zero) the only line an operator would
+    otherwise see is `_run_worktree_batch`'s "nothing queued", against a file with a hundred
+    lines in it. The held report, those rows' other trace, is written from inside a tick this
+    gate is what stops from running, so silence here is silence everywhere.
+
+    SAID ONLY WHEN THE FILE IS NOT EMPTY, and as a bare status line: a queue holding nothing
+    is exactly what "nothing queued" already reports, and a line that fires every pass on
+    every queue is the thing `write_held_report`'s own docstring refuses. `authorable` covers
+    the junk-only case as well as the below-threshold one — an unreadable line counts toward
+    it, so a file of four torn lines still says so rather than passing for empty.
+
+    Not `any(...)`: every wakeable queue is read whether or not an earlier one already woke
+    the drain, because the line above is per queue and a short-circuit would drop it."""
+    woken = False
+    for pending_file, env in _curator_queue_checks(paths):
+        threshold = env_int(env, 5)
+        authorable, held = _pending_queue_counts(pending_file)
+        if authorable >= threshold:
+            woken = True
+        elif authorable or held:
+            _log(
+                f"{pending_file.name}: pending={authorable} held={held} "
+                f"threshold={threshold} — not woken"
+            )
+    return woken
 
 
 def _has_lead_author_work(paths: LoopPaths) -> bool:

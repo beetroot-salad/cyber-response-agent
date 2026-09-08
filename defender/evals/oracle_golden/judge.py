@@ -71,7 +71,16 @@ class GrammarError(ValueError):
 # the learning loop's outcome classifier; this one is the calibration judge, picked to be off
 # the oracle's own lineage. This pair also feeds `prompts_sha8` into the score tag, so
 # importing the learning config would let a change there silently re-tag every committed
-# score. Two readers of two different env vars that happen to rhyme.
+# score.
+#
+# THE ENV VARS ARE THE SAME TWO NAMES. This note used to end by denying that — calling the two
+# readers coincidental namesakes — which was wrong, and wrong in the direction that costs
+# someone a day. `JUDGE_MODEL` and `JUDGE_EFFORT` are read here AND by
+# `learning/core/config.py`, with different defaults, so setting either for this harness also
+# retargets the family judge — and, since #1008 registered that judge, aborts every ordinary
+# investigation at `run.py`'s all-roles preflight if the value names a model no provider
+# routes. What is NOT shared is the CODE, for the reasons above; the NAMES are shared, and
+# separating them is a deliberate change with fixtures behind it.
 def judge_model() -> str:  # lint-dup: ok — see the note above
     return os.environ.get("JUDGE_MODEL") or DEFAULT_JUDGE_MODEL
 

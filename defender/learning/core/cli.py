@@ -24,7 +24,9 @@ same `_pending/findings.jsonl` this drain reads. The queue and both stages below
 only the producer moved.
 
 Environment:
-  LEARNING_AUTHOR_THRESHOLD          pending findings before the lessons curator runs (default: 5)
+  LEARNING_AUTHOR_THRESHOLD          AUTHORABLE queued findings before the lessons curator
+                                     runs — rows the gate has already held do not count
+                                     toward it (default: 5)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS  per-subagent timeout (default: 450)
 
 Exit codes: 0 success / 0 REFUSED because another drainer holds the lease (the stderr line is

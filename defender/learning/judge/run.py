@@ -1,37 +1,137 @@
 """The judge's model call: the correlating prompt, lenient parse / strict validate, evidence
 grounding, and one write per (world, draw) (#921 M2, D2, D3, D4, O1, O8, O9).
 
-D2 — the judge runs under `AgentRole.QUESTIONER`'s existing definition, with `agent_id`
-prefix `"judge:"`. `AgentRole.JUDGE` was bound to the old pipeline's judge, and the registry
-admits one definition per key (`agent_definition.build_registry`), so a second definition could
-not register beside it. #922 has since freed the key; #1008 is where this role claims it.
+D2 — the judge runs under ITS OWN `AgentRole.JUDGE`, declared here as `JUDGE_DEF` with
+`agent_id` prefix `"judge:"`. It borrowed the questioner's definition until #1008: the registry
+admits one definition per key (`agent_definition.build_registry`) and the key was held by the
+OLD pipeline's judge, so a second definition could not register beside it. #922 retired that
+pipeline and freed the word; the family judge is a different role that wanted the same one.
+
+WHAT THE OWN KEY BUYS, stated carefully because the easy version of this sentence is false.
+The two policies are NOT identical: they are empty on every grant surface and differ in
+`deny_reason`. But that one differing field has a single runtime reader — the bash gate — and
+a role registering no tools never produces a gate decision at all, so the refusal text is a
+fact about the compiled object rather than something this judge will ever be shown.
+
+The benefit that actually holds is PROSPECTIVE: a grant added to `QUESTIONER_DEF` cannot reach
+the judge, and the diff that would grant the judge something has to say so in the judge's own
+file. `agent_id` partitions traces, never policies (`runtime/agent_role.py` states that rule),
+so the separation had to be the key. The enum's own comment carries the general form: one
+deny-all key per PACKAGE, which is why the branch package's comparator stays under QUESTIONER
+while this package holds its own.
 
 Model and effort come from `learning.core.config.judge_model()`/`judge_effort()` — read at call
 time in `learning/judge/__init__.py` and threaded into the `StageWiring` the orchestration
-builds, never from `questioner_model()`.
+builds, never from `questioner_model()`. `JUDGE_DEF` names the same two accessors so that a
+build made OUTSIDE that wiring reaches the judge's knobs rather than another role's; but only
+`model` is a thunk. `effort` is a plain string field, so `judge_effort()` runs once at import
+and a later `JUDGE_EFFORT` cannot move it — which is why the wiring, not the definition, is
+what the driven path reads, and why the definition's effort is a default for out-of-band
+readers rather than a live one.
 
-THE TWO JUDGES SHARE THOSE KNOBS, and that is a limitation rather than a design. `JUDGE_MODEL`
-and `JUDGE_EFFORT` already name the OLD pipeline judge's model, so setting either retargets
-both; this module went through `config`'s accessors rather than spelling the same
-`env_str("JUDGE_MODEL", …)` a second time, because two copies of one default is drift waiting
-to happen and buys no separation at all. Separating them means a knob NAME of this judge's own,
-which the spec's fixtures pin to the shared spelling — so it is a change to make deliberately,
-not a side effect of reading the env twice.
+`JUDGE_MODEL` AND `JUDGE_EFFORT` ARE NOT THIS JUDGE'S ALONE, and the collision is live rather
+than historical. #922 retired the OLD pipeline judge that used to share them, but
+`evals/oracle_golden/judge.py` still reads both env vars directly, with DIFFERENT defaults
+(`claude-opus-5` / `high` against this module's `kimi-k3` / `medium`) and folds the resolved
+model into the tag it scores golden cases under. So setting either knob for this judge re-tags
+that harness's scores, and setting it for the harness retargets this judge.
+
+Registering this definition widened that blast radius one step further, and it is worth knowing
+before touching either name: `run.py`'s all-roles preflight iterates EVERY registered
+definition's model config at INVESTIGATION startup, so a `JUDGE_MODEL` naming a model no
+provider routes now exits an ordinary alert run — and every `--resume` sibling — with rc 2,
+before any judge is reached. That is a property of registration, shared with `QUESTIONER_MODEL`
+and not new in kind; what IS new is that this knob has a second reader outside the loop.
+Separating them means a knob NAME of this judge's own, which is a deliberate change with
+fixtures behind it, not a side effect of reading the env twice.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from defender._run_paths import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
-from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
+from defender.learning.core.config import (
+    QUEUEABLE_FINDING_TYPES,
+    judge_effort,
+    judge_model,
+)
 from defender.learning.core.validate import normalize_judge_yaml
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
+from defender.runtime.agent_definition import AgentDefinition
+from defender.runtime.agent_role import AgentRole
+
+#: The judge's refusal text, carried on its compiled policy.
+#:
+#: WHO READS THIS, stated plainly because the comment here used to imply the model does. It
+#: does not: `deny_reason` reaches only `AgentPolicy` and from there the bash gate, which a
+#: role registering no bash tool never invokes. The module docstring above says the same. So
+#: this string is a property of the compiled object and of the operator surface that prints
+#: it — which is why the judge holding its OWN is worth having, and also why its benefit is
+#: prospective rather than something a draw will ever be shown.
+#:
+#: A deny reason is PROMPT SURFACE wherever it IS shown, so it names no program and no
+#: capability this role lacks: a reason mentioning a command or a tool this lane denies
+#: teaches a dead one. The grant gate sweeps every registered policy for the program half
+#: (g1, in the #575 gate suite); the tool half it cannot see, so it is a rule kept by hand.
+#:
+#: AND IT IS WRITTEN, not derived from the questioner's by substitution. An earlier draft was
+#: that role's sentence with three noun phrases swapped and the closing clauses byte-identical
+#: — which passes every "is it the same string" check while being, in the only sense that
+#: matters, the same refusal.
+#:
+#: WHAT IT CLAIMS IS WHAT THE PROMPT ACTUALLY HOLDS. A draft said "every world's record ... the
+#: sibling run dirs" were framed into the prompt; `render.render` builds the input for ONE
+#: non-control world plus the control it is compared against, so the wider claim was false in
+#: the very string whose purpose is to stop the model reaching for more.
+_JUDGE_DENY_REASON = (
+    "Blocked: nothing is reachable from a judge draw. This episode was archived before the "
+    "call began, and the world under grading — with the control it is compared against — was "
+    "rendered into the prompt you already hold. There is no path left to resolve and no "
+    "system left to ask, and a grade that reached for more would be grading something other "
+    "than what was served. Answer from the prompt, as one YAML verdict document."
+)
+
+
+@dataclass(frozen=True)
+class JudgeDeps:
+    """Frozen, and carrying NOTHING but its role — zero fields, on purpose.
+
+    Modelled on `QuestionerDeps` and for the same reason: a field here would be a channel. An
+    episode dir, a world label or an archived trajectory reachable from inside a deny-all call
+    is exactly the state this role is defined not to have — everything the judge reads is
+    joined and inlined in one user message by the host before the call is made. `role` is a
+    `ClassVar`, so it is not a field either; it is how `build_stage_agent` finds the definition
+    (`learning/_pydantic_stage.py`) and how the trace names the call.
+
+    It does NOT subclass `AgentDeps`, and that departure is the point. `AgentDeps` IS the run
+    scope — run dir, compiled policy, box executor, cwd anchor — so inheriting it would hand
+    this role a handle on every tree it may not touch. Nothing binds it either:
+    `bind(JUDGE_DEF, ...)` refuses BY NAME (`agent_definition.bind`), because there is no run
+    for a role whose entire input arrived in one prompt.
+    """
+
+    role: ClassVar[AgentRole] = AgentRole.JUDGE
+
+
+#: The family judge's whole policy. Every grant surface `AgentDefinition` carries is an
+#: OMISSION over its deny-all default — no tool set, no bash shape, no write shape, no verb
+#: grant — rather than an empty grant line, which a one-word edit reopens while the diff still
+#: reads as a tweak. That includes the tool set, which the questioner does spell out as an
+#: empty one: the field default already IS empty, so spelling it buys nothing but a place to
+#: type a capability into.
+JUDGE_DEF = AgentDefinition(
+    role=AgentRole.JUDGE,
+    model=judge_model,
+    effort=judge_effort(),
+    deps_cls=JudgeDeps,
+    deny_reason=_JUDGE_DENY_REASON,
+)
 
 #: The judge's own reply-level outcome vocabulary — NOT `_vocab.JUDGE_OUTCOME_ENUM`. That
 #: vocabulary is the FAMILY's word (`caught|survived|undecidable|discard|corpus-contradiction`,
@@ -267,12 +367,23 @@ def _parse_finding(raw: Any, index: int, *, scope: str) -> Finding:  # noqa: C90
 
 
 def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
-    """Parse `text` LENIENTLY (a fence with prose around it recovers cleanly — C12) and
+    """Parse `text` LENIENTLY (a fence with prose BEFORE it recovers cleanly — C12) and
     validate STRICTLY: nothing is read off the reply before this returns.
 
     `scope` (#1007 M4/M5) is which call this reply came from: `"world"` (the default) is a
     per-world draw, which may emit either subject; `"family"` is the family-level draw, which
-    may emit only `subject: world` findings naming no world (M5/A1)."""
+    may emit only `subject: world` findings naming no world (M5/A1).
+
+    "Around" was the claim and it is true of every shape but ONE: a reply whose FIRST
+    character is the fence and that then adds a closing sentence. `strip_yaml_fence`'s
+    unanchored rule is guarded by `not s.startswith("```")`, so leading prose is what arms it
+    — a fence with prose on BOTH sides recovers, and a fence at position 0 with prose after it
+    is stripped by no rule and refused here as invalid YAML. One draw lost, and at the default
+    draw count that is the whole world's grade. Left standing deliberately: three attempts at
+    the obvious repair each silently returned the WRONG fenced block as the verdict on some
+    other shape, which is worse than the refusal, and what a reply carrying several fenced
+    blocks means has never been settled. Tracked as its own issue rather than guessed at
+    here — and no test pins the shape, so the sentence above is prose, not a gate."""
     import yaml
 
     from defender._yaml import safe_load
@@ -588,6 +699,7 @@ def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
 
 
 __all__ = [
-    "EXAMPLE_WORLD_BUCKETS", "Finding", "JudgeReply", "SUBJECT_DEFENDER", "SUBJECT_WORLD",
-    "_build_family_prompt", "_build_prompt", "validate_reply",
+    "EXAMPLE_WORLD_BUCKETS", "Finding", "JUDGE_DEF", "JudgeDeps", "JudgeReply",
+    "SUBJECT_DEFENDER", "SUBJECT_WORLD", "_build_family_prompt", "_build_prompt",
+    "validate_reply",
 ]

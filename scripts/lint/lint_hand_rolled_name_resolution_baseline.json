@@ -1,0 +1,17 @@
+{
+  "//": "Hand-rolled AST name resolution. See scripts/lint/lint_hand_rolled_name_resolution.py.",
+  "entries": {
+    "alias-by-hand defender/tests/test_797_retirement.py::_code_tokens": "pre-existing. Collects every imported name as a TOKEN SET for a retirement sweep, not to decide one binding — the alias and the name are both wanted. Converting it would ask the resolver a question it does not have (a name that resolves to nothing is still a token here).",
+    "callee-by-name defender/tests/e2e/test_540_scrub_lifecycle.py::test_no_box_failure_path_executes_in_process": "pre-existing. Matches subprocess-ish callees inside a scrub lifecycle assertion; the receivers are duck-typed values the resolver answers None for, so the lexical match is the only available answer — but the module should still go through `_astlib` so the resolvable ones are resolved.",
+    "callee-by-name defender/tests/e2e/test_query_tool_611.py::_subprocess_calls": "pre-existing. Same shape as the scrub one: a subprocess census over real source, matching by spelling.",
+    "callee-by-name defender/tests/test_922_witnesses.py::definition_modules": "pre-existing, and the sharpest instance in the tree: it derives the agent registry's DEF census from `agents.py`'s AST by matching `build_registry` by name and reading `alias.name`, so an aliased import of a definition would drop a role out of a census three suites are checked against. Convert with `_astlib.callee`/`origin` when that witness is next touched.",
+    "callee-by-name defender/tests/test_budget_seams_631.py::test_every_agent_construction_pins_retries_explicitly": "pre-existing. Finds `Agent(...)` constructions across real runtime source by callee spelling; an aliased import of `Agent` would hide a construction from a sweep whose whole claim is that it found EVERY one.",
+    "callee-by-name defender/tests/test_budget_seams_631.py::test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it": "pre-existing. Same file, same shape, over `_make_hooks` callers.",
+    "callee-by-name defender/tests/test_curator_manifest.py::test_p4_both_callers_forward_the_abs_corpus_path": "pre-existing. A two-caller census by callee spelling.",
+    "callee-by-name defender/tests/test_grant_gate_575.py::test_f5_runtime_imports_no_learning_private_and_enumerates_no_agent": "pre-existing, and PARTLY converted by #1008: the registry-tuple half now derives its name set, but the `build_registry` callee is still matched by spelling. The remaining risk is small (agents.py imports it unaliased and a gate asserts the walk resolved the roster's size) but it is the same shape.",
+    "callee-by-name defender/tests/test_loop_config_env.py::_reads_env": "pre-existing. An env-reader census over real source by callee spelling; `env_str` aliased at an import would drop a reader.",
+    "callee-by-name defender/tests/test_meta_json_retirement_647.py::_is_run_paths_call": "pre-existing. Matches `RunPaths(...)` by spelling in a retirement sweep over real source.",
+    "callee-by-name defender/tests/test_meta_json_retirement_647.py::test_run_py_binds_the_run_dir_and_threads_it_onward": "pre-existing. Same file; asserts a threading property of run.py by callee spelling.",
+    "callee-by-name defender/tests/test_wrap_fresh_875.py::_bind_calls_under_runtime": "pre-existing. A `bind(...)` census under runtime/ by callee spelling — an aliased import would under-count the calls the demand is about."
+  }
+}

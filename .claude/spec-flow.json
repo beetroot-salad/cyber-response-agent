@@ -78,7 +78,7 @@
         "readers": [
           "defender/learning/author/drain.py::_tick",
           "defender/learning/core/persist.py::read_pitfalls",
-          "defender/learning/core/drains.py::_pending_queue_count"
+          "defender/learning/core/drains.py::_pending_queue_counts"
         ],
         "grep": [
           "findings.jsonl",

@@ -153,7 +153,14 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
 
     assert _head_files(paths.repo_root) == ["defender/lessons/vouched.md"]
     assert list(h.pending_by_id(ch)) == ["run-B/0"]
-    assert h.pending_by_id(ch)["run-B/0"]["held_reason"].startswith("forward_bad: ")
+    # `forward_bad_reason`, not `held_reason`: this hold is RETRYABLE — the next tick
+    # re-admits the row — and #881/O2 made `held_reason` the wake gate's "not work"
+    # marker, which would have stopped the drain waking for exactly these rows.
+    assert h.pending_by_id(ch)["run-B/0"]["forward_bad_reason"].startswith("forward_bad: ")
+    assert "held_reason" not in h.pending_by_id(ch)["run-B/0"], (
+        "a retryable hold stamped the permanent hold's field, so the wake gate stops "
+        "counting it and the lesson is never retried"
+    )
     report = cfg.held_report.read_text(encoding="utf-8")
     assert "run-B/0" in report, (
         "the batch committed, so the forward-check hold went unreported — the operator's one "
