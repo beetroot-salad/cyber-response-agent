@@ -138,12 +138,17 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
 from defender.scripts.gather_tools.record_query import (  # noqa: E402
     ABOVE_GUARD_QUERY_ID,
+    # #1015 — the per-lead rejection budget, the SECOND guard `_replay_rejections` must now
+    # ask. Its own suite is `tests/e2e/test_1015_rejection_budget.py`; the oracle lives here
+    # because there is exactly one of it.
+    REJECTION_BUDGET,
     REPEAT_ESCAPE,
     REPEAT_THRESHOLD,
     REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
     RepeatTrip,
     lead_rows,
+    rejection_budget_trip,
     rejection_trip,
     repeat_trip,
 )
@@ -338,8 +343,8 @@ def _replay(rows: list[dict], *, threshold: int = REPEAT_THRESHOLD) -> list[tupl
 
 
 def _replay_rejections(
-    rows: list[dict], *, threshold: int = REPEAT_THRESHOLD,
-) -> list[tuple[str, int]]:
+    rows: list[dict], *, threshold: int = REPEAT_THRESHOLD, budget: int = REJECTION_BUDGET,
+) -> list[tuple[str, int, str]]:
     """The same oracle for the COMPANION guard (#826 item 4), differing from `_replay` only in
     the production predicate it drives — which is the claim under test: the two guards are one
     counting rule over two disjoint domains, so one replay shape serves both.
@@ -362,10 +367,26 @@ def _replay_rejections(
     guards: `_grant_check`'s adapter-load rows (`infra`, the third above-guard writer, which
     reaches no guard at all) and every below-guard row, each of which can inherit a count two
     genuine rejections of the same request earned and report a trip the live run did not
-    take."""
+    take.
+
+    #1015 — THE STOP'S KIND IS PART OF THE ANSWER. Two guards now sit at these placements: the
+    identity one above, and the per-lead `rejection_budget_trip`, which counts the SAME rows
+    identity-blind and ends a lead that has spent `budget` of them however much its calls
+    differed. They are asked HERE in the order the live placement asks them — repeat FIRST,
+    because its sentence names the specific repeated request and a call that is both the 3rd
+    repeat and the B-th rejection gets the more specific one — so a replay of a recorded table
+    reports not only WHERE a lead stopped but WHICH guard stopped it. An oracle returning a
+    pair could report a stop at the right seq and be unable to say that, which is exactly the
+    audit O3 exists for: the trip row is an ordinary above-guard row (it must keep counting),
+    so the kind is not a column and only the two predicates can recover it.
+
+    SOUNDNESS PRECONDITION over ARCHIVED tables, named because it is not self-evident: the
+    budget ask is truthful there only while no archived lead carries `budget` or more
+    above-guard agent-fixable rows, which #1015's C7 establishes (42 runs, 320 leads, max 2). A
+    future arm pointed at an archived table must respect that or seed its own."""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
-    trips: list[tuple[str, int]] = []
+    trips: list[tuple[str, int, str]] = []
     for row in rows:
         lead = row.get("lead_id")
         if not isinstance(lead, str) or lead in stopped:
@@ -373,14 +394,19 @@ def _replay_rejections(
         prior = seen.setdefault(lead, [])
         guarded = (row.get("query_id") == ABOVE_GUARD_QUERY_ID
                    and row.get("error_class") == circuit_breaker.AGENT_FIXABLE_ERROR_CLASS)
-        hit = rejection_trip(
-            prior, lead, system=row.get("system"), verb=row.get("verb"),
-            params=row.get("params"), threshold=threshold,
-            system_key=row.get("system_key"),
-        ) if guarded else None
+        kind: str | None = None
+        if guarded:
+            if rejection_trip(
+                prior, lead, system=row.get("system"), verb=row.get("verb"),
+                params=row.get("params"), threshold=threshold,
+                system_key=row.get("system_key"),
+            ) is not None:
+                kind = "repeat"
+            elif rejection_budget_trip(prior, lead, budget=budget) is not None:
+                kind = "budget"
         prior.append(row)
-        if hit is not None:
-            trips.append((lead, row.get("seq")))
+        if kind is not None:
+            trips.append((lead, row.get("seq"), kind))
             stopped.add(lead)
     return trips
 
@@ -418,7 +444,7 @@ def test_the_rejection_oracle_answers_only_where_a_placement_guards():
 
     third = _row(LEAD, 2, "elastic", "nosuch-verb", p, exit_code=64,
                  query_id=ABOVE_GUARD_QUERY_ID)
-    assert _replay_rejections([*prior, third]) == [(LEAD, 2)], \
+    assert _replay_rejections([*prior, third]) == [(LEAD, 2, "repeat")], \
         "the oracle stopped tripping at all, so the two negatives above say nothing"
 
 
@@ -1462,7 +1488,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert unresolvable.gather.calls == 3, \
         "the third identical rejection did not end the lead — the companion guard is silent"
     assert INCOMPLETE_IDIOM in unresolvable.summary()
-    assert _replay_rejections(grant_rows) == [(LEAD, 2)], \
+    assert _replay_rejections(grant_rows) == [(LEAD, 2, "repeat")], \
         "the companion guard's live stop and its replay over the same table disagree"
 
     genuine_rec = VerbRecorder()

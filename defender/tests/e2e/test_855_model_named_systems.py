@@ -89,8 +89,11 @@ def _dead_end(r: _Res) -> bool:
     exhaustion a reachable end for a rejection loop — a lead naming a fresh ghost each turn
     now runs to `DEFAULT_TOOL_RETRIES` instead of stopping at three. So every POSITIVE use of
     this helper is paired with `_trip_row_written`, which reads the guard's own row; a
-    NEGATIVE use is safe on its own only while the lead under it makes fewer than ten
-    rejections, and an arm that drives more must assert the run-on some other way.
+    NEGATIVE use is safe on its own only while the lead under it makes fewer than
+    `REJECTION_BUDGET` rejections, and an arm that drives more must assert the run-on some
+    other way. (#1015 moved that ceiling from the framework's ten to the host's own budget:
+    past it the lead now ends by the host's decision, and this helper cannot tell that from
+    any other terminator either.)
 
     The idiom is `test_repeat_breaker_807.INCOMPLETE_IDIOM` WHOLE, not a prefix of it: G19
     names that sentence as the only vocabulary any prompt teaches main, and a truncated copy
@@ -518,7 +521,7 @@ def test_the_replay_of_the_recorded_table_agrees_with_the_live_run(tmp_path):
     assert _trip_row_written(same), \
         "the live run ended on something other than the guard, so the parity below is over " \
         "the wrong table"
-    assert _replay_rejections(same.rows) == [(LEAD, 2)], \
+    assert _replay_rejections(same.rows) == [(LEAD, 2, "repeat")], \
         "the replay misses the trip the live run took, on the table that run wrote"
 
 
