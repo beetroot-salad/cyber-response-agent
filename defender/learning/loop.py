@@ -35,7 +35,6 @@ from defender.learning.core.validate import (  # noqa: E402
     normalize_judge_yaml,
     strip_yaml_fence,
 )
-from defender.learning.core.prologue import extract_case_entities  # noqa: E402
 
 #: THE TWO AUTHORING STAGES AND THE NAMES THEIR CALLERS ALREADY IMPORT FROM HERE.
 #:
@@ -50,7 +49,7 @@ __all__ = [
     "author_drain", "lead_author_drain",
     "main",
     "normalize_disposition", "strip_yaml_fence", "normalize_judge_yaml",
-    "derive_alert_rule_key", "extract_case_entities",
+    "derive_alert_rule_key",
     "lead_repository",
 ]
 

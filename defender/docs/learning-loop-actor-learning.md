@@ -485,9 +485,11 @@ Rules:
   appended `attempts` counter; after N=3 attempts the entry is moved
   to `_pending/actor_observations.rejected.jsonl` for review and
   removed from the active queue. Idempotent on retry.
-- **Threshold check.** Author fires when active-queue line count
-  reaches `LEARNING_AUTHOR_THRESHOLD` (default 5). Rejected-queue
-  entries do not count toward the threshold.
+- **Threshold check.** Author fires when the active queue holds
+  `LEARNING_AUTHOR_THRESHOLD` (default 5) rows it could author — not
+  when its LINE COUNT reaches it (#881): a row the pre-author gate has
+  held carries `held_reason` and counts for nothing. Rejected-queue
+  entries do not count toward the threshold either.
 - **No outcome=`skip-passthrough` entries.** Cases that emitted
   SKIP produce no `actor_observations` and therefore no queue
   entries.

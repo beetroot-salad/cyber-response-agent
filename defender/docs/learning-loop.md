@@ -255,9 +255,15 @@ Queueable types: `lead-set`, `lead-quality`, `analyze-discipline`,
 
 ## Lesson Delivery
 
-1. **Threshold** — at `LEARNING_AUTHOR_THRESHOLD` (default 5) the drain invokes
-   `author/lessons/run.py`. `core/drains.py` `_curator_queue_checks` is the one
-   place wakeable channels are named, and since #922 it names **one**.
+1. **Threshold** — at `LEARNING_AUTHOR_THRESHOLD` (default 5) AUTHORABLE queued
+   findings the drain invokes `author/lessons/run.py`. Any row carrying
+   `held_reason` is not counted (#881): the pre-author gate's own holds are
+   permanent — the facts they wait on have no writer — so counting them woke the
+   drain every tick to hold the same rows again. The stamp is sticky and the
+   count does not distinguish, so a *forward-check* hold (step 4) is uncounted
+   too even though the next tick would retry it. `core/drains.py`
+   `_curator_queue_checks` is the one place wakeable channels are named, and
+   since #922 it names **one**.
 2. **Pre-flight** — queue lock, `defender/lessons/` git-clean, findings already
    authored filtered by `source_finding_ids`, and findings whose source carries
    no ground truth **held** (the forward-check needs one).
