@@ -218,6 +218,10 @@ just prediction grading. Do not fetch from registry systems inline
 at ORIENT or PLAN; the registry is a system of record and its
 queries belong in the lead sequence.
 
+A contract's claim names a subject and its discharge covers that
+subject only — see `:R authz` below for what a lead owes when it
+resolves the action onto a finer entity than the claim names.
+
 **One question = one lead = one gather call.** Independent questions
 that happen to ground the same hypothesis ("is the source IP
 documented?" + "is the account active?") are *separate* leads,
@@ -473,6 +477,20 @@ anchor kind applicable to that contract's predicate was actually queried
 and none answered. That contract is not worth another loop; it still
 escalates. See `defender/skills/invlang/SKILL.md` §Authz contract
 resolution for the column shape.
+
+**A contract answers about the subject its claim names.** When a later
+lead resolves the action onto a *finer* entity than the claim names — a
+container on the alerted host, a pod on a node, a VM on a hypervisor —
+the discharge you already hold stands for the coarse subject and says
+nothing about the fine one. Nothing reopens it and nothing should; the
+repair is a sibling, written in the block of the lead that resolved the
+entity. Write the privilege edge to the finer entity, and declare a
+fresh `authz?` contract whose claim spells ITS name, on the hypothesis
+it discriminates. The rest follows from rules you already have: that
+contract is undischarged, an undischarged contract on a live-weight
+hypothesis blocks a confident close, and discharging it is the
+governance re-ask. The coarse edge and the coarse contract stay on the
+record and stay counted — a finer sibling supersedes nothing.
 
 If gather's summary feels thin, **re-dispatch gather** naming the
 obligation it left unaddressed — sharper, still an obligation, not a

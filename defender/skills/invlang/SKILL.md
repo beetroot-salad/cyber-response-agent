@@ -305,6 +305,15 @@ one is refused, because a blank does not leave the slot open — it closes it
 over nothing. If the lead did not settle the slot, leave the `??` standing
 and escalate.
 
+A name a lead RESOLVES for an entity the record already declares is that
+entity's `key=ident` — sharpen the vertex rather than parking the name
+beside it. `key=attrs.<name>` on the entity, and any key on the host it
+sits inside, carry a fact ABOUT the entity; neither is where its
+identifier goes. A resolved container name written as
+`attrs.container_name` on the host leaves the container's own `ident`
+still holding the raw id, where no reader of the record can tell the two
+apart.
+
 ### `:R authz` (authz contract resolution)
 
 ```invlang
