@@ -41,7 +41,10 @@ HEAD_MOVE_REASONS = ("fork", "fold")
 #: writers (the driver's run-end flush on the MAIN session, the gather dispatch's terminator
 #: stamp on a lead's) spelling the same shape differently would make "was this cut off, and by
 #: what" a per-session-kind question for every reader joining `session` rows. `dead-end` is the
-#: only value with no main-session analogue: only a lead can be stopped by the repeat guard.
+#: only value with no main-session analogue: only a lead can be stopped by the repeat guard or
+#: the rejection budget. Both stamp this one value — the terminator column says a HOST guard
+#: ended the lead, and which of them it was is recovered from the last above-guard row's
+#: detail (`record_query.rejection_detail` owns that phrase), not from a second stamp.
 TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
 TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"
 TRUNCATED_BY_ABORTED = "aborted"

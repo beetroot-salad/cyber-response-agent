@@ -461,6 +461,45 @@ REPEAT_ESCAPE = (
 # the fixed `INCOMPLETE_IDIOM` right after this string in the message handed to main, and the two
 # must not read as opposed dispositions.
 
+# The per-lead rejection budget (#1015).
+#
+# `rejection_trip` bounds the above-guard loop BY IDENTITY: three rejections of the SAME
+# request end the lead. Nothing bounded a lead whose rejections all DIFFER, and the family of
+# ways to differ is unbounded — `names_something_readable` is deliberately blind to assigned
+# but font-blank codepoints (its docstring names #1015 as the containment), so a fresh
+# undeclared name per turn walks past the guard forever. Worse, the FRAMEWORK's own ceiling
+# does not contain it either: `ToolManager.for_run_step` rebuilds `retries` excluding tools
+# that succeeded in the step, so one good call every few turns resets `DEFAULT_TOOL_RETRIES`
+# and the lead spends its whole request budget on rejections.
+#
+# So the containment is an AGGREGATE bound, identity-blind, over exactly `rejection_trip`'s
+# domain — the one filter both placements already load their rows for. NO NEW STATE and no new
+# column: the count is recovered from the rows the guard itself wrote.
+#
+# ITS OWN LITERAL, not derived from `REPEAT_THRESHOLD`: the two answer different questions
+# (this one is sized by the archive — no lead in 42 runs / 320 leads wrote more than 2
+# above-guard agent-fixable rows) and one edit must not move both.
+#
+# INVARIANT, pinned by `test_1015_rejection_budget_predicate` rather than enforced here:
+# `REJECTION_BUDGET < driver.DEFAULT_TOOL_RETRIES`. At or above the framework's per-tool
+# ceiling the framework raises first and main is handed pydantic-ai's text and a documentation
+# URL instead of the host's own sentence — the same race `challenge_gate.Bounds.__post_init__`
+# keeps its turn bound strictly below. The check lives in a test and not in an import because
+# this module is the low-level recorder every gather path already imports, and reaching up to
+# the agent-build layer for a constant would tie the two together for one assertion.
+
+REJECTION_BUDGET = 6
+
+REJECTION_BUDGET_ESCAPE = (
+    "Further requests of that shape will be turned back the same way. Move on with what "
+    "this lead has already captured."
+)
+# Avoids the word "complete" for the reason `REPEAT_ESCAPE` does: `_run_gather`'s dead-end
+# branch appends the fixed `INCOMPLETE_IDIOM` right after this string, and the two must not
+# read as opposed dispositions. DISTINCT from `REPEAT_ESCAPE` — the escape is the only part of
+# the dead-end message that says what kind of stop this was, and one shared sentence would
+# leave main unable to tell "you are repeating yourself" from "you have spent the allowance".
+
 RESERVED_QUERY_ID_PREFIX = "∅."
 """The prefix every writer-only sentinel `query_id` carries, and the ONE screen that keeps a
 model from spelling one.
@@ -538,6 +577,27 @@ class RepeatTrip:
 
     first_seq: int | None
     occurrence: int
+
+
+@dataclass(frozen=True)
+class RejectionBudgetTrip:
+    """One trip of the per-lead rejection budget: this call's 1-based `occurrence` among the
+    lead's above-guard agent-fixable rejections, and the `budget` it reached.
+
+    INTEGERS ONLY, and that is half of why the budget stop cannot leak (#1015 S1). The other
+    half is `_run_gather`'s dead-end arm, which composes main's summary from `reason` and
+    `escape` alone. A `str` field here — the ghost's name, its fingerprint, a params fragment —
+    would put a model-authored, unbounded string one attribute access away from
+    `rejection_budget_dead_end_reason`, which is the #855 leak channel. There is no field for
+    one to travel in, so no future edit of the sentence can spend it.
+
+    Deliberately NOT a `RepeatTrip` with a different threshold: `first_seq` is meaningless here
+    (the budget names no one earlier request), and the two dispatchers below tell the guards
+    apart by TYPE. A shared type would make that a flag, and a flag read wrongly would hand
+    main the other guard's sentence."""
+
+    occurrence: int
+    budget: int
 
 
 class GatherDeadEnd(Exception):
@@ -659,6 +719,53 @@ def rejection_trip(
     )
 
 
+def rejection_budget_trip(
+    rows: list[dict], lead: str, *, budget: int = REJECTION_BUDGET,
+) -> RejectionBudgetTrip | None:
+    """`None` while this lead has spent fewer than `budget` above-guard rejections, else the
+    `RejectionBudgetTrip` for the call being guarded (#1015).
+
+    THE DOMAIN IS EXACTLY `rejection_trip`'S — `lead_id`, `ABOVE_GUARD_QUERY_ID`, and
+    `agent-fixable` — and that identity of domains is the whole design. Wider by `error_class`
+    and an adapter outage becomes a lead-level dead end on rows `circuit_breaker` already owns
+    end to end. Wider than `ABOVE_GUARD_QUERY_ID` and it swallows the below-guard parameter
+    refusals, which run 4+ per lead in 30 of 320 archived leads (tails of 30, 71 and 98) —
+    those are a model iterating on a REAL system's parameters under specific coaching, and a
+    bound of 6 over them would end healthy leads.
+
+    IDENTITY-BLIND, which is the ONE way it differs from `rejection_trip` and the reason it is
+    a second predicate rather than another `threshold` on the first: it reads no `system`, no
+    `verb`, no `params`, no `system_key`. Those are exactly the fields an attacker-influenced
+    turn chooses freely, so any of them in the count is a knob for evading it. It does not go
+    through `_trip` for the same reason — `_trip` IS the identity rule, shared so the two
+    guards can never disagree about what a repeat is, and this predicate has no identity to
+    agree about.
+
+    NO RESET ON SUCCESS. The count is over the lead's LIFETIME rows, and that is the defect:
+    the framework's own per-tool counter drops on a successful call, which is precisely what
+    un-bounds the loop. A lead that recovered and then thrashes again still ends at `budget`.
+
+    ACCUMULATE BEFORE STOP, the shape `rejection_trip` has: the guarded call's own rejection
+    row is written whether or not it trips, so `occurrence = count + 1` and a recorded table
+    holds exactly `budget` matching rows at a trip. A replay over that table reaches the same
+    verdict at the same row — which is what makes the stop recoverable offline.
+
+    `>=` rather than `==`: the `query` tool is not declared `sequential`, so two calls in one
+    model step can both read a stale count and the second can arrive past the budget. The stop
+    then lands within the step rather than at the exact B-th row, and it must still land."""
+    count = sum(
+        1 for r in rows
+        if isinstance(r, dict)
+        and r.get("lead_id") == lead
+        and r.get("query_id") == ABOVE_GUARD_QUERY_ID
+        and r.get("error_class") == AGENT_FIXABLE_ERROR_CLASS
+    )
+    occurrence = count + 1
+    if occurrence < budget:
+        return None
+    return RejectionBudgetTrip(occurrence=occurrence, budget=budget)
+
+
 def _ordinal(n: int) -> str:
     if 10 <= n % 100 <= 20:
         suffix = "th"
@@ -708,6 +815,92 @@ def rejection_dead_end_reason(system: str, verb: str, trip: RepeatTrip) -> str:
         f"turned back at seq {trip.first_seq}; it has now been rejected "
         f"{trip.occurrence} times for the same reason. The rejection is structural, not a "
         "transient to retry through."
+    )
+
+
+def rejection_budget_dead_end_reason(trip: RejectionBudgetTrip) -> str:
+    """The string `GatherDeadEnd.reason` carries for a BUDGET stop (#1015).
+
+    TAKES NO TARGET AND NO VERB, and the absent parameters are the point rather than an
+    economy: the count is over the LEAD, not over a request, so there is no one request to
+    name — and both placements that reach this function are holding a raw model string at the
+    moment they call it (`wrap_tool_validate`'s pre-validation arguments, `_grant_check`'s
+    unresolved system). `rejection_dead_end_reason` next door takes a target because its
+    sentence is ABOUT one specific repeated request; this one would only be able to spend a
+    string, never to need it. A parameter it did not use would be one edit from being used.
+
+    Says WHAT was wrong with the requests in categories, not in the model's own words: the
+    three above-guard shapes are an undeclared system, an absent verb, and arguments the
+    schema could not read. That is enough for the lead to know why without a byte of what it
+    asked for crossing back.
+
+    The count is `occurrence`, NOT `budget`. They coincide on an ordinary stop and the design
+    admits they need not — parallel calls in one step can push the occurrence past the
+    allowance — and a sentence reporting the allowance would then tell main a number of
+    rejections that did not happen."""
+    return (
+        f"{trip.occurrence} requests in this lead were rejected before they ran — each named "
+        "a system the run does not declare, a verb it does not have, or arguments the tool "
+        "could not read. That is the lead's whole allowance for such requests; the rejections "
+        "are structural, not transients to retry through."
+    )
+
+
+def rejection_detail(trip: RepeatTrip | RejectionBudgetTrip, rejection: str = "") -> str:
+    """THE ONE PRODUCER of an above-guard trip row's `detail` — the shipped form of "which
+    guard stopped this lead", for every reader of the queries table.
+
+    NO NEW COLUMN carries this, and none may: the trip row must stay an ordinary
+    `ABOVE_GUARD_QUERY_ID` / `agent-fixable` row so it keeps counting, which is what lets a
+    replay reproduce the run that wrote it. So the leading PHRASE is the whole discriminator,
+    which is why it needs a single producer even though no field was added — both above-guard
+    placements call this rather than each choosing a sentence per trip type, and the offline
+    readers key on what it wrote. A second placement composing its own would be a second,
+    silently diverging answer to a question the table can only be asked one way.
+
+    The two branches must not be confusable, and that is #871's owner's promise (O2): the
+    repeat guard ends a lead only for a call that REPEATS one before it, so a budget stop —
+    which ends a lead for SPENDING, on calls that all differed — must never say "turned back
+    at seq". The repeat branch is DELEGATED to `rejection_trip_detail` rather than restated
+    here: that sentence already has an owner and a copy would drift from it.
+
+    `rejection` is the tail for the same reason it is one there: this row is both the rejection
+    record and the trip record, and replacing the detail outright would make the append-only
+    table permanently forget why the last call was malformed. The budget phrase leads, so it
+    survives `_record`'s 160-character digest cut whole and the tail is what gets eaten."""
+    if isinstance(trip, RepeatTrip):
+        return rejection_trip_detail(trip, rejection)
+    detail = (
+        f"refused: {_ordinal(trip.occurrence)} rejection before anything ran in this lead "
+        f"(budget {trip.budget})"
+    )
+    return f"{detail}; rejected: {rejection}" if rejection else detail
+
+
+def rejection_dead_end(
+    trip: RepeatTrip | RejectionBudgetTrip, target: str, verb: str,
+) -> GatherDeadEnd:
+    """THE ONE PRODUCER of the above-guard `GatherDeadEnd` pair — the reason and escape main's
+    summary is composed from, for both placements and both guards.
+
+    ONE dispatcher instead of a type switch at each placement, for the reason `_coarsen`
+    exists one file over: the two placements read mirrored argument surfaces and have already
+    had a `(raw, recorded)` pair transposed between them once. A budget branch spelled twice is
+    a budget branch that can be spelled once with the repeat guard's escape, and the failure is
+    silent — main simply receives the wrong explanation of why its lead stopped.
+
+    `target` and `verb` are DISCARDED on the budget branch, not merely unspent: they are the
+    model's own arguments (already coarsened by `_undeclared_target`, but derived from them),
+    and the budget stop's contract is that no byte of them crosses into main's context. The
+    repeat branch spends both, which is why they are still parameters at all."""
+    if isinstance(trip, RepeatTrip):
+        return GatherDeadEnd(
+            reason=rejection_dead_end_reason(target, verb, trip),
+            escape=REPEAT_ESCAPE,
+        )
+    return GatherDeadEnd(
+        reason=rejection_budget_dead_end_reason(trip),
+        escape=REJECTION_BUDGET_ESCAPE,
     )
 
 
