@@ -53,30 +53,21 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
     `_result_identity` reads it beside `payload_sha256`. On a FAILURE it is the discriminating
     half instead: every failed row hashes the same empty payload, so only the error text
     separates two of them — WITH ONE CLASS EXCEPTED since #1016. An above-guard rejection whose
-    `system` the host coarsened away records a detail composed from HOST material, and BOTH
-    placements collapse: the grant check writes one literal for every such row, and the schema
-    placement writes pydantic's message template with the offending field rendered as the
-    placeholder `argument` whenever the model chose its name. So two rejections naming two
-    different undeclared systems — and two schema rejections over two differently-misspelled
-    arguments — now share this string as well as their payload hash.
+    `system` the host coarsened away records HOST material, and both placements collapse: the
+    grant check writes one literal, and the schema placement renders a model-chosen field name
+    as the placeholder `argument`. Two rejections naming two different undeclared systems now
+    share this string as well as their payload hash.
 
-    WHAT KEEPS THAT SAFE IS THE ABOVE-GUARD EXCLUSION, not this column and not `system_key`.
+    THE ABOVE-GUARD EXCLUSION is what keeps that safe — not this column and not `system_key`.
     `_result_identity`'s only consumer is `repeat_note`, which skips every
-    `ABOVE_GUARD_QUERY_ID` row, so no collapsed pair can ever be compared; and
-    `collect_general_failures` drops a systemless row before `pitfall_key` merges on the
-    digest. `system_key` separates two READABLE ghosts for the companion guard alone — it is
-    `""` for the whole N5 group, and `lead_repository.QueryRow` does not project it, so no
-    rendered view carries it. A reader wanting to separate two READABLE coarsened rejections
-    has to go back to `executed_queries.jsonl` itself and read `system_key` there.
-
-    FOR THE N5 GROUP THERE IS NO SUCH FALLBACK, and saying so is the honest half of the
-    trade #855 and #1016 make together: an unreadable system is coarsened to `""` AND folded
-    to `system_key == ""`, `_raw_command` is built from the coarsened name, and this column
-    now holds one literal — so two rejections naming two DIFFERENT invisible strings are
-    byte-identical in every column the raw table has, and the string each named is recoverable
-    from nothing. That is the design — `system_fingerprint` folds the group on the grounds that
-    "no readable system at all" is ONE mistake — not an oversight; but a reader sent to the raw
-    table for that class would be sent to a surface that cannot answer."""
+    `ABOVE_GUARD_QUERY_ID` row, so no collapsed pair is ever compared, and
+    `collect_general_failures` drops a systemless row before `pitfall_key` merges on the digest.
+    `system_key` separates two READABLE ghosts for the companion guard alone, and only in the
+    raw table: it is `""` for the whole N5 group and `lead_repository.QueryRow` does not project
+    it. For that group there is no fallback at all — two rejections naming two different
+    invisible strings are byte-identical in every column, and neither string is recoverable.
+    That is #855 and #1016's trade, not an oversight, but a reader sent to the raw table for
+    that class would be sent to a surface that cannot answer."""
     if exit_code != 0:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0

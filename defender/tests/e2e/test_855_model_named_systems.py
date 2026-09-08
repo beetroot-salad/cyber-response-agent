@@ -49,22 +49,22 @@ placement records `str(e)`, whose pydantic text names the model's own chosen arg
 error's `loc`) on every extra-argument failure and the system VALUE whenever it was not a
 string.
 
-O1 is the honest version of that claim, and it is stated over the HOST-AUTHORED columns only:
-every key `append_query_row` writes except `verb`, `params` and `raw_command`, which hold the
-call's own arguments verbatim by design and always will (#1016 N1 — scrubbing them would
-destroy the row's audit value, and `system_fingerprint`'s docstring already concedes the
-channel). On a row whose `system` was coarsened to `""` — a row where the host DECIDED to
-withhold the name — no host-authored column may echo anything the model wrote. The oracle is a
-SUBSTRING search over `_host_authored(row)`, and it REPLACES the equality arms rather than
-sitting beside them: an arm that both checks cannot go red for the reason #1016 exists.
+O1 is the honest version of that claim, stated over the HOST-AUTHORED columns: every key
+`append_query_row` writes except `verb`, `params` and `raw_command`, which carry the call's own
+arguments and stay that way (#1016 N1 — scrubbing them would destroy the row's audit value, and
+`system_fingerprint`'s docstring already concedes the channel). `raw_command` is the partial
+exemption and `MODEL_AUTHORED_COLUMNS` says why: its first field is host-composed, so a separate
+arm keeps that field inside the sweep. On a row whose `system` was coarsened to `""` no
+host-authored column may echo anything the model wrote. The oracle is a SUBSTRING search over
+`_host_authored(row)`, and it REPLACES the equality arms rather than sitting beside them: an arm
+asserting both cannot go red for the reason #1016 exists.
 
-The verb is spelled `ghostverb` wherever the check runs, because `query` is the tool's OWN name
-and pydantic prints it in the header of every message this schema produces (`1 validation error
-for query`) — a digest carrying `query` says nothing about whether the model's verb reached it.
-The scope is deliberately narrow and #1016 N3 says so out loud: a row that KEPT its system
-records `str(e)` and `decision.refusal` byte-for-byte as before, model text and all, and
-`test_a_row_that_kept_its_system_records_the_rejection_verbatim` is the arm that holds the fix
-to that line.
+The verb is spelled `ghostverb` wherever the check runs — `query` is the tool's OWN name and
+pydantic prints it in every message this schema produces, so a digest carrying it says nothing
+about whether the model's verb reached the row. The scope is deliberately narrow, as N3 says out
+loud: a row that KEPT its system records `str(e)` and `decision.refusal` byte-for-byte as
+before, and `test_a_row_that_kept_its_system_records_the_rejection_verbatim` holds the fix to
+that line.
 """
 from __future__ import annotations
 
@@ -116,18 +116,16 @@ ZERO_WIDTH = "\u200b"
 #: at the FRONT because the front is the half that survives.
 LONG_GHOST_VALUE = "ghostlongvalue" + "x" * 300
 
-#: The three columns `append_query_row` fills with the call's OWN arguments, verbatim and by
-#: design. #1016 N1 keeps them that way: they are what makes the row an audit record of what was
-#: attempted, and `record_query.system_fingerprint`'s docstring already concedes that they store
-#: unbounded model text. O1 is therefore quantified over the COMPLEMENT — the host's own columns.
+#: The three columns carrying the call's own arguments, which #1016 N1 keeps verbatim: they are
+#: what makes the row an audit record of what was attempted, and `system_fingerprint`'s docstring
+#: already concedes they store unbounded model text. O1 is quantified over the COMPLEMENT.
 #:
-#: `raw_command` IS NOT WHOLLY MODEL-AUTHORED, and exempting the column is not the same as
-#: exempting all of it: `_record` builds it as `_raw_command(system, verb, params)` from the
-#: ALREADY-COARSENED system, so a coarsened row reads `'' ghostverb 'native_query=…'` and its
-#: FIRST shlex field is host material. Exempting the whole column would put that one field
-#: outside every O1 negative in this file — in exactly the place #855's leak lived, and on the
-#: value `_queued()` hands the pitfalls curator as `executed_query`. `_raw_command_system`
-#: below is what keeps it inside, so the exemption covers only the fields it is claimed for.
+#: `raw_command` IS NOT WHOLLY MODEL-AUTHORED: `_record` builds it as
+#: `_raw_command(system, verb, params)` from the ALREADY-COARSENED system, so a coarsened row
+#: reads `'' ghostverb 'native_query=…'` and its FIRST shlex field is host material. Exempting
+#: the whole column would put that field outside every O1 negative here — in exactly the place
+#: #855's leak lived, and on the value `_queued()` hands the curator as `executed_query`.
+#: `_raw_command_system` below is what keeps it inside.
 MODEL_AUTHORED_COLUMNS = frozenset({"verb", "params", "raw_command"})
 
 
@@ -138,34 +136,25 @@ def _bad_args(system: Any, params: dict = PARAMS, *,
     pre-validation arguments. `system` is whatever the model put there; that is the point.
 
     `verb` and `extra_key` are KEYWORD-ONLY and default to the spelling every pre-#1016 arm
-    drove, so none of them changes shape here. #1016 needs both spelled ghost-side at the arms
-    that check the row's host-authored columns:
+    drove, so no existing arm changes shape. #1016 spells both ghost-side where it checks the
+    row's host-authored columns:
 
-    * `verb="ghostverb"` — `query` is the TOOL's own name, and pydantic leads every message this
-      schema produces with it (`1 validation error for query`). A digest containing `query`
-      therefore says nothing about whether the MODEL's verb reached the row, so the default
-      spelling makes the O1 oracle unable to fail for the reason it exists.
-    * `extra_key="ghostkeyname"` — the model CHOOSES this name, and pydantic reports it as the
-      error's `loc`. It lands in every extra-argument digest whether the system string was
-      readable or not, so it catches a renderer that only stopped printing input values —
-      `e.errors(include_input=False)` drops the value and leaves the key standing. NOT the
-      only arm that does: `bogus_extra_arg` is a model-supplied key in exactly the same sense
-      and is in the same sweep lists, and two arms that never spell `ghostkeyname` at all
-      (`..._three_calls_not_one_repeat`, `..._carries_a_system_key_and_it_is_a_digest`) catch
-      that implementation through it. What the ghost spelling buys is a key that appears on ONE
-      call of its lead, which is what makes the `r.gather.seen` positive control beside the
-      negative a statement about that call rather than about the run.
+    * `verb="ghostverb"` — `query` is the TOOL's own name and pydantic leads every message this
+      schema produces with it, so a digest containing `query` says nothing about whether the
+      MODEL's verb reached the row. The default spelling makes that half of the O1 oracle
+      unfailable.
+    * `extra_key="ghostkeyname"` — a name the model CHOOSES, reported as the error's `loc`.
+      `bogus_extra_arg` is model-supplied in the same sense and catches the same renderers; what
+      the ghost spelling buys is a key appearing on ONE call of its lead, which is what makes
+      the `r.gather.seen` control beside the negative a statement about that call, not the run.
 
-    `extra_key` is ASSERTED to be extra, not assumed, and against all FOUR of the tool's own
-    parameter names rather than the three spelled below. It is spliced into the same dict
-    literal as the fixed keys, so `"system"`/`"verb"`/`"params"` would OVERWRITE that argument;
-    `"query_id"` is worse — the tool DECLARES it, so the call would validate and no above-guard
-    row would be written at all. Either way the turn stops being a schema-rejection shape and
-    every per-shape claim addressed to it is silently a claim about a different call. The
-    two-positional signature this replaced could not be misused that way; the assertion is what
-    buys the keyword back. The four names are spelled here rather than imported from
-    `query_tool.DECLARED_ARGS`, so a drift in that constant cannot quietly widen what this
-    helper accepts."""
+    `extra_key` is ASSERTED to be extra rather than assumed, against all FOUR declared parameter
+    names. It is spliced into the same dict literal as the fixed keys, so `system`/`verb`/
+    `params` would OVERWRITE one; `query_id` is worse, since the tool declares it and the call
+    would validate, leaving no above-guard row at all. Either way the turn stops being a
+    schema-rejection shape while every per-shape claim still addresses it. The names are spelled
+    here rather than imported from `query_tool.DECLARED_ARGS`, so drift there cannot widen what
+    this helper accepts."""
     assert extra_key not in ("system", "verb", "params", "query_id"), \
         f"extra_key={extra_key!r} is one of the tool's own arguments — it would overwrite that " \
         "argument, or (for `query_id`) make the call valid, instead of adding an extra one"
@@ -181,19 +170,16 @@ def _host_authored(row: dict) -> str:
     values and asked `phantom not in values`, which is column-value EQUALITY, and every leak
     #1016 closes is a model string EMBEDDED in a host-composed sentence.
 
-    The haystack is the raw column VALUES joined on NUL, never a `json.dumps` of them, and the
-    difference is the whole strength of the oracle. A serialized row ESCAPES precisely the
-    characters a model is freest to spell: `json.dumps` renders a ghost holding `"` as `\\"`, a
-    backslash as `\\\\`, a newline as `\\n` — and, left on its `ensure_ascii` default, a
-    zero-width system as the six ASCII characters `\\u200b`. Each of those makes a search for
-    the string the model actually sent find nothing while the column carries it verbatim, which
-    is the same escaping blind spot #1016 N5 cites to rule OUT a substring scrub of `str(e)`:
-    an oracle inheriting it is WEAKER than the column-value equality arms it replaced, not
-    stronger. Joined raw, every codepoint the model wrote is searchable as written, and
-    `test_the_o1_oracle_sees_what_a_serialised_row_would_hide` is what holds it there.
+    The haystack is the raw column VALUES joined on NUL, never a `json.dumps` of them, and that
+    is the strength of the oracle. Serializing ESCAPES precisely the characters a model is
+    freest to spell — `"` becomes `\\"`, a backslash doubles, a newline becomes `\\n`, and on
+    `ensure_ascii`'s default a zero-width codepoint becomes six ASCII ones — so a search for
+    what the model sent finds nothing while the column carries it verbatim. That is the same
+    escaping blind spot N5 cites to rule OUT a substring scrub of `str(e)`, and an oracle
+    inheriting it would be WEAKER than the equality arms it replaced.
+    `test_the_o1_oracle_sees_what_a_serialised_row_would_hide` holds it here.
 
-    NUL is the separator because no column can hold one, so no needle can straddle two columns
-    and no false positive can be manufactured by the join itself."""
+    NUL separates because no column can hold one, so no needle straddles two columns."""
     return "\x00".join(
         str(v) for k, v in row.items() if k not in MODEL_AUTHORED_COLUMNS
     )
@@ -909,64 +895,44 @@ def test_the_o1_oracle_sees_what_a_serialised_row_would_hide():
 
 def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path):
     """#1016 O1 — on a row whose `system` the host withheld, no column the HOST wrote echoes
-    anything the model wrote. Five coarsened SHAPES over six turns, and one control, all in ONE
-    lead, because
-    the property is about the writers and not about any one call.
+    anything the model wrote. Six coarsened turns and one control in ONE lead, because the
+    property is about the writers, not about any one call.
 
-    THE FIVE SHAPES, and why it takes all five. They differ in which of the two above-guard
-    placements records them and in what pydantic (or the grant check) then says, and each one
-    kills a different wrong implementation:
+    THE SHAPES, and what each kills:
 
-    1. GRANT / readable ghost — `decision.refusal` names the system AND the verb
-       (`unresolvable: ghosttwo.ghostverb (unknown, …)`). This is the coarsest leak and the one
-       #871's own probe would have found; it dies to any fix at all.
-    2. GRANT / nothing readable — a zero-width `system` is a `str`, so `as_str` does not coarsen
-       it and it reaches the grant check intact; `system_key` stays `""` because N5 folds it,
-       and the refusal carries it anyway. It is the shape that leaks INVISIBLY, and the one an
-       oracle left on `json.dumps`'s `ensure_ascii` default cannot see (`_host_authored`).
-    3. SCHEMA / readable ghost on an extra argument — pydantic names the offending KEY and its
-       value, never the `system` value, so this row leaks `bogus_extra_arg` and no system name
-       at all. It is the shape #871's arms drove, and the reason they concluded the schema
-       placement was clean.
-    4. SCHEMA / the model choosing the argument NAME — the shape that separates a renderer
-       filtering pydantic's `loc` down to the tool's own declared parameter names from a plain
-       `e.errors(include_input=False)`. Dropping the input still leaves `loc` standing, and
-       `loc` here is `("ghostkeyname",)`: a string the model picked, in a host column, on a row
-       the host coarsened. Shape 3 makes the same discrimination through `bogus_extra_arg`, so
-       this one is not load-bearing for THAT — what it is load-bearing for is the key being
-       spelled on one call of the lead and nowhere else, which is what makes the O2 positive
-       control below a statement about the coarsened call rather than about the run.
-    5. SCHEMA / a non-string `system` — the shape that puts the model's chosen text into
-       pydantic's `input_value=` WHOLE, which is the widest of the schema placement's three
-       channels and the one a `loc`-only filter does nothing about. It is coarsened because
-       `as_str` maps a list to `""` before `_coarsen` sees it, so the ROW records `""` and
-       `_was_coarsened` is true of it — the same route as shapes 2 and 6, deliberately, since
-       "the row kept no system" is the whole of the predicate. (An earlier draft called this
-       the ONLY arm separating a predicate asked of the pre-coercion argument from one asked of
-       `raw_system`. That is no longer a distinction: once a literal `system=""` is coarsened
-       too, both readings answer alike on every input, and the claim could not fail.)
-       `system_key` stays `""` here too (N5): the row's own identity gives no hint that
-       anything was hidden.
+    1. GRANT / readable ghost — `decision.refusal` names the system AND the verb. The coarsest
+       leak; it dies to any fix at all.
+    2. GRANT / nothing readable — a zero-width `system` is a `str`, so it reaches the grant
+       check intact and the refusal carries it; `system_key` stays `""` because N5 folds it.
+       The shape that leaks INVISIBLY, and the one a serialising oracle cannot see.
+    3. SCHEMA / readable ghost on an extra argument — pydantic names the offending KEY, never
+       the `system` value, so this row leaks `bogus_extra_arg` and no system name. It is the
+       shape #871's arms drove, and why they concluded the schema placement was clean.
+    4. SCHEMA / the model choosing the argument NAME — `loc` is `("ghostkeyname",)`, so a
+       renderer that only drops pydantic's INPUT still leaves a model-picked string in a host
+       column. Shape 3 makes that same discrimination; what this one is load-bearing for is
+       that the key is spelled on one call of the lead and nowhere else (see the control).
+    5-6. SCHEMA / a non-string `system`, once short and once too long for pydantic to print
+       whole. This is the widest of the schema placement's channels — the model's text lands in
+       `input_value=` intact — and a `loc`-only filter does nothing about it. The long one is
+       what a SCRUB cannot clean: `str(e).replace(what_the_model_sent, …)` never matches a
+       string pydantic already truncated. Both coarsen because `as_str` maps a list to `""`
+       before `_coarsen` sees it, and "the row kept no system" is the whole predicate.
 
-    THE CONTROL is the SEVENTH turn and it is exact rather than analogous: the same `_bad_args`
-    shape and an extra argument the model chose, against `elastic`, which the registry DECLARES.
-    Nothing was coarsened, so #1016 N3 leaves its digest exactly as it is — the model's argument
-    name included. Every negative below is therefore paired, on the same column, in the same
-    run, by the same writer, under the complementary condition: if the control row is clean too
-    then the writer stopped RECORDING rather than started withholding, and none of this test's
-    negatives mean anything.
+    THE CONTROL is the seventh turn and it is exact rather than analogous: the same `_bad_args`
+    shape and a model-chosen extra argument, against `elastic`, which the registry DECLARES.
+    Nothing was coarsened, so N3 leaves its digest as it is — the argument name included. Every
+    negative below is therefore paired on the same column, in the same run, by the same writer,
+    under the complementary condition: a clean control row would mean the writer stopped
+    RECORDING rather than started withholding, and none of these negatives would mean anything.
 
-    ITS KEY IS `elastickeyname`, NOT `ghostkeyname`, and the difference is load-bearing rather
-    than cosmetic: `ghostkeyname` is spelled on the coarsened call and nowhere else in this
-    lead, which is what makes `any("ghostkeyname" in seen ...)` a statement about THAT call's
-    retry text. Sharing the key with the control would make the same assertion true of the
-    control's own retry text and blind to the coarsened call it is about — the vacuity the
-    inline comment beside that assertion spells out. An earlier draft of this paragraph said
-    the control carried "the same `ghostkeyname` argument"; it did not, and must not.
+    ITS KEY IS `elastickeyname`, NOT `ghostkeyname`, and that is load-bearing: `ghostkeyname` is
+    spelled on the coarsened call alone, which is what makes `any("ghostkeyname" in seen …)` a
+    statement about THAT call's retry text rather than about the run.
 
-    The remaining vacuity guards are inline: each row is bound to the turn that wrote it by its
-    own `params`, the model's verb must still be in the columns O1 exempts, and the detail half
-    of every digest must be non-empty."""
+    Remaining vacuity guards are inline: each row is bound to its turn by its own `params`, the
+    model's verb must still be in the columns O1 exempts, and every digest's detail half must be
+    non-empty."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1016-shapes", verbs=elastic_ok(rec), turns=[
         q("ghosttwo", "ghostverb", {"native_query": "FROM one"}),
@@ -1015,21 +981,16 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
         "a row that KEPT its system stopped recording the model's own argument name (#1016 " \
         "N3) — so the negatives below are satisfied by a writer that records nothing"
 
-    # #1016 O2 at the SCHEMA placement — "at the schema placement it still sees pydantic's full
-    # text". The grant half of O2 is pinned two tests up; this half had nothing, and the gap is
-    # not cosmetic: the whole of M2 is that the ROW stops carrying pydantic's text while the
-    # MODEL keeps reading it, and an implementation that re-raised the host's coarse rendering
-    # to the model instead of the original error greens every other arm in this file. What the
-    # model loses then is exactly what O2 protects — a subagent that cannot see WHICH argument
-    # was refused cannot drop it, and retries until the lead runs out.
+    # #1016 O2 at the SCHEMA placement, which had nothing pinning it (the grant half is two
+    # tests up). The whole of M2 is that the ROW stops carrying pydantic's text while the MODEL
+    # keeps reading it, so an implementation that re-raised the host's coarse rendering to the
+    # model greens every other arm here — and a subagent that cannot see WHICH argument was
+    # refused cannot drop it, and retries until the lead runs out.
     #
-    # This is also the ghost-key negative's missing positive control: without it,
-    # "`ghostkeyname` is not in a host-authored column" is satisfied by a run in which the
-    # string never appeared anywhere at all.
-    # `ghostkeyname` is spelled on the COARSENED call and nowhere else in this lead — the
-    # control one turn later uses `elastickeyname` for exactly this reason. Sharing the key
-    # would make this assertion true of the control's own retry text and blind to the
-    # coarsened call it is about, which is the shape of vacuity this whole file guards against.
+    # It is also the ghost-key negative's positive control, and it is a statement about the
+    # COARSENED call only because `ghostkeyname` is spelled there and nowhere else in the lead:
+    # the control one turn later uses `elastickeyname`. Sharing the key would make this true of
+    # the control's own retry text and blind to the call it is about.
     assert any("ghostkeyname" in seen for seen in r.gather.seen), \
         "on a COARSENED call the model stopped reading back the argument name it got wrong, " \
         "so it can never drop it (#1016 O2) — and the `ghostkeyname` negative below is then " \
@@ -1053,30 +1014,25 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
             f"carries {_raw_command_system(row)!r} where the row carries {row['system']!r}, " \
             "and O1's oracle exempts that column"
 
-    # WHAT the host says, not merely THAT it said something. A blacklist of literals plus a
-    # truthiness check is satisfiable by any detail the model's text cannot be read out of —
-    # including a single constant for every shape, and including an ENCODING of the very text
-    # the blacklist is hunting (base64 of pydantic's message contains none of the eight tokens
-    # and is a complete copy of all of them). Both leave `payload_digest` useless to the
-    # operator it exists for, which is the column's whole job (`record_query.payload_digest`:
-    # on a failure "it is the discriminating half"). So each placement owes a positive:
+    # WHAT the host says, not merely THAT it said something. A blacklist plus a truthiness
+    # check is satisfied by any detail the model's text cannot be read out of — a single
+    # constant for every shape, or an ENCODING of the very text being hunted (base64 of
+    # pydantic's message holds none of the eight tokens and all of their content). Both leave
+    # `payload_digest` useless to the operator it exists for. So each placement owes a positive:
     #
-    # * the GRANT placement names the CLASS of failure it withheld the specifics of — #1016 N8
-    #   picks "an undeclared system" and `_undeclared_target` already speaks that vocabulary to
-    #   main. Asserted on the word, not the sentence, so the wording stays the fix's to choose.
-    # * the SCHEMA placement carries pydantic's own message TEMPLATE for the error type, UNDER
-    #   THE FIELD NAME the renderer chose for it. Those templates are host material — C21 pins
-    #   that they quote no input — and they are the only part of pydantic's text that survives
-    #   #1016 at all. A row that names the error type is one an operator can act on without ever
-    #   seeing what the model wrote.
+    # * the GRANT placement names the CLASS of failure it withheld the specifics of (N8 picks
+    #   "an undeclared system", the vocabulary `_undeclared_target` already speaks to main).
+    #   Asserted on the word, not the sentence, so the wording stays the fix's to choose.
+    # * the SCHEMA placement carries pydantic's message TEMPLATE for the error type, UNDER THE
+    #   FIELD NAME the renderer chose. The templates are host material (C21: they quote no
+    #   input) and the only part of pydantic's text that survives #1016.
     #
-    #   THE FIELD HALF IS `DECLARED_ARGS`' ONLY POSITIVE CONTROL, and without it the constant is
-    #   bound by nothing: the `ghostkeyname`/`bogus_extra_arg` negatives pin that a model-chosen
-    #   `loc[0]` becomes the placeholder, so a renderer that emits `argument:` for EVERY error
-    #   and never consults `DECLARED_ARGS` satisfies all of them — and the digest silently stops
-    #   telling an operator which of the tool's OWN arguments was wrong. Shapes five and six
-    #   fail on `system`, a declared name, so the pair below asserts both halves at once: the
-    #   declared field printed as itself, the invented one withheld.
+    #   The field half is `DECLARED_ARGS`' only positive control. The ghost-key negatives pin
+    #   only that a model-chosen `loc[0]` becomes the placeholder, so a renderer emitting
+    #   `argument:` for EVERY error satisfies them all while the digest silently stops saying
+    #   which of the tool's OWN arguments was wrong. Shapes five and six fail on `system`, a
+    #   declared name, so the pair below pins both halves: declared field printed as itself,
+    #   invented one withheld.
     for row in coarsened[:2]:
         assert "undeclared" in _detail(row), \
             "a coarsened grant-path row no longer says what KIND of failure it withheld the " \
