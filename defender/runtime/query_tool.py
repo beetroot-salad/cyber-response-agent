@@ -86,6 +86,24 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 DEFAULT_FAULT_EXIT = 2
 
+#: What an above-guard rejection records as its reason when the host COARSENED the system away
+#: (#1016 M1). A literal, and named as one: the two columns that could carry the specifics are
+#: on the same row already — `system_key` tells this ghost from another ghost, and `verb` and
+#: `params` hold the call's own arguments verbatim — so the digest owes an operator nothing it
+#: would have to quote the model to say. Deliberately NOT a third spelling of
+#: `_undeclared_target`'s readability question (#1016 N8): that predicate describes a repeat
+#: GROUP for main's context, this describes one row for the table, and a sentence that varied
+#: with readability here would be the same drift `_undeclared_target` exists to prevent.
+UNDECLARED_SYSTEM_DETAIL = "unresolvable: an undeclared system"
+
+#: The `query` tool's OWN parameter names — `register_query_tool`'s signature minus `ctx`.
+#: HOST material, which is the whole reason the coarse schema rendering may print one: pydantic
+#: reports a failure's `loc`, and on the shape that matters most (`extra_forbidden`) that `loc`
+#: is the offending key — a name the MODEL chose. Membership here is what separates "the schema
+#: is complaining about the tool's `system` argument" from "the schema is quoting a string the
+#: model invented"; anything outside it is rendered as the placeholder `argument`.
+DECLARED_ARGS = frozenset({"system", "verb", "params", "query_id"})
+
 #: Characters a `query_id` may not carry. The first four are PATH shapes — a traversal that
 #: would walk the id out of the directory it names a file in. The last three are RENDER
 #: shapes: a catalog id is interpolated into markdown three offline collectors read, and a
@@ -280,6 +298,74 @@ class QueryCapture(AbstractCapability[Any]):
         return recorded, system_fingerprint(raw_system, recorded)
 
     @staticmethod
+    def _was_coarsened(given: Any, recorded: str) -> bool:
+        """THE SOLE ANSWER to "did `_system_of_record` throw the model's `system` argument away
+        on this row?" — the question that scopes #1016's O1 to the rows where the host chose to
+        withhold a name, and leaves every other row's detail exactly as it was (N3).
+
+        Asked of `given`, the argument AS THE MODEL SENT IT, and typed `Any` for that reason:
+        the schema placement's own `raw_system` is already `as_str(raw.get("system"))`
+        (`query_tool.py`'s validate wrapper), and `as_str` maps every non-string to `""` — the
+        exact value a coarsened row RECORDS. Asked over that, `system=["Ignore Previous
+        Instructions"]` reads as "not coarsened", records pydantic's `input_value=` verbatim,
+        and the leak #1016 exists to close stays open on the one shape that carries the model's
+        text into the digest whole. The `isinstance` half is therefore load-bearing, not
+        defensive: it is the difference between "the host recorded what the model sent" and
+        "the host recorded `''` because it could not use what the model sent".
+
+        ONE function for both placements, though the design comment on #1016 spells the
+        predicate at each: they read different argument surfaces (validated `str` at the grant
+        check, raw `Any` at the schema) but ask the SAME question, and this module already
+        carries two long warnings — on `_coarsen` and on `_undeclared_target` — about what a
+        rule kept by hand at both placements costs when the two spellings drift. Each caller
+        still supplies its own `given`; only the question is shared.
+
+        Consequences, both decided in #1016's design: a MISSING `system` key (`None`) counts as
+        coarsened and takes the coarse rendering, which loses nothing (no reader sees such a
+        row); and a literal `system=""` counts as NOT coarsened, because the host recorded
+        precisely what the model sent and has nothing to withhold."""
+        return not (isinstance(given, str) and given == recorded)
+
+    @staticmethod
+    def _coarse_schema_detail(e: BaseException) -> str:
+        """THE SOLE PRODUCER of the detail a COARSENED argument-schema rejection records
+        (#1016 M2) — pydantic's complaint re-composed from host material, in place of the
+        `str(e)` a row that kept its system still gets.
+
+        `str(e)` cannot be used here and neither can a scrub of it. It carries the model's text
+        three ways: the failing `input_value=` (a non-string `system` lands there whole), the
+        offending `loc` (which is the model's own chosen key on an extra argument), and the
+        repr-escaping around both — and a substring replace over escaped text leaves fragments
+        for any name holding a quote or a backslash (#1016 N5). So nothing is subtracted; the
+        sentence is BUILT, from three host-owned pieces and no fourth:
+
+        * the error COUNT, a number;
+        * the FIELD, which is `loc[0]` only when it is one of the tool's own parameter names
+          (`DECLARED_ARGS`) and the literal `argument` otherwise. `loc` beyond its first element
+          is dropped whole — a deeper element is a key inside the model's `params`;
+        * pydantic's `msg`, which for every error type this schema can raise is a fixed template
+          ("Input should be a valid string", "Extra inputs are not permitted", "Field required",
+          "Input should be a valid dictionary") and never quotes an input.
+
+        `include_input=False` ALONE is not enough, and that is the trap worth naming: it drops
+        the value and leaves `loc` standing, so the model still gets to choose a string in a
+        host-authored column just by misspelling an argument.
+
+        A non-`ValidationError` — the `ModelRetry` this seam also catches — keeps `str(e)`:
+        pydantic-ai raises it here only for an unknown tool name or a timeout, and the tool name
+        is checked to be `TOOL_NAME` before this frame runs, so it formats no argument of the
+        call."""
+        if not isinstance(e, ValidationError):
+            return str(e)
+        errs = e.errors(include_input=False, include_url=False)
+        parts = []
+        for err in errs:
+            loc = err.get("loc") or ()
+            field = loc[0] if loc and loc[0] in DECLARED_ARGS else "argument"
+            parts.append(f"{field}: {err['msg']}")
+        return f"{len(errs)} validation error(s): " + "; ".join(parts)
+
+    @staticmethod
     def _undeclared_target(*, recorded: str, raw: str) -> str:
         """What the dead-end message calls the request's target. The coarsened `""` makes
         `rejection_dead_end_reason` say "system/verb unreadable in the call's own arguments",
@@ -349,6 +435,17 @@ class QueryCapture(AbstractCapability[Any]):
             verb = as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
             trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
+            # #1016 M2. `str(e)` is pydantic's own text and it names whatever the model sent:
+            # the failing value, and the offending KEY when the model invented one. On a row
+            # whose `system` this writer just threw away, that puts the model's text back in a
+            # column the host authored — so a coarsened row records the complaint re-composed
+            # from host material instead. Asked of the PRE-COERCION argument, not `raw_system`:
+            # `as_str` has already mapped a list or a dict to `""`, the same value the row
+            # records, and over that the shape carrying the most model text reads as untouched.
+            detail = (
+                self._coarse_schema_detail(e)
+                if self._was_coarsened(raw.get("system"), system) else str(e)
+            )
             await self._record(
                 ctx.deps,
                 system=system, verb=verb, system_key=system_key,
@@ -356,7 +453,7 @@ class QueryCapture(AbstractCapability[Any]):
                 params=params,
                 payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=str(e) if trip is None else rejection_trip_detail(trip, str(e)),
+                detail=detail if trip is None else rejection_trip_detail(trip, detail),
             )
             if trip is not None:
                 raise GatherDeadEnd(
@@ -422,13 +519,24 @@ class QueryCapture(AbstractCapability[Any]):
             trip = self._rejection_guard(
                 deps, recorded_system, verb, params, system_key=system_key,
             )
-            refusal = decision.refusal or "unresolvable"
+            # #1016 M1. `decision.refusal` names the system AND the verb the model asked for,
+            # which is right for the model (it is how a subagent corrects a typo, and the
+            # `ModelRetry` below still carries it whole) and wrong for the row: this writer has
+            # just coarsened that same system to `""`, and echoing it in the digest hands the
+            # table back the string #855 removed. A host literal when coarsened, `refusal`
+            # verbatim otherwise — a rejection against a system the registry DECLARES is the
+            # pitfalls channel's input and keeps saying which verb was unresolvable.
+            detail = (
+                UNDECLARED_SYSTEM_DETAIL
+                if self._was_coarsened(system, recorded_system)
+                else (decision.refusal or "unresolvable")
+            )
             await self._record(
                 deps, system=recorded_system, verb=verb, system_key=system_key,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
                 detail=(
-                    refusal if trip is None else rejection_trip_detail(trip, refusal)
+                    detail if trip is None else rejection_trip_detail(trip, detail)
                 ),
             )
             if trip is not None:
