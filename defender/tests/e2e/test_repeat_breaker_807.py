@@ -137,6 +137,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
 from defender.scripts.gather_tools.record_query import (  # noqa: E402
+    ABOVE_GUARD_QUERY_ID,
     REPEAT_ESCAPE,
     REPEAT_THRESHOLD,
     REPEAT_TRIP_QUERY_ID,
@@ -264,7 +265,13 @@ def _row(
     `payload_sha256` computed by the PRODUCTION helpers rather than restated — a seeded fixture
     that disagrees with `error_class_for_exit`, or one whose recorded hash does not belong to
     the payload it claims (#877 F-9), would be a fixture asserting its own arithmetic. A failed
-    row's payload text is `""`, as both writers persist it."""
+    row's payload text is `""`, as both writers persist it.
+
+    `system_key` is `""` and not omitted: every `system` this fixture seeds is a DISPATCHED
+    name, so the row identifies its own call and the #871 column has nothing to carry — and a
+    seed that silently dropped a frozen key would stop being "the shape a resumed lead leaves"
+    the day an arm here seeds an above-guard rejection of an UNDECLARED system, where the live
+    side keys on a digest and every seeded row would key on nothing."""
     payload_text = "" if exit_code != 0 else _SEEDED_PAYLOAD
     return {
         "lead_id": lead,
@@ -283,6 +290,7 @@ def _row(
             else record_query.payload_digest(payload_text, "", 0)
         ),
         "payload_sha256": record_query.payload_sha256(payload_text),
+        "system_key": "",
     }
 
 
@@ -346,7 +354,15 @@ def _replay_rejections(
     cannot carry — so an oracle that dropped it would fold two undeclared systems back into one
     group and report a trip no live run since #871 can produce. `.get` is `None` on every row
     recorded before the column existed, which is the archived-table shape this oracle is
-    pointed at, so the predicate has to read that as the `""` those rows mean."""
+    pointed at, so the predicate has to read that as the `""` those rows mean.
+
+    THE GUARD IS ASKED ONLY WHERE THE LIVE RUN ASKS IT — at a row this guard could itself have
+    refused. `rejection_trip`'s domain filter screens the rows it COUNTS, not the row it is
+    asked ABOUT, so an oracle that asked at every row would answer for calls no placement
+    guards: `_grant_check`'s adapter-load rows (`infra`, the third above-guard writer, which
+    reaches no guard at all) and every below-guard row, each of which can inherit a count two
+    genuine rejections of the same request earned and report a trip the live run did not
+    take."""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
     trips: list[tuple[str, int]] = []
@@ -355,16 +371,55 @@ def _replay_rejections(
         if not isinstance(lead, str) or lead in stopped:
             continue
         prior = seen.setdefault(lead, [])
+        guarded = (row.get("query_id") == ABOVE_GUARD_QUERY_ID
+                   and row.get("error_class") == circuit_breaker.AGENT_FIXABLE_ERROR_CLASS)
         hit = rejection_trip(
             prior, lead, system=row.get("system"), verb=row.get("verb"),
             params=row.get("params"), threshold=threshold,
             system_key=row.get("system_key"),
-        )
+        ) if guarded else None
         prior.append(row)
         if hit is not None:
             trips.append((lead, row.get("seq")))
             stopped.add(lead)
     return trips
+
+
+def test_the_rejection_oracle_answers_only_where_a_placement_guards():
+    """The oracle above is asked PER ROW, and `rejection_trip`'s domain filter screens the rows
+    it COUNTS, not the row it is asked ABOUT — so an oracle asked at every row answers for
+    calls no placement guards and reports trips no live run can produce.
+
+    Two such rows exist and both are reachable: `_grant_check`'s adapter-load row (`infra`, the
+    third above-guard writer, which never consults the guard) and any below-guard row, which
+    `wrap_tool_execute` puts to `repeat_trip` instead. Each can inherit the count two genuine
+    rejections of the same request earned.
+
+    Driven over hand-built tables rather than a live run because the shape needs an adapter
+    that fails to import mid-lead; the positive is the same three rows with a third GUARDED row
+    in place of the ungarded one, so this cannot pass on an oracle that reports nothing."""
+    p = {"native_query": "FROM logs"}
+    prior = [
+        _row(LEAD, 0, "elastic", "nosuch-verb", p, exit_code=64,
+             query_id=ABOVE_GUARD_QUERY_ID),
+        _row(LEAD, 1, "elastic", "nosuch-verb", p, exit_code=64,
+             query_id=ABOVE_GUARD_QUERY_ID),
+    ]
+    assert _replay_rejections(prior) == [], "two rejections are not yet a trip"
+
+    infra = _row(LEAD, 2, "elastic", "nosuch-verb", p, exit_code=2,
+                 query_id=ABOVE_GUARD_QUERY_ID)
+    assert _replay_rejections([*prior, infra]) == [], \
+        "the replay tripped at an adapter-load row, which reaches no guard in a live run"
+
+    below = _row(LEAD, 2, "elastic", "nosuch-verb", p, exit_code=0)
+    assert _replay_rejections([*prior, below]) == [], \
+        "the replay tripped at a below-guard row, which the COMPANION guard never sees"
+
+    third = _row(LEAD, 2, "elastic", "nosuch-verb", p, exit_code=64,
+                 query_id=ABOVE_GUARD_QUERY_ID)
+    assert _replay_rejections([*prior, third]) == [(LEAD, 2)], \
+        "the oracle stopped tripping at all, so the two negatives above say nothing"
 
 
 def named_verbs(rec: VerbRecorder, *, system: str = "elastic", verb: str = "sshd-auth-window") -> FakeVerbs:

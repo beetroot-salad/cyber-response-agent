@@ -247,12 +247,14 @@ def _record_manual_row(
         # never read as "no payload evidence" beside `_record`'s.
         "payload_sha256": payload_sha256(text),
         # DERIVED through the column's owner, like `error_class` and `payload_sha256` above and
-        # for the same reason (#871): `ITEM1_SYSTEM` is the host's own constant, so this row's
-        # `system` identifies its call already and the answer is `""` — but spelling that `""`
-        # by hand would make the two writers agree by coincidence rather than by construction,
-        # and this writer assembles the row itself instead of going through `append_query_row`.
+        # for the same reason (#871): this writer assembles the row itself instead of going
+        # through `append_query_row`, so routing the answer through `system_fingerprint` is what
+        # keeps it tracking the owner's rule rather than a literal that agrees by coincidence.
+        # The ARGUMENTS say what is true here and are not the same value twice: nothing
+        # model-authored named a system on this path (`raw_system` is `""`), and the system of
+        # record is the host's own constant — the DECLARED case, whose answer is `""`.
         # Written rather than omitted, because a key it skips is a key the frozen contract loses.
-        "system_key": system_fingerprint(ITEM1_SYSTEM, ITEM1_SYSTEM),
+        "system_key": system_fingerprint("", ITEM1_SYSTEM),
     }
     write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
 

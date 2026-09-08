@@ -227,11 +227,14 @@ class QueryCapture(AbstractCapability[Any]):
         """The `system` an ABOVE-GUARD row is allowed to carry: the model's own string when the
         registry declares that system, `""` when it does not.
 
-        The two writers up here record what the MODEL named, and nothing between them and the
-        offline collectors re-checks it. That is not inert: an exit-64 `agent-fixable` row is
-        the pitfalls channel's input, and `_build_pitfalls_handoffs` spends its `system`
-        verbatim as `defender/skills/<system>/execution.md`, so a schema the model can fail on
-        purpose was a route to naming a corpus write. `""` needs no new branch downstream —
+        The two writers that spend this function record what the MODEL named, and nothing
+        between them and the offline collectors re-checks it (`_grant_check`'s adapter-load
+        branch is a third above-guard writer and does NOT coarsen — its rows are `infra`, which
+        `collect_general_failures` drops before any corpus path is composed). That is not
+        inert: an exit-64 `agent-fixable` row is the pitfalls channel's input, and
+        `_build_pitfalls_handoffs` spends its `system` verbatim as
+        `defender/skills/<system>/execution.md`, so a schema the model can fail on purpose was
+        a route to naming a corpus write. `""` needs no new branch downstream —
         `collect_general_failures` already skips a systemless row.
 
         Spent on the rejection guard's identity as well as on the row, never one without the
@@ -276,11 +279,20 @@ class QueryCapture(AbstractCapability[Any]):
         return recorded, system_fingerprint(raw_system, recorded)
 
     @staticmethod
-    def _undeclared_target(recorded: str, raw: str) -> str:
+    def _undeclared_target(*, recorded: str, raw: str) -> str:
         """What the dead-end message calls the request's target. The coarsened `""` makes
         `rejection_dead_end_reason` say "system/verb unreadable in the call's own arguments",
         false for a call that named a system readably but not one that exists; and the raw
         string cannot be echoed, being unbounded model text on a path into MAIN's context.
+
+        KEYWORD-ONLY, for the reason `_coarsen` exists and with a worse blast radius than the
+        transposition that motivated it: this is the SAME `(raw, recorded)` pair one function
+        over, in the opposite order, spelled at two placements whose local names for the two
+        halves are mirrored (`(system, raw_system)` here, `(recorded_system, system)` at the
+        grant check). Both halves are `str` and only one may be echoed, so a swap returns the
+        model's own ghost string, `rejection_dead_end_reason` puts it in `GatherDeadEnd.reason`,
+        and it crosses into MAIN's context — the #855 leak — raising nothing and caught only by
+        a test that drives that one placement to the threshold.
 
         "Readable" is `names_something_readable`, THE SAME predicate `system_fingerprint` folds
         the N5 group with, and not a second spelling of it: this message describes a whole
@@ -348,7 +360,8 @@ class QueryCapture(AbstractCapability[Any]):
             if trip is not None:
                 raise GatherDeadEnd(
                     reason=rejection_dead_end_reason(
-                        self._undeclared_target(system, raw_system), verb, trip),
+                        self._undeclared_target(recorded=system, raw=raw_system),
+                        verb, trip),
                     escape=REPEAT_ESCAPE,
                 ) from e
             raise
@@ -420,7 +433,8 @@ class QueryCapture(AbstractCapability[Any]):
             if trip is not None:
                 raise GatherDeadEnd(
                     reason=rejection_dead_end_reason(
-                        self._undeclared_target(recorded_system, system), verb, trip),
+                        self._undeclared_target(recorded=recorded_system, raw=system),
+                        verb, trip),
                     escape=REPEAT_ESCAPE,
                 )
             raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")
@@ -520,7 +534,7 @@ class QueryCapture(AbstractCapability[Any]):
         return self._model_view(deps, row, text, exit_code, detail)
 
 
-    async def _record(  # noqa: PLR0913 — one parameter per ROW COLUMN, as `append_query_row`
+    async def _record(  # noqa: PLR0913 — one per row column the CALLER decides, plus `deps`
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
         payload: Any, exit_code: int, detail: str, system_key: str,
     ) -> tuple[dict, str]:
@@ -529,9 +543,10 @@ class QueryCapture(AbstractCapability[Any]):
         through `_record`, never through `append_query_row` directly, so a default here would
         satisfy the column's requirement on the writer's behalf and leave the discipline
         protecting nothing. `""` is a real answer at four of the six call sites and each says
-        so in its own argument list; the three above-guard writers (`wrap_tool_validate`, and
-        BOTH of `_grant_check`'s row-writing branches) are the ones a reader has to check, and
-        a required keyword is what puts a fourth one in front of that reader."""
+        so in its own argument list; the two that mint a fingerprint (`wrap_tool_validate` and
+        `_grant_check`'s unresolvable branch) are the ones a reader has to check, and a
+        required keyword is what puts each of the four in front of that reader rather than
+        letting a writer that OUGHT to fingerprint pass for one that has nothing to."""
         if deps.lead_id is None:
             raise RuntimeError("internal: query reached capture without a dispatched lead_id")
 

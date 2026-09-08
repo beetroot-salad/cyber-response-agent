@@ -17,6 +17,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
+from defender._text import is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 
 _ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
@@ -58,6 +59,26 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
     return f"{len(stdout)} bytes, {lines} line(s)"
 
 
+SYSTEM_KEY_HEX_LEN = 16
+"""How many hex characters of the digest `system_key` carries.
+
+Fixed and NAMED rather than a literal at the truncation: the width is part of a claim across
+processes — a table recorded by one build is replayed by a later one — so it is a contract, not
+a tuning knob."""
+
+
+def _sha256_hex(text: str) -> str:
+    """`sha256` over `text` under the ONE encoding contract both hash columns share.
+
+    `surrogatepass`, NOT the `replace` the transports decode vendor bytes with: `replace` maps
+    every unencodable codepoint to the SAME U+FFFD, so two distinct strings collide — which is
+    the one thing neither of the two callers may allow, `payload_sha256` because `repeat_note`
+    reads byte identity off it and `system_fingerprint` because telling two ghosts apart is the
+    whole of what it is for. One home, so a change to the contract cannot reach one and not the
+    other."""
+    return hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
 def payload_sha256(payload_text: str) -> str:
     """The row's CONTENT identity: `sha256` of the exact text persisted to the sidecar.
 
@@ -69,10 +90,10 @@ def payload_sha256(payload_text: str) -> str:
     every unencodable codepoint to the SAME U+FFFD, so two distinct payloads would collide and
     `repeat_note` would call them byte-identical. Moot while `ensure_ascii` is on at both
     writers; `surrogatepass` keeps it true the day that changes."""
-    return hashlib.sha256(payload_text.encode("utf-8", errors="surrogatepass")).hexdigest()
+    return _sha256_hex(payload_text)
 
 
-def names_something_readable(raw_system: str) -> bool:
+def names_something_readable(raw_system: Any) -> bool:
     """Does `raw_system` name anything a reader could tell apart from an empty argument?
 
     PUBLIC because it is asked at two seams that must never disagree: this module's N5 class
@@ -84,19 +105,34 @@ def names_something_readable(raw_system: str) -> bool:
     order.
 
     NOT `raw_system.strip()`, which is the same question asked of `str.isspace` alone and gets
-    it wrong in the direction that matters. `.strip()` folds the ASCII and Unicode SPACES —
-    U+00A0, U+3000, U+000B — but leaves every zero-width and format codepoint standing:
-    U+200B, U+200C/D, U+2060, U+FEFF, U+00AD and the C0 controls (`\\x00` included) are all
-    `isspace() == False`, so each of them, and each of their unbounded concatenations, would
-    mint a digest of its own while rendering as exactly the empty argument beside it. That is
-    the same unbounded supply of distinct identities this function refuses `str(raw)` for, one
-    codepoint class over — and it is worse than the `str(raw)` case, because no reader of the
-    row, the summary or the table can see which of the invisible strings a call used.
+    it wrong in the direction that matters: `.strip()` folds the SPACES but leaves every
+    zero-width and format codepoint standing (U+200B, U+200C/D, U+2060, U+FEFF, U+00AD, the C0
+    controls), so each of them, and each of their unbounded concatenations, would mint a digest
+    of its own while rendering as exactly the empty argument beside it.
 
-    A codepoint counts when it is printable and not whitespace: Python reads "printable" off
-    the Unicode database as "not Other, not Separator" (with the ASCII space the one exception),
-    which is exactly the class of things that leave a mark."""
-    return any(ch.isprintable() and not ch.isspace() for ch in raw_system)
+    THE ANSWER IS `_text.is_content_less`, NEGATED, and not a third spelling of it. That module
+    exists for this question over model-produced text, argues the `.strip()` case in the same
+    words, and pins the category set `{Cc, Cf, Cs}` — which is what makes this predicate a
+    fixed function of the string rather than of the interpreter. `str.isprintable()` is the
+    spelling to avoid here: it reads Cn off the RUNNING interpreter's UCD, so an unassigned
+    codepoint folds into the N5 group today and mints a digest of its own after a Python
+    upgrade — the same across-processes disagreement `system_fingerprint` pins `sha256` over
+    `hash()` to prevent, one function earlier. It also answers Co (private use) as unreadable,
+    which would tell MAIN a call naming a glyph the reader can see was "unreadable".
+
+    A non-`str` is UNREADABLE rather than a raise, for the reason `system_fingerprint` coerces:
+    both seams that ask this run inside a rejection handler with no `try` of their own.
+
+    WHAT THIS DOES NOT CLOSE, stated so the next reader does not have to rediscover it: a
+    character that is ASSIGNED and in a visible category but renders blank in most fonts —
+    U+3164 HANGUL FILLER (Lo), U+2800 BRAILLE PATTERN BLANK (So), U+115F/U+1160, a lone
+    variation selector (Mn) — is readable here and mints a digest of its own, so those still
+    supply an unbounded family of identities that print as nothing. That is deliberate rather
+    than overlooked: they are real characters, "renders blank" is a property of the FONT and
+    not of the string, and a predicate that guessed at it would be neither stable nor
+    explainable. The containment for a lead that spends identities is a bound on the number of
+    above-guard rejections, not a cleverer notion of emptiness — #1015."""
+    return isinstance(raw_system, str) and not is_content_less(raw_system)
 
 
 def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
@@ -111,24 +147,26 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     one repeat group; `names_something_readable` decides which strings are in it).
 
     `raw_system` is COERCED rather than trusted, like every other value on this path
-    (`_as_str`, `_as_dict`, `_system_key_of`): both call sites run inside a rejection handler
-    that has no `try` of its own, so a raise here would replace the rejection — no row for the
-    guard to count, and the fault unwinds past the lead's own catch.
+    (`_as_str`, `_as_dict`, `_system_key_of`) — the coercion is `names_something_readable`'s,
+    so the two seams cannot disagree about what a non-`str` means. Both ABOVE-GUARD call sites
+    run inside a rejection handler that has no `try` of its own, so a raise here would replace
+    the rejection — no row for the guard to count, and the fault unwinds past the lead's own
+    catch. (`lead_zero._record_manual_row` is the third caller and is not in a handler; it
+    passes a host constant, so it can only ever be answered `""`.)
 
-    Otherwise: a fixed 16 hex characters of `sha256` over the raw string. TRUNCATED on
-    purpose — the column exists to tell two ghosts apart within one lead, not to be reversed,
-    and a shorter fixed width is a smaller channel out of a table the gather agent can read.
-    `sha256` and the width are pinned rather than left to `hash()`, whose per-process salt
-    would make a replay over a recorded table disagree with the run that wrote it.
+    Otherwise: `SYSTEM_KEY_HEX_LEN` hex characters of `sha256` over the raw string. TRUNCATED
+    on purpose — the column exists to tell two ghosts apart within one lead, not to be
+    reversed, and a shorter fixed width is a smaller channel out of a table the gather agent
+    can read. `sha256` and the width are pinned rather than left to `hash()`, whose
+    per-process salt would make a replay over a recorded table disagree with the run that
+    wrote it.
 
-    The digest IS name-shaped — `is_system_name` accepts 16 hex characters — which is exactly
-    why it lives in its own column instead of being folded into `system`: the corpus-path
-    consumer reads `system`, and nothing reads this."""
-    if not isinstance(raw_system, str) or recorded_system:
+    The digest IS name-shaped — `is_system_name` accepts a hex run of this width — which is
+    exactly why it lives in its own column instead of being folded into `system`: the
+    corpus-path consumer reads `system`, and nothing reads this."""
+    if recorded_system or not names_something_readable(raw_system):
         return ""
-    if not names_something_readable(raw_system):
-        return ""
-    return hashlib.sha256(raw_system.encode("utf-8", errors="surrogatepass")).hexdigest()[:16]
+    return _sha256_hex(raw_system)[:SYSTEM_KEY_HEX_LEN]
 
 
 def _request_key(system: Any, verb: Any, params: Any) -> str:
@@ -228,8 +266,8 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         "payload_sha256": payload_sha256(payload_text),
         # #871: the rejection guard's identity for a row whose `system` was coarsened to `""`.
         # PASSED IN rather than derived, because the raw string it fingerprints is exactly what
-        # this row must not carry — `system_fingerprint` owns the value, at the two writers that
-        # still hold the string.
+        # this row must not carry — `system_fingerprint` owns the value, and only the two
+        # above-guard placements that mint one still hold the string to give it.
         "system_key": system_key,
     }
     write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
@@ -517,12 +555,14 @@ class GatherDeadEnd(Exception):
         self.escape = escape
 
 
-# lint-dup: ok — the same two lines as `query_tool._as_str`, deliberately NOT one home. That one
-# coarsens a MODEL TOOL ARGUMENT before it is spent as a system name; this one reads a STORED
-# column back. They are equal today by coincidence of shape, and the day either contract moves
-# (a tool argument that accepts a non-string, a stored key that must tell absent from empty) the
-# other must not move with it.
-def _system_key_of(value: Any) -> str:
+# The same two lines as `query_tool._as_str` and deliberately NOT one home. That one coarsens a
+# MODEL TOOL ARGUMENT before it is spent as a system name; this one reads a STORED column back.
+# They are equal today by coincidence of shape, and the day either contract moves (a tool
+# argument that accepts a non-string, a stored key that must tell absent from empty) the other
+# must not move with it. `lint_duplicate_helpers` cannot see the pair today — it groups by
+# module-level NAME across modules and these names differ — so the marker below is placed
+# where the gate reads it (`_suppressed` scans the `def` line only) for the day they converge.
+def _system_key_of(value: Any) -> str:  # lint-dup: ok — see above
     """A row's or a call's `system_key`, coerced. LOAD-BEARING on both sides of the comparison:
     every row recorded before #871 added the column, and every hand-built fixture row that
     lists the keys literally, has no `system_key` at all — and a live call reconstructed from
@@ -551,7 +591,9 @@ def _trip(
     is an `and`, so either order selects the same rows, but `_request_key` is a `json.dumps`
     per row and `_system_key_of` is an `isinstance`. #871 is precisely the change that fills a
     lead with rows whose cheap half already differs (one per distinct undeclared system), so
-    the expensive half is the one that must not run on them."""
+    the expensive half is the one that must not run on them. The saving is `rejection_trip`'s
+    ALONE — every row in `repeat_trip`'s domain stores `""` and every one of its callers means
+    `""`, so there the cheap half never short-circuits and is pure added compare."""
     key_request = _request_key(system, verb, _json_safe_params(params))
     key_system = _system_key_of(system_key)
     matches = [
@@ -588,8 +630,8 @@ def repeat_trip(
 
 
 def rejection_trip(
-    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any,
-    threshold: int = REPEAT_THRESHOLD, system_key: Any = "",
+    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, system_key: Any,
+    threshold: int = REPEAT_THRESHOLD,
 ) -> RepeatTrip | None:
     """The COMPANION guard's predicate — `repeat_trip` over the complementary domain: the
     rejections that never reached `wrap_tool_execute`'s placement at all.
@@ -610,7 +652,13 @@ def rejection_trip(
     model-named undeclared system is coarsened to `""` before it is recorded, so without it
     three rejections naming three different phantoms key the same and the third ends a lead
     the guard promised never to end for calls that DIFFER. The caller computes it with
-    `system_fingerprint`, from the raw string it still holds."""
+    `system_fingerprint`, from the raw string it still holds.
+
+    REQUIRED here and not defaulted, unlike `repeat_trip`'s — this is the one predicate whose
+    rows carry a real fingerprint, so a caller that omitted the keyword would silently get the
+    pre-#871 identity back: every ghost keying alike, no exception, no type error, and a guard
+    that can never trip on any recorded ghost table. `repeat_trip` keeps its default because
+    `""` is what every row in ITS domain stores and what every one of its callers means."""
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
         system_key=system_key,
@@ -656,7 +704,15 @@ def rejection_dead_end_reason(system: str, verb: str, trip: RepeatTrip) -> str:
     context on a refusal path."""
     # `system`/`verb` are the RAW arguments at the schema placement and coarsen to `""` when the
     # call did not supply them as strings, so the pair can be empty. Say that, not "( )".
-    target = f"{system} {verb}".strip() or "system/verb unreadable in the call's own arguments"
+    #
+    # `names_something_readable`, NOT `.strip()` — THE SAME predicate `_undeclared_target` uses
+    # to decide the system half. `.strip()` here is what made the two disagree: a verb of one
+    # zero-width codepoint is `.strip()`-truthy, so an empty system beside it kept this
+    # fallback from firing and MAIN was handed literally "the request ()" — the "( )" this
+    # branch exists to prevent, with an unbounded invisible model string inside the parens.
+    pair = f"{system} {verb}".strip()
+    target = pair if names_something_readable(pair) else (
+        "system/verb unreadable in the call's own arguments")
     return (
         f"the request ({target}) was rejected before it ran and repeats the one already "
         f"turned back at seq {trip.first_seq}; it has now been rejected "

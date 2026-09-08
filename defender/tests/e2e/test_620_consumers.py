@@ -16,8 +16,9 @@ not-yet-written query surface. The assertions below are the spec the code is wri
 The seams
 ---------
 - Produced rows come from a REAL driver run (`run_gather` → the query tool → the capture
-  capability writes the real 12-key row), never a hand-built `ExecutedLead` — the missing
-  producer→consumer seam is the actual defect (`two-suites-never-meet` in the ledger).
+  capability writes the real row, whatever the frozen key set is that week), never a
+  hand-built `ExecutedLead` — the missing producer→consumer seam is the actual defect
+  (`two-suites-never-meet` in the ledger).
 - Offline readers (`load_queries`, `_executed_query`, `render_joined_yaml`, the visualizer,
   `workspace_map`, `validate_scaffold`) are driven at their real entry points over rows on
   disk. Fakes inject faults / return payloads only — they never classify or branch on policy.

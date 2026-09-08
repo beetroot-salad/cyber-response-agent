@@ -1189,6 +1189,13 @@ def test_row_contract_frozen(tmp_path):
     assert row["error_class"] is None
     assert row["payload_status"] == "ok"
     assert row["payload_digest"]
+    # #871: pinned by VALUE here like every other column, not left to `set(row) == ROW_KEYS`.
+    # An executed row's `system` is the dispatched name, so it identifies its own call and the
+    # fingerprint column is empty — and today nothing else asserts that directly: a non-`""`
+    # here is caught only indirectly, by `repeat_trip`'s live call passing `""` and the row
+    # then matching nothing.
+    assert row["system_key"] == "", \
+        "an executed row was fingerprinted, which splits its own system's repeat count"
 
     assert isinstance(row["raw_command"], str)
     assert "elastic" in row["raw_command"]

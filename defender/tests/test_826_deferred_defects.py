@@ -251,9 +251,9 @@ def test_the_companion_guard_counts_what_the_first_guard_cannot_see():
     placement could have prevented."""
     rejections = [_above(0), _above(1)]
     assert rq.rejection_trip(rejections[:1], LEAD, system="elastic", verb="query",
-                             params={"native_query": "FROM logs"}) is None
+                             params={"native_query": "FROM logs"}, system_key="") is None
     trip = rq.rejection_trip(rejections, LEAD, system="elastic", verb="query",
-                            params={"native_query": "FROM logs"})
+                            params={"native_query": "FROM logs"}, system_key="")
     assert trip == rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
 
     # ... and the SAME rows are invisible to the first guard, which is why this one exists.
@@ -263,7 +263,7 @@ def test_the_companion_guard_counts_what_the_first_guard_cannot_see():
     # the same two occurrences.
     executed = [_row(0, exit_code=0), _row(1, exit_code=0)]
     assert rq.rejection_trip(executed, LEAD, system="elastic", verb="query",
-                             params={"native_query": "FROM logs"}) is None
+                             params={"native_query": "FROM logs"}, system_key="") is None
     assert rq.repeat_trip(executed, LEAD, system="elastic", verb="query",
                           params={"native_query": "FROM logs"}) is not None
 
@@ -278,11 +278,11 @@ def test_the_infra_half_of_the_above_guard_rows_stays_the_breakers():
     assert error_class_for_exit(2) == INFRA_ERROR_CLASS
     assert error_class_for_exit(64) == AGENT_FIXABLE_ERROR_CLASS
     assert rq.rejection_trip(load_errors, LEAD, system="elastic", verb="query",
-                             params={"native_query": "FROM logs"}) is None
+                             params={"native_query": "FROM logs"}, system_key="") is None
     # An infra row must not even top up a count the agent-fixable rows nearly reached.
     mixed = [_above(0, exit_code=2), _above(1, exit_code=64)]
     assert rq.rejection_trip(mixed, LEAD, system="elastic", verb="query",
-                             params={"native_query": "FROM logs"}) is None
+                             params={"native_query": "FROM logs"}, system_key="") is None
 
 
 def test_the_companion_guard_keys_on_the_same_identity_as_the_first():
@@ -293,13 +293,13 @@ def test_the_companion_guard_keys_on_the_same_identity_as_the_first():
     reordered = {"a": [1, {"z": None}], "b": 2}
     rows = [_above(0, params=params), _above(1, params=params)]
     assert rq.rejection_trip(rows, LEAD, system="elastic", verb="query",
-                             params=reordered) is not None
+                             params=reordered, system_key="") is not None
     assert rq.rejection_trip(rows, LEAD, system="elastic", verb="query",
-                             params={"a": 1}) is None
+                             params={"a": 1}, system_key="") is None
     # A different lead's rejections are a different lead's problem.
     assert rq.rejection_trip(
         [_above(0, params=params, lead="l-002"), _above(1, params=params, lead="l-002")],
-        LEAD, system="elastic", verb="query", params=params,
+        LEAD, system="elastic", verb="query", params=params, system_key="",
     ) is None
 
 
@@ -404,8 +404,13 @@ def test_an_unencodable_system_string_is_fingerprinted_rather_than_raising():
 
     `surrogatepass` is the same encoding contract `payload_sha256` argues for two functions
     above, and for the same reason: a codepoint that cannot round-trip must still produce a
-    digest, and it must be its OWN digest rather than the replacement character's, or two
-    distinct strings collide.
+    digest, and it must be its OWN digest, or two distinct ghosts fold into one group.
+
+    THE COLLISION PARTNER IS A SECOND SURROGATE, not U+FFFD. On the ENCODE side `replace`
+    emits `?` (U+FFFD is the DECODE replacement), so `"\ud800x"` and `"\ufffdx"` stay distinct
+    under it and an assertion against U+FFFD pins only "did not raise" — which `errors="replace"`
+    also satisfies. Two different lone surrogates are what `replace` actually maps to one byte,
+    and they are the pair this has to compare.
 
     No e2e twin: the replay harness serialises its own turns and refuses a lone surrogate
     before the tool is ever reached, which is exactly why nothing above this level can cover
@@ -414,8 +419,8 @@ def test_an_unencodable_system_string_is_fingerprinted_rather_than_raising():
     fp = rq.system_fingerprint(lone, "")
     assert re.fullmatch(r"[0-9a-f]{16}", fp), \
         f"an unencodable system string did not produce a digest: {fp!r}"
-    assert fp != rq.system_fingerprint("\ufffdghost", ""), \
-        "the surrogate was replaced with U+FFFD, so two distinct ghosts collide"
+    assert fp != rq.system_fingerprint("\ud801ghost", ""), \
+        "two different unencodable ghosts collided — the encoding folded them to one byte"
 
 
 def test_two_undeclared_systems_are_two_counts_at_the_predicate():
@@ -532,6 +537,63 @@ def test_an_invisible_system_string_is_no_more_readable_than_an_empty_one():
 
     assert rq.system_fingerprint("\u200bg", "") != "", \
         "a string carrying one readable character stopped being fingerprinted"
+
+
+def test_the_dead_end_message_asks_the_same_readability_question_the_fold_does():
+    """#871's own rule, applied to the CONSUMER of `_undeclared_target`'s answer.
+
+    `rejection_dead_end_reason` chooses between naming the target and saying the arguments were
+    unreadable, and it chose with `.strip()` while `_undeclared_target` chose with
+    `names_something_readable`. The two disagree on exactly the codepoints the fold exists for:
+    a verb of one zero-width character is `.strip()`-truthy, so with the system half already
+    `""` the fallback never fired and MAIN was handed `the request (\u200b)` — which renders as
+    `the request ()`, the "( )" the branch's own comment says it exists to prevent, with an
+    unbounded invisible model string sitting inside the parens on a refusal path.
+
+    Both halves are driven, so this cannot pass on "always take the fallback": a readable verb
+    beside a coarsened system must still be named."""
+    trip = rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
+    unreadable = "system/verb unreadable in the call's own arguments"
+
+    for verb in ("\u200b", "\ufeff", "\x00", "", "   "):
+        assert unreadable in rq.rejection_dead_end_reason("", verb, trip), \
+            f"an invisible verb {verb!r} was named to MAIN instead of reported unreadable"
+
+    assert unreadable not in rq.rejection_dead_end_reason("", "nosuch-verb", trip), \
+        "a readable verb stopped being named, so the assertions above say nothing"
+    assert "an undeclared system query" in rq.rejection_dead_end_reason(
+        "an undeclared system", "query", trip), \
+        "the host's own words for a ghost stopped reaching the message"
+
+
+def test_readability_is_a_fixed_function_of_the_string_not_of_the_interpreter():
+    """WHICH predicate answers N5, pinned — the arm above pins that invisible strings fold, and
+    every predicate that folds them passes it. This one separates them.
+
+    `str.isprintable()` is the tempting spelling and the wrong one: it answers False for
+    category Co (private use — a codepoint that CAN carry a glyph) and for Cn (whatever this
+    interpreter's Unicode database has not seen yet). Both directions hurt. A private-use name
+    folded into N5 collides two calls the reader can tell apart, and makes the dead end say the
+    arguments were unreadable about a call that named something visible — the "the coarsening
+    may not make the dead end LIE" property. And Cn membership MOVES with the interpreter: a
+    codepoint unassigned today is assigned tomorrow, so one raw string mints `""` on one build
+    and a digest on the next, over a table both are supposed to replay. That is the same
+    across-processes disagreement `system_fingerprint` pins `sha256` over `hash()` to prevent.
+
+    `_text.is_content_less` is the tree's answer and excludes Co and Cn for exactly this
+    reason (`defender/_text.py`), which is why this asks the question through
+    `names_something_readable` rather than restating a category set here."""
+    for raw in ("\ue000", "\uf8ff", "\U000f0000", "\u0378", "\U0002fffe"):
+        assert rq.names_something_readable(raw), \
+            f"{raw!r} was folded into the no-readable-system group; if it is unassigned today " \
+            "that answer changes under a newer Unicode database, and the recorded key with it"
+        assert rq.system_fingerprint(raw, "") != "", \
+            f"{raw!r} minted no identity, so two calls naming two of these are one repeat group"
+
+    # The complementary direction, so this is not satisfied by "fingerprint everything".
+    for raw in ("\u200b", "\ufeff", "\x00", "", "\u00a0"):
+        assert not rq.names_something_readable(raw), \
+            f"{raw!r} renders as nothing and was read as a readable system name"
 
 
 def test_a_non_string_system_is_coerced_rather_than_raising():

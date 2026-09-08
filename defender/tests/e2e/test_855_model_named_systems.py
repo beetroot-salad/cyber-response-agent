@@ -58,7 +58,7 @@ from defender.tests.e2e.test_query_tool_611 import DONE, ROW_KEYS, elastic_ok, q
 # The COMPANION guard's replay oracle, imported rather than re-written: O3 is the claim that
 # the live verdict and a replay over the recorded table are one predicate, and a second copy
 # of the oracle here could only ever agree with itself.
-from defender.tests.e2e.test_repeat_breaker_807 import _replay_rejections  # noqa: E402
+from defender.tests.e2e.test_repeat_breaker_807 import INCOMPLETE_IDIOM, _replay_rejections  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -90,8 +90,12 @@ def _dead_end(r: _Res) -> bool:
     now runs to `DEFAULT_TOOL_RETRIES` instead of stopping at three. So every POSITIVE use of
     this helper is paired with `_trip_row_written`, which reads the guard's own row; a
     NEGATIVE use is safe on its own only while the lead under it makes fewer than ten
-    rejections, and an arm that drives more must assert the run-on some other way."""
-    return "Treat this lead as incomplete" in _summary(r)
+    rejections, and an arm that drives more must assert the run-on some other way.
+
+    The idiom is `test_repeat_breaker_807.INCOMPLETE_IDIOM` WHOLE, not a prefix of it: G19
+    names that sentence as the only vocabulary any prompt teaches main, and a truncated copy
+    would keep every arm below green if the terminator lost its second half."""
+    return INCOMPLETE_IDIOM in _summary(r)
 
 
 def _trip_row_written(r: _Res) -> bool:
@@ -310,6 +314,36 @@ def test_the_grant_checks_writer_mints_its_own_identity_too(tmp_path):
         "three distinct ghosts ended the lead through the grant check — #871 is unfixed there"
 
 
+def test_one_ghost_keys_the_same_through_both_above_guard_writers(tmp_path):
+    """`system_fingerprint`'s sole-ownership claim, bound ACROSS the two placements rather than
+    within each. Every other arm here drives one ghost through one writer, or three ghosts
+    through two — so a placement that normalised before hashing (`.strip()`, `.lower()`,
+    `str(...)`) would mint two identities for ONE ghost and every one of them would still pass:
+    the fixtures are whitespace-free lowercase ASCII, on which those normalisations are the
+    identity function.
+
+    The realistic loop is exactly this shape — a typo'd extra argument on `ghostone` (schema
+    placement), the same name spelled cleanly (grant placement), the typo again — and if the
+    two writers disagree it is unbounded. Asserted on the ROWS, so the identity is read where
+    the guard reads it, and on the LEAD, so the count they share is the one that terminates."""
+    rec = VerbRecorder()
+    r = _run(tmp_path, run_id="d871-both-writers", verbs=elastic_ok(rec), turns=[
+        _bad_args("ghostone"), q("ghostone", "query", PARAMS), _bad_args("ghostone"),
+        q("elastic", "query", PARAMS), DONE,
+    ])
+
+    rows = _above_guard(r)
+    assert len(rows) == 3, "the loop ran past the threshold — the guard stopped counting"
+    assert {row["system_key"] for row in rows} == {
+        record_query.system_fingerprint("ghostone", "")}, \
+        "the two above-guard writers minted different identities for one ghost, so a loop " \
+        "alternating between them can never reach the threshold"
+    assert _dead_end(r), "one ghost through both placements stopped bounding the lead"
+    assert _trip_row_written(r), \
+        "the lead ended on something other than the guard, so the bound above is not the guard's"
+    assert rec.calls == [], "the lead ran on past its dead end"
+
+
 def test_the_grant_checks_writer_is_still_bounded_on_a_repeat(tmp_path):
     """The control for the test above, at the same placement: the grant check's writer must
     not buy O1 by minting a FRESH identity per call. The same undeclared name three times
@@ -330,6 +364,10 @@ def test_the_grant_checks_writer_is_still_bounded_on_a_repeat(tmp_path):
         "the lead ended, but not on the guard — the summary idiom is shared with the request " \
         "limit and with exhausted tool retries, so it alone certifies nothing"
     assert rec.calls == [], "the lead ran on past its dead end"
+    assert "an undeclared system" in _summary(r), \
+        "the GRANT placement's dead end named a system, or said the arguments were " \
+        "unreadable — neither is true, and the schema placement's twin is the only other " \
+        "arm asserting this sentence at all"
     assert "ghostone" not in _summary(r), \
         "the model's own string crossed into main's context on a refusal path"
 
@@ -351,7 +389,7 @@ def test_the_same_undeclared_system_named_three_times_still_ends_the_lead(tmp_pa
 
     rows = _above_guard(r)
     assert len(rows) == 3, "the loop ran past the threshold — the guard stopped counting"
-    assert "turned back at seq" in rows[-1]["payload_digest"], "no trip row was written"
+    assert _trip_row_written(r), "no trip row was written"
     assert rec.calls == [], "the lead ran on past its dead end and executed a later call"
     assert _dead_end(r)
     assert "an undeclared system" in _summary(r), \
@@ -520,6 +558,38 @@ def test_calls_with_no_readable_system_at_all_are_still_one_group(tmp_path):
     assert "" not in control, \
         f"a readable ghost went unfingerprinted, so `blank`'s says nothing: {control}"
     assert not _dead_end(readable)
+
+
+def test_an_invisible_system_string_is_folded_and_never_called_an_undeclared_system(tmp_path):
+    """The MESSAGE half of `names_something_readable`, at the seam — the fold half is pinned at
+    `test_826_deferred_defects` and nothing drove the two together.
+
+    `_undeclared_target` decided this with `raw.strip()` before #871, and `.strip()` answers
+    True for every zero-width and format codepoint. Both halves of that are observable here on
+    ONE run: three invisible strings must be ONE repeat group (so the third ends the lead — the
+    `system_fingerprint` half), and the sentence MAIN receives must not call them "an undeclared
+    system" (the `_undeclared_target` half), because they named nothing a reader can see. Under
+    `.strip()` the first still holds and the second silently flips, which is why the fold arms
+    elsewhere in this file cannot stand in for this one.
+
+    The complementary control is `..._named_three_times_still_ends_the_lead`, which asserts the
+    sentence IS present for a readable ghost on the same placement — so this is not satisfied by
+    a dead end that stopped saying anything."""
+    r = _run(tmp_path, run_id="d871-invisible", turns=[
+        _bad_args("\u200b"), _bad_args("\ufeff"), _bad_args("\u200b\u200b"), DONE,
+    ])
+
+    rows = _above_guard(r)
+    assert len(rows) == 3, "the three rejections did not all leave their rows"
+    assert {row["system_key"] for row in rows} == {""}, \
+        "an invisible system string was fingerprinted, so each is its own group and the loop " \
+        "they make is bounded by nothing"
+    assert _dead_end(r), "three indistinguishable invisible strings stopped being one mistake"
+    assert _trip_row_written(r), \
+        "the lead ended on something other than the guard, so the bound above is not the guard's"
+    assert "an undeclared system" not in _summary(r), \
+        "the dead end told MAIN a system was named when the argument held nothing readable — " \
+        "the message and the fold answered the readability question differently"
 
 
 def test_a_declared_system_is_never_folded_into_that_group(tmp_path):

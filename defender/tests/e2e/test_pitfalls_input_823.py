@@ -274,6 +274,14 @@ def test_shim_row_keeps_the_frozen_twelve_key_contract(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
     ])
     assert set(r.rows[1]) == ROW_KEYS
+    # #871 by VALUE, not just by name: this is the only place the shim lane's own answer for
+    # the fourteenth column is observed on a row this lane actually wrote. Its `system` is read
+    # off a payload path THIS RUN wrote, so no model-authored string was coarsened away and
+    # there is nothing to fingerprint — and a shim row sits inside `repeat_trip`'s counted
+    # domain (`BASH_SHIM_QUERY_ID` is not `ABOVE_GUARD_QUERY_ID`), where the live guard passes
+    # `""`, so a non-empty value here would make these rows match nothing.
+    assert r.rows[1]["system_key"] == "", \
+        "the bash lane fingerprinted a row whose system it derived itself"
 
 
 def test_succeeding_reducer_shim_writes_no_row(tmp_path):

@@ -73,6 +73,7 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     run,
 )
 from defender.tests.e2e._replay_harness import ReplayFn, Turn, VerbRecorder  # noqa: E402
+from defender.tests.e2e.test_query_tool_611 import ROW_KEYS  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -324,13 +325,14 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
 
     rows = res.rows_for(L0)
     assert rows, "lead-0 wrote no queries row — its calls did not reach QueryCapture._record"
-    assert set(rows[0]) == {
-        "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command",
-        "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
-        "payload_sha256", "system_key",
-    }, "lead-0's row is not the row QueryCapture._record builds — a second writer " \
-       "re-implemented the schema, which is exactly what the tree's other queries-table " \
-       "writer already did (g4)"
+    # IMPORTED, not restated: a literal here is this test re-implementing the schema, which is
+    # the very thing its failure message blames a second writer for — and it is what made this
+    # the one row-shape assertion in the tree that had to be hand-edited for `payload_sha256`
+    # (#877) and again for `system_key` (#871).
+    assert set(rows[0]) == ROW_KEYS, \
+        "lead-0's row is not the row QueryCapture._record builds — a second writer " \
+        "re-implemented the schema, which is exactly what the tree's other queries-table " \
+        "writer already did (g4)"
     assert rows[0]["system"] == "elastic"
     assert rows[0]["exit_code"] == 0
     assert res.payloads(L0), \
