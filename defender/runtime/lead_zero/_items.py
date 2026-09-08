@@ -403,10 +403,15 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     from ..tools_gather import GatherRequest, _run_gather
 
     # `prepare_correlation_lead` gated on this BEFORE claiming the row, so a dispatch reached
-    # with the table withholding the lead is a caller that skipped the synchronous half. Not
-    # a fault worth a raise — the same answer that half gives: nothing to dispatch.
-    system = CORRELATION_SYSTEM
-    if system is None:
+    # with the table granting the lead no query verb is a caller that skipped the synchronous
+    # half. Not a fault worth a raise — the same answer that half gives: nothing to dispatch.
+    #
+    # NOT named `system`: `gather_factory` below takes a parameter of that name (the one
+    # `_run_gather` hands it, which is what the prompt-cache key is derived from). The two
+    # carry the same string today, and a local that shadowed the parameter would let a later
+    # edit swap the cache lane with nothing to notice it.
+    dispatch_system = CORRELATION_SYSTEM
+    if dispatch_system is None:
         return None
 
     registry = _NarrowedRegistry(verbs, CORRELATION_GRANT)
@@ -465,7 +470,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
     )
 
-    request = GatherRequest(L3, system, goal, tuple(what_to_summarize))
+    request = GatherRequest(L3, dispatch_system, goal, tuple(what_to_summarize))
     try:
         return await _run_gather(
             gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, CORRELATION_GRANT,

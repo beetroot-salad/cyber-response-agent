@@ -126,7 +126,7 @@ def prepare_correlation_lead(
     carrying its entities outside those three fields.
 
     `system` is the dispatch target the table's projection determines (`CORRELATION_SYSTEM`),
-    and `None` means the verb-disposition table WITHHELD the lead's query verb (#999). That
+    and `None` means the verb-disposition table projects the lead NO query verb (#999). That
     gate sits FIRST, before the contract and before `claim_lead`: a lead that will never run
     must not own a row in the leads table. The parameter exists so a test can state the
     withholding without planting a table into the process-wide cache.
@@ -194,10 +194,13 @@ def render_orient_section(
     own refusal, which names the harness-reserved case in its repair text.
 
     `correlation_system` is the ONE case where `L3`'s absence is not the ordinary one and is
-    said: `None` means the verb-disposition table withheld the lead's query verb (#999), so
+    said: `None` means the verb-disposition table projects the lead no query verb (#999), so
     the lead was never claimed and never will be, and the heading names the table rather than
-    leaving "if any" to explain it. The parameter mirrors `prepare_correlation_lead`'s, for
-    the same reason."""
+    leaving "if any" to explain it. The line does not claim WHICH of the two states produced
+    it — a written withholding (`roles:` without the holder) and a table that never named the
+    holder at all are the distinction #995 exists to keep, and `correlation_system` alone
+    cannot tell them apart, so it says what is observable and points at the file. The
+    parameter mirrors `prepare_correlation_lead`'s, for the same reason."""
     heading = (
         f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
         f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
@@ -212,8 +215,8 @@ def render_orient_section(
     if correlation_system is None:
         heading += (
             f". NOTE: {L3} was NOT dispatched on this run — the verb-disposition table "
-            f"({DISPOSITIONS_REL}) withholds the correlation lead's query verb, so no "
-            "correlation was run and none is coming"
+            f"({DISPOSITIONS_REL}) grants the correlation lead no query verb (withheld, or "
+            "never decided for it), so no correlation was run and none is coming"
         )
     return heading + ")\n\n" + result.text
 
@@ -324,6 +327,7 @@ __all__ = [
     "CORRELATION_SYSTEM",
     "CORRELATION_TEMPLATE",
     "DEFAULT_LIMITS",
+    "DISPOSITIONS_REL",
     "ELIDED",
     "GROUP_ID_FIELD",
     "GrantError",

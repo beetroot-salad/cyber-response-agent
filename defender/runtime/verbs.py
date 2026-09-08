@@ -388,12 +388,15 @@ class VerbRegistry:
     answers GRANTED to everything."""
 
     #: Where THIS registry's grant is authored, or `None` when it is a code literal that no
-    #: data edit can widen. Read by `decide`'s DENIED and ungranted-system refusals, which
-    #: since #995 tell the reader where to go — and a pointer is worse than silence when it
-    #: names a file that cannot fix the refusal, so the two registries over `DENY_ALL`
-    #: (`_scaffold_rules`, the skill-description hook) keep the `None`. Every grant a model
-    #: calls through is the table's projection since #999 closed the last literal
-    #: (`lead_zero`'s correlation grant), and each such registry sets this itself.
+    #: data edit can widen — a pointer is worse than silence when it names a file that cannot
+    #: fix the refusal. Read by `decide`'s DENIED and ungranted-system refusals, which since
+    #: #995 tell the reader where to go. Every grant a model calls through is the table's
+    #: projection since #999 closed the last literal (`lead_zero`'s correlation grant), and
+    #: each such registry sets this itself; the class default is what a subclass over a
+    #: literal inherits. The two registries over `DENY_ALL` (`_scaffold_rules`, the
+    #: skill-description hook) are NOT that case — they are `ModuleVerbRegistry`s and take
+    #: its pointer; what makes them harmless is that neither ever calls `decide`, which is
+    #: the caveat written out in that constructor.
     grant_home: str | None = None
 
     def __init__(self, grant: VerbGrant):

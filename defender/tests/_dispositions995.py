@@ -91,8 +91,8 @@ __all__ = [
     "Disposition",
     "DispositionError",
     "DispositionWarning",
-    "GATHER_CENSUS",
     "CORRELATION_CENSUS",
+    "GATHER_CENSUS",
     "JUDGE_CENSUS",
     "WITHHELD_CENSUS",
     "census_gaps",
@@ -108,10 +108,11 @@ __all__ = [
 # ---------------------------------------------------------------------------------------
 # The census, written INDEPENDENTLY of the shipped table.
 #
-# These three tuples are transcribed from the grants as they stood BEFORE #995 moved them
-# out of code (`driver/_build.py:GATHER_PAIRS` plus its per-system health-check, and
-# the judge's inline `JUDGE_TICKET_PAIRS` tuple, since retired), so the suite can assert
-# that moving the table to config changed WHO MAY CALL WHAT not at all. Held as literals for
+# These tuples are transcribed from the grants as they stood BEFORE the move out of code
+# (`driver/_build.py:GATHER_PAIRS` plus its per-system health-check and the judge's inline
+# `JUDGE_TICKET_PAIRS` tuple for #995, both since retired; `lead_zero/_spec.py`'s
+# `VerbGrant` literal for #999), so the suite can assert that moving each of them into the
+# table changed WHO MAY CALL WHAT not at all. Held as literals for
 # the same reason `_verb_authorization_632.py` holds its copy: an expected value re-derived
 # from the file under test cannot disagree with it.
 #

@@ -12,10 +12,11 @@ THE SHAPE (settled on the issue). The lead is NOT a role — it is bound from `G
 its policy, trace and wire-log id are gather's — and it does not become one. It is a second
 GRANT HOLDER the table may name (gather is the only other, since #922 retired the judge),
 `CORRELATION_GRANT_HOLDER`, a plain constant beside the ablation-lens precedent in
-`agent_role.py`. The loader owns two coherence rules about it: the holder never holds a pair
-gather does not (it runs under gather's tools), and its rows reach at most one system (it is
-dispatched against exactly one). A withholding degrades — item 3 is neither claimed nor
-dispatched, and ORIENT says so — it never kills startup.
+`agent_role.py`. The loader owns three coherence rules about it: the holder never holds a pair
+gather does not (it runs under gather's tools), its rows reach at most one system (it is
+dispatched against exactly one), and it holds at most one query verb (the rule the subset-of-
+gather one cannot state, because the wider verb IS gather's). A withholding degrades — item 3
+is neither claimed nor dispatched, and ORIENT says so — it never kills startup.
 
 THE ORACLES. Conservation is asserted against `CORRELATION_CENSUS`, transcribed in
 `_dispositions995.py` from the literal as it stood, never from the file under test. Every rule
@@ -152,7 +153,7 @@ def test_a_denied_verb_names_the_table_for_gather_too():
 
 
 # =========================================================================================
-# O3 / O7 — the loader's two coherence rules about the holder.
+# O3 / O7 — the loader's three coherence rules about the holder.
 # =========================================================================================
 
 def test_the_lead_may_not_hold_a_pair_gather_does_not(tmp_path):
@@ -188,6 +189,39 @@ def test_a_holder_spanning_two_systems_is_refused_at_load(tmp_path):
     message = str(caught.value)
     assert "alpha" in message, message
     assert "beta" in message, message
+
+
+def test_the_lead_may_not_hold_a_second_query_verb(tmp_path):
+    """The safety case the table now owns. `esql` is granted to gather and is NOT run through
+    `confine_index`, so a subset-of-gather test alone would let one word here hand a lead no
+    model chose to spend an unconfined index verb. Refused at load, naming both pairs."""
+    # Positive control: one query verb plus `health-check` is exactly the shipped shape.
+    load_dispositions(_table(tmp_path / "ok", {
+        ("alpha", "lookup"): BOTH, ("alpha", "health-check"): BOTH,
+        ("alpha", "peek"): GATHER_ONLY,
+    }))
+    with pytest.raises(DispositionError) as caught:
+        load_dispositions(_table(tmp_path / "bad", {
+            ("alpha", "lookup"): BOTH, ("alpha", "health-check"): BOTH,
+            ("alpha", "peek"): BOTH,
+        }))
+    message = str(caught.value)
+    assert "alpha.lookup" in message, message
+    assert "alpha.peek" in message, message
+
+
+def test_a_health_check_on_a_second_system_is_not_a_second_dispatch_target(tmp_path):
+    """`health-check` never selects the dispatched system (`correlation_system` filters it out
+    before deriving one), so a row for it elsewhere is not the authoring ambiguity the
+    one-system rule refuses — and refusing it would kill startup over a table whose target is
+    unambiguous. The loader and the projection have to agree about which rows reach a system."""
+    from defender.runtime.lead_zero._spec import correlation_grant, correlation_system
+
+    rows = load_dispositions(_table(tmp_path / "ok", {
+        ("alpha", "lookup"): BOTH, ("alpha", "health-check"): BOTH,
+        ("beta", "lookup"): GATHER_ONLY, ("beta", "health-check"): BOTH,
+    }))
+    assert correlation_system(correlation_grant(rows)) == "alpha"
 
 
 # =========================================================================================
