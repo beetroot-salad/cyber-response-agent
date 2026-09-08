@@ -87,6 +87,14 @@ def apply_patches(payload: Any, patches: dict[str, dict]) -> tuple[Any, int]:
     world does not touch this system" — two different facts that would otherwise both read as
     an untouched response.
 
+    H1 (#1007, §7 human decision): `applied` counts CONTENT CHANGED, never an entity-NAME hit.
+    A node whose matched entity's patch writes only values the node already held — including an
+    empty patch table entry — is not an application: the merged node is compared to the node it
+    replaces, and the count only advances when they differ. Three production consumers read this
+    count (the serve path's ledger `source`, `_patched_visible` -> `_rejection`'s world-rejection
+    gate, and `judge/family.py`'s `doctored_answer_served`), and all three inherit the correction
+    from this one seam.
+
     Rebuilt rather than mutated in place, because the base payload is the FAMILY's recording:
     mutating it would edit one sibling's world into the shared row every other sibling replays.
 
@@ -122,10 +130,18 @@ def apply_patches(payload: Any, patches: dict[str, dict]) -> tuple[Any, int]:
                 out[k] = walked
         hits = _hits(node, patches)
         if hits:
-            out = dict(node) if out is None else out
+            working = dict(node) if out is None else dict(out)
             for patch in hits:
-                out.update(copy.deepcopy(patch))
-            applied += len(hits)
+                merged = dict(working)
+                merged.update(copy.deepcopy(patch))
+                # PER PATCH, not per node: two entities naming one object each contribute their
+                # own count when each genuinely moves the content, and a patch that lands on top
+                # of an already-identical value contributes none — H1's "content changed" reading
+                # applied at the same grain the table itself is keyed at.
+                if merged != working:
+                    applied += 1
+                working = merged
+            out = working
         return node if out is None else out
 
     return walk(payload), applied

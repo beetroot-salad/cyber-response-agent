@@ -48,6 +48,8 @@ from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.learning.branch.archive import WORLDS_DIRNAME
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
 from defender.learning.branch.ledger import (
+    PATCHED,
+    STAGED,
     Ledger,
     base_file,
     correlation_key_of,
@@ -337,6 +339,39 @@ def _wrong_seat(key: str, verdict: Verdict) -> str:
         f"{sorted(v.value for v in DELTA_SEAT)}")
 
 
+def difference_shown(rows: Any) -> bool | None:
+    """Over one world's served rows: was the sibling ever SHOWN a difference (#1007, M3/O3)?
+
+    `True` on any `patched` row — under H1's corrected counter (#1007) the applier reports
+    `patched` only when the merged content genuinely differs, so a patched row is shown by
+    construction again, honestly this time. `True` on any `staged` row whose witness (M2) reads
+    `differs_from_base: True`.
+
+    `None`, never `False`, when nothing measured anything: a row carries no witness at all (a
+    pre-#1007 archive, or a decision the witness never runs for) and no patched row exists
+    either. `False` only once at least one witness was actually taken and every one of them
+    read `differs_from_base: False` — "staged" on its own means "the call was retargeted", not
+    "shown", which is the inference this reader exists to replace.
+    """
+    measured = False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        source = row.get("source")
+        if source == PATCHED:
+            return True
+        if source != STAGED or "differs_from_base" not in row:
+            continue
+        witness = row.get("differs_from_base")
+        if witness is True:
+            return True
+        if witness is False:
+            measured = True
+        # `None` — the witness was taken and faulted, or an explicit unmeasured value on an
+        # otherwise-witnessed row — contributes neither a shown difference nor a measurement.
+    return False if measured else None
+
+
 def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dict[str, str]]:
     """Per world, per shared correlation key: one member of the comparator's DELTA seat.
 
@@ -399,5 +434,6 @@ __all__ = [
     "REVIEW_NAME",
     "EpisodeError",
     "delta_o",
+    "difference_shown",
     "verdicts",
 ]

@@ -53,15 +53,14 @@ from defender.runtime.branch._family import (
     episode_token_for,
     resume_world_from,
     runnable_worlds,
-    world_token_for,
 )
 from defender.runtime.verbs import VerbContext
-from defender.scripts.adapters.confinement import world_view
 
 from .comparator import Verdict, compare, mechanical
 from .estate.applier import WorldApplier
 from .estate.lookups import apply_patches
 from .estate.registry import refuse_a_foreign_world_view
+from .estate.stagers.dispatch import STAGERS
 from .ledger import (
     BASE,
     SERVED_DIRNAME,
@@ -279,7 +278,7 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
 
 
 def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
-           invoke: Any) -> dict:
+           invoke: Any, write: Any = None) -> dict:
     """Replay the capture through every world, judge each, and write `review.yaml`.
 
     THE CONTROL FIRST, always: the rest of the pass is defined against its result, and computing
@@ -291,7 +290,12 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
     comparator calls at most once per undecided key. None of the three has a default here: this
     frame runs once per episode, from one caller, and a default would be a second opinion about
     which estate an episode was reviewed against.
+
+    `write` is the whole-record write seam (#1007) — `write_guarded` by default, and a caller's
+    own wrapper otherwise, so "review.yaml is written exactly once per pass" is observable
+    without reaching around it with `monkeypatch.setattr`.
     """
+    write = write if write is not None else write_guarded  # lint-default: ok — DI seam owning its own default
     episode_dir = Path(episode_dir)
     rows, unreadable = read_jsonl_rows_report(base_file(episode_dir))
     context = verb_context(episode_dir)
@@ -301,11 +305,13 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
     try:
         worlds: dict[str, dict] = {}
         control: list[str] = []
+        deps = _Deps(adapters=adapters, door=door, invoke=invoke, ctx=context,
+                     scratch=scratch, token=token, drifted=drifted, captured_rows=rows,
+                     base_memo={})
         for world in _control_first(family):
             result = _review_world(
                 world, family=family, episode_dir=episode_dir, rows=rows, control=control,
-                deps=_Deps(adapters=adapters, door=door, invoke=invoke, ctx=context,
-                           scratch=scratch, token=token, drifted=drifted))
+                deps=deps)
             if world.role == BASE_ROLE:
                 control = list(result["consistency"]["control_mismatch_keys"])
             worlds[world.world_id] = result
@@ -322,7 +328,7 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
     # name wide on purpose ("exactly one function under `defender/learning` rewrites a queue
     # file"). A review record is not a queue, and a frame that spells the queue writer's own
     # primitive joins a census it does not belong to.
-    write_guarded(
+    write(
         episode_dir / REVIEW_NAME,
         yaml.safe_dump(record, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return record
@@ -343,6 +349,14 @@ class _Deps:
     #: every captured row and re-canonicalised every payload once per world, to rediscover a
     #: value that cannot vary between them.
     drifted: frozenset[str]
+    #: Every row `base_file` recorded — M1's own selection pool, read once at `review()` scope
+    #: rather than re-read per world.
+    captured_rows: Sequence[dict]
+    #: M1's base-arm memo (F3, F-A(d)): `(system, verb, canonical(params))` -> canonical text,
+    #: at EPISODE scope so a key re-asked by three worlds is read from the un-rewritten estate
+    #: exactly once. SUCCESSES ONLY — a faulted read is retried for the next world rather than
+    #: poisoning every world after the first (`test_a_faulted_base_arm_is_not_memoised_across_worlds`).
+    base_memo: dict[str, str]
 
 
 def _control_first(family: Family) -> list[World]:
@@ -382,7 +396,8 @@ def _review_world(world: World, *, family: Family, episode_dir: Path, rows: Sequ
 
     consistency = _consistency(rows, replay=replay, control=control, is_control=is_control,
                                invoke=deps.invoke, drifted=deps.drifted)
-    reachability = _reachability(world, family=family, replay=replay, deps=deps)
+    reachability = _reachability(world, family=family, replay=replay, deps=deps,
+                                 is_control=is_control, resumed=resumed, applier=applier)
     inventions = _inventions(world, rows=rows, reachability=reachability)
     reason = _rejection(world, consistency=consistency, reachability=reachability)
     result: dict[str, Any] = {
@@ -542,7 +557,8 @@ def _capture_drift(rows: Sequence[dict]) -> set[str]:
 # ---------------------------------------------------------------------------------------
 
 
-def _reachability(world: World, *, family: Family, replay: Any, deps: _Deps) -> dict:
+def _reachability(world: World, *, family: Family, replay: Any, deps: _Deps,
+                  is_control: bool, resumed: Any = None, applier: Any = None) -> dict:
     """Is the difference this world declares observable in this world?
 
     The envelope is the manifest's own discriminating query, run HERE in the world rather than
@@ -562,6 +578,11 @@ def _reachability(world: World, *, family: Family, replay: Any, deps: _Deps) -> 
     review measured nothing at all". It does not reject on its own, exactly as an unanswerable
     exclusion count does not: an outage is the harness's, and rejecting a world for one would
     charge it for the estate.
+
+    M1 (#1007): THE CONTROL TAKES NO RE-ASK AT ALL — it declares no difference of its own, so
+    there is nothing for the capture's own vocabulary to reach. Every other world's block also
+    carries `capture_replays`, `capture_addressed`, `capture_reasks_faulted` and
+    `reachable_by_capture`, the three executed facts M1 adds.
     """
     envelope = _envelope(family)
     rows: list[dict] = []
@@ -575,17 +596,187 @@ def _reachability(world: World, *, family: Family, replay: Any, deps: _Deps) -> 
             faulted = str(fault) or type(fault).__name__
         rows = _rows_of(payload)
         ran = bool(rows)
-    injected = _injected_retrieved(world, rows=rows, deps=deps)
+    retrieved, present = _injected_counts(world, rows=rows, deps=deps)
     matched, failed, total = _exclusion_matches(world, deps=deps)
-    return {
+    block: dict[str, Any] = {
         "envelope_ran": ran,
         "envelope_failed": faulted,
-        "injected_retrieved": injected,
+        "injected_retrieved": retrieved,
+        "injected_present": present,
         "patched_visible": _patched_visible(world, rows=rows),
         "exclusion_matches": matched,
         "exclusion_count_failed": failed,
         "base_documents": total,
     }
+    if not is_control:
+        block.update(_capture_reachability(
+            world, deps=deps, resumed=resumed, applier=applier))
+    return block
+
+
+def _addressing_patterns(world: World) -> frozenset[str]:
+    """This world's own staged elastic patterns — what a captured row's `source_pattern` must
+    equal for the pattern arm of `capture_addressed` to fire."""
+    return frozenset(pattern for pattern, _entry in _elastic_entries(world))
+
+
+def _addressed(call: tuple[str, str, dict], *, world: World, ctx: Any) -> bool:
+    """Does this ONE captured call name a pattern this world stages, or the patched system it
+    declares (ledger fork F4, `resolved_by: auto`)?
+
+    THE PATCHED-SYSTEM ARM COUNTS, because it decides which worlds can be withheld: a patch-only
+    world stages no elastic pattern at all, and a `capture_addressed` computed off the pattern
+    arm alone would read every one of them as unaddressed — `withheld_reason:
+    capture_unaddressed` — and suppress its defender findings under a recorded reason that is
+    false.
+    """
+    system, verb, params = call
+    if system in world.overlay.patches:
+        return True
+    stager = STAGERS.get(system)
+    if stager is None:
+        return False
+    try:
+        pattern = stager.source_pattern(verb, dict(params), ctx)
+    except Exception:  # noqa: BLE001 — an unreadable call names no pattern to be addressed by
+        return False
+    return pattern is not None and pattern in _addressing_patterns(world)
+
+
+def _capture_reachability(world: World, *, deps: _Deps, resumed: Any, applier: Any) -> dict:
+    """M1: re-ask the capture's own queries, live, and record what the re-ask measured.
+
+    Selection is by `_addressed` alone — a captured row naming a pattern this world stages, or
+    naming the system a patch-only world declares. For each selected row: the BASE arm (the
+    un-rewritten capture params, through the episode-scope memo) and the WORLD arm (through
+    `_world_arm`, which carries this world's staging/patching and the FORK-6 foreign-view
+    refusal, and is NEVER memoised — the confirming re-read (H4) has to reach the estate again,
+    not a cached answer to the same key). `differs` is confirmed by one back-to-back re-read of
+    the WORLD arm before it is recorded — the memoised base arm cannot itself be the skew, so
+    only the later arm is re-read.
+    """
+    selected = [
+        (str(row.get("system")), str(row.get("verb")), dict(row.get("params") or {}),
+         correlation_key_of(row))
+        for row in deps.captured_rows
+        if _addressed((str(row.get("system")), str(row.get("verb")), dict(row.get("params") or {})),
+                      world=world, ctx=deps.ctx)
+    ]
+    addressed = bool(selected)
+    replays: list[dict] = []
+    faulted_count = 0
+    any_differs = False
+    any_completed = False
+    for system, verb, params, key in selected:
+        call = (system, verb, params)
+        differs, faulted = _one_reask(call, world=resumed, applier=applier, deps=deps)
+        if faulted:
+            faulted_count += 1
+        else:
+            any_completed = True
+            if differs:
+                any_differs = True
+        replays.append({"key": key, "differs": differs if not faulted else False,
+                        "faulted": faulted})
+    reachable: bool | None
+    if not addressed:
+        reachable = None
+    elif any_differs:
+        reachable = True
+    elif any_completed:
+        reachable = False
+    else:
+        reachable = None
+    return {
+        "capture_replays": replays,
+        "capture_addressed": addressed,
+        "capture_reasks_faulted": faulted_count,
+        "reachable_by_capture": reachable,
+    }
+
+
+def _base_arm(call: tuple[str, str, dict], *, deps: _Deps) -> str | None:
+    """M1's base arm: the un-rewritten capture params, read once per episode per key.
+
+    THROUGH `deps.adapters` DIRECTLY — no staging, no world, the same recording read door every
+    other adapter read of the review goes through. SUCCESSES ONLY are memoised. A faulted read
+    is retried for the next world rather than poisoning every world that follows it in
+    `_control_first`'s order.
+    """
+    system, verb, params = call
+    memo_key = json.dumps([system, verb, params], sort_keys=True, default=str)
+    cached = deps.base_memo.get(memo_key)
+    if cached is not None:
+        return cached
+    try:
+        payload = deps.adapters(system, verb, **params)
+    except Exception:  # noqa: BLE001 — an unanswerable base arm is a faulted re-ask, not a raise
+        return None
+    text = payload_text(payload)
+    deps.base_memo[memo_key] = text
+    return text
+
+
+def _world_arm(call: tuple[str, str, dict], *, world: Any, applier: Any, deps: _Deps) -> str:
+    """One UNCACHED live read of `call` as this world would answer it.
+
+    Deliberately NOT `replay_one`: that frame's scratch ledger memoises the first answer for a
+    given `(system, verb, prepared)` key, which would make H4's confirming re-read a second look
+    at the SAME cached bytes rather than a second reach into the estate — exactly the skew this
+    re-read exists to catch. The FORK-6 refusal, `prepare`/`apply` and the restore-before-apply
+    order are all still here; only the memo is gone.
+    """
+    system, verb, params = call
+    refuse_a_foreign_world_view(world, system, verb, params)
+    prepared = applier.prepare(system, verb, dict(params), world, deps.ctx)
+    asked = dict(params) if prepared != params else None
+    served = deps.adapters(system, verb, **prepared)
+    restored = served if asked is None else applier.restore(
+        system, verb, served, asked, prepared, deps.ctx)
+    _decision, applied = applier.apply(system, verb, prepared, restored, world, asked)
+    return payload_text(applied)
+
+
+def _differs(base_text: str, other_text: str) -> bool:
+    """"Differs beyond formatting" — `mechanical`'s own vocabulary, read the way every other
+    caller in this module reads it: `SAME`/`FORMATTING` is `False`, everything else (including
+    the mechanically UNDECIDED `None` — C29 refuted `mechanical`'s decidability for a genuine
+    content difference, pd-5) is `True`. This pass has no model seat to settle `None` further,
+    so H4's confirming re-read is the only thing standing between an undecided verdict and a
+    recorded fact."""
+    verdict = mechanical(base_text, other_text)
+    return verdict not in (Verdict.SAME, Verdict.FORMATTING)
+
+
+def _one_reask(call: tuple[str, str, dict], *, world: Any, applier: Any,
+              deps: _Deps) -> tuple[bool, bool]:
+    """`(differs, faulted)` for one captured call, with H4's confirming re-read.
+
+    BOTH SIDES ARE GUARDED BEFORE THE COMPARATOR: `mechanical(None, <text>)` raises an uncaught
+    `TypeError`, so a faulted arm — base or world — never reaches it, and never as a quiet
+    `differs: false`.
+
+    THE CONFIRMING RE-READ (H4) fires only on the apparently-differing path — the extra read is
+    the price of recording a difference, not of every key — and re-reads the WORLD arm alone:
+    the memoised base arm cannot itself be the skew (P-D's normalization already removes the
+    incidental fields that would make two live reads of an unchanged corpus disagree), so only
+    the later arm is asked again. A difference that survives both reads is recorded; one that
+    does not is skew, not a fact.
+    """
+    base_text = _base_arm(call, deps=deps)
+    if base_text is None:
+        return False, True
+    try:
+        world_text = _world_arm(call, world=world, applier=applier, deps=deps)
+    except Exception:  # noqa: BLE001 — a refused or faulted world arm is a faulted re-ask
+        return False, True
+    if not _differs(base_text, world_text):
+        return False, False
+    try:
+        confirming = _world_arm(call, world=world, applier=applier, deps=deps)
+    except Exception:  # noqa: BLE001 — the re-read itself faulting is still a faulted re-ask
+        return False, True
+    return _differs(base_text, confirming), False
 
 
 def _envelope(family: Family) -> tuple[str, str, dict] | None:
@@ -654,37 +845,29 @@ def _elastic_entries(world: World) -> list[tuple[str, ElasticEntry]]:
     return sorted(world.overlay.elastic.items())  # lint-shippable: ok — the manifest schema's own field name, owned by `runtime/branch/_family.Overlay`  # noqa: E501
 
 
-def _injected_retrieved(world: World, *, rows: Sequence[dict], deps: _Deps) -> int:
-    """How many of this world's injected documents its own corpus can be seen to hold.
+def _injected_counts(world: World, *, rows: Sequence[dict], deps: _Deps) -> tuple[int, int]:
+    """`(injected_retrieved, injected_present)` — N4/M9's honest split (#1007).
 
-    THROUGH THE DOOR, not off the envelope's hits. A search returns at most one page
-    (`RETURNED_DOC_CAP`), so an injection larger than a page could never be counted from what
-    came back — and a world rejected for that would be rejected for the READER's limit rather
-    than for its own difference (§7 FORK-7(e)).
-
-    The envelope's own hits are counted too, and the larger of the two is kept. A door that
-    cannot see the injection index — a count that failed, a name it does not hold — must not
-    read as an unreachable injection while the envelope demonstrably retrieved one of the
-    documents in question.
+    THE OLD SINGLE COUNT (`max` of the two) let the door's own size stand in for the envelope's
+    reach: whenever the cluster could answer a count at all, the world read reachable — the door
+    count IS the injection size, so a world was never truly measured unreachable through this
+    field (§7 FORK-7(e)'s consequence). Split, each half means one thing: `injected_retrieved` is
+    the ENVELOPE's own hits — what this world's discriminating query actually returned — and
+    `injected_present` is the door's count of the injection index, a SIZE fact, never a
+    reachability one. `_rejection`'s injection branch retires under N4 as vacuous now that
+    neither half alone should gate a world.
     """
-    counted = 0
-    for pattern, entry in _elastic_entries(world):
+    retrieved = 0
+    present = 0
+    for _pattern, entry in _elastic_entries(world):
         if not entry.inject:
             continue
-        index = f"{world_view(pattern, _token(world, deps))}{INJECT_SUFFIX}"
-        counted += max(_counted(deps.door, index) or 0, _hit_count(entry, rows))
-    return counted
-
-
-def _token(world: World, deps: _Deps) -> str:
-    """This world's composed token — through `world_token_for`, which owns that spelling.
-
-    Written out as an f-string here this module was the fifth site to compare a world on the
-    join `world_token_for`'s own docstring says must have one spelling, and the only one not
-    calling it: a change to the composition would leave the review counting documents in a name
-    staging never wrote, reading zero, and rejecting every injecting world as unreachable.
-    """
-    return world_token_for(deps.token, world.world_id)
+        retrieved += _hit_count(entry, rows)
+        # THE OVERLAY'S OWN DECLARED SIZE — never a door count. "Size is not reach": an overlay
+        # can inject a great deal into a corpus the capture never queries, and `injected_present`
+        # exists to say so without borrowing the envelope's own measurement to do it.
+        present += len(entry.inject)
+    return retrieved, present
 
 
 def _hit_count(entry: ElasticEntry, rows: Sequence[dict]) -> int:
@@ -852,11 +1035,15 @@ def _base_total(reachability: dict) -> int:
 def _rejection(world: World, *, consistency: dict, reachability: dict) -> str | None:
     """Why this world may not run, or `None`.
 
-    FOUR REASONS AND NO OTHERS. A contradiction, an injection its own envelope cannot retrieve,
-    a patch that applies to nothing the envelope returned, and an exclusion that removes no base
-    document. Every one of them is a world that is not the world it declares — and everything
-    else this record carries (drift, faults, inventions, an unanswerable count) is a reading
-    that goes in the record and changes nothing.
+    THREE REASONS AND NO OTHERS (N4, #1007): a contradiction, a patch that applies to nothing
+    the envelope returned, and an exclusion that removes no base document. The FOURTH — an
+    injection its own envelope cannot retrieve — RETIRES under N4: `injected_retrieved` (the
+    envelope's own hits) and `injected_present` (the door's size count) are both honest now, and
+    neither alone is a reachability verdict a world should be rejected on, unlike the old single
+    count that let the door's size stand in for it. `reachable_by_capture` (M1) is what a later
+    reader consults for reachability; this frame no longer rejects on it. Everything else this
+    record carries (drift, faults, inventions, an unanswerable count) is a reading that goes in
+    the record and changes nothing.
     """
     contradicting = [m["key"] for m in consistency["mismatches"]
                      if m["verdict"] == Verdict.CONTRADICTION.value]
@@ -869,10 +1056,6 @@ def _rejection(world: World, *, consistency: dict, reachability: dict) -> str | 
                 "difference removes nothing")
     if not reachability["envelope_ran"]:
         return None
-    injects = any(entry.inject for _pattern, entry in _elastic_entries(world))
-    if injects and reachability["injected_retrieved"] == 0:
-        return ("the discriminating envelope, run here, retrieves none of this overlay's "
-                "injected documents — the difference is unreachable")
     if world.overlay.patches and not reachability["patched_visible"]:
         return ("this overlay's patches apply to nothing the discriminating envelope returned "
                 "— the difference is unreachable")
