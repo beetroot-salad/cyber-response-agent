@@ -235,6 +235,29 @@ def test_the_name_matches_a_params_value_case_insensitively(tmp_path):
     assert _asked(run, "web-1") is False, "negative control: a name this row does not carry"
 
 
+def test_both_the_subject_and_the_value_are_trimmed_before_comparison(tmp_path):
+    """CLAIM (a FIFTH assumption, undeclared until now): both sides are `.strip()`ed.
+
+    NEITHER STRIP WAS PINNED. Removing both — `name.casefold()` and `value.casefold()` — left
+    every other test in this file green, because `test_an_empty_name_is_never_an_ask`'s `"   "`
+    case passes either way (an untrimmed `"   "` simply matches no value) and every other
+    fixture is spelled without padding. So the module's own claim that a name "that trimmed to
+    nothing" is refused rested on an assertion that could not fail.
+
+    The two halves are deliberate and pull in opposite-looking directions. A NAME read out of a
+    record cell can carry padding the record's formatting put there, and scoring that as a miss
+    would understate the rate — the case-fold argument, one character class over. A VALUE's
+    padding is the same fact about the same machine, so `"db-1 "` in a params cell IS an ask
+    about `db-1` — which widens the file's "WHOLE-VALUE, never substring" rule by exactly that
+    character class, and is written down here for that reason rather than left in the code."""
+    run = _run(tmp_path, _row("cmdb", {"host": " db-1 "}, lead_id="l-002"))
+    assert _asked(run, "db-1") is True, "a padded params VALUE names the same machine"
+    assert _asked(run, " db-1 ") is True, "a padded NAME names the same machine"
+    assert _asked(run, "db") is False, (
+        "negative control: trimming must not become substring matching"
+    )
+
+
 def test_a_params_key_is_not_a_params_value(tmp_path):
     """CLAIM (assumption — the design does not settle it): keys do not count, values do.
 
@@ -457,24 +480,31 @@ def test_a_params_value_that_is_a_substring_of_the_name_is_not_an_ask(tmp_path):
 
 def test_a_refused_governance_call_counts_as_an_ask(tmp_path):
     """CLAIM: the oracle reads `system` and `params` and NOTHING about the call's outcome — a
-    policy-denied, screen-refused or repeat-guarded governance row counts.
+    screen-refused, repeat-guarded or above-guard governance row counts.
 
     THIS PINS THE DESIGN'S LETTER, AND THE DESIGN MAY BE WRONG. M4 says "some row ... has the
-    name among its `params` values" and says nothing about outcome. But `runtime/query_tool.py`
-    writes a row for calls that never executed — `_grant_check` stamps a policy denial with
-    `query_id="<empty>.above-repeat-guard"` and a non-zero exit, `_screen` keeps the ordinary
-    `query_id` and stamps `USAGE_EXIT_CODE` — each keeping `system` and `params` verbatim. So on
-    the three fields M4 names, a CMDB call that was REFUSED is indistinguishable from one that
-    was ANSWERED, and a run of twelve denied calls scores 12/12.
+    name among its `params` values" and says nothing about outcome. `runtime/query_tool.py`
+    writes a row for five calls that never executed, each keeping `system` and `params`
+    verbatim: the repeat guard's trip (`∅.repeat-trip`), the three above-guard writers
+    (`∅.above-repeat-guard` — the schema rejection, the adapter-load fault, the unresolvable
+    verb) and `_screen`'s param/traversal/self-ticket refusal, which keeps an ORDINARY
+    `query_id` and stamps `USAGE_EXIT_CODE`. So a run of twelve refused cmdb calls about the
+    container scores 12/12. (A POLICY DENIAL is not one of them: `_grant_check`'s `DENIED`
+    branch logs to `policy_denials.jsonl` and returns without writing a query row at all.)
 
-    Whether that is right turns on what O1 measures: "the run ASKS the governance systems about
-    that machine" reads as the act, which a refused call performed, and counting only answered
-    calls would score a policy misconfiguration as a failure of the skill-text intervention.
-    Counting refusals, though, lets a broken estate manufacture a rate.
+    IT IS A DESIGN CALL, NOT A DATA LIMIT — the row carries what would separate the cases, and
+    `load_queries` hands both fields over already typed. `QueryRow.is_sentinel` (the writer's
+    own `∅.` predicate) covers the four sentinel writers; `exit_code == 0` — `query_tool`'s own
+    spelling of "what actually executed" — covers `_screen`'s refusal too. Whether to use them
+    turns on what O1 measures: "the run ASKS the governance systems about that machine" reads
+    as the act, which a refused call performed, and counting only answered calls would score a
+    policy misconfiguration as a failure of the skill-text intervention. Counting refusals,
+    though, lets a broken estate manufacture a rate.
 
     The question is raised on the issue rather than settled here. This test exists so the
     behaviour is VISIBLE and a later flip has to edit a test that explains itself, instead of
-    being a silent change to what the experiment's numbers mean."""
+    being a silent change to what the experiment's numbers mean — and so that the flip is
+    known to be one predicate away rather than blocked on evidence the table does not carry."""
     run = _run(
         tmp_path,
         _row(
@@ -489,6 +519,44 @@ def test_a_refused_governance_call_counts_as_an_ask(tmp_path):
     assert _asked(run, "db-1") is True, (
         "the design's letter counts this row; if that changed, change this test and say so"
     )
+
+
+def test_a_row_whose_system_cell_is_not_a_string_is_skipped_not_hashed(tmp_path):
+    """CLAIM: a `system` cell holding a JSON array or object skips its row and does not raise.
+
+    `system` is a STORED COLUMN read back out of a tree a live box is root on, so its cell is
+    not guaranteed to be the string its column declares — and `<cell> in GOVERNANCE_SYSTEMS`
+    HASHES the cell, so an unhashable one raises `TypeError` from inside a function whose
+    contract is "never raises on a run dir ... one bad tree must not take the batch down".
+    Nothing else in this file varies that cell's TYPE: `test_a_malformed_row_is_skipped...`
+    covers a row with no `system` at all, and `None` is hashable, so the gap hid behind it.
+
+    The good row is LAST, so an implementation that dies on the bad cell fails rather than
+    passing on the row before it."""
+    run = _run(
+        tmp_path,
+        json.dumps({"lead_id": "l-002", "seq": 0, "system": ["cmdb"], "params": {"host": "db-1"}}),
+        json.dumps({"lead_id": "l-003", "seq": 1, "system": {"n": "cmdb"}, "params": {"h": "db-1"}}),
+        _row("cmdb", {"host": "db-1"}, lead_id="l-004"),
+    )
+    assert _asked(run, "db-1") is True, (
+        "a row whose `system` cell is not a string took the scan down with it — the intact "
+        "governance row after it never answered"
+    )
+
+
+def test_a_name_that_is_not_a_string_is_never_an_ask(tmp_path):
+    """CLAIM: a non-string subject is False, like the empty one.
+
+    `test_an_empty_name_is_never_an_ask` guards the caller's own `""`, but `None` is the more
+    likely spelling of that same harness bug: every name extractor in this tree returns
+    `X | None`, so an unresolved subject arrives as `None`, not as `""`. Unguarded,
+    `name.strip()` raises `AttributeError` on exactly the population the 0/9 baseline is
+    computed over."""
+    run = _run(tmp_path, _row("cmdb", {"host": "db-1"}))
+    assert _asked(run, None) is False, "a `None` name raised instead of answering False"
+    assert _asked(run, 1) is False, "a non-string name raised instead of answering False"
+    assert _asked(run, "db-1") is True, "positive control: the fixture does answer True"
 
 
 def test_a_query_log_that_is_a_directory_answers_false_rather_than_raising(tmp_path):
@@ -511,9 +579,11 @@ def test_an_unreadable_query_log_answers_false_rather_than_raising(tmp_path):
     starts crashing the query tool" — and the oracle scores a BATCH of runs, where one
     unreadable tree must not take the batch down.
 
-    SKIPS AS ROOT, which is how CI runs, so this test is a local-only guard and the `OSError`
-    catch it asks for is not held up by CI. Named here so that is a known limit rather than a
-    surprise."""
+    SKIPS AS ROOT — which is NOT how CI runs. `.github/workflows/ci.yml`'s `test` job is a
+    bare `runs-on: ubuntu-latest` with no `container:` key, so pytest runs as the unprivileged
+    `runner` user and this assertion is gated there. It self-skips in a root devcontainer,
+    which is the environment the skip is named for; do not read the skip as "CI never ran
+    this" and weaken the catch on that belief."""
     import os
 
     import pytest

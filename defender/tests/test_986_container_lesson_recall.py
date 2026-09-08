@@ -40,11 +40,13 @@ WHAT THIS FILE DRIVES, AND WHAT THAT DOES AND DOES NOT PROVE.
     ("frontier replay ... absent from the pushed set").
 
 Nothing here asserts the lesson's frontmatter has a field. A selector is a claim about which
-documents the lesson reaches, so every test below asks `match_lessons` for the answer.
+documents the lesson reaches, so every test below asks the matcher for the answer
+(`match_loaded`, which is what `match_lessons` is once the corpus is loaded — see `_lessons`).
 """
 from __future__ import annotations
 
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -53,7 +55,10 @@ DEFENDER = Path(__file__).resolve().parents[1]
 if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
     sys.path.insert(0, str(DEFENDER.parent))
 
-pytest.importorskip("pydantic_ai")
+# NO `pytest.importorskip("pydantic_ai")`. The four drivers this file uses —
+# `frontier_from_text`, `lessons_frontier`, `validate.diagnose`, `_corpus.iter_lessons` — do
+# not pull it in (asserted by importing all four and finding `pydantic_ai` absent from
+# `sys.modules`), and the guard costs ~5s of blocking import on every run of this file alone.
 
 #: The shipped corpus, and the lesson in it this file is about.
 CORPUS = DEFENDER / "lessons"
@@ -75,11 +80,28 @@ def _frontier(text: str):
     return frontier_from_text(text)
 
 
+@lru_cache(maxsize=1)
+def _lessons() -> tuple:
+    """The REAL shipped corpus, parsed ONCE for this module.
+
+    `match_lessons(frontier, CORPUS)` is `match_loaded(frontier, list(iter_lessons(CORPUS)))`,
+    and `iter_lessons` re-opens and re-YAML-parses all sixteen files on every call — the
+    dominant cost of the whole lane, and ~99% of a `_recall`. Nothing in this file writes to
+    `defender/lessons/`, so the twelve calls below share one walk. Still the shipped corpus,
+    which is this file's whole point; only the repeat parse goes."""
+    from defender._corpus import iter_lessons
+
+    return tuple(iter_lessons(CORPUS))
+
+
 def _recall(text: str, *, top_k: int | None = None) -> list[str]:
     from defender.scripts.lessons import lessons_frontier
 
     kw = {} if top_k is None else {"top_k": top_k}
-    return [h.name for h in lessons_frontier.match_lessons(_frontier(text), CORPUS, **kw)]
+    return [
+        h.name
+        for h in lessons_frontier.match_loaded(_frontier(text), list(_lessons()), **kw)
+    ]
 
 
 def _doc(*vertex_rows: str) -> str:
@@ -276,6 +298,11 @@ def test_the_shipped_open_ident_selector_still_fires():
 PROCESS_ATTR_OTHER_CLASS = _doc(
     HOST, ROOT, "v-003|process|sudo|sudo[pid=4242]|container=e5b0213bd690"
 )
+#: Registered with the others, because `_FIXTURES` is what
+#: `test_the_fixture_documents_carry_no_invlang_fault` guards and a fixture reachable only
+#: through its constant is a fixture that guard never validates — the exact hole that makes a
+#: quietly-unparseable document derive an empty frontier and green a negative assertion.
+_FIXTURES["process attrs.container, other class"] = PROCESS_ATTR_OTHER_CLASS
 
 
 def test_the_process_selector_is_not_scoped_to_one_process_class():
@@ -303,9 +330,7 @@ def _lesson():
     these assertions are about the document the retrieval path actually sees — and so a
     malformed edit reaches them as a skipped lesson (a `StopIteration` here) rather than as a
     hand-parsed dict that happens to still work."""
-    from defender._corpus import iter_lessons
-
-    return next(le for le in iter_lessons(CORPUS) if le.path.stem == LESSON)
+    return next(le for le in _lessons() if le.path.stem == LESSON)
 
 
 def test_m3_does_not_re_aim_the_lesson_off_the_alert_it_is_reachable_on_today():

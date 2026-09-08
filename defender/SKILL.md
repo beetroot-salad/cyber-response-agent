@@ -219,8 +219,11 @@ at ORIENT or PLAN; the registry is a system of record and its
 queries belong in the lead sequence.
 
 A contract's claim names a subject and its discharge covers that
-subject only — see `:R authz` below for what a lead owes when it
-resolves the action onto a finer entity than the claim names.
+subject only — see **A contract answers about the subject its claim
+names** under ANALYZE for what a lead owes when it resolves the action
+onto a finer entity than the claim names. (`:R authz` names a row, not a
+section of this file; its column shape is in
+`defender/skills/invlang/SKILL.md` §Authz contract resolution.)
 
 **One question = one lead = one gather call.** Independent questions
 that happen to ground the same hypothesis ("is the source IP
@@ -484,12 +487,13 @@ container on the alerted host, a pod on a node, a VM on a hypervisor —
 the discharge you already hold stands for the coarse subject and says
 nothing about the fine one. Nothing reopens it and nothing should; the
 repair is a sibling, written in the block of the lead that resolved the
-entity. Write the privilege edge to the finer entity, and declare a
-fresh `authz?` contract whose claim spells ITS name, on the hypothesis
-it discriminates. The rest follows from rules you already have: that
-contract is undischarged, an undischarged contract on a live-weight
-hypothesis blocks a confident close, and discharging it is the
-governance re-ask. The coarse edge and the coarse contract stay on the
+entity. Write the `escalated_privilege` edge to the finer entity — that
+relation, not a coined `privilege`, which is out of vocabulary and a hard
+refusal — and declare a fresh `authz?` contract whose claim spells ITS
+name, on the hypothesis it discriminates. The rest follows from rules
+you already have: that contract is undischarged, an undischarged
+contract on a live-weight hypothesis blocks a confident close, and
+discharging it is the governance re-ask. The coarse edge and the coarse contract stay on the
 record and stay counted — a finer sibling supersedes nothing.
 
 If gather's summary feels thin, **re-dispatch gather** naming the

@@ -32,19 +32,23 @@ that holds by luck is not a guard.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 DEFENDER = Path(__file__).resolve().parents[1]
-if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(DEFENDER.parent))
 
 MAIN_SKILL = DEFENDER / "SKILL.md"
 INVLANG_SKILL = DEFENDER / "skills" / "invlang" / "SKILL.md"
 
 
 def _text(path: Path) -> str:
-    return path.read_text(encoding="utf-8").lower()
+    """The file lowercased with every run of whitespace collapsed to one space.
+
+    WITHOUT the collapse these anchors are hostage to line wrapping: `undischarged contract`
+    is one phrase to a reader and two lines to `in`, so re-wrapping the paragraph — which
+    changes nothing about the rule — turns the guard red and teaches the next editor that the
+    guard is noise. A prose guard that cries wolf on a reflow does not survive to catch the
+    deletion it exists for."""
+    return " ".join(path.read_text(encoding="utf-8").lower().split())
 
 
 def test_the_main_skill_says_a_discharge_covers_only_the_subject_the_claim_names():
@@ -77,9 +81,12 @@ def test_the_main_skill_says_the_resolving_lead_declares_a_contract_naming_the_f
         "the mechanism that turns the new contract into a re-ask — an undischarged contract "
         "blocking a confident close — is no longer stated where the rule is"
     )
-    assert "privilege edge" in text, (
+    assert "`escalated_privilege` edge to the finer entity" in text, (
         "the rule no longer tells the resolving lead to write the privilege edge to the "
-        "finer entity, which is O2's half of the record repair"
+        "finer entity, which is O2's half of the record repair. Anchored on the RELATION "
+        "name rather than on the phrase `privilege edge`: `privilege` is not in "
+        "`invlang/vocab.py::RELATIONS`, and an out-of-vocabulary `rel` is a hard refusal, so "
+        "the prose has to name the edge kind a model can actually write"
     )
 
 
@@ -91,7 +98,15 @@ def test_the_invlang_skill_puts_a_resolved_name_in_ident_and_not_in_an_attribute
     id. The `attr_updates` key guidance lists `ident` as legal and never said it was the right
     one for a name, so the habit was not contradicted anywhere."""
     text = _text(INVLANG_SKILL)
-    assert "key=ident" in text, "the ident refinement key is no longer documented at all"
+    assert "neither is where its identifier goes" in text, (
+        "the rule that an `attrs.*` cell — on the entity or on its host — is not where a "
+        "resolved NAME goes is gone from invlang/SKILL.md. Two anchors were tried and "
+        "REJECTED for being unable to fail: `key=ident`, which the attr_updates key guidance "
+        "has spelled since long before #986, and `sharpen the vertex`, which §Open questions "
+        "already contains inside `sharpen the vertex's identifier` — invisible to a raw "
+        "substring test only because the base file happens to wrap that phrase across two "
+        "lines. An anchor that predates the rule cannot go red when the rule is deleted"
+    )
     assert "attrs.container_name" in text, (
         "the worked counter-example is gone — the guidance names a legal key without saying "
         "which cell a resolved NAME belongs in, which is the state #986 was filed against"
