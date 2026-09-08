@@ -49,10 +49,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.learning.leads.pitfalls_curator import _build_pitfalls_handoffs  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
-    ABOVE_GUARD_QUERY_ID,
-    REJECTION_BUDGET,
-)
+from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.runtime import lead_zero  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, Turn, materialize  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _dispatch, _run  # noqa: E402
@@ -129,7 +126,15 @@ def _summary(r: _Res) -> str:
 
 
 def _above_guard(r: _Res) -> list[dict]:
-    return [row for row in r.own_rows if row["query_id"] == ABOVE_GUARD_QUERY_ID]
+    """The rows the above-guard placements' two guards COUNT — spent from
+    `record_query.in_rejection_domain`, the predicate #1015 made public for exactly this.
+
+    NARROWER than `query_id == ABOVE_GUARD_QUERY_ID` alone, and the difference is a row no
+    guard wrote: `_grant_check`'s adapter-load branch is the THIRD above-guard writer and its
+    rows are `infra` (exit 2), outside both predicates' domain. Every caller here reads
+    `rows[-1]` as "the trip row" or counts the population against a guard's threshold, so a
+    row that reached no guard must not be in the list."""
+    return [row for row in r.own_rows if record_query.in_rejection_domain(row)]
 
 
 def _queued(rows: list[dict]) -> list[dict]:
@@ -151,20 +156,29 @@ def _queued(rows: list[dict]) -> list[dict]:
     ]
 
 
-#: The most above-guard rejections any arm in this FILE drives — `test_only_a_coarsened_row_...`
-#: at four. `_dead_end`'s negative uses read the summary alone, and past `REJECTION_BUDGET`
-#: rejections the host now ends the lead itself, so every `assert not _dead_end(...)` below
-#: silently changes meaning once the headroom is gone. Bound executably rather than left in
-#: prose: the arms cannot notice, so the constant must.
+#: The most above-guard rejections any arm in this FILE drives on ONE lead —
+#: `test_only_a_coarsened_row_...` at four. `_dead_end`'s negative uses read the summary alone,
+#: and past `REJECTION_BUDGET` rejections the host now ends the lead itself, so every
+#: `assert not _dead_end(...)` below silently changes meaning once the headroom is gone.
+#:
+#: A HAND-MAINTAINED CENSUS, and that is its limit: the assertion below relates two CONSTANTS,
+#: so it catches a budget that moved down and NOT an arm that started driving more. The
+#: durable oracle is `test_1015_rejection_budget._terminator` — a negative arm that read the
+#: lead's terminator instead of the summary would need no census at all. Until the four
+#: `assert not _dead_end(...)` sites are converted, re-count this when adding an arm.
 _MOST_REJECTIONS_ANY_ARM_DRIVES = 4
 
 
 def test_this_files_negative_dead_end_arms_still_have_budget_headroom():
     """The precondition `_dead_end`'s docstring states, asserted rather than described (#1015).
 
-    Lower `REJECTION_BUDGET` to `_MOST_REJECTIONS_ANY_ARM_DRIVES` or below and three arms here
-    flip from "the guard correctly let calls that DIFFER run on" to "the budget ended the
-    lead" — while staying green, because they read only the summary."""
+    What it catches: `REJECTION_BUDGET` lowered to `_MOST_REJECTIONS_ANY_ARM_DRIVES` or below.
+    At three or under, the negative `_dead_end` arms here flip from "the guard correctly let
+    calls that DIFFER run on" to "the budget ended the lead" while staying GREEN, because they
+    read only the summary and `INCOMPLETE_IDIOM` is written by all four `_run_gather` arms.
+
+    What it does NOT catch: a new arm driving more than the census records — see the
+    constant's own note. Nothing here reads the arms."""
     assert _MOST_REJECTIONS_ANY_ARM_DRIVES < REJECTION_BUDGET, \
         "an arm here drives as many above-guard rejections as the budget allows, so its " \
         "`assert not _dead_end(...)` no longer says what it claims"

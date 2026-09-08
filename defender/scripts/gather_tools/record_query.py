@@ -470,15 +470,23 @@ REPEAT_ESCAPE = (
 # ways to differ is unbounded — `names_something_readable` is deliberately blind to assigned
 # but font-blank codepoints (its docstring names #1015 as the containment), so a fresh
 # undeclared name per turn walks past the guard forever. Worse, the FRAMEWORK's own ceiling
-# does not contain it either: `ToolManager.for_run_step` rebuilds `retries` from `failed_tools`
-# ALONE (`pydantic_ai/tool_manager.py`, the `>=1.107` floor) — `retries = {name: prev + 1 for
-# name in self.failed_tools}` — so `query`'s count is dropped on every step where `query` did
-# not fail, which does NOT require a successful query. A step that runs a bash reduce, a
-# `list_verbs`, or no tool at all resets `DEFAULT_TOOL_RETRIES` just as well, and the lead
-# spends its whole request budget on rejections. (The reset is weaker than "on success", so
-# every argument below that leans on it holds a fortiori; the margin paragraph's worked example
-# is the shape that keeps `query` failing on CONSECUTIVE steps, not the only shape that
-# reaches the framework's arm.)
+# does not contain it either: `ToolManager.for_run_step` DROPS `query`'s accumulated retry
+# count, so a lead that stops failing for a turn buys `DEFAULT_TOOL_RETRIES` more rejections,
+# indefinitely, and spends its whole request budget on them.
+#
+# EXACTLY WHEN IT DROPS IS A VERSION FACT, and `defender/pyproject.toml` floors the dependency
+# without pinning it (`pydantic-ai-slim>=1.107`), so BOTH rules ship:
+#   - at the 1.107 floor, `for_run_step` rebuilds `retries` from `failed_tools` ALONE
+#     (`retries = {name: prev + 1 for name in self.failed_tools}`), so the count is dropped on
+#     every step where `query` did not FAIL — a bash reduce, a `list_verbs`, or a text-only
+#     turn resets it, no successful query required;
+#   - from 2.x, the rebuild carries a count forward unless its tool is in `succeeded_tools`,
+#     so the drop requires an actual SUCCESSFUL `query`.
+# Neither rule contains the loop, and the weaker one (the floor's) is what makes the loop
+# cheapest to sustain — so every argument below holds under both, and the margin paragraph's
+# worked example is the shape that keeps `query` failing on CONSECUTIVE steps, which is the
+# only shape that reaches the framework's arm under EITHER rule. Do not restate one of the two
+# as "the" rule; the installed version decides which is running.
 #
 # So the containment is an AGGREGATE bound, identity-blind, over exactly `rejection_trip`'s
 # domain — the one filter both placements already load their rows for. NO NEW STATE and no new
@@ -513,10 +521,15 @@ REPEAT_ESCAPE = (
 # budget, under `lead_zero._spec.CORRELATION_REQUEST_LIMIT = 8` — so this constant is 15% of a
 # model-dispatched lead's allowance and 75% of that one's. A dead end was already reachable
 # there (the repeat guard's, at three identical rejections), so this widens an existing door
-# rather than opening one; but no arm can observe it, because every fixture that reads
-# above-guard rows filters `RESERVED_LEAD_IDS` out and every terminator oracle keys on `l-001`.
-# Resizing, or exempting that lead, is a decision for whoever owns the correlation section of
-# ORIENT — recorded here because the number cannot be re-derived from the census alone.
+# rather than opening one. The stop is REACHABLE and was reproduced: six schema-rejected turns
+# on `l-00c` write six in-domain rows, stamp `dead-end` on that session and hand the
+# correlation section the budget summary. No arm drives it today — but not because the arms
+# CANNOT: `test_repeat_breaker_807._replay_rejections` reads every lead's rows with no reserved
+# filter, and `test_808_correlation_lead` already asserts `l-00c`'s terminator (it drives
+# SUCCESSFUL calls, so it reaches the request limit rather than this guard). An arm is
+# affordable; it is the SIZE that is not this issue's to settle. Resizing, or exempting that
+# lead, is a decision for whoever owns the correlation section of ORIENT — recorded here
+# because the number cannot be re-derived from the census alone.
 #
 # NOR IS IT THE ONLY WAY A LEAD SPENDS ITS REQUESTS ON REFUSALS: `_grant_check`'s DENIED branch
 # and both `_tripped_message` returns answer ABOVE this guard with a plain tool RESULT and no
@@ -615,7 +628,7 @@ class RepeatTrip:
     occurrence: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class RejectionBudgetTrip:
     """One trip of the per-lead rejection budget: this call's 1-based `occurrence` among the
     lead's above-guard agent-fixable rejections, and the `budget` it reached.
@@ -630,7 +643,15 @@ class RejectionBudgetTrip:
     Deliberately NOT a `RepeatTrip` with a different threshold: `first_seq` is meaningless here
     (the budget names no one earlier request), and the two dispatchers below tell the guards
     apart by TYPE. A shared type would make that a flag, and a flag read wrongly would hand
-    main the other guard's sentence."""
+    main the other guard's sentence.
+
+    KEYWORD-ONLY, for the reason `rejection_dead_end`'s two `str`s are: `occurrence` and
+    `budget` are two adjacent same-typed fields derived from the same call, and a transposition
+    is INVISIBLE at an ordinary stop because the two coincide there. It shows up only in the
+    one case the field exists to describe — the parallel calls the `>=` rule admits, where
+    `occurrence > budget` — and there it makes `rejection_budget_dead_end_reason` report the
+    allowance instead of the rejections that happened, which is exactly what that function's
+    docstring says it must never do."""
 
     occurrence: int
     budget: int
@@ -805,9 +826,11 @@ def rejection_budget_trip(
     guards can never disagree about what a repeat is, and this predicate has no identity to
     agree about.
 
-    NO RESET ON SUCCESS. The count is over the lead's LIFETIME rows, and that is the defect:
-    the framework's own per-tool counter drops on a successful call, which is precisely what
-    un-bounds the loop. A lead that recovered and then thrashes again still ends at `budget`.
+    NOTHING REFILLS IT. The count is over the lead's LIFETIME rows, and that is the defect it
+    answers: the framework's own per-tool counter is DROPPED whenever the lead stops failing
+    for a turn (the module comment above gives the two version-dependent rules for exactly
+    when), which is precisely what un-bounds the loop. A lead that recovered and then thrashes
+    again still ends at `budget`.
 
     ACCUMULATE BEFORE STOP, the shape `rejection_trip` has: the guarded call's own rejection
     row is written whether or not it trips, so `occurrence = count + 1` and a recorded table
@@ -942,15 +965,20 @@ def rejection_detail(trip: RepeatTrip | RejectionBudgetTrip, rejection: str = ""
     record and the trip record, and replacing the detail outright would make the append-only
     table permanently forget why the last call was malformed. The budget phrase leads, so it
     survives `_record`'s 160-character digest cut whole and the tail is what gets eaten."""
-    if isinstance(trip, RepeatTrip):
+    if type(trip) is RepeatTrip:
         return rejection_trip_detail(trip, rejection)
     if not isinstance(trip, RejectionBudgetTrip):
         # TOTAL, not an `else`. A third guard's trip falling through here would be described to
         # every reader of the table as a budget stop — silently, which is the one failure a
         # single producer exists to prevent.
+        #
+        # `type(trip) is`, not `isinstance`, on the branch above, and that is what makes this
+        # check total: the natural way to add a third guard is to SUBCLASS `RepeatTrip` for its
+        # `occurrence`/`first_seq`, and under `isinstance` such a trip takes the repeat branch
+        # — no raise, and the table is told the lead repeated a request it never issued.
         raise TypeError(f"no above-guard detail for {type(trip).__name__}")
     detail = (
-        f"refused: {_ordinal(trip.occurrence)} rejection before anything ran in this lead "
+        f"refused: {_ordinal(trip.occurrence)} request in this lead rejected before it ran "
         f"(budget {trip.budget})"
     )
     return _with_rejection_tail(detail, rejection)
@@ -978,7 +1006,7 @@ def rejection_dead_end(
     them are mirrored, and only one of them may be echoed. A transposition at either placement
     type-checks, raises nothing, and puts "the request (query an undeclared system)" in main's
     context — caught only by an arm that drives THAT placement to the threshold."""
-    if isinstance(trip, RepeatTrip):
+    if type(trip) is RepeatTrip:
         return GatherDeadEnd(
             reason=rejection_dead_end_reason(target, verb, trip),
             escape=REPEAT_ESCAPE,
@@ -986,6 +1014,9 @@ def rejection_dead_end(
     if not isinstance(trip, RejectionBudgetTrip):
         # TOTAL, for the reason `rejection_detail`'s twin is: a third guard falling through to
         # the budget's sentence and escape is main receiving the wrong explanation, silently.
+        # `type(trip) is` above for that twin's reason too — and here the subclass case is
+        # worse, because the repeat branch SPENDS `target` and `verb`, so a third guard that
+        # inherited from `RepeatTrip` would echo the model's own arguments into main's context.
         raise TypeError(f"no above-guard dead end for {type(trip).__name__}")
     return GatherDeadEnd(
         reason=rejection_budget_dead_end_reason(trip),

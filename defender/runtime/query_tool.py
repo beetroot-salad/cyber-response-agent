@@ -371,6 +371,13 @@ class QueryCapture(AbstractCapability[Any]):
             verb = as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
             trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
+            # BOUND before the `_record` call rather than spelled in its argument list:
+            # `rejection_detail` is TOTAL over the trip types and RAISES on one it does not
+            # know, and an argument expression is evaluated BEFORE the call it belongs to — so
+            # inlined, a future third guard would cost this rejection its row entirely and the
+            # append-only table would forget the call happened at all. Bound here, the raise
+            # happens where a row was never owed.
+            detail = str(e) if trip is None else rejection_detail(trip, str(e))
             await self._record(
                 ctx.deps,
                 system=system, verb=verb, system_key=system_key,
@@ -378,7 +385,7 @@ class QueryCapture(AbstractCapability[Any]):
                 params=params,
                 payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=str(e) if trip is None else rejection_detail(trip, str(e)),
+                detail=detail,
             )
             if trip is not None:
                 raise rejection_dead_end(
@@ -444,13 +451,13 @@ class QueryCapture(AbstractCapability[Any]):
                 deps, recorded_system, verb, params, system_key=system_key,
             )
             refusal = decision.refusal or "unresolvable"
+            # Bound before the call, for the reason the schema placement's twin is.
+            detail = refusal if trip is None else rejection_detail(trip, refusal)
             await self._record(
                 deps, system=recorded_system, verb=verb, system_key=system_key,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=(
-                    refusal if trip is None else rejection_detail(trip, refusal)
-                ),
+                detail=detail,
             )
             if trip is not None:
                 raise rejection_dead_end(

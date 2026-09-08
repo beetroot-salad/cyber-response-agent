@@ -350,6 +350,15 @@ def test_the_budget_trip_carries_integers_and_nothing_else():
     with pytest.raises(dataclasses.FrozenInstanceError):
         trip.occurrence = 99  # type: ignore[misc]
 
+    # KEYWORD-ONLY, for the reason `rejection_dead_end`'s two `str`s are. Two adjacent `int`s
+    # with a positional constructor transpose silently, and at an ordinary stop the two are
+    # EQUAL — so no fixture built at the budget can see it. It diverges only where the `>=`
+    # rule admits `occurrence > budget`, and there the transposition makes
+    # `rejection_budget_dead_end_reason` report the allowance instead of the rejections that
+    # happened, which the arm below says it must never do.
+    with pytest.raises(TypeError):
+        RejectionBudgetTrip(REJECTION_BUDGET, REJECTION_BUDGET)  # type: ignore[misc]
+
     # NOT `trip != RepeatTrip(...)`: two distinct dataclasses never compare equal (each
     # `__eq__` returns `NotImplemented` and Python falls back to identity), so that assertion
     # holds for every possible pair of field values and pins nothing. What both dispatchers
@@ -459,11 +468,18 @@ def test_the_detail_dispatcher_keeps_the_two_guards_sentences_apart():
 
     detail = rejection_detail(budget, "boom")
     assert detail == (
-        f"refused: {rq._ordinal(REJECTION_BUDGET)} rejection before anything ran in this lead "
+        f"refused: {rq._ordinal(REJECTION_BUDGET)} request in this lead rejected before it ran "
         f"(budget {REJECTION_BUDGET}); rejected: boom"
     )
     assert "turned back at seq" not in detail, \
         "a budget stop's row claims the call repeated one already turned back — O2"
+    # The subject of "ran" is the REQUEST, not the lead: the budget has NO reset on success, so
+    # the lead that spends it may have executed many queries first (the interleaved arm in the
+    # e2e half drives exactly that). A phrase saying nothing ran in this lead would write a
+    # false fact about the lead into the append-only table `session_store`'s `truncated_by`
+    # comment names as the one record of which guard stopped it.
+    assert "before anything ran" not in detail, \
+        "the row claims the lead executed nothing, which no reset-free count can know"
 
 
 def test_the_budget_phrase_leads_the_row_digest_and_survives_its_truncation():
@@ -476,7 +492,7 @@ def test_the_budget_phrase_leads_the_row_digest_and_survives_its_truncation():
     budget stop from an ordinary rejection at all."""
     budget = RejectionBudgetTrip(occurrence=REJECTION_BUDGET, budget=REJECTION_BUDGET)
     phrase = (
-        f"refused: {rq._ordinal(REJECTION_BUDGET)} rejection before anything ran in this lead "
+        f"refused: {rq._ordinal(REJECTION_BUDGET)} request in this lead rejected before it ran "
         f"(budget {REJECTION_BUDGET})"
     )
     assert len(phrase) <= 160
@@ -518,6 +534,40 @@ def test_the_dead_end_dispatcher_hands_the_budget_no_target_to_leak():
     assert LOUD_VERB not in b.escape
     assert "turned back at seq" not in b.reason, \
         "a budget stop tells main the request repeated one already turned back — O2"
+
+
+def test_neither_dispatcher_describes_a_guard_it_was_never_told_about():
+    """The TOTALITY both dispatchers argue for at length, asserted rather than commented.
+
+    Four comments and two docstrings say the trailing `raise` is `TOTAL, not an `else``,
+    because a third guard's trip silently taking one of the two existing branches is the one
+    failure a single producer exists to prevent. Nothing pinned it, and the branch was not
+    total: the NATURAL way to add a third guard is to subclass `RepeatTrip` for its
+    `occurrence`/`first_seq`, and an `isinstance` head takes such a trip down the REPEAT branch
+    — which writes "repeat of request already turned back at seq N" into the table for a call
+    that repeated nothing, and hands main `REPEAT_ESCAPE` plus `rejection_dead_end_reason`,
+    which SPENDS the model's own `target` and `verb`.
+
+    A subclass, not an unrelated class, is the whole point of the arm: an unrelated class was
+    already refused by the trailing `isinstance`, so a `Mock()` here would pass against the
+    defect."""
+    class _ThirdGuardTrip(rq.RepeatTrip):
+        pass
+
+    third = _ThirdGuardTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
+    with pytest.raises(TypeError):
+        rejection_detail(third, "boom")
+    with pytest.raises(TypeError):
+        rejection_dead_end(third, target=LOUD_SYSTEM, verb=LOUD_VERB)
+
+    # The control: the exact types still take their own branches, so the arm above is a
+    # totality claim and not a dispatcher that refuses everything.
+    assert "turned back at seq" in rejection_detail(
+        rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD))
+    assert rejection_dead_end(
+        RejectionBudgetTrip(occurrence=REJECTION_BUDGET, budget=REJECTION_BUDGET),
+        target=LOUD_SYSTEM, verb=LOUD_VERB,
+    ).escape == REJECTION_BUDGET_ESCAPE
 
 
 def test_each_dispatcher_spends_the_sentences_owner_rather_than_copying_it():

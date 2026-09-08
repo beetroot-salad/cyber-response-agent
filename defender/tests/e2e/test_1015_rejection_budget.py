@@ -344,8 +344,10 @@ def test_a_successful_query_between_rejections_does_not_refill_the_budget(tmp_pa
     """O1's "regardless of successful calls in between" — the C3/C4 heart of this issue, and
     the explicit non-obligation "no reset on success".
 
-    pydantic-ai drops a tool's retry count when that tool SUCCEEDED in the step
-    (`tool_manager.py:117-127`), which is exactly why the framework ceiling does not bound this
+    pydantic-ai DROPS a tool's accumulated retry count whenever the lead stops failing for a
+    turn (`ToolManager.for_run_step`; the two version-dependent rules for exactly when are in
+    `record_query`'s module comment, and a successful call satisfies BOTH of them — which is
+    why this arm drives one), and that is exactly why the framework ceiling does not bound this
     loop: one good call every few turns buys ten more rejections, indefinitely, until the
     lead's whole request budget is gone. The host's budget is over the lead's LIFETIME rows, so
     a lead that recovered and then thrashes again still ends at B lifetime above-guard
