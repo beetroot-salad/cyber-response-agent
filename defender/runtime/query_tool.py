@@ -86,6 +86,36 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 DEFAULT_FAULT_EXIT = 2
 
+#: How the host names a system it withheld — ONE spelling, spent by `_undeclared_target` on the
+#: sentence MAIN reads and by `UNDECLARED_SYSTEM_DETAIL` on the row. Not a shared PREDICATE (see
+#: below), a shared WORDING: two hand-kept copies would let a reword reach the dead-end message
+#: and not the digest, leaving an operator joining the two surfaces with two names for one class.
+UNDECLARED_SYSTEM = "an undeclared system"
+
+#: What the GRANT CHECK's unresolvable-verb rejection records when the host COARSENED the
+#: system away (#1016 M1) — that placement only; the schema placement renders
+#: `_coarse_schema_detail(e)`, and the adapter-load writer coarsens nothing. A literal, because
+#: the specifics are on the same row already: `system_key` tells one ghost from another, `verb`
+#: and `params` hold the call's own arguments.
+#:
+#: Deliberately NOT a second spelling of `_undeclared_target`'s readability question (N8), and
+#: the cost is real: on a call naming nothing READABLE that function returns `""` and the dead
+#: end declines to say a system was named, while this row says one was. The row is the coarser
+#: of the two by design — a reader joining the two surfaces reads the `system` column beside it.
+UNDECLARED_SYSTEM_DETAIL = "unresolvable: " + UNDECLARED_SYSTEM
+
+#: The `query` tool's OWN parameter names — `register_query_tool`'s signature minus `ctx`, and
+#: HOST material for that reason. Pydantic reports a failure's `loc`, which on `extra_forbidden`
+#: is the offending key, a name the MODEL chose; membership here separates "the schema is
+#: complaining about the tool's `system` argument" from "the schema is quoting a string the
+#: model invented". Anything outside it renders as the placeholder `argument`.
+#:
+#: HAND-COPIED and underivable — the tool is a closure inside `register_query_tool`, out of
+#: `inspect.signature`'s reach from module scope — and nothing fails when it drifts. So
+#: `_coarse_schema_detail` refuses `extra_forbidden`'s `loc[0]` separately, which keeps a stale
+#: entry a DEGRADATION (a real argument printed as `argument`) rather than a leak.
+DECLARED_ARGS = frozenset({"system", "verb", "params", "query_id"})
+
 #: Characters a `query_id` may not carry. The first four are PATH shapes — a traversal that
 #: would walk the id out of the directory it names a file in. The last three are RENDER
 #: shapes: a catalog id is interpolated into markdown three offline collectors read, and a
@@ -280,6 +310,101 @@ class QueryCapture(AbstractCapability[Any]):
         return recorded, system_fingerprint(raw_system, recorded)
 
     @staticmethod
+    def _was_coarsened(recorded: str) -> bool:
+        """THE SOLE ANSWER to "did `_system_of_record` throw the model's `system` argument away
+        on this row?" — the question that scopes #1016's O1 to the rows where the host chose to
+        withhold a name, and leaves every other row's detail exactly as it was (N3).
+
+        ASKED OF THE RECORDED VALUE ALONE, which is the whole predicate and not a shortcut past
+        one: `_system_of_record` returns `system if system in declared else ""`, so the recorded
+        value is either byte-identical to what the caller handed it or empty, and "is it empty"
+        answers "does it differ from what was sent" over this module's own producer. Taking the
+        raw half too would add an argument that cannot change the answer and a mirrored
+        `(raw, recorded)` pair to pass positionally — `system` is the RECORDED half at the schema
+        check and the RAW half at the grant check — which is the hazard `_undeclared_target` is
+        keyword-only to prevent, two functions below.
+
+        ONE function for both placements, though #1016's design spells the predicate at each:
+        they arrive from different argument surfaces but ask the same question of the one value
+        `_coarsen` returns, and `_coarsen`'s own docstring records what a rule kept by hand at
+        both placements cost the last time.
+
+        THE POPULATION IS "does this row carry a system at all?" — the question the ROW'S READERS
+        ask. #1016's design first left a literal `system=""` out of it, on the grounds that the
+        host recorded precisely what the model sent. True of the system STRING, false of the
+        DETAIL this branch selects: such a call still records pydantic's `loc` (the model's own
+        chosen argument key) at the schema placement and `decision.refusal` (which names the
+        verb) at the grant check, onto a row that is `system=""`, `system_key=""` — byte-identical
+        in both identity columns to one the host really did coarsen, and indistinguishable from
+        it to every reader. One character of model output is not a licence to reopen the leak.
+        A non-`str` `system` (already `""` by `as_str`) and a missing key coarsen the same way."""
+        return not recorded
+
+    @staticmethod
+    def _coarse_schema_detail(e: BaseException) -> str:
+        """THE SOLE PRODUCER of the detail a COARSENED argument-schema rejection records
+        (#1016 M2) — pydantic's complaint re-composed from host material, in place of the
+        `str(e)` a row that kept its system still gets.
+
+        `str(e)` cannot be used here and neither can a scrub of it. It carries the model's text
+        three ways: the failing `input_value=` (a non-string `system` lands there whole), the
+        offending `loc` (which is the model's own chosen key on an extra argument), and the
+        repr-escaping around both — and a substring replace over escaped text leaves fragments
+        for any name holding a quote or a backslash (#1016 N5). So nothing is subtracted; the
+        sentence is BUILT, from three host-owned pieces and no fourth:
+
+        * the error COUNT, a number;
+        * the FIELD, which is `loc[0]` only when it is one of the tool's own parameter names
+          (`DECLARED_ARGS`) AND the error is not `extra_forbidden`; the literal `argument`
+          otherwise. `loc` beyond its first element is dropped whole — a deeper element is a key
+          inside the model's `params`. The type test is redundant against today's set and is
+          spelled anyway, because `DECLARED_ARGS` is a hand-copy of a signature ~1000 lines off:
+          `extra_forbidden` is the ONE error whose `loc[0]` is a name the model chose, so a
+          stale entry (a parameter renamed or removed) is otherwise a licence to echo the model
+          spelling that old name back into a host-authored column. Membership can then only
+          DEGRADE the digest (a real argument rendered as `argument`), never leak;
+        * pydantic's `msg`, which for every error type this schema can raise quotes no input.
+          Against a decoded object it is a fixed template ("Input should be a valid string",
+          "Extra inputs are not permitted", "Field required", "Input should be a valid
+          dictionary"). When the framework hands the tool a JSON STRING instead — what every
+          real provider sends, and why `_raw_args` exists, though no replay arm drives it — a
+          malformed body yields `json_invalid` at `loc=()`, whose message names a POSITION in
+          the model's own text ("Invalid JSON: expected ident at line 1 column 13"). Kept: the
+          parser is describing its own state and the diagnosis is useless without the offset.
+          But the licence here is "quotes no input", never "is a constant".
+
+        `include_input=False` ALONE is not enough, and that is the trap worth naming: it drops
+        the value and leaves `loc` standing, so the model still gets to choose a string in a
+        host-authored column just by misspelling an argument.
+
+        A non-`ValidationError` — the `ModelRetry` this seam also catches — keeps `str(e)`, and
+        the reason is narrow enough to be worth stating: it is NOT that pydantic-ai's retries
+        carry no arguments. The unknown-tool one is raised in `_resolve_tool` before any
+        validate hook runs and the timeout one on the EXECUTE path, so neither reaches here;
+        what could is a per-tool `args_validator_func`, which `register_query_tool` does not
+        supply. Give `query` an args validator that formats an argument into its message and
+        this arm stops being safe."""
+        if not isinstance(e, ValidationError):
+            return str(e)
+        errs = e.errors(include_input=False, include_url=False)
+        parts = []
+        for err in errs:
+            # Nothing in this loop may raise. It runs inside a rejection handler with no `try`
+            # of its own, so any exception replaces the rejection outright — no row, hence no
+            # occurrence for the companion guard to recover from the rows it wrote, and the
+            # repeat loop #826 item 4 closed stops being bounded. Hence `.get` on every key,
+            # and `isinstance(head, str)` before the membership test rather than for mypy:
+            # `x in frozenset` HASHES x, so an unhashable `loc` element would raise here too.
+            head = next(iter(err.get("loc") or ()), None)
+            field = (
+                head if isinstance(head, str) and head in DECLARED_ARGS
+                and err.get("type") != "extra_forbidden"
+                else "argument"
+            )
+            parts.append(f"{field}: {err.get('msg', '')}")
+        return f"{len(errs)} validation error(s): " + "; ".join(parts)
+
+    @staticmethod
     def _undeclared_target(*, recorded: str, raw: str) -> str:
         """What the dead-end message calls the request's target. The coarsened `""` makes
         `rejection_dead_end_reason` say "system/verb unreadable in the call's own arguments",
@@ -299,7 +424,7 @@ class QueryCapture(AbstractCapability[Any]):
         the N5 group with, and not a second spelling of it: this message describes a whole
         repeat GROUP, so the two must answer alike or the sentence MAIN receives is chosen by
         whichever member of the group happened to land third."""
-        return recorded or ("an undeclared system" if names_something_readable(raw) else "")
+        return recorded or (UNDECLARED_SYSTEM if names_something_readable(raw) else "")
 
     def _forbidden_reject(self, model_query_id: Any) -> str | None:
         # The message names the WHOLE screen, not just its path half: `_QID_FORBIDDEN` reaches
@@ -349,6 +474,14 @@ class QueryCapture(AbstractCapability[Any]):
             verb = as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
             trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
+            # #1016 M2. `str(e)` names whatever the model sent — the failing value, and the
+            # offending KEY when the model invented one — so on a row whose `system` this writer
+            # just threw away it puts the model's text back in a host-authored column. Asked of
+            # `system`, the value the ROW records and the population O1 is stated over.
+            detail = (
+                self._coarse_schema_detail(e)
+                if self._was_coarsened(system) else str(e)
+            )
             await self._record(
                 ctx.deps,
                 system=system, verb=verb, system_key=system_key,
@@ -356,7 +489,7 @@ class QueryCapture(AbstractCapability[Any]):
                 params=params,
                 payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=str(e) if trip is None else rejection_trip_detail(trip, str(e)),
+                detail=detail if trip is None else rejection_trip_detail(trip, detail),
             )
             if trip is not None:
                 raise GatherDeadEnd(
@@ -422,14 +555,21 @@ class QueryCapture(AbstractCapability[Any]):
             trip = self._rejection_guard(
                 deps, recorded_system, verb, params, system_key=system_key,
             )
-            refusal = decision.refusal or "unresolvable"
+            # #1016 M1. `decision.refusal` names the system AND the verb — right for the model
+            # (it is how a subagent corrects a typo, and the `ModelRetry` below carries it
+            # whole) and wrong for the row, which just coarsened that system to `""`. A host
+            # literal when coarsened; `refusal` verbatim otherwise, since a rejection against a
+            # DECLARED system is the pitfalls channel's input and must keep naming the verb.
+            detail = (
+                UNDECLARED_SYSTEM_DETAIL
+                if self._was_coarsened(recorded_system)
+                else (decision.refusal or "unresolvable")
+            )
             await self._record(
                 deps, system=recorded_system, verb=verb, system_key=system_key,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=(
-                    refusal if trip is None else rejection_trip_detail(trip, refusal)
-                ),
+                detail=detail if trip is None else rejection_trip_detail(trip, detail),
             )
             if trip is not None:
                 raise GatherDeadEnd(
@@ -576,6 +716,15 @@ class QueryCapture(AbstractCapability[Any]):
                 # step later than the wrap below and with nothing between it and a reader.
                 # Redacted BEFORE the truncation, so the 160 characters kept are 160 characters
                 # of a redacted string rather than a window that happens to have cut the name.
+                #
+                # THE FAILURE ENVELOPE IS SPELLED HERE, not taken from `payload_digest`: this
+                # is one of three writers (`tools/_bash.py`, `lead_zero/_capture.py`) that hand
+                # that function only the SUCCESS arm and compose `exit={code}; {detail}`
+                # themselves, so its `exit_code != 0` branch has no production caller at all.
+                # `payload_digest`'s docstring is still where the column's contract is argued —
+                # including #1016's collapse of every coarsened above-guard row onto one host
+                # literal and what keeps that safe — so read it for THIS line, not for the
+                # branch it is attached to.
                 payload_digest=(
                     payload_digest(text, "", 0) if exit_code == 0
                     else f"exit={exit_code}; {redact_model_visible(detail).strip()[:160]}"
@@ -966,10 +1115,21 @@ def register_query_tool(agent, registry) -> None:
 
 
 def _raw_args(args: Any) -> dict:
+    """The call's arguments as the MODEL sent them, coerced to a dict it cannot escape.
+
+    `RecursionError` sits beside the decode errors and is not decoration. The one production
+    caller is `wrap_tool_validate`'s rejection handler — no `try` of its own — and the string
+    re-parsed here is the SAME one pydantic just refused. A deeply nested body fails pydantic
+    with `json_invalid: recursion limit exceeded` (a `ValidationError`, so the handler runs) and
+    then exhausts `json.loads`'s own limit here. `RecursionError` is a `RuntimeError`, so the
+    other two arms miss it: it escapes, NO ROW is written, the companion guard loses the
+    occurrence it recovers from the rows it wrote, and the fault unwinds past
+    `_run_validate_hooks`, which catches only `(ValidationError, ModelRetry)`. `{}` is the
+    honest answer — the arguments amounted to nothing readable, which is what the row records."""
     if isinstance(args, str):
         try:
             args = json.loads(args or "{}")
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, RecursionError):
             return {}
     return args if isinstance(args, dict) else {}
 

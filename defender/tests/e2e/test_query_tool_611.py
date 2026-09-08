@@ -458,6 +458,33 @@ def test_arg_shape_validation_error_still_writes_a_64_row(tmp_path):
     assert rows[0]["payload_status"] == "error"
 
 
+def test_a_recursive_args_body_does_not_take_the_rejection_row_with_it():
+    """a_recursive_args_body_does_not_take_the_rejection_row_with_it — `_raw_args` absorbs the
+    `RecursionError` a deeply nested arguments body raises, because its one production caller
+    is `wrap_tool_validate`'s rejection handler and that frame has no `try` of its own.
+
+    THE SHAPE IS ONE THAT FRAME ALREADY REACHES. When the framework hands the tool its arguments
+    as a JSON STRING — what every real provider sends, and the reason `_raw_args` exists — a
+    body nested past the interpreter's recursion limit is refused by pydantic as `json_invalid`,
+    which IS a `ValidationError`, so the handler runs. Its first statement then re-parses that
+    same string. `RecursionError` is a `RuntimeError`, so the `(JSONDecodeError, ValueError)`
+    arm did not catch it: it escaped the handler, no row was written, the companion guard lost
+    the occurrence it recovers from the rows it wrote, and the fault unwound past
+    `_run_validate_hooks`, which catches only `(ValidationError, ModelRetry)` — the silent
+    terminator class #826 item 4 closed.
+
+    Driven at the helper rather than through a lead because the replay harness builds a turn's
+    arguments as a dict (`Turn(tool_calls=[(name, {...})])`), so no arm in this suite can put a
+    STRING on that seam at all. The first assertion is what keeps this honest: it pins that the
+    fixture really is the hazardous shape, so the second cannot pass by testing nothing."""
+    body = '{"system": "elastic", "verb": "probe", "params": ' + "[" * 2000 + "]" * 2000 + "}"
+    with pytest.raises(RecursionError):
+        json.loads(body)
+    assert query_tool._raw_args(body) == {}, \
+        "a recursive arguments body no longer coarsens to `{}` — if it raises here instead, " \
+        "the rejection handler writes no row and the companion guard stops counting"
+
+
 def test_empty_verbs_declaration_fails_closed_at_the_tool(tmp_path):
     """empty_verbs_declaration_fails_closed_at_the_tool — a system whose module declares NO
     verbs is unreachable through query(): an empty declaration must not read as 'no filter'."""
