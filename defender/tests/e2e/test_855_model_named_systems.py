@@ -421,7 +421,7 @@ def test_only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest(tmp_path):
 
     keys = [row["system_key"] for row in r.own_rows]
     assert len(keys) == 5, "the five calls did not all leave their rows"
-    assert all(re.fullmatch(r"[0-9a-f]{16}", k) for k in keys[:3]), \
+    assert all(re.fullmatch(r"[0-9a-f]{64}", k) for k in keys[:3]), \
         f"a coarsened row carries no fixed-length hex digest: {keys[:3]}"
     assert keys[0] == keys[2], "one ghost named twice produced two identities"
     assert keys[0] != keys[1], "two different ghosts produced one identity"
@@ -524,7 +524,7 @@ def test_the_replay_of_the_recorded_table_agrees_with_the_live_run(tmp_path):
 
 def test_calls_with_no_readable_system_at_all_are_still_one_group(tmp_path):
     """N5 — the fingerprint is of a READABLE string, and a `system` argument that is not a
-    string has none. `_as_str` coarsens it to `""` at the schema placement, the same value a
+    string has none. `_text.as_str` coarsens it to `""` at the schema placement, the same value a
     row already stores, and no fingerprint is minted: "no readable system at all" is ONE
     mistake however many shapes the argument takes, so three of them still end the lead.
 

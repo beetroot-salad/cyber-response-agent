@@ -17,7 +17,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
-from defender._text import is_content_less
+from defender._text import as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 
 _ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
@@ -57,14 +57,6 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0
     return f"{len(stdout)} bytes, {lines} line(s)"
-
-
-SYSTEM_KEY_HEX_LEN = 16
-"""How many hex characters of the digest `system_key` carries.
-
-Fixed and NAMED rather than a literal at the truncation: the width is part of a claim across
-processes — a table recorded by one build is replayed by a later one — so it is a contract, not
-a tuning knob."""
 
 
 def _sha256_hex(text: str) -> str:
@@ -142,31 +134,38 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     `""` is "this row's identity needs no fingerprint", and it is the answer in both cases
     where the row already separates the call by itself: a DECLARED system (`recorded_system`
     is the model's own string, so `_request_key` discriminates on it already) and a system
-    argument with nothing readable in it (`_as_str` coarsens a non-string to `""` at the
+    argument with nothing readable in it (`_text.as_str` coarsens a non-string to `""` at the
     schema placement, and "no readable system at all" is ONE mistake — two such calls stay
     one repeat group; `names_something_readable` decides which strings are in it).
 
     `raw_system` is COERCED rather than trusted, like every other value on this path
-    (`_as_str`, `_as_dict`, `_system_key_of`) — the coercion is `names_something_readable`'s,
+    (`_text.as_str`, `_as_dict`) — the coercion is `names_something_readable`'s,
     so the two seams cannot disagree about what a non-`str` means. Both ABOVE-GUARD call sites
     run inside a rejection handler that has no `try` of its own, so a raise here would replace
     the rejection — no row for the guard to count, and the fault unwinds past the lead's own
     catch. (`lead_zero._record_manual_row` is the third caller and is not in a handler; it
     passes a host constant, so it can only ever be answered `""`.)
 
-    Otherwise: `SYSTEM_KEY_HEX_LEN` hex characters of `sha256` over the raw string. TRUNCATED
-    on purpose — the column exists to tell two ghosts apart within one lead, not to be
-    reversed, and a shorter fixed width is a smaller channel out of a table the gather agent
-    can read. `sha256` and the width are pinned rather than left to `hash()`, whose
-    per-process salt would make a replay over a recorded table disagree with the run that
-    wrote it.
+    Otherwise: `sha256` over the raw string, at FULL width, exactly as `payload_sha256` spends
+    it on the neighbouring column of the same row. It is not truncated, and an earlier draft
+    that truncated it to 16 was carrying two reasons that do not survive being asked for
+    evidence — "harder to reverse" (a system name is low-entropy, so it is dictionary-open at
+    any width) and "a smaller channel out of a table the gather agent can read" (the agent
+    AUTHORED the string, and `verb`, `params` and `raw_command` on this same row store
+    unbounded model text verbatim). The repo's other truncations are all identifiers a person
+    reads or types; this one is compared machine-to-machine inside `_trip` and displayed
+    nowhere, so the readability that buys them their width buys this nothing.
 
-    The digest IS name-shaped — `is_system_name` accepts a hex run of this width — which is
-    exactly why it lives in its own column instead of being folded into `system`: the
-    corpus-path consumer reads `system`, and nothing reads this."""
+    `sha256` itself IS pinned, and against `hash()`, whose per-process salt would make a
+    replay over a recorded table disagree with the run that wrote it.
+
+    The digest is name-shaped at either width — `is_system_name` accepts a 64-character hex
+    run as readily as a 16-character one — which is why it lives in its own column instead of
+    being folded into `system`: the corpus-path consumer reads `system`, and nothing reads
+    this."""
     if recorded_system or not names_something_readable(raw_system):
         return ""
-    return _sha256_hex(raw_system)[:SYSTEM_KEY_HEX_LEN]
+    return _sha256_hex(raw_system)
 
 
 def _request_key(system: Any, verb: Any, params: Any) -> str:
@@ -555,22 +554,6 @@ class GatherDeadEnd(Exception):
         self.escape = escape
 
 
-# The same two lines as `query_tool._as_str` and deliberately NOT one home. That one coarsens a
-# MODEL TOOL ARGUMENT before it is spent as a system name; this one reads a STORED column back.
-# They are equal today by coincidence of shape, and the day either contract moves (a tool
-# argument that accepts a non-string, a stored key that must tell absent from empty) the other
-# must not move with it. `lint_duplicate_helpers` cannot see the pair today — it groups by
-# module-level NAME across modules and these names differ — so the marker below is placed
-# where the gate reads it (`_suppressed` scans the `def` line only) for the day they converge.
-def _system_key_of(value: Any) -> str:  # lint-dup: ok — see above
-    """A row's or a call's `system_key`, coerced. LOAD-BEARING on both sides of the comparison:
-    every row recorded before #871 added the column, and every hand-built fixture row that
-    lists the keys literally, has no `system_key` at all — and a live call reconstructed from
-    such a row passes `None`. Read either as anything but `""` and each of those rows stops
-    matching the next one, which silently un-bounds the rejection loop #826 item 4 closed."""
-    return value if isinstance(value, str) else ""
-
-
 def _trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, threshold: int,
     in_domain, system_key: Any,
@@ -579,6 +562,13 @@ def _trip(
     hand-written loops over the same `(lead_id, system, verb, canonical(params))` would be one
     normalisation fix away from disagreeing about what a repeat is; only the DOMAIN is ever
     meant to differ.
+
+    BOTH SIDES ARE COERCED THROUGH `as_str`, and that is load-bearing rather than defensive:
+    every row recorded before #871 added the column, and every hand-built fixture row that
+    lists the keys literally, has no `system_key` at all — while a live call reconstructed
+    from such a row (which is exactly what #807's replay oracle does) passes `None`. Read
+    either as anything but `""` and each of those rows stops matching the next one, silently
+    un-bounding the rejection loop #826 item 4 closed.
 
     `system_key` EXTENDS that identity rather than replacing any of it (#871): it is `""` for
     every call whose `system` names itself, so it changes nothing for the first guard, and it
@@ -589,17 +579,17 @@ def _trip(
 
     The KEY HALF IS COMPARED FIRST, and that is a cost decision, not a semantic one: the pair
     is an `and`, so either order selects the same rows, but `_request_key` is a `json.dumps`
-    per row and `_system_key_of` is an `isinstance`. #871 is precisely the change that fills a
+    per row and `as_str` is an `isinstance`. #871 is precisely the change that fills a
     lead with rows whose cheap half already differs (one per distinct undeclared system), so
     the expensive half is the one that must not run on them. The saving is `rejection_trip`'s
     ALONE — every row in `repeat_trip`'s domain stores `""` and every one of its callers means
     `""`, so there the cheap half never short-circuits and is pure added compare."""
     key_request = _request_key(system, verb, _json_safe_params(params))
-    key_system = _system_key_of(system_key)
+    key_system = as_str(system_key)
     matches = [
         r for r in rows
         if isinstance(r, dict) and r.get("lead_id") == lead and in_domain(r)
-        and _system_key_of(r.get("system_key")) == key_system
+        and as_str(r.get("system_key")) == key_system
         and _request_key(r.get("system"), r.get("verb"), r.get("params")) == key_request
     ]
     occurrence = len(matches) + 1

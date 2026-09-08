@@ -361,10 +361,10 @@ def test_the_fingerprint_gives_three_answers_and_each_one_is_a_decision():
     assert rq.system_fingerprint("   ", "") == "", "whitespace was read as a readable system"
 
     fp = rq.system_fingerprint("ghostone", "")
-    assert re.fullmatch(r"[0-9a-f]{16}", fp), f"not a 16-char lowercase hex digest: {fp!r}"
+    assert re.fullmatch(r"[0-9a-f]{64}", fp), f"not a full-width lowercase hex digest: {fp!r}"
     assert fp == rq.system_fingerprint("ghostone", ""), "the same string keyed two ways"
     assert fp != rq.system_fingerprint("ghosttwo", ""), "two strings keyed one way"
-    assert fp == hashlib.sha256(b"ghostone").hexdigest()[:16], \
+    assert fp == hashlib.sha256(b"ghostone").hexdigest(), \
         "the digest is not a fixed function of the string, so a recorded table cannot be replayed"
 
 
@@ -382,7 +382,7 @@ def test_the_fingerprint_hashes_the_whole_string_exactly_as_the_model_wrote_it()
     function tomorrow, in another process, over a table recorded today."""
     for raw in ("elastic-prod", "elastic-staging", "Elastic", " elastic ", "\u00e9lastic"):
         assert rq.system_fingerprint(raw, "") == \
-            hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16], \
+            hashlib.sha256(raw.encode("utf-8")).hexdigest(), \
             f"{raw!r} was normalised or truncated before hashing"
 
     prefixed = {rq.system_fingerprint(r, "")
@@ -417,7 +417,7 @@ def test_an_unencodable_system_string_is_fingerprinted_rather_than_raising():
     it."""
     lone = "\ud800ghost"
     fp = rq.system_fingerprint(lone, "")
-    assert re.fullmatch(r"[0-9a-f]{16}", fp), \
+    assert re.fullmatch(r"[0-9a-f]{64}", fp), \
         f"an unencodable system string did not produce a digest: {fp!r}"
     assert fp != rq.system_fingerprint("\ud801ghost", ""), \
         "two different unencodable ghosts collided — the encoding folded them to one byte"
@@ -602,7 +602,7 @@ def test_a_non_string_system_is_coerced_rather_than_raising():
     encoding axis: both above-guard call sites compute this INSIDE a rejection handler with no
     `try` of its own, so a raise here replaces the rejection outright — no row is written, the
     table loses the call the guard is counting, and the fault unwinds past the lead's own
-    catch. `_system_key_of`, the other half of the same comparison, already coerces; the two
+    catch. `_text.as_str`, the coercion on the other half of the same comparison, already does; the two
     halves of one contract must not disagree about what a non-string means."""
     for raw in (None, 12345, True, {"n": 1}, ["ghost"], b"ghost"):
         assert rq.system_fingerprint(raw, "") == "", \

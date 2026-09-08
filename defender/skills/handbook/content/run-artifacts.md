@@ -118,7 +118,7 @@ field-by-field spec.** At a glance:
   `payload_sha256` is the payload's content identity; any byte-identity claim
   about two successful results rests on it, never on the digest alone.
   `system_key` is what tells two rejections of two DIFFERENT undeclared systems
-  apart once `system` has been coarsened to `""` for both: a fixed-length hex
+  apart once `system` has been coarsened to `""` for both: a `sha256` hex
   digest of the model's string, never the string. It is `""` everywhere the row
   identifies its own call without it — every row carrying a `system`, and a
   rejection whose `system` argument held nothing readable to hash (those are one

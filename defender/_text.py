@@ -13,6 +13,7 @@ analyze. Decisions key off what RENDERS instead.
 from __future__ import annotations
 
 import unicodedata
+from typing import Any
 
 # Categories whose members occupy no visual space: Cc (controls, incl. NUL), Cf
 # (formats — U+200B, U+FEFF, U+00AD, U+2060, the tag block), Cs (lone surrogates).
@@ -20,6 +21,23 @@ import unicodedata
 # interpreter's UCD has not seen yet can carry a glyph, and "empty" must not shift
 # with the interpreter's Unicode version.
 _INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs"})
+
+
+def as_str(value: Any) -> str:
+    """`value` when it is a `str`, else `""` — the ONE coercion for a value that is typed as
+    text but arrives from somewhere that cannot promise it.
+
+    Two callers with two provenances and one answer: a MODEL TOOL ARGUMENT before it is spent
+    as a system name (`query_tool`, where the pydantic schema has already refused, so the
+    arguments are whatever the model sent) and a STORED COLUMN read back (`record_query`,
+    where a row written before the column existed has `None`). They were separate one-line
+    copies with a comment arguing they might diverge; nothing about "not a string" differs
+    between the two, and the module that already owns "what does this text amount to" is
+    where the answer belongs.
+
+    `""` and not `None`: every caller goes on to compare or hash the result, and an `Optional`
+    that each of them re-narrows is the second source of truth this exists to remove."""
+    return value if isinstance(value, str) else ""
 
 
 def is_content_less(text: str) -> bool:

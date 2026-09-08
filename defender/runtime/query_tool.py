@@ -22,6 +22,7 @@ from pydantic_ai.exceptions import (
 )
 
 from defender.hooks.budget_enforcer import BudgetKill
+from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
@@ -343,9 +344,9 @@ class QueryCapture(AbstractCapability[Any]):
             # and a replay over the recorded table read the same identity. `system` coarsens
             # the same way when the registry does not declare it, and for a stronger reason:
             # this row's `system` steers an offline corpus write (`_system_of_record`).
-            raw_system = _as_str(raw.get("system"))
+            raw_system = as_str(raw.get("system"))
             system, system_key = self._coarsen(raw_system)
-            verb = _as_str(raw.get("verb"))
+            verb = as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
             trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
             await self._record(
@@ -467,8 +468,8 @@ class QueryCapture(AbstractCapability[Any]):
             return await handler(args)
 
         deps = ctx.deps
-        system = _as_str(args.get("system"))
-        verb = _as_str(args.get("verb"))
+        system = as_str(args.get("system"))
+        verb = as_str(args.get("verb"))
         params = _as_dict(args.get("params"))
         model_query_id = args.get("query_id")
         self_key = self_case_key(deps)
@@ -510,7 +511,7 @@ class QueryCapture(AbstractCapability[Any]):
             deps, decision, system, verb, params, model_query_id, self_key,
         )
 
-        query_id = resolve_query_id(system, verb, _as_str(model_query_id) or None)
+        query_id = resolve_query_id(system, verb, as_str(model_query_id) or None)
 
         payload: Any = None
         try:
@@ -971,10 +972,6 @@ def _raw_args(args: Any) -> dict:
         except (json.JSONDecodeError, ValueError):
             return {}
     return args if isinstance(args, dict) else {}
-
-
-def _as_str(v: Any) -> str:
-    return v if isinstance(v, str) else ""
 
 
 def _as_dict(v: Any) -> dict:
