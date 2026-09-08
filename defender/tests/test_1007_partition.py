@@ -806,8 +806,12 @@ def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_ow
     enqueue.append_world_rows(tmp_path, [world_row(finding_id=shared_id)],
                               queue_dir=paths.pending_dir)
 
-    pending = drains._pending_queue_count(W.questioner_channel(paths).file)
+    # #881 (merged from main) renamed the drain's counter to `_pending_queue_counts`,
+    # returning `(authorable, held)` rather than one int — this row carries no `held_reason`,
+    # so it counts on the authorable side.
+    pending, held = drains._pending_queue_counts(W.questioner_channel(paths).file)
 
+    assert held == 0, f"the row was held, not suppressed: {held}"
     assert pending == 1, (
         "the world row was suppressed by a defender-channel consumption of the same id — the "
         "two channels are sharing one id space AND one consumption record")

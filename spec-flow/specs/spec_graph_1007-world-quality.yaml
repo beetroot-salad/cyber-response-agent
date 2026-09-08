@@ -2546,6 +2546,33 @@ actor_waivers:
     (#691) and `test_the_new_corpus_root_is_admitted_by_no_runtime_read_or_write_scope`
     (#1007). Out of scope for #1007 (implemented during write-code-from-spec
     continuation, post-write-tests).
+  validate_cases: >-
+    defender/evals/oracle_golden/validate_cases.py imports oracle_golden's own `score.py`,
+    which imports oracle_golden's own `judge.py` — a same-named, unrelated two-pass golden-
+    set scoring judge (claude-opus-5 grading a projection against a measured envelope), not
+    `defender/learning/judge/`. A module-name collision, not a real reach into #1007's
+    subsystem. Surfaced only because this actors check landed after merging main's own
+    34-commit drift (through #1008) into this branch to resolve a PR conflict.
+  score: >-
+    defender/evals/oracle_golden/score.py imports its own sibling `judge.py`, the same
+    name-collision as `validate_cases` above. No import of `defender/learning/judge/`.
+  record_held_out: >-
+    defender/evals/oracle_golden/record_held_out.py imports oracle_golden's own `judge.py`,
+    the same name-collision as `validate_cases` above.
+  audit_judge: >-
+    defender/evals/oracle_golden/audit_judge.py imports oracle_golden's own `judge.py` and
+    `score.py`, the same name-collision as `validate_cases` above — despite the filename,
+    it audits the golden-set scorer, not the learning-loop judge #1007 changes.
+  workspace_map: >-
+    defender/scripts/workspace_map.py imports `ADAPTER_SUFFIX` from
+    `defender/runtime/verbs.py`, changed on `main` by #871/#995 (unrelated verb-disposition
+    work merged into this branch to resolve the #1008 PR conflict), not by #1007. An
+    operator-only read diagnostic; no reach into the subject-partition mechanism.
+  tacit_cli: >-
+    defender/scripts/tacit_cli.py transitively reaches `agent_role`/`verb_dispositions`/
+    `verbs` through `defender.scripts.adapters.tacit_knowledge_adapter`'s own import chain
+    — again #871/#995/#1008 drift from `main`, not #1007. An operator-only CLI over the
+    tacit-knowledge adapter; no reach into #1007's judge/queue/corpus changes.
 
 # ===========================================================================================
 handoff:
