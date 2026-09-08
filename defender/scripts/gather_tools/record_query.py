@@ -489,6 +489,23 @@ REPEAT_ESCAPE = (
 # keeps its turn bound strictly below. The check lives in a test and not in an import because
 # this module is the low-level recorder every gather path already imports, and reaching up to
 # the agent-build layer for a constant would tie the two together for one assertion.
+#
+# WHAT THE MARGIN DOES NOT COVER, stated because the inequality alone reads as if it did: the
+# framework counts every FAILED STEP for the tool NAME, and this budget counts only above-guard
+# rows. A lead that MIXES the two — below-guard `_screen` parameter refusals among the ghosts —
+# reaches eleven failed `query` steps before its sixth above-guard rejection and ends on
+# `UnexpectedModelBehavior` after all, with the framework's text in main's context. Executed:
+# six below-guard refusals then five ghosts, no successful call between them, stamps
+# `retry-exhausted`. Closing that means either widening this domain (which C13's census
+# forbids at this bound) or keeping the framework's own text out of `_run_gather`'s degrade
+# arms; neither is #1015's, and the claim above holds only for a lead whose `query` failures
+# are all above-guard rows.
+#
+# NOR IS IT THE ONLY WAY A LEAD SPENDS ITS REQUESTS ON REFUSALS: `_grant_check`'s DENIED branch
+# and both `_tripped_message` returns answer ABOVE this guard with a plain tool RESULT and no
+# queries-table row at all, so they are invisible to both predicates AND reset the framework's
+# per-tool counter. A lead looping on a policy-denied verb is bounded only by
+# `GATHER_REQUEST_LIMIT`. Also not #1015's, and also not closed by this constant.
 
 REJECTION_BUDGET = 6
 
@@ -681,6 +698,31 @@ def repeat_trip(
     )
 
 
+def in_rejection_domain(row: Any) -> bool:
+    """THE above-guard rejection domain, in ONE place: a row this lead's calls were refused at
+    ABOVE `wrap_tool_execute`'s guard, for something the model itself can fix.
+
+    PUBLIC and shared because THREE readers ask it and their agreement is load-bearing:
+    `rejection_trip` counts this population by identity, `rejection_budget_trip` counts it
+    blind to identity, and #807's replay oracle asks it again offline to reproduce a stop. Both
+    predicates' docstrings assert the domains are identical — spelled three times, that
+    identity was asserted by nothing, and widening one copy (a second sentinel `query_id`, a
+    second error class) would split the guards in silence while every fixture stayed green.
+
+    NARROWER THAN `ABOVE_GUARD_QUERY_ID` ALONE, by `error_class`: `_grant_check`'s
+    adapter-load-error rows are `infra` (exit 2) and their repeat is ALREADY owned end to end
+    by `circuit_breaker`, so counting them here would give one shape two owners and turn an
+    infra outage into a lead-level dead end.
+
+    A non-`dict` is OUT of the domain rather than a raise, for the reason `lead_rows` swallows
+    `OSError`: a torn or hand-built table must not be what starts crashing the query tool."""
+    return (
+        isinstance(row, dict)
+        and row.get("query_id") == ABOVE_GUARD_QUERY_ID
+        and row.get("error_class") == AGENT_FIXABLE_ERROR_CLASS
+    )
+
+
 def rejection_trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, system_key: Any,
     threshold: int = REPEAT_THRESHOLD,
@@ -694,11 +736,8 @@ def rejection_trip(
     rather than a widening of the first: the two count disjoint domains, so neither can report a
     trip the other's placement could have prevented.
 
-    THE DOMAIN IS NARROWER THAN `ABOVE_GUARD_QUERY_ID` ALONE, by `error_class`: an above-guard
-    row counts only when it is `agent-fixable`. `_grant_check`'s adapter-load-error rows are
-    `infra` (exit 2) and their repeat is ALREADY owned end to end by `circuit_breaker` — two
-    failures mark the system down and the third call gets the down-message. Counting them here
-    would give one shape two owners and turn an infra outage into a lead-level dead end.
+    THE DOMAIN IS `in_rejection_domain`, spent rather than restated — narrower than
+    `ABOVE_GUARD_QUERY_ID` alone, by `error_class`, for the reason that predicate gives.
 
     `system_key` (#871) is the identity half the ROW cannot carry: above the guard a
     model-named undeclared system is coarsened to `""` before it is recorded, so without it
@@ -721,26 +760,25 @@ def rejection_trip(
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
         system_key=system_key,
-        in_domain=lambda r: (
-            r.get("query_id") == ABOVE_GUARD_QUERY_ID
-            and r.get("error_class") == AGENT_FIXABLE_ERROR_CLASS
-        ),
+        in_domain=in_rejection_domain,
     )
 
 
 def rejection_budget_trip(
     rows: list[dict], lead: str, *, budget: int = REJECTION_BUDGET,
 ) -> RejectionBudgetTrip | None:
-    """`None` while this lead has spent fewer than `budget` above-guard rejections, else the
-    `RejectionBudgetTrip` for the call being guarded (#1015).
+    """`None` while this call is below the lead's `budget`-th above-guard rejection, else the
+    `RejectionBudgetTrip` for the call being guarded (#1015). The guarded call COUNTS: a table
+    already holding `budget - 1` such rows trips, because this call is the `budget`-th.
 
-    THE DOMAIN IS EXACTLY `rejection_trip`'S — `lead_id`, `ABOVE_GUARD_QUERY_ID`, and
-    `agent-fixable` — and that identity of domains is the whole design. Wider by `error_class`
-    and an adapter outage becomes a lead-level dead end on rows `circuit_breaker` already owns
-    end to end. Wider than `ABOVE_GUARD_QUERY_ID` and it swallows the below-guard parameter
-    refusals, which run 4+ per lead in 30 of 320 archived leads (tails of 30, 71 and 98) —
-    those are a model iterating on a REAL system's parameters under specific coaching, and a
-    bound of 6 over them would end healthy leads.
+    THE DOMAIN IS EXACTLY `rejection_trip`'S, and not by restatement — both spend
+    `in_rejection_domain`, so the identity of domains that is the whole design is a shared
+    call rather than two copies. Wider by `error_class` and an adapter outage becomes a
+    lead-level dead end on rows `circuit_breaker` already owns end to end. Wider than
+    `ABOVE_GUARD_QUERY_ID` and it swallows the below-guard parameter refusals, which run 4+ per
+    lead in 30 of 320 archived leads (tails of 30, 71 and 98) — those are a model iterating on
+    a REAL system's parameters under specific coaching, and a bound of 6 over them would end
+    healthy leads.
 
     IDENTITY-BLIND, which is the ONE way it differs from `rejection_trip` and the reason it is
     a second predicate rather than another `threshold` on the first: it reads no `system`, no
@@ -764,10 +802,7 @@ def rejection_budget_trip(
     then lands within the step rather than at the exact B-th row, and it must still land."""
     count = sum(
         1 for r in rows
-        if isinstance(r, dict)
-        and r.get("lead_id") == lead
-        and r.get("query_id") == ABOVE_GUARD_QUERY_ID
-        and r.get("error_class") == AGENT_FIXABLE_ERROR_CLASS
+        if in_rejection_domain(r) and r.get("lead_id") == lead
     )
     occurrence = count + 1
     if occurrence < budget:
@@ -879,6 +914,11 @@ def rejection_detail(trip: RepeatTrip | RejectionBudgetTrip, rejection: str = ""
     survives `_record`'s 160-character digest cut whole and the tail is what gets eaten."""
     if isinstance(trip, RepeatTrip):
         return rejection_trip_detail(trip, rejection)
+    if not isinstance(trip, RejectionBudgetTrip):
+        # TOTAL, not an `else`. A third guard's trip falling through here would be described to
+        # every reader of the table as a budget stop — silently, which is the one failure a
+        # single producer exists to prevent.
+        raise TypeError(f"no above-guard detail for {type(trip).__name__}")
     detail = (
         f"refused: {_ordinal(trip.occurrence)} rejection before anything ran in this lead "
         f"(budget {trip.budget})"
@@ -887,7 +927,7 @@ def rejection_detail(trip: RepeatTrip | RejectionBudgetTrip, rejection: str = ""
 
 
 def rejection_dead_end(
-    trip: RepeatTrip | RejectionBudgetTrip, target: str, verb: str,
+    trip: RepeatTrip | RejectionBudgetTrip, *, target: str, verb: str,
 ) -> GatherDeadEnd:
     """THE ONE PRODUCER of the above-guard `GatherDeadEnd` pair — the reason and escape main's
     summary is composed from, for both placements and both guards.
@@ -901,12 +941,22 @@ def rejection_dead_end(
     `target` and `verb` are DISCARDED on the budget branch, not merely unspent: they are the
     model's own arguments (already coarsened by `_undeclared_target`, but derived from them),
     and the budget stop's contract is that no byte of them crosses into main's context. The
-    repeat branch spends both, which is why they are still parameters at all."""
+    repeat branch spends both, which is why they are still parameters at all.
+
+    BOTH ARE KEYWORD-ONLY, for the reason `_undeclared_target` one file over is: they are two
+    adjacent `str`s derived from the same call, spelled at two placements whose local names for
+    them are mirrored, and only one of them may be echoed. A transposition at either placement
+    type-checks, raises nothing, and puts "the request (query an undeclared system)" in main's
+    context — caught only by an arm that drives THAT placement to the threshold."""
     if isinstance(trip, RepeatTrip):
         return GatherDeadEnd(
             reason=rejection_dead_end_reason(target, verb, trip),
             escape=REPEAT_ESCAPE,
         )
+    if not isinstance(trip, RejectionBudgetTrip):
+        # TOTAL, for the reason `rejection_detail`'s twin is: a third guard falling through to
+        # the budget's sentence and escape is main receiving the wrong explanation, silently.
+        raise TypeError(f"no above-guard dead end for {type(trip).__name__}")
     return GatherDeadEnd(
         reason=rejection_budget_dead_end_reason(trip),
         escape=REJECTION_BUDGET_ESCAPE,

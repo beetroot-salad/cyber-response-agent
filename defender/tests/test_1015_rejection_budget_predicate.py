@@ -44,7 +44,6 @@ from defender.runtime.circuit_breaker import (
     INFRA_ERROR_CLASS,
     error_class_for_exit,
 )
-from defender.runtime.driver import DEFAULT_TOOL_RETRIES
 from defender.scripts.gather_tools import record_query as rq
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
@@ -98,21 +97,32 @@ def _row(
 
 
 def _above(seq: int, **kw) -> dict:
-    kw.setdefault("query_id", rq.ABOVE_GUARD_QUERY_ID)
-    return _row(seq, **kw)
+    """FORCED, not `setdefault` — the shape `test_826_deferred_defects._above` has. A caller
+    that passed its own `query_id` here would get a row OUTSIDE the domain from a helper whose
+    name asserts membership, and in a suite whose whole subject is which rows are counted that
+    is an arm measuring the opposite population while staying green. Spelled this way the
+    conflict is a `TypeError` at the call."""
+    return _row(seq, query_id=rq.ABOVE_GUARD_QUERY_ID, **kw)
 
 
 def _ghosts(n: int, *, lead: str = LEAD) -> list[dict]:
-    """`n` rows in the budget's domain, no two of which share ANY identity element the repeat
-    guard keys on: different `system` half, different verb, different params, different
-    fingerprint. This is the table the repeat guard is blind to and the budget must not be."""
+    """`n` rows in the budget's domain that the repeat guard keys APART, one per row — the
+    table it is blind to and the budget must not be.
+
+    Alternates the TWO shapes an above-guard writer actually emits, and pairs the two columns
+    the way `system_fingerprint` pairs them: a coarsened ghost (`system=""` beside a real
+    digest) and a declared system with an unresolvable verb (`system="elastic"` beside `""`,
+    because the row identifies its own call). The pairing is not decoration — the owner returns
+    `""` for every truthy `recorded_system`, so a row carrying a declared name AND a digest is
+    a shape no run can leave behind, and a table built from those would measure the predicate
+    against rows it will never see."""
     return [
         _above(
             i, lead=lead,
-            system="elastic" if i % 2 else "",
+            system="" if i % 2 else "elastic",
             verb=f"verb-{i}",
             params={"native_query": f"FROM t{i}"},
-            system_key=rq.system_fingerprint(f"ghost{i}", ""),
+            system_key=rq.system_fingerprint(f"ghost{i}", "") if i % 2 else "",
         )
         for i in range(n)
     ]
@@ -131,8 +141,8 @@ def _same(n: int, *, lead: str = LEAD) -> list[dict]:
 
 def test_the_budget_is_a_literal_strictly_below_the_frameworks_own_ceiling():
     """O1 — the design fixes `REJECTION_BUDGET = 6`: three times the largest above-guard
-    agent-fixable count any archived lead carries (C7: 42 runs, 320 leads, max 2) and 40% of
-    the framework ceiling.
+    agent-fixable count any archived lead carries (C7: 42 runs, 320 leads, max 2), and 60% of
+    the framework ceiling — four failed steps of headroom below it.
 
     STRICTLY BELOW `DEFAULT_TOOL_RETRIES` is the invariant, not a coincidence. pydantic-ai
     raises `UnexpectedModelBehavior` at the eleventh FAILED STEP for one tool name, and a lead
@@ -140,7 +150,17 @@ def test_the_budget_is_a_literal_strictly_below_the_frameworks_own_ceiling():
     above the ceiling the framework wins the race and main is handed
     "Tool 'query' exceeded max retries count of 10 … https://ai.pydantic.dev/…" instead of the
     host's own sentence. `challenge_gate.Bounds.__post_init__` enforces the same rule on its
-    turn bound for the same reason. The margin is what makes the stop the HOST's."""
+    turn bound for the same reason. The margin is what makes the stop the HOST's.
+
+    `DEFAULT_TOOL_RETRIES` is reached INSIDE this arm, behind `importorskip`, and not at module
+    scope: `defender.runtime.driver` imports `pydantic_ai`, which the `runtime` extra installs
+    and the runtime-free learning-loop/CI install deliberately does not. At module scope the
+    whole suite — every arm of which is a pure function over row dicts — would be a collection
+    ERROR there rather than one skipped assertion. `challenge_gate._retry_budget` reaches the
+    same constant through the same kind of deferred import."""
+    pytest.importorskip("pydantic_ai")
+    from defender.runtime.driver import DEFAULT_TOOL_RETRIES
+
     assert isinstance(REJECTION_BUDGET, int)
     assert not isinstance(REJECTION_BUDGET, bool)
     assert REJECTION_BUDGET == 6, \
@@ -298,8 +318,19 @@ def test_the_budget_trip_carries_integers_and_nothing_else():
     with pytest.raises(dataclasses.FrozenInstanceError):
         trip.occurrence = 99  # type: ignore[misc]
 
-    assert trip != rq.RepeatTrip(first_seq=0, occurrence=REJECTION_BUDGET), \
-        "the two guards' trips compare equal, so no dispatcher can tell them apart"
+    # NOT `trip != RepeatTrip(...)`: two distinct dataclasses never compare equal (each
+    # `__eq__` returns `NotImplemented` and Python falls back to identity), so that assertion
+    # holds for every possible pair of field values and pins nothing. What both dispatchers
+    # actually rest on is `isinstance`, and THAT can be broken — by making either type a
+    # subclass of the other, at which point a budget trip takes the repeat branch and main is
+    # handed the other guard's sentence.
+    repeat = rq.RepeatTrip(first_seq=0, occurrence=REJECTION_BUDGET)
+    assert not isinstance(trip, rq.RepeatTrip), \
+        "a budget trip answers `isinstance(..., RepeatTrip)`, so both dispatchers describe " \
+        "it as a repeat"
+    assert not isinstance(repeat, RejectionBudgetTrip), \
+        "a repeat trip answers `isinstance(..., RejectionBudgetTrip)`, so the totality check " \
+        "in each dispatcher stops discriminating"
 
 
 # ── the strings ────────────────────────────────────────────────────────────────────────────
@@ -404,7 +435,8 @@ def test_the_detail_dispatcher_keeps_the_two_guards_sentences_apart():
 
 
 def test_the_budget_phrase_leads_the_row_digest_and_survives_its_truncation():
-    """`_record` cuts the detail at 160 characters (`query_tool.py:581`), and the row it cuts
+    """`_record` cuts the detail at 160 characters (`QueryCapture._record`'s `payload_digest`
+    argument), and the row it cuts
     is BOTH the rejection record and the trip record — the append-only table would otherwise
     permanently forget why the last call was malformed. So the budget phrase LEADS and the
     schema's own error text is the tail that gets eaten, exactly as `rejection_trip_detail`
@@ -424,7 +456,7 @@ def test_the_budget_phrase_leads_the_row_digest_and_survives_its_truncation():
 
 
 def test_the_dead_end_dispatcher_hands_the_budget_no_target_to_leak():
-    """O4 at the seam both placements reach it through. `rejection_dead_end(trip, target, verb)`
+    """O4 at the seam both placements reach it through. `rejection_dead_end(trip, *, target, verb)`
     is called from `wrap_tool_validate` and from `_grant_check`'s unresolvable branch, and at
     both of them `target` and `verb` are derived from the model's own arguments. On the BUDGET
     branch they must be discarded outright, not merely unused by today's wording.
@@ -435,14 +467,14 @@ def test_the_dead_end_dispatcher_hands_the_budget_no_target_to_leak():
     repeat = rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
     budget = RejectionBudgetTrip(occurrence=REJECTION_BUDGET, budget=REJECTION_BUDGET)
 
-    r = rejection_dead_end(repeat, LOUD_SYSTEM, LOUD_VERB)
+    r = rejection_dead_end(repeat, target=LOUD_SYSTEM, verb=LOUD_VERB)
     assert isinstance(r, rq.GatherDeadEnd)
     assert r.reason == rq.rejection_dead_end_reason(LOUD_SYSTEM, LOUD_VERB, repeat)
     assert r.escape == rq.REPEAT_ESCAPE
     assert LOUD_SYSTEM in r.reason, \
         "the repeat branch stopped naming its target, so the negative below is vacuous"
 
-    b = rejection_dead_end(budget, LOUD_SYSTEM, LOUD_VERB)
+    b = rejection_dead_end(budget, target=LOUD_SYSTEM, verb=LOUD_VERB)
     assert isinstance(b, rq.GatherDeadEnd)
     assert b.reason == rejection_budget_dead_end_reason(budget)
     assert b.escape == REJECTION_BUDGET_ESCAPE

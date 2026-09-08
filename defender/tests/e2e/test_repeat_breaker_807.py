@@ -147,6 +147,7 @@ from defender.scripts.gather_tools.record_query import (  # noqa: E402
     REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
     RepeatTrip,
+    in_rejection_domain,
     lead_rows,
     rejection_budget_trip,
     rejection_trip,
@@ -392,8 +393,10 @@ def _replay_rejections(
         if not isinstance(lead, str) or lead in stopped:
             continue
         prior = seen.setdefault(lead, [])
-        guarded = (row.get("query_id") == ABOVE_GUARD_QUERY_ID
-                   and row.get("error_class") == circuit_breaker.AGENT_FIXABLE_ERROR_CLASS)
+        # The production domain predicate, spent rather than re-spelled: an oracle that carried
+        # its own copy of "which rows a placement guards" could disagree with the guard about
+        # the very population whose stop it exists to reproduce.
+        guarded = in_rejection_domain(row)
         kind: str | None = None
         if guarded:
             if rejection_trip(
@@ -446,6 +449,33 @@ def test_the_rejection_oracle_answers_only_where_a_placement_guards():
                  query_id=ABOVE_GUARD_QUERY_ID)
     assert _replay_rejections([*prior, third]) == [(LEAD, 2, "repeat")], \
         "the oracle stopped tripping at all, so the two negatives above say nothing"
+
+    # #1015 — THE SAME CLAIM FOR THE SECOND GUARD, and it needs its own table: every row above
+    # repeats one before it, so the repeat ask answers first and the budget ask is never
+    # reached. Hoist the budget ask out of the `if guarded` gate and all four assertions above
+    # stay green; these do not. `B - 1` rows that share NO identity element leave the repeat
+    # guard silent and the budget one row short.
+    b_prior = [
+        _row(LEAD, i, f"ghost{i}", f"verb-{i}", {"native_query": f"FROM t{i}"},
+             exit_code=64, query_id=ABOVE_GUARD_QUERY_ID)
+        for i in range(REJECTION_BUDGET - 1)
+    ]
+    last = REJECTION_BUDGET - 1
+    assert _replay_rejections(b_prior) == [], "one short of the budget is not yet a trip"
+
+    b_infra = _row(LEAD, last, "elastic", "nosuch-verb", p, exit_code=2,
+                   query_id=ABOVE_GUARD_QUERY_ID)
+    assert _replay_rejections([*b_prior, b_infra]) == [], \
+        "the replay spent the BUDGET at an adapter-load row, which reaches no guard live"
+
+    b_below = _row(LEAD, last, "elastic", "query", p, exit_code=0)
+    assert _replay_rejections([*b_prior, b_below]) == [], \
+        "the replay spent the BUDGET at a successful below-guard row — a stop no run took"
+
+    b_guarded = _row(LEAD, last, "ghostlast", "verb-last", {"native_query": "FROM last"},
+                     exit_code=64, query_id=ABOVE_GUARD_QUERY_ID)
+    assert _replay_rejections([*b_prior, b_guarded]) == [(LEAD, last, "budget")], \
+        "the budget ask stopped tripping at all, so the two negatives above say nothing"
 
 
 def named_verbs(rec: VerbRecorder, *, system: str = "elastic", verb: str = "sshd-auth-window") -> FakeVerbs:

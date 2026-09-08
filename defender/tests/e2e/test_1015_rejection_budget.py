@@ -2,7 +2,8 @@
 
 THE CODE DOES NOT EXIST YET. The import block below names the surface the design doc (issue
 #1015, "Discussion outcome — intent + design") specifies; this suite is RED by construction
-until it is built. The predicate-and-strings half is `tests/test_1015_rejection_budget.py`.
+until it is built. The predicate-and-strings half is
+`tests/test_1015_rejection_budget_predicate.py`.
 
 THE DEFECT, reproduced by execution on main (the issue's C3/C4)
 --------------------------------------------------------------
@@ -45,12 +46,15 @@ in the summary · O5 leads below the budget untouched.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX  # noqa: E402
+from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
 from defender.runtime.driver import DEFAULT_TOOL_RETRIES  # noqa: E402
 from defender.scripts.gather_tools import record_query as rq  # noqa: E402
 from defender.tests.e2e._replay_harness import Turn, VerbRecorder  # noqa: E402
@@ -133,28 +137,37 @@ def _terminator(r: _Res) -> str | None:
 
 
 def _budget_phrase(occurrence: int = B) -> str:
-    """The leading phrase `rejection_detail` gives a budget trip's row, spelled through the
-    production ordinal so this is not a second copy of the arithmetic."""
-    return (
-        f"refused: {rq._ordinal(occurrence)} rejection before anything ran in this lead "
-        f"(budget {B})"
-    )
+    """The leading phrase `rejection_detail` gives a budget trip's row — spent from the
+    PRODUCER, not re-spelled. With no rejection tail that call returns exactly the phrase, so a
+    rewording moves the row and this oracle together; a copy here would drift from the shipped
+    sentence and keep every arm below green against a table that no longer says it. The wording
+    itself is pinned once, in `test_1015_rejection_budget_predicate`, where it is the subject
+    under test."""
+    return rq.rejection_detail(RejectionBudgetTrip(occurrence=occurrence, budget=B))
+
+
+#: `wrap_fresh`'s frame, matched WHOLE and with the salt back-referenced — the shape
+#: `_toon872.framed_content` reads it with, spelled here because that module `importorskip`s
+#: the optional `toons` package and this suite must not inherit its dependency.
+_FRAME_RE = re.compile(r"<run-([0-9a-f]+)-untrusted>\n(.*)\n</run-\1-untrusted>", re.DOTALL)
 
 
 def _summary_body(r: _Res) -> str:
     """The summary main receives with its untrusted frame removed. `wrap_fresh` is
-    `f"<run-{salt}-{tag}>\n{content}\n</run-{salt}-{tag}>"` and preserves the body verbatim,
-    so the body is every line between the two tag lines.
+    `f"<run-{salt}-{tag}>\n{content}\n</run-{salt}-{tag}>"` and preserves the body verbatim.
+
+    The two tag lines are tied by the SALT rather than checked independently: a body that
+    happened to open or close with a tag-shaped line would otherwise be mistaken for the frame,
+    and this helper's whole job is to make the O4 claim an equality over what is left.
 
     Recovered so the assertion below can be an EQUALITY. A substring check on the reason is
     satisfied by a summary that ALSO carries something else — which is exactly the shape O4
     forbids, and the only thing standing between a model-authored fragment and main's context
     is that nothing but the host's own two sentences is in this file."""
-    lines = _summary(r).split("\n")
-    assert len(lines) >= 3, "the summary has no body between its two frame tags"
-    assert lines[0].startswith("<run-"), f"no opening frame tag: {lines[0]!r}"
-    assert lines[-1].startswith("</run-"), f"no closing frame tag: {lines[-1]!r}"
-    return "\n".join(lines[1:-1])
+    summary = _summary(r)
+    m = _FRAME_RE.fullmatch(summary)
+    assert m is not None, f"the summary is not one whole untrusted frame: {summary[:120]!r}"
+    return m.group(2)
 
 
 def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
@@ -329,8 +342,13 @@ def test_a_successful_query_between_rejections_does_not_refill_the_budget(tmp_pa
 
     assert [row["exit_code"] for row in r.own_rows] == [64, 64, 0, 64, 64, 0, 64, 64], \
         "the lead did not run the interleaved shape through to its sixth rejection"
-    assert len(rec.calls) == 2, \
-        "the successful calls did not reach the backend, so no reset was ever available"
+    # The PREMISE, stated as the weakest thing that establishes it: some successful call
+    # reached the backend, so the framework's per-tool counter did drop at least once. The
+    # exact count is the run-on CONTROL below, and the two must not be the same expression —
+    # `rec.calls` is frozen once `_run` returns, so a closing assertion identical to this one
+    # can never fail on its own and the arm would carry no run-on evidence at all.
+    assert rec.calls, \
+        "no successful call reached the backend, so no reset was ever available"
     assert len(_above_guard(r)) == B
     _assert_budget_stop(r)
     assert len(rec.calls) == 2, "the lead ran on past its dead end and executed a third query"
@@ -671,7 +689,7 @@ def test_a_lead_iterating_on_a_declared_systems_parameters_is_not_the_budgets(tm
 
     below = [row for row in r.rows
              if row.get("query_id") != rq.ABOVE_GUARD_QUERY_ID
-             and row.get("error_class") == "agent-fixable"]
+             and row.get("error_class") == AGENT_FIXABLE_ERROR_CLASS]
     assert len(below) == 5, \
         f"the lead wrote {len(below)} below-guard refusals — this arm drives the wrong shape"
     assert len(_above_guard(r)) == 1, "the ghost did not land above the guard"

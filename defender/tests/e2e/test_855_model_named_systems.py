@@ -49,7 +49,10 @@ pytest.importorskip("pydantic_ai")
 
 from defender.learning.leads.pitfalls_curator import _build_pitfalls_handoffs  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
-from defender.scripts.gather_tools.record_query import ABOVE_GUARD_QUERY_ID  # noqa: E402
+from defender.scripts.gather_tools.record_query import (  # noqa: E402
+    ABOVE_GUARD_QUERY_ID,
+    REJECTION_BUDGET,
+)
 from defender.runtime import lead_zero  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, Turn, materialize  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _dispatch, _run  # noqa: E402
@@ -102,9 +105,16 @@ def _dead_end(r: _Res) -> bool:
 
 
 def _trip_row_written(r: _Res) -> bool:
-    """Whether the COMPANION GUARD is what ended the lead, read off the table rather than the
-    summary: `rejection_trip_detail` leads the last rejection row's digest, and no other
-    terminator writes it."""
+    """Whether the companion guard's REPEAT branch is what ended the lead, read off the table
+    rather than the summary: `rejection_trip_detail` leads the last rejection row's digest, and
+    no other terminator writes it.
+
+    THE REPEAT BRANCH ONLY, since #1015. The companion placement now carries a second guard —
+    the per-lead rejection budget — whose trip row leads with its own phrase, so this helper
+    reads False for a lead the companion placement demonstrably ended. A positive use still
+    means "the repeat branch stopped this lead"; a NEGATIVE one means only that, and an arm
+    that wants "no host guard stopped this lead" must read the terminator
+    (`test_1015_rejection_budget._terminator`) instead."""
     rows = _above_guard(r)
     return bool(rows) and "turned back at seq" in rows[-1]["payload_digest"]
 
@@ -134,6 +144,25 @@ def _queued(rows: list[dict]) -> list[dict]:
         }
         for row in rows
     ]
+
+
+#: The most above-guard rejections any arm in this FILE drives — `test_only_a_coarsened_row_...`
+#: at four. `_dead_end`'s negative uses read the summary alone, and past `REJECTION_BUDGET`
+#: rejections the host now ends the lead itself, so every `assert not _dead_end(...)` below
+#: silently changes meaning once the headroom is gone. Bound executably rather than left in
+#: prose: the arms cannot notice, so the constant must.
+_MOST_REJECTIONS_ANY_ARM_DRIVES = 4
+
+
+def test_this_files_negative_dead_end_arms_still_have_budget_headroom():
+    """The precondition `_dead_end`'s docstring states, asserted rather than described (#1015).
+
+    Lower `REJECTION_BUDGET` to `_MOST_REJECTIONS_ANY_ARM_DRIVES` or below and three arms here
+    flip from "the guard correctly let calls that DIFFER run on" to "the budget ended the
+    lead" — while staying green, because they read only the summary."""
+    assert _MOST_REJECTIONS_ANY_ARM_DRIVES < REJECTION_BUDGET, \
+        "an arm here drives as many above-guard rejections as the budget allows, so its " \
+        "`assert not _dead_end(...)` no longer says what it claims"
 
 
 def test_a_schema_rejected_call_cannot_name_a_system_of_record(tmp_path):

@@ -383,8 +383,8 @@ class QueryCapture(AbstractCapability[Any]):
             if trip is not None:
                 raise rejection_dead_end(
                     trip,
-                    self._undeclared_target(recorded=system, raw=raw_system),
-                    verb,
+                    target=self._undeclared_target(recorded=system, raw=raw_system),
+                    verb=verb,
                 ) from e
             raise
 
@@ -455,8 +455,8 @@ class QueryCapture(AbstractCapability[Any]):
             if trip is not None:
                 raise rejection_dead_end(
                     trip,
-                    self._undeclared_target(recorded=recorded_system, raw=system),
-                    verb,
+                    target=self._undeclared_target(recorded=recorded_system, raw=system),
+                    verb=verb,
                 )
             raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")
 
