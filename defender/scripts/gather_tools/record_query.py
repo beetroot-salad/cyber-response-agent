@@ -66,8 +66,17 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
     `collect_general_failures` drops a systemless row before `pitfall_key` merges on the
     digest. `system_key` separates two READABLE ghosts for the companion guard alone — it is
     `""` for the whole N5 group, and `lead_repository.QueryRow` does not project it, so no
-    rendered view carries it. A reader wanting to separate two coarsened rejections has to go
-    back to `executed_queries.jsonl` itself."""
+    rendered view carries it. A reader wanting to separate two READABLE coarsened rejections
+    has to go back to `executed_queries.jsonl` itself and read `system_key` there.
+
+    FOR THE N5 GROUP THERE IS NO SUCH FALLBACK, and saying so is the honest half of the
+    trade #855 and #1016 make together: an unreadable system is coarsened to `""` AND folded
+    to `system_key == ""`, `_raw_command` is built from the coarsened name, and this column
+    now holds one literal — so two rejections naming two DIFFERENT invisible strings are
+    byte-identical in every column the raw table has, and the string each named is recoverable
+    from nothing. That is the design — `system_fingerprint` folds the group on the grounds that
+    "no readable system at all" is ONE mistake — not an oversight; but a reader sent to the raw
+    table for that class would be sent to a surface that cannot answer."""
     if exit_code != 0:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0
