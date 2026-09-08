@@ -141,6 +141,22 @@ def _budget_phrase(occurrence: int = B) -> str:
     )
 
 
+def _summary_body(r: _Res) -> str:
+    """The summary main receives with its untrusted frame removed. `wrap_fresh` is
+    `f"<run-{salt}-{tag}>\n{content}\n</run-{salt}-{tag}>"` and preserves the body verbatim,
+    so the body is every line between the two tag lines.
+
+    Recovered so the assertion below can be an EQUALITY. A substring check on the reason is
+    satisfied by a summary that ALSO carries something else — which is exactly the shape O4
+    forbids, and the only thing standing between a model-authored fragment and main's context
+    is that nothing but the host's own two sentences is in this file."""
+    lines = _summary(r).split("\n")
+    assert len(lines) >= 3, "the summary has no body between its two frame tags"
+    assert lines[0].startswith("<run-"), f"no opening frame tag: {lines[0]!r}"
+    assert lines[-1].startswith("</run-"), f"no closing frame tag: {lines[-1]!r}"
+    return "\n".join(lines[1:-1])
+
+
 def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
     """THE THREE-PART ORACLE. Every one of the three is load-bearing:
 
@@ -167,11 +183,22 @@ def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
     summary = _summary(r)
     assert "the lead's whole allowance" in summary, \
         "main was not told the lead spent its allowance — the reason below may be empty"
-    assert reason in summary, "the summary carries some other sentence than the budget reason"
     assert REJECTION_BUDGET_ESCAPE in summary, "main was handed no escape for a budget stop"
     assert INCOMPLETE_IDIOM in summary, "the fixed idiom stopped following the escape"
     assert rq.REPEAT_ESCAPE not in summary, \
         "a budget stop handed main the repeat guard's escape"
+
+    # EQUALITY, not `reason in summary`. S1 discharges O4 with TWO facts, and the second is
+    # that `_run_gather`'s dead-end arm composes this file from `reason` and `escape` ALONE,
+    # discarding the lead's own output. A substring check tests only the first: it stays green
+    # while a placement appends (or prepends) a model-authored fragment of its own around the
+    # dispatcher's sentences — a truncated ghost name, a params key, a hash prefix — none of
+    # which is a substring of any canary a negative could name. Stated whole, there is nowhere
+    # in this file for a byte the model authored to be.
+    assert _summary_body(r) == (
+        f"gather for {LEAD} hit a dead end: {reason} {REJECTION_BUDGET_ESCAPE} "
+        f"{INCOMPLETE_IDIOM}"
+    ), "main's context carries something besides the host's own two sentences — O4"
 
 
 # ── O1: the bound holds however the calls differ ───────────────────────────────────────────
@@ -523,3 +550,135 @@ def test_no_byte_the_model_authored_reaches_main_through_a_budget_stop(tmp_path)
         assert digest not in summary, \
             "the fingerprint crossed into main's context — it is name-shaped, so a reader " \
             "downstream can spend it exactly as it would spend a system"
+
+
+# ── the arms the adversary's pass added ────────────────────────────────────────────────────
+
+
+def test_the_repeat_guard_takes_a_stop_that_is_both_a_repeat_and_the_budgets(tmp_path):
+    """PRECEDENCE, on the only table where it is observable — and it is a claim about what
+    MAIN is told, not an ordering preference.
+
+    The design fixes it: the guards are asked "repeat FIRST, then the budget", because "a call
+    that is both the 3rd repeat and the B-th rejection gets the more specific one". Every other
+    arm in this file reaches one guard or the other, so the order is free in all of them: a
+    lead of B distinct ghosts never repeats, and a lead repeating one ghost trips at 3 and
+    never reaches B. The two only collide on a table built to make them collide.
+
+    Two spellings of `ghostone`, three fresh ghosts, then `ghostone` again: at the sixth call
+    the repeat guard sees its 3rd occurrence AND the budget sees its 6th rejection. The repeat
+    sentence names the earlier request the lead is repeating, which the lead can act on; the
+    budget's can only say the allowance is gone. Asked the other way round main loses the
+    specific explanation it had before this issue — and, worse, `_replay_rejections` asks
+    repeat first over the recorded table and would report `repeat` for a stop the live run took
+    as `budget`, which is O3's own failing-by.
+
+    The replay is asserted here for that reason, not as a duplicate of the O3 arm below."""
+    rec = VerbRecorder()
+    r = _run(tmp_path, run_id="d1015-both", verbs=elastic_ok(rec), turns=[
+        _bad_args("ghostone"), _bad_args("ghostone"),
+        *[_bad_args(f"g{i}") for i in range(3)],
+        _bad_args("ghostone"),
+        q("elastic", "query", PARAMS), DONE,
+    ])
+
+    rows = _above_guard(r)
+    assert len(rows) == B, \
+        f"the lead wrote {len(rows)} rejections — the two guards did not collide on the last"
+    assert rq.rejection_budget_trip(rows[:-1], LEAD) is not None, \
+        "the budget would not have tripped here either, so this arm pins no precedence"
+
+    digest = rows[-1]["payload_digest"]
+    assert "turned back at seq" in digest, \
+        "the budget took a stop the repeat guard owns — main lost the specific sentence"
+    assert _budget_phrase() not in digest, "the budget's phrase reached a repeat guard's row"
+
+    body = _summary_body(r)
+    assert rq.REPEAT_ESCAPE in body, "main was handed the wrong escape for a repeat stop"
+    assert REJECTION_BUDGET_ESCAPE not in body
+    assert "the lead's whole allowance" not in body, \
+        "main was told it spent its allowance for a stop taken on a repeat"
+
+    assert _replay_rejections(r.rows) == [(LEAD, rows[-1]["seq"], "repeat")], \
+        "the replay names a different guard than the one the live run stopped on — O3"
+    assert rec.calls == [], "the lead ran on past its dead end"
+
+
+def test_no_byte_the_model_authored_reaches_main_through_the_grant_placements_stop(tmp_path):
+    """O4 at the SECOND placement. The leak-check arm below drives `wrap_tool_validate` only
+    (its turns carry `bogus_extra_arg`, which is what routes them to the schema), so the grant
+    check's own budget branch — which holds the model's string in a differently-named local,
+    `system` rather than `raw_system`, and reaches the dispatcher one function further on — is
+    checked by no negative anywhere.
+
+    That asymmetry is #855's own lesson, in its words: the fix has TWO writers and arms that
+    reach the stop through only one of them leave the other exactly as it was. Here the cost is
+    the #855 leak channel itself — an unbounded model-authored system name in main's context on
+    a refusal path.
+
+    Schema-valid turns by construction (`q`), so every row here is the grant check's."""
+    rec = VerbRecorder()
+    r = _run(tmp_path, run_id="d1015-grant-leak", verbs=elastic_ok(rec), turns=[
+        *[q(f"{LOUD_SYSTEM}-{i}", f"{LOUD_VERB}-{i}",
+            {"native_query": f"FROM {LOUD_PARAM}-{i}"}) for i in range(B)],
+        q("elastic", "query", PARAMS), DONE,
+    ])
+
+    rows = _above_guard(r)
+    assert len(rows) == B, "the grant placement did not take this stop"
+    _assert_budget_stop(r)
+
+    body = _summary_body(r)
+    for canary in (LOUD_SYSTEM, LOUD_VERB, LOUD_PARAM):
+        assert canary in str(r.rows), \
+            f"{canary} never reached the table, so its absence from main's context says nothing"
+        assert canary not in body, \
+            f"the model's own {canary!r} crossed into main's context through the grant stop"
+    for row in rows:
+        assert row["system_key"] not in body, \
+            "a ghost's fingerprint — a stable identifier of the model's string — reached main"
+
+    # The truncation escape the whole-string canaries above cannot see: no run of six
+    # characters from any dispatched value is in main's context either.
+    for value in (LOUD_SYSTEM, LOUD_VERB, LOUD_PARAM):
+        for i in range(len(value) - 5):
+            assert value[i:i + 6] not in body, \
+                f"a {value[i:i + 6]!r} fragment of the model's own argument reached main"
+
+
+def test_a_lead_iterating_on_a_declared_systems_parameters_is_not_the_budgets(tmp_path):
+    """C13, LIVE — the design's loudest non-obligation, and the one the predicate's unit arms
+    cannot carry alone. They pin `rejection_budget_trip` over hand-built tables; nothing pins
+    what the live guard hands it. A placement that counted its own rows instead — every
+    `agent-fixable` row of the lead, say — passes every unit arm (the predicate is untouched)
+    and every other live arm (none of them mixes the two domains), while ending a healthy lead
+    at its FIRST above-guard refusal.
+
+    That population is not hypothetical: below-guard parameter refusals against a DECLARED
+    system run 4+ per lead in 30 of the 320 archived leads, with tails of 30, 71 and 98. They
+    are the model iterating on a real system's parameters under specific coaching, which is a
+    lead working, and a bound of 6 over them would end it. Five of them, then one ghost, then
+    the corrected call: the lead must finish, and the corrected query must RUN.
+
+    The replay is asserted because the same wrong domain also makes the recorded table replay
+    to a verdict the live run did not take — a flat O3 disagreement."""
+    rec = VerbRecorder()
+    r = _run(tmp_path, run_id="d1015-below", verbs=elastic_ok(rec), turns=[
+        *[q("elastic", "query", {"native_query": f"FROM t{i}", "nope": i}) for i in range(5)],
+        _bad_args("ghostone"),
+        q("elastic", "query", PARAMS), DONE,
+    ])
+
+    below = [row for row in r.rows
+             if row.get("query_id") != rq.ABOVE_GUARD_QUERY_ID
+             and row.get("error_class") == "agent-fixable"]
+    assert len(below) == 5, \
+        f"the lead wrote {len(below)} below-guard refusals — this arm drives the wrong shape"
+    assert len(_above_guard(r)) == 1, "the ghost did not land above the guard"
+
+    assert _terminator(r) is None, \
+        f"a healthy lead was ended as {_terminator(r)!r} — the budget counted C13's population"
+    assert not _dead_end(r), "the lead was stopped after one above-guard rejection"
+    assert rec.calls, "the corrected query never ran — the lead was killed before it"
+    assert _replay_rejections(r.rows) == [], \
+        "the replay reports a stop the live run did not take — O3"

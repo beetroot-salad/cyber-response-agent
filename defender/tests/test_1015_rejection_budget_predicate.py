@@ -454,3 +454,36 @@ def test_the_dead_end_dispatcher_hands_the_budget_no_target_to_leak():
     assert LOUD_VERB not in b.escape
     assert "turned back at seq" not in b.reason, \
         "a budget stop tells main the request repeated one already turned back — O2"
+
+
+def test_each_dispatcher_spends_the_sentences_owner_rather_than_copying_it():
+    """The two arms above assert the dispatchers' repeat branches EQUAL their owners' output,
+    which a byte-identical copy of the owner's body satisfies exactly as well as a call does.
+    Equality is the right check for what main receives; it is the wrong one for the claim those
+    docstrings actually make — "BOUND to its owner, not restated".
+
+    The distinction is not pedantry: `rejection_trip_detail`'s leading phrase and
+    `rejection_dead_end_reason`'s sentence are read by the offline collectors and by main, and
+    a copy drifts the first time either owner is reworded — silently, with every equality arm
+    here still green because both copies were updated in whichever file the author had open.
+
+    Read off the SOURCE, the way this repo's own lints answer a "who derives this" question,
+    because there is no runtime seam to observe: a delegating call and an inlined copy are
+    indistinguishable from their return values, which is the whole problem."""
+    detail_src = inspect.getsource(rejection_detail)
+    assert "rejection_trip_detail(" in detail_src, \
+        "the repeat branch restates a detail sentence that already has an owner"
+    assert "turned back at seq" not in detail_src, \
+        "the repeat guard's phrase is spelled a second time here — one rewording drifts them"
+
+    dead_end_src = inspect.getsource(rejection_dead_end)
+    assert "rejection_dead_end_reason(" in dead_end_src, \
+        "the repeat branch restates a reason that already has an owner"
+    assert "REPEAT_ESCAPE" in dead_end_src, \
+        "the repeat escape is not spent from its constant"
+    assert "Sending this exact request again" not in dead_end_src, \
+        "REPEAT_ESCAPE's text is copied here rather than referenced"
+    assert "rejection_budget_dead_end_reason(" in dead_end_src, \
+        "the budget branch restates its own reason instead of spending its owner"
+    assert "were rejected before they ran" not in dead_end_src, \
+        "the budget reason's text is copied into the dispatcher"

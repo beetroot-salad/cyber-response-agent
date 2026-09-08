@@ -122,8 +122,10 @@ def names_something_readable(raw_system: Any) -> bool:
     supply an unbounded family of identities that print as nothing. That is deliberate rather
     than overlooked: they are real characters, "renders blank" is a property of the FONT and
     not of the string, and a predicate that guessed at it would be neither stable nor
-    explainable. The containment for a lead that spends identities is a bound on the number of
-    above-guard rejections, not a cleverer notion of emptiness — #1015."""
+    explainable. The containment for a lead that spends identities is a bound on the NUMBER of
+    above-guard rejections, not a cleverer notion of emptiness — and since #1015 that bound
+    exists: `rejection_budget_trip` counts this predicate's whole output identity-blind, so
+    every member of the family above costs the same one rejection as a visible name."""
     return isinstance(raw_system, str) and not is_content_less(raw_system)
 
 
@@ -708,7 +710,14 @@ def rejection_trip(
     rows carry a real fingerprint, so a caller that omitted the keyword would silently get the
     pre-#871 identity back: every ghost keying alike, no exception, no type error, and a guard
     that can never trip on any recorded ghost table. `repeat_trip` keeps its default because
-    `""` is what every row in ITS domain stores and what every one of its callers means."""
+    `""` is what every row in ITS domain stores and what every one of its callers means.
+
+    SINCE #1015 THIS IS NOT THE ONLY GUARD ON THESE ROWS. `rejection_budget_trip` counts the
+    same domain identity-blind, and a lead can now end on a call that differs from every one
+    before it — for SPENDING, never for repeating. That does not weaken the promise this
+    predicate keeps: the two are asked in order and each has its own sentence, so a lead ended
+    here is still one that repeated itself, and the row's own detail says which guard it
+    was."""
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
         system_key=system_key,
