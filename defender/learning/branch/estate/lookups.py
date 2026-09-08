@@ -113,35 +113,47 @@ def apply_patches(payload: Any, patches: dict[str, dict]) -> tuple[Any, int]:
     """
     if not patches:
         return payload, 0
-    applied = 0
+    counter = [0]
+    return _walk_patched(payload, patches, counter), counter[0]
 
-    def walk(node: Any) -> Any:
-        nonlocal applied
-        if isinstance(node, list):
-            return _rebuilt_list(node, walk)
-        if not isinstance(node, dict):
-            return node
-        out: dict | None = None
-        for k, v in node.items():
-            walked = walk(v)
-            if walked is not v and out is None:
-                out = dict(node)
-            if out is not None:
-                out[k] = walked
-        hits = _hits(node, patches)
-        if hits:
-            working = dict(node) if out is None else dict(out)
-            for patch in hits:
-                merged = dict(working)
-                merged.update(copy.deepcopy(patch))
-                # PER PATCH, not per node: two entities naming one object each contribute their
-                # own count when each genuinely moves the content, and a patch that lands on top
-                # of an already-identical value contributes none — H1's "content changed" reading
-                # applied at the same grain the table itself is keyed at.
-                if merged != working:
-                    applied += 1
-                working = merged
-            out = working
-        return node if out is None else out
 
-    return walk(payload), applied
+def _apply_hits(node: dict, out: dict | None, hits: list[dict], counter: list[int]) -> dict:
+    """`node` (or its already-child-rebuilt `out`) with every hit merged in.
+
+    Split out of `_walk_patched` on its own — the per-patch content-comparison loop (H1) is one
+    more branch than the walk's own dispatch, and the two together tripped the complexity gate.
+    A MODULE-LEVEL function rather than a closure, and `counter` a one-element list rather than
+    a `nonlocal`: mccabe counts a closure's branches against its enclosing function too, so a
+    nested `apply_hits` moved the complexity rather than removing it.
+    """
+    working = dict(node) if out is None else dict(out)
+    for patch in hits:
+        merged = dict(working)
+        merged.update(copy.deepcopy(patch))
+        # PER PATCH, not per node: two entities naming one object each contribute their own
+        # count when each genuinely moves the content, and a patch that lands on top of an
+        # already-identical value contributes none — H1's "content changed" reading applied at
+        # the same grain the table itself is keyed at.
+        if merged != working:
+            counter[0] += 1
+        working = merged
+    return working
+
+
+def _walk_patched(node: Any, patches: dict[str, dict], counter: list[int]) -> Any:
+    """`node` with every matching entity patched, `counter[0]` incremented per content change."""
+    if isinstance(node, list):
+        return _rebuilt_list(node, lambda item: _walk_patched(item, patches, counter))
+    if not isinstance(node, dict):
+        return node
+    out: dict | None = None
+    for k, v in node.items():
+        walked = _walk_patched(v, patches, counter)
+        if walked is not v and out is None:
+            out = dict(node)
+        if out is not None:
+            out[k] = walked
+    hits = _hits(node, patches)
+    if hits:
+        out = _apply_hits(node, out, hits, counter)
+    return node if out is None else out

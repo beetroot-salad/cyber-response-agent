@@ -676,8 +676,7 @@ def _capture_reachability(world: World, *, deps: _Deps, resumed: Any, applier: A
             any_completed = True
             if differs:
                 any_differs = True
-        replays.append({"key": key, "differs": differs if not faulted else False,
-                        "faulted": faulted})
+        replays.append({"key": key, "differs": differs, "faulted": faulted})
     reachable: bool | None
     if not addressed:
         reachable = None
@@ -749,8 +748,11 @@ def _differs(base_text: str, other_text: str) -> bool:
 
 
 def _one_reask(call: tuple[str, str, dict], *, world: Any, applier: Any,
-              deps: _Deps) -> tuple[bool, bool]:
+              deps: _Deps) -> tuple[bool | None, bool]:
     """`(differs, faulted)` for one captured call, with H4's confirming re-read.
+
+    `differs` is `None` whenever `faulted` is `True` — a faulted arm measured nothing, so it
+    is never recorded as `False` (which would read as "measured, and no difference").
 
     BOTH SIDES ARE GUARDED BEFORE THE COMPARATOR: `mechanical(None, <text>)` raises an uncaught
     `TypeError`, so a faulted arm — base or world — never reaches it, and never as a quiet
@@ -765,17 +767,17 @@ def _one_reask(call: tuple[str, str, dict], *, world: Any, applier: Any,
     """
     base_text = _base_arm(call, deps=deps)
     if base_text is None:
-        return False, True
+        return None, True
     try:
         world_text = _world_arm(call, world=world, applier=applier, deps=deps)
     except Exception:  # noqa: BLE001 — a refused or faulted world arm is a faulted re-ask
-        return False, True
+        return None, True
     if not _differs(base_text, world_text):
         return False, False
     try:
         confirming = _world_arm(call, world=world, applier=applier, deps=deps)
     except Exception:  # noqa: BLE001 — the re-read itself faulting is still a faulted re-ask
-        return False, True
+        return None, True
     return _differs(base_text, confirming), False
 
 

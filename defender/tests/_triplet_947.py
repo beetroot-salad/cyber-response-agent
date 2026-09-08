@@ -895,7 +895,7 @@ class FakeAdapters:
                 return answer
         if self.fault.raise_after is not None and len(self.calls) > self.fault.raise_after:
             raise FakeDoor._upstream_fault("Elasticsearch query failed (HTTP 503)")
-        if self.fault.hits(f"{system}.{verb}"):
+        if self.fault.hits(rendered) or self.fault.hits(f"{system}.{verb}"):
             raise FakeDoor._upstream_fault(f"{system}.{verb} is unavailable")
         if self.fault.malformed == "truncated-json":
             raise ValueError("Expecting value: line 1 column 1 (char 0)")

@@ -334,9 +334,23 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
 def test_947_a_rejected_world_ends_the_episode_and_the_record_archives(tmp_path):
     """Any rejected world ends the EPISODE: no world runs, the manifest, staging record and
     review are archived, and the episode's recorded outcome is rejected — an examined no, not a
-    per-world refusal that would leave a two-world family running."""
+    per-world refusal that would leave a two-world family running.
+
+    #1007/N4: the fixture used to reject through the injection-unreachable branch (world b's
+    envelope retrieving none of its injected documents). That branch retires under N4 — a world
+    is no longer rejected on `injected_retrieved` alone. Rejected here through a still-live
+    reason instead: an exclusion that matches zero base documents. Call 1 (the family reply) is
+    where an overlay is actually authored — `SEAT_AUTHORED_FIELDS` covers only the per-seat
+    STORY fields, so a seat reply's own `overlay` is silently ignored; the exclusion has to be
+    declared on the family document's `worlds` plan.
+    """
     adapters = T.FakeAdapters(by_target={T.world_token("b"): {"hits": [{"_id": "planted"}]}})
+    fam = T.family_doc(worlds=[
+        T.base_world(),
+        T.world_doc("b", ov=T.overlay(elastic=T.elastic_overlay(exclude={"match_all": {}}))),
+    ])
     rc, spawn, ep = _launch(tmp_path, adapters=adapters,
+                            questioner=T.FakeAgent(fam, T.world_doc("b")),
                             invoke=T.FakeAgent(*["contradiction"] * 24))
     assert rc != 0
     assert spawn.launches == []
@@ -744,3 +758,4 @@ def test_947_concurrent_siblings_take_distinct_container_names(tmp_path):
     names = {docker.container_name(f"{T.EPISODE_ID}-{w}") for w in T.WORLDS}
     assert len(names) == len(T.WORLDS)
     assert all(name.startswith("defender-run-") for name in names)
+
