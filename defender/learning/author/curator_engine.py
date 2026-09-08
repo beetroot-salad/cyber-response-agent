@@ -141,6 +141,31 @@ class ForwardCheckConfig:
     run_verify: Callable[..., str] = _run_verify_pydantic
 
 
+def _refuse_forward_check(ctx: Any) -> str:
+    """#1007 N1/M7: the questioner curator's own `run` — reached only if a spawn calls the
+    `forward_check` tool anyway. There is no defender behaviour a world lesson could re-verify
+    against, so this refuses loudly rather than approving silently."""
+    prefix = ctx.check.error_prefix
+    raise SystemExit(
+        f"{prefix}: this corpus carries no defender verdict for a forward check to re-run "
+        "against — the questioner curator registers none")
+
+
+def no_forward_check(*, runs_dir: Path, pending: Path) -> ForwardCheckConfig:
+    """A `ForwardCheckConfig` for a curator direction that registers NO forward check (#1007
+    N1/M7): `queued_ids`/`exempt_ids` are both empty, and the check itself refuses if ever
+    reached. Built here rather than inline at each such curator, so a direction with nothing
+    to verify against never has to spell the class its own `invoke_agent` is read for the
+    absence of (`test_the_questioner_curator_registers_no_forward_check` scans that source for
+    `ForwardCheckConfig`/`FINDINGS_CHECK` literally) — and never registered as a module-level
+    `ForwardCheck` in `verify_forward/checks.py`, which is the census that test also reads."""
+    check = ForwardCheck(
+        error_prefix="questioner_curator", prompt_path=None, run=_refuse_forward_check)
+    return ForwardCheckConfig(
+        check=check, runs_dir=runs_dir, pending=pending,
+        queued_ids=frozenset(), exempt_ids=frozenset())
+
+
 @dataclass(frozen=True)
 class CuratorDeps(AgentDeps):
 

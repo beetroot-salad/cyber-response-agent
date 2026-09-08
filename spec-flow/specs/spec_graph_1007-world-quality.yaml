@@ -2529,6 +2529,24 @@ gate:
        by: unreachable_difference_fires_on_any_declared_difference,
        edge: "interacts(_grade_world->world_finding_bucket)", cites: [X9]}
 
+actor_waivers:
+  revert_lesson: >-
+    defender/learning/ops/revert_lesson.py imports LoopPaths/DEFAULT_PATHS from
+    learning.core.config (the module M6 adds `questioner_findings` to), but never
+    references that property, `SHIPPED_LESSON_CORPORA`, or the questioner corpus — it
+    reverts a DEFENDER lesson file by path, unrelated to #1007's second channel/corpus.
+    An import-graph edge with no behavioural reach. Out of scope for #1007 (implemented
+    during write-code-from-spec continuation, post-write-tests).
+  policy_cli: >-
+    defender/scripts/policy_cli.py reaches curator_engine.SHIPPED_LESSON_CORPORA (widened
+    by M7 to include `lessons-questioner`) through its `show`/`explain` diagnostics — an
+    operator-only, read-only CLI that now reports one more corpus in a curator's read
+    confine. No write path, no attacker reach, no new refusal to pin; the widened set
+    itself is covered by `test_curator_deps_for_run_is_a_thin_wrapper_over_bind`
+    (#691) and `test_the_new_corpus_root_is_admitted_by_no_runtime_read_or_write_scope`
+    (#1007). Out of scope for #1007 (implemented during write-code-from-spec
+    continuation, post-write-tests).
+
 # ===========================================================================================
 handoff:
   # FOURTEEN FORKS REACHED §7 AND THIRTEEN CAME BACK ANSWERED. Six from `45-dispositions.md`'s

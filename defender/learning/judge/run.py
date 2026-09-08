@@ -144,6 +144,10 @@ SECTION_TITLES: dict[str, str] = {
     "spread": "TRIAL SPREAD (the dispositions those sibling trials reached, tallied)",
     "document": "THE GRADED WORLD'S OWN investigation.md",
     "report": "THE GRADED WORLD'S OWN report.md",
+    "sample": "THE QUESTIONER'S OWN SAMPLE (the real document, per staged pattern, this "
+              "world's overlay was authored from)",
+    "review": "THIS WORLD'S OWN REVIEW RECORD (what the capture's own vocabulary could and "
+              "could not show)",
 }
 
 
@@ -349,9 +353,28 @@ def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER)
     else:
         if artifact_file(candidate):
             return True
-    if (subject == SUBJECT_WORLD and path_part in _WORLD_EVIDENCE_FILES
-            and Path(path_part).name == path_part):
-        return artifact_file(world_dir.parent.parent / path_part)
+    # NO EXISTENCE CHECK on the widened branch, deliberately: `judge.yaml` is the pass's OWN
+    # output, written only after every world's draws complete, so an evidence pointer citing it
+    # from INSIDE the very draw that is producing it can never find it on disk yet — the
+    # allowlist is by NAME (`path_part in _WORLD_EVIDENCE_FILES`, `Path(path_part).name ==
+    # path_part` already refuses every traversal shape in the negative test, since a hostile
+    # operand's `.name` is never equal to the whole pointer), never by a stat this pass cannot
+    # honestly perform on its own future output.
+    return subject == SUBJECT_WORLD and path_part in _WORLD_EVIDENCE_FILES \
+        and Path(path_part).name == path_part
+
+
+def cites_sample(finding: dict[str, Any]) -> bool:
+    """A1(b): does this finding's evidence cite `samples.yaml`, BY NAME, whatever its fragment?
+
+    Anchored on the EVIDENCE rather than on the `shape-invention` bucket literal, because R2's
+    world vocabulary is open (G-3) — a refusal keyed on one string is evadable by a model that
+    spells the same claim differently. A world whose row reads `sample_unavailable` refuses
+    every finding this returns `True` for and keeps every other one, whatever its bucket
+    (#1007, `test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket`)."""
+    for pointer in finding.get("evidence") or ():
+        if isinstance(pointer, str) and pointer.split("#", 1)[0] == "samples.yaml":
+            return True
     return False
 
 

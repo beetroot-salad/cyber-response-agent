@@ -561,10 +561,17 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
         # lane alone, so a withheld world's own world-subject findings still stand
         # (`test_a_withheld_world_is_still_drawn_and_still_yields_world_findings`).
         if "world_findings" in row:
+            # A1(b) — a world whose sample went unavailable (#1007 M4/O5) admits no finding
+            # that cites `samples.yaml` as its evidence, whatever its bucket; every other
+            # world-subject finding still stands.
+            sample_unavailable = row.get("sample_unavailable")
             for draw_doc in per_world_draws.get(label, {}).values():
                 for finding in draw_doc.get("findings") or []:
-                    if isinstance(finding, dict) and finding.get("subject") == run_mod.SUBJECT_WORLD:
-                        row["world_findings"].append(finding)
+                    if not isinstance(finding, dict) or finding.get("subject") != run_mod.SUBJECT_WORLD:
+                        continue
+                    if sample_unavailable and run_mod.cites_sample(finding):
+                        continue
+                    row["world_findings"].append(finding)
 
     # M5: the family-level call — UNCONDITIONAL (even an episode with nothing to separate is
     # exactly the one this call exists to say so about) and an ADDITION to the pass: its own

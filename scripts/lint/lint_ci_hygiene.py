@@ -63,6 +63,7 @@ EXCLUDED_PREFIXES = (
     "defender/tests/",
     "defender/lessons/",
     "defender/lessons-actor/",
+    "defender/lessons-questioner/",                    # #1007: the questioner's own corpus
     "defender/docs/",                                  # POC design notes
     "defender/skills/wazuh/",
     "defender/skills/host-query/",

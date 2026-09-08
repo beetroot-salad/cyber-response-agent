@@ -221,16 +221,72 @@ class _Capture:
     alert: str
     frontier: str
     corpora: str = ""
+    lessons: str = ""
+
+
+#: #1007 M8: the questioner's own lessons — count-capped like the defender's own view, and the
+#: same 20-row convention the judge's prompt already uses.
+_QUESTIONER_LESSONS_CAP = 20
+
+
+def _questioner_lessons_section(lessons: Any, *, stageable_patterns: Sequence[str]) -> str:
+    """Every candidate lesson path, read, screened and selected — the section body, or "".
+
+    `lessons` is the RAW candidate list — file paths the launcher globbed off
+    `defender/lessons-questioner/`, none of them read yet. This is where they are actually
+    opened: a lesson whose frontmatter declares its OWN selection key (`pattern`) TWICE is
+    refused outright (`_yaml.duplicate_top_level_key` — `split_frontmatter`'s plain
+    `safe_load` resolves a repeat last-wins in silence, which would let a model-authored value
+    become the document's own structure and steer this selector), and a lesson whose `pattern`
+    is not one this episode's capture named is simply not selected. Count-capped after
+    selection, never before — a corpus with more matching lessons than the cap must not read as
+    empty because the cap fell on the wrong end.
+    """
+    if not lessons:
+        return ""
+    from defender._frontmatter import FrontmatterError, split_frontmatter
+    from defender._io import TEXT_READ_ERRORS, read_text_utf8
+    from defender._yaml import duplicate_top_level_key
+
+    stageable = set(stageable_patterns)
+    bodies: list[str] = []
+    for path in lessons:
+        try:
+            text = read_text_utf8(Path(path))
+        except TEXT_READ_ERRORS:
+            continue
+        try:
+            fm, raw, body = split_frontmatter(text)
+        except FrontmatterError:
+            continue
+        # THE RAW FRONTMATTER ALONE, never the whole file: `duplicate_top_level_key` parses its
+        # argument as one YAML document, and the body below the closing fence is markdown, not
+        # YAML — checking the whole text raises on every ordinary lesson and this guard would
+        # silently never fire (caught by the SAME except clause a genuine forgery needs).
+        if duplicate_top_level_key(raw):
+            continue
+        if fm.get("pattern") not in stageable:
+            continue
+        if body:
+            bodies.append(body)
+    if not bodies:
+        return ""
+    capped = bodies[:_QUESTIONER_LESSONS_CAP]
+    return titled_section(
+        "Pitfalls this questioner corpus recorded about worlds it authored before",
+        "\n\n---\n\n".join(capped))
 
 
 def _capture_sections(*, leads: Any, alert: Any, frontier: str,
-                      corpus_samples: Any = None) -> _Capture:
+                      corpus_samples: Any = None, lessons: Any = None,
+                      stageable_patterns: Sequence[str] = ()) -> _Capture:
     """The captured inputs, rendered."""
     return _Capture(
         leads=titled_section("The joined leads at the branch point", leads),
         alert=titled_section("The alert this investigation started from", alert),
         frontier=titled_section("The investigation document at the branch point", frontier),
         corpora=_corpus_section(corpus_samples),
+        lessons=_questioner_lessons_section(lessons, stageable_patterns=stageable_patterns),
     )
 
 
@@ -351,7 +407,8 @@ def _family_prompt(header: str, capture: _Capture) -> str:
     instruction in it. `stage_user_message` puts the reader contract at the head of the framed
     region, so what follows the contract is exactly the region it speaks about.
     """
-    salt = message_salt(capture.leads, capture.alert, capture.frontier, capture.corpora)
+    salt = message_salt(capture.leads, capture.alert, capture.frontier, capture.corpora,
+                        capture.lessons)
     return (
         f"{_prompt('family.md')}\n{header}\n"
         + stage_user_message(
@@ -360,6 +417,11 @@ def _family_prompt(header: str, capture: _Capture) -> str:
             wrap(capture.alert, UNTRUSTED_TAG, salt),
             wrap(capture.frontier, UNTRUSTED_TAG, salt),
             *([wrap(capture.corpora, UNTRUSTED_TAG, salt)] if capture.corpora else []),
+            # #1007 M8: the questioner's own lessons, call 1 ONLY — this is the call that
+            # names the discriminator and picks the base story, the two things a world's own
+            # findings have anything to say about; the overlay-authoring seats (`_world_prompt`)
+            # never see them.
+            *([wrap(capture.lessons, UNTRUSTED_TAG, salt)] if capture.lessons else []),
         )
     )
 
@@ -483,7 +545,7 @@ def _seat_letter(index: int) -> str:
     return WORLD_SEATS[index] if index < len(WORLD_SEATS) else chr(ord("B") + index)
 
 
-def author_family(
+def author_family(  # noqa: PLR0913 — one keyword per captured input plus #1007's own `lessons`; the caller already resolves every optional at the boundary (its docstring), so splitting this would re-coalesce them somewhere else
     *,
     source_run_dir: Path,
     episode_dir: Path,
@@ -493,6 +555,7 @@ def author_family(
     frontier: str,
     stageable_patterns: Sequence[str] = (),
     corpus_samples: Any = None,
+    lessons: Any = None,
 ) -> dict[str, Any]:
     """Author one family document: three model calls, one role key, three identities.
 
@@ -513,6 +576,12 @@ def author_family(
     launcher supplies the derived half (`episode_id`, `source_run_dir`, `source_run_id`,
     `branch_message_id`, `fences_at`, `as_of`) and the operator's `continuation_prompt`, because
     those are facts about the measurement rather than anything a model may choose.
+
+    `lessons` (#1007 M8) is the RAW candidate list of questioner-corpus lesson paths — the
+    launcher's own glob of `defender/lessons-questioner/`, none of them read yet. This
+    function is where they are opened, screened and selected against `stageable_patterns`, and
+    reach ONLY call 1 (`_family_prompt`) — the call that names the discriminator and the base
+    story, never a seat's own overlay-authoring call.
     """
     header = _measurement_header(Path(source_run_dir), Path(episode_dir),
                                  stageable_patterns)
@@ -521,7 +590,8 @@ def author_family(
     # and spelled inside the seat loop it was rebuilt per seat for a value that cannot vary
     # between them. The FRAMING is per call, because the salt is (see `_world_prompt`).
     capture = _capture_sections(leads=leads, alert=alert, frontier=frontier,
-                                corpus_samples=corpus_samples)
+                                corpus_samples=corpus_samples, lessons=lessons,
+                                stageable_patterns=stageable_patterns)
     family_reply = invoke(
         _family_prompt(header, capture),
         role=AgentRole.QUESTIONER,

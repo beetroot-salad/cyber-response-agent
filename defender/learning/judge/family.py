@@ -91,6 +91,7 @@ WITHHELD_REACHABILITY_UNMEASURED = "reachability_unmeasured"
 WITHHELD_EPISODE_INCOMPLETE = "episode_incomplete"
 
 REVIEW_NAME = "review.yaml"
+SAMPLES_NAME = "samples.yaml"
 
 
 def _default_review_reader(path: Path) -> dict[str, Any]:
@@ -120,6 +121,37 @@ def read_review_record(episode_dir: Path, *, reader: Any = None) -> dict[str, An
     `test_grade_family_reads_the_review_record_once_through_the_guarded_reader`)."""
     read = reader if reader is not None else _default_review_reader
     return read(Path(episode_dir) / REVIEW_NAME)
+
+
+def _default_samples_reader(path: Path) -> dict[str, Any]:
+    """`samples.yaml`, read PERMISSIVELY: absent, unreadable or unparseable all read as `{}`,
+    never a `JudgeRefused`. Unlike `_default_review_reader`, this is deliberate (#1007 M4,
+    `test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern`): the
+    review record is load-bearing for O2/O4's withholding ladder, so a fault there ends the
+    pass; the sample is evidence for one narrow claim (shape-invention) per world, so one
+    damaged file costs those claims their evidence and nothing else — never the whole grade."""
+    import yaml
+
+    from defender._yaml import safe_load
+
+    if not (path.exists() or path.is_symlink()):
+        return {}
+    text, _refusal = read_guarded(path)
+    if text is None:
+        return {}
+    try:
+        doc = safe_load(text) or {}
+    except yaml.YAMLError:
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def read_samples_record(episode_dir: Path, *, reader: Any = None) -> dict[str, Any]:
+    """`samples.yaml`, parsed once per caller — the questioner's own reference document per
+    staged pattern, moved into the episode archive at step 2 so it survives a pruned source run
+    (#1007 O5/M4)."""
+    read = reader if reader is not None else _default_samples_reader
+    return read(Path(episode_dir) / SAMPLES_NAME)
 
 
 def _world_review_block(review: dict[str, Any], label: str) -> dict[str, Any] | None:
@@ -747,7 +779,7 @@ def _missing_required_input(
 def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the bucket state machine are one demand (J5 + the mechanical bucket table); splitting them would let a caller reach the bucket logic on a world the tier rule never cleared
     episode_dir: Path, world: dict[str, Any], *, episode_token: str, holding_system: str,
     review_block: dict[str, Any] | None = None, episode_incomplete: bool = False,
-    withholding_applies: bool = True,
+    withholding_applies: bool = True, samples: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], WorldFacts | None]:
     label = world["world_id"]
     raw_declared = world.get("disposition_declared")
@@ -873,6 +905,15 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
             and declares_difference(world.get("overlay"))):
         mechanical_findings.append(_mechanical_world_finding(
             label=label, pattern=pattern, holding_system=holding_system))
+    # @owns sample_unavailable — the SOLE producer of the row's `sample_unavailable` field.
+    # #1007 M4/O5: no sample was captured for THIS world's own staged pattern — matched by
+    # EXACT string, never case-folded (a differently-cased overlay pattern stages a different
+    # index and would otherwise be graded against another corpus's document). A pattern present
+    # but mapped to `null` reads identically to an absent key — both are "nothing to compare
+    # against" (`test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern`).
+    # `judge/__init__.py`'s world_findings loop and `run.cites_sample` both READ this row field
+    # to enforce A1(b); neither re-derives it.
+    sample_unavailable = (samples or {}).get(pattern) is None
 
     row.update(
         holding_queried=holding_queried, scope_discriminated=scope_discriminated,
@@ -906,7 +947,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
         # -count a model draw already enqueued through the per-draw loop).
         world_findings=list(mechanical_findings),
         mechanical_world_findings=mechanical_findings,
-        sample_unavailable=False,
+        sample_unavailable=sample_unavailable,
     )
     if integrity_notes:
         row["integrity_notes"] = integrity_notes
@@ -1014,7 +1055,9 @@ def grade_family(
     orchestration reads it once for its own outcome check and hands it over here); when neither
     is given, this pass reads `review.yaml` itself, through `review_reader` when injected,
     EXACTLY ONCE regardless of world count (#1007, `test_grade_family_reads_the_review_record_
-    once_through_the_guarded_reader`)."""
+    once_through_the_guarded_reader`). It also reads `samples.yaml` once, permissively
+    (`read_samples_record` — absent/unparseable reads as `{}`), to compute each row's
+    `sample_unavailable` (#1007 M4/O5)."""
     episode_dir = Path(episode_dir)
     doc = manifest if manifest is not None else _raw_manifest(episode_dir)
     holding_system = _holding_system(doc)
@@ -1024,6 +1067,7 @@ def grade_family(
     episode_token = episode_token_for(episode_id)
     review_doc = review if review is not None else read_review_record(
         episode_dir, reader=review_reader)
+    samples_doc = read_samples_record(episode_dir)
 
     # GATED ON THERE BEING A SIBLING TO SPEAK OF (len(worlds) >= 2). A single-world episode
     # whose one world queried nothing is structurally identical to the ordinary "no row on H"
@@ -1052,7 +1096,7 @@ def grade_family(
         row, read = _grade_world(episode_dir, world, episode_token=episode_token,
                                 holding_system=holding_system, review_block=block,
                                 episode_incomplete=episode_incomplete,
-                                withholding_applies=m1_participates)
+                                withholding_applies=m1_participates, samples=samples_doc)
         rows.append(row)
         if read is not None:
             facts[row["world"]] = read

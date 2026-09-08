@@ -150,7 +150,16 @@ demands:
   - {id: review_verb_context_host_side, kind: seam, form: test, settled_at: "§7-round-2 F5-EPISODE-ROOT (applied)", discharged_by: test_947_review_verb_context_is_host_side_over_the_episode_dir, binds: ["interacts(review->episode_dir)", runs_base, episodes_root]}
   - {id: review_and_prime_share_the_set, kind: coherence, form: test, discharged_by: test_947_review_replays_exactly_the_set_prime_base_read, binds: [captured_payload, base_ledger, "interacts(prime_base->captured_payload)"]}
   - {id: zero_match_exclusion_rejects, kind: domain-outcome, form: test, discharged_by: test_947_exclusion_matching_zero_base_documents_rejects_the_world, binds: ["exclude_predicate.domain.distinguished[zero-match]"]}
-  - {id: injection_unreachable_rejects, kind: domain-outcome, form: test, discharged_by: test_947_envelope_retrieving_none_of_its_injection_rejects_the_world, binds: [envelope, inject_index]}
+  # RETIRED by #1007/N4. The injection branch of `_rejection` this demand pinned no longer
+  # rejects — `injected_retrieved` is now the envelope's own hits, `injected_present` the door
+  # count, and neither feeds `_rejection`. `discharged_by` is repointed to the test now standing
+  # at this name so the pointer keeps resolving, but its assertion is now the OPPOSITE of this
+  # demand's original claim — see `status`/`superseded_by`, and
+  # spec_graph_1007-world-quality.yaml's `injection_rejection_branch_retired` for the live demand.
+  - {id: injection_unreachable_rejects, kind: domain-outcome, form: test,
+     discharged_by: test_947_envelope_retrieving_none_of_its_injection_is_no_longer_rejected,
+     status: retired, superseded_by: injection_rejection_branch_retired,
+     binds: [envelope, inject_index]}
   - {id: patch_unreachable_rejects, kind: domain-outcome, form: test, discharged_by: test_947_zero_apply_count_on_the_envelope_payload_rejects_the_world, binds: [envelope, overlay]}
   - {id: reachability_recorded, kind: shape, form: test, discharged_by: test_947_review_record_carries_the_full_reachability_block, binds: ["review_yaml.payload"]}
   - {id: exclusion_count_through_staging_door, kind: seam, form: test, discharged_by: test_947_exclusion_count_goes_through_the_staging_door_not_an_adapter, binds: ["interacts(review->elastic_cluster)"]}
@@ -353,7 +362,9 @@ demands:
 
   # ---- FORK-7 (auto) — drift subtraction, the injection count, the full-match mirror ---------------
   - {id: d_delta_o_subtracts_control_drift, minted_from: FORK-7, kind: behavior, form: test, discharged_by: test_947_delta_o_subtracts_the_controls_drift_keys, binds: [delta_o, base_ledger, world_ledger]}
-  - {id: d_injection_count_through_the_door, minted_from: FORK-7, kind: behavior, form: test, discharged_by: test_947_the_injection_count_is_asked_through_the_door_not_a_capped_search, binds: ["RETURNED_DOC_CAP.domain.distinguished[21]", "interacts(review->elastic_cluster)"]}
+  # REPOINTED by #1007/N4: same claim (the count comes from the overlay's own declared size,
+  # never a capped search page), field renamed `injected_present` and test renamed alongside it.
+  - {id: d_injection_count_through_the_door, minted_from: FORK-7, kind: behavior, form: test, discharged_by: test_947_the_injection_size_is_reported_from_the_overlay_not_a_capped_search, binds: ["RETURNED_DOC_CAP.domain.distinguished[21]", "interacts(review->elastic_cluster)"]}
   - {id: d_full_match_exclusion_recorded_not_rejected, minted_from: FORK-7, kind: domain-outcome, form: test, discharged_by: test_947_a_full_match_exclusion_is_recorded_not_rejected, binds: ["exclude_predicate.domain.distinguished[match-all]", "review_yaml.payload"]}
 
   # ---- F5 (demand-level, human at §7 round 2) — the staging rewriter's unset-index arm ---------------

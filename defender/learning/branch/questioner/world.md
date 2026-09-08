@@ -38,6 +38,11 @@ disagree with the family it will be composed into.
 Your `axis` elaborates the one call 1 planned for this seat; your `story` is what makes that
 axis a world an investigator could land in. Change the least that makes your axis true.
 
+If your axis is an ABSENCE — something the capture shows and this world does not — say so
+plainly in your story rather than inventing a document that never existed: call 1's `overlay`
+expresses "this world does not hold X" with `exclude`, the same way it expresses "this world
+holds a new Y" with `inject`.
+
 `disposition_declared` is what a competent investigator SHOULD reach in your world, given the
 same alert and the same history. It is a claim about the world you wrote, not about the one that
 was captured, and it is what the sibling's own verdict is read against. It may match the

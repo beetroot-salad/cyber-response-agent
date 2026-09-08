@@ -177,6 +177,8 @@ EXCLUDED_GREP_DIRS = (
     # prefix, which would silently swallow any future `defender/tests-*` sibling.
     "defender/fixtures-e2e",
     "defender/lessons-environment",
+    # #1007: the questioner's own corpus — same rationale as the two above.
+    "defender/lessons-questioner",
     # The judge-alignment dataset: human-labelled samples of what a judge emitted, batch by
     # batch. Same class as the lesson corpora above — authored knowledge whose text quotes the
     # code of its own moment, and #922 deleted the judge it was labelled against. Rewriting the

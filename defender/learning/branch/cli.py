@@ -103,6 +103,7 @@ RUNS_SUBDIR = "runs"
 WORLDS_SUBDIR = "worlds"
 FAMILY_STAMP_NAME = "provenance.json"
 REVIEW_NAME = "review.yaml"
+SAMPLES_NAME = "samples.yaml"
 
 #: The three outcomes an episode can end in. `incomplete` is a MODELLED outcome carrying a
 #: reason rather than the absence of a file (§7 FORK-1): every question about a partially good
@@ -368,7 +369,7 @@ def _is_empty_capture(refusal: LedgerError) -> bool:
 def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8): every refusal that is knowable before a model call is asked here, so an operator with two problems is not told about them one paid episode at a time. Splitting it to satisfy an argument count would restore exactly the shape it exists to replace.
     *, source_run_dir: Path, branch_message_id: int, episode_id: str, episode_dir: Path,
     door: Any, preflight: Callable[[str | None], int], model: str | None,
-    continuation_prompt: str, episode_token: str | None = None,
+    continuation_prompt: str,
 ) -> tuple[str, tuple[str, ...]]:
     """Everything that can refuse BEFORE the questioner is paid for, in one block.
 
@@ -382,7 +383,7 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     to be checked and every later step needs them — recomputing either downstream is a second
     reading of a value the preflight already judged.
     """
-    token = _episode_token(episode_id, episode_token)
+    token = _episode_token(episode_id)
     patterns = staging_mod.check_configured_patterns(configured_patterns())
     _check_branch_point(source_run_dir, branch_message_id,
                         continuation_prompt=continuation_prompt)
@@ -439,21 +440,20 @@ def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
             "source run or branch point")
 
 
-def _episode_token(episode_id: str, override: str | None = None) -> str:
-    """The episode's token, or the operator-facing refusal that names the escape.
+def _episode_token(episode_id: str) -> str:
+    """The episode's token, or the operator-facing refusal.
 
-    `override` IS THAT ESCAPE, and it has to reach `episode_token_for` or the refusal below
-    names a remedy that does nothing: the operator re-runs with `--episode-token`, the flag is
-    parsed and dropped, the identical message prints again, and that source run and branch
-    point are permanently unbranchable. The override is held to exactly the same nameability
-    rule as a derived token (`_nameable_token`), so naming one buys no laxity.
+    No override reaches this: an id `episode_token_for` cannot render is already refused by
+    `refuse_bad_episode_id`, which every caller of `episode_dir_for` runs first (F-R5 removed
+    the operator-named-token flag — it replaced the derived token outright, which let two
+    episode ids share one namespace and defeated `staging.sweep` by hand). This wrapper exists
+    only so a direct caller of `preflight_episode` — never the real launcher — meets the same
+    operator-facing refusal class as every other check here, rather than a bare `FamilyError`.
     """
     try:
-        return episode_token_for(episode_id, override=override)
+        return episode_token_for(episode_id)
     except FamilyError as bad:
-        raise LauncherRefused(
-            f"[branch] {bad} — pass an explicit episode token if this source run's id cannot "
-            "render to one") from bad
+        raise LauncherRefused(f"[branch] {bad}") from bad
 
 
 def _probe_cluster(door: Any, patterns: Sequence[str]) -> None:
@@ -991,10 +991,6 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
         help="what every sibling is told on arrival — part of the measured instrument, so it is "
              "the operator's rather than the seam's")
     p.add_argument(
-        "--episode-token", default=None,
-        help="an explicit episode token, for a source run id that cannot render to a nameable "
-             "one; every world token and staged alias is built from it")
-    p.add_argument(
         "--allow-dirty", action="store_true",
         help="record the family stamp even though a sibling reported a tree git could not "
              "certify clean; the override is NAMED in the stamp")
@@ -1068,8 +1064,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     token, patterns = preflight_episode(
         source_run_dir=source, branch_message_id=ns.branch_message_id, episode_id=episode_id,
         episode_dir=episode_dir, door=write_door, preflight=role_preflight,
-        model=ns.model, continuation_prompt=ns.continuation_prompt,
-        episode_token=ns.episode_token)
+        model=ns.model, continuation_prompt=ns.continuation_prompt)
 
     # THE REMAINING SEAMS ARE ANSWERED FOR HERE, at the same boundary `door` and `preflight`
     # are resolved at, and threaded inward non-`None`. Left to their `None` defaults they
@@ -1355,6 +1350,33 @@ def _release_and_grade(
                   "that ended the episode is what follows", file=sys.stderr)
 
 
+def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
+    """Step 2 (#1007 M4/O5): `samples.yaml`, the questioner's own reference document per staged
+    pattern, moved into the EPISODE archive — not left in the source run, which a later prune
+    removes, and not kept only in memory. This is the ONE thing that makes a `shape-invention`
+    claim decidable at grading time: the judge is shown the same bytes the questioner was.
+
+    `samples` is normalised to ONE Python `dict` BEFORE it is dumped — never a sequence of
+    `(pattern, document)` pairs written as repeated YAML keys and left to the loader's own
+    last-key-wins, which would be a decision made by a serializer rather than by this design
+    (`test_the_writer_pins_one_document_per_pattern_rather_than_relying_on_last_key_wins`).
+    `dict(samples)` already resolves a repeated key deterministically (last write wins) before
+    a single byte is serialized, so the file that lands always parses to one key, one value.
+
+    OVERWRITES WHOLESALE on a re-entered episode (H3/RS-1) — no merge, no second file, no
+    refusal. O5's byte-identity obligation is scoped to ONE ATTEMPT; the accepted cost of
+    keeping the episode resumable is that a re-entered step 2 may hand the judge attempt N's
+    samples for a world authored in attempt N-1 (accepted gap G-2).
+    """
+    import yaml
+
+    doc = dict(samples)
+    path = Path(episode_dir) / SAMPLES_NAME
+    write_guarded(path, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
+                                       default_flow_style=False))
+    return path
+
+
 def _author(
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
     questioner: Any, patterns: Sequence[str] = (),
@@ -1382,6 +1404,10 @@ def _author(
     # judges an overlay's keys against, and what the prompt must name as stageable. Derived
     # apart, the sampler and the pattern set would answer for two different captures.
     samples = _corpus_samples(source, corpus_samples, source_pattern)
+    # #1007 O5/M4: the SAME documents the questioner is about to be shown, moved into the
+    # episode archive now — before the model call — so the judge can be shown byte-identical
+    # bytes at grading time regardless of what later happens to the source run.
+    write_questioner_samples(episode_dir, samples)
     captured = tuple(samples)
     stageable = tuple(dict.fromkeys([*patterns, *captured]))
     document = questioner_mod.author_family(

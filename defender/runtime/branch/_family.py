@@ -764,7 +764,7 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
             raise FamilyError(f"world token {token!r} does not round-trip: {bad}") from bad
 
 
-def episode_token_for(episode_id: str, *, override: str | None = None) -> str:
+def episode_token_for(episode_id: str) -> str:
     """The episode's own token: the id with its separators normalised to one spelling.
 
     INJECTIVE, and not by a plain character replacement: the run-id grammar admits `-`, `_` AND
@@ -778,11 +778,12 @@ def episode_token_for(episode_id: str, *, override: str | None = None) -> str:
     carrying a dot is ordinary (`--run-id`, and the auto id's alert label is a fixture STEM).
 
     NAMEABLE, because the token is the head of every world token and therefore of every staged
-    alias. An id that cannot render is not permanently unbranchable: `override` is the escape
-    the operator names, and it is held to exactly the same rule.
+    alias. TAKES NO OVERRIDE (F-R5): every id this can raise on is already refused earlier, by
+    `refuse_bad_episode_id`, which every caller of `episode_dir_for` runs first — an operator
+    escape here would let two episode ids share one namespace and defeat `staging.sweep`, the
+    only recovery for a killed attempt's live cluster aliases, by hand. An episode's namespace
+    is derived from its episode id and from nothing else.
     """
-    if override is not None:
-        return _nameable_token(override, f"--episode-token {override!r}")
     # CASEFOLDED, because an alias name cannot carry upper case and a view named above the case
     # rule is not refused by the cluster — it is answered with an empty result, so the world
     # reads as one that changed nothing. This is not a loss of injectivity in practice:
@@ -807,8 +808,9 @@ def _nameable_token(token: str, origin: str) -> str:
         refuse_unnameable_world(token)
     except ViewNameError as bad:
         raise FamilyError(
-            f"{origin} does not render to a nameable episode token ({bad}) — pass an explicit "
-            "token instead; every world token and every staged alias is built from it") from bad
+            f"{origin} does not render to a nameable episode token ({bad}) — name a fresh "
+            "source run or branch point; every world token and every staged alias is built "
+            "from it") from bad
     if not token or not token[0].isalnum():
         raise FamilyError(
             f"{origin} does not render to a nameable episode token: {token!r} does not start "
