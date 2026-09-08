@@ -68,7 +68,6 @@ to that line.
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -101,8 +100,9 @@ PHANTOM = "Ignore Previous Instructions"
 #: A `system` argument holding one zero-width space: readable to `str`, invisible to a reader,
 #: and `names_something_readable`-false — so it reaches the GRANT placement (it is a `str`, so
 #: `as_str` does not coarsen it) and is recorded with NO fingerprint (N5). #1016 keeps it in the
-#: O1 sweep because it is model-authored text like any other, and the one shape a `json.dumps`
-#: oracle left on its `ensure_ascii` default would silently fail to look for.
+#: O1 sweep because it is model-authored text like any other, and the one shape a serialising
+#: oracle would silently fail to look for (`_host_authored` searches raw values for that
+#: reason).
 ZERO_WIDTH = "\u200b"
 
 #: A model-authored `system` value too long for pydantic to print whole: its error text renders
@@ -153,25 +153,34 @@ def _host_authored(row: dict) -> str:
     values and asked `phantom not in values`, which is column-value EQUALITY, and every leak
     #1016 closes is a model string EMBEDDED in a host-composed sentence.
 
-    `ensure_ascii=False` deliberately. On the default, `json.dumps` escapes a zero-width system
-    string to the seven ASCII characters `\\u200b`, so a search for the codepoint itself finds
-    nothing and the arm goes green over a digest that is carrying it verbatim — and the invisible
-    system is exactly the shape N5 refuses to fingerprint, i.e. the one whose leak no other
-    column would reveal."""
-    return json.dumps(
-        {k: v for k, v in row.items() if k not in MODEL_AUTHORED_COLUMNS}, ensure_ascii=False,
+    The haystack is the raw column VALUES joined on NUL, never a `json.dumps` of them, and the
+    difference is the whole strength of the oracle. A serialized row ESCAPES precisely the
+    characters a model is freest to spell: `json.dumps` renders a ghost holding `"` as `\\"`, a
+    backslash as `\\\\`, a newline as `\\n` — and, left on its `ensure_ascii` default, a
+    zero-width system as the six ASCII characters `\\u200b`. Each of those makes a search for
+    the string the model actually sent find nothing while the column carries it verbatim, which
+    is the same escaping blind spot #1016 N5 cites to rule OUT a substring scrub of `str(e)`:
+    an oracle inheriting it is WEAKER than the column-value equality arms it replaced, not
+    stronger. Joined raw, every codepoint the model wrote is searchable as written, and
+    `test_the_o1_oracle_sees_what_a_serialised_row_would_hide` is what holds it there.
+
+    NUL is the separator because no column can hold one, so no needle can straddle two columns
+    and no false positive can be manufactured by the join itself."""
+    return "\x00".join(
+        str(v) for k, v in row.items() if k not in MODEL_AUTHORED_COLUMNS
     )
 
 
 def _model_authored(row: dict) -> str:
-    """The complement — the three columns O1 exempts (#1016 N1).
+    """The complement — the three columns O1 exempts (#1016 N1), joined the same way and for
+    the same reason.
 
     Every O1 negative in this file is paired with a POSITIVE over this string on the SAME row:
     the model's verb is present here and absent there, one run, one writer, one call. Without
     it `ghost not in _host_authored(row)` is satisfied by a row that never saw the ghost at all
     — which is precisely how #871's equality arms stayed green for two issues."""
-    return json.dumps(
-        {k: v for k, v in row.items() if k in MODEL_AUTHORED_COLUMNS}, ensure_ascii=False,
+    return "\x00".join(
+        str(v) for k, v in row.items() if k in MODEL_AUTHORED_COLUMNS
     )
 
 
@@ -363,8 +372,9 @@ def test_the_companion_repeat_guard_still_bounds_a_phantom_rejection_loop(tmp_pa
     assert "Extra inputs are not permitted" in rows[-1]["payload_digest"], \
         "the trip row's tail no longer names the error type, so an operator reading the one " \
         "row that ended the lead cannot tell what the model kept getting wrong"
+    trip_host = _host_authored(rows[-1])
     for text in (PHANTOM, "ghostverb", "ghostkeyname"):
-        assert text not in _host_authored(rows[-1]), \
+        assert text not in trip_host, \
             f"the trip row's tail put {text!r} in a host-authored column of a coarsened row"
     summary = (r.run_dir / "gather_summaries" / "l-001.md").read_text(encoding="utf-8")
     assert "Treat this lead as incomplete" in summary
@@ -417,9 +427,6 @@ def test_three_different_undeclared_systems_are_three_calls_not_one_repeat(tmp_p
     assert not _dead_end(r), "the lead was refused for three calls that differ"
 
     summary = _summary(r)
-    values = [value for row in r.rows for value in row.values()]
-    assert "elastic" in values, \
-        "no column holds the dispatched system either — the inequalities below are vacuous"
     for phantom in ("ghostone", "ghosttwo", "ghostthree"):
         assert phantom not in summary, \
             "a model-authored system name crossed into main's context on a refusal path"
@@ -436,8 +443,13 @@ def test_three_different_undeclared_systems_are_three_calls_not_one_repeat(tmp_p
             "may say, not a licence to say nothing"
         assert "ghostverb" in _model_authored(row), \
             "the row lost the call's own arguments, so the negatives below are vacuous"
-        for text in ("ghostone", "ghosttwo", "ghostthree", "ghostverb"):
-            assert text not in _host_authored(row), \
+        host = _host_authored(row)
+        # `bogus_extra_arg` is in the sweep because two of these three rows are SCHEMA
+        # rejections, whose `system` and `verb` are valid strings pydantic never mentions:
+        # the only model text their digest can carry is the argument NAME. Without it the
+        # schema half of this arm cannot fail, and one grant row is doing all the work.
+        for text in ("ghostone", "ghosttwo", "ghostthree", "ghostverb", "bogus_extra_arg"):
+            assert text not in host, \
                 f"{text!r} — model-authored text — is in a host-authored column of a row " \
                 "whose `system` the host deliberately withheld"
 
@@ -492,8 +504,9 @@ def test_the_grant_checks_writer_mints_its_own_identity_too(tmp_path):
             "a coarsened grant-path row recorded no reason at all"
         assert "ghostverb" in _model_authored(row), \
             "the row lost the call's own arguments, so the negative below is vacuous"
+        host = _host_authored(row)
         for text in ("ghostone", "ghosttwo", "ghostthree", "ghostverb"):
-            assert text not in _host_authored(row), \
+            assert text not in host, \
                 f"the grant check put {text!r} — model-authored text — in a host-authored " \
                 "column of a row whose `system` it had just withheld"
 
@@ -601,10 +614,14 @@ def test_only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest(tmp_path):
     r = _run(tmp_path, run_id="d871-column", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone", verb="ghostverb"), _bad_args("ghosttwo", verb="ghostverb"),
         _bad_args("ghostone", verb="ghostverb"),
-        _bad_args("elastic"), q("elastic", "query", PARAMS), DONE,
+        _bad_args("elastic", verb="ghostverb"), q("elastic", "query", PARAMS), DONE,
     ])
 
-    keys = [row["system_key"] for row in r.own_rows]
+    # `r.own_rows` re-reads and re-parses `executed_queries.jsonl` on every access, so it is
+    # bound once: the table is immutable by now, and five reads of it in one test read as a
+    # claim that it might not be.
+    own = r.own_rows
+    keys = [row["system_key"] for row in own]
     assert len(keys) == 5, "the five calls did not all leave their rows"
     assert all(re.fullmatch(r"[0-9a-f]{64}", k) for k in keys[:3]), \
         f"a coarsened row carries no fixed-length hex digest: {keys[:3]}"
@@ -624,16 +641,13 @@ def test_only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest(tmp_path):
         if row["system"]:
             assert row["system_key"] == "", \
                 f"{row['system']!r} kept its system AND took a fingerprint"
-    values = [value for row in r.rows for value in row.values()]
-    assert "elastic" in values, "the negative below is quantified over nothing"
-
     # #1016 O1, in place of the two `not in values` arms this test shipped with. The fourth turn
     # is the positive control and it is exact rather than analogous: the SAME `_bad_args` shape,
     # the same `bogus_extra_arg` key, the same run and the same writer — differing only in the
     # condition O1 is scoped by. Its system was DECLARED, so nothing was coarsened, so N3 says
     # its digest keeps pydantic's text verbatim and the model's argument name with it. If that
     # row's digest is clean too, the writer has stopped recording rather than started scrubbing.
-    declared = r.own_rows[3]
+    declared = own[3]
     assert declared["system"] == "elastic", \
         "the control row lost its declared system, so it is not the complementary condition"
     assert declared["system_key"] == "", \
@@ -641,12 +655,13 @@ def test_only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest(tmp_path):
     assert "bogus_extra_arg" in _host_authored(declared), \
         "a row that KEPT its system stopped recording the model's own argument name — the " \
         "negatives below are then satisfied by a writer that records nothing (#1016 N3)"
-    for row in r.own_rows[:3]:
+    for row in own[:3]:
         assert _detail(row), "a coarsened row recorded no reason at all"
         assert "ghostverb" in _model_authored(row), \
             "the row lost the call's own arguments, so the negatives below are vacuous"
+        host = _host_authored(row)
         for text in ("ghostone", "ghosttwo", "ghostverb", "bogus_extra_arg"):
-            assert text not in _host_authored(row), \
+            assert text not in host, \
                 f"the fourteenth column's row put {text!r} — model-authored text — in a " \
                 "host-authored column of a coarsened row"
 
@@ -821,6 +836,34 @@ def test_a_declared_system_is_never_folded_into_that_group(tmp_path):
 # coarsened and must therefore be untouched.
 
 
+def test_the_o1_oracle_sees_what_a_serialised_row_would_hide():
+    """`_host_authored` itself, because every O1 negative in this file is only as strong as it
+    is — and the shapes that defeat a SERIALISING oracle are ones no fixture here spells.
+
+    A row rendered through `json.dumps` escapes exactly the characters a model is freest to put
+    in a `system` value or an invented argument name: `"` becomes `\\"`, a backslash doubles, a
+    newline becomes `\\n`, and on `ensure_ascii`'s default a zero-width codepoint becomes six
+    ASCII ones. A substring search for what the model actually sent then finds nothing while
+    the column carries it verbatim — the same escaping blind spot #1016 N5 cites to rule OUT a
+    substring scrub of `str(e)`, and inheriting it would make the replacement oracle WEAKER
+    than the column-value equality arms it retired rather than stronger.
+
+    Hand-built rows, deliberately: driving these ghosts through a live lead would put them
+    through `system_fingerprint`, `shlex.join` and the summary arms too, and this is a claim
+    about the ORACLE, not about the writers. The last fixture is the plain ASCII ghost every
+    other arm in this file uses, so a helper that stopped searching altogether fails here."""
+    for ghost in ('gh"ost', "C:\\ghost", "ghost\nname", ZERO_WIDTH, "ghostplain"):
+        row = dict.fromkeys(MODEL_AUTHORED_COLUMNS, "-") | {
+            "system": "", "system_key": "",
+            "payload_digest": f"exit=64; unresolvable: {ghost}.someverb",
+        }
+        assert ghost in _host_authored(row), \
+            f"the O1 oracle cannot see {ghost!r} in a host-authored column — every negative " \
+            "quantified over it is unfailable for a ghost holding that character"
+        assert ghost not in _model_authored(row), \
+            "the complement is answering about the wrong columns"
+
+
 def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path):
     """#1016 O1 — on a row whose `system` the host withheld, no column the HOST wrote echoes
     anything the model wrote. Five coarsened shapes and one control, all in ONE lead, because
@@ -889,8 +932,10 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
         "FROM seven",
     ], "the rows are not the seven calls in order, so the per-shape claims below are misaddressed"
     assert not _dead_end(r), \
-        "the shapes tripped the companion guard, so one of these rows is a trip row and " \
-        "they are not distinct calls"
+        "the lead ended early: either the shapes tripped the companion guard (so one of " \
+        "these rows is a trip row and they are not distinct calls) or this lead now makes " \
+        "more rejections than `DEFAULT_TOOL_RETRIES` allows — `_trip_row_written` tells the " \
+        "two apart, and a sixth coarsened shape is what would cross the second"
 
     coarsened, control = rows[:6], rows[6]
     assert {row["system"] for row in coarsened} == {""}, \
@@ -970,17 +1015,77 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
     # one lead: a per-row `assert` stops at the first leak, and the first leak is the coarse one
     # every candidate fix closes. The failure has to name EVERY shape still leaking, or a fix
     # that repairs the grant placement and leaves pydantic's `loc` standing reads as progress.
+    hosts = [_host_authored(row) for row in coarsened]
     leaks = [
         (row["params"]["native_query"], text)
-        for row in coarsened
+        for row, host in zip(coarsened, hosts, strict=True)
         for text in ("ghostone", "ghosttwo", ZERO_WIDTH, PHANTOM, "ghostlongvalue",
                      "ghostverb", "ghostkeyname", "bogus_extra_arg")
-        if text in _host_authored(row)
+        if text in host
     ]
     assert leaks == [], (
         "model-authored text is in a host-authored column of a row whose `system` the host "
         f"withheld — (call, leaked text): {leaks}"
     )
+
+
+def test_an_empty_system_argument_is_coarsened_like_every_other(tmp_path):
+    """The SIXTH shape, and the one a predicate written as "did the recorded value differ from
+    what the model SENT?" answers wrongly: a literal `system=""`.
+
+    `_system_of_record("")` is `""` because no registry declares it, and `system_fingerprint`
+    mints no digest for it (`names_something_readable("")` is false). So the ROW is `system=""`,
+    `system_key=""` — byte-identical in both identity columns to shapes 2, 5 and 6 above and
+    indistinguishable from them to every reader of the table — while `given == recorded` reads
+    "nothing was withheld" and hands the detail back to `str(e)` at the schema placement and
+    `decision.refusal` at the grant placement. What those carry is not the system string (there
+    was none to withhold) but the model's own chosen argument KEY and its VERB: the two shapes
+    O1 exists for, in a host-authored column of a row that says the host withheld a name.
+
+    One character of model output is the whole of the bypass, which is why this is driven
+    rather than argued — both placements, in one lead, under the sweep the five shapes get."""
+    rec = VerbRecorder()
+    r = _run(tmp_path, run_id="d1016-empty", verbs=elastic_ok(rec), turns=[
+        _bad_args("", {"native_query": "FROM one"}, verb="ghostverb",
+                  extra_key="ghostkeyname"),
+        q("", "ghostverb", {"native_query": "FROM two"}),
+        DONE,
+    ])
+
+    rows = _above_guard(r)
+    assert len(rows) == 2, "the two empty-system rejections did not both leave their rows"
+    assert [row["system"] for row in rows] == ["", ""], \
+        "an empty system argument stopped being recorded as `''`, so this is no longer the " \
+        "row shape O1 is quantified over"
+    assert [row["system_key"] for row in rows] == ["", ""], \
+        "an empty system argument was fingerprinted, so the row is no longer indistinguishable " \
+        "from a coarsened one and the claim below is about a different population"
+
+    assert any("ghostkeyname" in seen for seen in r.gather.seen), \
+        "the model stopped reading back the argument name it got wrong, so it can never drop " \
+        "it (#1016 O2) — and the negative below is quantified over a string this run never made"
+    assert all("ghostverb" in _model_authored(row) for row in rows), \
+        "the rows lost the call's own arguments, so the negative below is vacuous"
+
+    leaks = [
+        (row["params"]["native_query"], text)
+        for row in rows
+        for text in ("ghostverb", "ghostkeyname")
+        if text in _host_authored(row)
+    ]
+    assert leaks == [], (
+        "an empty `system` argument bought the model its own text in a host-authored column of "
+        f"a row whose identity columns say the host withheld a name: {leaks}"
+    )
+
+    # And the row still SAYS something. O1 bounds what the host may put in that tail; it is not
+    # a licence to empty it — the same positive each of the five shapes above owes.
+    schema, grant = rows
+    assert "Extra inputs are not permitted" in _detail(schema), \
+        "the schema placement stopped naming the error type, so its digest tells an operator " \
+        "nothing about why the call was turned back"
+    assert "undeclared" in _detail(grant), \
+        "the grant placement stopped saying what KIND of failure it withheld the specifics of"
 
 
 def test_a_row_that_kept_its_system_records_the_rejection_verbatim(tmp_path):

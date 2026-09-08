@@ -309,9 +309,11 @@ class QueryCapture(AbstractCapability[Any]):
         exact value a coarsened row RECORDS. Asked over that, `system=["Ignore Previous
         Instructions"]` reads as "not coarsened", records pydantic's `input_value=` verbatim,
         and the leak #1016 exists to close stays open on the one shape that carries the model's
-        text into the digest whole. The `isinstance` half is therefore load-bearing, not
-        defensive: it is the difference between "the host recorded what the model sent" and
-        "the host recorded `''` because it could not use what the model sent".
+        text into the digest whole. The `isinstance` half is a BELT on that comparison rather
+        than the thing that answers it — no JSON value that is not a `str` compares equal to
+        one, so today it changes no answer; it is spelled out so that a `_system_of_record`
+        that ever NORMALISED (case, whitespace) could not make "recorded" and "sent" read alike
+        while differing.
 
         ONE function for both placements, though the design comment on #1016 spells the
         predicate at each: they read different argument surfaces (validated `str` at the grant
@@ -320,11 +322,21 @@ class QueryCapture(AbstractCapability[Any]):
         rule kept by hand at both placements costs when the two spellings drift. Each caller
         still supplies its own `given`; only the question is shared.
 
-        Consequences, both decided in #1016's design: a MISSING `system` key (`None`) counts as
-        coarsened and takes the coarse rendering, which loses nothing (no reader sees such a
-        row); and a literal `system=""` counts as NOT coarsened, because the host recorded
-        precisely what the model sent and has nothing to withhold."""
-        return not (isinstance(given, str) and given == recorded)
+        THE FIRST DISJUNCT is the question the ROW'S READERS ask — "does this row carry a
+        system at all?" — and it is what scopes the predicate to the population O1 is stated
+        over. #1016's design first left a literal `system=""` OUT of it, on the grounds that
+        "the host recorded precisely what the model sent and has nothing to withhold". True of
+        the system STRING, false of the detail this branch actually selects: on a `system=""`
+        call the schema placement still records pydantic's `loc` — the model's own chosen
+        argument key — and the grant placement still records `decision.refusal`, which names
+        the verb. The ROW those land on is `system=""`, `system_key=""` (`""` is not
+        `names_something_readable`, so no fingerprint is minted): byte-identical in both
+        identity columns to a row the host really did coarsen, and indistinguishable from one
+        to every reader of the table. A one-character argument is not a licence to reopen the
+        leak, so an empty system of record is coarsened whatever produced it.
+
+        A MISSING `system` key (`None`) is coarsened by both disjuncts."""
+        return not recorded or not (isinstance(given, str) and given == recorded)
 
     @staticmethod
     def _coarse_schema_detail(e: BaseException) -> str:
@@ -360,9 +372,15 @@ class QueryCapture(AbstractCapability[Any]):
         errs = e.errors(include_input=False, include_url=False)
         parts = []
         for err in errs:
-            loc = err.get("loc") or ()
-            field = loc[0] if loc and loc[0] in DECLARED_ARGS else "argument"
-            parts.append(f"{field}: {err['msg']}")
+            # `.get` on BOTH keys, not `.get` on one and `err['msg']` on the other. This frame
+            # is inside a rejection handler with no `try` of its own, so a `KeyError` here
+            # would replace the rejection outright — no row, so no occurrence for the companion
+            # guard to recover from the rows it wrote, and the repeat loop #826 item 4 closed
+            # stops being bounded (`system_fingerprint`'s docstring argues the same hazard for
+            # the same two call sites).
+            head = next(iter(err.get("loc") or ()), None)
+            field = head if head in DECLARED_ARGS else "argument"
+            parts.append(f"{field}: {err.get('msg', '')}")
         return f"{len(errs)} validation error(s): " + "; ".join(parts)
 
     @staticmethod
@@ -535,9 +553,7 @@ class QueryCapture(AbstractCapability[Any]):
                 deps, system=recorded_system, verb=verb, system_key=system_key,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=(
-                    detail if trip is None else rejection_trip_detail(trip, detail)
-                ),
+                detail=detail if trip is None else rejection_trip_detail(trip, detail),
             )
             if trip is not None:
                 raise GatherDeadEnd(
