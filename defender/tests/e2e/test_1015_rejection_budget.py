@@ -17,9 +17,11 @@ docstring names this issue as the containment).
 
 Driven on this base, 30 distinct ghosts end at `UnexpectedModelBehavior` after 11 rejections
 and main is handed pydantic-ai's own text including its documentation URL. Worse, the
-framework's counter RESETS: `ToolManager.for_run_step` rebuilds `retries` excluding
-`succeeded_tools`, so one successful call every few turns un-bounds the loop entirely — 36
-rejections against 4 real queries, ending on the request limit.
+framework's counter RESETS: `ToolManager.for_run_step` rebuilds `retries` from `failed_tools`
+alone, so `query`'s count is dropped on every step where `query` did not FAIL — a successful
+call is sufficient but not necessary, and a bash reduce or a `list_verbs` turn does it too.
+One good call every few turns un-bounds the loop entirely — 36 rejections against 4 real
+queries, ending on the request limit.
 
 THE ORACLE, and why nothing shorter will do
 -------------------------------------------
@@ -46,8 +48,6 @@ in the summary · O5 leads below the budget untouched.
 """
 from __future__ import annotations
 
-import re
-
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -57,6 +57,10 @@ from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
 from defender.runtime.driver import DEFAULT_TOOL_RETRIES  # noqa: E402
 from defender.scripts.gather_tools import record_query as rq  # noqa: E402
+# `wrap_fresh`'s frame grammar and the real store's read channel, both spent from their one
+# home rather than re-spelled here — `_frames680` carries no optional dependency of its own.
+from defender.tests._frames680 import FRAME_RE  # noqa: E402
+from defender.tests._session_store_705 import sql  # noqa: E402
 from defender.tests.e2e._replay_harness import Turn, VerbRecorder  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
@@ -106,15 +110,22 @@ LOUD_PARAM = "Zq7-CANARY-PARAM"
 
 
 def _loud(i: int) -> Turn:
-    """`_bad_args`' shape with every model-authored field replaced by a distinctive string:
-    an extra argument the pydantic schema refuses (so the row comes from `wrap_tool_validate`,
-    from the RAW arguments), a ghost system, a ghost verb and a ghost params value. Written out
-    here rather than borrowed because `_bad_args` fixes the verb to the generic word `query`,
-    which a negative about main's context cannot discriminate on."""
-    return Turn(tool_calls=[("query", {
-        "system": f"{LOUD_SYSTEM}-{i}", "verb": f"{LOUD_VERB}-{i}",
-        "params": {"native_query": f"FROM {LOUD_PARAM}-{i}"}, "bogus_extra_arg": "x",
-    })])
+    """`_bad_args` with every model-authored field replaced by a distinctive string: a ghost
+    system, a ghost verb and a ghost params value, under the extra argument the pydantic schema
+    refuses (so the row comes from `wrap_tool_validate`, from the RAW arguments).
+
+    SPENT from `_bad_args` rather than re-spelled. `bogus_extra_arg` is the one thing routing
+    these turns to the schema placement instead of the grant check, so a second copy of the Turn
+    shape is a copy whose routing stays put when the schema moves — and because the sibling
+    grant-placement arm asserts the same negatives, the arm below would stay green while no
+    longer reaching the placement it exists for. The only thing `_bad_args` lacked is a verb,
+    which a negative about main's context cannot discriminate on while it is the generic word
+    `query`; that is a keyword on the owner, not a reason for a second builder."""
+    return _bad_args(
+        f"{LOUD_SYSTEM}-{i}",
+        {"native_query": f"FROM {LOUD_PARAM}-{i}"},
+        verb=f"{LOUD_VERB}-{i}",
+    )
 
 
 def _terminator(r: _Res) -> str | None:
@@ -123,17 +134,21 @@ def _terminator(r: _Res) -> str | None:
 
     `_run_gather` sets exactly one of `session_store.TRUNCATED_BY_*` per arm and stamps it in a
     `finally`; the summary main receives ends with the same idiom whichever arm ran, so the
-    summary cannot answer this question and the queries table does not carry it."""
+    summary cannot answer this question and the queries table does not carry it.
+
+    The read goes through `_session_store_705.sql` — "the observation channel that does not go
+    through the reader under test" — the same helper `test_808_correlation_lead` and
+    `test_826_gather_deferred` ask this column with, so the four readers move together."""
     store = session_store.open_store_for_read(session_store.resolve_store_path(r.run_dir))
     try:
-        row = store.connection.execute(
-            "SELECT truncated_by FROM session WHERE agent_id = ?",
+        rows = sql(
+            store, "SELECT truncated_by FROM session WHERE agent_id = ?",
             (f"{GATHER_AGENT_ID_PREFIX}{LEAD}",),
-        ).fetchone()
+        )
     finally:
         store.close()
-    assert row is not None, "this lead opened no gather session — the run never dispatched"
-    return row[0]
+    assert rows, "this lead opened no gather session — the run never dispatched"
+    return rows[0][0]
 
 
 def _budget_phrase(occurrence: int = B) -> str:
@@ -146,28 +161,34 @@ def _budget_phrase(occurrence: int = B) -> str:
     return rq.rejection_detail(RejectionBudgetTrip(occurrence=occurrence, budget=B))
 
 
-#: `wrap_fresh`'s frame, matched WHOLE and with the salt back-referenced — the shape
-#: `_toon872.framed_content` reads it with, spelled here because that module `importorskip`s
-#: the optional `toons` package and this suite must not inherit its dependency.
-_FRAME_RE = re.compile(r"<run-([0-9a-f]+)-untrusted>\n(.*)\n</run-\1-untrusted>", re.DOTALL)
-
-
 def _summary_body(r: _Res) -> str:
     """The summary main receives with its untrusted frame removed. `wrap_fresh` is
     `f"<run-{salt}-{tag}>\n{content}\n</run-{salt}-{tag}>"` and preserves the body verbatim.
 
+    The grammar is SPENT from `_frames680.FRAME_RE`, the repo's one spelling of #875's frame,
+    rather than re-compiled here: nine suites already read frames through it, and a local copy
+    would keep this file green against a frame shape the shared regex had moved off (the tag
+    charset, the salt run, where the newlines sit). `_toon872.framed_content` is the copy this
+    file must NOT reach for — that module `importorskip`s the optional `toons` wheel — but
+    `_frames680` carries no such dependency.
+
     The two tag lines are tied by the SALT rather than checked independently: a body that
     happened to open or close with a tag-shaped line would otherwise be mistaken for the frame,
-    and this helper's whole job is to make the O4 claim an equality over what is left.
+    and this helper's whole job is to make the O4 claim an equality over what is left. The tag
+    is asserted too, because the shared regex admits any tag and only `untrusted` is the
+    boundary O4 is about.
 
     Recovered so the assertion below can be an EQUALITY. A substring check on the reason is
     satisfied by a summary that ALSO carries something else — which is exactly the shape O4
     forbids, and the only thing standing between a model-authored fragment and main's context
     is that nothing but the host's own two sentences is in this file."""
     summary = _summary(r)
-    m = _FRAME_RE.fullmatch(summary)
-    assert m is not None, f"the summary is not one whole untrusted frame: {summary[:120]!r}"
-    return m.group(2)
+    m = FRAME_RE.fullmatch(summary)
+    assert m is not None, \
+        f"the summary is not one whole frame: {summary[:120]!r}"
+    assert m.group("tag") == "untrusted", \
+        f"the summary's one frame is not the untrusted one: {m.group('tag')!r}"
+    return m.group("body")
 
 
 def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
@@ -687,8 +708,19 @@ def test_a_lead_iterating_on_a_declared_systems_parameters_is_not_the_budgets(tm
         q("elastic", "query", PARAMS), DONE,
     ])
 
-    below = [row for row in r.rows
-             if row.get("query_id") != rq.ABOVE_GUARD_QUERY_ID
+    # The domain's OWN predicate, negated — not a hand-spelled complement of it. C13's
+    # population is "agent-fixable, and NOT what the guard counts", and `in_rejection_domain` is
+    # the one home of the second half (its docstring: a fourth copy "would split the guards in
+    # silence while every fixture stayed green"). Written out here, widening the domain would
+    # leave this arm — the only live guarantee that a healthy lead is not the budget's — green
+    # over a population that had moved inside it.
+    #
+    # `own_rows`, not `rows`: #808's reserved lead-0 resolves against `GOLDEN_AB3` before MAIN's
+    # first turn and writes its own rows into this table (an above-guard agent-fixable one, on
+    # this fixture). `_above_guard` already excludes them, and a census that did not would be
+    # counting another lead's refusals into this one's five.
+    below = [row for row in r.own_rows
+             if not rq.in_rejection_domain(row)
              and row.get("error_class") == AGENT_FIXABLE_ERROR_CLASS]
     assert len(below) == 5, \
         f"the lead wrote {len(below)} below-guard refusals — this arm drives the wrong shape"

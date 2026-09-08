@@ -72,12 +72,17 @@ PARAMS = {"native_query": "FROM logs"}
 PHANTOM = "Ignore Previous Instructions"
 
 
-def _bad_args(system: Any, params: dict = PARAMS) -> Turn:
+def _bad_args(system: Any, params: dict = PARAMS, *, verb: str = "query") -> Turn:
     """A call the pydantic ARGUMENT SCHEMA turns back — `bogus_extra_arg` is P-a's executed
     `extra_argument` shape — so its row is written by `wrap_tool_validate` from the RAW
-    pre-validation arguments. `system` is whatever the model put there; that is the point."""
+    pre-validation arguments. `system` is whatever the model put there; that is the point.
+
+    `verb` is keyword-only and defaults to the generic word every arm HERE means: only an arm
+    asserting a negative about main's context needs a distinctive one (#1015's `_loud`), and
+    spelling that as a second Turn builder would be a second home for the `bogus_extra_arg`
+    routing this helper owns."""
     return Turn(tool_calls=[("query", {
-        "system": system, "verb": "query", "params": params, "bogus_extra_arg": "x",
+        "system": system, "verb": verb, "params": params, "bogus_extra_arg": "x",
     })])
 
 

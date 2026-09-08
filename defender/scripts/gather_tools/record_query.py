@@ -470,9 +470,15 @@ REPEAT_ESCAPE = (
 # ways to differ is unbounded — `names_something_readable` is deliberately blind to assigned
 # but font-blank codepoints (its docstring names #1015 as the containment), so a fresh
 # undeclared name per turn walks past the guard forever. Worse, the FRAMEWORK's own ceiling
-# does not contain it either: `ToolManager.for_run_step` rebuilds `retries` excluding tools
-# that succeeded in the step, so one good call every few turns resets `DEFAULT_TOOL_RETRIES`
-# and the lead spends its whole request budget on rejections.
+# does not contain it either: `ToolManager.for_run_step` rebuilds `retries` from `failed_tools`
+# ALONE (`pydantic_ai/tool_manager.py`, the `>=1.107` floor) — `retries = {name: prev + 1 for
+# name in self.failed_tools}` — so `query`'s count is dropped on every step where `query` did
+# not fail, which does NOT require a successful query. A step that runs a bash reduce, a
+# `list_verbs`, or no tool at all resets `DEFAULT_TOOL_RETRIES` just as well, and the lead
+# spends its whole request budget on rejections. (The reset is weaker than "on success", so
+# every argument below that leans on it holds a fortiori; the margin paragraph's worked example
+# is the shape that keeps `query` failing on CONSECUTIVE steps, not the only shape that
+# reaches the framework's arm.)
 #
 # So the containment is an AGGREGATE bound, identity-blind, over exactly `rejection_trip`'s
 # domain — the one filter both placements already load their rows for. NO NEW STATE and no new
@@ -500,6 +506,17 @@ REPEAT_ESCAPE = (
 # forbids at this bound) or keeping the framework's own text out of `_run_gather`'s degrade
 # arms; neither is #1015's, and the claim above holds only for a lead whose `query` failures
 # are all above-guard rows.
+#
+# NOR IS 40 THE ONLY REQUEST LIMIT THIS BOUND SITS UNDER. #1015 sized 6 against main's gather
+# limit (`GATHER_REQUEST_LIMIT = 40`) and against the retry ceiling, but the harness-authored
+# CORRELATION lead runs the same `_run_gather`, hence the same `QueryCapture` and the same
+# budget, under `lead_zero._spec.CORRELATION_REQUEST_LIMIT = 8` — so this constant is 15% of a
+# model-dispatched lead's allowance and 75% of that one's. A dead end was already reachable
+# there (the repeat guard's, at three identical rejections), so this widens an existing door
+# rather than opening one; but no arm can observe it, because every fixture that reads
+# above-guard rows filters `RESERVED_LEAD_IDS` out and every terminator oracle keys on `l-001`.
+# Resizing, or exempting that lead, is a decision for whoever owns the correlation section of
+# ORIENT — recorded here because the number cannot be re-derived from the census alone.
 #
 # NOR IS IT THE ONLY WAY A LEAD SPENDS ITS REQUESTS ON REFUSALS: `_grant_check`'s DENIED branch
 # and both `_tripped_message` returns answer ABOVE this guard with a plain tool RESULT and no
@@ -825,6 +842,19 @@ def repeat_trip_detail(trip: RepeatTrip) -> str:
     return f"refused: repeat of request already issued at seq {trip.first_seq} ({_ordinal(trip.occurrence)} occurrence)"  # noqa: E501
 
 
+def _with_rejection_tail(detail: str, rejection: str) -> str:
+    """THE join between an above-guard trip row's leading PHRASE and the error the guarded call
+    itself produced — one home, so the leading phrase is the only thing that differs between the
+    two guards' rows.
+
+    Spelled once per branch instead, one edit to the separator (or to what an empty tail does)
+    reaches whichever branch the author had open, and the append-only table then holds two
+    grammars for one field: an offline reader splitting on `"; rejected: "` would parse the
+    repeat guard's rows and the budget's differently, which is exactly the divergence
+    `rejection_detail`'s single-producer discipline exists to prevent."""
+    return f"{detail}; rejected: {rejection}" if rejection else detail
+
+
 def rejection_trip_detail(trip: RepeatTrip, rejection: str = "") -> str:
     """`repeat_trip_detail`'s counterpart for the companion guard's trip row. Says "turned
     back", not "issued": the calls it counts never reached a system of record, and a reader that
@@ -835,7 +865,7 @@ def rejection_trip_detail(trip: RepeatTrip, rejection: str = "") -> str:
     table permanently forget why the last call was malformed. The trip phrase leads, so it
     survives `_record`'s 160-character digest truncation whole and the tail is what gets cut."""
     detail = f"refused: repeat of request already turned back at seq {trip.first_seq} ({_ordinal(trip.occurrence)} occurrence)"  # noqa: E501
-    return f"{detail}; rejected: {rejection}" if rejection else detail
+    return _with_rejection_tail(detail, rejection)
 
 
 def rejection_dead_end_reason(system: str, verb: str, trip: RepeatTrip) -> str:
@@ -923,7 +953,7 @@ def rejection_detail(trip: RepeatTrip | RejectionBudgetTrip, rejection: str = ""
         f"refused: {_ordinal(trip.occurrence)} rejection before anything ran in this lead "
         f"(budget {trip.budget})"
     )
-    return f"{detail}; rejected: {rejection}" if rejection else detail
+    return _with_rejection_tail(detail, rejection)
 
 
 def rejection_dead_end(

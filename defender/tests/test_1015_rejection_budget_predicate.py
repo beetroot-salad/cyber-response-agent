@@ -12,9 +12,10 @@ rejections of the SAME request end the lead. Nothing bounds a lead whose rejecti
 DIFFER. Measured on main (the issue's C3/C4, reproduced here by the e2e half): 30 distinct
 ghost names end at `UnexpectedModelBehavior` after 11 rejections with pydantic-ai's own text
 (and its documentation URL) crossing into main's context; one successful call every nine turns
-resets the framework's per-tool retry count (`ToolManager.for_run_step` rebuilds `retries`
-excluding `succeeded_tools`) and the lead spends its whole request budget — 36 rejections
-against 4 real queries. `names_something_readable` is deliberately blind to assigned-but-blank
+resets the framework's per-tool retry count (`ToolManager.for_run_step` rebuilds `retries` from
+`failed_tools` alone, so `query`'s count drops on any step where `query` did not FAIL — a
+successful call is sufficient, not necessary) and the lead spends its whole request budget — 36
+rejections against 4 real queries. `names_something_readable` is deliberately blind to assigned-but-blank
 codepoints (U+3164, U+2800, U+115F, U+1160, U+FE0F), so the family of distinct identities is
 unbounded and no cleverer notion of emptiness closes it.
 
@@ -136,6 +137,18 @@ def _same(n: int, *, lead: str = LEAD) -> list[dict]:
     return [_above(i, lead=lead, system_key=key) for i in range(n)]
 
 
+def _code_of(fn) -> str:
+    """`fn`'s shipped source with its DOCSTRING removed — the CODE, which is what a "who derives
+    this" question is about.
+
+    `inspect.getsource` returns the prose as well, so a substring negative over the raw source is
+    answered by where a sentence happens to WRAP rather than by what the function spells. The
+    docstrings in this module quote the very phrases the arm below asserts are absent."""
+    doc = fn.__doc__
+    src = inspect.getsource(fn)
+    return src.replace(doc, "") if doc else src
+
+
 # ── the constant and the invariant that makes the guard reachable ──────────────────────────
 
 
@@ -168,6 +181,16 @@ def test_the_budget_is_a_literal_strictly_below_the_frameworks_own_ceiling():
     assert REJECTION_BUDGET != rq.REPEAT_THRESHOLD, \
         "the aggregate bound was spelled as the repeat guard's threshold; they answer " \
         "different questions and one edit must not move both"
+    # THE LOWER BOUND, and it is the one the PRECEDENCE design rests on rather than a second
+    # way of saying the line above. `_rejection_guard` asks the repeat guard first so that a
+    # call which is both the 3rd repeat and the B-th rejection gets the more specific sentence;
+    # below `REPEAT_THRESHOLD` the budget always answers first, `rejection_detail`'s and
+    # `rejection_dead_end`'s RepeatTrip branches become unreachable from both above-guard
+    # placements, and every above-guard repeat stop is reported to main as "you have spent the
+    # allowance" with its trip row losing "turned back at seq" — O2, silently.
+    assert rq.REPEAT_THRESHOLD < REJECTION_BUDGET, \
+        "the budget can now trip before the repeat guard ever reaches its threshold, so the " \
+        "repeat branch of both dispatchers is unreachable above the guard — O2"
     assert REJECTION_BUDGET < DEFAULT_TOOL_RETRIES, \
         "at or above the framework's per-tool retry ceiling the framework raises first and " \
         "main gets pydantic-ai's text, not the host's — O1 is unreachable"
@@ -181,10 +204,19 @@ def test_the_budget_counts_rejections_it_cannot_tell_apart():
     repeat guard bounds a lead by identity, so an unbounded family of identities (distinct
     ghost names, whitespace drift, assigned-but-blank codepoints) walks straight past it.
 
-    Stated as an EQUALITY between two tables rather than as a count over one: `_ghosts` shares
-    no identity element between any two rows, `_same` shares all of them, and the budget must
-    return the same answer for both. A predicate that read `system_key` — or `system`, `verb`,
-    `params` — would separate the first table into singletons and never trip on it.
+    Stated as an EQUALITY between two tables rather than as a count over one: `_same` shares
+    every identity element across all its rows, `_ghosts` shares none of `verb` or `params`
+    between any two, and the budget must return the same answer for both. A predicate that read
+    `verb` or `params` would separate the first table into singletons and never trip on it.
+
+    `system` and `system_key` are the WEAKER halves here and deliberately so: `_ghosts`
+    alternates the two shapes an above-guard writer can actually emit, so its even rows share
+    `("elastic", "")` and its odd rows share `""` for `system`. A predicate reading only one of
+    those two columns folds this table into two or three groups rather than singletons — still
+    below the budget at `B - 1` rows, so the arm holds, but it is not the "every column
+    separates every pair" fixture a reader might take it for. `_row`'s docstring says why the
+    pairing cannot be loosened to get one: `system_fingerprint` returns `""` for every truthy
+    recorded system, so a row carrying a declared name AND a digest is a shape no run leaves.
 
     The control is the repeat guard over the SAME rows: it is silent, which is what makes the
     budget's answer a new bound rather than a restatement of one that already held."""
@@ -501,14 +533,21 @@ def test_each_dispatcher_spends_the_sentences_owner_rather_than_copying_it():
 
     Read off the SOURCE, the way this repo's own lints answer a "who derives this" question,
     because there is no runtime seam to observe: a delegating call and an inlined copy are
-    indistinguishable from their return values, which is the whole problem."""
-    detail_src = inspect.getsource(rejection_detail)
+    indistinguishable from their return values, which is the whole problem.
+
+    The DOCSTRING IS STRIPPED FIRST (`_code_of`), and that is load-bearing rather than tidy:
+    every negative below is a claim about what the CODE spells, and `inspect.getsource` hands
+    back the prose too. `rejection_detail`'s own docstring argues that a budget stop "must never
+    say 'turned back at seq'" — so over the raw source that negative held only because the
+    sentence happens to WRAP between "back" and "at", and reflowing the paragraph by one word
+    would have turned this arm red with nothing having changed about the code it measures."""
+    detail_src = _code_of(rejection_detail)
     assert "rejection_trip_detail(" in detail_src, \
         "the repeat branch restates a detail sentence that already has an owner"
     assert "turned back at seq" not in detail_src, \
         "the repeat guard's phrase is spelled a second time here — one rewording drifts them"
 
-    dead_end_src = inspect.getsource(rejection_dead_end)
+    dead_end_src = _code_of(rejection_dead_end)
     assert "rejection_dead_end_reason(" in dead_end_src, \
         "the repeat branch restates a reason that already has an owner"
     assert "REPEAT_ESCAPE" in dead_end_src, \
