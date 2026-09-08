@@ -27,7 +27,7 @@ under-scoped story, an undiscriminating family), and what a future questioner sh
 differently when authoring a world against this pattern / holding system.}
 ```
 
-`pattern` and `holding_system` are the keys a future episode's questioner selects lessons by — copy them from the finding you are authoring from, verbatim. Do not invent a value for either.
+`pattern` is the key a future episode's questioner selects lessons by today (by membership in that episode's own captured/configured patterns) — copy it from the finding you are authoring from, verbatim. `holding_system` is recorded the same way, verbatim, but is not yet a second selection key; do not invent a value for either field regardless.
 
 ## What to do
 

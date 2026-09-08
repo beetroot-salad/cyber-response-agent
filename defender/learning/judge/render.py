@@ -35,6 +35,7 @@ from defender._report import read_report
 from defender.learning.judge.family import (
     WorldFacts,
     _own_h_rows,
+    _staged_patterns,
     _world_pattern,
     _world_review_block,
     _raw_manifest,
@@ -549,6 +550,22 @@ def _render_sample(pattern: str, samples_doc: dict[str, Any]) -> str:
     return json.dumps(document, sort_keys=True, indent=2) + "\n"
 
 
+def _render_samples(patterns: list[str], samples_doc: dict[str, Any]) -> str:
+    """EVERY staged pattern's own sample, one `_render_sample` block per pattern — O5's own
+    domain ("per staged pattern"), never reduced to the world's single representative one.
+
+    A world staging into two staged patterns and shown a sample for only one is O5's own
+    falsifier: this function is what closes it on the RENDER side (`family._grade_world`'s
+    `sample_unavailable_patterns` closes the corresponding fact side). A single-pattern world
+    (every fixture in this suite until `test_a_two_pattern_world_...`) renders identically to
+    the single-block output `_render_sample` alone produced before this existed — one header,
+    one document — so no existing byte-identity assertion moves."""
+    if not patterns:
+        return "no pattern is staged for this world\n"
+    return "\n".join(
+        f"pattern {p!r}:\n{_render_sample(p, samples_doc)}" for p in patterns)
+
+
 def _render_review_block(block: dict[str, Any] | None) -> str:
     """This world's OWN reachability block off `review.yaml` (M1/M3) — never a sibling's, and
     never the review record whole (S6 forbids a sibling's overlay reaching this prompt, and the
@@ -625,14 +642,18 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     h_rows = _own_h_rows(record.ledger_rows, str(holding_system).strip().casefold()) \
         if isinstance(holding_system, str) else []
 
-    # #1007 M4/O5: this world's own sample and its own reachability block — off the SAME
-    # `_world_pattern` and `_world_review_block` helpers `family._grade_world` uses, so the
-    # prompt names the same pattern and the same block the mechanical row was computed from.
-    pattern = _world_pattern(
-        world_entry.get("overlay"),
-        holding_system=holding_system if isinstance(holding_system, str) else "")
+    # #1007 M4/O5: this world's own sample(s) and its own reachability block — off the SAME
+    # `_staged_patterns`/`_world_pattern` and `_world_review_block` helpers `family._grade_world`
+    # uses, so the prompt names the same pattern(s) and the same block the mechanical row was
+    # computed from. EVERY staged pattern, never just one (O5's own falsifier) — the patch-only
+    # fallback (`_world_pattern`'s single holding-system name) stays for a world with no
+    # staged pattern to enumerate.
+    overlay = world_entry.get("overlay")
+    resolved_holding_system = holding_system if isinstance(holding_system, str) else ""
+    staged_patterns = _staged_patterns(overlay) or [
+        _world_pattern(overlay, holding_system=resolved_holding_system)]
     samples_doc = read_samples_record(episode_dir)
-    sample_text = _render_sample(pattern, samples_doc)
+    sample_text = _render_samples(staged_patterns, samples_doc)
     review_doc = read_review_record(episode_dir)
     review_block = _world_review_block(review_doc, world_label)
     review_text = _render_review_block(review_block)

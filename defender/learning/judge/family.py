@@ -74,6 +74,7 @@ from defender.runtime.branch._family import (
     BASE_ROLE,
     MANIFEST_NAME,
     episode_token_for,
+    is_reserved_world_label,
     world_token_for,
 )
 from defender.skills.invlang._walkers import iter_resolutions
@@ -253,12 +254,31 @@ def _mechanical_world_finding(
 def _world_pattern(overlay: Any, *, holding_system: str) -> str:
     """The pattern a world row's queue entry cites — the first staged corpus pattern the
     overlay names, or the holding system's own name for a patch-only world (no such pattern
-    exists to name)."""
+    exists to name).
+
+    A SINGLE, REPRESENTATIVE value, used only where one anchor string is what the caller needs
+    (the mechanical `unreachable-difference` finding's own `pattern` field, a per-WORLD claim
+    about reachability that names no particular corpus). For anything that must be right per
+    STAGED PATTERN — `sample_unavailable`, the judge's own `sample` prompt section (O5) — see
+    `_staged_patterns` below; `_world_pattern` reducing to "the first one" is exactly the gap
+    O5's own falsifier names for those two."""
+    return next(iter(_staged_patterns(overlay)), holding_system)
+
+
+def _staged_patterns(overlay: Any) -> list[str]:
+    """EVERY staged pattern this world's overlay names, in a stable order — the
+    domain O5 quantifies over ("per staged pattern"), never reduced to one.
+
+    A world staging into two staged patterns and shown a sample for only one is exactly O5's
+    falsifier: `sample_unavailable` read `false` (because SOME pattern had a sample) while the
+    judge was rendered nothing for the pattern it was never shown. Empty for a patch-only world
+    — no pattern exists to enumerate, and the caller falls back to the holding system's
+    own name (`_world_pattern`) for its single anchor use."""
     if isinstance(overlay, dict):
         staged = overlay.get("elastic")  # lint-shippable: ok — the manifest's own field name; see runtime/branch/_family.py's own suppression on the same field
         if isinstance(staged, dict) and staged:
-            return str(next(iter(staged)))
-    return holding_system
+            return sorted(str(k) for k in staged)
+    return []
 
 
 @dataclass
@@ -412,9 +432,24 @@ def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
 
     F-3: a world label colliding with a real run under the operator's runs base is refused at
     manifest load — the last-segment resolver every family row's `source_run_dir` reaches would
-    otherwise resolve to wrong-but-real content instead of failing loudly."""
+    otherwise resolve to wrong-but-real content instead of failing loudly.
+
+    RESERVED LABELS, CHECKED HERE TOO. `_family.check_identities` refuses `"base"`/`"family"`
+    at manifest load, but `grade_episode` is a directly-callable entry point over a
+    `review.yaml`/manifest that need not have passed through the launcher (a re-entered or
+    hand-assembled episode) — so this gate re-checks the same reserved set independently,
+    rather than trusting a validation the caller may have skipped. Without it, a world literally
+    labeled `"family"` mints the SAME `finding_id`/`source_run_dir` coordinate and the SAME
+    `worlds/family/judge/` archive path as the family-level call's own draws (M5,
+    `build_finding_row`'s `label == "family"` branch) — the collision M5's own docstring claims
+    can never happen."""
     for world in worlds:
         label = world.get("world_id")
+        if isinstance(label, str) and is_reserved_world_label(label):
+            raise JudgeRefused(
+                f"world label {label!r} is the reserved name of the family's own base capture "
+                "or the family-level judge call — a graded world claiming it would collide "
+                "with the family call's own agent id and archive path (M5)")
         # BOTH SPELLINGS. The concatenation is the launcher's own check (`_family.
         # check_identities` applies exactly it), and it is not enough on its own: the grammar
         # tests the FIRST character for `isalnum`, and in `f"{episode_id}-{label}"` that
@@ -905,15 +940,23 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
             and declares_difference(world.get("overlay"))):
         mechanical_findings.append(_mechanical_world_finding(
             label=label, pattern=pattern, holding_system=holding_system))
-    # @owns sample_unavailable — the SOLE producer of the row's `sample_unavailable` field.
-    # #1007 M4/O5: no sample was captured for THIS world's own staged pattern — matched by
-    # EXACT string, never case-folded (a differently-cased overlay pattern stages a different
-    # index and would otherwise be graded against another corpus's document). A pattern present
-    # but mapped to `null` reads identically to an absent key — both are "nothing to compare
+    # @owns sample_unavailable, @owns sample_unavailable_patterns — the SOLE producer of both
+    # row fields. #1007 M4/O5: no sample was captured for a staged pattern — matched by EXACT
+    # string, never case-folded (a differently-cased overlay pattern stages a different index
+    # and would otherwise be graded against another corpus's document). A pattern present but
+    # mapped to `null` reads identically to an absent key — both are "nothing to compare
     # against" (`test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern`).
-    # `judge/__init__.py`'s world_findings loop and `run.cites_sample` both READ this row field
-    # to enforce A1(b); neither re-derives it.
-    sample_unavailable = (samples or {}).get(pattern) is None
+    #
+    # OVER EVERY STAGED PATTERN, not `_world_pattern`'s single representative one — a world
+    # staging into two staged patterns and shown a sample for only one is O5's own falsifier
+    # (`test_a_two_pattern_world_names_each_patterns_sample_availability_independently`).
+    # `sample_unavailable_patterns` is that per-pattern detail; `sample_unavailable` stays the
+    # aggregate bool ("was ANY staged pattern's sample missing") the existing single-pattern
+    # tests and `judge/__init__.py`'s blanket callers already read.
+    staged_patterns = _staged_patterns(world.get("overlay")) or [pattern]
+    sample_unavailable_patterns = [
+        p for p in staged_patterns if (samples or {}).get(p) is None]
+    sample_unavailable = bool(sample_unavailable_patterns)
 
     row.update(
         holding_queried=holding_queried, scope_discriminated=scope_discriminated,
@@ -948,6 +991,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
         world_findings=list(mechanical_findings),
         mechanical_world_findings=mechanical_findings,
         sample_unavailable=sample_unavailable,
+        sample_unavailable_patterns=sample_unavailable_patterns,
     )
     if integrity_notes:
         row["integrity_notes"] = integrity_notes

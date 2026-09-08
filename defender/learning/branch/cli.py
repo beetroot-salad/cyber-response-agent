@@ -998,7 +998,7 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(  # noqa: PLR0913 — the launcher's inputs plus its six injection seams
+def main(  # noqa: PLR0913 — the launcher's inputs plus its seven injection seams
     argv: list[str],
     *,
     spawn: Callable[..., int] | None = None,
@@ -1008,6 +1008,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its six injection seam
     invoke: Any = None,
     preflight: Callable[[str | None], int] | None = None,
     judge: Any = None,
+    lessons_dir: Path | None = None,
 ) -> int:
     """Launch one episode, reporting a refusal as a REFUSAL rather than as a crash.
 
@@ -1037,7 +1038,8 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its six injection seam
 
     try:
         return _launch(argv, spawn=spawn, door=door, questioner=questioner,
-                       adapters=adapters, invoke=invoke, preflight=preflight, judge=judge)
+                       adapters=adapters, invoke=invoke, preflight=preflight, judge=judge,
+                       lessons_dir=lessons_dir)
     except (branch.BranchError, LedgerError, EstateError, FamilyError,
             staging_mod.StagingRefused, ReviewError,
             session_store.StoreError, sqlite3.Error) as refusal:
@@ -1047,6 +1049,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its six injection seam
 def _launch(  # noqa: PLR0913 — see `main`
     argv: list[str], *, spawn: Any, door: Any, questioner: Any, adapters: Any, invoke: Any,
     preflight: Callable[[str | None], int] | None, judge: Any = None,
+    lessons_dir: Path | None = None,
 ) -> int:
     from defender.run import preflight_role_models
 
@@ -1058,6 +1061,10 @@ def _launch(  # noqa: PLR0913 — see `main`
     # each body, which is what would let two frames disagree about which door an episode used.
     role_preflight = preflight_role_models if preflight is None else preflight
     write_door = staging_mod.write_door_from_env() if door is None else door
+    # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
+    # questioner_dir`, resolved here rather than as a literal default so a test can hand in a
+    # `tmp_path` corpus and this frame is the only one that ever sees the production path.
+    questioner_lessons_dir = PATHS.lessons_questioner_dir if lessons_dir is None else lessons_dir
     source = Path(ns.source_run_dir).resolve()
     episode_id = episode_id_for(source.name, ns.branch_message_id)
     episode_dir = episode_dir_for(episode_id)
@@ -1113,7 +1120,7 @@ def _launch(  # noqa: PLR0913 — see `main`
             ns, source=source, episode_id=episode_id, episode_dir=episode_dir, token=token,
             patterns=patterns, door=write_door, questioner=author,
             adapters=read_side, invoke=compare_with, spawn=spawn, judge=judge,
-            teardown=teardown)
+            lessons_dir=questioner_lessons_dir, teardown=teardown)
     except SystemExit:
         aborting = True
         raise
@@ -1202,7 +1209,7 @@ def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path, token: str,
     patterns: Sequence[str], door: Any, questioner: Any, adapters: Any, invoke: Any, spawn: Any,
-    judge: Any = None, teardown: Any = None,
+    lessons_dir: Path, judge: Any = None, teardown: Any = None,
 ) -> int:
     """Steps 2 to 6, inside the teardown guard.
 
@@ -1210,7 +1217,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     cluster is released before the grade spends its model calls; `_launch`'s `finally` covers
     every path that does not reach that call."""
     family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
-                     questioner=questioner, patterns=patterns)
+                     questioner=questioner, patterns=patterns, lessons_dir=lessons_dir)
     # THE STAGING RECORD EXISTS FROM THE MOMENT STAGING BEGINS, empty if nothing is staged.
     # It is the SOLE account of a cluster write — the write door bypasses `guard_outbound`,
     # which is also the capture recorder — so its ABSENCE has to mean "staging never started"
@@ -1379,7 +1386,7 @@ def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
 
 def _author(
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
-    questioner: Any, patterns: Sequence[str] = (),
+    questioner: Any, lessons_dir: Path, patterns: Sequence[str] = (),
 ) -> Family:
     """Step 2: the questioner authors the triplet, and it is validated before anything reads it.
 
@@ -1391,7 +1398,12 @@ def _author(
     ONE IDENTITY GATE, over the whole manifest, BEFORE anything is staged (§7 FORK-4): every
     rule it applies would otherwise have refused at a different depth, and refused there it
     costs a primed episode and however many siblings had already run against a live model.
-    """
+
+    `lessons_dir` (#1007 M8/O7) is resolved by `_launch`, the same boundary `door`/`preflight`
+    are resolved at, and threaded inward non-`None` — never re-coalesced here — so a test can
+    give it a `tmp_path` corpus without the production default (`PATHS.lessons_questioner_dir`)
+    ever entering the picture."""
+    from defender._corpus import iter_lesson_paths
     from defender.learning.branch import questioner as questioner_mod
     from defender.learning.branch.estate.stagers.elastic import source_pattern  # noqa: E501 # lint-shippable: ok — the per-vendor stager owns which key of a call names its corpus; the join surface holds no vendor knowledge and takes this as its `pattern_of`
     from defender.learning.lead_repository import corpus_samples, joined
@@ -1410,6 +1422,13 @@ def _author(
     write_questioner_samples(episode_dir, samples)
     captured = tuple(samples)
     stageable = tuple(dict.fromkeys([*patterns, *captured]))
+    # #1007 M8/O7: the launcher's own glob of the questioner corpus, the SAME helper
+    # (`_corpus.iter_lesson_paths`) the defender's own lessons corpus is globbed through — none
+    # of these are read yet; `author_family` is where they are opened, screened against
+    # `stageable`, and reach only call 1. Without this call, O7 is unwired end to end: every
+    # test in `test_1007_questioner.py` drives `author_family` directly and stayed green while
+    # this launcher never passed `lessons=` at all.
+    lessons = iter_lesson_paths(lessons_dir)
     document = questioner_mod.author_family(
         source_run_dir=source, episode_dir=episode_dir,
         invoke=questioner,
@@ -1420,6 +1439,7 @@ def _author(
         # and the refusal cannot name two different domains.
         stageable_patterns=stageable,
         corpus_samples=samples,
+        lessons=lessons,
     )
     document.update({
         "episode_id": episode_id,

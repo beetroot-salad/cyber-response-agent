@@ -142,6 +142,27 @@ def test_the_family_agent_id_cannot_collide_with_a_world_label(tmp_path, monkeyp
     assert set(judge.agent_ids) - set(world_ids), "the family call reuses a world's agent id"
 
 
+def test_grade_episode_itself_refuses_a_world_labeled_family(tmp_path, monkeypatch):
+    """`grade_episode` refuses a world labeled `family` ON ITS OWN — not merely through
+    `parse_family`, which the test above shows refuses it too, but which `grade_episode` never
+    calls (`family_mod.parse_family` is the LAUNCHER's manifest parse; `grade_episode` reads its
+    own manifest and never runs the launcher's `check_identities`).
+
+    Observably true: an episode whose manifest was hand-assembled with a world literally
+    labeled `family` — bypassing the launcher entirely, as a re-entered or hand-repaired episode
+    could — is refused by `grade_episode` itself, at `_check_world_labels`, before any finding
+    row is built off it.
+
+    What failure looks like: `grade_episode` mints a `worlds/family/judge/` archive and a
+    `judge:family:<n>` agent id for that world's OWN per-world draws, landing in the exact
+    files and exact agent-id namespace the family-level call (M5) uses for itself.
+    """
+    ep = family_episode(tmp_path, monkeypatch, labels=("family", "c"))
+    judge = W.FakeJudge(W.reply_document())
+    with pytest.raises(W.refusals()):
+        grade(ep, judge)
+
+
 def test_the_family_call_emits_no_defender_finding(tmp_path, monkeypatch):
     """The family call never produces a `subject: defender` finding.
 

@@ -272,9 +272,12 @@ def _drain_curators(
     # of the direction table. Each channel this fires for is the same one the wake gate answers
     # for, spelled the same way in both places so they cannot disagree about what work exists.
     # A2/R1: both calls share this ONE tick — one worktree, one box, one branch, one PR lease —
-    # and `_drain_one_curator` contains each curator's own fault independently, so one
-    # curator's exception never stops the other from being triggered or from landing its own
-    # commit (this frame itself must not raise, or `_run_worktree_batch`'s `do_work` never
+    # and `_drain_one_curator` contains each curator's own NON-RETIRING fault independently, so
+    # such a fault in one curator never stops the other from being triggered or from landing
+    # its own commit. A `RETIRE_SET`-class fault (`_drain_one_curator`'s own `except: raise`)
+    # is the one exception: it propagates past this frame, so a retiring fault in the FIRST
+    # curator this pass calls can still cost the second curator its turn this tick (this frame
+    # itself must not raise on a non-retiring fault, or `_run_worktree_batch`'s `do_work` never
     # reaches `finish_batch` and NEITHER curator's work is committed).
     _drain_one_curator(paths, trigger_author, paths.findings, "LEARNING_AUTHOR_THRESHOLD",
                        "author", "pending", box=box)

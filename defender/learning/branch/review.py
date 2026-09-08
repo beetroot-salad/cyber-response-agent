@@ -855,9 +855,9 @@ def _injected_counts(world: World, *, rows: Sequence[dict], deps: _Deps) -> tupl
     count IS the injection size, so a world was never truly measured unreachable through this
     field (§7 FORK-7(e)'s consequence). Split, each half means one thing: `injected_retrieved` is
     the ENVELOPE's own hits — what this world's discriminating query actually returned — and
-    `injected_present` is the door's count of the injection index, a SIZE fact, never a
-    reachability one. `_rejection`'s injection branch retires under N4 as vacuous now that
-    neither half alone should gate a world.
+    `injected_present` is the OVERLAY's own declared injection-list length, a SIZE fact,
+    never a reachability one and never a door-measured count. `_rejection`'s injection branch
+    retires under N4 as vacuous now that neither half alone should gate a world.
     """
     retrieved = 0
     present = 0
@@ -1040,7 +1040,8 @@ def _rejection(world: World, *, consistency: dict, reachability: dict) -> str | 
     THREE REASONS AND NO OTHERS (N4, #1007): a contradiction, a patch that applies to nothing
     the envelope returned, and an exclusion that removes no base document. The FOURTH — an
     injection its own envelope cannot retrieve — RETIRES under N4: `injected_retrieved` (the
-    envelope's own hits) and `injected_present` (the door's size count) are both honest now, and
+    envelope's own hits) and `injected_present` (the overlay's own declared size, never a
+    door-measured count) are both honest now, and
     neither alone is a reachability verdict a world should be rejected on, unlike the old single
     count that let the door's size stand in for it. `reachable_by_capture` (M1) is what a later
     reader consults for reachability; this frame no longer rejects on it. Everything else this

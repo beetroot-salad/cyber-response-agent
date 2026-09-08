@@ -677,12 +677,21 @@ def check_manifest_digest(path: Path, recorded: str) -> None:
 #: `serialized-append` sink) interleaving both streams, unreadable as either.
 RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base", "family"})
 
-#: `family_<digits>` too — the colon-fold `agent_id.replace(':', '_')` that names a wire-log
-#: file is NOT injective (`judge:family:3`.replace(...) == `judge_family_3`.replace(...)), so a
-#: world literally named `family_3` composes the SAME folded stem the family call's own draw 3
-#: does, for the same reason `RESERVED_WORLD_LABELS` alone exists — refused at the same gate,
-#: rather than leaving a second collision shape unreserved one regex away from the first.
+#: `family_<digits>` too, as DEFENSE IN DEPTH — the colon-fold `agent_id.replace(':', '_')`
+#: that names a wire-log file is not obviously injective across the two agent-id shapes this
+#: design mints (`judge:<world>:<n>` per-world, `judge:family:<n>` family-level), and refusing
+#: the whole `family_\d+` shape at the same gate `RESERVED_WORLD_LABELS` uses closes the family
+#: of near-miss names rather than reasoning about each one's actual fold.
 _RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
+
+
+def is_reserved_world_label(label: str) -> bool:
+    """THE membership test for `RESERVED_WORLD_LABELS` — case-folded, the vocabulary's own
+    normalizer, so a second reader (`learning/judge/family.py::_check_world_labels`, which
+    `grade_episode` reaches directly without the launcher's own `check_identities`) asks THIS
+    module rather than re-deriving the fold locally and risking the two gates disagreeing on
+    what counts as a match."""
+    return label.casefold() in RESERVED_WORLD_LABELS
 
 
 def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, deliberately not split (see its own docstring)
@@ -714,7 +723,7 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
     token_head = episode_token_for(family.episode_id)
     for world in family.worlds:
         label = world.world_id
-        if label.casefold() in RESERVED_WORLD_LABELS:
+        if is_reserved_world_label(label):
             raise FamilyError(
                 f"world label {label!r} is the reserved name of the family's own base capture "
                 "or the family-level judge call — a world claiming it would append its live "
@@ -915,6 +924,7 @@ __all__ = [
     "check_manifest_digest",
     "episode_token_for",
     "is_contradiction",
+    "is_reserved_world_label",
     "load_family",
     "manifest_digest",
     "parse_as_of",

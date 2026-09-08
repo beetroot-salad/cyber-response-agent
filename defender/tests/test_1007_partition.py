@@ -140,6 +140,35 @@ def test_defender_row_still_reaches_the_findings_channel(tmp_path):
     assert landed[0]["type"] == "lead-set"
 
 
+def test_a_defender_row_with_direction_world_is_refused_at_the_appender_too(tmp_path):
+    """The DEFENDER lane's own appender refuses a hand-fed row whose `direction` disagrees with
+    its `subject` — the same screen `_validate_world_row` already carries for the questioner
+    lane, now symmetric.
+
+    `build_finding_row` derives `direction` from `subject` (`test_direction_is_derived_from_
+    subject_so_disagreement_is_unrepresentable`), so the pass's own producer can never mint a
+    disagreeing row — but `append_rows` is documented to take rows "handed in from anywhere",
+    and only the questioner-lane validator checked the pair for agreement. Without this screen,
+    a hand-fed `subject: defender` / `direction: world` row would land on the defender channel
+    unnoticed.
+
+    Observably true: `queue_row(direction=W.SUBJECT_WORLD)` — otherwise a fully valid defender
+    row — is refused, and nothing lands.
+
+    What failure looks like: the row is silently accepted, landing a `direction: world` row on
+    the channel the defender curator's own gate (keyed on `direction`) and the appender's
+    `subject` gate could then read differently.
+    """
+    enqueue = W.mod("learning.judge.enqueue")
+    paths = W.loop_paths(tmp_path)
+
+    with pytest.raises(W.refusals()):
+        enqueue.append_rows(
+            tmp_path, [queue_row(direction=W.SUBJECT_WORLD)], queue_dir=paths.pending_dir)
+
+    assert W.queue_rows(paths.findings) == [], "the disagreeing row still landed"
+
+
 def test_a_world_row_type_is_not_gated_against_the_defender_vocabulary(tmp_path):
     """The questioner channel's appender does NOT check a row's `type` against
     `QUEUEABLE_FINDING_TYPES`.

@@ -325,6 +325,64 @@ def test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket(
         f"the control failed — a finding citing something else was dropped too: {buckets}")
 
 
+def test_a_two_pattern_world_names_each_patterns_sample_availability_independently(
+        tmp_path, monkeypatch):
+    """A world staging TWO elastic patterns is graded — and rendered — per pattern, never
+    reduced to one (O5's own falsifier).
+
+    Observably true: with a sample captured for one staged pattern and none for the other,
+    `sample_unavailable_patterns` names exactly the missing one (not both, and not neither);
+    the per-world prompt carries a real document for the pattern that WAS sampled and an
+    explicit "no sample was captured" sentence for the one that was not; and a finding citing
+    the AVAILABLE pattern survives while one citing the UNAVAILABLE pattern is refused — in the
+    SAME grading pass, over the SAME world.
+
+    What failure looks like: `_world_pattern`'s single-value reduction (the first staged
+    pattern alone) makes `sample_unavailable` read `false` because SOME pattern had a sample,
+    while the judge is rendered nothing for the pattern it was never shown — a
+    `shape-invention` claim then gets made, or refused, against the wrong pattern's evidence.
+    """
+    judge_mod = W.mod("learning.judge")
+    ep = rendered_episode(
+        tmp_path, monkeypatch,
+        worlds=[W.base_world(), W.world_doc("b", ov=W.overlay(elastic={
+            **W.elastic_overlay(W.EVENTS_PATTERN, inject=[{"_id": "i1"}]),
+            **W.elastic_overlay(W.ALERTS_PATTERN, inject=[{"_id": "i2"}]),
+        }))],
+        samples={W.EVENTS_PATTERN: dict(W.SAMPLE_DOCUMENT)})
+    judge = W.FakeJudge(W.reply_document(findings=[
+        W.world_finding(bucket="cites-the-available-pattern",
+                        evidence=[f"{W.SAMPLES_NAME}#{W.EVENTS_PATTERN}"]),
+        W.world_finding(bucket="cites-the-unavailable-pattern",
+                        evidence=[f"{W.SAMPLES_NAME}#{W.ALERTS_PATTERN}"]),
+    ]))
+
+    result = judge_mod.grade_episode(ep, judge=judge)
+    prompt = render_prompt(ep)
+
+    row = {r["world"]: r for r in result.worlds}["b"]
+    assert row["sample_unavailable_patterns"] == [W.ALERTS_PATTERN], (
+        f"expected exactly {W.ALERTS_PATTERN!r} unavailable, got "
+        f"{row.get('sample_unavailable_patterns')!r}")
+    assert row["sample_unavailable"] is True, (
+        "the aggregate bool should still read true — SOME staged pattern lacked a sample")
+
+    buckets = [f["bucket"] for f in row["world_findings"]]
+    assert "cites-the-available-pattern" in buckets, (
+        "a finding citing the pattern that WAS sampled was refused for a gap in the other one")
+    assert "cites-the-unavailable-pattern" not in buckets, (
+        "a finding citing the pattern that was NOT sampled stood")
+
+    canonical = json.dumps(dict(W.SAMPLE_DOCUMENT), sort_keys=True)
+    rendered = [json.dumps(json.loads(chunk), sort_keys=True)
+               for chunk in _json_objects(prompt)]
+    assert canonical in rendered, (
+        "the judge's prompt carries no rendering of the pattern that WAS sampled")
+    assert f"no sample was captured for {W.ALERTS_PATTERN!r}" in prompt, (
+        "the judge's prompt says nothing about the second staged pattern at all — reduced to "
+        "the first, O5's own falsifier")
+
+
 # ---------------------------------------------------------------------------------------
 # M4 — the per-world prompt
 # ---------------------------------------------------------------------------------------

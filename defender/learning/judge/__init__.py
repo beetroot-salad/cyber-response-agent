@@ -121,6 +121,12 @@ class EpisodeGrade:
     #: the family draw alike) — the questioner-channel rows, for an in-process caller that wants
     #: them without re-reading the queue file.
     world_findings: list[dict[str, Any]] = field(default_factory=list)
+    #: O4/F7: `{finding, world, reason}` for every defender finding this pass withheld rather
+    #: than enqueued (`enqueue.EnqueueReport.withheld_findings`) — the operator artifact O4
+    #: promises: not merely THAT a world's defender findings were withheld (`withheld_worlds`
+    #: already says that), but WHICH finding and why, since the draw document it came off is
+    #: not part of this design's write set.
+    withheld_findings: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _judge_yaml_path(episode_dir: Path) -> Path:
@@ -575,14 +581,17 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
         # (`test_a_withheld_world_is_still_drawn_and_still_yields_world_findings`).
         if "world_findings" in row:
             # A1(b) — a world whose sample went unavailable (#1007 M4/O5) admits no finding
-            # that cites `samples.yaml` as its evidence, whatever its bucket; every other
-            # world-subject finding still stands.
-            sample_unavailable = row.get("sample_unavailable")
+            # that cites `samples.yaml#<that pattern>` as its evidence, whatever its bucket;
+            # every other world-subject finding still stands. `sample_unavailable_patterns`
+            # (not the blanket `sample_unavailable` bool) is what `cites_sample` checks the
+            # citation's own fragment against, so a two-pattern world's finding about the
+            # pattern it WAS shown is never refused for a gap in a sibling staged pattern.
+            unavailable_patterns = row.get("sample_unavailable_patterns") or []
             for draw_doc in per_world_draws.get(label, {}).values():
                 for finding in draw_doc.get("findings") or []:
                     if not isinstance(finding, dict) or finding.get("subject") != run_mod.SUBJECT_WORLD:
                         continue
-                    if sample_unavailable and run_mod.cites_sample(finding):
+                    if run_mod.cites_sample(finding, unavailable_patterns=unavailable_patterns):
                         continue
                     row["world_findings"].append(finding)
 
@@ -651,6 +660,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     world_queue_malformed_rows = report.world_queue_malformed_rows
     unqueueable = report.unqueueable
     world_enqueued_rows = report.world_appended
+    withheld_findings = report.withheld_findings
 
     record = EpisodeGrade(
         episode_dir=episode_dir, worlds=grade.worlds, verdict_word=verdict_word,
@@ -664,6 +674,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
         family_outcome=family_outcome, world_enqueued_rows=world_enqueued_rows,
         world_enqueued_to=world_enqueued_to, withheld_worlds=grade.withheld_worlds,
         measuring_worlds=grade.measuring_worlds, world_findings=report.world_rows,
+        withheld_findings=withheld_findings,
     )
     _write_judge_yaml(episode_dir, record)
     return record
@@ -758,6 +769,7 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
         world_enqueued_to=doc.get("world_enqueued_to") or "",
         withheld_worlds=graded - measuring, measuring_worlds=measuring,
         world_findings=list(doc.get("world_findings") or []),
+        withheld_findings=list(doc.get("withheld_findings") or []),
     )
 
 
@@ -776,6 +788,7 @@ def _write_judge_yaml(episode_dir: Path, record: EpisodeGrade) -> None:
         "world_enqueued_rows": record.world_enqueued_rows,
         "world_enqueued_to": record.world_enqueued_to,
         "world_findings": record.world_findings,
+        "withheld_findings": record.withheld_findings,
     }
     if record.not_graded is not None:
         doc["not_graded"] = record.not_graded

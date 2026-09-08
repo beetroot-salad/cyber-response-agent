@@ -188,6 +188,22 @@ def test_a_measured_nothing_world_withholds_its_defender_findings(tmp_path, monk
             if r.get("subject") == W.SUBJECT_DEFENDER] == [], (
         "a defender finding for a world that measured nothing reached the queue")
 
+    # O4/F7: the finding itself, not merely the fact of withholding, survives on the family
+    # record — the draw document it came off is not part of this design's write set, so this
+    # row is the ONLY place its content is recoverable once the episode is graded.
+    assert len(result.withheld_findings) == 1, (
+        f"expected exactly one withheld finding, got {result.withheld_findings!r}")
+    withheld = result.withheld_findings[0]
+    assert withheld["world"] == "b"
+    assert withheld["reason"] == "measured_nothing"
+    assert withheld["finding"]["claim"] == W.finding()["claim"], (
+        "the withheld finding's own content did not survive — only its bucket/reason did")
+    # AND ON DISK, not merely on the in-process return value — `judge.yaml` is the artifact a
+    # re-entered pass and a human reader both read back.
+    on_disk = W.judge_record(ep)["withheld_findings"]
+    assert on_disk == result.withheld_findings, (
+        "judge.yaml's own withheld_findings disagrees with what grade_episode returned")
+
 
 def test_withheld_reason_is_capture_unaddressed_when_nothing_names_the_corpus(
         tmp_path, monkeypatch):

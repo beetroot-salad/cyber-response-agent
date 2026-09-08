@@ -475,16 +475,38 @@ def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER)
         and Path(path_part).name == path_part
 
 
-def cites_sample(finding: dict[str, Any]) -> bool:
-    """A1(b): does this finding's evidence cite `samples.yaml`, BY NAME, whatever its fragment?
+def cites_sample(finding: dict[str, Any], *, unavailable_patterns: Any = None) -> bool:
+    """A1(b): does this finding's evidence cite `samples.yaml`, BY NAME, for a pattern this
+    world's row says was UNAVAILABLE?
 
     Anchored on the EVIDENCE rather than on the `shape-invention` bucket literal, because R2's
     world vocabulary is open (G-3) — a refusal keyed on one string is evadable by a model that
     spells the same claim differently. A world whose row reads `sample_unavailable` refuses
     every finding this returns `True` for and keeps every other one, whatever its bucket
-    (#1007, `test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket`)."""
+    (#1007, `test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket`).
+
+    `unavailable_patterns` (#1007 O5, the multi-pattern fix) is the row's own
+    `sample_unavailable_patterns` — the SPECIFIC staged patterns with no sample, not the
+    blanket "was anything unavailable" fact. A citation naming a pattern that WAS available is
+    admitted even when a sibling staged pattern's sample was not (a two-pattern world's finding
+    about the pattern it WAS shown must not be refused for a gap in the pattern it wasn't). A
+    citation with no fragment at all names no particular pattern, so it is refused exactly when
+    `unavailable_patterns` is non-empty — the old blanket rule, preserved for the ambiguous
+    case. `unavailable_patterns=None` (the default) keeps the OLD blanket behavior in full —
+    any `samples.yaml` citation refused — for a caller that has not been updated to pass it."""
     for pointer in finding.get("evidence") or ():
-        if isinstance(pointer, str) and pointer.split("#", 1)[0] == "samples.yaml":
+        if not isinstance(pointer, str):
+            continue
+        prefix, has_fragment, fragment = pointer.partition("#")
+        if prefix != "samples.yaml":
+            continue
+        if unavailable_patterns is None:
+            return True
+        if not has_fragment:
+            if unavailable_patterns:
+                return True
+            continue
+        if fragment in unavailable_patterns:
             return True
     return False
 

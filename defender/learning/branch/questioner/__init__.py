@@ -267,8 +267,10 @@ def _questioner_lessons_section(lessons: Any, *, stageable_patterns: Sequence[st
             continue
         # THE RAW FRONTMATTER ALONE, never the whole file: `duplicate_top_level_key` parses its
         # argument as one YAML document, and the body below the closing fence is markdown, not
-        # YAML — checking the whole text raises on every ordinary lesson and this guard would
-        # silently never fire (caught by the SAME except clause a genuine forgery needs).
+        # YAML — `duplicate_top_level_key` returns `False` on any parse trouble rather than
+        # raising (`_yaml.py`'s own contract), so checking the whole text would just read as
+        # "no duplicate" silently on every ordinary lesson, and this guard would never fire —
+        # not because an exception is caught, but because the check itself goes blind.
         if duplicate_top_level_key(raw):
             continue
         if fm.get("pattern") not in stageable:

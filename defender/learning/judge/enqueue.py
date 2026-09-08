@@ -1,4 +1,4 @@
-"""The judge's own appender: twelve-key rows into the existing findings queue (#921 M5).
+"""The judge's own appender: thirteen-key rows into the existing findings queue (#921 M5).
 
 Its own, and not the shared appender the old pipeline used: that writer gated the outcome word
 against the pipeline's own enum, which this design's words (`survived`/`caught`/`undecidable`/
@@ -102,6 +102,17 @@ def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> No
         raise JudgeRefused(
             f"{where}a row bound for the defender findings channel must carry "
             f"subject={SUBJECT_DEFENDER!r}, not {subject!r}")
+    # SYMMETRIC WITH `_validate_world_row`'s own `direction` screen (#1007, claims-adversary
+    # finding): `build_finding_row` derives `direction` from `subject` so the two can never
+    # disagree from the pass's own producer, but this appender also takes rows handed in from
+    # anywhere (its own docstring above) — a hand-fed row whose two fields DO disagree must be
+    # refused here too, not just on the questioner lane, or a `subject: defender` row carrying
+    # `direction: world` would still land on this channel unnoticed.
+    if row.get("direction") == SUBJECT_WORLD:
+        raise JudgeRefused(
+            f"{where}a row bound for the defender findings channel must carry "
+            f"direction={SUBJECT_WORLD!r} nowhere near subject={SUBJECT_DEFENDER!r} — the two "
+            "fields disagree")
     row_type = row.get("type")
     # `isinstance` FIRST: `QUEUEABLE_FINDING_TYPES` is a `set`, so an UNHASHABLE value here
     # (`bucket: [lead-set]` read back off a draw file) raises `TypeError` out of a function whose
@@ -276,7 +287,7 @@ def _resolving_citations(finding: dict[str, Any]) -> list[str]:
     O1 keeps a finding when at least one pointer resolves inside the graded world's own subtree
     and records the rest; citing all of them anyway handed the curator pointers already known
     not to resolve, with nothing on the row distinguishing them. The unresolved ones stay off
-    the row rather than riding under a thirteenth key — the queue's shape is twelve keys the
+    the row rather than riding under a fourteenth key — the queue's shape is thirteen keys the
     shared validator reads — and remain readable in full on the draw document the row's own
     `source_run_dir` names."""
     # EVERY VALUE HERE IS MODEL-AUTHORED YAML off a tree a box can reach (`_draws_on_disk`), so
@@ -299,7 +310,7 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     *, run_id: str, label: str, draw: str, index: int, subject: str, finding: dict[str, Any],
     alert_rule_key: str, judge_outcome: str, provenance: str = "model",
 ) -> dict[str, Any]:
-    """The twelve-key `FindingRow` for one finding of one draw of one world — PLUS, for
+    """The thirteen-key `FindingRow` for one finding of one draw of one world — PLUS, for
     `subject: world` (#1007 M6), `world`/`pattern`/`holding_system`/`provenance`.
 
     @owns finding_id
@@ -312,7 +323,10 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     findings would suppress a real one), and it is the ONLY place in this module that mints
     one — `enqueue()`'s own loop calls this rather than interpolating the f-string itself.
     `label="family"` (M5, `family` a reserved world label) keys a family-level finding as
-    `<run_id>/family/<draw>/<index>` — a coordinate that can never collide with a per-world one.
+    `<run_id>/family/<draw>/<index>` — a coordinate that collides with a per-world one only if
+    a graded world is itself labeled `"family"`, which `family._check_world_labels` refuses
+    before `grade_episode` builds any row (mirroring the launcher's own `RESERVED_WORLD_LABELS`
+    check, independently, since `grade_episode` is directly callable without the launcher).
 
     `direction` is DERIVED FROM `subject`, never taken as a separate argument (#1007
     `test_direction_is_derived_from_subject_so_disagreement_is_unrepresentable`): a row whose
@@ -348,7 +362,7 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
         # on `unresolved_evidence`; copying the whole list into `citations` handed the curator
         # pointers already known not to resolve, with nothing on the row distinguishing them —
         # O1's grounding claim, lost one hop downstream. The unresolved ones stay OFF the row
-        # rather than riding under a thirteenth key — the queue's shape is twelve keys the
+        # rather than riding under a fourteenth key — the queue's shape is thirteen keys the
         # shared validator reads — and they remain readable in full on the draw document the
         # row's own `source_run_dir` names.
         "citations": _resolving_citations(finding),
@@ -426,6 +440,10 @@ class EnqueueReport:
     #: The world rows this pass actually appended — handed on so an in-process caller
     #: (`EpisodeGrade.world_findings`) can see them without re-reading the queue file.
     world_rows: list[dict[str, Any]] = field(default_factory=list)
+    #: O4/F7: `{finding, world, reason}` for every defender finding this pass withheld rather
+    #: than enqueued — the whole finding, the ONLY surviving record of one that never became a
+    #: queue row. Distinct from `unqueueable` (could not be made a valid row at all).
+    withheld_findings: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _add_row(  # noqa: PLR0913 — the sink dispatch's own inputs
@@ -472,7 +490,12 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     # `family.is_gradable_row`, the ONE predicate — see its docstring: this site and
     # `grade_family`'s own answered the same question two ways.
     graded_labels = [w["world"] for w in world_rows if is_gradable_row(w)]
-    withheld_labels = {w["world"] for w in world_rows if w.get("withheld_reason")}
+    # `str`-keyed, not a set: O4's own reason (one of the four `WITHHELD_*` values on the row)
+    # is what F7's resolution asks `withheld_findings` to carry alongside each dropped finding
+    # — a bare membership set can say a world was withheld but not why.
+    withheld_reasons = {
+        w["world"]: w["withheld_reason"] for w in world_rows if w.get("withheld_reason")}
+    withheld_labels = set(withheld_reasons)
     run_id = episode_dir.name
     # `render.episode_alert`, the ONE rule for which world's `alert.json` this episode's alert
     # comes off. A local copy taking the first world whose file merely PARSED disagreed with
@@ -489,6 +512,10 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     defender_rows: list[dict[str, Any]] = []
     world_rows_out: list[dict[str, Any]] = []
     unqueueable: list[str] = []
+    #: O4/F7: the whole finding, since this row is the ONLY surviving record of a defender
+    #: finding that never became a queue row — the draw document it came off is not part of
+    #: this design's write set and a later re-grade may not reproduce the same model draw.
+    withheld_findings: list[dict[str, Any]] = []
 
     # M5's family-level draws FIRST — always `subject: world`, `world: None`, keyed under the
     # reserved `family` label so the coordinate can never collide with a per-world one. Ordered
@@ -541,10 +568,22 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                     _add_row(row, validator=_validate_world_row, sink=world_rows_out,
                              unqueueable=unqueueable, episode_dir=episode_dir)
                     continue
-                if defender_blocked or label in withheld_labels:
-                    # O7 (discard/corpus-contradiction) or O4 (this world measured nothing):
-                    # never a defender row, and never counted as unqueueable — it was never
-                    # eligible in the first place.
+                if label in withheld_labels:
+                    # O4 (F7): this world's difference was never measured — the finding is
+                    # recorded WHOLE on `withheld_findings`, with the row's own reason, rather
+                    # than dropped in silence the way `defender_blocked` (O7, below) is. O7's
+                    # own artifact is the family record itself (the whole episode's outcome),
+                    # so a `discard`/`corpus-contradiction` episode's findings stay unrecorded
+                    # here exactly as `unqueueable` already leaves them — two different reasons
+                    # a finding never reaches the queue, kept apart rather than merged into one
+                    # drop.
+                    withheld_findings.append(
+                        {"finding": finding, "world": label, "reason": withheld_reasons[label]})
+                    continue
+                if defender_blocked:
+                    # O7 (discard/corpus-contradiction): never a defender row, and never
+                    # counted as unqueueable OR withheld — it was never eligible in the first
+                    # place, and the family record's own outcome is the artifact for it.
                     continue
                 row = build_finding_row(
                     run_id=run_id, label=label, draw=str(draw), index=index,
@@ -577,7 +616,8 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     return EnqueueReport(
         appended=defender_appended, unqueueable=unqueueable,
         queue_malformed_rows=defender_malformed, world_appended=world_appended,
-        world_queue_malformed_rows=world_malformed, world_rows=reported_world_rows)
+        world_queue_malformed_rows=world_malformed, world_rows=reported_world_rows,
+        withheld_findings=withheld_findings)
 
 
 __all__ = [
