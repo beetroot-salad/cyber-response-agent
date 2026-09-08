@@ -132,6 +132,29 @@ class LoopPaths(DefenderPaths):
             id_key="finding_id",
         )
 
+    @property
+    def questioner_findings_file(self) -> Path:
+        return self.pending_dir / "questioner_findings.jsonl"
+
+    @property
+    def questioner_findings(self) -> QueueChannel:
+        """The second queue channel (#1007 M6): `subject: world` rows, questioner-authored.
+
+        SHARES `drain_lock` WITH `findings` (write-tests' R1 correction over the design doc's
+        own "its own drain_lock" — the incumbent `drain_lock` is `_pending/.lock`, a
+        DIRECTORY-level fixed path, so a channel declaring "its own" at the same pending dir
+        resolves to the same file anyway; spelling it explicitly here is what keeps two
+        curators from holding one worktree at once, which a genuinely separate lock would give
+        up for nothing). Its OWN `append_lock` and `consumed` file, so an appender on one
+        channel never blocks the other."""
+        return QueueChannel(
+            file=self.questioner_findings_file,
+            consumed=self.pending_dir / "questioner_consumed.jsonl",
+            append_lock=self.pending_dir / ".questioner_findings.lock",
+            drain_lock=self.pending_dir / ".lock",
+            id_key="finding_id",
+        )
+
 
 def _env_state_dir() -> Path | None:
     raw = os.environ.get("DEFENDER_LEARNING_STATE_DIR")

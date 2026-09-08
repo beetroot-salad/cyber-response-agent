@@ -615,7 +615,7 @@ def _reachability(world: World, *, family: Family, replay: Any, deps: _Deps,
 
 
 def _addressing_patterns(world: World) -> frozenset[str]:
-    """This world's own staged elastic patterns — what a captured row's `source_pattern` must
+    """This world's own staged corpus patterns — what a captured row's `source_pattern` must
     equal for the pattern arm of `capture_addressed` to fire."""
     return frozenset(pattern for pattern, _entry in _elastic_entries(world))
 
@@ -625,7 +625,7 @@ def _addressed(call: tuple[str, str, dict], *, world: World, ctx: Any) -> bool:
     declares (ledger fork F4, `resolved_by: auto`)?
 
     THE PATCHED-SYSTEM ARM COUNTS, because it decides which worlds can be withheld: a patch-only
-    world stages no elastic pattern at all, and a `capture_addressed` computed off the pattern
+    world stages no such pattern at all, and a `capture_addressed` computed off the pattern
     arm alone would read every one of them as unaddressed — `withheld_reason:
     capture_unaddressed` — and suppress its defender findings under a recorded reason that is
     false.

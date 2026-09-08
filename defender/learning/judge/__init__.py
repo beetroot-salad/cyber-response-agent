@@ -98,11 +98,26 @@ class EpisodeGrade:
     lessons_commit: str | None = None
     discard_evidence: dict[str, Any] = field(default_factory=dict)
     queue_malformed_rows: int = 0
+    world_queue_malformed_rows: int = 0
     #: Findings this pass could not turn into a queue row, one line each naming the finding
     #: and why. Dropped rather than raised on, so the drop is said out loud instead of read
     #: later as a finding the model never emitted.
     unqueueable_findings: list[str] = field(default_factory=list)
     not_graded: dict[str, Any] | None = None
+    #: #1007's family-level half (M5): the family draw's own majority-resolved outcome word
+    #: (`_REPLY_OUTCOME_ENUM` — never the family's `verdict_word`, a different vocabulary), and
+    #: how many family-level rows this pass enqueued and where.
+    family_outcome: str | None = None
+    world_enqueued_rows: int = 0
+    world_enqueued_to: str = ""
+    #: The withholding ladder's own record (O4/M3): every graded world's `withheld_reason`,
+    #: named — `withheld_worlds`/`measuring_worlds` partition `graded_worlds`.
+    withheld_worlds: frozenset[str] = field(default_factory=frozenset)
+    measuring_worlds: frozenset[str] = field(default_factory=frozenset)
+    #: Every `subject: world` finding this pass enqueued (mechanical, per-world model draws and
+    #: the family draw alike) — the questioner-channel rows, for an in-process caller that wants
+    #: them without re-reading the queue file.
+    world_findings: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _judge_yaml_path(episode_dir: Path) -> Path:
@@ -135,30 +150,6 @@ def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
     if not isinstance(doc, dict):
         raise JudgeRefused(f"{path} exists but is not a family grade document")
     return doc
-
-
-def _read_review(episode_dir: Path) -> dict[str, Any]:
-    """`review.yaml`, parsed once per pass. `{}` when there is none."""
-    import yaml
-
-    from defender._yaml import safe_load
-
-    path = Path(episode_dir) / "review.yaml"
-    # THROUGH THE SCREENED READ, like every other read this pass makes out of the episode dir:
-    # `review.yaml` is what says the episode was `accepted`, and a link planted at its name
-    # decides whether the pass runs at all. An ABSENT record is `{}` (there is nothing to read);
-    # an ALIASED one is this design's refusal, because something is there and it is not the
-    # record.
-    if not (path.exists() or path.is_symlink()):
-        return {}
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise JudgeRefused(f"{path} could not be read: {refusal}")
-    try:
-        doc = safe_load(text) or {}
-    except yaml.YAMLError as bad:
-        raise JudgeRefused(f"{path} could not be read: {bad}") from bad
-    return doc if isinstance(doc, dict) else {}
 
 
 def _episode_outcome_from_review(review: dict[str, Any]) -> tuple[str, str]:
@@ -253,7 +244,7 @@ def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threade
 
 def _run_world_draws(
     episode_dir: Path, label: str, *, judge: Any, draws: int,
-    model: str, effort: str, prompt: str,
+    model: str, effort: str, prompt: str, scope: str = "world",
 ) -> tuple[int, dict[str, int], dict[int, dict[str, Any]], int]:
     """Call the judge `draws` times over `prompt`, writing one `worlds/<X>/judge/<n>.yaml` per
     draw. Returns `(completed_draws, bucket_spread, this pass's draw documents KEYED BY DRAW
@@ -299,7 +290,7 @@ def _run_world_draws(
             _write_wire_log(episode_dir, agent_id=agent_id, prompt=prompt,
                             reply=reply_text, failure=None)
             try:
-                reply = run_mod.validate_reply(reply_text)
+                reply = run_mod.validate_reply(reply_text, scope=scope)
             except JudgeRefused:
                 # ONE DRAW, not the episode. A malformed reply is a model failure of the same
                 # kind as the transport failure above, and containing one while propagating the
@@ -451,7 +442,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
         raise JudgeRefused(f"episode {episode_dir}: {bad!r}") from bad
 
 
-def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, deliberately not split (its own steps are the demand)
+def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestration, deliberately not split (its own steps are the demand)
     episode_dir: Path, *, judge: Any, runs_base: Path | None, draws: int | None,
     git_show: Any, queue_dir: Path | None,
 ) -> EpisodeGrade:
@@ -464,7 +455,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
     if existing is not None and not existing.get("not_graded"):
         return _grade_from_document(episode_dir, existing)
 
-    review = _read_review(episode_dir)
+    review = family_mod.read_review_record(episode_dir)
     outcome, reason = _episode_outcome_from_review(review)
     if outcome != "accepted":
         reason = reason or f"the episode's review.yaml outcome is {outcome!r}, not 'accepted'"
@@ -484,7 +475,9 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
     # THE PARSE THIS PASS ALREADY MADE. `grade_family` read and parsed `family.yaml` a second
     # time from the same directory — a tree a box can reach — so nothing held the two documents
     # in agreement, and one pass paid for two reads of the file that says which worlds exist.
-    grade = family_mod.grade_family(episode_dir, manifest=manifest)
+    # `review=review` likewise hands over the record this frame already read, so `grade_family`
+    # does not read `review.yaml` a second time (#1007).
+    grade = family_mod.grade_family(episode_dir, manifest=manifest, review=review)
     gradable = [row["world"] for row in grade.worlds if family_mod.is_gradable_row(row)]
 
     # BOTH PER-PASS FACTS, RESOLVED ONCE AND THREADED (J8's own sentence, and J9's union with
@@ -563,6 +556,40 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
             # nothing, so its `completed_draws` is 0 for the same reason an ungradable world's
             # is — and without this the two are indistinguishable on the record.
             row["draws_failed_reason"] = per_world_failed[label]
+        # #1007 M3/M4: this world's OWN model-drawn `subject: world` findings, joined onto the
+        # mechanical ones family.py already put on the row — withholding is about the DEFENDER
+        # lane alone, so a withheld world's own world-subject findings still stand
+        # (`test_a_withheld_world_is_still_drawn_and_still_yields_world_findings`).
+        if "world_findings" in row:
+            for draw_doc in per_world_draws.get(label, {}).values():
+                for finding in draw_doc.get("findings") or []:
+                    if isinstance(finding, dict) and finding.get("subject") == run_mod.SUBJECT_WORLD:
+                        row["world_findings"].append(finding)
+
+    # M5: the family-level call — UNCONDITIONAL (even an episode with nothing to separate is
+    # exactly the one this call exists to say so about) and an ADDITION to the pass: its own
+    # fault (a bad prompt build, every draw failing) costs only its own contribution and never
+    # unwinds what the per-world draws already produced
+    # (`test_a_faulted_family_draw_isolates_and_leaves_verdict_word_intact`).
+    family_documents: dict[int, dict[str, Any]] = {}
+    family_completed = 0
+    try:
+        family_prompt = run_mod._build_family_prompt(manifest=manifest, grade=grade,
+                                                      review=review)
+        guarded_mkdir(Path(episode_dir) / "worlds" / "family" / "judge", base=episode_dir)
+        family_completed, _family_spread, family_documents, _family_malformed = (
+            _run_world_draws(episode_dir, "family", judge=judge, draws=configured_draws,
+                             model=model, effort=effort, prompt=family_prompt,
+                             scope="family"))
+    except Exception:  # noqa: BLE001 — the family call is an addition to the pass (M5); its own fault costs only itself, never the already-completed per-world draws
+        family_documents = {}
+        family_completed = 0
+    family_outcome: str | None = None
+    if family_completed:
+        for word in sorted(run_mod._REPLY_OUTCOME_ENUM):
+            if _majority_outcome(family_documents, family_completed, word):
+                family_outcome = word
+                break
 
     episode_outcome = "gradable"
     discard_evidence = {
@@ -586,22 +613,24 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
     verdict_word = episode_outcome if episode_outcome != "gradable" else grade.verdict_word
 
     pending_file, _lock_file = enqueue_mod._queue_paths(queue_dir)
+    questioner_file, _questioner_lock = enqueue_mod._questioner_queue_paths(queue_dir)
     enqueued_to = str(pending_file)
-    enqueued_rows = 0
-    queue_malformed_rows = 0
-    unqueueable: list[str] = []
-    if episode_outcome == "gradable":
-        # The malformed count comes back FROM the append, measured under the queue's own lock:
-        # reading the shared queue again afterwards raced every other appender on it.
-        report = enqueue_mod.enqueue_report(
-            episode_dir,
-            family_mod.FamilyGrade(episode_dir=episode_dir, worlds=grade.worlds,
-                                   verdict_word=verdict_word,
-                                   graded_worlds=grade.graded_worlds),
-            queue_dir=queue_dir, drawn=per_world_draws)
-        enqueued_rows = report.appended
-        queue_malformed_rows = report.queue_malformed_rows
-        unqueueable = report.unqueueable
+    world_enqueued_to = str(questioner_file)
+    # UNCONDITIONAL (#1007 O7/N2): a `discard`/`corpus-contradiction` episode blocks the
+    # DEFENDER lane alone — `enqueue_report`'s own `defender_blocked` gate reads `verdict_word`
+    # for that — but the WORLD lane (mechanical findings, per-world and family model-drawn
+    # world findings) is never gated on the defender's own outcome
+    # (`test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings`).
+    report = enqueue_mod.enqueue_report(
+        episode_dir,
+        family_mod.FamilyGrade(episode_dir=episode_dir, worlds=grade.worlds,
+                               verdict_word=verdict_word, graded_worlds=grade.graded_worlds),
+        queue_dir=queue_dir, drawn=per_world_draws, family_drawn=family_documents)
+    enqueued_rows = report.appended
+    queue_malformed_rows = report.queue_malformed_rows
+    world_queue_malformed_rows = report.world_queue_malformed_rows
+    unqueueable = report.unqueueable
+    world_enqueued_rows = report.world_appended
 
     record = EpisodeGrade(
         episode_dir=episode_dir, worlds=grade.worlds, verdict_word=verdict_word,
@@ -610,7 +639,11 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, C901 — one orchestration, delib
         draws={"configured": configured_draws,
               "completed": max(per_world_completed.values(), default=0)},
         knobs=knobs, lessons_commit=lessons_commit, discard_evidence=discard_evidence,
-        queue_malformed_rows=queue_malformed_rows, unqueueable_findings=unqueueable,
+        queue_malformed_rows=queue_malformed_rows,
+        world_queue_malformed_rows=world_queue_malformed_rows, unqueueable_findings=unqueueable,
+        family_outcome=family_outcome, world_enqueued_rows=world_enqueued_rows,
+        world_enqueued_to=world_enqueued_to, withheld_worlds=grade.withheld_worlds,
+        measuring_worlds=grade.measuring_worlds, world_findings=report.world_rows,
     )
     _write_judge_yaml(episode_dir, record)
     return record
@@ -680,11 +713,16 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
     # returned `verdict_word=None` and `draws=None` from fields typed `str` and `dict`, so
     # `grade.draws["completed"]` raised `TypeError` in the caller and `verdict_word in
     # _UNQUEUEABLE_VERDICTS` silently answered False for an episode whose record said `discard`.
+    graded = frozenset(r["world"] for r in worlds if family_mod.is_gradable_row(r))
+    # `measuring_worlds`/`withheld_worlds` are RE-DERIVED from the rows' own `withheld_reason`
+    # (#1007), the same way `graded_worlds` is already re-derived from `ungradable` — one fewer
+    # pair of top-level lists that could disagree with what the rows themselves say.
+    measuring = frozenset(
+        r["world"] for r in worlds if r["world"] in graded and r.get("withheld_reason") is None)
     return EpisodeGrade(
         episode_dir=episode_dir, worlds=worlds,
         verdict_word=doc.get("verdict_word") or "undecidable",
-        graded_worlds=frozenset(
-            r["world"] for r in worlds if family_mod.is_gradable_row(r)),
+        graded_worlds=graded,
         episode_outcome=doc.get("episode_outcome") or "gradable",
         enqueued_rows=doc.get("enqueued_rows") or 0,
         enqueued_to=doc.get("enqueued_to") or "",
@@ -692,8 +730,14 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
         lessons_commit=doc.get("lessons_commit"),
         discard_evidence=doc.get("discard_evidence") or {},
         queue_malformed_rows=doc.get("queue_malformed_rows") or 0,
+        world_queue_malformed_rows=doc.get("world_queue_malformed_rows") or 0,
         unqueueable_findings=list(doc.get("unqueueable_findings") or []),
         not_graded=doc.get("not_graded"),
+        family_outcome=doc.get("family_outcome"),
+        world_enqueued_rows=doc.get("world_enqueued_rows") or 0,
+        world_enqueued_to=doc.get("world_enqueued_to") or "",
+        withheld_worlds=graded - measuring, measuring_worlds=measuring,
+        world_findings=list(doc.get("world_findings") or []),
     )
 
 
@@ -706,7 +750,12 @@ def _write_judge_yaml(episode_dir: Path, record: EpisodeGrade) -> None:
         "enqueued_to": record.enqueued_to, "draws": record.draws, "knobs": record.knobs,
         "lessons_commit": record.lessons_commit, "discard_evidence": record.discard_evidence,
         "queue_malformed_rows": record.queue_malformed_rows,
+        "world_queue_malformed_rows": record.world_queue_malformed_rows,
         "unqueueable_findings": record.unqueueable_findings,
+        "family_outcome": record.family_outcome,
+        "world_enqueued_rows": record.world_enqueued_rows,
+        "world_enqueued_to": record.world_enqueued_to,
+        "world_findings": record.world_findings,
     }
     if record.not_graded is not None:
         doc["not_graded"] = record.not_graded

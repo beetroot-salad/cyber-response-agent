@@ -670,10 +670,22 @@ def check_manifest_digest(path: Path, recorded: str) -> None:
 
 #: The world label the family's own shared capture is written under. No world may claim it: a
 #: world that did would append its live rows into the recording its siblings replay.
-RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base"})
+#:
+#: `family` (#1007 M5) is reserved for the SAME reason, one layer up: the family-level judge
+#: call's own agent id is `judge:family:<n>`, and a world labelled `family` would give a per-
+#: world draw the identical agent id — one wire-log file (`_run_paths.stage_trace_path`'s
+#: `serialized-append` sink) interleaving both streams, unreadable as either.
+RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base", "family"})
+
+#: `family_<digits>` too — the colon-fold `agent_id.replace(':', '_')` that names a wire-log
+#: file is NOT injective (`judge:family:3`.replace(...) == `judge_family_3`.replace(...)), so a
+#: world literally named `family_3` composes the SAME folded stem the family call's own draw 3
+#: does, for the same reason `RESERVED_WORLD_LABELS` alone exists — refused at the same gate,
+#: rather than leaving a second collision shape unreserved one regex away from the first.
+_RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
 
 
-def check_identities(family: Family) -> None:
+def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, deliberately not split (see its own docstring)
     """ONE gate over the whole manifest, before anything is staged.
 
     Every rule the downstream names would each have refused at a different depth, and refused
@@ -705,8 +717,14 @@ def check_identities(family: Family) -> None:
         if label.casefold() in RESERVED_WORLD_LABELS:
             raise FamilyError(
                 f"world label {label!r} is the reserved name of the family's own base capture "
-                "— a world claiming it would append its live rows into the recording its "
-                "siblings replay")
+                "or the family-level judge call — a world claiming it would append its live "
+                "rows into the recording its siblings replay, or collide with the family "
+                "call's own agent id")
+        if _RESERVED_FAMILY_DRAW_LABEL.match(label):
+            raise FamilyError(
+                f"world label {label!r} matches family_<n> — the colon fold that names a wire "
+                "log file is not injective, and this label's own agent id would fold to the "
+                "same stem as one of the family call's draws")
         try:
             refuse_unnameable_world(label)
         except ViewNameError as bad:

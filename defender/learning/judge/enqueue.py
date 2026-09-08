@@ -36,20 +36,31 @@ from defender.learning.core.persist import derive_alert_rule_key, queue_lock
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import is_gradable_row
 from defender.learning.judge.render import episode_alert
+#: The two `subject` literals (#1007 O1/M6) — re-exported here rather than a second literal
+#: pair, so the appender's own guard and `run.py`'s selector cannot drift apart.
+from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
 
 #: `discard` and `corpus-contradiction` are members of `JUDGE_OUTCOME_ENUM` and ARE the
 #: family's `verdict_word` when they apply — never a defender failure to author from (O7).
 _UNQUEUEABLE_VERDICTS = frozenset({"discard", "corpus-contradiction"})
 
 
-def _queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
-    """The findings queue's file and its append lock — `(pending_file, lock_file)`.
+def _queue_paths_for(channel: Any, queue_dir: Path | None) -> tuple[Path, Path]:
+    """One channel's `(file, append_lock)`, relocated under `queue_dir` when given.
 
-    BOTH NAMES COME FROM THE CHANNEL THAT OWNS THEM. `LoopPaths.findings` is the `QueueChannel`
-    the drain reaches the queue through; spelling
-    `"findings.jsonl"` and `".findings.lock"` a third time here is how a rename or a lock-role
-    change leaves this appender writing files nothing reads. Only the DIRECTORY is overridable
-    — `queue_dir` relocates the channel, it does not rename it.
+    BOTH NAMES COME FROM THE CHANNEL THAT OWNS THEM — `LoopPaths.findings` /
+    `.questioner_findings` are the `QueueChannel`s the drain reaches each queue through, so
+    spelling a filename a third time here is how a rename or a lock-role change leaves an
+    appender writing files nothing reads. Only the DIRECTORY is overridable — `queue_dir`
+    relocates the channel, it does not rename it."""
+    if queue_dir is None:
+        return channel.file, channel.append_lock
+    queue_dir = Path(queue_dir)
+    return queue_dir / channel.file.name, queue_dir / channel.append_lock.name
+
+
+def _queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
+    """The DEFENDER findings queue's file and its append lock.
 
     Resolved through `config.loop_paths()` rather than the import-frozen `DEFAULT_PATHS` so a
     process pointed at a different learning state root by its environment writes where that
@@ -58,17 +69,19 @@ def _queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
     an env var is unset is a pass whose rows can land in a directory no drain reads, with the
     family record's `enqueued_to` as the only trace.
     """
-    channel = loop_paths().findings
-    if queue_dir is None:
-        return channel.file, channel.append_lock
-    queue_dir = Path(queue_dir)
-    return queue_dir / channel.file.name, queue_dir / channel.append_lock.name
+    return _queue_paths_for(loop_paths().findings, queue_dir)
+
+
+def _questioner_queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
+    """The QUESTIONER channel's file and its OWN append lock (#1007 M6) — see `_queue_paths`'s
+    docstring; the two channels share every reasoning point above except which channel."""
+    return _queue_paths_for(loop_paths().questioner_findings, queue_dir)
 
 
 def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
-    """THE rule for what may go on the queue. One function, so the producer below can ask it
-    about a single row (and drop that row alone) while the appender still refuses outright for
-    a caller handing rows in from anywhere else."""
+    """THE rule for what may go on the DEFENDER queue. One function, so the producer below can
+    ask it about a single row (and drop that row alone) while the appender still refuses
+    outright for a caller handing rows in from anywhere else."""
     where = f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
     # `finding_id` FIRST, because `_gate_findings` indexes it FIRST — `fid = entry["finding_id"]`
     # opens its per-row loop, before `skips_forward_check` and before the deliberate
@@ -80,6 +93,15 @@ def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> No
                 f"{where}a family finding row is missing {key!r} — a row missing it raises a "
                 "bare KeyError inside the shared findings gate and stuck-records the whole "
                 "keyed batch (P6); refused at the appender instead")
+    # `subject` (#1007 O1/M6), NO CASE-FOLD AND NO TRIM — a row bound for the DEFENDER channel
+    # must carry EXACTLY `subject: defender`; a `subject: world` row (or a near-miss, or an
+    # absent one) is refused here, at the last screen before the shared findings gate and the
+    # defender curator.
+    subject = row.get("subject")
+    if subject != SUBJECT_DEFENDER:
+        raise JudgeRefused(
+            f"{where}a row bound for the defender findings channel must carry "
+            f"subject={SUBJECT_DEFENDER!r}, not {subject!r}")
     row_type = row.get("type")
     # `isinstance` FIRST: `QUEUEABLE_FINDING_TYPES` is a `set`, so an UNHASHABLE value here
     # (`bucket: [lead-set]` read back off a draw file) raises `TypeError` out of a function whose
@@ -114,29 +136,50 @@ def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> No
             "author from, so no row of it may reach the queue (O7)")
 
 
-def append_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
-                queue_dir: Path | None = None) -> int:
-    """How many of `rows` were appended. See `append_rows_report` for the rest of the answer."""
-    return append_rows_report(episode_dir, rows, queue_dir=queue_dir)[0]
+def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
+    """THE rule for what may go on the QUESTIONER channel (#1007 M6). The bucket (`type`) is
+    NEVER gated against `QUEUEABLE_FINDING_TYPES` — R2's open vocabulary — but `pattern`,
+    `holding_system` and `subject` are required here because this appender is the LAST screen:
+    the questioner curator's own gate is idempotency-only (M7)."""
+    where = f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
+    for key in ("finding_id", "run_id", "direction"):
+        if key not in row:
+            raise JudgeRefused(
+                f"{where}a questioner finding row is missing {key!r} — a row missing it raises "
+                "a bare KeyError inside the shared drain machinery")
+    if row.get("direction") != SUBJECT_WORLD:
+        raise JudgeRefused(
+            f"{where}a row bound for the questioner findings channel must carry "
+            f"direction={SUBJECT_WORLD!r}, not {row.get('direction')!r}")
+    subject = row.get("subject")
+    if subject != SUBJECT_WORLD:
+        raise JudgeRefused(
+            f"{where}a row bound for the questioner findings channel must carry "
+            f"subject={SUBJECT_WORLD!r}, not {subject!r}")
+    for key in ("pattern", "holding_system"):
+        value = row.get(key)
+        if not isinstance(value, str) or is_content_less(value):
+            raise JudgeRefused(
+                f"{where}a questioner finding row's {key} must be a non-empty string")
 
 
-def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
-                       queue_dir: Path | None = None) -> tuple[int, int]:
-    """Append `rows`, and report `(appended, malformed lines seen on the queue)`.
+def _append_validated_rows(
+    rows: list[dict[str, Any]], *, pending_file: Path, lock_file: Path,
+    dedup_key: str | None = None,
+) -> tuple[int, int]:
+    """The one write, one lock hold every channel appender shares (P3) — through
+    `write_guarded(..., mode="append")` so the write lint sees the guarded spelling (J7's
+    survivor). The malformed count is taken INSIDE that same hold: it is a fact about the queue
+    as this pass found it (F-11's evidence that some writer left a row half-written), and read
+    outside the lock a concurrent appender can tear the very read that is supposed to measure
+    tearing. Rows are assumed ALREADY VALIDATED — each channel's own rule runs before this.
 
-    ONE write, ONE lock hold (P3) — through `write_guarded(..., mode="append")` so the write
-    lint sees the guarded spelling (J7's survivor). The malformed count is taken INSIDE that
-    same hold: it is a fact about the queue as this pass found it (F-11's evidence that some
-    writer left a row half-written), and read outside the lock a concurrent appender can tear
-    the very read that is supposed to measure tearing.
-
-    `episode_dir` names the pass, for the refusal text; the queue itself is a shared sink whose
-    location is `queue_dir` or the configured default, never derived from the episode.
-    """
-    rows = list(rows)
-    for row in rows:
-        _validate_row(row, episode_dir=episode_dir)
-    pending_file, lock_file = _queue_paths(queue_dir)
+    `dedup_key`, when given, makes the append IDEMPOTENT on that field: a row whose value is
+    already present on THIS channel's own file is dropped rather than written a second time.
+    Read under the SAME lock hold as the write, off THIS channel alone — never another
+    channel's file or its `consumed` sidecar, so a finding id already consumed on the defender
+    channel does not suppress a world row sharing that id
+    (`test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_own_curator`)."""
     if not rows:
         # Nothing to append means no lock to take and no directory to create — a pass that
         # enqueued nothing must not bring a queue into existence. The count is therefore
@@ -149,20 +192,70 @@ def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
     # itself: `base=path` makes `path.relative_to(base)` yield `.`, so zero components are
     # judged and the alias-refusing guard degenerates into a plain `mkdir(parents=True)`.
     guarded_mkdir(pending_file.parent, base=_queue_trust_root(pending_file))
-    text = "".join(json.dumps(row) + "\n" for row in rows)
     with queue_lock(lock_file):
         # F-11: a torn trailing row (no closing newline) already on the queue must not be
         # concatenated onto — that turns both the fragment AND this pass's first row into one
         # unreadable line. A leading newline closes the fragment's own line without touching
         # its bytes; the fragment stays exactly as unreadable as it already was.
-        _existing, malformed = read_jsonl_rows_report(pending_file)
+        existing, malformed = read_jsonl_rows_report(pending_file)
+        to_write = rows
+        if dedup_key is not None:
+            seen = {r.get(dedup_key) for r in existing if isinstance(r, dict)}
+            to_write = [r for r in rows if r.get(dedup_key) not in seen]
+        if not to_write:
+            return 0, malformed
+        text = "".join(json.dumps(row) + "\n" for row in to_write)
         if artifact_file(pending_file) and pending_file.stat().st_size > 0:
             with pending_file.open("rb") as fh:
                 fh.seek(-1, 2)
                 if fh.read(1) != b"\n":
                     text = "\n" + text
         write_guarded(pending_file, text, mode="append")
-    return len(rows), malformed
+    return len(to_write), malformed
+
+
+def append_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
+                queue_dir: Path | None = None) -> int:
+    """How many of `rows` were appended. See `append_rows_report` for the rest of the answer."""
+    return append_rows_report(episode_dir, rows, queue_dir=queue_dir)[0]
+
+
+def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
+                       queue_dir: Path | None = None) -> tuple[int, int]:
+    """Append `rows` to the DEFENDER findings channel, and report `(appended, malformed lines
+    seen on the queue)`. `episode_dir` names the pass, for the refusal text; the queue itself is
+    a shared sink whose location is `queue_dir` or the configured default, never derived from
+    the episode."""
+    rows = list(rows)
+    for row in rows:
+        _validate_row(row, episode_dir=episode_dir)
+    pending_file, lock_file = _queue_paths(queue_dir)
+    return _append_validated_rows(rows, pending_file=pending_file, lock_file=lock_file)
+
+
+def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
+                      queue_dir: Path | None = None) -> int:
+    """How many of `rows` were appended to the QUESTIONER channel. See
+    `append_world_rows_report` for the rest of the answer."""
+    return append_world_rows_report(episode_dir, rows, queue_dir=queue_dir)[0]
+
+
+def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
+                             queue_dir: Path | None = None) -> tuple[int, int]:
+    """Append `rows` to the QUESTIONER findings channel (#1007 M6), and report `(appended,
+    malformed lines seen on the queue)`.
+
+    `judge_outcome` is FORCED to `None` on every row this writes, whatever the caller handed
+    in: a world row is about the world, and a defender verdict word on it (`caught`/`survived`/
+    `undecidable`) is the category error O1 exists to prevent — it would invite the questioner
+    curator to author a lesson about the DEFENDER into the corpus the questioner reads back."""
+    validated = list(rows)
+    for row in validated:
+        _validate_world_row(row, episode_dir=episode_dir)
+    pending_file, lock_file = _questioner_queue_paths(queue_dir)
+    sanitized = [{**row, "judge_outcome": None} for row in validated]
+    return _append_validated_rows(sanitized, pending_file=pending_file, lock_file=lock_file,
+                                  dedup_key="finding_id")
 
 
 def _queue_trust_root(pending_file: Path) -> Path:
@@ -202,34 +295,49 @@ def _resolving_citations(finding: dict[str, Any]) -> list[str]:
     return [p for p in evidence if p not in unresolved]
 
 
-def _build_row(
-    *, run_id: str, label: str, draw: str, index: int, finding: dict[str, Any],
-    alert_rule_key: str, judge_outcome: str,
+def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one keyword each
+    *, run_id: str, label: str, draw: str, index: int, subject: str, finding: dict[str, Any],
+    alert_rule_key: str, judge_outcome: str, provenance: str = "model",
 ) -> dict[str, Any]:
-    """The twelve-key `FindingRow` for one finding of one draw of one world.
+    """The twelve-key `FindingRow` for one finding of one draw of one world — PLUS, for
+    `subject: world` (#1007 M6), `world`/`pattern`/`holding_system`/`provenance`.
 
     @owns finding_id
     @owns source_run_dir
+    @owns direction
 
     `finding_id` is `f"{run_id}/{label}/{draw}/{index}"` — deterministic across a retried
     `enqueue()` call over the SAME on-disk draw files (P5's idempotency guard keys on this
     value alone, so a fresh id per retry would defeat it, and a reused id across two distinct
     findings would suppress a real one), and it is the ONLY place in this module that mints
     one — `enqueue()`'s own loop calls this rather than interpolating the f-string itself.
+    `label="family"` (M5, `family` a reserved world label) keys a family-level finding as
+    `<run_id>/family/<draw>/<index>` — a coordinate that can never collide with a per-world one.
 
-    `source_run_dir` is `f"episodes/{run_id}/worlds/{label}"` — the archived world dir a
-    row's evidence is scoped to. ONE parameter carries the episode's name for both keys: as two
-    (`run_id=` and `episode_name=`, which the single call site filled from one value), nothing
-    held them in agreement, and a caller taking one from a manifest field and the other from the
-    directory would mint rows whose `finding_id` and `source_run_dir` name different episodes —
-    which P5's idempotency guard, keyed on `finding_id` alone, cannot notice (F-3: a value the last-segment `resolve_run_bundle` resolver
-    can honour, never a value shaped like a run id it could collide with)."""
-    return {
+    `direction` is DERIVED FROM `subject`, never taken as a separate argument (#1007
+    `test_direction_is_derived_from_subject_so_disagreement_is_unrepresentable`): a row whose
+    two fields could disagree is a row the defender curator's gate and the appender's own guard
+    could each read differently. `world` is likewise the PASS's own stamp — `None` for a
+    family-level finding (`label == "family"`), the draw's own world label otherwise — never
+    the model's own `finding["world"]` claim (A3: identity belongs to the pass).
+
+    `source_run_dir` is `f"episodes/{run_id}/worlds/{label}"` for a per-world finding, or
+    `f"episodes/{run_id}"` for a family-level one (there is no `worlds/family/` archive). ONE
+    parameter carries the episode's name for both keys: as two (`run_id=` and `episode_name=`,
+    which the single call site filled from one value), nothing held them in agreement, and a
+    caller taking one from a manifest field and the other from the directory would mint rows
+    whose `finding_id` and `source_run_dir` name different episodes — which P5's idempotency
+    guard, keyed on `finding_id` alone, cannot notice (F-3: a value the last-segment
+    `resolve_run_bundle` resolver can honour, never a value shaped like a run id it could
+    collide with)."""
+    direction = SUBJECT_WORLD if subject == SUBJECT_WORLD else "family"
+    row: dict[str, Any] = {
         "schema_version": 1,
         "finding_id": f"{run_id}/{label}/{draw}/{index}",
         "run_id": run_id,
         "alert_rule_key": alert_rule_key,
-        "direction": "family",
+        "direction": direction,
+        "subject": subject,
         "type": finding.get("bucket"),
         "subject_anchor": finding.get("anchor"),
         "subject_topic": finding.get("topic"),
@@ -244,8 +352,15 @@ def _build_row(
         # shared validator reads — and they remain readable in full on the draw document the
         # row's own `source_run_dir` names.
         "citations": _resolving_citations(finding),
-        "source_run_dir": f"episodes/{run_id}/worlds/{label}",
+        "source_run_dir": (
+            f"episodes/{run_id}" if label == "family" else f"episodes/{run_id}/worlds/{label}"),
     }
+    if subject == SUBJECT_WORLD:
+        row["world"] = None if label == "family" else label
+        row["pattern"] = finding.get("pattern")
+        row["holding_system"] = finding.get("holding_system")
+        row["provenance"] = provenance
+    return row
 
 
 def _draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
@@ -290,53 +405,74 @@ def _draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
 
 
 def enqueue(episode_dir: Path, grade: Any, *, queue_dir: Path | None = None,
-            drawn: dict[str, dict[int, dict[str, Any]]] | None = None) -> int:
-    """How many rows this pass enqueued. See `enqueue_report` for the rest of the answer."""
-    return enqueue_report(episode_dir, grade, queue_dir=queue_dir, drawn=drawn).appended
+            drawn: dict[str, dict[int, dict[str, Any]]] | None = None,
+            family_drawn: dict[int, dict[str, Any]] | None = None) -> int:
+    """How many DEFENDER rows this pass enqueued. See `enqueue_report` for the rest of the
+    answer, including the questioner channel's own count."""
+    return enqueue_report(episode_dir, grade, queue_dir=queue_dir, drawn=drawn,
+                          family_drawn=family_drawn).appended
 
 
 @dataclass(frozen=True)
 class EnqueueReport:
-    """What one enqueue did: rows appended, findings it could not make a row of, and the
-    malformed lines already on the queue when it appended."""
+    """What one enqueue did, on BOTH channels (#1007 M6): rows appended, findings it could not
+    make a row of, and the malformed lines already on each queue when it appended."""
 
     appended: int = 0
     unqueueable: list[str] = field(default_factory=list)
     queue_malformed_rows: int = 0
+    world_appended: int = 0
+    world_queue_malformed_rows: int = 0
+    #: The world rows this pass actually appended — handed on so an in-process caller
+    #: (`EpisodeGrade.world_findings`) can see them without re-reading the queue file.
+    world_rows: list[dict[str, Any]] = field(default_factory=list)
 
 
-def enqueue_report(episode_dir: Path, grade: Any, *, queue_dir: Path | None = None,
-                   drawn: dict[str, dict[int, dict[str, Any]]] | None = None) -> EnqueueReport:
-    """Every finding of every completed draw of every graded world -> one `FindingRow`.
+def _add_row(  # noqa: PLR0913 — the sink dispatch's own inputs
+    row: dict[str, Any], *, validator: Any, sink: list[dict[str, Any]],
+    unqueueable: list[str], episode_dir: Path,
+) -> None:
+    """Validate one row against its OWN channel's rule and file it — or name the drop. ONE
+    dispatcher for both channels, so a finding that cannot become a valid row costs only that
+    finding (never the episode): the blast radius `_validate_row`'s docstring has always
+    promised, now shared by the world lane too."""
+    try:
+        validator(row, episode_dir=episode_dir)
+    except JudgeRefused as refused:
+        unqueueable.append(f"{row['finding_id']}: {refused}")
+        return
+    sink.append(row)
 
-    `grade` carries the family's `verdict_word` (the word every row's `judge_outcome` takes)
-    and the per-world rows that name which worlds are graded. `drawn` is what the pass just
-    produced, per world and keyed by draw index; a caller that has it hands it over rather than
-    having every file it wrote read and parsed back, and a caller that does not (a bare
-    re-enqueue) falls back to the directory. Either way a retried call re-derives the SAME rows
-    rather than minting fresh ids (P5's idempotency key is `finding_id` alone).
 
-    A finding that cannot become a valid row is DROPPED AND NAMED, not raised on. The rule it
-    is judged by is `_validate_row` itself, asked one row at a time, so there is still exactly
-    one definition of what the queue accepts — but the blast radius is that finding rather than
-    the episode: a model emitting one finding with an empty anchor used to refuse the whole
-    append, discarding every other world's good findings and (because the record is written
-    after the enqueue, J11) leaving no `judge.yaml` to say what had been graded at all."""
+def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partition (M6) and the mechanical/family draws (M3/M5) are one pass over one set of findings; splitting it would re-derive `graded_labels`/`alert_rule_key` per lane
+    episode_dir: Path, grade: Any, *, queue_dir: Path | None = None,
+    drawn: dict[str, dict[int, dict[str, Any]]] | None = None,
+    family_drawn: dict[int, dict[str, Any]] | None = None,
+) -> EnqueueReport:
+    """Every finding of every completed draw -> one `FindingRow`, partitioned by `subject`
+    (#1007 O1/M6) onto the defender channel or the questioner channel.
+
+    `grade` carries the family's `verdict_word` (the word every DEFENDER row's `judge_outcome`
+    takes; a world row's is always blanked at the questioner appender) and the per-world rows
+    that name which worlds are graded, their `withheld_reason` (O4) and their own mechanical
+    `world_findings` (M3). `drawn` is what the pass just produced, per world and keyed by draw
+    index; `family_drawn` is likewise the family-level call's own draws (M5). A caller that has
+    them hands them over rather than having every file it wrote read back, and one that does
+    not (a bare re-enqueue) falls back to the world draw directories on disk — the family call
+    has no such directory and is `family_drawn=None` on that path (nothing to re-derive).
+
+    THE TWO LANES DO NOT SHARE ONE EARLY RETURN. A `discard`/`corpus-contradiction`
+    `verdict_word` (O7) means no DEFENDER row may reach the queue — that episode's whole
+    artifact is the family record — but it says nothing about the WORLD lane, whose findings
+    are about the instrument, not the defender's conduct (`test_an_unqueueable_defender_finding_
+    does_not_suppress_the_world_findings`)."""
     episode_dir = Path(episode_dir)
     verdict_word = grade["verdict_word"] if isinstance(grade, dict) else grade.verdict_word
-    # THROUGH THE OWNER'S NORMALIZER, not a bare `in` — the same rule `_validate_row` states two
-    # functions up, and for the same two reasons. `grade` may be built from `judge.yaml` off a
-    # tree a box can reach (`_grade_from_document`), so `verdict_word: [discard]` raises
-    # `TypeError: unhashable type` out of a function whose contract is this design's refusal, and
-    # `verdict_word: Discard` misses the O7 early return entirely — every row is then built with
-    # a `judge_outcome` `_validate_row` refuses one at a time, so the pass reports N unqueueable
-    # findings instead of the one honest "the family record is this episode's whole artifact".
-    if normalized_judge_outcome(verdict_word) in _UNQUEUEABLE_VERDICTS:
-        return EnqueueReport()
     world_rows = grade["worlds"] if isinstance(grade, dict) else grade.worlds
     # `family.is_gradable_row`, the ONE predicate — see its docstring: this site and
     # `grade_family`'s own answered the same question two ways.
     graded_labels = [w["world"] for w in world_rows if is_gradable_row(w)]
+    withheld_labels = {w["world"] for w in world_rows if w.get("withheld_reason")}
     run_id = episode_dir.name
     # `render.episode_alert`, the ONE rule for which world's `alert.json` this episode's alert
     # comes off. A local copy taking the first world whose file merely PARSED disagreed with
@@ -344,9 +480,36 @@ def enqueue_report(episode_dir: Path, grade: Any, *, queue_dir: Path | None = No
     # union was then keyed on one world's alert while every row landed under a rule key derived
     # from another's document.
     alert_rule_key = derive_alert_rule_key(episode_alert(episode_dir, graded_labels))
+    # THROUGH THE OWNER'S NORMALIZER, not a bare `in` — the same rule `_validate_row` states.
+    # `grade` may be built from `judge.yaml` off a tree a box can reach (`_grade_from_document`),
+    # so `verdict_word: [discard]` raises `TypeError: unhashable type` out of a function whose
+    # contract is this design's refusal, and `verdict_word: Discard` misses the O7 gate entirely.
+    defender_blocked = normalized_judge_outcome(verdict_word) in _UNQUEUEABLE_VERDICTS
 
-    rows: list[dict[str, Any]] = []
+    defender_rows: list[dict[str, Any]] = []
+    world_rows_out: list[dict[str, Any]] = []
     unqueueable: list[str] = []
+
+    # M5's family-level draws FIRST — always `subject: world`, `world: None`, keyed under the
+    # reserved `family` label so the coordinate can never collide with a per-world one. Ordered
+    # ahead of the per-world walk so a family-level finding is never shadowed, on the channel's
+    # own written order, by a per-world finding that happens to share its bucket string (the
+    # vocabulary is open — R2 — so nothing else distinguishes them positionally).
+    for draw, draw_doc in (family_drawn or {}).items():
+        findings = draw_doc.get("findings") or []
+        for index, finding in enumerate(findings):
+            if not isinstance(finding, dict):
+                unqueueable.append(
+                    f"{run_id}/family/{draw}/{index}: the family draw's finding[{index}] is "
+                    f"{type(finding).__name__}, not a mapping")
+                continue
+            row = build_finding_row(
+                run_id=run_id, label="family", draw=str(draw), index=index,
+                subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,
+                judge_outcome=verdict_word, provenance="model")
+            _add_row(row, validator=_validate_world_row, sink=world_rows_out,
+                     unqueueable=unqueueable, episode_dir=episode_dir)
+
     for label in graded_labels:
         # "THE CALLER HANDED NOTHING OVER" IS `drawn is None`, and nothing else. `(drawn or
         # {})` folded an EMPTY map — and a map simply missing this label — back onto the disk
@@ -354,10 +517,8 @@ def enqueue_report(episode_dir: Path, grade: Any, *, queue_dir: Path | None = No
         # draw for a world would then queue whatever an earlier, wider attempt left in that
         # world's draw directory as its own findings (P4: a retry clobbers, it cleans nothing
         # up), under THIS pass's `verdict_word`.
-        if drawn is not None:
-            documents = drawn.get(label) or {}
-        else:
-            documents = _draws_on_disk(episode_dir / "worlds" / label / "judge")
+        documents = (drawn.get(label) or {}) if drawn is not None else _draws_on_disk(
+            episode_dir / "worlds" / label / "judge")
         for draw, draw_doc in documents.items():
             findings = draw_doc.get("findings") or []
             for index, finding in enumerate(findings):
@@ -371,19 +532,55 @@ def enqueue_report(episode_dir: Path, grade: Any, *, queue_dir: Path | None = No
                         f"{run_id}/{label}/{draw}/{index}: the draw's finding[{index}] is "
                         f"{type(finding).__name__}, not a mapping")
                     continue
-                row = _build_row(
-                    run_id=run_id, label=label, draw=str(draw), index=index,
-                    finding=finding, alert_rule_key=alert_rule_key,
-                    judge_outcome=verdict_word)
-                try:
-                    _validate_row(row, episode_dir=episode_dir)
-                except JudgeRefused as refused:
-                    unqueueable.append(f"{row['finding_id']}: {refused}")
+                subject = finding.get("subject")
+                if subject == SUBJECT_WORLD:
+                    row = build_finding_row(
+                        run_id=run_id, label=label, draw=str(draw), index=index,
+                        subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,
+                        judge_outcome=verdict_word, provenance="model")
+                    _add_row(row, validator=_validate_world_row, sink=world_rows_out,
+                             unqueueable=unqueueable, episode_dir=episode_dir)
                     continue
-                rows.append(row)
-    appended, malformed = append_rows_report(episode_dir, rows, queue_dir=queue_dir)
-    return EnqueueReport(appended=appended, unqueueable=unqueueable,
-                         queue_malformed_rows=malformed)
+                if defender_blocked or label in withheld_labels:
+                    # O7 (discard/corpus-contradiction) or O4 (this world measured nothing):
+                    # never a defender row, and never counted as unqueueable — it was never
+                    # eligible in the first place.
+                    continue
+                row = build_finding_row(
+                    run_id=run_id, label=label, draw=str(draw), index=index,
+                    subject=SUBJECT_DEFENDER, finding=finding, alert_rule_key=alert_rule_key,
+                    judge_outcome=verdict_word)
+                _add_row(row, validator=_validate_row, sink=defender_rows,
+                         unqueueable=unqueueable, episode_dir=episode_dir)
+
+    # M3's mechanical world finding(s) — a FIXED synthetic (draw, index) coordinate per world,
+    # so a re-grade is absorbed by the questioner channel's own idempotency
+    # (`test_a_re_grade_appends_no_second_mechanical_world_finding`).
+    for row_dict in world_rows:
+        label = row_dict.get("world")
+        for mech_index, finding in enumerate(row_dict.get("mechanical_world_findings") or []):
+            wrow = build_finding_row(
+                run_id=run_id, label=label, draw="mechanical", index=mech_index,
+                subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,
+                judge_outcome=verdict_word, provenance=finding.get("provenance", "mechanical"))
+            _add_row(wrow, validator=_validate_world_row, sink=world_rows_out,
+                     unqueueable=unqueueable, episode_dir=episode_dir)
+
+    if defender_blocked:
+        defender_appended, defender_malformed = 0, 0
+    else:
+        defender_appended, defender_malformed = append_rows_report(
+            episode_dir, defender_rows, queue_dir=queue_dir)
+    world_appended, world_malformed = append_world_rows_report(
+        episode_dir, world_rows_out, queue_dir=queue_dir)
+    reported_world_rows = [{**row, "judge_outcome": None} for row in world_rows_out]
+    return EnqueueReport(
+        appended=defender_appended, unqueueable=unqueueable,
+        queue_malformed_rows=defender_malformed, world_appended=world_appended,
+        world_queue_malformed_rows=world_malformed, world_rows=reported_world_rows)
 
 
-__all__ = ["EnqueueReport", "append_rows", "append_rows_report", "enqueue", "enqueue_report"]
+__all__ = [
+    "EnqueueReport", "append_rows", "append_rows_report", "append_world_rows",
+    "append_world_rows_report", "build_finding_row", "enqueue", "enqueue_report",
+]

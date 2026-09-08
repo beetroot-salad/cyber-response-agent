@@ -38,11 +38,12 @@ validated holding system):
 | a doctored answer was served, no resolution moved, verdict != declared | `analyze-discipline` |
 | a doctored answer was served, a resolution moved, verdict != declared | `decision-discipline` |
 
-`verdict == declared` while every H row is `passthrough` (queried, never shown anything) is
-flagged `agreed-without-evidence` rather than bucketed — an outcome, not a defect. A `fault` row
-on H makes the world `ungradable` (J5's tier rule) rather than any of the above; a `refused` row
-on H counts as having queried (F-1) and excludes the world from every failure bucket without
-making it ungradable.
+`verdict == declared` while every H row is `passthrough` (queried, never shown anything) still
+buckets `lead-quality` (#1007/N8 retired the old flag this table used to carve out here — see
+O4's withholding ladder for what now distinguishes an honest agreement from a lucky one). A
+`fault` row on H makes the world `ungradable` (J5's tier rule) rather than any of the above; a
+`refused` row on H counts as having queried (F-1) and excludes the world from every failure
+bucket without making it ungradable.
 """
 
 from __future__ import annotations
@@ -60,6 +61,7 @@ from defender.learning.branch.ledger import (
     APPLIER_DECISIONS,
     FAULT,
     PASSTHROUGH,
+    PATCHED,
     REFUSED,
     STAGED,
     normalized_source,
@@ -77,6 +79,154 @@ from defender.runtime.branch._family import (
 from defender.skills.invlang._walkers import iter_resolutions
 from defender.skills.invlang.parser import NO_OPEN_BLOCK, parse_dense_companion, scan_fences
 
+#: The ONE bucket the mechanical pass itself mints on the world lane (M3 row 4 + O4's "including
+#: row 1"). Every other world bucket in this design is a model's own string (R2's open
+#: vocabulary) — this is the sole arithmetic one.
+MECHANICAL_WORLD_BUCKET = "unreachable-difference"
+
+#: `withheld_reason`'s closed domain (O4's own cells plus the episode-wide one).
+WITHHELD_MEASURED_NOTHING = "measured_nothing"
+WITHHELD_CAPTURE_UNADDRESSED = "capture_unaddressed"
+WITHHELD_REACHABILITY_UNMEASURED = "reachability_unmeasured"
+WITHHELD_EPISODE_INCOMPLETE = "episode_incomplete"
+
+REVIEW_NAME = "review.yaml"
+
+
+def _default_review_reader(path: Path) -> dict[str, Any]:
+    """`review.yaml`, through the same guarded read every other episode-dir read in this pass
+    makes. ABSENT reads as `{}` (there is nothing to read); an ALIASED entry is this design's
+    refusal, because something is there and it is not the record."""
+    import yaml
+
+    from defender._yaml import safe_load
+
+    if not (path.exists() or path.is_symlink()):
+        return {}
+    text, refusal = read_guarded(path)
+    if text is None:
+        raise JudgeRefused(f"{path} could not be read: {refusal}")
+    try:
+        doc = safe_load(text) or {}
+    except yaml.YAMLError as bad:
+        raise JudgeRefused(f"{path} could not be read: {bad}") from bad
+    return doc if isinstance(doc, dict) else {}
+
+
+def read_review_record(episode_dir: Path, *, reader: Any = None) -> dict[str, Any]:
+    """`review.yaml`, parsed ONCE per caller. The ONE home for this read: `judge/__init__.py`'s
+    own orchestration and `family.grade_family` both want it, and the episode dir is a tree a
+    box can reach — two independent parses had no guarantee of agreeing (#1007,
+    `test_grade_family_reads_the_review_record_once_through_the_guarded_reader`)."""
+    read = reader if reader is not None else _default_review_reader
+    return read(Path(episode_dir) / REVIEW_NAME)
+
+
+def _world_review_block(review: dict[str, Any], label: str) -> dict[str, Any] | None:
+    """This world's own `reachability` sub-block off the review record, or `None` when the
+    review carries no entry for this label at all (a manifest/review disagreement, J-shaped:
+    joined BY NAME, never by position — #1007
+    `test_a_label_present_in_only_one_artifact_reads_as_an_absent_block`)."""
+    worlds = review.get("worlds")
+    entry = worlds.get(label) if isinstance(worlds, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    block = entry.get("reachability")
+    return block if isinstance(block, dict) else None
+
+
+@dataclass(frozen=True)
+class ReachabilityFacts:
+    """O2's three executed facts, read off ONE world's review block and validated against
+    their own bool|null domain — never coerced (#1007, `test_a_non_boolean_reachable_by_capture
+    _reads_as_unmeasured`)."""
+
+    present: bool
+    reachable_by_capture: bool | None
+    capture_addressed: bool
+    capture_reasks_faulted: int
+    injected_retrieved: Any
+    injected_present: Any
+
+
+def _reachability_facts(block: dict[str, Any] | None) -> ReachabilityFacts:
+    if block is None:
+        return ReachabilityFacts(
+            present=False, reachable_by_capture=None, capture_addressed=False,
+            capture_reasks_faulted=0, injected_retrieved=None, injected_present=None)
+    raw = block.get("reachable_by_capture")
+    reachable = raw if isinstance(raw, bool) else None
+    faulted = block.get("capture_reasks_faulted")
+    return ReachabilityFacts(
+        present=True, reachable_by_capture=reachable,
+        capture_addressed=block.get("capture_addressed") is True,
+        capture_reasks_faulted=faulted if isinstance(faulted, int) else 0,
+        injected_retrieved=block.get("injected_retrieved"),
+        injected_present=block.get("injected_present"))
+
+
+def _withheld_reason(*, difference_shown: bool, facts: ReachabilityFacts) -> str | None:
+    """O4's ladder row 4, as a pure function of what O2/O3 measured — independent of which
+    mechanical bucket the row falls into, so a `lead-set`/`lead-quality` world can be withheld
+    exactly as a doctored one can (#1007, `test_a_reachable_world_that_showed_nothing_still_
+    enqueues_lead_set` is the positive control)."""
+    if difference_shown:
+        return None
+    if not facts.present:
+        return WITHHELD_REACHABILITY_UNMEASURED
+    if not facts.capture_addressed:
+        return WITHHELD_CAPTURE_UNADDRESSED
+    if facts.reachable_by_capture is True:
+        return None
+    if facts.reachable_by_capture is False:
+        return WITHHELD_MEASURED_NOTHING
+    return WITHHELD_REACHABILITY_UNMEASURED
+
+
+def declares_difference(overlay: Any) -> bool:
+    """Does this world's overlay declare ANY difference — an injection, an exclusion or a
+    patch? The three overlay halves are three spellings of one claim ("this world differs"),
+    which is why the mechanical world finding checks all three rather than the injection alone
+    (#1007, `test_unreachable_difference_fires_for_inject_exclude_and_patch_alike`)."""
+    if not isinstance(overlay, dict):
+        return False
+    if overlay.get("patches"):
+        return True
+    staged = overlay.get("elastic")  # lint-shippable: ok — the manifest's own field name; see runtime/branch/_family.py's own suppression on the same field
+    if isinstance(staged, dict):
+        for spec in staged.values():  # lint-shippable: ok — the manifest's own field name
+            if isinstance(spec, dict) and (spec.get("inject") or spec.get("exclude")):
+                return True
+    return False
+
+
+def _mechanical_world_finding(
+    *, label: str, pattern: str, holding_system: str,
+) -> dict[str, Any]:
+    """The ONE finding the mechanical pass itself mints: `unreachable-difference`, tagged
+    `provenance: mechanical` so a same-bucket model draw of the same world never collapses onto
+    it (#1007, `test_a_mechanical_world_finding_is_told_from_a_model_drawn_one_by_provenance`)."""
+    return {
+        "bucket": MECHANICAL_WORLD_BUCKET, "subject": "world",
+        "claim": f"world {label!r}'s declared difference could not be reproduced live against "
+                 "the capture's own vocabulary",
+        "root_cause": "no completed re-ask of a captured query naming this world's staged "
+                       "pattern (or, for a patch, its host-side replay) differed from the base",
+        "anchor": f"world {label}", "topic": "reachability",
+        "evidence": [f"{REVIEW_NAME}#worlds.{label}.reachability"],
+        "pattern": pattern, "holding_system": holding_system, "provenance": "mechanical",
+    }
+
+
+def _world_pattern(overlay: Any, *, holding_system: str) -> str:
+    """The pattern a world row's queue entry cites — the first staged corpus pattern the
+    overlay names, or the holding system's own name for a patch-only world (no such pattern
+    exists to name)."""
+    if isinstance(overlay, dict):
+        staged = overlay.get("elastic")  # lint-shippable: ok — the manifest's own field name; see runtime/branch/_family.py's own suppression on the same field
+        if isinstance(staged, dict) and staged:
+            return str(next(iter(staged)))
+    return holding_system
 
 
 @dataclass
@@ -87,13 +237,19 @@ class FamilyGrade:
     exclusion has to be traceable on the record). `graded_worlds` names the ones that
     contributed to `verdict_word`. `world_facts` is what this pass READ, per world it got as
     far as reading — handed on so the render does not open the same three files again; it is
-    an in-memory by-product of the pass and is not part of `judge.yaml`."""
+    an in-memory by-product of the pass and is not part of `judge.yaml`.
+
+    `measuring_worlds` (#1007) is the subset of `graded_worlds` whose `withheld_reason` is
+    `None` — the ones `verdict_word` is computed over. `withheld_worlds` is graded worlds NOT in
+    that set."""
 
     episode_dir: Path
     worlds: list[dict[str, Any]] = field(default_factory=list)
     verdict_word: str = "undecidable"
     graded_worlds: frozenset[str] = field(default_factory=frozenset)
     world_facts: dict[str, WorldFacts] = field(default_factory=dict)
+    measuring_worlds: frozenset[str] = field(default_factory=frozenset)
+    withheld_worlds: frozenset[str] = field(default_factory=frozenset)
 
 
 def _raw_manifest(episode_dir: Path) -> dict[str, Any]:
@@ -590,6 +746,8 @@ def _missing_required_input(
 
 def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the bucket state machine are one demand (J5 + the mechanical bucket table); splitting them would let a caller reach the bucket logic on a world the tier rule never cleared
     episode_dir: Path, world: dict[str, Any], *, episode_token: str, holding_system: str,
+    review_block: dict[str, Any] | None = None, episode_incomplete: bool = False,
+    withholding_applies: bool = True,
 ) -> tuple[dict[str, Any], WorldFacts | None]:
     label = world["world_id"]
     raw_declared = world.get("disposition_declared")
@@ -673,6 +831,49 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     scope_discriminated = any(_scope_discriminated_row(r) for r in h_rows)
     has_refused = any(r.get("source") == REFUSED for r in h_rows)
 
+    # M2's witness (O3): `differs_from_base` is written ONLY on `staged` rows, and its domain
+    # is `bool | null` — `null` when the witness read itself faulted. NOT FALSE is the rule for
+    # BOTH readings this field must survive: a pre-#1007 fixture (or any non-staged system's
+    # row) that never carries the key at all reads as `.get(...) is None`, identically to a
+    # witness that ran and faulted — and neither is the one fact this field exists to record
+    # ("the payload served genuinely differed"), so both lean toward NOT excusing the defender
+    # rather than toward withholding a real finding. `patched` rows carry no witness at all
+    # (M2's own scope) and count unconditionally: H1 already makes the applier report `PATCHED`
+    # only when the merged content differs from what an unpatched read would have served, so
+    # RS-2's "PATCHED implied shown, wrongly" is closed at ITS root rather than by a second
+    # witness here.
+    difference_shown = any(
+        r.get("source") == PATCHED
+        or (r.get("source") == STAGED and r.get("differs_from_base") is not False)
+        for r in h_rows)
+
+    facts_o2 = _reachability_facts(review_block)
+    if not withholding_applies:
+        # M1 never participated in this review at all (see `grade_family`'s own comment) — O4's
+        # whole withholding ladder, `episode_incomplete` included, has nothing to withhold ON:
+        # a review record with no per-world reachability data anywhere is a review that never
+        # went through #1007's review step at all (every pre-#1007 fixture), and "no served
+        # row anywhere" reads exactly like the ordinary "the sibling queried nothing" case those
+        # fixtures already pin — not evidence the episode died mid-run.
+        withheld_reason = None
+    else:
+        withheld_reason = (
+            WITHHELD_EPISODE_INCOMPLETE if episode_incomplete
+            else _withheld_reason(difference_shown=difference_shown, facts=facts_o2))
+
+    # THE MECHANICAL WORLD FINDING IS NOT GATED ON `episode_incomplete`. Reachability is a
+    # REVIEW-TIME fact (M1's capture re-ask, step 4) — decided before any sibling even runs
+    # (step 5) — so it exists independently of whether the sibling ever queried anything; only
+    # the DEFENDER lane's withholding depends on whether the episode ran at all
+    # (`test_unreachable_difference_fires_even_with_no_row_on_the_holding_system`, whose own
+    # served ledger is empty and still mints this finding).
+    mechanical_findings: list[dict[str, Any]] = []
+    pattern = _world_pattern(world.get("overlay"), holding_system=holding_system)
+    if (not difference_shown and facts_o2.reachable_by_capture is False
+            and declares_difference(world.get("overlay"))):
+        mechanical_findings.append(_mechanical_world_finding(
+            label=label, pattern=pattern, holding_system=holding_system))
+
     row.update(
         holding_queried=holding_queried, scope_discriminated=scope_discriminated,
         doctored_answer_served=doctored, resolution_moved=resolution_moved,
@@ -688,6 +889,24 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
         # J5's tier rule keeps its meaning. Derived from absence, this fact and that refusal
         # would be competing readings of one missing file.
         served_nothing=not facts.ledger_rows,
+        # #1007's per-world facts (O2/O3/O4/M3), the row shape `test_grade_episode_returns_
+        # extended_record` pins.
+        difference_shown=difference_shown,
+        reachable_by_capture=facts_o2.reachable_by_capture,
+        capture_addressed=facts_o2.capture_addressed,
+        capture_reasks_faulted=facts_o2.capture_reasks_faulted,
+        injected_retrieved=facts_o2.injected_retrieved,
+        injected_present=facts_o2.injected_present,
+        withheld_reason=withheld_reason,
+        # `world_findings` starts as exactly the mechanical ones and the orchestration EXTENDS
+        # it with this world's own model-drawn `subject: world` findings once its draws
+        # complete (#1007 M4) — the row reads as "every world finding about this world", while
+        # `mechanical_world_findings` stays the STABLE subset `enqueue_report`'s dedicated
+        # fixed-coordinate walk enqueues (never re-walking `world_findings`, which would double
+        # -count a model draw already enqueued through the per-draw loop).
+        world_findings=list(mechanical_findings),
+        mechanical_world_findings=mechanical_findings,
+        sample_unavailable=False,
     )
     if integrity_notes:
         row["integrity_notes"] = integrity_notes
@@ -705,41 +924,41 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
         return row, facts
 
     bucket: str | None
-    flag: str | None = None
+    agreed_without_difference = False
     if not holding_queried:
         bucket = "lead-set"
     elif not doctored:
-        # "agreed-without-evidence" needs the world to have genuinely exhausted its asking of
-        # H — more than one distinct call — before "it agreed and was shown nothing" reads as
-        # an honest non-defect rather than as a lead the world tried once, narrowly, and
-        # happened to still land on the right side of.
-        #
-        # AND NOT A REFUSED ROW AMONG THEM. This module's own table defines the flag as
-        # `verdict == declared` while every H row is `passthrough` — queried, and shown
-        # nothing. A refused row is the estate declining to answer at all, which is a
-        # CAPABILITY outcome (F-1), and stamping it `agreed-without-evidence` tells an
-        # operator the defender agreed having been shown nothing when in fact it was never
-        # answered. Tested before the flag rather than after it, because the flag branch used
-        # to win and `elif has_refused` was then unreachable for exactly this world.
-        if verdict == declared and len(h_rows) >= 2 and not has_refused:
-            bucket = None
-            flag = "agreed-without-evidence"
-        elif has_refused:
-            # F-1: a refused H interaction counts as having queried, and is excluded from the
-            # failure buckets rather than defaulted into `lead-set`.
-            bucket = None
-        else:
-            bucket = "lead-quality"
-    else:
+        # F-1: a refused H interaction counts as having queried, and is excluded from the
+        # failure buckets rather than defaulted into `lead-quality`. The OLD "agreed-without-
+        # evidence" special case (verdict == declared while every H row is passthrough) is
+        # REMOVED (N8): O4's withholding ladder above now carries that distinction — a world
+        # that agreed having been shown nothing still buckets `lead-quality`, and whether its
+        # finding is actually enqueued turns on `withheld_reason` (reachable_by_capture), not
+        # on a bucket-level flag.
+        bucket = None if has_refused else "lead-quality"
+    elif difference_shown:
+        # Ladder row 3 — UNCHANGED.
         if verdict == declared:
             bucket = None
         elif resolution_moved:
             bucket = "decision-discipline"
         else:
             bucket = "analyze-discipline"
+    else:
+        # Ladder row 4: staged/patched rows exist, but nothing was SHOWN.
+        if facts_o2.reachable_by_capture is True:
+            # "the sibling scoped the difference out; a captured query would have shown it" —
+            # a real coverage gap regardless of the eventual verdict.
+            bucket = "lead-quality"
+        elif verdict == declared:
+            bucket = None
+            agreed_without_difference = True
+        elif resolution_moved:
+            bucket = "decision-discipline"
+        else:
+            bucket = "analyze-discipline"
     row["bucket"] = bucket
-    if flag is not None:
-        row["flag"] = flag
+    row["agreed_without_difference"] = agreed_without_difference
     return row, facts
 
 
@@ -752,19 +971,50 @@ def is_gradable_row(row: Any) -> bool:
     return isinstance(row, dict) and not row.get("ungradable")
 
 
-def grade_family(episode_dir: Path, *, manifest: dict[str, Any] | None = None) -> FamilyGrade:
-    """The mechanical pass: five facts and a bucket per non-control world, plus the family's
-    `verdict_word`. Self-contained over `episode_dir` alone — no comparison, no comparator
-    call, order-independent across worlds (O3).
+def _episode_has_any_served_row(
+    episode_dir: Path, worlds: list[dict[str, Any]], *, episode_token: str,
+) -> bool:
+    """Was ANY row served anywhere in this episode — not merely on the holding system?
+
+    A LIGHTWEIGHT pre-check, read separately from `_grade_world`'s own ledger read: whether the
+    episode is complete at all has to be known BEFORE any single world's `withheld_reason` can
+    be computed (#1007, `test_an_episode_killed_before_the_sibling_ran_withholds_with_episode_
+    incomplete`), so this reads first and cheaply rather than threading a two-pass state machine
+    through `_grade_world` itself. A world whose ledger cannot even be read (J5 tier 1/2, which
+    `_grade_world` will mark `ungradable` on its own pass) contributes nothing here either way."""
+    for world in worlds:
+        label = world.get("world_id")
+        if not isinstance(label, str) or not label:
+            continue
+        path = world_ledger_path(episode_dir, label, episode_token=episode_token)
+        try:
+            rows, _malformed = _read_world_ledger(
+                path, world_token_for(episode_token, label))
+        except JudgeRefused:
+            continue
+        if rows:
+            return True
+    return False
+
+
+def grade_family(
+    episode_dir: Path, *, manifest: dict[str, Any] | None = None,
+    review: dict[str, Any] | None = None, review_reader: Any = None,
+) -> FamilyGrade:
+    """The mechanical pass: per-world facts and a bucket per non-control world, plus the
+    family's `verdict_word`. Self-contained over `episode_dir` alone — no comparator call,
+    order-independent across worlds (O3).
 
     Refuses only for a fault in the MANIFEST, which is what says which worlds there are. A
     fault in one world's own archive marks that world `ungradable` and grades the rest — see
     the module docstring on where a refusal stops.
 
     `manifest` is THE PASS'S OWN PARSE, when the caller has one — the same hand-over `render`
-    already takes. The orchestration reads and parses `family.yaml` immediately before calling
-    this, so without it one pass read and parsed the same file twice, and the episode dir is a
-    tree a box can reach: there was no guarantee the two documents were the same document."""
+    already takes. `review` is likewise the caller's own already-parsed record (#1007's
+    orchestration reads it once for its own outcome check and hands it over here); when neither
+    is given, this pass reads `review.yaml` itself, through `review_reader` when injected,
+    EXACTLY ONCE regardless of world count (#1007, `test_grade_family_reads_the_review_record_
+    once_through_the_guarded_reader`)."""
     episode_dir = Path(episode_dir)
     doc = manifest if manifest is not None else _raw_manifest(episode_dir)
     holding_system = _holding_system(doc)
@@ -772,12 +1022,37 @@ def grade_family(episode_dir: Path, *, manifest: dict[str, Any] | None = None) -
     episode_id = episode_id_of(doc)
     _check_world_labels(episode_id, worlds)
     episode_token = episode_token_for(episode_id)
+    review_doc = review if review is not None else read_review_record(
+        episode_dir, reader=review_reader)
+
+    # GATED ON THERE BEING A SIBLING TO SPEAK OF (len(worlds) >= 2). A single-world episode
+    # whose one world queried nothing is structurally identical to the ordinary "no row on H"
+    # case the withholding ladder already reads correctly off `reachable_by_capture` alone
+    # (`test_a_reachable_world_that_showed_nothing_still_enqueues_lead_set`, one world, empty
+    # ledger, `reachable_by_capture: true` — NOT episode_incomplete). "The episode died before
+    # any sibling ran" is a fact only a FAMILY OF SIBLINGS can be caught in — there is nothing
+    # for one lone world to have been killed before.
+    episode_incomplete = len(worlds) >= 2 and not _episode_has_any_served_row(
+        episode_dir, worlds, episode_token=episode_token)
+    # DID M1 PARTICIPATE IN THIS REVIEW AT ALL? A review record whose `worlds` carries no entry
+    # for ANY world (never run through M1's capture re-ask — every #921/#947 fixture predating
+    # #1007, which write `review.yaml` with `worlds: {}`) is a DIFFERENT fact from "M1 ran and
+    # this particular world's block is missing" (`test_a_label_present_in_only_one_artifact_
+    # reads_as_an_absent_block`, where OTHER worlds in the same record do carry a block). Only
+    # the second is withheld as `reachability_unmeasured`; the first withholds nothing; O2/O4
+    # are additive facts a review that never measured them at all cannot make.
+    m1_participates = isinstance(review_doc.get("worlds"), dict) and bool(review_doc["worlds"])
 
     rows: list[dict[str, Any]] = []
     facts: dict[str, WorldFacts] = {}
     for world in worlds:
+        label = world.get("world_id")
+        block = (_world_review_block(review_doc, label)
+                if m1_participates and isinstance(label, str) else None)
         row, read = _grade_world(episode_dir, world, episode_token=episode_token,
-                                holding_system=holding_system)
+                                holding_system=holding_system, review_block=block,
+                                episode_incomplete=episode_incomplete,
+                                withholding_applies=m1_participates)
         rows.append(row)
         if read is not None:
             facts[row["world"]] = read
@@ -787,22 +1062,32 @@ def grade_family(episode_dir: Path, *, manifest: dict[str, Any] | None = None) -
     # that is not there.
     control_declared = normalized_disposition(_control_declared(doc))
     graded = frozenset(r["world"] for r in rows if is_gradable_row(r))
+    # #1007/O4: `verdict_word` is computed over MEASURING worlds only — a graded world whose
+    # `withheld_reason` is set contributed no observation the family's word can rest on, exactly
+    # as an ungradable one already did not (`test_a_withheld_world_does_not_vote_in_verdict_
+    # word`, `test_verdict_word_is_undecidable_when_no_world_measured`).
+    measuring = frozenset(
+        r["world"] for r in rows if r["world"] in graded and r.get("withheld_reason") is None)
+    withheld = graded - measuring
     contrasting = {
         r["world"] for r in rows
-        if r["world"] in graded and r.get("declared") is not None
+        if r["world"] in measuring and r.get("declared") is not None
         and r.get("declared") != control_declared
     }
     if not contrasting:
         word = "undecidable"
-    elif all(r["verdict"] == r["declared"] for r in rows if r["world"] in graded):
+    elif all(r["verdict"] == r["declared"] for r in rows if r["world"] in measuring):
         word = "caught"
     else:
         word = "survived"
     return FamilyGrade(episode_dir=episode_dir, worlds=rows, verdict_word=word,
-                       graded_worlds=graded, world_facts=facts)
+                       graded_worlds=graded, world_facts=facts,
+                       measuring_worlds=measuring, withheld_worlds=withheld)
 
 
 __all__ = [
-    "FamilyGrade", "WorldFacts", "discriminator_of", "episode_id_of", "grade_family",
-    "is_gradable_row", "mapping_key", "names_one_file", "read_world_facts", "scope_params",
+    "FamilyGrade", "MECHANICAL_WORLD_BUCKET", "ReachabilityFacts", "WorldFacts",
+    "declares_difference", "discriminator_of", "episode_id_of", "grade_family",
+    "is_gradable_row", "mapping_key", "names_one_file", "read_review_record",
+    "read_world_facts", "scope_params",
 ]

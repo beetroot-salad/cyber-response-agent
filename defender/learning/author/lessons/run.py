@@ -352,11 +352,20 @@ def _gate_findings(
     # gate keys on the symbol NAME, so it is structurally blind to the copy. Widening the family
     # route later would otherwise update one site and leave the other routing as it always did.
     from defender.learning.author.verify_forward.checks import skips_forward_check
+    from defender.learning.judge.run import SUBJECT_WORLD
 
     existing_ids = existing_finding_ids(cfg)
     held: list[dict] = []
     consumed_idempotent: list[dict] = []
     for entry in batch:
+        # #1007 M6/S4: a `direction: world` row is bound for the QUESTIONER curator's channel,
+        # never this one — the defender curator's gate refuses it LOUDLY (never a silent hold,
+        # which would read exactly like an ordinary un-authorable finding) so a mis-routed row
+        # cannot be turned into a defender lesson by the gate that never expected to see it.
+        if entry.get("direction") == SUBJECT_WORLD:
+            raise ValueError(
+                f"a direction: {SUBJECT_WORLD!r} row (finding_id={entry.get('finding_id')!r}) "
+                "reached the defender curator's gate — it belongs on the questioner channel")
         fid = entry["finding_id"]
         if fid in existing_ids:
             rec = dict(entry)

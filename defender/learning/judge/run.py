@@ -84,17 +84,48 @@ def _outcome_guidance() -> str:
         f"- `{word}` — {_OUTCOME_GUIDANCE[word]}.\n" for word in sorted(_REPLY_OUTCOME_ENUM)
     )
 
-#: The finding bucket vocabulary — closed, and NEVER coerced to the nearest member (a
-#: lookalike is rejected, not rounded).
+#: The two `subject` literals (#1007 O1/M6). Exactly two string literals — no case-fold and no
+#: trim anywhere, which is what makes this selector and the appender's own guard agree by
+#: construction rather than by convention.
+SUBJECT_DEFENDER = "defender"
+SUBJECT_WORLD = "world"
+
+#: The four names that reach the prompt as EXAMPLES of a world-subject bucket — never a closed
+#: set (R2/G-3): `validate_reply` refuses no bucket string outside this tuple.
+EXAMPLE_WORLD_BUCKETS = (
+    "unreachable-difference", "shape-invention", "story-overlay-gap", "undiscriminating-family",
+)
+
+
+class _OpenBucketVocabulary:
+    """The world lane's bucket vocabulary (#1007 R2, accepted gap G-3): every STRING is a
+    member, and nothing else is. Deliberately open — the design's example names
+    (`unreachable-difference`, `shape-invention`, `story-overlay-gap`, `undiscriminating-family`)
+    are PROMPT EXAMPLES, not a closed set, so a model's own novel reading of a world is admitted
+    rather than rejected. `isinstance` alone, never truthiness: an empty or whitespace-only
+    bucket is still a string and is admitted, stored verbatim — the drift a human declined to
+    filter out before it can be observed."""
+
+    def __contains__(self, item: object) -> bool:
+        return isinstance(item, str)
+
+
+#: The finding bucket vocabulary, SELECTED BY SUBJECT (#1007 O8/M10 + R2): the defender arm is
+#: the queue's own closed set — NEVER coerced to the nearest member (a lookalike is rejected,
+#: not rounded) — and the world arm is open. ONE lookup, so the two arms cannot drift into
+#: disagreeing about which subject they are validating.
 #:
-#: IT IS THE QUEUE'S OWN SET, not a fifth hand-typed copy of the same five words. Every finding
-#: this validator admits becomes a queue row whose `type` is that bucket, and
-#: `enqueue._validate_row` accepts it against `QUEUEABLE_FINDING_TYPES` — so the two must be the
-#: same set or the pair disagrees in one direction or the other. Spelled here, adding a sixth
-#: family bucket to `config.FAMILY_ONLY_FINDING_TYPES` widened the queue and left this validator
-#: refusing every reply that used it, counted as a malformed reply, with the draw file removed
-#: and no error above `malformed_replies`.
-_BUCKET_ENUM = frozenset(QUEUEABLE_FINDING_TYPES)
+#: THE DEFENDER ARM IS THE QUEUE'S OWN SET, not a fifth hand-typed copy of the same five words.
+#: Every defender finding this validator admits becomes a queue row whose `type` is that
+#: bucket, and `enqueue._validate_row` accepts it against `QUEUEABLE_FINDING_TYPES` — so the two
+#: must be the same set or the pair disagrees in one direction or the other. Spelled here,
+#: adding a sixth family bucket to `config.FAMILY_ONLY_FINDING_TYPES` widened the queue and left
+#: this validator refusing every reply that used it, counted as a malformed reply, with the draw
+#: file removed and no error above `malformed_replies`.
+_BUCKET_ENUM: dict[str, Any] = {
+    SUBJECT_DEFENDER: frozenset(QUEUEABLE_FINDING_TYPES),
+    SUBJECT_WORLD: _OpenBucketVocabulary(),
+}
 
 _ROLE_PROMPT = Path(__file__).resolve().parent / "role.md"
 
@@ -127,12 +158,19 @@ def _normalize_reply_outcome(value: Any) -> str | None:
 @dataclass(frozen=True)
 class Finding:
     bucket: str
+    subject: str
     claim: str
     root_cause: str
     anchor: str
     topic: str
     evidence: list[str] = field(default_factory=list)
     discriminator_related: bool = False
+    #: World-lane-only content (#1007 M6/A3): carried through so the pass can build a
+    #: questioner-channel row, but IDENTITY (which world) is never taken from here — the pass
+    #: stamps its own `world` from the draw's own world directory, never the model's claim.
+    pattern: str | None = None
+    holding_system: str | None = None
+    world: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,10 +199,10 @@ def _require_list(doc: dict[str, Any], key: str) -> list[Any]:
     return value
 
 
-def _parse_finding(raw: Any, index: int) -> Finding:
+def _parse_finding(raw: Any, index: int, *, scope: str) -> Finding:  # noqa: C901 — the field checks, subject partition and family-scope rules are one demand over one raw finding
     if not isinstance(raw, dict):
         raise JudgeRefused(f"finding[{index}] is not a mapping")
-    for key in ("bucket", "claim", "root_cause", "anchor", "topic", "evidence"):
+    for key in ("bucket", "subject", "claim", "root_cause", "anchor", "topic", "evidence"):
         if key not in raw:
             raise JudgeRefused(f"finding[{index}] is missing {key!r}")
     # A PRESENT-AND-NULL KEY IS A MISSING ONE. `key not in raw` is satisfied by `anchor:` with
@@ -179,25 +217,58 @@ def _parse_finding(raw: Any, index: int) -> Finding:
             raise JudgeRefused(
                 f"finding[{index}].{key} is null — a null is refused rather than rendered as "
                 "the string 'None', which reads downstream as content the model never wrote")
-    bucket = raw["bucket"]
-    if not isinstance(bucket, str) or bucket not in _BUCKET_ENUM:
+    # `subject` (#1007 O1/M6): the partition itself. NO CASE-FOLD, NO TRIM — a near-miss
+    # (`"World"`, `" world"`, `"defender\n"`) is refused exactly like a bucket lookalike, so the
+    # validator and the appender's own guard cannot come to disagree about which channel a row
+    # belongs on.
+    subject = raw["subject"]
+    if subject not in (SUBJECT_DEFENDER, SUBJECT_WORLD):
         raise JudgeRefused(
-            f"finding[{index}].bucket={bucket!r} is not one of {sorted(_BUCKET_ENUM)} — a "
-            "lookalike is rejected, never coerced to the nearest member")
+            f"finding[{index}].subject={subject!r} is not one of "
+            f"{sorted((SUBJECT_DEFENDER, SUBJECT_WORLD))!r} — no case-fold and no trim, so a "
+            "finding whose subject nobody stated exactly is a finding no channel can route")
+    if scope == "family":
+        # M5/A1: the family reply is itself `subject: world` in its entirety, and may name no
+        # world — the pass owns identity for a family-level observation (`world: null`), and a
+        # model attributing one to whichever world it found memorable is refused here rather
+        # than silently overridden.
+        if subject != SUBJECT_WORLD:
+            raise JudgeRefused(
+                f"finding[{index}].subject={subject!r} — the family call may emit only "
+                f"subject: {SUBJECT_WORLD!r} findings; it never grades the defender")
+        if raw.get("world") is not None:
+            raise JudgeRefused(
+                f"finding[{index}] names world={raw.get('world')!r} — a family-level finding "
+                "is about the family and may not name a member of it")
+    bucket = raw["bucket"]
+    bucket_enum = _BUCKET_ENUM[subject]
+    if not isinstance(bucket, str) or bucket not in bucket_enum:
+        raise JudgeRefused(
+            f"finding[{index}].bucket={bucket!r} is not a valid {subject} bucket — a lookalike "
+            "is rejected, never coerced to the nearest member")
     evidence = raw["evidence"]
     if not isinstance(evidence, list):
         raise JudgeRefused(f"finding[{index}].evidence must be a list")
+    for key in ("pattern", "holding_system", "world"):
+        if key in raw and raw[key] is not None and not isinstance(raw[key], str):
+            raise JudgeRefused(f"finding[{index}].{key} must be a string when present")
     return Finding(
-        bucket=bucket, claim=str(raw["claim"]), root_cause=str(raw["root_cause"]),
-        anchor=str(raw["anchor"]), topic=str(raw["topic"]),
+        bucket=bucket, subject=subject, claim=str(raw["claim"]),
+        root_cause=str(raw["root_cause"]), anchor=str(raw["anchor"]), topic=str(raw["topic"]),
         evidence=[str(e) for e in evidence],
         discriminator_related=bool(raw.get("discriminator_related", False)),
+        pattern=raw.get("pattern"), holding_system=raw.get("holding_system"),
+        world=raw.get("world"),
     )
 
 
-def validate_reply(text: str) -> JudgeReply:
+def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
     """Parse `text` LENIENTLY (a fence with prose around it recovers cleanly — C12) and
-    validate STRICTLY: nothing is read off the reply before this returns."""
+    validate STRICTLY: nothing is read off the reply before this returns.
+
+    `scope` (#1007 M4/M5) is which call this reply came from: `"world"` (the default) is a
+    per-world draw, which may emit either subject; `"family"` is the family-level draw, which
+    may emit only `subject: world` findings naming no world (M5/A1)."""
     import yaml
 
     from defender._yaml import safe_load
@@ -238,7 +309,7 @@ def validate_reply(text: str) -> JudgeReply:
     findings_raw = doc.get("findings")
     if not isinstance(findings_raw, list):
         raise JudgeRefused("the judge's reply's findings must be a list")
-    findings = [_parse_finding(f, i) for i, f in enumerate(findings_raw)]
+    findings = [_parse_finding(f, i, scope=scope) for i, f in enumerate(findings_raw)]
     noise = doc.get("noise_floor_note")
     return JudgeReply(
         episode_outcome=outcome, noise_floor_note=str(noise) if noise is not None else "",
@@ -247,9 +318,18 @@ def validate_reply(text: str) -> JudgeReply:
     )
 
 
-def _resolves(pointer: str, world_dir: Path) -> bool:
-    """J13(a): does this evidence pointer resolve inside the GRADED WORLD's own subtree —
-    never the episode, never a sibling's archive, whatever bytes exist at the target."""
+#: S7: the exactly-three episode-level files a `subject: world` evidence pointer may ALSO name
+#: — an allowlist of resolved TARGETS (bare names only, never a prefix a traversal could dress
+#: up to pass), never a widen of the whole episode dir. The defender arm is unchanged: world-
+#: subtree-only.
+_WORLD_EVIDENCE_FILES = ("samples.yaml", "review.yaml", "judge.yaml")
+
+
+def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER) -> bool:
+    """J13(a): does this evidence pointer resolve inside the GRADED WORLD's own subtree — never
+    a sibling's archive, whatever bytes exist at the target. For a `subject: world` finding
+    ONLY, S7 widens this to also admit exactly the three episode-level files named above, by
+    NAME — never a directory prefix, never the episode dir wholesale."""
     if not isinstance(pointer, str) or not pointer:
         return False
     path_part = pointer.split("#", 1)[0]
@@ -265,8 +345,14 @@ def _resolves(pointer: str, world_dir: Path) -> bool:
     # neither this frame's handler nor `grade_episode`'s conversion set, so it escaped the whole
     # pass as a bare traceback AFTER every world's model calls had been paid for.
     except (OSError, RuntimeError, ValueError):
-        return False
-    return artifact_file(candidate)
+        pass
+    else:
+        if artifact_file(candidate):
+            return True
+    if (subject == SUBJECT_WORLD and path_part in _WORLD_EVIDENCE_FILES
+            and Path(path_part).name == path_part):
+        return artifact_file(world_dir.parent.parent / path_part)
+    return False
 
 
 def _draw_document(reply: JudgeReply, *, world_dir: Path) -> dict[str, Any]:
@@ -277,15 +363,18 @@ def _draw_document(reply: JudgeReply, *, world_dir: Path) -> dict[str, Any]:
     for finding in reply.findings:
         # ONE resolution pass per pointer: "did any resolve" and "which did not" are two reads
         # of the same answer, and asking twice `stat`s every pointer of every finding twice.
-        unresolved = [p for p in finding.evidence if not _resolves(p, world_dir)]
+        unresolved = [p for p in finding.evidence
+                     if not _resolves(p, world_dir, subject=finding.subject)]
         if len(unresolved) == len(finding.evidence):
             dropped += 1
             continue
         kept.append({
-            "bucket": finding.bucket, "claim": finding.claim, "root_cause": finding.root_cause,
-            "anchor": finding.anchor, "topic": finding.topic, "evidence": finding.evidence,
-            "unresolved_evidence": unresolved,
+            "bucket": finding.bucket, "subject": finding.subject, "claim": finding.claim,
+            "root_cause": finding.root_cause, "anchor": finding.anchor, "topic": finding.topic,
+            "evidence": finding.evidence, "unresolved_evidence": unresolved,
             "discriminator_related": finding.discriminator_related,
+            "pattern": finding.pattern, "holding_system": finding.holding_system,
+            "world": finding.world,
         })
     return {
         "episode_outcome": reply.episode_outcome, "noise_floor_note": reply.noise_floor_note,
@@ -332,15 +421,24 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         # note described as the defender never pulling the payload — which is `gradable`.
         f"Reply as one YAML mapping: episode_outcome (exactly one of "
         f"{' | '.join(sorted(_REPLY_OUTCOME_ENUM))}), "
-        "noise_floor_note, correlations, scope_checks, derivations, findings (each: bucket "
+        "noise_floor_note, correlations, scope_checks, derivations, findings (each: bucket, "
+        f"subject [{SUBJECT_DEFENDER}|{SUBJECT_WORLD}], claim, "
         # THE VALIDATOR'S OWN SET, rendered — not a sixth hand-typed copy of the same five
-        # words. `_BUCKET_ENUM` is derived from `QUEUEABLE_FINDING_TYPES`, so a bucket added
-        # there widened what a reply may carry and was never named to the model, and a bucket
-        # removed there left the prompt advertising one every reply using it is refused for —
-        # counted as a malformed reply, with the draw file removed and no error above
-        # `malformed_replies`.
-        f"[{'|'.join(sorted(_BUCKET_ENUM))}], claim, "
-        "root_cause, anchor, topic, evidence, discriminator_related).\n\n"
+        # words. `_BUCKET_ENUM[SUBJECT_DEFENDER]` is derived from `QUEUEABLE_FINDING_TYPES`, so
+        # a bucket added there widened what a reply may carry and was never named to the model,
+        # and a bucket removed there left the prompt advertising one every reply using it is
+        # refused for — counted as a malformed reply, with the draw file removed and no error
+        # above `malformed_replies`. THE WORLD VOCABULARY IS DELIBERATELY OPEN (R2): the four
+        # names below are EXAMPLES, not an enum, so no exhaustive list is rendered for it.
+        f"a subject: {SUBJECT_DEFENDER} finding's bucket is one of "
+        f"[{'|'.join(sorted(_BUCKET_ENUM[SUBJECT_DEFENDER]))}]; a subject: {SUBJECT_WORLD} "
+        f"finding's bucket is your own free text naming what is wrong with the WORLD itself "
+        f"rather than the defender — for example {', '.join(EXAMPLE_WORLD_BUCKETS)} — "
+        "root_cause, anchor, topic, evidence, discriminator_related). Every finding names its "
+        f"subject: {SUBJECT_DEFENDER} finding is about how the defender investigated; a "
+        f"{SUBJECT_WORLD} finding is about the instrument itself — an invented shape, a story "
+        "the overlay does not back, or (family call only) that the family failed to "
+        "discriminate at all — and is never authored as a lesson for the defender.\n\n"
         # THE SHAPE OF `evidence`, stated. The field list above names it and stops, so a model
         # that reads "evidence" writes the English sense of the word — a sentence quoting what
         # it saw. The reply validator requires a LIST and refuses the reply outright, which
@@ -391,4 +489,82 @@ def _build_prompt(judge_input: JudgeInput) -> str:
     return task + body
 
 
-__all__ = ["Finding", "JudgeReply", "_build_prompt", "validate_reply"]
+def _render_family_manifest(manifest: dict[str, Any]) -> str:
+    """Every world's story, axis, declared disposition and overlay — WITHHOLDING NONE. The
+    per-world call's whole point is that a sibling's overlay must never reach it (O5/J14); the
+    family call's whole question is whether the SET separates, so withholding a member here
+    makes that question unanswerable (#1007, `test_the_family_call_is_shown_every_world`)."""
+    from defender.learning.judge.family import _control_declared
+
+    lines = [f"discriminator: {manifest.get('discriminator')}",
+             f"source disposition (base/control world): {_control_declared(manifest)!r}"]
+    for world in manifest.get("worlds") or ():
+        if not isinstance(world, dict):
+            continue
+        lines.append(
+            f"world {world.get('world_id')} (role {world.get('role')}): "
+            f"story={world.get('story')!r} axis={world.get('axis')!r} "
+            f"disposition_declared={world.get('disposition_declared')!r} "
+            f"overlay={world.get('overlay')}")
+    return "\n".join(lines) + "\n"
+
+
+def _render_family_mechanical_rows(grade: Any) -> str:
+    """Every world's mechanical row (M3) — the same facts the per-world call sees about itself,
+    joined here across the whole family, plus each world's completed-draw verdict."""
+    worlds = grade["worlds"] if isinstance(grade, dict) else grade.worlds
+    lines = []
+    for row in worlds:
+        lines.append(
+            f"world {row.get('world')}: declared={row.get('declared')!r} "
+            f"verdict={row.get('verdict')!r} bucket={row.get('bucket')!r} "
+            f"withheld_reason={row.get('withheld_reason')!r} "
+            f"difference_shown={row.get('difference_shown')!r} "
+            f"reachable_by_capture={row.get('reachable_by_capture')!r} "
+            f"ungradable={row.get('ungradable', False)!r}")
+    return "\n".join(lines) + "\n" if lines else "No worlds are recorded.\n"
+
+
+def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
+                         review: dict[str, Any]) -> str:
+    """M5: one call per draw, judging what no single world can — whether the FAMILY separates
+    on the discriminator. Shown every world's overlay, the review record and every mechanical
+    row; withholds none (unlike the per-world call, which withholds every sibling's).
+
+    The reply is `subject: {SUBJECT_WORLD!r}` in its entirety (A1: the family reply IS a world-
+    subject reply, never a defender one) and may name no `world` — a family-level observation is
+    about the set, not about any one member of it."""
+    import yaml
+
+    task = (
+        "Judge this WHOLE FAMILY of sibling worlds — never any single world. You are shown "
+        "every world's overlay, the family's review record and every world's own mechanical "
+        "facts; nothing here is withheld.\n\n"
+        "Answer only family-level questions: did the worlds SEPARATE on the discriminator (did "
+        "at least one measuring world's verdict disagree from another's, or from what its own "
+        "difference should have produced), and did the envelope actually ask it?\n\n"
+        f"Reply as one YAML mapping: episode_outcome (exactly one of "
+        f"{' | '.join(sorted(_REPLY_OUTCOME_ENUM))}), noise_floor_note, correlations, "
+        "scope_checks, derivations, findings (each: bucket [your own free text — for example "
+        f"{', '.join(EXAMPLE_WORLD_BUCKETS)}], subject (always {SUBJECT_WORLD!r} — this call "
+        "never grades the defender), claim, root_cause, anchor, topic, evidence, "
+        "discriminator_related). A family-level finding is about the FAMILY as a whole and "
+        "must NEVER name a `world` — do not add a `world` key to any finding.\n\n"
+        f"{_outcome_guidance()}"
+    )
+    sections = {
+        "manifest": _render_family_manifest(manifest),
+        "review": yaml.safe_dump(review, sort_keys=False) if review else
+                 "no review.yaml is recorded for this episode\n",
+        "mechanical": _render_family_mechanical_rows(grade),
+    }
+    titled = [titled_section(name.upper(), body) for name, body in sections.items()]
+    salt = message_salt(task, *titled)
+    body = stage_user_message(salt, *(wrap(section, UNTRUSTED_TAG, salt) for section in titled))
+    return task + body
+
+
+__all__ = [
+    "EXAMPLE_WORLD_BUCKETS", "Finding", "JudgeReply", "SUBJECT_DEFENDER", "SUBJECT_WORLD",
+    "_build_family_prompt", "_build_prompt", "validate_reply",
+]

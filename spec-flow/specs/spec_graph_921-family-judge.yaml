@@ -616,12 +616,15 @@ demands:
   - id: agreed_without_evidence_flag
     kind: domain-outcome
     form: test
-    source: "amendment ('the honest reading of agreeing without having seen anything')"
-    binds: ['family_bucket.domain.distinguished[agreed-without-evidence]']
-    discharged_by: test_921_verdict_matched_while_every_H_row_is_passthrough_is_flagged
+    source: "amendment ('the honest reading of agreeing without having seen anything'), superseded by #1007/N8"
+    binds: ['family_bucket.domain.distinguished[lead-quality]']
+    discharged_by: test_921_verdict_matched_while_every_H_row_is_passthrough_still_buckets_lead_quality
     seed_docstring: >-
       The verdict matched while EVERY row on H says `passthrough`: the world agreed without
-      having been shown anything. No bucket, flagged `agreed-without-evidence`.
+      having been shown anything. #1007/N8 retired the flag this demand originally bound the
+      old bucket's now-removed domain member to — the bucket is now `lead-quality`, and whether
+      the finding is enqueued is O4's withholding ladder's question, not a bucket-level special
+      case.
 
   - id: verdict_word_caught
     kind: domain-outcome
@@ -2235,9 +2238,9 @@ structure:
       facets:
         domain:
           type: str
-          refinement: {nl: "The mechanical bucket per non-control world, as the amendment's fact table leaves it. `none` and `agreed-without-evidence` are outcomes, not defects."}
+          refinement: {nl: "The mechanical bucket per non-control world, as the amendment's fact table leaves it. `none` is an outcome, not a defect."}
           default: none
-          distinguished: ['lead-set', 'lead-quality', 'analyze-discipline', 'decision-discipline', 'none', 'agreed-without-evidence']
+          distinguished: ['lead-set', 'lead-quality', 'analyze-discipline', 'decision-discipline', 'none']
           falsy_valid: false
           documented_alternatives:
             # J5's recommendation, unresolved: a world whose input is ABSENT is `ungradable`,
@@ -3182,7 +3185,7 @@ gate:
     - {rule: R4, element: 'family_bucket.domain.distinguished[analyze-discipline]', by: bucket_analyze_discipline}
     - {rule: R4, element: 'family_bucket.domain.distinguished[decision-discipline]', by: bucket_decision_discipline}
     - {rule: R4, element: 'family_bucket.domain.distinguished[none]', by: bucket_none_when_verdict_matches}
-    - {rule: R4, element: 'family_bucket.domain.distinguished[agreed-without-evidence]', by: agreed_without_evidence_flag}
+    - {rule: R4, element: 'family_bucket.domain.distinguished[lead-quality]', by: agreed_without_evidence_flag, cites: [1007-N8]}
     - {rule: R4, element: 'JUDGE_OUTCOME_ENUM.domain.distinguished[caught]', by: gate_family_caught_and_undecidable_skip}
     - {rule: R4, element: 'JUDGE_OUTCOME_ENUM.domain.distinguished[survived]', by: gate_family_survived_authors}
     - {rule: R4, element: 'JUDGE_OUTCOME_ENUM.domain.distinguished[undecidable]', by: gate_family_caught_and_undecidable_skip}

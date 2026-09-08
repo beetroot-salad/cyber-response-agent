@@ -223,9 +223,11 @@ def test_921_no_two_judge_calls_of_one_family_share_a_trace_name(tmp_path):
     ep = _episode(tmp_path)
     judge = _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(J.reply_doc())), draws=3)
 
-    assert len(judge.agent_ids) == 6
-    assert len(set(judge.agent_ids)) == 6, f"colliding agent ids: {judge.agent_ids}"
-    assert set(judge.agent_ids) == {f"judge:{label}:{n}" for label in ("b", "c")
+    # #1007 M5 added a THIRD caller (the family-level draw, `judge:family:<n>`) to the fan-out
+    # beside the two per-world ones — 3 callers x 3 draws = 9, not 6.
+    assert len(judge.agent_ids) == 9
+    assert len(set(judge.agent_ids)) == 9, f"colliding agent ids: {judge.agent_ids}"
+    assert set(judge.agent_ids) == {f"judge:{label}:{n}" for label in ("b", "c", "family")
                                     for n in range(3)}
 
 
@@ -430,7 +432,8 @@ def test_921_judge_call_is_zero_grant_and_deny_all(tmp_path):
     ep = _episode(tmp_path)
     judge = _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(J.reply_doc())), draws=1)
 
-    assert judge.calls == 2, "the positive control failed: the model was never reached"
+    # #1007 M5 adds a THIRD call (the family-level draw) beside the two per-world ones.
+    assert judge.calls == 3, "the positive control failed: the model was never reached"
     assert J.draw_files(ep, "b"), "no reply came back"
     for kw in judge.kwargs:
         for forbidden in ("tools", "bash_shapes", "write_shapes", "grant", "verbs"):
@@ -478,8 +481,13 @@ def test_921_no_prompt_carries_two_trajectories(tmp_path):
     ep = _episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": [J.staged_row("c")]})
     judge = _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(J.reply_doc())), draws=1)
 
-    assert len(judge.prompts) == 2, "two worlds did not produce two calls"
-    for label, prompt in zip(["b", "c"], judge.prompts, strict=True):
+    # #1007 M5 adds a THIRD call (the family-level draw) that IS shown every world on purpose
+    # (that is its whole point) — excluded here, since this test is about the two PER-WORLD
+    # calls' own withholding.
+    world_prompts = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)
+                     if not a.startswith("judge:family")]
+    assert len(world_prompts) == 2, "two worlds did not produce two calls"
+    for label, prompt in zip(["b", "c"], world_prompts, strict=True):
         other = "c" if label == "b" else "b"
         assert f"world {label}" in prompt
         assert f"{J.world_token(other)}" not in prompt, (

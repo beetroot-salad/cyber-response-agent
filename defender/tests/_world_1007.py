@@ -318,7 +318,7 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
 
 
 def served_row(*, world: str = "b", key: str = "k1", source: str = "staged",
-               payload_text: str | None = None, differs_from_base: Any = True,
+               payload_text: str | None = None, differs_from_base: Any = False,
                base_pattern_digest: str | None = "sha256:deadbeef",
                **extra: Any) -> dict[str, Any]:
     """One `served/<world>.jsonl` row, `ServedCall.row()`-shaped, with M2's witness pair.

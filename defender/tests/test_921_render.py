@@ -157,8 +157,11 @@ def test_921_prompt_names_the_graded_world_and_keeps_the_cap_and_quoting_rule(tm
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")],
                                                "c": [J.staged_row("c")]})
     judge = _prompts(tmp_path, ep, draws=1)
-    by_world = dict(zip([aid.split(":")[1] for aid in judge.agent_ids], judge.prompts,
-                        strict=True))
+    # #1007 M5 adds a THIRD call (`judge:family:<n>`) beside the two per-world ones; excluded
+    # here, since this test is about the per-world prompt's own parameterisation.
+    by_world = {aid.split(":")[1]: prompt
+               for aid, prompt in zip(judge.agent_ids, judge.prompts, strict=True)
+               if aid.split(":")[1] != "family"}
 
     assert set(by_world) == {"b", "c"}
     for label, prompt in by_world.items():
