@@ -192,7 +192,7 @@ _UNMAPPED_FAULT_EXIT = 2
 def _record_manual_row(
     deps: _CaptureDeps, verb: str, params: dict, payload: Any, *, exit_code: int,
 ) -> None:
-    """Write a queries-table row with the SAME thirteen-key shape `QueryCapture._record` writes
+    """Write a queries-table row with the SAME fourteen-key shape `QueryCapture._record` writes
     — including `error_class`/`payload_status` DERIVED the same way
     (`circuit_breaker.error_class_for_exit`, `query_tool._payload_status`'s rule) rather than
     hardcoded, since a hardcoded `error_class="infra"` mis-files an agent-fixable capped-path
@@ -211,6 +211,7 @@ def _record_manual_row(
         _next_seq,
         payload_digest,
         payload_sha256,
+        system_fingerprint,
     )
 
     seq = _next_seq(deps.run_dir, deps.lead_id)
@@ -245,6 +246,15 @@ def _record_manual_row(
         # byte-identity on. Derived rather than defaulted, so this second writer's rows can
         # never read as "no payload evidence" beside `_record`'s.
         "payload_sha256": payload_sha256(text),
+        # DERIVED through the column's owner, like `error_class` and `payload_sha256` above and
+        # for the same reason (#871): this writer assembles the row itself instead of going
+        # through `append_query_row`, so routing the answer through `system_fingerprint` is what
+        # keeps it tracking the owner's rule rather than a literal that agrees by coincidence.
+        # The ARGUMENTS say what is true here and are not the same value twice: nothing
+        # model-authored named a system on this path (`raw_system` is `""`), and the system of
+        # record is the host's own constant — the DECLARED case, whose answer is `""`.
+        # Written rather than omitted, because a key it skips is a key the frozen contract loses.
+        "system_key": system_fingerprint("", ITEM1_SYSTEM),
     }
     write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
 

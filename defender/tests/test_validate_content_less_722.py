@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._text import is_content_less, strip_zero_width
+from defender._text import as_str, is_content_less, strip_zero_width
 from defender.learning import loop
 from defender.learning.core.config import RunUnprocessable
 
@@ -164,3 +164,24 @@ def test_strip_zero_width_keeps_the_whitespace_callers_split_on():
     # what survives is exactly what a reader sees, so the two helpers agree
     assert is_content_less(strip_zero_width("​﻿ \x00"))
     assert not is_content_less(strip_zero_width("​x"))
+
+
+def test_as_str_answers_on_the_type_and_not_on_emptiness():
+    """`as_str` is the coercion #871 gave a shared home, and what it must do is turn a
+    NON-STRING into `""` — not merely turn `None` into one.
+
+    The distinction is the whole helper. `value if value is not None else ""` passes every
+    caller's happy path and every arm that drives a missing value, because each caller then
+    re-checks the type on its own account: `names_something_readable` has its own
+    `isinstance`, and `_trip` compares whatever it is against itself. What it does NOT survive
+    is a non-string reaching a spelling that has no such check — `query_tool` coarsens `verb`
+    through here before `_request_key` serializes it, so a non-string verb would key as
+    ITSELF and two calls that named no readable verb at all would stop being one group, which
+    is the #871 defect in the other coordinate of the same pair.
+
+    Pinned at the helper rather than through a caller for exactly that reason: the callers
+    each have a second net, so the contract is only observable here."""
+    assert as_str("elastic") == "elastic"
+    assert as_str("") == ""
+    for not_a_string in (None, 12345, True, ["a"], {"n": 1}, 1.5, b"bytes"):
+        assert as_str(not_a_string) == "", f"{not_a_string!r} was passed through, not coerced"

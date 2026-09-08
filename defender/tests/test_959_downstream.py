@@ -169,7 +169,7 @@ def test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_s
     record_query.append_query_row(
         run, lead_id="l-1", system="elastic", verb="query", query_id="elastic.q", params={},
         raw_command="seed", payload_text="{}", exit_code=0, payload_status="ok",
-        payload_digest="d",
+        payload_digest="d", system_key="",
     )
     _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT 1'")
     rows = [json.loads(line) for line in (run / "executed_queries.jsonl").read_text().splitlines()]

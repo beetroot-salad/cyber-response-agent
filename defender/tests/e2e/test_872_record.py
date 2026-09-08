@@ -494,7 +494,8 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     later decides for the model-visible text. BOUND PER WRITER EDGE, not at the boundary, for
     the reason coherence always is: the table has THREE independently spelled writers — the
     shared `append_query_row` helper reached by the query tool and the gather bash lane,
-    `lead_zero`'s twelve keys assembled INLINE, and the judge's closed-ticket tool appending its
+    `lead_zero`'s copy of the frozen key set assembled INLINE, and the judge's closed-ticket
+    tool appending its
     own — and a demand at the table's altitude is green when two of the three agree.
 
     TWO WRITERS ARE DRIVEN AND THE THIRD IS OUT OF REACH BY CONSTRUCTION
@@ -516,9 +517,11 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     def _manual_row(run_dir: Path) -> None:
         """`lead_zero`'s SECOND spelling of the row, written into the run under test.
 
-        Called through the module's own function rather than re-assembled here: the twelve
-        keys are spelled INLINE at that site, and a copy in this test would compare the test's
-        idea of the row against itself."""
+        Called through the module's own function rather than re-assembled here: the frozen
+        keys are spelled INLINE at that site — a count this docstring deliberately does not
+        restate, having been stale through two column additions (#877's `payload_sha256`,
+        #871's `system_key`) — and a copy in this test would compare the test's idea of the row
+        against itself."""
         deps = lead_zero._CaptureDeps(
             run_dir=run_dir, defender_dir=DEFENDER, run_id=RUN_ID,
             lead_id="l-000",

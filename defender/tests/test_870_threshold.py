@@ -373,12 +373,16 @@ def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
         tmp_path, lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
         params={"native_query": "FROM logs"}, raw_command="elastic query",
         payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",
+        system_key="",
     )
     append_query_row(
         tmp_path, lead_id="l-001", system="", verb="bash", query_id=BASH_SHIM_QUERY_ID,
         params={"command": "cat 0.json | defender-sql 'SELECT unnest(data)'"},
         raw_command="defender-sql", payload_text="", exit_code=1, payload_status="error",
         payload_digest=BINDER,
+        # The bash lane's own value (#871): its `system=""` means "no run payload was read",
+        # not "a name was coarsened away", and nothing up here named a system to fingerprint.
+        system_key="",
     )
 
     joined = [jl for jl in lead_repository.joined(tmp_path) if jl.lead_id == "l-001"]

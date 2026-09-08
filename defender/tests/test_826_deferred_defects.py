@@ -11,6 +11,8 @@ records. `reviewer-measure-0807-b` is cited by number where it is the evidence.
 """
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -249,9 +251,9 @@ def test_the_companion_guard_counts_what_the_first_guard_cannot_see():
     placement could have prevented."""
     rejections = [_above(0), _above(1)]
     assert rq.rejection_trip(rejections[:1], LEAD, system="elastic", verb="query",
-                             params={"native_query": "FROM logs"}) is None
+                             params={"native_query": "FROM logs"}, system_key="") is None
     trip = rq.rejection_trip(rejections, LEAD, system="elastic", verb="query",
-                            params={"native_query": "FROM logs"})
+                            params={"native_query": "FROM logs"}, system_key="")
     assert trip == rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
 
     # ... and the SAME rows are invisible to the first guard, which is why this one exists.
@@ -261,7 +263,7 @@ def test_the_companion_guard_counts_what_the_first_guard_cannot_see():
     # the same two occurrences.
     executed = [_row(0, exit_code=0), _row(1, exit_code=0)]
     assert rq.rejection_trip(executed, LEAD, system="elastic", verb="query",
-                             params={"native_query": "FROM logs"}) is None
+                             params={"native_query": "FROM logs"}, system_key="") is None
     assert rq.repeat_trip(executed, LEAD, system="elastic", verb="query",
                           params={"native_query": "FROM logs"}) is not None
 
@@ -276,11 +278,11 @@ def test_the_infra_half_of_the_above_guard_rows_stays_the_breakers():
     assert error_class_for_exit(2) == INFRA_ERROR_CLASS
     assert error_class_for_exit(64) == AGENT_FIXABLE_ERROR_CLASS
     assert rq.rejection_trip(load_errors, LEAD, system="elastic", verb="query",
-                             params={"native_query": "FROM logs"}) is None
+                             params={"native_query": "FROM logs"}, system_key="") is None
     # An infra row must not even top up a count the agent-fixable rows nearly reached.
     mixed = [_above(0, exit_code=2), _above(1, exit_code=64)]
     assert rq.rejection_trip(mixed, LEAD, system="elastic", verb="query",
-                             params={"native_query": "FROM logs"}) is None
+                             params={"native_query": "FROM logs"}, system_key="") is None
 
 
 def test_the_companion_guard_keys_on_the_same_identity_as_the_first():
@@ -291,13 +293,13 @@ def test_the_companion_guard_keys_on_the_same_identity_as_the_first():
     reordered = {"a": [1, {"z": None}], "b": 2}
     rows = [_above(0, params=params), _above(1, params=params)]
     assert rq.rejection_trip(rows, LEAD, system="elastic", verb="query",
-                             params=reordered) is not None
+                             params=reordered, system_key="") is not None
     assert rq.rejection_trip(rows, LEAD, system="elastic", verb="query",
-                             params={"a": 1}) is None
+                             params={"a": 1}, system_key="") is None
     # A different lead's rejections are a different lead's problem.
     assert rq.rejection_trip(
         [_above(0, params=params, lead="l-002"), _above(1, params=params, lead="l-002")],
-        LEAD, system="elastic", verb="query", params=params,
+        LEAD, system="elastic", verb="query", params=params, system_key="",
     ) is None
 
 
@@ -329,3 +331,328 @@ def test_the_trip_row_detail_says_turned_back_not_issued():
     assert "elastic nosuch-verb" in reason
     assert "rejected before it ran" in reason
     assert "structural" in reason
+
+
+# #871 — the companion guard could not tell two UNDECLARED systems apart, because #855 keeps
+# their names off the row and every one of them coarsens to `system=""`. `system_key` carries
+# the identity across the seam as a digest. These are the predicate-level arms; the lead-level
+# ones are in `tests/e2e/test_855_model_named_systems.py`.
+
+
+def test_the_fingerprint_gives_three_answers_and_each_one_is_a_decision():
+    """`system_fingerprint(raw, recorded)` is where the coarsened row's identity is minted.
+    Three answers, and none of them is a default: `""` when the row kept its system (a
+    declared system keys as ITSELF, or `elastic`'s above-guard rejections would form a group
+    its below-guard rows are not in); `""` when the raw string is blank or whitespace (N5 — an
+    argument with no readable system in it is one mistake however it is malformed); a digest
+    otherwise. That the two above-guard WRITERS actually spend this function rather than
+    deriving their own is observed on a live table, in
+    `..._only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest`.
+
+    The digest is pinned to a FIXED function of the string rather than left to the
+    implementation, because O3 is a claim across time: a table recorded by one build is
+    replayed by a later one, and any per-process or salted hash (`hash()` is randomized per
+    interpreter) makes yesterday's dead end unauditable while passing every in-process
+    assertion here."""
+    assert rq.system_fingerprint("ghostone", "elastic") == "", \
+        "a row that kept its system took a fingerprint too, splitting that system's count"
+    assert rq.system_fingerprint("elastic", "elastic") == ""
+    assert rq.system_fingerprint("", "") == "", "a blank system was given an identity (N5)"
+    assert rq.system_fingerprint("   ", "") == "", "whitespace was read as a readable system"
+
+    fp = rq.system_fingerprint("ghostone", "")
+    assert re.fullmatch(r"[0-9a-f]{64}", fp), f"not a full-width lowercase hex digest: {fp!r}"
+    assert fp == rq.system_fingerprint("ghostone", ""), "the same string keyed two ways"
+    assert fp != rq.system_fingerprint("ghosttwo", ""), "two strings keyed one way"
+    assert fp == hashlib.sha256(b"ghostone").hexdigest(), \
+        "the digest is not a fixed function of the string, so a recorded table cannot be replayed"
+
+
+def test_the_fingerprint_hashes_the_whole_string_exactly_as_the_model_wrote_it():
+    """`ghostone`/`ghosttwo`/`ghostthree` cannot pin this on their own: they differ in the
+    first eight characters and in nothing a `strip().lower()` would touch, so a fingerprint
+    that normalised or truncated its input keeps them distinct and passes every other arm in
+    this file. The strings that separate the two are the ones a MODEL actually gets wrong —
+    environment suffixes on a real system's name, a capitalisation, a stray space — and under
+    a lossy digest each of those families collapses back into one repeat group, which is #871
+    unfixed for the most likely input rather than for a synthetic one.
+
+    Pinned against `hashlib` directly rather than against distinctness alone: distinctness is
+    satisfiable by any injective-enough function, and O3 needs the digest to be the SAME
+    function tomorrow, in another process, over a table recorded today."""
+    for raw in ("elastic-prod", "elastic-staging", "Elastic", " elastic ", "\u00e9lastic"):
+        assert rq.system_fingerprint(raw, "") == \
+            hashlib.sha256(raw.encode("utf-8")).hexdigest(), \
+            f"{raw!r} was normalised or truncated before hashing"
+
+    prefixed = {rq.system_fingerprint(r, "")
+                for r in ("elastic-prod", "elastic-staging", "elastic-dev")}
+    assert len(prefixed) == 3, \
+        "three environment variants of one name are one group again — a truncating digest"
+    assert rq.system_fingerprint("Elastic", "") != rq.system_fingerprint("elastic", ""), \
+        "case was folded away, so two names the registry tells apart key the same"
+    assert rq.system_fingerprint(" ghostone ", "") != rq.system_fingerprint("ghostone", ""), \
+        "surrounding whitespace was stripped before hashing, not merely tested for emptiness"
+
+
+def test_an_unencodable_system_string_is_fingerprinted_rather_than_raising():
+    """A lone surrogate reaches this function: `json.loads('"\\ud800"')` yields one, and the
+    model's tool-call arguments arrive as JSON. The call site is inside
+    `wrap_tool_validate`'s `except (ValidationError, ModelRetry)` handler with no `try` of
+    its own, so a raising digest REPLACES the rejection — no row is written, the table loses
+    the call it is supposed to be counting, and the fault unwinds past the lead's own catch.
+
+    `surrogatepass` is the same encoding contract `payload_sha256` argues for two functions
+    above, and for the same reason: a codepoint that cannot round-trip must still produce a
+    digest, and it must be its OWN digest, or two distinct ghosts fold into one group.
+
+    THE COLLISION PARTNER IS A SECOND SURROGATE, not U+FFFD. On the ENCODE side `replace`
+    emits `?` (U+FFFD is the DECODE replacement), so `"\ud800x"` and `"\ufffdx"` stay distinct
+    under it and an assertion against U+FFFD pins only "did not raise" — which `errors="replace"`
+    also satisfies. Two different lone surrogates are what `replace` actually maps to one byte,
+    and they are the pair this has to compare.
+
+    No e2e twin: the replay harness serialises its own turns and refuses a lone surrogate
+    before the tool is ever reached, which is exactly why nothing above this level can cover
+    it."""
+    lone = "\ud800ghost"
+    fp = rq.system_fingerprint(lone, "")
+    assert re.fullmatch(r"[0-9a-f]{64}", fp), \
+        f"an unencodable system string did not produce a digest: {fp!r}"
+    assert fp != rq.system_fingerprint("\ud801ghost", ""), \
+        "two different unencodable ghosts collided — the encoding folded them to one byte"
+
+
+def test_two_undeclared_systems_are_two_counts_at_the_predicate():
+    """THE DEFECT (#871): `rejection_trip` keyed on `(system, verb, params)` alone, and #855
+    makes `system` `""` for every undeclared name — so `ghostone` and `ghosttwo` under one
+    verb and params were one group and the third such rejection ended the lead, which is the
+    one thing #826 item 4's guard promised it would never do to a call that DIFFERS.
+
+    Driven at the predicate rather than only end to end because the split has to be visible in
+    BOTH directions on the same rows: the same ghost still trips, and a different ghost does
+    not inherit the count."""
+    one, two = rq.system_fingerprint("ghostone", ""), rq.system_fingerprint("ghosttwo", "")
+    params = {"native_query": "FROM logs"}
+    mixed = [dict(_above(0, system=""), system_key=one),
+             dict(_above(1, system=""), system_key=two)]
+
+    assert rq.rejection_trip(mixed, LEAD, system="", verb="query", params=params,
+                             system_key=one) is None, \
+        "a rejection was refused on a count another undeclared system earned"
+
+    repeated = [dict(_above(0, system=""), system_key=one),
+                dict(_above(1, system=""), system_key=one)]
+    trip = rq.rejection_trip(repeated, LEAD, system="", verb="query", params=params,
+                            system_key=one)
+    assert trip == rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD), \
+        "the same undeclared system named three times stopped being bounded"
+    assert rq.rejection_trip(repeated, LEAD, system="", verb="query", params=params,
+                             system_key=two) is None
+
+
+def test_the_identity_is_the_pair_and_the_request_half_still_counts():
+    """`system_key` EXTENDS the identity; it does not become it. Every other arm here holds
+    `params` fixed and varies the ghost, so a guard that keyed a fingerprinted call on its
+    digest ALONE passes all of them — and then ends a lead for three genuinely different
+    requests that merely happen to name one undeclared system, which is the same promise #871
+    is here to keep, broken from the other side.
+
+    The control is the fourth assertion: under one ghost AND one request the group is still a
+    group, so this is not satisfied by "a fingerprinted call never counts anything"."""
+    ghost = rq.system_fingerprint("ghostone", "")
+    varied = [dict(_above(0, system="", params={"native_query": "FROM one"}), system_key=ghost),
+              dict(_above(1, system="", params={"native_query": "FROM two"}), system_key=ghost)]
+
+    assert rq.rejection_trip(varied, LEAD, system="", verb="query",
+                             params={"native_query": "FROM three"},
+                             system_key=ghost) is None, \
+        "three different requests under one ghost ended the lead — the request key was dropped"
+    assert rq.rejection_trip(varied, LEAD, system="", verb="nosuch-verb",
+                             params={"native_query": "FROM one"},
+                             system_key=ghost) is None, \
+        "a different verb inherited the count, so only the digest is being compared"
+
+    same = [dict(_above(0, system=""), system_key=ghost),
+            dict(_above(1, system=""), system_key=ghost)]
+    assert rq.rejection_trip(same, LEAD, system="", verb="query",
+                             params={"native_query": "FROM logs"},
+                             system_key=ghost) is not None, \
+        "one ghost and one request stopped being a group, so the negatives above say nothing"
+
+
+def test_a_call_with_no_readable_system_inherits_no_ghosts_count():
+    """The other direction of the wildcard, and the one no arm here reaches: a call whose
+    `system` argument was not readable at all mints NO fingerprint (N5), so its live key is
+    `""` — and a guard that let an empty key match any row would hand it the count two named
+    ghosts earned. Every lead in this suite is either all-fingerprinted or all-blank; the
+    mixed lead is where that bug lives.
+
+    Paired with the positive on the same rows: two BLANK rows must still bound a third blank
+    call, or this passes on a guard that simply never counts anything for a keyless call."""
+    params = {"native_query": "FROM logs"}
+    ghosts = [dict(_above(0, system=""), system_key=rq.system_fingerprint("ghostone", "")),
+              dict(_above(1, system=""), system_key=rq.system_fingerprint("ghosttwo", ""))]
+
+    assert rq.rejection_trip(ghosts, LEAD, system="", verb="query", params=params,
+                             system_key="") is None, \
+        "an unreadable call was refused on a count two named ghosts earned"
+
+    blanks = [dict(_above(0, system=""), system_key=""),
+              dict(_above(1, system=""), system_key="")]
+    assert rq.rejection_trip(blanks, LEAD, system="", verb="query", params=params,
+                             system_key="") is not None, \
+        "two unreadable calls stopped being one mistake (N5), so the negative above is vacuous"
+
+
+def test_an_invisible_system_string_is_no_more_readable_than_an_empty_one():
+    """N5's equivalence class is "nothing a reader could tell apart from an empty argument",
+    and `.strip()` is not that question. It folds the SPACES — U+00A0, U+3000, U+000B — and
+    leaves every zero-width and format codepoint standing: U+200B, U+200C/D, U+2060, U+FEFF,
+    U+00AD and the C0 controls are `isspace() == False`, so under a `.strip()` test each of
+    them, and each of their unbounded concatenations, mints a digest of its own.
+
+    That is the unbounded supply of distinct identities
+    `..._no_readable_system_at_all_are_still_one_group` refuses `str(raw)` for, reached one
+    codepoint class over — and worse than the `str(raw)` case, because the row, the summary
+    and the table all render these calls identically, so nothing downstream can even see that
+    three "different" systems were named. A model repeating one invisible string with one more
+    zero-width space each turn would never reach `REPEAT_THRESHOLD`.
+
+    The positive control is the last arm: a string with ONE readable character in it is still
+    fingerprinted, so this is not satisfied by "stop fingerprinting anything unusual"."""
+    invisible = ["\u200b", "\u200b\u200b", "\ufeff", "\u200c\u200d", "\u2060", "\u00ad",
+                 "\x00", "\x00\x00"]
+    for raw in invisible:
+        assert rq.system_fingerprint(raw, "") == "", \
+            f"{raw!r} renders as an empty system argument and was given an identity anyway"
+
+    params = {"native_query": "FROM logs"}
+    rows = [dict(_above(0, system=""), system_key=rq.system_fingerprint(invisible[0], "")),
+            dict(_above(1, system=""), system_key=rq.system_fingerprint(invisible[1], ""))]
+    assert rq.rejection_trip(rows, LEAD, system="", verb="query", params=params,
+                             system_key=rq.system_fingerprint(invisible[2], "")) is not None, \
+        "three indistinguishable invisible strings were three repeat groups, so the loop " \
+        "they make is bounded by nothing"
+
+    assert rq.system_fingerprint("\u200bg", "") != "", \
+        "a string carrying one readable character stopped being fingerprinted"
+
+
+def test_the_dead_end_message_asks_the_same_readability_question_the_fold_does():
+    """#871's own rule, applied to the CONSUMER of `_undeclared_target`'s answer.
+
+    `rejection_dead_end_reason` chooses between naming the target and saying the arguments were
+    unreadable, and it chose with `.strip()` while `_undeclared_target` chose with
+    `names_something_readable`. The two disagree on exactly the codepoints the fold exists for:
+    a verb of one zero-width character is `.strip()`-truthy, so with the system half already
+    `""` the fallback never fired and MAIN was handed `the request (\u200b)` — which renders as
+    `the request ()`, the "( )" the branch's own comment says it exists to prevent, with an
+    unbounded invisible model string sitting inside the parens on a refusal path.
+
+    Both halves are driven, so this cannot pass on "always take the fallback": a readable verb
+    beside a coarsened system must still be named."""
+    trip = rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
+    unreadable = "system/verb unreadable in the call's own arguments"
+
+    for verb in ("\u200b", "\ufeff", "\x00", "", "   "):
+        assert unreadable in rq.rejection_dead_end_reason("", verb, trip), \
+            f"an invisible verb {verb!r} was named to MAIN instead of reported unreadable"
+
+    assert unreadable not in rq.rejection_dead_end_reason("", "nosuch-verb", trip), \
+        "a readable verb stopped being named, so the assertions above say nothing"
+    assert "an undeclared system query" in rq.rejection_dead_end_reason(
+        "an undeclared system", "query", trip), \
+        "the host's own words for a ghost stopped reaching the message"
+
+
+def test_readability_is_a_fixed_function_of_the_string_not_of_the_interpreter():
+    """WHICH predicate answers N5, pinned — the arm above pins that invisible strings fold, and
+    every predicate that folds them passes it. This one separates them.
+
+    `str.isprintable()` is the tempting spelling and the wrong one: it answers False for
+    category Co (private use — a codepoint that CAN carry a glyph) and for Cn (whatever this
+    interpreter's Unicode database has not seen yet). Both directions hurt. A private-use name
+    folded into N5 collides two calls the reader can tell apart, and makes the dead end say the
+    arguments were unreadable about a call that named something visible — the "the coarsening
+    may not make the dead end LIE" property. And Cn membership MOVES with the interpreter: a
+    codepoint unassigned today is assigned tomorrow, so one raw string mints `""` on one build
+    and a digest on the next, over a table both are supposed to replay. That is the same
+    across-processes disagreement `system_fingerprint` pins `sha256` over `hash()` to prevent.
+
+    `_text.is_content_less` is the tree's answer and excludes Co and Cn for exactly this
+    reason (`defender/_text.py`), which is why this asks the question through
+    `names_something_readable` rather than restating a category set here."""
+    for raw in ("\ue000", "\uf8ff", "\U000f0000", "\u0378", "\U0002fffe"):
+        assert rq.names_something_readable(raw), \
+            f"{raw!r} was folded into the no-readable-system group; if it is unassigned today " \
+            "that answer changes under a newer Unicode database, and the recorded key with it"
+        assert rq.system_fingerprint(raw, "") != "", \
+            f"{raw!r} minted no identity, so two calls naming two of these are one repeat group"
+
+    # The complementary direction, so this is not satisfied by "fingerprint everything".
+    for raw in ("\u200b", "\ufeff", "\x00", "", "\u00a0"):
+        assert not rq.names_something_readable(raw), \
+            f"{raw!r} renders as nothing and was read as a readable system name"
+
+
+def test_a_non_string_system_is_coerced_rather_than_raising():
+    """The type axis of the same argument
+    `..._an_unencodable_system_string_is_fingerprinted_rather_than_raising` makes on the
+    encoding axis: both above-guard call sites compute this INSIDE a rejection handler with no
+    `try` of its own, so a raise here replaces the rejection outright — no row is written, the
+    table loses the call the guard is counting, and the fault unwinds past the lead's own
+    catch. `_text.as_str`, the coercion on the other half of the same comparison, already does; the two
+    halves of one contract must not disagree about what a non-string means."""
+    for raw in (None, 12345, True, {"n": 1}, ["ghost"], b"ghost"):
+        assert rq.system_fingerprint(raw, "") == "", \
+            f"a non-string system argument ({raw!r}) was fingerprinted or raised"
+
+
+def test_a_row_written_before_the_fourteenth_column_existed_still_counts():
+    """THE COERCION, and it is load-bearing: `_row` above builds the row keys LITERALLY and
+    carries no `system_key`, which is exactly the shape of every row already on disk from a
+    run that predates this column. `row.get("system_key")` is `None` there, and a guard that
+    compared `None` against the live `""` would silently stop counting every pre-existing
+    rejection — the same silent terminator #826 item 4 closed, reopened by its own fix.
+
+    Both sides coerce, because #807's replay oracle passes `row.get("system_key")` straight
+    into the live argument the way it passes `system`: over an archived table that is `None`
+    on every row, and an oracle that could not match its own input is not the parity O3 asks
+    for.
+
+    The negative on the same rows is what makes this more than "coerce and always match": a
+    call that DID mint a fingerprint must not count keyless rows toward its own total."""
+    params = {"native_query": "FROM logs"}
+    keyless = [_above(0), _above(1)]
+    assert "system_key" not in keyless[0], \
+        "the fixture grew the column, and with it the only evidence of the coercion"
+
+    assert rq.rejection_trip(keyless, LEAD, system="elastic", verb="query", params=params,
+                             system_key="") is not None, \
+        "a row written before the column existed stopped counting"
+    assert rq.rejection_trip(keyless, LEAD, system="elastic", verb="query", params=params,
+                             system_key=None) is not None, \
+        "the replay oracle's own argument shape matches nothing"
+    explicit_none = [dict(_above(0), system_key=None), dict(_above(1), system_key=None)]
+    assert rq.rejection_trip(explicit_none, LEAD, system="elastic", verb="query",
+                             params=params, system_key="") is not None
+
+    assert rq.rejection_trip(keyless, LEAD, system="elastic", verb="query", params=params,
+                             system_key=rq.system_fingerprint("ghostone", "")) is None, \
+        "a fingerprinted call inherited the count of rows that carry no fingerprint"
+
+
+def test_the_first_guard_is_untouched_by_the_second_guards_new_identity():
+    """`repeat_trip`'s callers pass no `system_key` and must behave exactly as they did: its
+    domain is the EXECUTED rows, whose `system` is always the dispatched name, so there is no
+    identity for a fingerprint to add and a default that leaked one would split a real
+    system's repeat count by placement."""
+    params = {"native_query": "FROM logs"}
+    executed = [_row(0, exit_code=0), _row(1, exit_code=0)]
+    assert rq.repeat_trip(executed, LEAD, system="elastic", verb="query",
+                          params=params) == rq.RepeatTrip(
+        first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
+    assert rq.repeat_trip(executed, LEAD, system="elastic", verb="query", params=params,
+                          system_key="") is not None, \
+        "the shared counting loop's keyword did not reach the first guard"

@@ -108,6 +108,9 @@ def _record_shim_failure(
                 deps.run_dir, _opened_operands(deps, decision),
             ),
             verb=_BASH_VERB,
+            # Nothing to fingerprint (#871): this lane never sees a model-authored system
+            # string — `system` above is read off a payload path this run itself wrote.
+            system_key="",
             query_id=record_query.BASH_SHIM_QUERY_ID,
             params={"command": recorded_command},
             raw_command=recorded_command,

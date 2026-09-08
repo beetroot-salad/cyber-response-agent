@@ -86,7 +86,7 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
             "episode id, or remove the episode directory to re-prime it")
     # THROUGH `lead_repository`, which `defender/CLAUDE.md` names as "the single read/join
     # surface … consumers never re-parse the artifacts". Hand-decoded here, the primer was a
-    # second reader of a thirteen-column row with ONE writer, and it had already drifted:
+    # second reader of a fourteen-column row with ONE writer, and it had already drifted:
     # `row.get("exit_code") != 0` treats a `"0"` written as a string as a failure where
     # `load_queries` coerces it through `_as_int` and reads it as the success it is — so the two
     # readers disagreed about which captures exist, in the direction that silently leaves keys
