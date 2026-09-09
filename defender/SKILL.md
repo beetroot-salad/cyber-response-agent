@@ -218,6 +218,11 @@ just prediction grading. Do not fetch from registry systems inline
 at ORIENT or PLAN; the registry is a system of record and its
 queries belong in the lead sequence.
 
+A contract's claim names a subject and its discharge covers that
+subject only — see **A contract answers about the subject its claim
+names** under ANALYZE for what a lead owes when it changes what the
+subject is.
+
 **One question = one lead = one gather call.** Independent questions
 that happen to ground the same hypothesis ("is the source IP
 documented?" + "is the account active?") are *separate* leads,
@@ -473,6 +478,26 @@ anchor kind applicable to that contract's predicate was actually queried
 and none answered. That contract is not worth another loop; it still
 escalates. See `defender/skills/invlang/SKILL.md` §Authz contract
 resolution for the column shape.
+
+**A contract answers about the subject its claim names, and only that
+subject.** The claim is prose. Nothing binds it to a vertex, so nothing
+notices when your picture of the subject moves out from under it — and
+a discharge is a fact about the claim, not about the entity you were
+thinking of when you wrote it.
+
+So when a later lead changes what the subject IS — sharpens it,
+replaces it, or splits one entity into two — the discharge you hold
+stays true of the subject it named and says nothing about the subject
+you now believe you are looking at. Do not reopen it; it answered the
+question it was asked. Declare a NEW `authz?` contract, in the block of
+the lead that moved the subject, whose claim names the subject as you
+now understand it. It is undischarged, and the rules you already have
+take it from there.
+
+The commonest shape is a subject that gets finer: the alert named a
+host, and a lead finds the container, pod or VM the action actually ran
+in. Everything already on the record stays on it and stays counted — a
+sibling contract supersedes nothing.
 
 If gather's summary feels thin, **re-dispatch gather** naming the
 obligation it left unaddressed — sharper, still an obligation, not a
