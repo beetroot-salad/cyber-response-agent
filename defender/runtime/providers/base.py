@@ -27,7 +27,9 @@ class Provider(Protocol):
     def build_model(self, name: str) -> Model:
         ...
 
-    def effort_for_role(self, role: AgentRole) -> str | None:
+    def effort_for_role(self, name: str, role: AgentRole) -> str | None:
+        """Takes the MODEL as well as the role: whether an effort can be served at all is a
+        property of the model, and a provider serving many cannot answer for one of them."""
         ...
 
     def settings_for_effort(self, effort: str | None) -> ModelSettings | None:

@@ -129,3 +129,9 @@ seam-harness/
 # at this one, where nothing refuses it. The refusal already covers runs launched from
 # here; this covers the ones that are not.
 .defender-episodes/
+
+# Experiment run artifacts — run dirs and their session stores are EVIDENCE, not source:
+# 30MB per experiment, and `experiments/*/plan.md` already carries what a reader needs.
+# Ignored rather than trusted to discipline, for the reason seam-harness/ above is.
+experiments/*/runs/
+experiments/*/sessions/

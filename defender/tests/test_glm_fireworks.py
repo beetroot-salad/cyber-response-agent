@@ -1,5 +1,5 @@
-"""Unit tests for the LLM provider abstraction + the Fireworks integration: GLM 5.2
-as the MAIN default, Kimi K2.6 as the GATHER default.
+"""Unit tests for the LLM provider abstraction + the Fireworks integration: GLM 5.3
+as the MAIN default (#1023), Kimi K2.6 as the GATHER default.
 
 Hermetic — no API key, no network. Model construction only builds the provider
 client (no request is made), so these run in the default suite. Covers the provider
@@ -31,9 +31,12 @@ from pydantic_ai.models.openai import OpenAIChatModel  # noqa: E402
 import run  # noqa: E402
 from defender import agents  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
+from defender.scripts.pricing import UnknownModel  # noqa: E402
 from defender.runtime import driver, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.runtime import review_roles  # noqa: E402
+from defender.runtime.driver import _prompts  # noqa: E402
 from defender.scripts import pricing  # noqa: E402
 
 _GLM_ID = "accounts/fireworks/models/glm-5p2"
@@ -45,17 +48,21 @@ _CACHE = {
 }
 
 
-def _role_settings(provider, role):
+def _role_settings(provider, role, name="glm-5.2"):
     """The live role→settings path after `settings(role)` was retired (#493): resolve the
-    role's default effort, then map it to settings."""
-    return provider.settings_for_effort(provider.effort_for_role(role))
+    role's default effort, then map it to settings.
+
+    Carries a MODEL since #1023 — whether an effort can be served at all is the model's
+    property, not the provider's. The default is a model with no floor, so every caller that
+    is asking about the ROLE keeps asking exactly what it asked before."""
+    return provider.settings_for_effort(provider.effort_for_role(name, role))
 
 
 
 def test_role_model_defaults(monkeypatch):
     for k in ("DEFENDER_MODEL", "DEFENDER_GATHER_MODEL"):
         monkeypatch.delenv(k, raising=False)
-    assert driver.resolve_main_model() == "glm-5.2"
+    assert driver.resolve_main_model() == "glm-5.3"
     assert driver.gather_model() == "kimi-k2.6"
 
 
@@ -267,7 +274,6 @@ def test_cache_affinity_passes_an_unroutable_name_through():
     ("glm-5p2", "glm-5.2"),
     (_KIMI_ID, "kimi-k2.6"),
     ("kimi-k2p6", "kimi-k2.6"),
-    ("kimi-k2p5", "kimi-k2.6"),
     ("claude-haiku-4-5", "claude-haiku-4-5"),
     ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),
     ("", "claude-sonnet-4-6"),
@@ -362,10 +368,166 @@ def test_preflight_missing_required_key_exits_2(monkeypatch):
 
 
 def test_preflight_unknown_model_exits_2(monkeypatch, capsys):
-    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.3", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
+    # The sentinel is a name NO vendor can ship, not a plausible next version. This test
+    # used "glm-5.3" until #1023 registered it, at which point the preflight succeeded and
+    # the assertion read as a regression in the preflight rather than as a claimed name.
+    monkeypatch.setattr(agents, "AGENTS", _registry("no-such-vendor/no-such-model", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
     assert run.preflight_role_models() == 2
     err = capsys.readouterr().err
     assert "[run.py] preflight" in err
     # The fault names the ROLE at fault, not just the model — an operator with eleven roles
     # configured cannot act on "some model is unknown".
     assert AgentRole.MAIN.name in err
+
+
+# --- #1023: GLM 5.3 ---------------------------------------------------------
+
+_GLM53_ID = "accounts/fireworks/models/glm-5p3"
+
+
+@pytest.mark.parametrize(("model", "key"), [
+    ("glm-5.3", "glm-5.3"),
+    ("glm-5p3", "glm-5.3"),
+    (f"fireworks:{_GLM53_ID}", "glm-5.3"),
+    (_GLM53_ID, "glm-5.3"),
+    # Flash is a DIFFERENT row ($0.15/$0.50), and its name CONTAINS the plain-5.3 name, so
+    # the two branches are order-dependent: flash has to be tested first or every flash call
+    # bills at 5.3's nine-times-higher input rate. Nothing pinned this before #1023.
+    ("glm-5.3-flash", "glm-5.3-flash"),
+    ("glm-5p3-flash", "glm-5.3-flash"),
+    ("accounts/fireworks/models/glm-5p3-flash", "glm-5.3-flash"),
+])
+def test_pricing_model_key_routes_5p3_to_its_own_row(model, key):
+    """5.3 is not 5.2. The generic `"glm" in m` fallthrough answers `glm-5.2` for every GLM
+    spelling it is reached with, and 5.2's row is RIGHT on input and output ($1.40/$4.40) —
+    which is what makes the miss quiet. Only the cached-input rate differs."""
+    assert pricing.model_key(model) == key
+
+
+def test_pricing_5p3_cached_input_is_not_5p2s():
+    """$0.26/M against 5.2's $0.14/M (docs.fireworks.ai/serverless/pricing, 2026-09-09).
+    Cache reads are the bulk of a run's tokens — 265K of one 349K main-model lane — so
+    pricing 5.3's read at 5.2's rate under-reports a real run by ~7%."""
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000,
+             "cache_read_input_tokens": 1_000_000}
+    assert pricing.usage_cost("glm-5p3", usage) == pytest.approx(1.40 + 4.40 + 0.26)
+    assert pricing.usage_cost("glm-5p2", usage) == pytest.approx(1.40 + 4.40 + 0.14)
+
+
+def _own_row_key(model: str) -> str:
+    """The row name a model spells for itself: `kimi-k2p6` -> `kimi-k2.6`. Compared against
+    `model_key`, this is what separates a row a model OWNS from a neighbour's row it merely
+    falls through to."""
+    import re
+    bare = model.split(":", 1)[-1].rsplit("/", 1)[-1]
+    return re.sub(r"(?<=\d)p(?=\d)", ".", bare)
+
+
+@pytest.mark.parametrize("model", [
+    _prompts.DEFAULT_MODEL,
+    _prompts.DEFAULT_GATHER_MODEL,
+    review_roles.DEFAULT_REVIEW_MODEL,
+])
+def test_every_shipped_default_model_owns_its_pricing_row(model):
+    """A shipped default that falls through to a NEIGHBOUR's row costs every run out at the
+    wrong rate, and the run still looks priced. This is the guard #1023 was missing: 5.3
+    shipped as a reachable model with no row of its own, and only the cached-input rate
+    disagreed, so nothing downstream read as broken."""
+    assert pricing.model_key(model) == _own_row_key(model)
+    assert _own_row_key(model) in pricing.PRICING
+
+
+# --- #1023 ask 3: reasoning effort is a MODEL capability, not a provider preference ------
+
+def test_gather_effort_is_floored_for_a_thinking_only_model():
+    """`gather_effort="none"` is the PROVIDER saying "gather wants the cheapest thinking on
+    offer". GLM 5.3 is thinking-only and answers `reasoning_effort='none'` with an HTTP 400
+    naming the model rather than the mismatch, so the run dies on its FIRST gather dispatch —
+    observed live, #1023. The cheapest thinking a thinking-only model offers is `low`, and
+    that is what a floor means: a preference clamped to a capability."""
+    assert providers.effort_for_role("glm-5.3", AgentRole.GATHER) == "low"
+    assert providers.effort_for_role("glm-5p3", AgentRole.GATHER) == "low"
+    assert providers.effort_for_role(f"fireworks:{_GLM53_ID}", AgentRole.GATHER) == "low"
+
+
+def test_flash_is_floored_too():
+    """5.3 Flash is the variant #1023's arm B and C actually ran as GATHER, and it refuses
+    `none` exactly as plain 5.3 does. It reaches the registry only through the `fireworks:`
+    passthrough — it has no alias — so a floor keyed on alias spellings would miss it, which
+    is why the set holds RESOLVED ids."""
+    flash = "fireworks:accounts/fireworks/models/glm-5p3-flash"
+    assert providers.effort_for_role(flash, AgentRole.GATHER) == "low"
+
+
+def test_a_model_that_accepts_none_still_gets_none():
+    """The floor is per-model, not a blanket raise of gather's effort. Kimi K2.6 — the shipped
+    gather default — takes `none` and must keep taking it, or every gather lane in the tree
+    silently starts paying for reasoning tokens it never asked for."""
+    assert providers.effort_for_role("kimi-k2.6", AgentRole.GATHER) == "none"
+
+
+def test_an_explicit_none_on_a_thinking_only_model_is_refused(monkeypatch):
+    """The clamp covers the SHIPPED default, which is not a statement about any one model.
+    An operator who names `none` for a thinking-only model has asked for something the model
+    cannot do, and silently answering `low` would hide the one thing they typed."""
+    monkeypatch.setenv("DEFENDER_GATHER_REASONING_EFFORT", "none")
+    with pytest.raises(FatalConfigError, match="thinking-only"):
+        providers.effort_for_role("glm-5.3", AgentRole.GATHER)
+
+
+def test_the_main_lane_is_floored_too(monkeypatch):
+    """MAIN ships `low`, which is already above the floor — so the guard has to be shown on
+    the lane's own env var rather than assumed from GATHER's."""
+    monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "none")
+    with pytest.raises(FatalConfigError, match="thinking-only"):
+        providers.effort_for_role("glm-5.3", AgentRole.MAIN)
+
+
+# --- the key is an EQUALITY, not a containment signal ---------------------------------
+
+@pytest.mark.parametrize("model", [
+    "kimi-k2p5",            # never shipped; the old `"kimi" in m` branch billed it as K2.6
+    "glm-5p4",              # the next GLM, which `"glm" in m` would have billed as 5.2
+    "glm",                  # the bare family name names no model and no price
+    "accounts/fireworks/models/nope",
+    "fireworks:accounts/fireworks/models/nope",
+    "gpt-4o",               # the old catch-all answered Sonnet's rate for this
+])
+def test_a_model_no_row_claims_is_refused_not_absorbed(model):
+    """Every silent fallback this table had cost a real run its real number. `"glm" in m`
+    billed 5.3 on 5.2's row (#1023); the `return "claude-sonnet-4-6"` under it answered for
+    EVERY unrecognised name at the most expensive rate in the table — so a typo'd model, or
+    any `fireworks:` passthrough, costed out as Sonnet and read as priced."""
+    with pytest.raises(UnknownModel):
+        pricing.model_key(model)
+
+
+def test_a_longer_name_does_not_absorb_a_shorter_row():
+    """The containment trap in one assertion: `glm-5p3-flash` CONTAINS `glm-5p3`, and under
+    substring matching which row won depended only on branch ORDER. Under equality the two
+    names are simply different, and no ordering can make them collide."""
+    assert pricing.model_key("glm-5p3-flash") == "glm-5.3-flash"
+    assert pricing.model_key("glm-5p3") == "glm-5.3"
+    assert pricing.PRICING["glm-5.3-flash"]["in"] != pricing.PRICING["glm-5.3"]["in"]
+
+
+@pytest.mark.parametrize(("raw", "normalized"), [
+    ("fireworks:accounts/fireworks/models/glm-5p3", "glm-5p3"),
+    ("anthropic:claude-haiku-4-5", "claude-haiku-4-5"),
+    ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),
+    ("  GLM-5P3  ", "glm-5p3"),
+])
+def test_normalize_strips_only_what_does_not_select_a_price(raw, normalized):
+    """A provider prefix, a registry path and an Anthropic release date are the three things
+    that genuinely do not vary the price. Everything else has to match a row exactly."""
+    assert pricing.normalize_model(raw) == normalized
+
+
+def test_an_unpriced_model_costs_zero_rather_than_a_neighbours_rate():
+    """`usage_cost` runs per-response inside a live run and over every archived trace, so it
+    cannot raise — a finished investigation must not lose its trace over a number nobody is
+    billed on. It answers 0.0, which reads as WRONG to anyone looking at a run's total. The
+    Sonnet-rate fallback it replaces read as correct."""
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+    assert pricing.usage_cost("fireworks:accounts/fireworks/models/nope", usage) == 0.0
+    assert pricing.usage_cost("claude-sonnet-4-6", usage) == pytest.approx(3.00 + 15.00)

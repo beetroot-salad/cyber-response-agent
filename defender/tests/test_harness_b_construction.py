@@ -109,7 +109,7 @@ def test_effort_for_role_anthropic_is_none_for_every_role():
 
 
 def test_effort_for_role_fireworks_main_default_is_low(monkeypatch):
-    """Fireworks MAIN, no env override → "low" (the production DEFAULT_MODEL=glm-5.2 main
+    """Fireworks MAIN, no env override → "low" (the production DEFAULT_MODEL main
     effort). This is the value the live main loop must keep running under."""
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     assert providers.effort_for_role("glm-5.2", AgentRole.MAIN) == "low"
@@ -176,11 +176,11 @@ def test_settings_role_still_equals_pinned_values_after_collapse(monkeypatch):
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
     fw, an = providers.FIREWORKS, providers.ANTHROPIC
-    assert fw.settings_for_effort(fw.effort_for_role(AgentRole.MAIN)) == {"extra_body": {"reasoning_effort": "low"}}
-    assert fw.settings_for_effort(fw.effort_for_role(AgentRole.GATHER)) == {"extra_body": {"reasoning_effort": "none"}}
-    assert an.settings_for_effort(an.effort_for_role(AgentRole.MAIN)) == _CACHE
-    assert (an.settings_for_effort(an.effort_for_role(AgentRole.MAIN))
-            == an.settings_for_effort(an.effort_for_role(AgentRole.GATHER)))
+    assert fw.settings_for_effort(fw.effort_for_role("glm-5.2", AgentRole.MAIN)) == {"extra_body": {"reasoning_effort": "low"}}
+    assert fw.settings_for_effort(fw.effort_for_role("glm-5.2", AgentRole.GATHER)) == {"extra_body": {"reasoning_effort": "none"}}
+    assert an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.MAIN)) == _CACHE
+    assert (an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.MAIN))
+            == an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.GATHER)))
 
 
 
