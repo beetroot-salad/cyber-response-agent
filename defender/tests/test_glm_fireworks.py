@@ -31,6 +31,7 @@ from pydantic_ai.models.openai import OpenAIChatModel  # noqa: E402
 import run  # noqa: E402
 from defender import agents  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
+from defender.scripts.pricing import UnknownModel  # noqa: E402
 from defender.runtime import driver, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
@@ -273,7 +274,6 @@ def test_cache_affinity_passes_an_unroutable_name_through():
     ("glm-5p2", "glm-5.2"),
     (_KIMI_ID, "kimi-k2.6"),
     ("kimi-k2p6", "kimi-k2.6"),
-    ("kimi-k2p5", "kimi-k2.6"),
     ("claude-haiku-4-5", "claude-haiku-4-5"),
     ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),
     ("", "claude-sonnet-4-6"),
@@ -481,3 +481,53 @@ def test_the_main_lane_is_floored_too(monkeypatch):
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "none")
     with pytest.raises(FatalConfigError, match="thinking-only"):
         providers.effort_for_role("glm-5.3", AgentRole.MAIN)
+
+
+# --- the key is an EQUALITY, not a containment signal ---------------------------------
+
+@pytest.mark.parametrize("model", [
+    "kimi-k2p5",            # never shipped; the old `"kimi" in m` branch billed it as K2.6
+    "glm-5p4",              # the next GLM, which `"glm" in m` would have billed as 5.2
+    "glm",                  # the bare family name names no model and no price
+    "accounts/fireworks/models/nope",
+    "fireworks:accounts/fireworks/models/nope",
+    "gpt-4o",               # the old catch-all answered Sonnet's rate for this
+])
+def test_a_model_no_row_claims_is_refused_not_absorbed(model):
+    """Every silent fallback this table had cost a real run its real number. `"glm" in m`
+    billed 5.3 on 5.2's row (#1023); the `return "claude-sonnet-4-6"` under it answered for
+    EVERY unrecognised name at the most expensive rate in the table — so a typo'd model, or
+    any `fireworks:` passthrough, costed out as Sonnet and read as priced."""
+    with pytest.raises(UnknownModel):
+        pricing.model_key(model)
+
+
+def test_a_longer_name_does_not_absorb_a_shorter_row():
+    """The containment trap in one assertion: `glm-5p3-flash` CONTAINS `glm-5p3`, and under
+    substring matching which row won depended only on branch ORDER. Under equality the two
+    names are simply different, and no ordering can make them collide."""
+    assert pricing.model_key("glm-5p3-flash") == "glm-5.3-flash"
+    assert pricing.model_key("glm-5p3") == "glm-5.3"
+    assert pricing.PRICING["glm-5.3-flash"]["in"] != pricing.PRICING["glm-5.3"]["in"]
+
+
+@pytest.mark.parametrize(("raw", "normalized"), [
+    ("fireworks:accounts/fireworks/models/glm-5p3", "glm-5p3"),
+    ("anthropic:claude-haiku-4-5", "claude-haiku-4-5"),
+    ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),
+    ("  GLM-5P3  ", "glm-5p3"),
+])
+def test_normalize_strips_only_what_does_not_select_a_price(raw, normalized):
+    """A provider prefix, a registry path and an Anthropic release date are the three things
+    that genuinely do not vary the price. Everything else has to match a row exactly."""
+    assert pricing.normalize_model(raw) == normalized
+
+
+def test_an_unpriced_model_costs_zero_rather_than_a_neighbours_rate():
+    """`usage_cost` runs per-response inside a live run and over every archived trace, so it
+    cannot raise — a finished investigation must not lose its trace over a number nobody is
+    billed on. It answers 0.0, which reads as WRONG to anyone looking at a run's total. The
+    Sonnet-rate fallback it replaces read as correct."""
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+    assert pricing.usage_cost("fireworks:accounts/fireworks/models/nope", usage) == 0.0
+    assert pricing.usage_cost("claude-sonnet-4-6", usage) == pytest.approx(3.00 + 15.00)

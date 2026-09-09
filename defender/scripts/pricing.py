@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+import re
+
 PRICING = {
     "claude-sonnet-4-6": {"in": 3.0, "out": 15.0, "cache_w": 3.75, "cache_r": 0.30},
     "claude-haiku-4-5":  {"in": 1.0, "out":  5.0, "cache_w": 1.25, "cache_r": 0.10},
@@ -29,34 +31,84 @@ PRICING = {
 }
 
 
+class UnknownModel(KeyError):
+    """A model spelling no row claims. Raised rather than absorbed: every silent fallback this
+    table has had cost a real run its real number. The generic `"glm" in m` branch billed GLM
+    5.3 on 5.2's row — right on input and output, wrong only on cached input, so the run read
+    as priced (#1023). The catch-all `return "claude-sonnet-4-6"` under it was worse: it
+    answered for EVERY unrecognised name, including any `fireworks:` passthrough, at the most
+    expensive rate in the table."""
+
+
+#: Every spelling that names a row, exactly. Fireworks writes `5p3` where its own docs write
+#: `5.3`, and a model arrives here as a bare alias, a full `accounts/...` id, or a
+#: `fireworks:`-prefixed one — so the spellings are enumerated rather than pattern-matched.
+#: A new model is a new pair here; it is NOT absorbed by a neighbour whose name it contains.
+_ROW_BY_NAME = {
+    "claude-sonnet-4-6": "claude-sonnet-4-6",
+    "claude-haiku-4-5": "claude-haiku-4-5",
+    "glm-5.2": "glm-5.2",
+    "glm-5p2": "glm-5.2",
+    "glm-5.3": "glm-5.3",
+    "glm-5p3": "glm-5.3",
+    "glm-5.3-flash": "glm-5.3-flash",
+    "glm-5p3-flash": "glm-5.3-flash",
+    "kimi-k2.6": "kimi-k2.6",
+    "kimi-k2p6": "kimi-k2.6",
+    "kimi-k3": "kimi-k3",
+    "deepseek-v4-flash": "deepseek-v4-flash",
+}
+
+#: An Anthropic id carries a release date the price does not vary by.
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
+
+
+def normalize_model(model: str) -> str:
+    """A raw model string reduced to the one spelling `_ROW_BY_NAME` is keyed on.
+
+    Strips only what genuinely does not select a price: the provider prefix a caller may have
+    typed, the registry path a Fireworks id carries, and an Anthropic release date. Everything
+    left has to match a row EXACTLY."""
+    m = model.lower().strip()
+    for prefix in ("fireworks:", "anthropic:"):
+        if m.startswith(prefix):
+            m = m[len(prefix):]
+    m = m.rsplit("/", 1)[-1]
+    return _DATE_SUFFIX.sub("", m)
+
+
 def model_key(model: str) -> str:
+    """The pricing row `model` names. Raises `UnknownModel` when no row claims it.
+
+    An empty string is the one absorbed case and it is a DIFFERENT question: it means no model
+    was recorded on the call at all, which predates every provider in this table."""
     if not model:
         return "claude-sonnet-4-6"
-    m = model.lower()
-    # Must precede the generic glm branch, or 5.3 Flash bills at 5.2's rate. Flash first
-    # of the two, or `glm-5p3-flash` matches the plain-5.3 test and bills at 5.3's rate.
-    if "glm-5p3-flash" in m or "glm-5.3-flash" in m:
-        return "glm-5.3-flash"
-    if "glm-5p3" in m or "glm-5.3" in m:
-        return "glm-5.3"
-    if "glm" in m:
-        return "glm-5.2"
-    if "deepseek" in m:
-        return "deepseek-v4-flash"
-    # Must precede the generic kimi branch, or K3 bills at K2.6's rate.
-    if "kimi-k3" in m:
-        return "kimi-k3"
-    if "kimi" in m:
-        return "kimi-k2.6"
-    if "haiku" in m:
-        return "claude-haiku-4-5"
-    return "claude-sonnet-4-6"
+    name = normalize_model(model)
+    try:
+        return _ROW_BY_NAME[name]
+    except KeyError:
+        raise UnknownModel(
+            f"no pricing row for model {model!r} (normalized to {name!r}); add one to "
+            f"PRICING and a spelling to _ROW_BY_NAME rather than letting it bill as a "
+            f"neighbour. Known: {sorted(set(_ROW_BY_NAME.values()))}"
+        ) from None
 
 
 def usage_cost(model: str, usage: dict) -> float:
+    """`model`'s bill for `usage`, or 0.0 when no row prices it.
+
+    A zero is the honest answer to "what does this cost?" when the table cannot say, and it is
+    deliberately not a guess: this runs per-response inside a live run (`observe.write_trace`)
+    and on every archived trace the visualizers read, so raising would cost a finished
+    investigation its trace over a number nobody is billed on. A zero total reads as WRONG to
+    anyone looking at it; the Sonnet-rate fallback this replaces read as correct."""
     if not isinstance(usage, dict):
         return 0.0
-    p = PRICING[model_key(model)]
+    try:
+        p = PRICING[model_key(model)]
+    except UnknownModel:
+        return 0.0
     return (
         usage.get("input_tokens", 0) * p["in"]
         + usage.get("output_tokens", 0) * p["out"]

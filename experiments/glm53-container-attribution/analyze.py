@@ -14,12 +14,25 @@ RATES = {
     "glm-5p3":       {"in": 1.40, "out": 4.40, "cr": 0.26},  # docs.fireworks.ai/serverless/pricing, fetched 2026-09-09
 }
 
+# Exact spellings, not substrings: `glm-5p3-flash` CONTAINS `glm-5p3`, so a containment test
+# bills every flash call at 5.3's nine-times-higher input rate depending only on branch order.
+_ROW = {
+    "glm-5p2": "glm-5p2",
+    "glm-5p3": "glm-5p3",
+    "glm-5p3-flash": "glm-5p3-flash",
+    "kimi-k2p6": "kimi-k2p6",
+    "kimi-k3": "kimi-k3",
+}
+
+
 def key(model: str) -> str:
-    m = model.rsplit("/", 1)[-1].lower()
-    for name in ("glm-5p3-flash", "glm-5p3", "glm-5p2", "kimi-k3", "kimi-k2p6"):
-        if name in m:
-            return name
-    return m
+    """The rate row `model` names, or the bare name when nothing prices it — which `main`
+    then reports as UNPRICED rather than folding into a total."""
+    m = model.lower().strip()
+    if m.startswith("fireworks:"):
+        m = m[len("fireworks:"):]
+    m = m.rsplit("/", 1)[-1]
+    return _ROW.get(m, m)
 
 def tally(run_dir: Path):
     agg = defaultdict(lambda: {"reqs":0,"in":0,"out":0,"cr":0,"cw":0,"reason":0})
