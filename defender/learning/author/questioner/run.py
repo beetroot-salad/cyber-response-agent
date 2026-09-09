@@ -26,7 +26,6 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender.learning.author import drain
 from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
-from defender._corpus import iter_lessons
 from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
@@ -39,7 +38,6 @@ from defender.learning.core.config import (
     author_max_attempts,
     author_timeout as _author_timeout,
     make_logger,
-    provenance_field,
 )
 
 
@@ -86,21 +84,13 @@ def build_questioner_config(
 
 
 def questioner_existing_finding_ids(cfg: QuestionerAuthorConfig) -> set[str]:
-    """The SAME idempotency read `lessons/run.py`'s own `existing_finding_ids` makes, over
-    THIS corpus and THIS channel's id key. Named distinctly (not a second `def
-    existing_finding_ids`) so the duplicate-helper lint's NAME-keyed census does not read two
-    independent four-line functions as one collision — the two configs are different
-    dataclasses, so a shared helper would need to take `cfg: CorpusAuthorConfig` (the base
-    both subclass), which is the fix if a THIRD corpus ever needs this read."""
-    ids: set[str] = set()
-    field_name = provenance_field(cfg.channel.id_key)
-    for lesson in iter_lessons(
-        cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
-    ):
-        sids = lesson.fm.get(field_name) or []
-        if isinstance(sids, list):
-            ids.update(sid for sid in sids if isinstance(sid, str))
-    return ids
+    """The SAME idempotency read `lessons/run.py`'s own `existing_finding_ids` makes, over THIS
+    corpus and THIS channel's id key — and now literally the same function: `shared.
+    existing_finding_ids` takes `CorpusAuthorConfig`, the base both configs subclass, and reads
+    only its `corpus_dir`/`channel.id_key`. A second body here was a duplicate the NAME-keyed
+    helper lint could not see, so any change to how a lesson attributes its source rows had to
+    be made twice or this corpus would silently re-author every row on every tick."""
+    return _shared.existing_finding_ids(cfg)
 
 
 def _gate_questioner(
@@ -137,9 +127,22 @@ def build_questioner_user_prompt(
     )
 
 
+def questioner_exempt_ids(findings: list[dict]) -> frozenset[str]:
+    """Every source id in this batch — N1's exemption, spelled the way J12's already is.
+
+    A world finding has no defender verdict to re-verify against, so EVERY row of this batch is
+    exempt from the forward check rather than merely absent from a queued set: absent is what
+    `verify_forward/tool._prepare` answers ERROR for, and the curator prompts' rule for a
+    repeated ERROR is to revert the lesson. Named here, beside the caller that passes it, so a
+    test can drive it — the same reason `lessons/run.forward_exempt_ids` is a function."""
+    return frozenset(str(f["run_id"]) for f in findings if f.get("run_id"))
+
+
 def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfig) -> dict:
     """N1: no forward check wired — see the module docstring. `curator_engine.no_forward_check`
-    builds an inert forward-check config this function never spells the class name of."""
+    builds an inert forward-check config this function never spells the class name of, with
+    every row of the batch exempt so a spawn that calls the (still-granted) tool anyway is told
+    EXEMPT rather than ERROR."""
     from defender.learning.author import curator_engine
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side queue dir, never a box-writable or model-authored tree; the sibling `lessons/run.py::invoke_agent` makes the same call
@@ -159,7 +162,9 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfi
             salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
-        cfg=curator_engine.no_forward_check(runs_dir=cfg.runs_dir, pending=cfg.channel.file),
+        cfg=curator_engine.no_forward_check(
+            runs_dir=cfg.runs_dir, pending=cfg.channel.file,
+            exempt_ids=questioner_exempt_ids(findings)),
         log=_log,
     )
 

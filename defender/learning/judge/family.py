@@ -168,6 +168,45 @@ def _world_review_block(review: dict[str, Any], label: str) -> dict[str, Any] | 
     return block if isinstance(block, dict) else None
 
 
+#: The M1 fields a #1007 review writes onto every non-control world's reachability block. A
+#: review carrying none of them anywhere never ran M1's capture re-ask at all, which is a
+#: different fact from "M1 ran and this world's block is missing".
+_M1_REACHABILITY_KEYS = ("capture_addressed", "reachable_by_capture", "capture_replays")
+
+
+def _review_measured_reachability(review: dict[str, Any]) -> bool:
+    """Did M1's capture re-ask run in the review this record came from (#1007)?
+
+    Three states, not two. NO WORLD ENTRIES AT ALL is a review that never went through #1007's
+    review step (`worlds: {}` — every pre-#1007 fixture): nothing to withhold on. ENTRIES WITH
+    REACHABILITY BLOCKS THAT CARRY NONE OF M1'S OWN KEYS is a REAL pre-#1007 record —
+    `review._record` always writes one entry per world, so a non-emptiness test read those as
+    participating, and every world whose H rows showed nothing was then withheld as
+    `capture_unaddressed` (a reason that is false about that episode) with `verdict_word`
+    collapsing to `undecidable`. ANYTHING ELSE participates: a block carrying an M1 key, and
+    also entries with no block at all, which is "M1 ran and this world's block is missing" —
+    the case `test_an_absent_reachability_block_withholds_and_never_mints_unreachable_
+    difference` pins as `reachability_unmeasured`.
+
+    THE CONTROL'S OWN BLOCK IS NOT EVIDENCE EITHER WAY, and skipping it is what makes the third
+    state reachable in production at all. `review._reachability` adds M1's keys only `if not
+    is_control` — while `review._review_world` writes a `reachability` block for EVERY world
+    including the base one — so every real #1007 record carries at least one M1-key-less block.
+    Counted, it made "M1 ran and this world's block is missing" indistinguishable from a
+    pre-#1007 record for any family whose graded worlds' blocks were all absent, and the whole
+    withholding ladder went dark (`withheld_reason` forced to `None` family-wide) exactly where
+    it is most needed. The fixtures never saw it: they write no control entry."""
+    worlds = review.get("worlds")
+    if not isinstance(worlds, dict) or not worlds:
+        return False
+    blocks = [entry["reachability"] for entry in worlds.values()
+              if isinstance(entry, dict) and entry.get("role") != BASE_ROLE
+              and isinstance(entry.get("reachability"), dict)]
+    if not blocks:
+        return True
+    return any(key in block for block in blocks for key in _M1_REACHABILITY_KEYS)
+
+
 @dataclass(frozen=True)
 class ReachabilityFacts:
     """O2's three executed facts, read off ONE world's review block and validated against
@@ -193,7 +232,11 @@ def _reachability_facts(block: dict[str, Any] | None) -> ReachabilityFacts:
     return ReachabilityFacts(
         present=True, reachable_by_capture=reachable,
         capture_addressed=block.get("capture_addressed") is True,
-        capture_reasks_faulted=faulted if isinstance(faulted, int) else 0,
+        # `not isinstance(faulted, bool)`: `bool` IS an `int` subclass, so a `review.yaml`
+        # whose `capture_reasks_faulted` is `true` would otherwise be accepted verbatim AS the
+        # count — the one coercion this class exists not to make.
+        capture_reasks_faulted=(
+            faulted if isinstance(faulted, int) and not isinstance(faulted, bool) else 0),
         injected_retrieved=block.get("injected_retrieved"),
         injected_present=block.get("injected_present"))
 
@@ -446,10 +489,15 @@ def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
     for world in worlds:
         label = world.get("world_id")
         if isinstance(label, str) and is_reserved_world_label(label):
+            # THE PREDICATE OWNS TWO RULES, so the message names both rather than only the set
+            # arm — `is_reserved_world_label` also matches the `family_<n>` DRAW shape (#1007),
+            # and a label refused for that arm was being told it had claimed a reserved name it
+            # is not, sending an operator to rename away from a set its label was never in.
             raise JudgeRefused(
-                f"world label {label!r} is the reserved name of the family's own base capture "
-                "or the family-level judge call — a graded world claiming it would collide "
-                "with the family call's own agent id and archive path (M5)")
+                f"world label {label!r} is reserved — it is the family's own base capture, the "
+                "family-level judge call, or one of that call's own `family_<n>` draws — a "
+                "graded world claiming it would collide with the family call's own agent id "
+                "and archive path (M5)")
         # BOTH SPELLINGS. The concatenation is the launcher's own check (`_family.
         # check_identities` applies exactly it), and it is not enough on its own: the grammar
         # tests the FIRST character for `isalnum`, and in `f"{episode_id}-{label}"` that
@@ -814,7 +862,7 @@ def _missing_required_input(
 def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the bucket state machine are one demand (J5 + the mechanical bucket table); splitting them would let a caller reach the bucket logic on a world the tier rule never cleared
     episode_dir: Path, world: dict[str, Any], *, episode_token: str, holding_system: str,
     review_block: dict[str, Any] | None = None, episode_incomplete: bool = False,
-    withholding_applies: bool = True, samples: dict[str, Any] | None = None,
+    withholding_applies: bool = True, samples: dict[str, Any],
 ) -> tuple[dict[str, Any], WorldFacts | None]:
     label = world["world_id"]
     raw_declared = world.get("disposition_declared")
@@ -822,7 +870,16 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # and `None` on every row that does not — never the raw manifest text on some rows and the
     # normalized value on others, which is what an early `declared: raw` gave a world that then
     # returned ungradable, and which put two spellings of one word in one table.
-    row: dict[str, Any] = {"world": label, "declared": normalized_disposition(raw_declared)}
+    # `holding_system` IS ON EVERY ROW THIS FRAME RETURNS, including the three ungradable early
+    # returns below. It is the PASS's own value (the manifest's single validated
+    # `discriminator.holding_system`), not a measurement, so a world the tier rule excluded
+    # still carries it — and `enqueue_report`'s `family_holding_system` scavenges it off these
+    # rows to stamp the family-level lane's own required keys. Set only in the terminal
+    # `row.update(...)`, an episode whose worlds are ALL ungradable left it `""` there, and
+    # every family-level finding — the one thing that episode shape exists to report — was
+    # refused by `_validate_world_row`'s non-empty-string rule and filed as a model defect.
+    row: dict[str, Any] = {"world": label, "declared": normalized_disposition(raw_declared),
+                           "holding_system": holding_system}
     world_dir = Path(episode_dir) / "worlds" / label
     ledger_path = world_ledger_path(episode_dir, label, episode_token=episode_token)
     alert_path = world_dir / ALERT_NAME
@@ -955,7 +1012,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # tests and `judge/__init__.py`'s blanket callers already read.
     staged_patterns = _staged_patterns(world.get("overlay")) or [pattern]
     sample_unavailable_patterns = [
-        p for p in staged_patterns if (samples or {}).get(p) is None]
+        p for p in staged_patterns if samples.get(p) is None]
     sample_unavailable = bool(sample_unavailable_patterns)
 
     row.update(
@@ -992,6 +1049,12 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
         mechanical_world_findings=mechanical_findings,
         sample_unavailable=sample_unavailable,
         sample_unavailable_patterns=sample_unavailable_patterns,
+        # THE PASS'S OWN `pattern`/`holding_system`, on the row (A3: identity belongs to the
+        # pass). `enqueue_report` fills either one in on a model-drawn world finding that
+        # omitted it, so `_validate_world_row`'s non-empty-string rule is met by a value this
+        # pass derived rather than by one a model had to remember to emit.
+        pattern=pattern,
+        holding_system=holding_system,
     )
     if integrity_notes:
         row["integrity_notes"] = integrity_notes
@@ -1085,6 +1148,7 @@ def _episode_has_any_served_row(
 def grade_family(
     episode_dir: Path, *, manifest: dict[str, Any] | None = None,
     review: dict[str, Any] | None = None, review_reader: Any = None,
+    samples: dict[str, Any] | None = None,
 ) -> FamilyGrade:
     """The mechanical pass: per-world facts and a bucket per non-control world, plus the
     family's `verdict_word`. Self-contained over `episode_dir` alone — no comparator call,
@@ -1099,9 +1163,16 @@ def grade_family(
     orchestration reads it once for its own outcome check and hands it over here); when neither
     is given, this pass reads `review.yaml` itself, through `review_reader` when injected,
     EXACTLY ONCE regardless of world count (#1007, `test_grade_family_reads_the_review_record_
-    once_through_the_guarded_reader`). It also reads `samples.yaml` once, permissively
-    (`read_samples_record` — absent/unparseable reads as `{}`), to compute each row's
-    `sample_unavailable` (#1007 M4/O5)."""
+    once_through_the_guarded_reader`).
+
+    `samples` IS THE SAME HAND-OVER, and for the same reason `review` is. `samples.yaml` sits
+    in the box-reachable episode dir, and `judge/__init__._grade_episode` parses it to thread
+    into every `render` — so a second, independent parse here let the mechanical row's
+    `sample_unavailable_patterns` and the `sample` prompt section that claims to explain it
+    come off two different documents, which is exactly what `manifest=`/`review=` exist to
+    prevent. Absent, this pass reads it itself, permissively (`read_samples_record` —
+    absent/unparseable reads as `{}`), to compute each row's `sample_unavailable` (#1007
+    M4/O5)."""
     episode_dir = Path(episode_dir)
     doc = manifest if manifest is not None else _raw_manifest(episode_dir)
     holding_system = _holding_system(doc)
@@ -1111,7 +1182,7 @@ def grade_family(
     episode_token = episode_token_for(episode_id)
     review_doc = review if review is not None else read_review_record(
         episode_dir, reader=review_reader)
-    samples_doc = read_samples_record(episode_dir)
+    samples_doc = samples if samples is not None else read_samples_record(episode_dir)
 
     # GATED ON THERE BEING A SIBLING TO SPEAK OF (len(worlds) >= 2). A single-world episode
     # whose one world queried nothing is structurally identical to the ordinary "no row on H"
@@ -1129,7 +1200,14 @@ def grade_family(
     # reads_as_an_absent_block`, where OTHER worlds in the same record do carry a block). Only
     # the second is withheld as `reachability_unmeasured`; the first withholds nothing; O2/O4
     # are additive facts a review that never measured them at all cannot make.
-    m1_participates = isinstance(review_doc.get("worlds"), dict) and bool(review_doc["worlds"])
+    # ASKED OF THE M1 KEYS THEMSELVES, never of "the `worlds` map is non-empty". A REAL
+    # pre-#1007 `review.yaml` carries one entry per world (`review._record` always writes them)
+    # whose `reachability` block simply lacks M1's own fields — so a non-emptiness test reads
+    # `m1_participates` True there, `capture_addressed` is absent hence False, and every world
+    # whose H rows showed nothing is withheld as `capture_unaddressed`: a reason that is false
+    # about that episode, and `verdict_word` collapses to `undecidable` with every defender
+    # finding diverted to `withheld_findings`. Only the `worlds: {}` fixtures were caught.
+    m1_participates = _review_measured_reachability(review_doc)
 
     rows: list[dict[str, Any]] = []
     facts: dict[str, WorldFacts] = {}

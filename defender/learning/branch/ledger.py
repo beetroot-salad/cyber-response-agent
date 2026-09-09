@@ -270,7 +270,12 @@ class ServedCall:
             # WRITTEN WHENEVER THIS ROW IS STAGED, whatever `differs_from_base` holds — `None`
             # is itself a fact (the witness was not measured), so omitting the key on that value
             # would make it indistinguishable from a pre-#1007 row that never took a witness at
-            # all. `episode.difference_shown` is the reader that tells the two apart.
+            # all. TWO READERS, AND THEY DO NOT AGREE about that pair: `episode.difference_shown`
+            # answers `None` (unmeasured) for both, while the reader O4's withholding ladder
+            # actually consults — `judge/family._grade_world`'s own `is not False` — answers
+            # "shown" for both, deliberately leaning toward not excusing the defender. The
+            # GRADING answer is family.py's; `episode.difference_shown` has no production caller
+            # and must not be adopted as one without reconciling the unmeasured case first.
             row["differs_from_base"] = self.differs_from_base
             row["base_pattern_digest"] = self.base_pattern_digest
         return row

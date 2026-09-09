@@ -58,6 +58,7 @@ from defender.runtime.branch._family import (
     BASE_ROLE,
     MANIFEST_NAME,
     episode_token_for,
+    is_reserved_world_label,
     load_family,
     world_token_for,
 )
@@ -141,11 +142,23 @@ def _archived_labels(episode_dir: Path) -> list[str]:
     individually clean and omits the one that was not, and both readers answer about what is
     on disk. `artifact_dir` rather than `is_dir()`: this directory sits inside the episode
     tree, and an entry there is judged on what it IS rather than on what it points at.
+
+    A RESERVED LABEL IS NOT A WORLD, and skipping it here is what keeps this reader honest
+    about a directory the grading pass owns. #1007's family-level judge call archives its draws
+    at `worlds/family/judge/`, unconditionally and before any draw is attempted, so every graded
+    episode carries a `worlds/family/` entry that no manifest can ever declare — `_family.
+    RESERVED_WORLD_LABELS` refuses a world claiming that name precisely so it cannot. Counted
+    as a world, it made `delta_o` raise `EpisodeError: the archive holds a world 'family' the
+    manifest does not declare` for EVERY episode from the moment it was graded, and left
+    `verdicts()` skipping a phantom label on the strength of an absent `report.md`. Asked
+    through the owner's own normalizer, never a local `!= "family"`, so the two gates cannot
+    come to disagree about what the reservation covers.
     """
     worlds = Path(episode_dir) / WORLDS_DIRNAME
     if not artifact_dir(worlds):
         return []
-    return sorted(entry.name for entry in worlds.iterdir() if artifact_dir(entry))
+    return sorted(entry.name for entry in worlds.iterdir()
+                  if artifact_dir(entry) and not is_reserved_world_label(entry.name))
 
 
 # ---------------------------------------------------------------------------------------

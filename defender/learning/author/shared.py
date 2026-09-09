@@ -98,6 +98,30 @@ def without_consumed_category(rec: dict) -> dict:
     return {k: v for k, v in rec.items() if k != "consumed_category"}
 
 
+def existing_finding_ids(cfg: Any) -> set[str]:
+    """Every queue-row id THIS corpus already attributes a lesson to — the pre-author
+    idempotency read, shared by every corpus-author direction.
+
+    ONE HOME (`defender/CLAUDE.md`: "One home for a helper, not the same `def` in two or more
+    modules"). It reads only `CorpusAuthorConfig`'s own two fields — `corpus_dir` and
+    `channel.id_key` — which is why it takes the base rather than either direction's subclass,
+    and why a second direction needs no second copy. The spelling of the frontmatter list comes
+    from `provenance_field`, the same derivation the drain's attribution gate reads: a file
+    attributable there but invisible here is authored again on every following tick.
+    """
+    from defender.learning.core.config import provenance_field
+
+    ids: set[str] = set()
+    field = provenance_field(cfg.channel.id_key)
+    for lesson in iter_lessons(
+        cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
+    ):
+        sids = lesson.fm.get(field) or []
+        if isinstance(sids, list):
+            ids.update(sid for sid in sids if isinstance(sid, str))
+    return ids
+
+
 def by_id(rows: list[dict], id_key: str) -> dict[str, dict]:
     return {r[id_key]: r for r in rows}
 

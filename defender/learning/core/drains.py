@@ -255,7 +255,24 @@ def _drain_one_curator(
         trigger_author(paths, channel.file, threshold_env, module_name, pending_label, box=box)
     except drain.RETIRE_SET:
         raise
-    except BaseException as e:  # noqa: BLE001 — A2's third clause: EVERY other fault class is recorded, never silently swallowed
+    # AN INTERRUPT LEAVES AT ONCE, and nothing else does — drain.py's own recorder states the
+    # first half of the rule ("so an interrupt arriving mid-record still leaves at once").
+    # Caught as a bare `BaseException` this frame swallowed `KeyboardInterrupt`: an operator's
+    # Ctrl-C was written to the channel's stuck report as if it were a curator fault, the SECOND
+    # curator's model calls then started, and `_run_worktree_batch` went on to `finish_batch` —
+    # committing, pushing and opening a PR for the batch the operator had just asked to stop.
+    #
+    # `SystemExit` IS STILL CONTAINED, though, because it is not an interrupt: it is this
+    # repo's own fatal-configuration idiom (`verify_forward/checks._verify` raises it for a
+    # check carrying no verifier prompt, `curator_engine._refuse_forward_check` for a direction
+    # that registers none). Let out, it escapes `_drain_curators` — the one thing that frame's
+    # own comment says this frame must never do — skipping the sibling curator entirely and
+    # unwinding past `finish_batch`, so the FIRST curator's already-authored lessons are
+    # discarded with the worktree and nothing is committed, pushed or recorded on either
+    # channel. That is A2's third clause exactly: recorded on this channel, contained here.
+    except KeyboardInterrupt:
+        raise
+    except (Exception, SystemExit) as e:  # noqa: BLE001 — A2's third clause: EVERY other fault class is recorded, never silently swallowed
         rows = read_jsonl_rows(channel.file) if channel.file.is_file() else []
         drain._record_stuck(channel, e, rows)
         _log(f"{module_name}: {type(e).__name__} took this curator out of the tick "

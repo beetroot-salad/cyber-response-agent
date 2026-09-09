@@ -567,13 +567,19 @@ def _base_witness(
     (`comparator.canonical`) the `differs` verdict itself rests on (F5) — so a later reader can
     trust the digest without re-issuing the read.
     """
+    # THE WHOLE WITNESS IS INSIDE THE ENVELOPE, not the adapter call alone. Everything below
+    # the read is measurement too — `payload_text` can raise on a payload it cannot dump,
+    # `canonical(...).encode("utf-8")` on a lone surrogate, `mechanical` on text it cannot
+    # parse — and a witness that raises there escapes into the SIBLING'S OWN LIVE QUERY, turning
+    # an unmeasurable extra read into a fault on the call the world was actually served. The
+    # answer is the same one the read arm already gives: unmeasured, never "no difference".
     try:
         served = fn(ctx, **moved)
+        base_text = payload_text(served)
+        digest = hashlib.sha256(canonical(base_text).encode("utf-8")).hexdigest()
+        verdict = mechanical(staged_text, base_text)
     except Exception:  # noqa: BLE001 — an unanswerable witness is unmeasured, not "no difference"
         return None, None
-    base_text = payload_text(served)
-    digest = hashlib.sha256(canonical(base_text).encode("utf-8")).hexdigest()
-    verdict = mechanical(staged_text, base_text)
     return verdict not in (Verdict.SAME, Verdict.FORMATTING), digest
 
 

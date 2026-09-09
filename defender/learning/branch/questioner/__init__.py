@@ -273,7 +273,14 @@ def _questioner_lessons_section(lessons: Any, *, stageable_patterns: Sequence[st
         # not because an exception is caught, but because the check itself goes blind.
         if duplicate_top_level_key(raw):
             continue
-        if fm.get("pattern") not in stageable:
+        # `isinstance` FIRST, exactly as `enqueue._validate_row` does over its own set and for
+        # the same reason: `pattern` is model-authored frontmatter (the curator copies it
+        # verbatim and nothing type-checks it on write), so `pattern: [logs-*]` is UNHASHABLE
+        # and `x not in <set>` raises `TypeError` — out of a frame the launcher's own refusal
+        # handler does not name, so one such lesson turns every later episode into a bare
+        # traceback until a human deletes the file.
+        pattern = fm.get("pattern")
+        if not isinstance(pattern, str) or pattern not in stageable:
             continue
         if body:
             bodies.append(body)

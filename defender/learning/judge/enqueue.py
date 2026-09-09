@@ -38,7 +38,7 @@ from defender.learning.judge.family import is_gradable_row
 from defender.learning.judge.render import episode_alert
 #: The two `subject` literals (#1007 O1/M6) — re-exported here rather than a second literal
 #: pair, so the appender's own guard and `run.py`'s selector cannot drift apart.
-from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
+from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD, cites_sample
 
 #: `discard` and `corpus-contradiction` are members of `JUDGE_OUTCOME_ENUM` and ARE the
 #: family's `verdict_word` when they apply — never a defender failure to author from (O7).
@@ -172,6 +172,28 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
         if not isinstance(value, str) or is_content_less(value):
             raise JudgeRefused(
                 f"{where}a questioner finding row's {key} must be a non-empty string")
+    # `isinstance` ON THE BUCKET, exactly as `_validate_row` does two functions up and for the
+    # same reason. R2's vocabulary is OPEN, not untyped: `_OpenBucketVocabulary` itself admits
+    # "every STRING and nothing else". A bare re-enqueue reads draw YAML off a box-reachable
+    # tree with no `validate_reply` pass, so `bucket: 2024-01-01` arrives as a `datetime.date`
+    # — admitted here, it reaches `json.dumps` INSIDE the queue lock and raises `TypeError`,
+    # a class neither `_add_row` nor `grade_episode`'s conversion set names.
+    row_type = row.get("type")
+    if not isinstance(row_type, str) or is_content_less(row_type):
+        raise JudgeRefused(
+            f"{where}a questioner finding row's type must be a non-empty string, not "
+            f"{type(row_type).__name__}")
+    # AND THE TWO ANCHOR COLUMNS, exactly as `_validate_row` screens them on the defender lane
+    # — the world lane's rows go down the SAME `json.dumps(row)` inside the SAME queue lock. A
+    # bare re-enqueue reads draw YAML with no `validate_reply` pass, so `anchor: 2026-01-01`
+    # arrives as a `datetime.date`: admitted here it raises `TypeError` mid-append, a class
+    # neither `_add_row` nor `grade_episode`'s conversion set names, with the defender rows
+    # already written and no `judge.yaml` to say what was graded.
+    for key in ("subject_anchor", "subject_topic"):
+        value = row.get(key)
+        if not isinstance(value, str) or is_content_less(value):
+            raise JudgeRefused(
+                f"{where}a questioner finding row's {key} must be a non-empty string")
 
 
 def _append_validated_rows(
@@ -211,8 +233,19 @@ def _append_validated_rows(
         existing, malformed = read_jsonl_rows_report(pending_file)
         to_write = rows
         if dedup_key is not None:
-            seen = {r.get(dedup_key) for r in existing if isinstance(r, dict)}
-            to_write = [r for r in rows if r.get(dedup_key) not in seen]
+            # STRING IDS ONLY, on BOTH sides of the membership test. `existing` is whatever
+            # `read_jsonl_rows_report` parsed off a shared queue file — a line spelling
+            # `{"finding_id": ["a"]}` makes the set comprehension raise `TypeError: unhashable
+            # type` INSIDE this lock hold, and `x not in <set>` raises the same way for a row
+            # whose own id is unhashable. Neither `_add_row` nor `grade_episode`'s conversion
+            # set names `TypeError`, so one malformed queue line took the whole append down
+            # with the lock held. Every id this module mints is an f-string (`build_finding_
+            # row`), so nothing a producer writes is excluded by the narrowing; an id of any
+            # other type simply cannot suppress a write, which is the safe direction.
+            seen = {r[dedup_key] for r in existing
+                    if isinstance(r, dict) and isinstance(r.get(dedup_key), str)}
+            to_write = [r for r in rows
+                        if not (isinstance(r.get(dedup_key), str) and r[dedup_key] in seen)]
         if not to_write:
             return 0, malformed
         text = "".join(json.dumps(row) + "\n" for row in to_write)
@@ -309,6 +342,7 @@ def _resolving_citations(finding: dict[str, Any]) -> list[str]:
 def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one keyword each
     *, run_id: str, label: str, draw: str, index: int, subject: str, finding: dict[str, Any],
     alert_rule_key: str, judge_outcome: str, provenance: str = "model",
+    pattern: str | None = None, holding_system: str | None = None,
 ) -> dict[str, Any]:
     """The thirteen-key `FindingRow` for one finding of one draw of one world — PLUS, for
     `subject: world` (#1007 M6), `world`/`pattern`/`holding_system`/`provenance`.
@@ -371,10 +405,26 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     }
     if subject == SUBJECT_WORLD:
         row["world"] = None if label == "family" else label
-        row["pattern"] = finding.get("pattern")
-        row["holding_system"] = finding.get("holding_system")
+        # THE MODEL'S OWN VALUE WHEN IT GAVE ONE, the PASS's stamp otherwise. Both keys are
+        # required by `_validate_world_row` (the questioner channel's last screen, since that
+        # curator's gate is idempotency-only), and until the prompts named them no reply
+        # carried either — so every model-drawn world finding was refused one row at a time and
+        # filed under `unqueueable_findings`, and the questioner corpus was fed the mechanical
+        # `unreachable-difference` rows alone. The fallback is the pass's own derivation, never
+        # a guess: `family._grade_world` stamps `pattern`/`holding_system` on the world's row.
+        row["pattern"] = _first_nonempty(finding.get("pattern"), pattern)
+        row["holding_system"] = _first_nonempty(finding.get("holding_system"), holding_system)
         row["provenance"] = provenance
     return row
+
+
+def _first_nonempty(*values: Any) -> Any:
+    """The first argument that is a non-blank string, else the LAST one (so the caller's own
+    absent value, and its type, still reaches the validator that refuses it)."""
+    for value in values:
+        if isinstance(value, str) and not is_content_less(value):
+            return value
+    return values[-1] if values else None
 
 
 def _draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
@@ -437,8 +487,10 @@ class EnqueueReport:
     queue_malformed_rows: int = 0
     world_appended: int = 0
     world_queue_malformed_rows: int = 0
-    #: The world rows this pass actually appended — handed on so an in-process caller
-    #: (`EpisodeGrade.world_findings`) can see them without re-reading the queue file.
+    #: The world rows this pass BUILT and handed to the appender — handed on so an in-process
+    #: caller (`EpisodeGrade.world_findings`) can see them without re-reading the queue file.
+    #: NOT "appended": the questioner channel dedups on `finding_id`, so a re-grade builds every
+    #: row again and appends none, and `world_appended` (not `len(world_rows)`) is the count.
     world_rows: list[dict[str, Any]] = field(default_factory=list)
     #: O4/F7: `{finding, world, reason}` for every defender finding this pass withheld rather
     #: than enqueued — the whole finding, the ONLY surviving record of one that never became a
@@ -493,9 +545,17 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     # `str`-keyed, not a set: O4's own reason (one of the four `WITHHELD_*` values on the row)
     # is what F7's resolution asks `withheld_findings` to carry alongside each dropped finding
     # — a bare membership set can say a world was withheld but not why.
+    # `is not None`, THE SAME PREDICATE `grade_family` and `_grade_from_document` partition
+    # `measuring_worlds` with. Read as truthiness, a `withheld_reason` of `""` would be
+    # withheld to those two and measuring here — one world excluded from `verdict_word` whose
+    # findings this appender still enqueues.
     withheld_reasons = {
-        w["world"]: w["withheld_reason"] for w in world_rows if w.get("withheld_reason")}
+        w["world"]: w["withheld_reason"] for w in world_rows
+        if w.get("withheld_reason") is not None}
     withheld_labels = set(withheld_reasons)
+    #: The graded world's own row, by label — the pass's `pattern`/`holding_system` stamp and
+    #: its `sample_unavailable_patterns`, both of which the world lane below needs per finding.
+    row_of = {w["world"]: w for w in world_rows if isinstance(w, dict) and "world" in w}
     run_id = episode_dir.name
     # `render.episode_alert`, the ONE rule for which world's `alert.json` this episode's alert
     # comes off. A local copy taking the first world whose file merely PARSED disagreed with
@@ -517,6 +577,22 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     #: this design's write set and a later re-grade may not reproduce the same model draw.
     withheld_findings: list[dict[str, Any]] = []
 
+    #: The family's own holding system, off the rows the mechanical pass already stamped —
+    #: every row carries the manifest's single `discriminator.holding_system`, on the
+    #: ungradable early returns too (`family._grade_world` puts it on the row at construction).
+    family_holding_system = _first_nonempty(
+        *(w.get("holding_system") for w in world_rows if isinstance(w, dict)), "")
+    #: And a STAGED PATTERN for the family lane's own `pattern`, off the same rows. The holding
+    #: system's name is what `_world_pattern` falls back to for a world with no staged pattern,
+    #: but it is never a member of `stageable_patterns` — and `pattern` is the questioner
+    #: corpus's ONLY selection key (`branch/questioner/_questioner_lessons_section` keeps a
+    #: lesson iff `fm["pattern"] in stageable`), so a family-level lesson stamped with it can
+    #: never be selected into any later episode: the M8/O7 feedback loop this design wires up
+    #: would drop every family-level finding in silence. A real staged pattern one of this
+    #: family's worlds was graded on is the closest pass-owned value that stays selectable.
+    family_pattern = _first_nonempty(
+        *(w.get("pattern") for w in world_rows if isinstance(w, dict)), family_holding_system)
+
     # M5's family-level draws FIRST — always `subject: world`, `world: None`, keyed under the
     # reserved `family` label so the coordinate can never collide with a per-world one. Ordered
     # ahead of the per-world walk so a family-level finding is never shadowed, on the channel's
@@ -530,10 +606,24 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                     f"{run_id}/family/{draw}/{index}: the family draw's finding[{index}] is "
                     f"{type(finding).__name__}, not a mapping")
                 continue
+            # NO A1(b) GATE ON THIS LANE, deliberately and as the committed spec pins it
+            # (`test_every_family_level_finding_carries_a_null_world` and siblings enqueue a
+            # family finding whose evidence IS `samples.yaml#<pattern>`). The gap is real —
+            # `_build_family_prompt` renders the manifest, the review record and the mechanical
+            # rows, never a sample, so every pattern is unavailable to THIS call and a
+            # `samples.yaml` citation off it is evidence the judge was never shown — but
+            # closing it here would drop findings the spec says reach the curator. The half
+            # that IS closed is the invitation: `run._FAMILY_EVIDENCE_FILES` no longer
+            # advertises `samples.yaml` to this call.
             row = build_finding_row(
                 run_id=run_id, label="family", draw=str(draw), index=index,
                 subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,
-                judge_outcome=verdict_word, provenance="model")
+                judge_outcome=verdict_word, provenance="model",
+                # A FAMILY-LEVEL finding is about the SET, so there is no ONE staged pattern it
+                # belongs to — a representative one this family was actually graded on is the
+                # fallback, because `pattern` is what selects the lesson back into a later
+                # episode and the holding system's own name never can be.
+                pattern=family_pattern, holding_system=family_holding_system)
             _add_row(row, validator=_validate_world_row, sink=world_rows_out,
                      unqueueable=unqueueable, episode_dir=episode_dir)
 
@@ -559,14 +649,50 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                         f"{run_id}/{label}/{draw}/{index}: the draw's finding[{index}] is "
                         f"{type(finding).__name__}, not a mapping")
                     continue
-                subject = finding.get("subject")
+                # ABSENT means a pre-#1007 draw read back off disk (`_draws_on_disk`, the
+                # bare-re-enqueue path), which is the only shape that legitimately carries no
+                # `subject` — every reply `validate_reply` admits has one. Anything else that
+                # is neither literal is a DROP, said out loud: routed to the defender lane it
+                # was re-stamped `subject: defender` by `build_finding_row`, which made
+                # `_validate_row`'s own "NO CASE-FOLD AND NO TRIM" guard structurally
+                # unreachable and turned `subject: World` into a defender lesson.
+                subject = finding.get("subject", SUBJECT_DEFENDER)
                 if subject == SUBJECT_WORLD:
+                    world_row = row_of.get(label) or {}
+                    # A1(b), ON THE PATH THAT REACHES THE QUEUE. `_grade_episode` applies this
+                    # same refusal when it builds the row's own `world_findings`, but that
+                    # list is a record field — the questioner channel is fed from THIS walk,
+                    # and unfiltered it shipped a finding whose only evidence is a sample the
+                    # judge was never shown straight to the curator.
+                    # `.get(...)` WITHOUT `or []`: absent and empty are different answers here.
+                    # A row that recorded the fact and found nothing unavailable is `[]` (screen
+                    # per pattern); a row that never recorded it at all — a `grade` rebuilt from
+                    # a pre-#1007 `judge.yaml`, or a label with no row on this pass — is `None`,
+                    # which `cites_sample` documents as the blanket refusal. Collapsed to `[]`,
+                    # the un-recorded case turned A1(b) OFF for that world instead of leaving it
+                    # at its conservative default.
+                    if cites_sample(
+                        finding,
+                        unavailable_patterns=world_row.get("sample_unavailable_patterns"),
+                    ):
+                        unqueueable.append(
+                            f"{run_id}/{label}/{draw}/{index}: cites `samples.yaml` for a "
+                            "pattern this world had no sample for (A1(b))")
+                        continue
                     row = build_finding_row(
                         run_id=run_id, label=label, draw=str(draw), index=index,
                         subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,
-                        judge_outcome=verdict_word, provenance="model")
+                        judge_outcome=verdict_word, provenance="model",
+                        pattern=world_row.get("pattern"),
+                        holding_system=world_row.get("holding_system"))
                     _add_row(row, validator=_validate_world_row, sink=world_rows_out,
                              unqueueable=unqueueable, episode_dir=episode_dir)
+                    continue
+                if subject != SUBJECT_DEFENDER:
+                    unqueueable.append(
+                        f"{run_id}/{label}/{draw}/{index}: subject={subject!r} names neither "
+                        f"channel ({SUBJECT_DEFENDER!r}/{SUBJECT_WORLD!r}) — no case-fold and "
+                        "no trim, so it is dropped rather than routed by guesswork")
                     continue
                 if label in withheld_labels:
                     # O4 (F7): this world's difference was never measured — the finding is

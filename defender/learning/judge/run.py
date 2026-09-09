@@ -439,6 +439,13 @@ def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
 #: subtree-only.
 _WORLD_EVIDENCE_FILES = ("samples.yaml", "review.yaml", "judge.yaml")
 
+#: The subset of the above the FAMILY-level call is actually shown. `_build_family_prompt`
+#: renders the manifest, the review record and every world's mechanical row — and no sample at
+#: all — so advertising `samples.yaml` to that call invited a citation of a document it never
+#: saw, which `enqueue_report`'s family lane then refuses under A1(b). Named here beside the
+#: allowlist it narrows, so the two cannot drift.
+_FAMILY_EVIDENCE_FILES = tuple(n for n in _WORLD_EVIDENCE_FILES if n != "samples.yaml")
+
 
 def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER) -> bool:
     """J13(a): does this evidence pointer resolve inside the GRADED WORLD's own subtree — never
@@ -595,6 +602,18 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         f"{SUBJECT_WORLD} finding is about the instrument itself — an invented shape, a story "
         "the overlay does not back, or (family call only) that the family failed to "
         "discriminate at all — and is never authored as a lesson for the defender.\n\n"
+        # THE TWO WORLD-LANE KEYS THE APPENDER REQUIRES, NAMED. `enqueue._validate_world_row`
+        # refuses a questioner-channel row whose `pattern` or `holding_system` is not a
+        # non-empty string, and neither field was in the field list above — so every
+        # model-drawn world finding was built with `pattern: None`, refused one row at a time,
+        # and filed under `unqueueable_findings` where it reads as a model defect rather than
+        # as a prompt that never asked. (The pass fills either in from the graded world's own
+        # row when a reply still omits it, but the reply is where they belong.)
+        f"A subject: {SUBJECT_WORLD} finding MUST also carry `pattern` (the staged corpus "
+        "pattern the observation is about, copied verbatim from the manifest overlay or the "
+        "sample header — never invented) and `holding_system` (the discriminator's own holding "
+        "system). Both are non-empty strings; a world finding without them cannot be "
+        "routed.\n\n"
         # THE SHAPE OF `evidence`, stated. The field list above names it and stops, so a model
         # that reads "evidence" writes the English sense of the word — a sentence quoting what
         # it saw. The reply validator requires a LIST and refuses the reply outright, which
@@ -693,6 +712,16 @@ def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
     import yaml
 
     task = (
+        # THE ROLE PROMPT IS THE PER-WORLD ONE (`_ROLE_PROMPT`, shared by both calls), and it
+        # opens "you grade one archived, branched world" and "treat [every other world's]
+        # overlay as withheld". Both sentences are false of THIS call, and a task that did not
+        # say so left the model holding two contradictory instructions about the only input it
+        # is given. Overridden here, in the user message, because the role file is the
+        # per-world contract and #1008 pins its text.
+        "This is the FAMILY-LEVEL call. The role prompt's \"one archived, branched world\" "
+        "framing and its withheld-sibling rule DO NOT APPLY here: you are shown every world "
+        "deliberately, and citing one world's overlay while reasoning about another is the "
+        "whole point of this call.\n\n"
         "Judge this WHOLE FAMILY of sibling worlds — never any single world. You are shown "
         "every world's overlay, the family's review record and every world's own mechanical "
         "facts; nothing here is withheld.\n\n"
@@ -705,7 +734,22 @@ def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
         f"{', '.join(EXAMPLE_WORLD_BUCKETS)}], subject (always {SUBJECT_WORLD!r} — this call "
         "never grades the defender), claim, root_cause, anchor, topic, evidence, "
         "discriminator_related). A family-level finding is about the FAMILY as a whole and "
-        "must NEVER name a `world` — do not add a `world` key to any finding.\n\n"
+        "must NEVER name a `world` — do not add a `world` key to any finding. It MUST carry "
+        "`pattern` (a staged corpus pattern this family is about) and `holding_system` (the "
+        "discriminator's own holding system), both non-empty strings: the questioner channel's "
+        "appender refuses a row without them.\n\n"
+        # THE EVIDENCE CONTRACT, which the per-world prompt states at length and this one
+        # omitted entirely. `_draw_document` resolves a family finding's pointers against
+        # `worlds/family/` — a directory holding only this call's own draw files — so every
+        # pointer naming a world archive or the manifest fails, and A FINDING WHOSE POINTERS
+        # ALL FAIL TO RESOLVE IS DISCARDED, silently, above `malformed_replies`. The only
+        # pointers this call can resolve are the episode-level files S7 allowlists.
+        "`evidence` IS A LIST OF POINTERS, never prose and never a quotation. A family-level "
+        f"finding may cite ONLY these episode-level files by bare name: "
+        f"{', '.join(f'`{name}`' for name in _FAMILY_EVIDENCE_FILES)}, optionally with a "
+        "`#fragment` naming what in the file you mean (for example "
+        "`review.yaml#worlds.b.reachability`). Any other path fails to resolve, and A FINDING "
+        "WHOSE POINTERS ALL FAIL TO RESOLVE IS DISCARDED.\n\n"
         f"{_outcome_guidance()}"
     )
     sections = {

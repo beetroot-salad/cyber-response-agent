@@ -547,7 +547,25 @@ def _render_sample(pattern: str, samples_doc: dict[str, Any]) -> str:
     document = samples_doc.get(pattern)
     if document is None:
         return f"no sample was captured for {pattern!r}\n"
-    return json.dumps(document, sort_keys=True, indent=2) + "\n"
+    # `default=str`, the guard the questioner's own renderer of these same documents carries
+    # (`branch/questioner/_corpus_section`). `samples.yaml` is read PERMISSIVELY on purpose —
+    # `_default_samples_reader`'s contract is that a damaged file costs the shape-invention
+    # claims their evidence and NEVER the whole grade — and a bare `json.dumps` over a value
+    # `safe_load` typed as `date`/`set`/`bytes` raises `TypeError` out of `render`, a class
+    # `grade_episode`'s conversion set does not name.
+    #
+    # AND THE DUMP ITSELF IS INSIDE THE ENVELOPE, because `default=` is never consulted for a
+    # dict KEY: `{2024-01-01: ...}` still raises `TypeError: keys must be str, int, float,
+    # bool or None`, and `sort_keys=True` over mixed key types raises before any conversion is
+    # attempted. Both shapes are ordinary `safe_load` output from a file this reader promises
+    # cannot cost more than its own claims, so an unrenderable document says so here rather
+    # than escaping `render` (past `_prepare_world_prompt`'s `(JudgeRefused, OSError,
+    # ValueError, TimeoutError)` arm and `grade_episode`'s conversion set alike) as a bare
+    # traceback with every world's model calls already paid for.
+    try:
+        return json.dumps(document, sort_keys=True, indent=2, default=str) + "\n"
+    except (TypeError, ValueError):
+        return f"the sample recorded for {pattern!r} could not be rendered\n"
 
 
 def _render_samples(patterns: list[str], samples_doc: dict[str, Any]) -> str:
@@ -596,10 +614,11 @@ def _render_review_block(block: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined views (O4) plus #1007's sample/review pair; each view is already its own helper, this is the join, and the keyword tail is the per-pass hand-over (facts/union/manifest) that keeps this from re-reading what the caller has already read
+def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined views (O4) plus #1007's sample/review pair; each view is already its own helper, this is the join, and the keyword tail is the per-pass hand-over (facts/union/manifest/review/samples) that keeps this from re-reading what the caller has already read
     episode_dir: Path, world_label: str, runs_base: Path | None = None, *,
     git_show: Any = None, lessons_commit: str | None = None, payload_cap: int | None = None,
-    facts: WorldFacts | None = None,
+    facts: WorldFacts | None = None, review: dict[str, Any] | None = None,
+    samples: dict[str, Any] | None = None,
     union: tuple[list[dict[str, Any]], dict[str, Any]] | None = None,
     manifest: dict[str, Any] | None = None,
 ) -> JudgeInput:
@@ -638,9 +657,20 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     # The report's BYTES for the prompt, off the same read the mechanical pass made.
     report_text = record.report.text
 
-    holding_system = discriminator_of(doc).get("holding_system")
-    h_rows = _own_h_rows(record.ledger_rows, str(holding_system).strip().casefold()) \
-        if isinstance(holding_system, str) else []
+    # NORMALIZED ONCE, and the same way `family._holding_system` normalizes it — `raw.strip()
+    # .casefold()`, which is the spelling every per-world fact keys on. Taken RAW for the
+    # patch-only pattern fallback below while the ledger filter took it FOLDED, a manifest that
+    # merely capitalised the system name made the prompt render one spelling of the pattern
+    # while that world's row — its `sample_unavailable_patterns`, and its mechanical finding —
+    # carried the folded one. Samples are matched by exact string on purpose, and
+    # `cites_sample` compares a citation's fragment the same way, so A1(b) stopped refusing the
+    # very citation the prompt had told the model to copy verbatim.
+    raw_holding_system = discriminator_of(doc).get("holding_system")
+    resolved_holding_system = (
+        raw_holding_system.strip().casefold()
+        if isinstance(raw_holding_system, str) else "")
+    h_rows = _own_h_rows(record.ledger_rows, resolved_holding_system) \
+        if isinstance(raw_holding_system, str) else []
 
     # #1007 M4/O5: this world's own sample(s) and its own reachability block — off the SAME
     # `_staged_patterns`/`_world_pattern` and `_world_review_block` helpers `family._grade_world`
@@ -649,12 +679,17 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     # fallback (`_world_pattern`'s single holding-system name) stays for a world with no
     # staged pattern to enumerate.
     overlay = world_entry.get("overlay")
-    resolved_holding_system = holding_system if isinstance(holding_system, str) else ""
     staged_patterns = _staged_patterns(overlay) or [
         _world_pattern(overlay, holding_system=resolved_holding_system)]
-    samples_doc = read_samples_record(episode_dir)
+    # THE PASS'S OWN PARSES, when the caller has them — the same hand-over `manifest`/`facts`/
+    # `union` already take, and for the reason `read_review_record`'s own docstring gives ("the
+    # episode dir is a tree a box can reach — two independent parses had no guarantee of
+    # agreeing"). `render` runs once per graded world, so reading these here made 2N further
+    # parses of two box-reachable files the pass had already read, and let the mechanical row
+    # and the prompt section that claims to render it come off different documents.
+    samples_doc = read_samples_record(episode_dir) if samples is None else samples
     sample_text = _render_samples(staged_patterns, samples_doc)
-    review_doc = read_review_record(episode_dir)
+    review_doc = read_review_record(episode_dir) if review is None else review
     review_block = _world_review_block(review_doc, world_label)
     review_text = _render_review_block(review_block)
     coverage = []

@@ -151,19 +151,32 @@ def _refuse_forward_check(ctx: Any) -> str:
         "against — the questioner curator registers none")
 
 
-def no_forward_check(*, runs_dir: Path, pending: Path) -> ForwardCheckConfig:
+def no_forward_check(
+    *, runs_dir: Path, pending: Path, exempt_ids: frozenset[str] = frozenset(),
+) -> ForwardCheckConfig:
     """A `ForwardCheckConfig` for a curator direction that registers NO forward check (#1007
-    N1/M7): `queued_ids`/`exempt_ids` are both empty, and the check itself refuses if ever
-    reached. Built here rather than inline at each such curator, so a direction with nothing
-    to verify against never has to spell the class its own `invoke_agent` is read for the
-    absence of (`test_the_questioner_curator_registers_no_forward_check` scans that source for
-    `ForwardCheckConfig`/`FINDINGS_CHECK` literally) — and never registered as a module-level
-    `ForwardCheck` in `verify_forward/checks.py`, which is the census that test also reads."""
+    N1/M7): `queued_ids` is empty, EVERY row of the batch is `exempt_ids`, and the check itself
+    refuses if ever reached. Built here rather than inline at each such curator, so a direction
+    with nothing to verify against never has to spell the class its own `invoke_agent` is read
+    for the absence of (`test_the_questioner_curator_registers_no_forward_check` scans that
+    source for `ForwardCheckConfig`/`FINDINGS_CHECK` literally) — and never registered as a
+    module-level `ForwardCheck` in `verify_forward/checks.py`, which is the census that test
+    also reads.
+
+    THE BATCH'S OWN IDS GO IN `exempt_ids`, and that is the whole point of the parameter.
+    `verify_forward/tool._prepare` answers ERROR for a `source_id` absent from BOTH sets, and
+    the curator prompts' rule for a repeated ERROR is to revert the lesson — which is J12's
+    already-shipped bug, whose fix (`lessons/run.forward_exempt_ids`) exists precisely because
+    "keep the id out of `queued_ids`" is not how a row is exempted. Left empty, a direction
+    that registers NO check would tell every spawn that every lesson it wrote failed to verify,
+    and the spawn's remedy is to delete its own work. The tool IS granted to this role
+    (`CORPUS_AUTHOR_DEF.tools`), so "the model never calls it" is not a guarantee this frame
+    may lean on."""
     check = ForwardCheck(
         error_prefix="questioner_curator", prompt_path=None, run=_refuse_forward_check)
     return ForwardCheckConfig(
         check=check, runs_dir=runs_dir, pending=pending,
-        queued_ids=frozenset(), exempt_ids=frozenset())
+        queued_ids=frozenset(), exempt_ids=exempt_ids)
 
 
 @dataclass(frozen=True)

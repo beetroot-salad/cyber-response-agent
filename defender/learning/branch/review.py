@@ -596,7 +596,7 @@ def _reachability(world: World, *, family: Family, replay: Any, deps: _Deps,
             faulted = str(fault) or type(fault).__name__
         rows = _rows_of(payload)
         ran = bool(rows)
-    retrieved, present = _injected_counts(world, rows=rows, deps=deps)
+    retrieved, present = _injected_counts(world, rows=rows)
     matched, failed, total = _exclusion_matches(world, deps=deps)
     block: dict[str, Any] = {
         "envelope_ran": ran,
@@ -620,7 +620,8 @@ def _addressing_patterns(world: World) -> frozenset[str]:
     return frozenset(pattern for pattern, _entry in _elastic_entries(world))
 
 
-def _addressed(call: tuple[str, str, dict], *, world: World, ctx: Any) -> bool:
+def _addressed(call: tuple[str, str, dict], *, world: World, ctx: Any,
+               staged: frozenset[str]) -> bool:
     """Does this ONE captured call name a pattern this world stages, or the patched system it
     declares (ledger fork F4, `resolved_by: auto`)?
 
@@ -629,6 +630,10 @@ def _addressed(call: tuple[str, str, dict], *, world: World, ctx: Any) -> bool:
     arm alone would read every one of them as unaddressed — `withheld_reason:
     capture_unaddressed` — and suppress its defender findings under a recorded reason that is
     false.
+
+    `staged` is `_addressing_patterns(world)`, resolved ONCE by the caller: it cannot vary
+    between the rows of one world, and rebuilt here it re-sorted the whole overlay per captured
+    row per world.
     """
     system, verb, params = call
     if system in world.overlay.patches:
@@ -640,7 +645,7 @@ def _addressed(call: tuple[str, str, dict], *, world: World, ctx: Any) -> bool:
         pattern = stager.source_pattern(verb, dict(params), ctx)
     except Exception:  # noqa: BLE001 — an unreadable call names no pattern to be addressed by
         return False
-    return pattern is not None and pattern in _addressing_patterns(world)
+    return pattern is not None and pattern in staged
 
 
 def _capture_reachability(world: World, *, deps: _Deps, resumed: Any, applier: Any) -> dict:
@@ -655,13 +660,15 @@ def _capture_reachability(world: World, *, deps: _Deps, resumed: Any, applier: A
     the WORLD arm before it is recorded — the memoised base arm cannot itself be the skew, so
     only the later arm is re-read.
     """
-    selected = [
-        (str(row.get("system")), str(row.get("verb")), dict(row.get("params") or {}),
-         correlation_key_of(row))
-        for row in deps.captured_rows
-        if _addressed((str(row.get("system")), str(row.get("verb")), dict(row.get("params") or {})),
-                      world=world, ctx=deps.ctx)
-    ]
+    # ONE PASS, ONE TRIPLE PER ROW. Built inside the `if` as well as in the value, every
+    # captured row's params were copied twice and this world's staged-pattern set re-derived
+    # from a fresh `sorted()` of the whole overlay once per row.
+    staged = _addressing_patterns(world)
+    selected: list[tuple[str, str, dict, str | None]] = []
+    for row in deps.captured_rows:
+        call = (str(row.get("system")), str(row.get("verb")), dict(row.get("params") or {}))
+        if _addressed(call, world=world, ctx=deps.ctx, staged=staged):
+            selected.append((*call, correlation_key_of(row)))
     addressed = bool(selected)
     replays: list[dict] = []
     faulted_count = 0
@@ -701,17 +708,27 @@ def _base_arm(call: tuple[str, str, dict], *, deps: _Deps) -> str | None:
     other adapter read of the review goes through. SUCCESSES ONLY are memoised. A faulted read
     is retried for the next world rather than poisoning every world that follows it in
     `_control_first`'s order.
+
+    THE WHOLE ARM IS INSIDE THE ENVELOPE, not the adapter call alone — the same rule
+    `estate/registry._base_witness` states for M2's witness. `payload_text` is
+    `json.dumps(..., sort_keys=True)`, which raises `TypeError` on a payload whose mapping keys
+    are not comparable (and `default=` is never consulted for a KEY), and the memo key is the
+    same dump over the captured params. A raise there is not "the estate answered" — it is
+    UNMEASURED, exactly as an unanswerable read is — and left outside the `try` it escaped
+    `_one_reask`, `_capture_reachability`, `_reachability`, `_review_world` and `review()`,
+    none of which catch it, killing the episode after the corpora were staged and the base
+    primed, with no `review.yaml` written.
     """
     system, verb, params = call
-    memo_key = json.dumps([system, verb, params], sort_keys=True, default=str)
-    cached = deps.base_memo.get(memo_key)
-    if cached is not None:
-        return cached
     try:
+        memo_key = json.dumps([system, verb, params], sort_keys=True, default=str)
+        cached = deps.base_memo.get(memo_key)
+        if cached is not None:
+            return cached
         payload = deps.adapters(system, verb, **params)
+        text = payload_text(payload)
     except Exception:  # noqa: BLE001 — an unanswerable base arm is a faulted re-ask, not a raise
         return None
-    text = payload_text(payload)
     deps.base_memo[memo_key] = text
     return text
 
@@ -764,21 +781,28 @@ def _one_reask(call: tuple[str, str, dict], *, world: Any, applier: Any,
     incidental fields that would make two live reads of an unchanged corpus disagree), so only
     the later arm is asked again. A difference that survives both reads is recorded; one that
     does not is skew, not a fact.
+
+    AND THE COMPARISON IS INSIDE THE ENVELOPE TOO, not the reads alone. `_differs` calls
+    `mechanical`, which canonicalises both sides — a text neither side can parse, or one
+    carrying a lone surrogate, raises out of a frame whose whole vocabulary is `(differs,
+    faulted)`, and there is no handler between here and `review()`'s own caller. An
+    unmeasurable comparison is a FAULTED re-ask, never a quiet `differs: false`.
     """
     base_text = _base_arm(call, deps=deps)
     if base_text is None:
         return None, True
     try:
         world_text = _world_arm(call, world=world, applier=applier, deps=deps)
-    except Exception:  # noqa: BLE001 — a refused or faulted world arm is a faulted re-ask
+        differing = _differs(base_text, world_text)
+    except Exception:  # noqa: BLE001 — a refused, faulted or unmeasurable world arm is a faulted re-ask
         return None, True
-    if not _differs(base_text, world_text):
+    if not differing:
         return False, False
     try:
         confirming = _world_arm(call, world=world, applier=applier, deps=deps)
+        return _differs(base_text, confirming), False
     except Exception:  # noqa: BLE001 — the re-read itself faulting is still a faulted re-ask
         return None, True
-    return _differs(base_text, confirming), False
 
 
 def _envelope(family: Family) -> tuple[str, str, dict] | None:
@@ -847,7 +871,7 @@ def _elastic_entries(world: World) -> list[tuple[str, ElasticEntry]]:
     return sorted(world.overlay.elastic.items())  # lint-shippable: ok — the manifest schema's own field name, owned by `runtime/branch/_family.Overlay`  # noqa: E501
 
 
-def _injected_counts(world: World, *, rows: Sequence[dict], deps: _Deps) -> tuple[int, int]:
+def _injected_counts(world: World, *, rows: Sequence[dict]) -> tuple[int, int]:
     """`(injected_retrieved, injected_present)` — N4/M9's honest split (#1007).
 
     THE OLD SINGLE COUNT (`max` of the two) let the door's own size stand in for the envelope's

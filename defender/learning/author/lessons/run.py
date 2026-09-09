@@ -17,7 +17,6 @@ from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender._vocab import normalized_judge_outcome
 from defender._yaml import safe_load
-from defender._corpus import iter_lessons
 from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
@@ -31,7 +30,6 @@ from defender.learning.core.config import (
     author_timeout as _author_timeout,
     make_logger,
     now_iso,
-    provenance_field,
 )
 
 
@@ -109,17 +107,9 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
 
 
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
-    ids: set[str] = set()
-    # The same spelling the drain's attribution gate reads: a file attributable there but
-    # invisible here is authored again on every following tick.
-    field = provenance_field(cfg.channel.id_key)
-    for lesson in iter_lessons(
-        cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
-    ):
-        sids = lesson.fm.get(field) or []
-        if isinstance(sids, list):
-            ids.update(sid for sid in sids if isinstance(sid, str))
-    return ids
+    """This direction's name for the ONE shared read (`shared.existing_finding_ids`), kept so
+    the module's own callers and tests keep their spelling."""
+    return _shared.existing_finding_ids(cfg)
 
 
 
@@ -400,9 +390,13 @@ def _gate_findings(
         # never this one — the defender curator's gate refuses it LOUDLY (never a silent hold,
         # which would read exactly like an ordinary un-authorable finding) so a mis-routed row
         # cannot be turned into a defender lesson by the gate that never expected to see it.
-        if entry.get("direction") == SUBJECT_WORLD:
+        # BOTH FIELDS, not `direction` alone. `subject` is the appender's own PRIMARY screen
+        # (`_validate_row` refuses anything but `subject: defender`), so a row screened here on
+        # `direction` alone let `{subject: world, direction: family}` through the one guard that
+        # exists to stop a world observation becoming a defender lesson.
+        if SUBJECT_WORLD in (entry.get("direction"), entry.get("subject")):
             raise ValueError(
-                f"a direction: {SUBJECT_WORLD!r} row (finding_id={entry.get('finding_id')!r}) "
+                f"a {SUBJECT_WORLD!r}-subject row (finding_id={entry.get('finding_id')!r}) "
                 "reached the defender curator's gate — it belongs on the questioner channel")
         fid = entry["finding_id"]
         if fid in existing_ids:
