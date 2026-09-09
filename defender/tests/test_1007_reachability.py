@@ -58,6 +58,30 @@ def block_of(record: dict, label: str = "b") -> dict:
     return record["worlds"][label]["reachability"]
 
 
+def serving_world(family, ep: Path, label: str = "b"):
+    """The world object the review's own arm holds when it asks the FORK-6 refusal.
+
+    `resume_world_from`, not `parse_world`. A parsed `World` carries the SHORT manifest label,
+    and the refusal compares that label against the view name's world token — which is the
+    episode token joined to the label. Asked with a `World`, the guard refuses every `wv-` name
+    it is ever shown, including this world's own: the positive control cannot pass, and the
+    negative twin passes for the wrong reason, since a sibling's name and this world's name are
+    both non-matches. Production reaches the guard with a `ResumeWorld`; so does this suite.
+    """
+    return W.mod("runtime.branch._family").resume_world_from(family, label, ep)
+
+
+def view_name(label: str) -> str:
+    """`label`'s view of the events corpus, through the BUILDER the stager itself uses.
+
+    Hand-spelling it as `wv-<token>-logs` names nothing: `_view_stem` trims the wildcard and
+    keeps the separator, so the real alias is `wv-<token>-logs-`, and a hand-written near-miss
+    is refused for not being a view at all rather than for belonging to a sibling.
+    """
+    return W.mod("scripts.adapters.confinement").world_view(
+        W.EVENTS_PATTERN, W.world_token(label))
+
+
 # ---------------------------------------------------------------------------------------
 # The block itself
 # ---------------------------------------------------------------------------------------
@@ -373,11 +397,13 @@ def test_the_world_arm_refuses_a_foreign_world_view(tmp_path, monkeypatch):
     assert block_of(record)["capture_replays"], (
         "no capture re-ask was issued, so the sweep of world-arm reads below is over an empty "
         "list and proves nothing about what the arm may reach")
-    own = W.mod("runtime.branch._family").parse_world(W.world_doc(
-        "b", ov=W.overlay(elastic=W.elastic_overlay(inject=[{"_id": "i1"}]))))
+    own = serving_world(family, ep)
+    assert own.world_id == W.world_token("b"), (
+        f"the guard is being asked with {own.world_id!r}, which matches no view name at all — "
+        "the refusal below would hold for a sibling's name and for this world's own alike")
     with pytest.raises(W.refusals()):
         registry.refuse_a_foreign_world_view(
-            own, "elastic", "query", {"index": f"wv-{W.world_token('c')}-logs"})
+            own, "elastic", "query", {"index": view_name("c")})
     for _s, _v, params in adapters.calls:
         rendered = json.dumps(params, sort_keys=True, default=str)
         if W.world_token("b") in rendered:
@@ -406,10 +432,8 @@ def test_the_world_arm_admits_this_worlds_own_view(tmp_path, monkeypatch):
     reached = [p for _s, _v, p in adapters.calls
                if W.world_token("b") in json.dumps(p, sort_keys=True, default=str)]
     assert reached, f"no read reached world b's own view: {adapters.calls}"
-    own = W.mod("runtime.branch._family").parse_world(W.world_doc(
-        "b", ov=W.overlay(elastic=W.elastic_overlay(inject=[{"_id": "i1"}]))))
     registry.refuse_a_foreign_world_view(
-        own, "elastic", "query", {"index": f"wv-{W.world_token('b')}-logs"})
+        serving_world(family, ep), "elastic", "query", {"index": view_name("b")})
 
 
 def test_any_reask_fault_records_faulted_and_the_pattern_loop_continues(tmp_path, monkeypatch):

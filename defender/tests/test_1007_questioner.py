@@ -20,7 +20,15 @@ from pathlib import Path
 from defender.tests import _world_1007 as W
 
 
-def author(tmp_path: Path, paths, *, invoke, lessons=None, **kw):
+#: The captured-leads text, as a marker a containment assertion can look for. It has to be a
+#: string that appears NOWHERE ELSE in the composed prompt: `family.md`'s own host preamble
+#: reads "1. the joined leads as they stood at the branch point," — so a fixture that used the
+#: phrase "the joined leads" as its marker matched that boilerplate outside every frame and
+#: reported a containment failure that had not happened.
+CAPTURED_LEADS = "CAPTURED-LEADS-BODY-1007"
+
+
+def author(tmp_path: Path, paths, *, invoke, lessons=None, leads=CAPTURED_LEADS, **kw):
     """Drive the REAL `questioner.author_family` through its injected `invoke=` seam."""
     questioner = W.mod("learning.branch.questioner")
     base, src = W.runs_base(tmp_path)
@@ -28,7 +36,7 @@ def author(tmp_path: Path, paths, *, invoke, lessons=None, **kw):
     ep.mkdir(parents=True, exist_ok=True)
     return questioner.author_family(
         source_run_dir=src, episode_dir=ep, invoke=invoke,
-        leads="the joined leads", alert={"rule": {"id": "r"}},
+        leads=leads, alert={"rule": {"id": "r"}},
         frontier="```invlang\n?h1 open\n```",
         stageable_patterns=W.CONFIGURED,
         corpus_samples=W.samples_document(),
@@ -176,7 +184,10 @@ def test_a_lesson_body_carrying_the_frame_delimiter_cannot_close_the_frame(tmp_p
     prompt = agent.prompts[0]
     assert "AFTER-THE-FAKE-CLOSE" not in W.outside_untrusted_frames(prompt), (
         "a lesson body closed the frame it was inside — everything after it is now host text")
-    assert "the joined leads" not in W.outside_untrusted_frames(prompt), (
+    assert CAPTURED_LEADS in prompt, (
+        "the capture section is absent from the prompt entirely, so the containment assertion "
+        "below holds vacuously")
+    assert CAPTURED_LEADS not in W.outside_untrusted_frames(prompt), (
         "the capture section escaped its own frame in the same prompt")
 
 
@@ -242,11 +253,37 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
     investigation it is supposed to work on its own.
     """
     orient = W.mod("runtime.orient")
+    run_common = W.mod("run_common")
+    lessons_fm = W.mod("scripts.lessons.lessons_fm")
+    frontier = W.mod("scripts.lessons.lessons_frontier")
     paths = W.loop_paths(tmp_path)
     W.questioner_lesson(paths, "q", body="QUESTIONER-ONLY-BODY", pattern=W.EVENTS_PATTERN)
 
-    section = orient._build_lessons_section(paths.defender_dir)
+    # BOTH READERS' ROOTS ARE CONSTANTS, and that is the whole mechanism: neither resolves a
+    # corpus from configuration, so neither can be pointed at the questioner's. Asserted on the
+    # constants because a planted lesson in a tmp corpus is unreachable BY EITHER READER — a
+    # test that only greps their output for its own body would pass on a reader that scanned
+    # every corpus root in the repo.
+    for root in (lessons_fm.LESSONS_DIR, frontier.DEFAULT_CORPUS):
+        assert root.name != W.QUESTIONER_CORPUS_DIRNAME, (
+            f"a defender-side lessons reader is rooted at {root} — the questioner corpus")
+        assert root.name == "lessons", f"the defender's lessons root moved to {root}"
+        assert not (root / W.QUESTIONER_CORPUS_DIRNAME).exists(), (
+            "the questioner corpus sits INSIDE the defender's own root, so a recursive glob "
+            "would reach it")
 
-    assert "QUESTIONER-ONLY-BODY" not in (section or ""), (
+    # And the section the defender actually gets, built through the production env seam so the
+    # shim really runs: it names neither the corpus nor anything in it.
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(exist_ok=True)
+    # The SHIPPED `defender/` tree, not the tmp one: `run_env` puts `<defender_dir>/bin` on
+    # PATH, and the shim lives there. Both readers' roots are repo constants anyway, so this is
+    # the only tree either of them could ever read.
+    env = run_common.run_env(Path(orient.__file__).resolve().parents[1], run_dir)
+    section = orient._build_lessons_section(env, "rule-v2-cross-tier-ssh-pivot")
+
+    assert section, ("the lessons shim produced nothing at all, so the two assertions below "
+                     "hold vacuously — check that defender/bin is on the built PATH")
+    assert "QUESTIONER-ONLY-BODY" not in section, (
         "a questioner lesson reached the defender agent's own orientation section")
-    assert W.QUESTIONER_CORPUS_DIRNAME not in (section or "")
+    assert W.QUESTIONER_CORPUS_DIRNAME not in section

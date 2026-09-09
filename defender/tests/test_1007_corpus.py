@@ -167,11 +167,14 @@ def test_the_questioner_curator_gate_is_idempotency_only(tmp_path):
     curator = W.mod("learning.author.questioner.run")
     cfg = curator.build_questioner_config(paths)
 
-    to_author, held, consumed = cfg.gate([world_queue_row()], cfg)
+    # `CorpusAuthorConfig.gate`'s own documented order, which is what `drain.run_batch`
+    # unpacks: `held, consumed_pre, to_author = cfg.gate(keyed, cfg)`.
+    held, consumed_pre, to_author = cfg.gate([world_queue_row()], cfg)
 
     assert [r["finding_id"] for r in to_author] == ["ep-1/b/0/0"], (
         f"a world row with no defender ground truth was held: {held}")
-    assert consumed == []
+    assert held == [], f"the gate held a world row it has no ground-truth rule for: {held}"
+    assert consumed_pre == []
 
 
 def test_the_questioner_curator_registers_no_forward_check(tmp_path):

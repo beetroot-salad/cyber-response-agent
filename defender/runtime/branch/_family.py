@@ -297,6 +297,7 @@ def parse_world(raw: Any, *, where: str = "worlds") -> World:
     if not isinstance(world_id, str) or not world_id:
         raise FamilyError(f"{where} entry carries no world_id")
     at = f"{where}[{world_id!r}]"
+    refuse_reserved_world_label(world_id, at=at)
     role = raw.get("role")
     if role is not None and (not isinstance(role, str) or not role):
         raise FamilyError(f"{at}.role must be a label or the null replicate sentinel")
@@ -686,12 +687,46 @@ _RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
 
 
 def is_reserved_world_label(label: str) -> bool:
-    """THE membership test for `RESERVED_WORLD_LABELS` — case-folded, the vocabulary's own
+    """THE membership test for the reserved namespace — case-folded, the vocabulary's own
     normalizer, so a second reader (`learning/judge/family.py::_check_world_labels`, which
     `grade_episode` reaches directly without the launcher's own `check_identities`) asks THIS
     module rather than re-deriving the fold locally and risking the two gates disagreeing on
-    what counts as a match."""
-    return label.casefold() in RESERVED_WORLD_LABELS
+    what counts as a match.
+
+    BOTH RULES, not just the set. The `family_<digits>` shape below is half the reservation;
+    left out of this predicate it was applied by `check_identities` alone — so the judge's own
+    gate, which exists precisely because `grade_episode` is directly callable over a manifest
+    the launcher never saw, admitted the near-miss names the launcher refuses."""
+    return (label.casefold() in RESERVED_WORLD_LABELS
+            or _RESERVED_FAMILY_DRAW_LABEL.match(label) is not None)
+
+
+def refuse_reserved_world_label(label: str, *, at: str) -> None:
+    """THE refusal for a reserved label, in one place, raised WHEREVER a world is minted.
+
+    It used to live in `check_identities` alone, which has exactly one caller — the launcher.
+    Every other way into a `Family` (`parse_family` on a hand-repaired document, `load_family`
+    on resume and re-entry) admitted a world labelled `family`, whose per-world judge draws
+    then land in `worlds/family/judge/` under agent id `judge:family:<n>` — the same archive
+    directory and the same serialized-append wire log the family-level call writes. The
+    reservation is a property of the LABEL, not of the family around it, so it is asked where
+    the label is parsed and the launcher's gate keeps it only as defense in depth.
+
+    TWO ARMS, TWO SENTENCES, the shape one first — so `family_1` is refused for the fold that
+    actually matched it rather than for a set it is not a member of.
+    """
+    where = f"{at} " if at else ""
+    if _RESERVED_FAMILY_DRAW_LABEL.match(label):
+        raise FamilyError(
+            f"{where}world label {label!r} matches family_<n> — the colon fold that names a "
+            "wire log file is not injective, and this label's own agent id would fold to the "
+            "same stem as one of the family call's draws")
+    if is_reserved_world_label(label):
+        raise FamilyError(
+            f"{where}world label {label!r} is the reserved name of the family's own base "
+            "capture or the family-level judge call — a world claiming it would append its "
+            "live rows into the recording its siblings replay, or collide with the family "
+            "call's own agent id")
 
 
 def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, deliberately not split (see its own docstring)
@@ -723,17 +758,11 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
     token_head = episode_token_for(family.episode_id)
     for world in family.worlds:
         label = world.world_id
-        if is_reserved_world_label(label):
-            raise FamilyError(
-                f"world label {label!r} is the reserved name of the family's own base capture "
-                "or the family-level judge call — a world claiming it would append its live "
-                "rows into the recording its siblings replay, or collide with the family "
-                "call's own agent id")
-        if _RESERVED_FAMILY_DRAW_LABEL.match(label):
-            raise FamilyError(
-                f"world label {label!r} matches family_<n> — the colon fold that names a wire "
-                "log file is not injective, and this label's own agent id would fold to the "
-                "same stem as one of the family call's draws")
+        # DEFENSE IN DEPTH ONLY. `parse_world` already refused this at the mint, so a `Family`
+        # carrying a reserved label cannot reach here through any parser — the arm stays
+        # because this gate is the one a reader looks in for the whole identity rule set, and
+        # because a `Family` can be constructed directly in a test or a future caller.
+        refuse_reserved_world_label(label, at="")
         try:
             refuse_unnameable_world(label)
         except ViewNameError as bad:
@@ -925,6 +954,7 @@ __all__ = [
     "episode_token_for",
     "is_contradiction",
     "is_reserved_world_label",
+    "refuse_reserved_world_label",
     "load_family",
     "manifest_digest",
     "parse_as_of",

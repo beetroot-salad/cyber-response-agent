@@ -608,8 +608,13 @@ def test_a_mechanical_world_finding_is_told_from_a_model_drawn_one_by_provenance
 
     grade(ep, judge=judge, queue_dir=paths.pending_dir)
 
+    # ON ONE WORLD. `FakeJudge` answers every call with the same document, so the family-level
+    # call draws this bucket too and files it as a row of its own (`world: None`) — a THIRD row
+    # that is not what this cell is about. The claim is that two findings ON ONE WORLD carrying
+    # one bucket both survive, so the family row is filtered out by the field that distinguishes
+    # it rather than by loosening the assertion to a subset check.
     rows = [r for r in W.queue_rows(W.questioner_channel(paths))
-            if r.get("type") == W.MECHANICAL_WORLD_BUCKET]
+            if r.get("type") == W.MECHANICAL_WORLD_BUCKET and r.get("world") == "b"]
     assert sorted(r["provenance"] for r in rows) == ["mechanical", "model"], (
         f"the two same-bucket findings collapsed to {rows} — the open vocabulary means the "
         "bucket cannot tell an arithmetic finding from a drawn one")
