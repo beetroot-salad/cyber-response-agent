@@ -670,13 +670,18 @@ def _capture_reachability(world: World, *, deps: _Deps, resumed: Any, applier: A
         if _addressed(call, world=world, ctx=deps.ctx, staged=staged):
             selected.append((*call, correlation_key_of(row)))
     addressed = bool(selected)
+    # ONE PER WORLD, here rather than per call: the registry underneath is shared and only the
+    # world declaration differs, and this is the one frame that holds both the resumed world and
+    # the loop its reads happen in.
+    read = deps.adapters.for_world(resumed.world_id)
     replays: list[dict] = []
     faulted_count = 0
     any_differs = False
     any_completed = False
     for system, verb, params, key in selected:
         call = (system, verb, params)
-        differs, faulted = _one_reask(call, world=resumed, applier=applier, deps=deps)
+        differs, faulted = _one_reask(call, world=resumed, applier=applier, deps=deps,
+                                      read=read)
         if faulted:
             faulted_count += 1
         else:
@@ -733,8 +738,17 @@ def _base_arm(call: tuple[str, str, dict], *, deps: _Deps) -> str | None:
     return text
 
 
-def _world_arm(call: tuple[str, str, dict], *, world: Any, applier: Any, deps: _Deps) -> str:
+def _world_arm(call: tuple[str, str, dict], *, world: Any, applier: Any, deps: _Deps,
+               read: Any) -> str:
     """One UNCACHED live read of `call` as this world would answer it.
+
+    `read` IS THIS WORLD'S OWN READ SIDE, never `deps.adapters`. Staging retargets the call at
+    `wv-<world>-<corpus>`, an alias no configured pattern reaches by design, and `confine_index`
+    admits such a name only from a context that DECLARES the world. `deps.adapters` is built
+    once per episode and declares none, so reading through it refused the very alias the line
+    above had just written — every capture re-ask on a world that STAGES a corpus faulted, and
+    O4's ladder then withheld every defender finding in the family for a reachability that was
+    never measured. `seams.EpisodeAdapters.for_world` is where the declaration comes from.
 
     Deliberately NOT `replay_one`: that frame's scratch ledger memoises the first answer for a
     given `(system, verb, prepared)` key, which would make H4's confirming re-read a second look
@@ -746,7 +760,7 @@ def _world_arm(call: tuple[str, str, dict], *, world: Any, applier: Any, deps: _
     refuse_a_foreign_world_view(world, system, verb, params)
     prepared = applier.prepare(system, verb, dict(params), world, deps.ctx)
     asked = dict(params) if prepared != params else None
-    served = deps.adapters(system, verb, **prepared)
+    served = read(system, verb, **prepared)
     restored = served if asked is None else applier.restore(
         system, verb, served, asked, prepared, deps.ctx)
     _decision, applied = applier.apply(system, verb, prepared, restored, world, asked)
@@ -765,7 +779,7 @@ def _differs(base_text: str, other_text: str) -> bool:
 
 
 def _one_reask(call: tuple[str, str, dict], *, world: Any, applier: Any,
-              deps: _Deps) -> tuple[bool | None, bool]:
+              deps: _Deps, read: Any) -> tuple[bool | None, bool]:
     """`(differs, faulted)` for one captured call, with H4's confirming re-read.
 
     `differs` is `None` whenever `faulted` is `True` — a faulted arm measured nothing, so it
@@ -792,14 +806,14 @@ def _one_reask(call: tuple[str, str, dict], *, world: Any, applier: Any,
     if base_text is None:
         return None, True
     try:
-        world_text = _world_arm(call, world=world, applier=applier, deps=deps)
+        world_text = _world_arm(call, world=world, applier=applier, deps=deps, read=read)
         differing = _differs(base_text, world_text)
     except Exception:  # noqa: BLE001 — a refused, faulted or unmeasurable world arm is a faulted re-ask
         return None, True
     if not differing:
         return False, False
     try:
-        confirming = _world_arm(call, world=world, applier=applier, deps=deps)
+        confirming = _world_arm(call, world=world, applier=applier, deps=deps, read=read)
         return _differs(base_text, confirming), False
     except Exception:  # noqa: BLE001 — the re-read itself faulting is still a faulted re-ask
         return None, True

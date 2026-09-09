@@ -886,6 +886,21 @@ class FakeAdapters:
         self.by_target = dict(by_target or {})
         self.fault = fault
         self.calls: list[tuple[str, str, dict]] = []
+        #: Every world token `for_world` was asked for, in order. The production read side
+        #: hands back a copy whose context DECLARES the world, which is the only thing that
+        #: makes a `wv-<world>-<corpus>` alias admissible at `confine_index`; a fake carries no
+        #: confinement, so it records the request and answers as itself. A test that wants to
+        #: know a staged read went out under its own world's declaration reads this.
+        self.world_views: list[str] = []
+
+    def for_world(self, world_id: str) -> FakeAdapters:
+        """The per-world view `seams.EpisodeAdapters` provides and the review requires.
+
+        SELF, not a copy: `calls` is what every demand in this suite asserts on, and a copy per
+        world would split one world's staged reads off the list its base reads are on.
+        """
+        self.world_views.append(world_id)
+        return self
 
     def __call__(self, system: str, verb: str, **params: Any) -> Any:
         self.calls.append((system, verb, dict(params)))

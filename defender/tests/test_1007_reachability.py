@@ -436,6 +436,70 @@ def test_the_world_arm_admits_this_worlds_own_view(tmp_path, monkeypatch):
         serving_world(family, ep), "elastic", "query", {"index": view_name("b")})
 
 
+def test_the_world_arm_reads_under_its_own_worlds_declaration(tmp_path, monkeypatch):
+    """M1's world arm reads through a read side that DECLARES the world, not the episode-wide one.
+
+    Observably true: reviewing a family whose world b stages the event stream asks the read side
+    for world b's own view, by TOKEN, before any staged call goes out.
+
+    What failure looks like: the arm stages the call — rewriting its index to
+    `wv-<token>-<corpus>` — and then reads it through the episode-wide read side, which declares
+    no world. `confine_index` admits a view name ONLY from a context that declares its world, and
+    a view name is outside every configured pattern on purpose, so the read is refused before it
+    leaves the process. Every capture re-ask on an elastic-staged world then faults,
+    `reachable_by_capture` is `null` for all of them, `_withheld_reason` answers
+    `reachability_unmeasured`, `verdict_word` collapses to `undecidable`, and every defender
+    finding in the family is withheld. Only patch-only worlds — whose calls name no view — ever
+    measure. Invisible to a suite whose read side carries no confinement, which is why the twin
+    below drives the real one.
+    """
+    ep, family = scene(tmp_path, monkeypatch)
+    adapters = W.CountingAdapters(
+        {("elastic", "query"): BASE_ANSWER},
+        by_target={W.world_token("b"): STAGED_ANSWER})
+
+    run_review(ep, family, adapters=adapters)
+
+    assert W.world_token("b") in adapters.world_views, (
+        f"the world arm never asked for world b's own read side: {adapters.world_views} — a "
+        "staged read went out under a context declaring no world")
+
+
+def test_the_production_read_side_declares_the_world_and_the_confinement_needs_it(
+        tmp_path, monkeypatch):
+    """The twin with the REAL confinement in it: the seam's per-world view is what makes a
+    staged read admissible, and the episode-wide one refuses the same name.
+
+    Observably true: `adapter_seam(...)` carries no world; `for_world(<token>)` carries exactly
+    that token; and `confine_index` — the check every elastic read passes — admits this world's
+    own view name from the second and refuses it from the first.
+
+    Driven against the real `confine_index` and the real view-name builder rather than a fake,
+    because the fake read side in the test above has no confinement at all: the assertion there
+    is that the review ASKS, and the assertion here is that asking is what makes the read legal.
+    No cluster is reached — the seam is constructed and its context inspected.
+    """
+    ep, _family = scene(tmp_path, monkeypatch)
+    seams = W.mod("learning.branch.seams")
+    confinement = W.mod("scripts.adapters.confinement")
+    registry = W.mod("learning.branch.estate.registry")
+    token = W.world_token("b")
+
+    episode_wide = seams.adapter_seam(ep)
+    this_world = episode_wide.for_world(token)
+
+    assert episode_wide.ctx.world_id is None, (
+        "the episode-wide read side already declares a world, so the contrast below is empty")
+    assert this_world.ctx.world_id == token, (
+        f"the per-world read side declares {this_world.ctx.world_id!r}, not the composed token "
+        "the view name's own segment carries")
+    patterns = registry.STAGERS["elastic"].configured_patterns()
+    view = confinement.world_view(W.EVENTS_PATTERN, token)
+    assert confinement.confine_index(view, patterns, world_id=this_world.ctx.world_id) == view
+    with pytest.raises(W.refusals()):
+        confinement.confine_index(view, patterns, world_id=episode_wide.ctx.world_id)
+
+
 def test_any_reask_fault_records_faulted_and_the_pattern_loop_continues(tmp_path, monkeypatch):
     """One key's fault does not end the loop — the remaining keys are still re-asked.
 
