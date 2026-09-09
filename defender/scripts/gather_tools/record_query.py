@@ -52,7 +52,22 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
     payloads share a digest, so it must NOT stand alone for a payload comparison —
     `_result_identity` reads it beside `payload_sha256`. On a FAILURE it is the discriminating
     half instead: every failed row hashes the same empty payload, so only the error text
-    separates two of them."""
+    separates two of them — WITH ONE CLASS EXCEPTED since #1016. An above-guard rejection whose
+    `system` the host coarsened away records HOST material, and both placements collapse: the
+    grant check writes one literal, and the schema placement renders a model-chosen field name
+    as the placeholder `argument`. Two rejections naming two different undeclared systems now
+    share this string as well as their payload hash.
+
+    THE ABOVE-GUARD EXCLUSION is what keeps that safe — not this column and not `system_key`.
+    `_result_identity`'s only consumer is `repeat_note`, which skips every
+    `ABOVE_GUARD_QUERY_ID` row, so no collapsed pair is ever compared, and
+    `collect_general_failures` drops a systemless row before `pitfall_key` merges on the digest.
+    `system_key` separates two READABLE ghosts for the companion guard alone, and only in the
+    raw table: it is `""` for the whole N5 group and `lead_repository.QueryRow` does not project
+    it. For that group there is no fallback at all — two rejections naming two different
+    invisible strings are byte-identical in every column, and neither string is recoverable.
+    That is #855 and #1016's trade, not an oversight, but a reader sent to the raw table for
+    that class would be sent to a surface that cannot answer."""
     if exit_code != 0:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0

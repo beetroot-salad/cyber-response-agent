@@ -670,11 +670,26 @@ def test_no_byte_the_model_authored_reaches_main_through_the_grant_placements_st
     _assert_budget_stop(r)
 
     body = _summary_body(r)
-    for canary in (LOUD_SYSTEM, LOUD_VERB, LOUD_PARAM):
+    # THE VACUITY CONTROL IS PER-COLUMN SINCE #1016, and the split is that issue's N1: `verb`
+    # and `params` are the call's own arguments, which a coarsened row KEEPS — they are what
+    # makes it an audit record of what was attempted — while the model's `system` is now
+    # withheld from the ROW too (`UNDECLARED_SYSTEM_DETAIL` replaces the refusal that named it).
+    #
+    # So "it reached the table" is the right control for the two columns still carrying model
+    # text, and the WRONG one for the system name: asserting it would now fail on #1016 working.
+    # What makes the system's absence from main non-vacuous instead is that the call demonstrably
+    # happened and was identified — B rows, each with its own fingerprint (asserted below) — so
+    # there was a name to leak and the host declined to spend it at either surface.
+    for canary in (LOUD_VERB, LOUD_PARAM):
         assert canary in str(r.rows), \
             f"{canary} never reached the table, so its absence from main's context says nothing"
+    assert len({row["system_key"] for row in rows}) == B, \
+        "the ghosts did not key distinctly, so no per-call name existed for the stop to leak"
+    for canary in (LOUD_SYSTEM, LOUD_VERB, LOUD_PARAM):
         assert canary not in body, \
             f"the model's own {canary!r} crossed into main's context through the grant stop"
+    assert LOUD_SYSTEM not in str(r.rows), \
+        "#1016 stopped withholding the model's system from the grant check's own row"
     for row in rows:
         assert row["system_key"] not in body, \
             "a ghost's fingerprint — a stable identifier of the model's string — reached main"
