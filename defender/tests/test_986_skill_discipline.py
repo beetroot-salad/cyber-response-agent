@@ -62,14 +62,17 @@ def test_the_main_skill_says_a_discharge_covers_only_the_subject_the_claim_names
     text = _text(MAIN_SKILL)
     assert "the subject its claim names" in text, (
         "the rule that a contract answers about the subject its claim names is gone from "
-        "SKILL.md — with it goes the only thing that makes a resolved container owe anything"
+        "SKILL.md — with it goes the only thing that makes a moved subject owe anything"
     )
-    assert "finer" in text, (
-        "the coarse-to-fine resolution the rule is about is no longer described"
+    assert "changes what the subject is" in text, (
+        "the rule no longer names its own trigger. The trigger is a lead CHANGING THE "
+        "SUBJECT — sharpening, replacing or splitting it — not the container case that "
+        "prompted it; an anchor on the example would survive the rule being narrowed back "
+        "to that one shape, which is the regression worth catching"
     )
 
 
-def test_the_main_skill_says_the_resolving_lead_declares_a_contract_naming_the_finer_entity():
+def test_the_main_skill_says_the_lead_that_moved_the_subject_declares_a_new_contract():
     """CLAIM (M1 -> O1): the rule names the ACTION owed, not just the gap.
 
     Naming the gap without naming the repair is what the tried-and-rejected frontier
@@ -77,16 +80,16 @@ def test_the_main_skill_says_the_resolving_lead_declares_a_contract_naming_the_f
     what it ASKED next. The re-ask only happens because a fresh undischarged contract blocks
     the close, so the instruction to DECLARE one is the load-bearing half."""
     text = _text(MAIN_SKILL)
-    assert "undischarged contract" in text, (
-        "the mechanism that turns the new contract into a re-ask — an undischarged contract "
-        "blocking a confident close — is no longer stated where the rule is"
+    assert "declare a new `authz?` contract" in text, (
+        "the ACTION the rule owes — declaring a fresh contract naming the subject as it is "
+        "now understood — is gone. Naming the gap without naming the repair is what the "
+        "tried-and-rejected frontier intervention did: it changed what runs RECORDED and "
+        "not what they ASKED next"
     )
-    assert "`escalated_privilege` edge to the finer entity" in text, (
-        "the rule no longer tells the resolving lead to write the privilege edge to the "
-        "finer entity, which is O2's half of the record repair. Anchored on the RELATION "
-        "name rather than on the phrase `privilege edge`: `privilege` is not in "
-        "`invlang/vocab.py::RELATIONS`, and an out-of-vocabulary `rel` is a hard refusal, so "
-        "the prose has to name the edge kind a model can actually write"
+    assert "it is undischarged" in text, (
+        "the rule no longer says why the new contract does anything — being undischarged is "
+        "what makes the existing machinery force the re-ask, and without that clause the "
+        "rule is an observation rather than an instruction"
     )
 
 
@@ -110,4 +113,11 @@ def test_the_invlang_skill_puts_a_resolved_name_in_ident_and_not_in_an_attribute
     assert "attrs.container_name" in text, (
         "the worked counter-example is gone — the guidance names a legal key without saying "
         "which cell a resolved NAME belongs in, which is the state #986 was filed against"
+    )
+    assert "is not a name" in text, (
+        "the CONVERSE half is gone: an opaque token is not a name, so it belongs in an "
+        "attribute with `ident` left open. That is the half that actually keeps the open "
+        "question visible — a run that closes `ident` over a raw id looks resolved to every "
+        "mechanism built to surface an unresolved identity, which is why the lesson lane was "
+        "dark on the runs this issue was filed from"
     )

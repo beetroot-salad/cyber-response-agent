@@ -314,6 +314,13 @@ identifier goes. A resolved container name written as
 still holding the raw id, where no reader of the record can tell the two
 apart.
 
+And the converse, which is the half that gets skipped: an opaque token a
+system happens to emit — a container id, an instance id, a pod uid — is
+NOT a name. Writing one into `ident` closes the slot over a value that
+answers nothing, and a closed slot is invisible to every mechanism that
+exists to surface an open question. Keep the token as `key=attrs.<name>`
+and leave `ident` at `??` until a lead names the entity.
+
 ### `:R authz` (authz contract resolution)
 
 ```invlang
