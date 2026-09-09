@@ -47,10 +47,14 @@ _CACHE = {
 }
 
 
-def _role_settings(provider, role):
+def _role_settings(provider, role, name="glm-5.2"):
     """The live role→settings path after `settings(role)` was retired (#493): resolve the
-    role's default effort, then map it to settings."""
-    return provider.settings_for_effort(provider.effort_for_role(role))
+    role's default effort, then map it to settings.
+
+    Carries a MODEL since #1023 — whether an effort can be served at all is the model's
+    property, not the provider's. The default is a model with no floor, so every caller that
+    is asking about the ROLE keeps asking exactly what it asked before."""
+    return provider.settings_for_effort(provider.effort_for_role(name, role))
 
 
 
@@ -431,3 +435,49 @@ def test_every_shipped_default_model_owns_its_pricing_row(model):
     disagreed, so nothing downstream read as broken."""
     assert pricing.model_key(model) == _own_row_key(model)
     assert _own_row_key(model) in pricing.PRICING
+
+
+# --- #1023 ask 3: reasoning effort is a MODEL capability, not a provider preference ------
+
+def test_gather_effort_is_floored_for_a_thinking_only_model():
+    """`gather_effort="none"` is the PROVIDER saying "gather wants the cheapest thinking on
+    offer". GLM 5.3 is thinking-only and answers `reasoning_effort='none'` with an HTTP 400
+    naming the model rather than the mismatch, so the run dies on its FIRST gather dispatch —
+    observed live, #1023. The cheapest thinking a thinking-only model offers is `low`, and
+    that is what a floor means: a preference clamped to a capability."""
+    assert providers.effort_for_role("glm-5.3", AgentRole.GATHER) == "low"
+    assert providers.effort_for_role("glm-5p3", AgentRole.GATHER) == "low"
+    assert providers.effort_for_role(f"fireworks:{_GLM53_ID}", AgentRole.GATHER) == "low"
+
+
+def test_flash_is_floored_too():
+    """5.3 Flash is the variant #1023's arm B and C actually ran as GATHER, and it refuses
+    `none` exactly as plain 5.3 does. It reaches the registry only through the `fireworks:`
+    passthrough — it has no alias — so a floor keyed on alias spellings would miss it, which
+    is why the set holds RESOLVED ids."""
+    flash = "fireworks:accounts/fireworks/models/glm-5p3-flash"
+    assert providers.effort_for_role(flash, AgentRole.GATHER) == "low"
+
+
+def test_a_model_that_accepts_none_still_gets_none():
+    """The floor is per-model, not a blanket raise of gather's effort. Kimi K2.6 — the shipped
+    gather default — takes `none` and must keep taking it, or every gather lane in the tree
+    silently starts paying for reasoning tokens it never asked for."""
+    assert providers.effort_for_role("kimi-k2.6", AgentRole.GATHER) == "none"
+
+
+def test_an_explicit_none_on_a_thinking_only_model_is_refused(monkeypatch):
+    """The clamp covers the SHIPPED default, which is not a statement about any one model.
+    An operator who names `none` for a thinking-only model has asked for something the model
+    cannot do, and silently answering `low` would hide the one thing they typed."""
+    monkeypatch.setenv("DEFENDER_GATHER_REASONING_EFFORT", "none")
+    with pytest.raises(FatalConfigError, match="thinking-only"):
+        providers.effort_for_role("glm-5.3", AgentRole.GATHER)
+
+
+def test_the_main_lane_is_floored_too(monkeypatch):
+    """MAIN ships `low`, which is already above the floor — so the guard has to be shown on
+    the lane's own env var rather than assumed from GATHER's."""
+    monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "none")
+    with pytest.raises(FatalConfigError, match="thinking-only"):
+        providers.effort_for_role("glm-5.3", AgentRole.MAIN)

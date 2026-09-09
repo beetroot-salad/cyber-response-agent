@@ -176,11 +176,11 @@ def test_settings_role_still_equals_pinned_values_after_collapse(monkeypatch):
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
     fw, an = providers.FIREWORKS, providers.ANTHROPIC
-    assert fw.settings_for_effort(fw.effort_for_role(AgentRole.MAIN)) == {"extra_body": {"reasoning_effort": "low"}}
-    assert fw.settings_for_effort(fw.effort_for_role(AgentRole.GATHER)) == {"extra_body": {"reasoning_effort": "none"}}
-    assert an.settings_for_effort(an.effort_for_role(AgentRole.MAIN)) == _CACHE
-    assert (an.settings_for_effort(an.effort_for_role(AgentRole.MAIN))
-            == an.settings_for_effort(an.effort_for_role(AgentRole.GATHER)))
+    assert fw.settings_for_effort(fw.effort_for_role("glm-5.2", AgentRole.MAIN)) == {"extra_body": {"reasoning_effort": "low"}}
+    assert fw.settings_for_effort(fw.effort_for_role("glm-5.2", AgentRole.GATHER)) == {"extra_body": {"reasoning_effort": "none"}}
+    assert an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.MAIN)) == _CACHE
+    assert (an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.MAIN))
+            == an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.GATHER)))
 
 
 

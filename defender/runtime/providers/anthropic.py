@@ -39,7 +39,7 @@ class AnthropicProvider:
             )
         return self._cache
 
-    def effort_for_role(self, role: AgentRole) -> str | None:
+    def effort_for_role(self, name: str, role: AgentRole) -> str | None:
         return None
 
     def settings_for_effort(self, effort: str | None) -> ModelSettings | None:

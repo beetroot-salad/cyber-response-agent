@@ -26,6 +26,12 @@ FIREWORKS = OpenAICompatProvider(
     },
     main_effort="low",
     gather_effort="none",
+    # GLM 5.3 and its Flash variant reason unconditionally; `none` is an API refusal, not a
+    # cheaper request. 5.2 and both Kimis take it.
+    thinking_only=frozenset({
+        "accounts/fireworks/models/glm-5p3",
+        "accounts/fireworks/models/glm-5p3-flash",
+    }),
 )
 PROVIDERS: tuple[Provider, ...] = (ANTHROPIC, FIREWORKS)
 
@@ -64,7 +70,7 @@ def provider_id_for(name: str) -> str:
 
 
 def effort_for_role(name: str, role: AgentRole) -> str | None:
-    return provider_for(name).effort_for_role(role)
+    return provider_for(name).effort_for_role(name, role)
 
 
 def build_for_effort(name: str, effort: str | None) -> BuiltModel:
