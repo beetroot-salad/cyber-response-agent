@@ -421,7 +421,7 @@ def test_d12_build_view_takes_a_defaulted_corpus_root(tmp_path):
     assert _titles(view) == {"fixture-only-lesson"}
 
     real = serialize.build_view()
-    assert set(real["groups"]) == {"defender", "actor", "environment"}
+    assert set(real["groups"]) == {"defender", "actor", "environment", "questioner"}  # 1007 M7: a fourth group
     assert _titles(real) != _titles(view)
     assert all(g["lessons"] for g in real["groups"].values())
 
@@ -582,7 +582,7 @@ def test_d17b_stdout_positive_control_dump_contract_round_trips():
 
     Without this, d17's empty-stdout assertion is green merely because nothing was ever emitted."""
     payload = json.loads(serialize.dump_contract(serialize.stamped_view()))
-    assert set(payload["groups"]) == {"defender", "actor", "environment"}
+    assert set(payload["groups"]) == {"defender", "actor", "environment", "questioner"}  # 1007 M7: a fourth group
     assert payload["generated_at"]
     assert all(g["lessons"] for g in payload["groups"].values())
     assert all(rec["title"] for rec in _records(payload))

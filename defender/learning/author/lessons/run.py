@@ -17,7 +17,6 @@ from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender._vocab import normalized_judge_outcome
 from defender._yaml import safe_load
-from defender._corpus import iter_lessons
 from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
@@ -30,8 +29,6 @@ from defender.learning.core.config import (
     author_max_attempts,
     author_timeout as _author_timeout,
     make_logger,
-    now_iso,
-    provenance_field,
 )
 
 
@@ -109,17 +106,9 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
 
 
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
-    ids: set[str] = set()
-    # The same spelling the drain's attribution gate reads: a file attributable there but
-    # invisible here is authored again on every following tick.
-    field = provenance_field(cfg.channel.id_key)
-    for lesson in iter_lessons(
-        cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
-    ):
-        sids = lesson.fm.get(field) or []
-        if isinstance(sids, list):
-            ids.update(sid for sid in sids if isinstance(sid, str))
-    return ids
+    """This direction's name for the ONE shared read (`shared.existing_finding_ids`), kept so
+    the module's own callers and tests keep their spelling."""
+    return _shared.existing_finding_ids(cfg)
 
 
 
@@ -245,7 +234,13 @@ def write_held_report(
     skipped: list[dict],
     gate_held: list[dict],
 ) -> None:
-    """@owns gate_held_ids — the operator's one written trace of a pre-author gate hold.
+    """The lessons channel's three decline reasons, as the labels its report line carries.
+
+    The ownership tag that stood here — claiming the `gate_held` id list as this function's own
+    field — is gone with the thing it claimed: the line is now composed by
+    `shared.write_disposition_report`, which both curators call and which derives every
+    `<label>_ids` key from the caller's own group names. What this function owns is WHICH labels
+    the lessons channel reports, not the spelling of the keys.
 
     THREE REASONS UNDER THREE LABELS, never merged: a `forward_bad` hold is the forward
     check's verdict on a lesson the agent wrote, a skip is terminal, and a `gate_held` row
@@ -254,20 +249,10 @@ def write_held_report(
 
     Nothing is written when the tick held and skipped nothing: a report that gains a line per
     tick names nothing."""
-    if not held_forward_bad and not skipped and not gate_held:
-        return
-    cfg.pending_dir.mkdir(parents=True, exist_ok=True)
-    line = (
-        f"{now_iso()} batch={batch_id} "
-        f"forward_bad={len(held_forward_bad)} "
-        f"skipped={len(skipped)} "
-        f"gate_held={len(gate_held)} "
-        f"forward_bad_ids={[h.get('finding_id') for h in held_forward_bad]} "
-        f"skipped_ids={[s.get('finding_id') for s in skipped]} "
-        f"gate_held_ids={[g.get('finding_id') for g in gate_held]}\n"
+    _shared.write_disposition_report(
+        cfg.held_report, cfg.pending_dir, batch_id=batch_id,
+        groups={"forward_bad": held_forward_bad, "skipped": skipped, "gate_held": gate_held},
     )
-    with cfg.held_report.open("a", encoding="utf-8") as fh:
-        fh.write(line)
 
 
 
@@ -390,11 +375,24 @@ def _gate_findings(
     # gate keys on the symbol NAME, so it is structurally blind to the copy. Widening the family
     # route later would otherwise update one site and leave the other routing as it always did.
     from defender.learning.author.verify_forward.checks import skips_forward_check
+    from defender.learning.judge.run import SUBJECT_WORLD
 
     existing_ids = existing_finding_ids(cfg)
     held: list[dict] = []
     consumed_idempotent: list[dict] = []
     for entry in batch:
+        # #1007 M6/S4: a `direction: world` row is bound for the QUESTIONER curator's channel,
+        # never this one — the defender curator's gate refuses it LOUDLY (never a silent hold,
+        # which would read exactly like an ordinary un-authorable finding) so a mis-routed row
+        # cannot be turned into a defender lesson by the gate that never expected to see it.
+        # BOTH FIELDS, not `direction` alone. `subject` is the appender's own PRIMARY screen
+        # (`_validate_row` refuses anything but `subject: defender`), so a row screened here on
+        # `direction` alone let `{subject: world, direction: family}` through the one guard that
+        # exists to stop a world observation becoming a defender lesson.
+        if SUBJECT_WORLD in (entry.get("direction"), entry.get("subject")):
+            raise ValueError(
+                f"a {SUBJECT_WORLD!r}-subject row (finding_id={entry.get('finding_id')!r}) "
+                "reached the defender curator's gate — it belongs on the questioner channel")
         fid = entry["finding_id"]
         if fid in existing_ids:
             rec = dict(entry)

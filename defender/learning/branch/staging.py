@@ -823,8 +823,9 @@ class _Door:
         own injection index it deletes the world's own documents, and it does so for exactly
         the worlds whose predicate overlaps what they injected — a `match_all` exclusion (which
         `ALLOWED_CLAUSES` admits on purpose, so "the corpus is empty except for this" is an
-        authorable world) served nothing at all, while `review._injected_retrieved` counts
-        through the raw injection index and reported the difference reachable.
+        authorable world) served nothing at all, while `review._injected_counts`'s
+        `injected_present` counted through the raw injection index and reported the difference
+        reachable.
         """
         _checked(name, _NAME_CHARS, "alias name")
         exempt = set(unfiltered)

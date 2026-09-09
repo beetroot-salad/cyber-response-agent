@@ -10,7 +10,10 @@ from pathlib import Path
 #: KEPT AS TWO NAMES rather than collapsed to one. They answer different questions — what a
 #: curator may read and write, versus what the runtime agent loads at PLAN — and a single
 #: constant would make the next author-only corpus silently readable by the runtime.
-LESSON_CORPORA = frozenset({"lessons"})
+#: #1007 M7 adds `lessons-questioner` here, on the AUTHOR side alone — the questioner curator's
+#: own read/write confine. `RUNTIME_LESSON_CORPORA` stays `{"lessons"}`: a world finding is
+#: never a lesson the defender agent itself may read at PLAN time.
+LESSON_CORPORA = frozenset({"lessons", "lessons-questioner"})
 
 RUNTIME_LESSON_CORPORA = frozenset({"lessons"})
 

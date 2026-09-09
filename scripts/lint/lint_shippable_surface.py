@@ -68,6 +68,9 @@ EXCLUDED_PREFIXES = (
     # Per-environment lesson corpus (sibling to lessons-actor) + learning-loop
     # calibration/eval fixtures — internal, not the shipped vendor-neutral surface.
     "defender/lessons-environment/",
+    # #1007: the questioner's own corpus — findings about a WORLD, not about the runtime
+    # defender agent; internal like the two above.
+    "defender/lessons-questioner/",
     "defender/learning/judge-alignment/",
     "defender/evals/",
     "defender/.venv/",

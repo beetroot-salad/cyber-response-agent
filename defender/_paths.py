@@ -33,6 +33,9 @@ class DefenderPaths:
     skills_rel: ClassVar[str] = "defender/skills/"
     adapters_rel: ClassVar[str] = "defender/scripts/adapters/"
     lessons_dir_rel: ClassVar[str] = "defender/lessons/"
+    #: #1007 M7: the questioner's own corpus — findings ABOUT a world, never a lesson for the
+    #: defender. A second, deliberately separate root from `lessons_dir_rel` above.
+    lessons_questioner_dir_rel: ClassVar[str] = "defender/lessons-questioner/"
 
     @property
     def defender_dir(self) -> Path:
@@ -57,6 +60,10 @@ class DefenderPaths:
     @property
     def lessons_dir(self) -> Path:
         return self.defender_dir / "lessons"
+
+    @property
+    def lessons_questioner_dir(self) -> Path:
+        return self.defender_dir / "lessons-questioner"
 
     @property
     def worktree_base(self) -> Path:

@@ -39,8 +39,13 @@ def test_build_view_is_pure():
 
 
 def test_three_groups_present():
+    """#1007 M7 adds a FOURTH group, `questioner` — findings about a WORLD rather than
+    about the defender agent, folded from the family judge's own world findings. Name kept
+    (referenced by `spec_graph_584-corpus-fold.yaml` and this file's own `test_corpus_fold_
+    584.py` docstring); the assertion widens in the same diff, per #922's own precedent for
+    an exact-set test gaining a member."""
     groups = serialize.build_view()["groups"]
-    assert set(groups) == {"defender", "actor", "environment"}
+    assert set(groups) == {"defender", "actor", "environment", "questioner"}
     for g in groups.values():
         assert g["label"]
         assert g["blurb"]

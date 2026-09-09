@@ -117,13 +117,19 @@ def test_947_review_replays_exactly_the_set_prime_base_read(tmp_path):
 
 
 def test_947_no_post_branch_query_reaches_a_real_adapter_unasked(tmp_path):
-    """No post-branch query reaches a real adapter body unasked: every captured key is answered
-    from the primed recording, so the adapter layer records no call for it — on the review's
-    replay and on a sibling's own serving path alike."""
-    ep = T.episode(tmp_path)
+    """No post-branch query reaches a real adapter body unasked FOR CONSISTENCY: every captured
+    key is answered from the primed recording there, so consistency's own replay records no
+    adapter call for it.
+
+    #1007/M1 SCOPES THIS: the review now re-asks, live, a captured query that a SIBLING's own
+    staged pattern or patched system addresses (`capture_addressed`) — that re-ask is the whole
+    point of M1, not a violation of this invariant. Scoped here to a family with no sibling at
+    all, so the only replay in play is the control's own consistency pass, which this test is
+    actually about."""
+    ep = T.episode(tmp_path, doc=T.family_doc(worlds=[T.base_world()]))
     T.base_capture(ep, [T.captured_row(key="k1")])
     adapters = T.FakeAdapters()
-    _run_review(ep, adapters=adapters)
+    _run_review(ep, adapters=adapters, doc=T.family_doc(worlds=[T.base_world()]))
     assert ("elastic", "query") not in adapters.asked
 
 
@@ -325,15 +331,18 @@ def test_947_a_full_match_exclusion_is_recorded_not_rejected(tmp_path):
     assert any("exclusion" in note for note in record["worlds"]["b"]["inventions"])
 
 
-def test_947_envelope_retrieving_none_of_its_injection_rejects_the_world(tmp_path):
-    """A world whose discriminating envelope, run in that world, retrieves none of its own
-    injected documents is rejected: the injection is unreachable, so the difference the world
-    declares cannot be observed."""
+def test_947_envelope_retrieving_none_of_its_injection_is_no_longer_rejected(tmp_path):
+    """#1007/N4: a world whose discriminating envelope retrieves none of its own injected
+    documents is NO LONGER rejected on that alone. `injected_retrieved` (the envelope's own
+    hits) reads 0, honestly, but the injection branch of `_rejection` retires as vacuous —
+    `reachable_by_capture` (M1) is what a later reader consults for reachability, and N2 already
+    held that a world may legitimately require vocabulary the defender lacked without being
+    inadmissible."""
     ep = T.episode(tmp_path)
     adapters = T.FakeAdapters({("elastic", "esql"): {"hits": [{"_id": "unrelated"}]}})
     record = _run_review(ep, adapters=adapters)
     assert record["worlds"]["b"]["reachability"]["injected_retrieved"] == 0
-    assert record["worlds"]["b"]["decision"] == "rejected"
+    assert record["worlds"]["b"]["decision"] == "accepted"
 
 
 def test_947_zero_apply_count_on_the_envelope_payload_rejects_the_world(tmp_path):
@@ -383,19 +392,19 @@ def test_947_count_endpoint_is_absent_from_the_elastic_adapter_allowlist(tmp_pat
                      ("/_cluster/health", "GET"), ("/api/status", "GET")}
 
 
-def test_947_the_injection_count_is_asked_through_the_door_not_a_capped_search(tmp_path):
-    """The injected-document count is asked through the staging door too, not read off a
-    capped search envelope: a search returns at most one page, so an injection larger than a
-    page could never be counted from its hits, and a world would be rejected for the reader's
-    limit rather than for its own difference."""
+def test_947_the_injection_size_is_reported_from_the_overlay_not_a_capped_search(tmp_path):
+    """#1007/N4: `injected_present` reports the overlay's own declared injection size, not a
+    count read off a capped search envelope — a search returns at most one page, so an
+    injection larger than a page could never be counted from its hits alone, and this field
+    exists so "how much this world injected" never depends on what the envelope's own page
+    happened to return."""
     ep = T.episode(tmp_path)
     cap = T.sym("scripts.adapters.elastic_adapter", "RETURNED_DOC_CAP")
     injected = [{"_id": f"i{n}"} for n in range(cap + 1)]
     doc = T.family_doc(worlds=[T.base_world(), T.world_doc("b", ov=T.overlay(
         elastic=T.elastic_overlay(inject=injected)))])
-    door = T.FakeDoor(counts={f"wv-{TOKEN_B}-logs-.inject": cap + 1})
-    record = _run_review(ep, doc=doc, door=door)
-    assert record["worlds"]["b"]["reachability"]["injected_retrieved"] == cap + 1
+    record = _run_review(ep, doc=doc)
+    assert record["worlds"]["b"]["reachability"]["injected_present"] == cap + 1
     assert record["worlds"]["b"]["decision"] == "accepted"
 
 
@@ -415,12 +424,24 @@ def test_947_every_review_record_carries_a_control_result(tmp_path):
 
 def test_947_rejected_episode_keeps_its_review_on_disk(tmp_path):
     """A rejected episode keeps its review record on disk: the measurement of a family that did
-    not run is the second thing the drift obligation is observed by."""
-    ep = T.episode(tmp_path)
+    not run is the second thing the drift obligation is observed by.
+
+    #1007/N4: the fixture used to reject through the injection-unreachable branch (world b's
+    envelope retrieving none of its injected documents). That branch retires under N4 —
+    `injected_retrieved` (the envelope's own hits) and `injected_present` (the overlay's
+    declared size) are both honest now, and neither alone is a reachability verdict this gate
+    still rejects on; `reachable_by_capture` (M1) is where a later reader looks instead. Rejected
+    here through a still-live reason: an exclusion that matches zero base documents.
+    """
+    doc = T.family_doc(worlds=[
+        T.base_world(),
+        T.world_doc("b", ov=T.overlay(elastic=T.elastic_overlay(exclude={"match_all": {}}))),
+    ])
+    ep = T.episode(tmp_path, doc=doc)
     T.base_capture(ep, [T.captured_row(key="k1", payload={"hits": [{"_id": "d1"}]})])
-    adapters = T.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "d1"}]}},
-                              by_target={TOKEN_B: {"hits": [{"_id": "planted"}]}})
-    _run_review(ep, adapters=adapters, invoke=T.FakeAgent("contradiction"))
+    adapters = T.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "d1"}]}})
+    _run_review(ep, adapters=adapters, door=T.FakeDoor(), doc=doc,
+               invoke=T.FakeAgent("same"))
     assert (ep / "review.yaml").is_file()
     assert T.review_doc(ep)["episode"]["decision"] == "rejected"
 

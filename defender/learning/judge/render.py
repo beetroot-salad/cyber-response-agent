@@ -35,10 +35,15 @@ from defender._report import read_report
 from defender.learning.judge.family import (
     WorldFacts,
     _own_h_rows,
+    _staged_patterns,
+    _world_pattern,
+    _world_review_block,
     _raw_manifest,
     discriminator_of,
     episode_id_of,
     names_one_file,
+    read_review_record,
+    read_samples_record,
     read_world_facts,
     scope_params,
 )
@@ -72,6 +77,10 @@ class JudgeInput:
     manifest_text: str = ""
     document_text: str = ""
     report_text: str = ""
+    #: #1007 M4/O5: the questioner's own sample for this world's staged pattern, and this
+    #: world's own reachability block off `review.yaml` — never a sibling's (S6).
+    sample_text: str = ""
+    review_text: str = ""
 
     #: The operator's `JUDGE_PAYLOAD_CAP`, or `None`. Held on the input rather than applied
     #: during assembly because what it must bound is the BYTES THAT REACH THE PROMPT.
@@ -96,6 +105,8 @@ class JudgeInput:
             "spread": _render_spread(self.spread, self.union_notes),
             "document": self.document_text,
             "report": self.report_text,
+            "sample": self.sample_text,
+            "review": self.review_text,
         }, self.payload_cap)
 
 
@@ -520,10 +531,94 @@ def episode_alert(episode_dir: Path, labels: list[str]) -> dict[str, Any]:
     return fallback
 
 
-def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4); each view is already its own helper, this is the join, and the keyword tail is the per-pass hand-over (facts/union/manifest) that keeps this from re-reading what the caller has already read
+def _render_sample(pattern: str, samples_doc: dict[str, Any]) -> str:
+    """#1007 M4/O5: the questioner's own reference document for THIS world's staged pattern —
+    the same bytes `samples.yaml` holds under `pattern`, dumped as JSON so the prompt carries
+    exactly one canonical rendering of it (`test_the_judges_sample_is_byte_identical_to_the_
+    questioners_within_one_attempt` re-parses whatever JSON object appears here and compares it
+    canonically to the stored document — never a substring match, which a re-ordered or
+    re-quoted YAML dump would fail).
+
+    `pattern not in samples_doc` and `samples_doc[pattern] is None` render IDENTICALLY — both
+    are "nothing to compare against" — which is the SAME predicate `family._grade_world`
+    computes independently for `sample_unavailable` over the same file (`.get(pattern) is
+    None`); this is that fact's own rendering, not a second derivation of it (H2's `family.py`
+    owns the flag on the row, this owns the prompt's own sentence)."""
+    document = samples_doc.get(pattern)
+    if document is None:
+        return f"no sample was captured for {pattern!r}\n"
+    # `default=str`, the guard the questioner's own renderer of these same documents carries
+    # (`branch/questioner/_corpus_section`). `samples.yaml` is read PERMISSIVELY on purpose —
+    # `_default_samples_reader`'s contract is that a damaged file costs the shape-invention
+    # claims their evidence and NEVER the whole grade — and a bare `json.dumps` over a value
+    # `safe_load` typed as `date`/`set`/`bytes` raises `TypeError` out of `render`, a class
+    # `grade_episode`'s conversion set does not name.
+    #
+    # AND THE DUMP ITSELF IS INSIDE THE ENVELOPE, because `default=` is never consulted for a
+    # dict KEY: `{2024-01-01: ...}` still raises `TypeError: keys must be str, int, float,
+    # bool or None`, and `sort_keys=True` over mixed key types raises before any conversion is
+    # attempted. Both shapes are ordinary `safe_load` output from a file this reader promises
+    # cannot cost more than its own claims, so an unrenderable document says so here rather
+    # than escaping `render` (past `_prepare_world_prompt`'s `(JudgeRefused, OSError,
+    # ValueError, TimeoutError)` arm and `grade_episode`'s conversion set alike) as a bare
+    # traceback with every world's model calls already paid for.
+    try:
+        return json.dumps(document, sort_keys=True, indent=2, default=str) + "\n"
+    except (TypeError, ValueError):
+        return f"the sample recorded for {pattern!r} could not be rendered\n"
+
+
+def _render_samples(patterns: list[str], samples_doc: dict[str, Any]) -> str:
+    """EVERY staged pattern's own sample, one `_render_sample` block per pattern — O5's own
+    domain ("per staged pattern"), never reduced to the world's single representative one.
+
+    A world staging into two staged patterns and shown a sample for only one is O5's own
+    falsifier: this function is what closes it on the RENDER side (`family._grade_world`'s
+    `sample_unavailable_patterns` closes the corresponding fact side). A single-pattern world
+    (every fixture in this suite until `test_a_two_pattern_world_...`) renders identically to
+    the single-block output `_render_sample` alone produced before this existed — one header,
+    one document — so no existing byte-identity assertion moves."""
+    if not patterns:
+        return "no pattern is staged for this world\n"
+    return "\n".join(
+        f"pattern {p!r}:\n{_render_sample(p, samples_doc)}" for p in patterns)
+
+
+def _render_review_block(block: dict[str, Any] | None) -> str:
+    """This world's OWN reachability block off `review.yaml` (M1/M3) — never a sibling's, and
+    never the review record whole (S6 forbids a sibling's overlay reaching this prompt, and the
+    review record carries no overlay itself, but rendering it whole would still carry every
+    OTHER world's own measurements where this world's judge has no business reading them)."""
+    if not isinstance(block, dict):
+        return "No reachability block is recorded for this world.\n"
+    lines = [
+        f"capture_addressed: {block.get('capture_addressed')!r}",
+        f"capture_reasks_faulted: {block.get('capture_reasks_faulted')!r}",
+        f"reachable_by_capture: {block.get('reachable_by_capture')!r}",
+        f"injected_retrieved: {block.get('injected_retrieved')!r}",
+        f"injected_present: {block.get('injected_present')!r}",
+        # H2/G-1, KNOWINGLY: `envelope_failed` is `str(AdapterFault.detail)` verbatim
+        # (`review.py`), which can carry the `wv-<world>-<stem>` staged-view naming scheme. The
+        # frame below stops this text being read as instruction; it does not redact the names.
+        f"envelope_failed: {block.get('envelope_failed')!r}",
+    ]
+    replays = block.get("capture_replays")
+    if isinstance(replays, list) and replays:
+        lines.append("capture_replays:")
+        for entry in replays:
+            if isinstance(entry, dict):
+                lines.append(f"  - key={entry.get('key')!r} differs={entry.get('differs')!r} "
+                             f"faulted={entry.get('faulted')!r}")
+    else:
+        lines.append("capture_replays: none recorded")
+    return "\n".join(lines) + "\n"
+
+
+def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined views (O4) plus #1007's sample/review pair; each view is already its own helper, this is the join, and the keyword tail is the per-pass hand-over (facts/union/manifest/review/samples) that keeps this from re-reading what the caller has already read
     episode_dir: Path, world_label: str, runs_base: Path | None = None, *,
     git_show: Any = None, lessons_commit: str | None = None, payload_cap: int | None = None,
-    facts: WorldFacts | None = None,
+    facts: WorldFacts | None = None, review: dict[str, Any] | None = None,
+    samples: dict[str, Any] | None = None,
     union: tuple[list[dict[str, Any]], dict[str, Any]] | None = None,
     manifest: dict[str, Any] | None = None,
 ) -> JudgeInput:
@@ -547,7 +642,7 @@ def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4
     doc = manifest if manifest is not None else _raw_manifest(episode_dir)
     episode_token = episode_token_for(episode_id_of(doc))
     world_dir = episode_dir / "worlds" / world_label
-    _world_entry(doc, world_label)  # validates the graded world is actually declared
+    world_entry = _world_entry(doc, world_label)  # validates the graded world is actually declared
     show = git_show if git_show is not None else _git_show_default
     record = facts if facts is not None else read_world_facts(
         episode_dir, world_label, episode_token=episode_token)
@@ -562,9 +657,41 @@ def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4
     # The report's BYTES for the prompt, off the same read the mechanical pass made.
     report_text = record.report.text
 
-    holding_system = discriminator_of(doc).get("holding_system")
-    h_rows = _own_h_rows(record.ledger_rows, str(holding_system).strip().casefold()) \
-        if isinstance(holding_system, str) else []
+    # NORMALIZED ONCE, and the same way `family._holding_system` normalizes it — `raw.strip()
+    # .casefold()`, which is the spelling every per-world fact keys on. Taken RAW for the
+    # patch-only pattern fallback below while the ledger filter took it FOLDED, a manifest that
+    # merely capitalised the system name made the prompt render one spelling of the pattern
+    # while that world's row — its `sample_unavailable_patterns`, and its mechanical finding —
+    # carried the folded one. Samples are matched by exact string on purpose, and
+    # `cites_sample` compares a citation's fragment the same way, so A1(b) stopped refusing the
+    # very citation the prompt had told the model to copy verbatim.
+    raw_holding_system = discriminator_of(doc).get("holding_system")
+    resolved_holding_system = (
+        raw_holding_system.strip().casefold()
+        if isinstance(raw_holding_system, str) else "")
+    h_rows = _own_h_rows(record.ledger_rows, resolved_holding_system) \
+        if isinstance(raw_holding_system, str) else []
+
+    # #1007 M4/O5: this world's own sample(s) and its own reachability block — off the SAME
+    # `_staged_patterns`/`_world_pattern` and `_world_review_block` helpers `family._grade_world`
+    # uses, so the prompt names the same pattern(s) and the same block the mechanical row was
+    # computed from. EVERY staged pattern, never just one (O5's own falsifier) — the patch-only
+    # fallback (`_world_pattern`'s single holding-system name) stays for a world with no
+    # staged pattern to enumerate.
+    overlay = world_entry.get("overlay")
+    staged_patterns = _staged_patterns(overlay) or [
+        _world_pattern(overlay, holding_system=resolved_holding_system)]
+    # THE PASS'S OWN PARSES, when the caller has them — the same hand-over `manifest`/`facts`/
+    # `union` already take, and for the reason `read_review_record`'s own docstring gives ("the
+    # episode dir is a tree a box can reach — two independent parses had no guarantee of
+    # agreeing"). `render` runs once per graded world, so reading these here made 2N further
+    # parses of two box-reachable files the pass had already read, and let the mechanical row
+    # and the prompt section that claims to render it come off different documents.
+    samples_doc = read_samples_record(episode_dir) if samples is None else samples
+    sample_text = _render_samples(staged_patterns, samples_doc)
+    review_doc = read_review_record(episode_dir) if review is None else review
+    review_block = _world_review_block(review_doc, world_label)
+    review_text = _render_review_block(review_block)
     coverage = []
     for row in h_rows:
         params = scope_params(row)
@@ -671,6 +798,7 @@ def render(  # noqa: C901, PLR0913 — one assembly of the four joined views (O4
         leads=leads, coverage=coverage, siblings=siblings, lessons=lessons,
         spread=spread_rows, union_notes=union_notes,
         manifest_text=manifest_text, document_text=text, report_text=report_text,
+        sample_text=sample_text, review_text=review_text,
         payload_cap=payload_cap,
     )
 

@@ -150,8 +150,9 @@ PER_WORLD_FACTS = (
 )
 
 #: The twelve keys `persist.py:315-330` writes and the queue's validator reads (C7).
+#: The DEFENDER-lane row's own thirteen keys — twelve at #921, plus `subject` (#1007 O1/M6).
 ROW_KEYS = (
-    "schema_version", "finding_id", "run_id", "alert_rule_key", "direction", "type",
+    "schema_version", "finding_id", "run_id", "alert_rule_key", "direction", "subject", "type",
     "subject_anchor", "subject_topic", "finding", "judge_outcome", "citations",
     "source_run_dir",
 )
@@ -442,14 +443,18 @@ def wire_logs(episode_dir: Path) -> list[Path]:
 # --------------------------------------------------------------------------------------
 
 
-def finding_doc(*, bucket: str = "lead-set", claim: str = "the holding system was never re-queried",
+def finding_doc(*, bucket: str = "lead-set", subject: str = "defender",
+                claim: str = "the holding system was never re-queried",
                 root_cause: str = "the lead was set and never revisited",
                 anchor: str = "l-001", topic: str = "holding-system coverage",
                 evidence: list[str] | None = None,
                 discriminator_related: bool = True) -> dict:
-    """One `Finding`. `anchor` and `topic` are what `subject_anchor` / `subject_topic` fill from."""
+    """One `Finding`. `anchor` and `topic` are what `subject_anchor` / `subject_topic` fill from.
+
+    `subject` defaults to `"defender"` (#1007 O1/M6 made the field required on every finding);
+    this suite predates the world/defender partition and is entirely about the defender lane."""
     return {
-        "bucket": bucket, "claim": claim, "root_cause": root_cause,
+        "bucket": bucket, "subject": subject, "claim": claim, "root_cause": root_cause,
         "anchor": anchor, "topic": topic,
         "evidence": evidence if evidence is not None else ["investigation.md#l-001"],
         "discriminator_related": discriminator_related,

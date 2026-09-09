@@ -433,8 +433,10 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
     which is the line a reader of the wire log meets. The deps class the shipped seam builds
     with is pinned by the AST check below, for the reason the module docstring gives.
 
-    Positive control: four draws actually happened (two graded worlds x two draws) and the pass
-    wrote its draw files, so "every recorded role is JUDGE" cannot pass over an empty list.
+    Positive control: six draws actually happened (two graded worlds x two per-world draws,
+    plus one family-level draw per draw index — #1007 M5, "one call per draw" beside the
+    per-world ones) and the pass wrote its draw files, so "every recorded role is JUDGE"
+    cannot pass over an empty list.
     """
     AgentRole = _role()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
@@ -443,12 +445,15 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
     J.mod("learning.judge").grade_episode(
         ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2)
 
-    assert judge.calls == 4, (
-        f"the judge was called {judge.calls} times, not once per draw per graded world — with "
-        "no calls the role assertion below is vacuous")
+    assert judge.calls == 6, (
+        f"the judge was called {judge.calls} times, not once per draw per graded world plus "
+        "one family draw per draw index (#1007 M5) — with no calls the role assertion below "
+        "is vacuous")
     assert J.draw_files(ep, "b"), "the pass wrote no draw file, so nothing was really graded"
-    assert judge.agent_ids == ["judge:b:0", "judge:b:1", "judge:c:0", "judge:c:1"], (
-        f"the `judge:<world>:<n>` agent ids changed: {judge.agent_ids}")
+    assert judge.agent_ids == [
+        "judge:b:0", "judge:b:1", "judge:c:0", "judge:c:1",
+        "judge:family:0", "judge:family:1",
+    ], f"the `judge:<world>:<n>` / `judge:family:<n>` agent ids changed: {judge.agent_ids}"
     for i, kw in enumerate(judge.kwargs):
         assert kw["role"] is AgentRole.JUDGE, (
             f"draw {i} ({kw['agent_id']}) declared {kw['role']!r} — the family judge no longer "

@@ -99,8 +99,11 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
 
     grade = J.judge_record(ep)
     assert grade.get("episode_outcome"), "the family record carries no episode outcome"
-    assert judge.calls == len(graded) * grade["draws"]["configured"], (
-        "one model call per world per draw is the contract; the seam saw a different count")
+    # #1007 M5 adds ONE MORE caller (the family-level draw) beside the per-world ones — one
+    # call per world per draw, PLUS one call per draw for the family.
+    assert judge.calls == (len(graded) + 1) * grade["draws"]["configured"], (
+        "one model call per world per draw plus one per-draw family call is the contract; the "
+        "seam saw a different count")
 
 
 # ---------------------------------------------------------------------------------------

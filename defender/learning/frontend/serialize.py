@@ -149,6 +149,25 @@ GROUPS: dict[str, GroupSpec] = {
             {"label": "Recorded", "key": "recorded_at", "kind": "text"},
         ],
     },
+    "questioner": {
+        "label": "Questioner lessons",
+        "dir": "lessons-questioner",
+        "blurb": "Pitfalls about the WORLDS the questioner authors — an invented field shape, "
+                 "an under-scoped story, a family that failed to discriminate — folded from "
+                 "the family judge's own world findings (#1007) and read back at the "
+                 "questioner's call 1.",
+        "retired": False,
+        "retired_note": "",
+        "title_keys": ["name"],
+        "desc_key": "description",
+        "fields": [
+            {"label": "Pattern", "key": "pattern", "kind": "text"},
+            {"label": "Holding system", "key": "holding_system", "kind": "text"},
+            {"label": "Bucket", "key": "bucket", "kind": "text"},
+            {"label": "Source findings", "key": "source_finding_ids", "kind": "count"},
+            {"label": "Created", "key": "created_at", "kind": "date"},
+        ],
+    },
 }
 
 

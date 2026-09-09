@@ -342,16 +342,34 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_staging(t
         assert door.created() == [], "a name was staged before the identity gate ran"
 
 
-def test_947_a_source_run_id_that_cannot_render_is_given_an_escape():
-    """A source run whose id cannot render to a nameable episode token is not permanently
-    unbranchable: the launcher's escape names an operator-supplied token, and the same source
-    then branches through it."""
+def test_947_a_source_run_id_that_cannot_render_is_refused_by_the_gate_that_runs_first():
+    """A source run whose id cannot render to a nameable episode token is refused, and refused
+    EARLIER — by the id gate `episode_dir_for` runs before any token is derived — so the escape
+    this test used to pin has no input left to serve.
+
+    EDITED BY #1007 (F-R5), on a recorded human decision, and this is the one place a removed
+    flag's own test changes hands. It used to assert that `--episode-token` made an unrenderable
+    source branchable again. That escape is removed: it replaced the derived token outright, so
+    two episode ids could share one namespace and one episode could stage under a namespace no
+    reader re-derives, and `staging.sweep` — the only recovery for a killed attempt's live
+    cluster aliases — was defeated by hand in both directions.
+
+    THE WORKFLOW SURVIVES THROUGH ITS SUBSTITUTE, which is what this test now pins: every id
+    that `episode_token_for` cannot render is ALREADY refused by `refuse_bad_episode_id`, which
+    `episode_dir_for` calls first, so an operator meets one legible refusal before anything is
+    spent rather than a source run that is permanently unbranchable. The pairing is re-probed
+    against the real predicates on every run rather than recorded once. The positive control is
+    a valid id, which both admit.
+    """
     fam = _family()
-    unrenderable = "FRESH CASE/2026"
-    with pytest.raises(_refusal()):
-        fam.episode_token_for(f"{unrenderable}-n59")
-    assert fam.episode_token_for(f"{unrenderable}-n59", override="fresh.case.2026.n59") == \
-        "fresh.case.2026.n59"
+    untokenable = ("FRESH CASE/2026-n59", "_lead-n5", ".hidden-n5", "-n5")
+    for episode_id in untokenable:
+        with pytest.raises(_refusal()):
+            fam.episode_token_for(episode_id)
+        with pytest.raises(_refusal()):
+            fam.refuse_bad_episode_id(episode_id)
+    fam.refuse_bad_episode_id(T.EPISODE_ID)
+    assert fam.episode_token_for(T.EPISODE_ID) == T.EPISODE_TOKEN
 
 
 # ---------------------------------------------------------------------------------------

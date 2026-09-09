@@ -12,6 +12,7 @@ from collections.abc import Callable
 from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
+    QueueChannel,
     _log,
     author_max_attempts,
     env_int,
@@ -111,6 +112,9 @@ _CURATOR_MODULES = {
     "lead_author": "defender.learning.leads.lead_author",
     "pitfalls_curator": "defender.learning.leads.pitfalls_curator",
     "author": "defender.learning.author.lessons.run",
+    # #1007 M6/M7/R1: the second curator, one unit with `author` — same tick, same worktree,
+    # same box, same branch and PR lease; its own channel, its own corpus, its own consumption.
+    "questioner_curator": "defender.learning.author.questioner.run",
 }
 
 
@@ -133,7 +137,12 @@ def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
     producer in the same change (the family judge writes findings rows only), so the honest
     shape is one channel spelled once. A second channel returning is an edit here, in a diff,
     which is the property the loop did not have."""
-    return [(paths.pending_file, "LEARNING_AUTHOR_THRESHOLD")]
+    return [
+        (paths.pending_file, "LEARNING_AUTHOR_THRESHOLD"),
+        # #1007 M6/M7: the second channel, named the same deliberate way — an edit here, in a
+        # diff, is #922's own stated property for what a second channel returning looks like.
+        (paths.questioner_findings_file, "LEARNING_QUESTIONER_THRESHOLD"),
+    ]
 
 
 def _pending_queue_counts(pending_file: Path) -> tuple[int, int]:
@@ -228,18 +237,80 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(paths)), threshold)
 
 
+def _drain_one_curator(
+    paths: LoopPaths, trigger_author: Callable[..., None], channel: QueueChannel,
+    threshold_env: str, module_name: str, pending_label: str, *, box: Any,
+) -> None:
+    """One curator's own fault CONTAINED to its own channel (#1007 A2's third clause) —
+    `trigger_author` here is a caller-supplied seam (`_maybe_trigger_author` in production,
+    an arbitrary fake in tests) and this frame cannot assume ITS OWN exception discipline, so
+    the isolation lives here rather than inside it. A fault whose class IS in `RETIRE_SET`
+    (`AuthorError`/`GitError`/`ModelRetry`) is production's own "this row is bad, retire it"
+    signal and propagates as it always has; anything else is durably recorded on THIS channel's
+    own stuck report and swallowed — the other curator's own `_drain_one_curator` call is a
+    sibling statement, never inside this one's `try`, so it still runs."""
+    from defender._io import read_jsonl_rows
+
+    # WHAT THE STUCK REPORT HELD BEFORE THIS CURATOR RAN. `run_batch` records every
+    # non-`RETIRE_SET` fault before it re-raises, so on the ordinary path this frame's own
+    # record would be the SECOND for one tick — and the two frames hold different row sets
+    # (the rows in flight there, the whole queue here), so the next tick's record matched
+    # neither and `consecutive_ticks` reset to 1 forever. Comparing the count is what tells
+    # "already recorded" from "raised by the seam above `run_batch`, recorded nowhere".
+    recorded_before = drain.stuck_record_count(channel)
+    try:
+        trigger_author(paths, channel.file, threshold_env, module_name, pending_label, box=box)
+    except drain.RETIRE_SET:
+        raise
+    # AN INTERRUPT LEAVES AT ONCE, and nothing else does — drain.py's own recorder states the
+    # first half of the rule ("so an interrupt arriving mid-record still leaves at once").
+    # Caught as a bare `BaseException` this frame swallowed `KeyboardInterrupt`: an operator's
+    # Ctrl-C was written to the channel's stuck report as if it were a curator fault, the SECOND
+    # curator's model calls then started, and `_run_worktree_batch` went on to `finish_batch` —
+    # committing, pushing and opening a PR for the batch the operator had just asked to stop.
+    #
+    # `SystemExit` IS STILL CONTAINED, though, because it is not an interrupt: it is this
+    # repo's own fatal-configuration idiom (`verify_forward/checks._verify` raises it for a
+    # check carrying no verifier prompt, `curator_engine._refuse_forward_check` for a direction
+    # that registers none). Let out, it escapes `_drain_curators` — the one thing that frame's
+    # own comment says this frame must never do — skipping the sibling curator entirely and
+    # unwinding past `finish_batch`, so the FIRST curator's already-authored lessons are
+    # discarded with the worktree and nothing is committed, pushed or recorded on either
+    # channel. That is A2's third clause exactly: recorded on this channel, contained here.
+    except KeyboardInterrupt:
+        raise
+    except (Exception, SystemExit) as e:  # noqa: BLE001 — A2's third clause: EVERY other fault class is recorded, never silently swallowed
+        already = drain.stuck_record_count(channel) > recorded_before
+        if not already:
+            rows = read_jsonl_rows(channel.file) if channel.file.is_file() else []
+            drain.record_stuck(channel, e, rows)
+        _log(f"{module_name}: {type(e).__name__} took this curator out of the tick "
+             f"({'already recorded in' if already else 'recorded to'} "
+             f"{drain.stuck_report_file(channel)}); the other curator still ran")
+
+
 def _drain_curators(
     paths: LoopPaths,
     trigger_author: Callable[..., None],
     *,
     box: Any = None,
 ) -> None:
-    # ONE curator, named — see `_curator_queue_checks` for why this is no longer a walk of the
-    # direction table. The channel this fires for is the same one the wake gate answers for,
-    # spelled the same way in both places so they cannot disagree about what work exists.
-    trigger_author(
-        paths, paths.pending_file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending", box=box,
-    )
+    # TWO curators, each named — see `_curator_queue_checks` for why this is no longer a walk
+    # of the direction table. Each channel this fires for is the same one the wake gate answers
+    # for, spelled the same way in both places so they cannot disagree about what work exists.
+    # A2/R1: both calls share this ONE tick — one worktree, one box, one branch, one PR lease —
+    # and `_drain_one_curator` contains each curator's own NON-RETIRING fault independently, so
+    # such a fault in one curator never stops the other from being triggered or from landing
+    # its own commit. A `RETIRE_SET`-class fault (`_drain_one_curator`'s own `except: raise`)
+    # is the one exception: it propagates past this frame, so a retiring fault in the FIRST
+    # curator this pass calls can still cost the second curator its turn this tick (this frame
+    # itself must not raise on a non-retiring fault, or `_run_worktree_batch`'s `do_work` never
+    # reaches `finish_batch` and NEITHER curator's work is committed).
+    _drain_one_curator(paths, trigger_author, paths.findings, "LEARNING_AUTHOR_THRESHOLD",
+                       "author", "pending", box=box)
+    _drain_one_curator(paths, trigger_author, paths.questioner_findings,
+                       "LEARNING_QUESTIONER_THRESHOLD", "questioner_curator",
+                       "questioner_pending", box=box)
 
 
 def _discard_worktree_changes(repo_root: Path) -> None:
@@ -406,21 +477,30 @@ def _drain_box_request(
     wt: Path, batch_id: str, label: str, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
     """The drain box's geography: ro over the whole worktree leaf (it carries `<wt>/defender`
-    and is both drain roles' cwd_anchor), rw ONLY over what this batch actually needs — the
-    lessons corpus for `author_drain`, `<wt>/defender/skills` for `lead_author_drain` — never
+    and is both drain roles' cwd_anchor), rw ONLY over what this batch actually needs — BOTH
+    lessons corpora for `author_drain` (#1007 M7/A2: one shared batch, two curators, so the one
+    box must hold write access for both), `<wt>/defender/skills` for `lead_author_drain` — never
     a static union, never anything outside the leaf.
 
-    `author_drain`'s one rw mount is NAMED here rather than derived. Until #922 it came from a
+    `author_drain`'s rw mounts are NAMED here rather than derived. Until #922 they came from a
     walk of the direction table, which added an actor or environment corpus whenever that
     direction's observation queue was over threshold; deleting the table would have shrunk the
-    mount set to its single literal with nothing saying so. Those corpora and their queues went
-    with the table, so the box now gets exactly the corpus the wake gate answered for."""
+    mount set to its literals with nothing saying so. Those corpora and their queues went with
+    the table, so the box now gets exactly the corpora the wake gate answers for.
+
+    THREE-WAY, deliberately — never a two-way `if/else` that lets an unrecognized label fall
+    through to the defender corpus rw: a future drain role whose label does not match either
+    literal here gets NO lesson corpus writable, which is the safe default for a mount grant
+    (`test_an_unrecognized_drain_label_mounts_no_lesson_corpus_writable`)."""
     wt_paths = paths.with_repo_root(wt)
     mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
+    rw_dirs: tuple[Path, ...]
     if label == "lead_author_drain":
-        rw_dirs: tuple[Path, ...] = (wt_paths.skills_dir,)
+        rw_dirs = (wt_paths.skills_dir,)
+    elif label == "author_drain":
+        rw_dirs = (wt_paths.lessons_dir, wt_paths.lessons_questioner_dir)
     else:
-        rw_dirs = (wt_paths.lessons_dir,)
+        rw_dirs = ()
     for d in rw_dirs:
         mounts.append(box_mod.Mount(source=d, target=d, writable=True))
     return box_mod.BoxRequest(

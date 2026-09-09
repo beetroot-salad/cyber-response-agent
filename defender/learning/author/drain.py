@@ -722,6 +722,36 @@ def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
     return sorted(named)
 
 
+def record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
+    """THE public spelling of "record this fault on the channel's stuck report".
+
+    `drains._drain_one_curator` is a second frame that catches faults this module raises, and
+    it was reaching into `_record_stuck` directly — a private name whose signature could change
+    under it with no lint and no test coupling. Same body, one supported entry point.
+    """
+    _record_stuck(channel, exc, rows)
+
+
+def stuck_record_count(channel: QueueChannel) -> int:
+    """How many records the channel's stuck report holds right now.
+
+    The instrument a second frame uses to ask whether THIS tick's fault has already been
+    recorded, without guessing from the exception. `_record_stuck` folds `consecutive_ticks`
+    only when the previous record's fault class AND row ids both match — so two records per
+    tick, written by two frames holding two different row sets, meant the next tick's record
+    matched neither and the count reset to 1 forever. A permanently wedged channel emitted an
+    endless run of `consecutive_ticks: 1` and an operator paging on "stuck for N ticks" never
+    fired, which is the exact silence the counter exists against.
+
+    ASKED OF THE FILE, never of the exception. Marking the exception itself would look simpler
+    and is wrong: nothing stops a raiser reusing one exception instance across ticks (this
+    suite's own `raising()` fake does), and a mark that outlives its tick suppresses every
+    record after the first.
+    """
+    path = stuck_report_file(channel)
+    return len(read_jsonl_rows(path)) if path.is_file() else 0
+
+
 def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
     """The operator signal for a stuck tick. The count is per TICK, not per row — a
     non-retiring row must stay byte-identical, so the counter cannot live on it the way

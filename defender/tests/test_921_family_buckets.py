@@ -133,16 +133,21 @@ def test_921_verdict_matching_declared_gets_no_bucket(tmp_path):
     assert rows["b"]["verdict"] == rows["b"]["declared"] == "malicious"
     assert rows["b"]["doctored_answer_served"] is True
     assert rows["b"]["bucket"] is None
-    assert rows["b"].get("flag") != "agreed-without-evidence"
 
 
-def test_921_verdict_matched_while_every_H_row_is_passthrough_is_flagged(tmp_path):
+def test_921_verdict_matched_while_every_H_row_is_passthrough_still_buckets_lead_quality(
+        tmp_path):
     """The verdict matched while EVERY row on H says `passthrough`: the world agreed without
-    having been shown anything. No bucket, flagged `agreed-without-evidence`.
+    having been shown anything. `lead-quality`, not a retired special-case flag.
 
-    That is the honest reading of agreeing with a declared disposition the world was never given
-    evidence for, and it is a flag rather than a bucket because there is no defect to author a
-    lesson from — only a result that should not be counted as a catch.
+    #1007/N8 removed that flag: whether an agreeing-but-unshown world's finding is a genuine
+    defect to author a lesson from is now O4's withholding ladder's question
+    (`withheld_reason`, keyed on the review record's reachability facts), not a bucket-level
+    special case. This episode's `review.yaml` (written by `accepted_episode`, this suite
+    predates #1007) carries no per-world reachability data at all — a review that never went
+    through #1007's review step, which O4's ladder has nothing to withhold on — so the row is
+    not withheld here; a `test_1007_ladder.py` scenario pins the withheld case on a review
+    record that DOES carry the data.
     """
     _ep, _grade, rows = _graded(tmp_path, ledgers={
         "b": [J.ledger_row(source="passthrough", world_label="b"),
@@ -152,8 +157,9 @@ def test_921_verdict_matched_while_every_H_row_is_passthrough_is_flagged(tmp_pat
 
     assert rows["b"]["verdict"] == rows["b"]["declared"]
     assert rows["b"]["doctored_answer_served"] is False
-    assert rows["b"]["bucket"] is None
-    assert rows["b"]["flag"] == "agreed-without-evidence"
+    assert rows["b"]["bucket"] == "lead-quality"
+    assert "flag" not in rows["b"]
+    assert rows["b"]["withheld_reason"] is None
 
 
 # ---------------------------------------------------------------------------------------

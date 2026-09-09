@@ -18,6 +18,7 @@ someone maintains and gets wrong.
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import sys
 from collections.abc import Iterable, Mapping
@@ -34,7 +35,8 @@ from defender.scripts.adapters.confinement import (
 )
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 
-from ..ledger import BASE, FAULT, REFUSED, Ledger, LedgerError, ServedCall, payload_text
+from ..comparator import Verdict, canonical, mechanical
+from ..ledger import BASE, FAULT, REFUSED, STAGED, Ledger, LedgerError, ServedCall, payload_text
 from . import applier as applier_module
 from .applier import WorldApplier
 from .stagers.dispatch import STAGERS
@@ -516,23 +518,69 @@ class WorldRegistry(ModuleVerbRegistry):
             # produce, since it is deterministic and already ran over this object. Re-dumping a
             # multi-hundred-KB result to rediscover that is the single most expensive thing the
             # seam did per call.
-            #
+            served_text = base_text if out is payload else payload_text(out)
+            # M2 (O3, #1007): ONE EXTRA LIVE READ, taken only on a STAGED decision, at the PLAIN
+            # ctx — never `_carrying(ctx, world_id=...)`, which would let `confine_index` admit
+            # this world's own staged views for what is supposed to be the un-rewritten base
+            # pattern. Recorded on the staged row itself (never a second ledger row: a witness
+            # row would be the FIRST row under this correlation key, under `episode._answers`'
+            # first-row-wins, and would shadow the one the sibling was actually served).
+            differs_from_base: bool | None = None
+            base_pattern_digest: str | None = None
+            if decision == STAGED and asked is not None:
+                differs_from_base, base_pattern_digest = _base_witness(fn, ctx, asked, served_text)
             # The decision is validated by `Ledger.record`, which OWNS that vocabulary — and it
             # raises before `out` is returned, so an applier that names no honest decision
             # cannot serve. Re-checking it here would put the same rule in two places, and the
             # copy that drifts is the one that stops refusing.
             ledger.record(ServedCall(
                 system=system, verb=verb, params=dict(prepared),
-                payload_text=base_text if out is payload else payload_text(out),
+                payload_text=served_text,
                 source=decision, world_id=world.world_id,
                 # Only when staging moved it. This is what lets a sibling's row find its
                 # opposite number: the prepared forms differ BY CONSTRUCTION on a staged
                 # system, so a comparison keyed on them alone pairs nothing.
                 asked_params=asked,
+                differs_from_base=differs_from_base,
+                base_pattern_digest=base_pattern_digest,
             ))
             return out
 
         return served
+
+
+def _base_witness(
+    fn: Any, ctx: Any, moved: dict, staged_text: str,
+) -> tuple[bool | None, str | None]:
+    """M2's witness: one live read of the un-rewritten base pattern, and how it compares.
+
+    `moved` is the world's OWN question, as asked — the same params staging retargeted, before
+    the retarget — and `ctx` here is the PLAIN ctx the caller already holds (never one carrying
+    `world_id`), so this read reaches the base pattern rather than this world's own staged view.
+
+    `(None, None)` on a faulted read: `differs_from_base` MEANS the comparison was made, and a
+    witness the estate could not answer has not shown the sibling anything — recording `False`
+    there would charge a world for an outage in the estate the same way an unmeasured
+    reachability count would.
+
+    The digest is `sha256` of the base pattern's own text, through the ONE canonicalisation
+    (`comparator.canonical`) the `differs` verdict itself rests on (F5) — so a later reader can
+    trust the digest without re-issuing the read.
+    """
+    # THE WHOLE WITNESS IS INSIDE THE ENVELOPE, not the adapter call alone. Everything below
+    # the read is measurement too — `payload_text` can raise on a payload it cannot dump,
+    # `canonical(...).encode("utf-8")` on a lone surrogate, `mechanical` on text it cannot
+    # parse — and a witness that raises there escapes into the SIBLING'S OWN LIVE QUERY, turning
+    # an unmeasurable extra read into a fault on the call the world was actually served. The
+    # answer is the same one the read arm already gives: unmeasured, never "no difference".
+    try:
+        served = fn(ctx, **moved)
+        base_text = payload_text(served)
+        digest = hashlib.sha256(canonical(base_text).encode("utf-8")).hexdigest()
+        verdict = mechanical(staged_text, base_text)
+    except Exception:  # noqa: BLE001 — an unanswerable witness is unmeasured, not "no difference"
+        return None, None
+    return verdict not in (Verdict.SAME, Verdict.FORMATTING), digest
 
 
 def _record_beside(ledger: Ledger, call: ServedCall) -> None:

@@ -340,9 +340,13 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert triggered == [
-        # ONE CURATOR SINCE #922 — the three observation channels lost their producer
-        # with the old pipeline's judge, and their curators went with them.
+        # TWO CURATORS SINCE #1007 (was one, since #922 — the three observation channels
+        # lost their producer with the old pipeline's judge, and their curators went with
+        # them). `_drain_curators` names both unconditionally; per-curator thresholding is
+        # `trigger_author`'s own job (`_maybe_trigger_author` in production), and this
+        # stub always appends — an edit here, in a diff, per #922's own stated property.
         "author",
+        "questioner_curator",
     ]
 
 

@@ -15,6 +15,7 @@ from defender import _flock, _git
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
 from defender._untrusted import wrap
+from defender._clock import now_iso
 from defender._corpus import PROVENANCE_KEYS, iter_lessons
 
 
@@ -96,6 +97,30 @@ def flock_or_skip(path: Path) -> Iterator[bool]:
 
 def without_consumed_category(rec: dict) -> dict:
     return {k: v for k, v in rec.items() if k != "consumed_category"}
+
+
+def existing_finding_ids(cfg: Any) -> set[str]:
+    """Every queue-row id THIS corpus already attributes a lesson to — the pre-author
+    idempotency read, shared by every corpus-author direction.
+
+    ONE HOME (`defender/CLAUDE.md`: "One home for a helper, not the same `def` in two or more
+    modules"). It reads only `CorpusAuthorConfig`'s own two fields — `corpus_dir` and
+    `channel.id_key` — which is why it takes the base rather than either direction's subclass,
+    and why a second direction needs no second copy. The spelling of the frontmatter list comes
+    from `provenance_field`, the same derivation the drain's attribution gate reads: a file
+    attributable there but invisible here is authored again on every following tick.
+    """
+    from defender.learning.core.config import provenance_field
+
+    ids: set[str] = set()
+    field = provenance_field(cfg.channel.id_key)
+    for lesson in iter_lessons(
+        cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
+    ):
+        sids = lesson.fm.get(field) or []
+        if isinstance(sids, list):
+            ids.update(sid for sid in sids if isinstance(sid, str))
+    return ids
 
 
 def by_id(rows: list[dict], id_key: str) -> dict[str, dict]:
@@ -311,3 +336,30 @@ def build_curator_user_prompt(
         wrap(manifest_stems, "corpus_manifest", stage_salt),
         wrap(structured_json_body(rows) if rows else "", "lesson_rows", stage_salt),
     )
+
+
+def write_disposition_report(
+    report: Path, pending_dir: Path, *, batch_id: str, groups: dict[str, list[dict]],
+) -> None:
+    """One line per tick naming what the tick DECLINED, under one label per reason.
+
+    THE ONE WRITER FOR BOTH CURATORS. It used to be lessons-local, so the questioner channel —
+    which declares a `consumed_skip` bucket like its sibling — rotated every skipped row off
+    the queue permanently with no written trace anywhere. A skip is terminal: the row is gone,
+    and without this line an operator has no way to learn a finding was ever seen.
+
+    LABELS ARE THE CALLER'S, never merged: the reasons a row is declined differ per channel and
+    per bucket, and an operator reading one label for another reads the wrong recovery. Counts
+    first, then ids, in the caller's own order.
+
+    Nothing is written when the tick declined nothing — a report that gains a line per tick
+    names nothing.
+    """
+    if not any(groups.values()):
+        return
+    pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side `_pending` state root, outside every box mount; the same call this moved from, and the report file beside it is appended by the host alone
+    counts = " ".join(f"{label}={len(rows)}" for label, rows in groups.items())
+    ids = " ".join(
+        f"{label}_ids={[r.get('finding_id') for r in rows]}" for label, rows in groups.items())
+    with report.open("a", encoding="utf-8") as fh:
+        fh.write(f"{now_iso()} batch={batch_id} {counts} {ids}\n")

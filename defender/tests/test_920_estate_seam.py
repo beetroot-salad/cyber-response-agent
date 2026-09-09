@@ -954,10 +954,14 @@ def test_a_staged_call_records_its_base_under_the_view_it_asked_for(tmp_path):
     from_a = a.verbs("elastic")["esql"](ctx, query=body)
     from_b = b.verbs("elastic")["esql"](ctx, query=body)
 
-    # TWO adapter calls, each against its own world's corpus — the subject of this test.
+    # TWO adapter calls against each world's own corpus, PLUS #1007's M2 witness — one extra
+    # plain-ctx read of the un-rewritten base pattern per staged call, taken so "the sibling was
+    # shown the difference" stops being inferred from `source: staged` alone.
     assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [
         "FROM wv-a-logs-system.auth-\n| STATS COUNT(*)",
-        "FROM wv-b-logs-system.auth-\n| STATS COUNT(*)"]
+        body,
+        "FROM wv-b-logs-system.auth-\n| STATS COUNT(*)",
+        body]
     assert {r["world_id"] for r in served_rows(ledger_path)} == {None, "a", "b"}
     # And neither world's identity reaches what the model reads: the echoed query comes back
     # as the one it wrote, so a lead narrowing the template it was just served does not
@@ -983,8 +987,11 @@ def test_a_staged_call_reaches_the_adapter_already_retargeted(tmp_path):
 
     reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
 
+    # The retargeted call, plus #1007's M2 witness — one extra plain-ctx read of the
+    # un-rewritten base pattern, taken on every `staged` decision.
     assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [
-        "FROM wv-w1-logs-nginx.access-\n| LIMIT 5"]
+        "FROM wv-w1-logs-nginx.access-\n| LIMIT 5",
+        "FROM logs-nginx.access-*\n| LIMIT 5"]
     assert [r["source"] for r in served_rows(ledger_path) if r["world_id"] == "w1"] == [STAGED]
 
 
@@ -1011,8 +1018,11 @@ def test_a_retargeted_call_declares_its_world_to_the_adapter(tmp_path):
     reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
+    # The retargeted call declares "w1"; #1007's M2 witness right behind it declares NO world
+    # (the plain ctx, so the confinement guard admits no world's own view for it); `cmdb` has no
+    # stager, so `get-host` is never staged and takes no witness.
     assert [(c["verb"], c["world_id"]) for c in adapter_calls(ctx)] == [
-        ("esql", "w1"), ("get-host", None)]
+        ("esql", "w1"), ("esql", None), ("get-host", None)]
 
 
 def test_the_familys_base_recording_carries_no_worlds_identity(tmp_path):

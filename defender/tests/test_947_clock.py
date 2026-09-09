@@ -447,8 +447,12 @@ def test_the_clock_rides_every_served_call_staged_or_not(tmp_path):
     reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
+    # The retargeted call, plus #1007's M2 witness right behind it (plain ctx — no world
+    # declared — and the SAME clock, since every read of the pass is still `as_of`-stamped);
+    # `cmdb` has no stager, so `get-host` is passthrough and takes no witness.
     assert [(c["verb"], c["world_id"], c["as_of"]) for c in adapter_calls(ctx)] == [
         ("esql", "w1", T0.isoformat()),
+        ("esql", None, T0.isoformat()),
         ("get-host", None, T0.isoformat()),
     ]
 

@@ -250,6 +250,48 @@ def test_947_accepted_siblings_are_started_together_as_processes(tmp_path):
     assert spawn.overlap, "the siblings ran serially; nothing was started together"
 
 
+def test_947_the_launcher_globs_and_passes_its_own_questioner_lessons(tmp_path):
+    """#1007 M8/O7, wired end to end through the REAL launcher, not `author_family` called
+    directly: a matching lesson on disk in the questioner corpus reaches call 1's prompt.
+
+    Every M8 test in `test_1007_questioner.py` drives `questioner.author_family` directly,
+    which is where the selection/framing/cap logic lives and is correctly tested — but
+    `learning/branch/cli.py`'s own `_author` step is what has to GLOB the corpus and hand the
+    raw candidate list in, and nothing exercised that wiring: the launcher never passed
+    `lessons=` at all until this fix, so O7 was a no-op in production despite every unit test
+    passing.
+
+    Observably true: with a lesson file in a `lessons_dir` the launcher is handed (the same
+    injection-seam discipline `door`/`preflight`/`spawn` already use — never `monkeypatch.
+    setattr` on the production corpus path), whose `pattern` matches this episode's captured
+    pattern, the lesson's body reaches the FIRST prompt the questioner's fake agent records
+    (call 1, the family-authoring call).
+
+    What failure looks like: the launcher resolves its own production corpus path but never
+    globs it, or globs it and drops the result on the floor instead of passing it through
+    `_author` into `author_family`.
+    """
+    import yaml
+
+    lessons_dir = tmp_path / "lessons-questioner"
+    lessons_dir.mkdir(parents=True)
+    body = "QUESTIONER-LAUNCHER-LESSON-BODY"
+    meta = {"name": "l1", "pattern": T.EVENTS_PATTERN, "holding_system": "elastic"}
+    (lessons_dir / "l1.md").write_text(
+        "---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body + "\n",
+        encoding="utf-8")
+
+    questioner = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
+    rc, _spawn, _ep = _launch(
+        tmp_path, questioner=questioner, capture=[{}], lessons_dir=lessons_dir)
+
+    assert rc == 0, "the episode did not complete cleanly"
+    assert questioner.prompts, "the questioner was never called"
+    assert body in questioner.prompts[0], (
+        "the lesson never reached call 1's prompt — the launcher's own glob/pass-through is "
+        "not wired, even though author_family's own selection logic is correct")
+
+
 def test_947_launcher_has_no_import_or_await_of_run_investigation(tmp_path):
     """The launcher has no path to the in-process investigation at all: its module names neither
     the driver's entry point nor an await of it, and every sibling it drives is reached through
@@ -334,9 +376,23 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
 def test_947_a_rejected_world_ends_the_episode_and_the_record_archives(tmp_path):
     """Any rejected world ends the EPISODE: no world runs, the manifest, staging record and
     review are archived, and the episode's recorded outcome is rejected — an examined no, not a
-    per-world refusal that would leave a two-world family running."""
+    per-world refusal that would leave a two-world family running.
+
+    #1007/N4: the fixture used to reject through the injection-unreachable branch (world b's
+    envelope retrieving none of its injected documents). That branch retires under N4 — a world
+    is no longer rejected on `injected_retrieved` alone. Rejected here through a still-live
+    reason instead: an exclusion that matches zero base documents. Call 1 (the family reply) is
+    where an overlay is actually authored — `SEAT_AUTHORED_FIELDS` covers only the per-seat
+    STORY fields, so a seat reply's own `overlay` is silently ignored; the exclusion has to be
+    declared on the family document's `worlds` plan.
+    """
     adapters = T.FakeAdapters(by_target={T.world_token("b"): {"hits": [{"_id": "planted"}]}})
+    fam = T.family_doc(worlds=[
+        T.base_world(),
+        T.world_doc("b", ov=T.overlay(elastic=T.elastic_overlay(exclude={"match_all": {}}))),
+    ])
     rc, spawn, ep = _launch(tmp_path, adapters=adapters,
+                            questioner=T.FakeAgent(fam, T.world_doc("b")),
                             invoke=T.FakeAgent(*["contradiction"] * 24))
     assert rc != 0
     assert spawn.launches == []
@@ -744,3 +800,4 @@ def test_947_concurrent_siblings_take_distinct_container_names(tmp_path):
     names = {docker.container_name(f"{T.EPISODE_ID}-{w}") for w in T.WORLDS}
     assert len(names) == len(T.WORLDS)
     assert all(name.startswith("defender-run-") for name in names)
+

@@ -55,9 +55,9 @@ def _family():
     return J.mod("learning.judge.family")
 
 
-#: The four buckets that name a DEFECT. `none` and `agreed-without-evidence` are outcomes, not
-#: defects, and F-1's exclusion is from these four — `lead-set` most of all, because it is the
-#: never-asked bucket and the one that authors a lesson.
+#: The four buckets that name a DEFECT. `None` (no bucket) is an outcome, not a defect, and
+#: F-1's exclusion is from these four — `lead-set` most of all, because it is the never-asked
+#: bucket and the one that authors a lesson.
 FAILURE_BUCKETS = ("lead-set", "lead-quality", "analyze-discipline", "decision-discipline")
 
 

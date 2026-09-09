@@ -230,6 +230,13 @@ class ServedCall:
     #: What the model asked, when staging rewrote it. `None` means nothing was rewritten, so
     #: the two identities coincide — the ordinary case for the six unstaged systems.
     asked_params: dict | None = None
+    #: M2's witness (#1007, O3): whether a live read of the un-rewritten base pattern differed
+    #: from what this world was served, beyond formatting. `None` means unmeasured (no witness
+    #: taken, or the witness read faulted) — never "no difference". Written only on a `staged`
+    #: row, following `asked_params`' own precedent, because only that decision takes a witness.
+    differs_from_base: bool | None = None
+    #: `sha256` of the base pattern's own canonicalised text — see `differs_from_base`.
+    base_pattern_digest: str | None = None
 
     @property
     def key(self) -> str:
@@ -259,6 +266,19 @@ class ServedCall:
             # rewritten", which is true of every unstaged call and is the honest default; a
             # column echoing `params` on every row would make the two identities look like one.
             row["asked_params"] = _json_safe_params(self.asked_params)
+        if self.source == STAGED:
+            # WRITTEN WHENEVER THIS ROW IS STAGED, whatever `differs_from_base` holds — `None`
+            # is itself a fact (the witness was not measured), so omitting the key on that value
+            # would make it indistinguishable from a pre-#1007 row that never took a witness at
+            # all. ONE READER decides what the pair MEANS: `judge/family._grade_world`'s own
+            # `is not False`, which answers "shown" for both, deliberately leaning toward not
+            # excusing the defender rather than withholding a real finding. There used to be a
+            # second, exported `episode.difference_shown` answering `None` (unmeasured) for the
+            # same pair — no production caller, an `__all__` entry advertising it as THE reader,
+            # and the opposite answer. Deleted rather than reconciled: a future author reaching
+            # for the public name would have flipped every unmeasured episode's decision.
+            row["differs_from_base"] = self.differs_from_base
+            row["base_pattern_digest"] = self.base_pattern_digest
         return row
 
 

@@ -53,9 +53,14 @@ def _enqueue():
 
 
 def _family_row(fid: str = "ep-1/b/0/0", **over) -> dict:
-    """One `FindingRow` in the `direction: family` shape M5 appends."""
+    """One `FindingRow` in the `direction: family` shape M5 appends.
+
+    `subject="defender"` overrides `D.finding_row`'s own placeholder `"subj"` value — that
+    fixture predates #1007's `subject` partition and this suite is entirely about the DEFENDER
+    lane.
+    """
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
-               type="decision-discipline", judge_outcome="survived",
+               type="decision-discipline", judge_outcome="survived", subject="defender",
                subject_anchor="l-001", subject_topic="holding-system coverage",
                source_run_dir="episodes/ep-1/worlds/b")
     row.update(over)

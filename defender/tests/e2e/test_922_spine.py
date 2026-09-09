@@ -324,12 +324,21 @@ def test_922_author_drain_triggers_exactly_the_findings_curator(tmp_path):
     rc, _rec = drive_author_drain(paths, trigger)
 
     assert rc == 0
-    assert trigger.modules == ["author"], (
+    # EDITED BY #1007, ON A RECORDED HUMAN DECISION (15-resolutions R1), NOT AS TEST CHURN.
+    # #922's stated property is "a second channel returning is an edit here, in a diff"; the
+    # questioner channel arrives WITH its edit, which honours that property rather than
+    # exempting itself from it. STILL EXACT — a multiset equality, not an `in` check, because
+    # exactness is what makes this its own positive control. The list's ORDER is not part of
+    # the contract (nothing downstream depends on which curator the tick triggers first), so
+    # the set is compared sorted; loosening it any further would give up the property.
+    assert sorted(trigger.modules) == ["author", "questioner_curator"], (
         f"author_drain triggered {trigger.modules} — it is still discovering its curators by "
         "iterating the direction table, so the retired observation channels are still drained")
-    call = trigger.calls[0]
+    # Selected BY MODULE rather than by position, for the same reason the set above is sorted:
+    # the tick now triggers two curators and their order is not a contract.
+    call = next(c for c in trigger.calls if c["module_name"] == "author")
     assert call["pending_file"] == paths.findings.file, (
-        f"the one trigger names {call['pending_file']}, not the findings queue")
+        f"the findings trigger names {call['pending_file']}, not the findings queue")
     assert call["threshold_env"] == "LEARNING_AUTHOR_THRESHOLD"
     assert call["pending_label"] == "pending"
 
@@ -358,7 +367,12 @@ def test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable(tmp_path):
 
     assert rc == 0
     request = rec.only_request()
-    assert writable_sources(request) == {paths.lessons_dir}, (
+    # EDITED BY #1007 (15-resolutions R1), and STILL AN EXACT SET. The set gains exactly one
+    # member — the questioner corpus the second curator authors into — because both curators
+    # share one batch and one box. It is not loosened into two `in` checks: an exact set is its
+    # own positive control, and a bare membership test passes on a request that mounts the
+    # whole checkout writable.
+    assert writable_sources(request) == {paths.lessons_dir, paths.lessons_questioner_dir}, (
         f"the drain box's writable mounts are {sorted(map(str, writable_sources(request)))} — "
         "the mount set is still derived from the direction table, so a retired corpus is "
         "still handed to the batch as a writable bind")
@@ -394,7 +408,13 @@ def test_922_a_full_findings_queue_alone_wakes_the_drain(tmp_path):
     assert "author" in trigger.modules, (
         "the findings queue alone did not wake the drain — the surviving channel's own "
         "threshold no longer answers the wake gate")
-    assert writable_sources(rec.only_request()) == {paths.lessons_dir}
+    # EDITED BY #1007 (15-resolutions R1). This test is declared "GUARD (green now, must stay
+    # green)" and this line is the one part of it the change touches: `_drain_box_request`
+    # never learns WHICH queue crossed threshold, so a findings-only drive composes the same
+    # two-corpus box any other drive does. The guard's own subject — that a full findings queue
+    # alone still wakes the drain — is unchanged and still asserted above. Kept exact.
+    assert writable_sources(rec.only_request()) == {paths.lessons_dir,
+                                                    paths.lessons_questioner_dir}
 
 
 def test_922_the_retired_queues_alone_no_longer_wake_the_drain(tmp_path):

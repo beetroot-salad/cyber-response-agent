@@ -297,6 +297,7 @@ def parse_world(raw: Any, *, where: str = "worlds") -> World:
     if not isinstance(world_id, str) or not world_id:
         raise FamilyError(f"{where} entry carries no world_id")
     at = f"{where}[{world_id!r}]"
+    refuse_reserved_world_label(world_id, at=at)
     role = raw.get("role")
     if role is not None and (not isinstance(role, str) or not role):
         raise FamilyError(f"{at}.role must be a label or the null replicate sentinel")
@@ -670,10 +671,65 @@ def check_manifest_digest(path: Path, recorded: str) -> None:
 
 #: The world label the family's own shared capture is written under. No world may claim it: a
 #: world that did would append its live rows into the recording its siblings replay.
-RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base"})
+#:
+#: `family` (#1007 M5) is reserved for the SAME reason, one layer up: the family-level judge
+#: call's own agent id is `judge:family:<n>`, and a world labelled `family` would give a per-
+#: world draw the identical agent id — one wire-log file (`_run_paths.stage_trace_path`'s
+#: `serialized-append` sink) interleaving both streams, unreadable as either.
+RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base", "family"})
+
+#: `family_<digits>` too, as DEFENSE IN DEPTH — the colon-fold `agent_id.replace(':', '_')`
+#: that names a wire-log file is not obviously injective across the two agent-id shapes this
+#: design mints (`judge:<world>:<n>` per-world, `judge:family:<n>` family-level), and refusing
+#: the whole `family_\d+` shape at the same gate `RESERVED_WORLD_LABELS` uses closes the family
+#: of near-miss names rather than reasoning about each one's actual fold.
+_RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
 
 
-def check_identities(family: Family) -> None:
+def is_reserved_world_label(label: str) -> bool:
+    """THE membership test for the reserved namespace — case-folded, the vocabulary's own
+    normalizer, so a second reader (`learning/judge/family.py::_check_world_labels`, which
+    `grade_episode` reaches directly without the launcher's own `check_identities`) asks THIS
+    module rather than re-deriving the fold locally and risking the two gates disagreeing on
+    what counts as a match.
+
+    BOTH RULES, not just the set. The `family_<digits>` shape below is half the reservation;
+    left out of this predicate it was applied by `check_identities` alone — so the judge's own
+    gate, which exists precisely because `grade_episode` is directly callable over a manifest
+    the launcher never saw, admitted the near-miss names the launcher refuses."""
+    return (label.casefold() in RESERVED_WORLD_LABELS
+            or _RESERVED_FAMILY_DRAW_LABEL.match(label) is not None)
+
+
+def refuse_reserved_world_label(label: str, *, at: str) -> None:
+    """THE refusal for a reserved label, in one place, raised WHEREVER a world is minted.
+
+    It used to live in `check_identities` alone, which has exactly one caller — the launcher.
+    Every other way into a `Family` (`parse_family` on a hand-repaired document, `load_family`
+    on resume and re-entry) admitted a world labelled `family`, whose per-world judge draws
+    then land in `worlds/family/judge/` under agent id `judge:family:<n>` — the same archive
+    directory and the same serialized-append wire log the family-level call writes. The
+    reservation is a property of the LABEL, not of the family around it, so it is asked where
+    the label is parsed and the launcher's gate keeps it only as defense in depth.
+
+    TWO ARMS, TWO SENTENCES, the shape one first — so `family_1` is refused for the fold that
+    actually matched it rather than for a set it is not a member of.
+    """
+    where = f"{at} " if at else ""
+    if _RESERVED_FAMILY_DRAW_LABEL.match(label):
+        raise FamilyError(
+            f"{where}world label {label!r} matches family_<n> — the colon fold that names a "
+            "wire log file is not injective, and this label's own agent id would fold to the "
+            "same stem as one of the family call's draws")
+    if is_reserved_world_label(label):
+        raise FamilyError(
+            f"{where}world label {label!r} is the reserved name of the family's own base "
+            "capture or the family-level judge call — a world claiming it would append its "
+            "live rows into the recording its siblings replay, or collide with the family "
+            "call's own agent id")
+
+
+def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, deliberately not split (see its own docstring)
     """ONE gate over the whole manifest, before anything is staged.
 
     Every rule the downstream names would each have refused at a different depth, and refused
@@ -702,11 +758,11 @@ def check_identities(family: Family) -> None:
     token_head = episode_token_for(family.episode_id)
     for world in family.worlds:
         label = world.world_id
-        if label.casefold() in RESERVED_WORLD_LABELS:
-            raise FamilyError(
-                f"world label {label!r} is the reserved name of the family's own base capture "
-                "— a world claiming it would append its live rows into the recording its "
-                "siblings replay")
+        # DEFENSE IN DEPTH ONLY. `parse_world` already refused this at the mint, so a `Family`
+        # carrying a reserved label cannot reach here through any parser — the arm stays
+        # because this gate is the one a reader looks in for the whole identity rule set, and
+        # because a `Family` can be constructed directly in a test or a future caller.
+        refuse_reserved_world_label(label, at="")
         try:
             refuse_unnameable_world(label)
         except ViewNameError as bad:
@@ -746,7 +802,7 @@ def check_identities(family: Family) -> None:
             raise FamilyError(f"world token {token!r} does not round-trip: {bad}") from bad
 
 
-def episode_token_for(episode_id: str, *, override: str | None = None) -> str:
+def episode_token_for(episode_id: str) -> str:
     """The episode's own token: the id with its separators normalised to one spelling.
 
     INJECTIVE, and not by a plain character replacement: the run-id grammar admits `-`, `_` AND
@@ -760,11 +816,12 @@ def episode_token_for(episode_id: str, *, override: str | None = None) -> str:
     carrying a dot is ordinary (`--run-id`, and the auto id's alert label is a fixture STEM).
 
     NAMEABLE, because the token is the head of every world token and therefore of every staged
-    alias. An id that cannot render is not permanently unbranchable: `override` is the escape
-    the operator names, and it is held to exactly the same rule.
+    alias. TAKES NO OVERRIDE (F-R5): every id this can raise on is already refused earlier, by
+    `refuse_bad_episode_id`, which every caller of `episode_dir_for` runs first — an operator
+    escape here would let two episode ids share one namespace and defeat `staging.sweep`, the
+    only recovery for a killed attempt's live cluster aliases, by hand. An episode's namespace
+    is derived from its episode id and from nothing else.
     """
-    if override is not None:
-        return _nameable_token(override, f"--episode-token {override!r}")
     # CASEFOLDED, because an alias name cannot carry upper case and a view named above the case
     # rule is not refused by the cluster — it is answered with an empty result, so the world
     # reads as one that changed nothing. This is not a loss of injectivity in practice:
@@ -789,8 +846,9 @@ def _nameable_token(token: str, origin: str) -> str:
         refuse_unnameable_world(token)
     except ViewNameError as bad:
         raise FamilyError(
-            f"{origin} does not render to a nameable episode token ({bad}) — pass an explicit "
-            "token instead; every world token and every staged alias is built from it") from bad
+            f"{origin} does not render to a nameable episode token ({bad}) — name a fresh "
+            "source run or branch point; every world token and every staged alias is built "
+            "from it") from bad
     if not token or not token[0].isalnum():
         raise FamilyError(
             f"{origin} does not render to a nameable episode token: {token!r} does not start "
@@ -895,6 +953,8 @@ __all__ = [
     "check_manifest_digest",
     "episode_token_for",
     "is_contradiction",
+    "is_reserved_world_label",
+    "refuse_reserved_world_label",
     "load_family",
     "manifest_digest",
     "parse_as_of",

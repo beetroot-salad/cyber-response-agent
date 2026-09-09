@@ -23,6 +23,7 @@ model across SIBLINGS, and these calls all happen in the launcher.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -87,17 +88,63 @@ def model_seam(episode_dir: Path) -> Any:
     return invoke
 
 
-def adapter_seam(episode_dir: Path) -> Any:
-    """The production `(system, verb, **params) -> payload` the review replays through.
+@dataclass(frozen=True)
+class EpisodeAdapters:
+    """The review's read side: one registry and one context, plus one per-world VIEW of both.
+
+    CALLABLE IS THE BASE READ — no world declared, which is what the un-rewritten capture
+    params want (M1's base arm) and what every un-staged replay wants.
+
+    `for_world` IS WHAT A STAGED READ MUST GO THROUGH, and it is not an optimisation. A staged
+    call names `wv-<world>-<corpus>`, an alias that no configured pattern reaches BY DESIGN —
+    the whole point of the namespace is that a sibling cannot stumble into it. `confine_index`
+    admits such a name on one condition: the context declares that world. Asked through the
+    base context it declares none, so the check refuses the alias the stager had just written,
+    before the call leaves the process.
+
+    That is what happened to M1's world arm. `_world_arm` staged the call and then read it
+    through the episode-wide callable, so every capture re-ask on a world that STAGES a corpus
+    faulted; `reachable_by_capture` read `null` for all of them, `_withheld_reason` answered
+    `reachability_unmeasured` for every world, `verdict_word` collapsed to `undecidable`, and
+    every defender finding was diverted to `withheld_findings`. Only patch-only worlds — whose
+    calls name no view at all — ever measured anything. The suite could not see it because every
+    test injects a stand-in read side with no confinement in it.
+
+    ONE PER WORLD, and the registry is SHARED across them: it does a cold read and parse per
+    system at construction, and neither it nor the environment the context composes varies with
+    the world. Only the declaration does.
+    """
+
+    registry: Any
+    ctx: Any
+
+    def __call__(self, system: str, verb: str, **params: Any) -> Any:
+        return self.registry.verbs(system)[verb](self.ctx, **params)  # lint-verb-dispatch: ok — the review's own replay, not the fault seam: a system whose adapter fails to import raises here, inside `replay_one`, where the review records the failure against the world rather than losing a row
+
+    def for_world(self, world_id: str) -> EpisodeAdapters:
+        """The same registry, read as `world_id` — the composed TOKEN, never the short label.
+
+        `confine_index` matches the declaration against the view name's own world segment, and
+        that segment is the token (`wv-<episode>.<label>-<corpus>`). Handed a short label the
+        check compares two strings that never match, which reads exactly like a world reaching
+        for a sibling's view and refuses identically.
+
+        `replace` directly rather than `registry._carrying`: that guard exists for a ctx a TEST
+        stub supplied, and this one is the `VerbContext` built four lines up.
+        """
+        return replace(self, ctx=replace(self.ctx, world_id=world_id))
+
+
+def adapter_seam(episode_dir: Path) -> EpisodeAdapters:
+    """The production read side the review replays through.
 
     THE GATHER GRANT, which is the same roster a sibling serves through — `run.py` builds its
     registry from it, and a review that could reach a verb no sibling can would be measuring a
     world through a door the family cannot open.
 
-    ONE registry and ONE context for the whole review, built here rather than per call: the
-    registry does a cold read and parse per system at construction, and the context composes the
-    run environment every adapter subprocess inherits. `review.verb_context` owns what that
-    context is — including that it writes no query row anywhere, because a review is not a run.
+    ONE registry and ONE context for the whole review, built here rather than per call.
+    `review.verb_context` owns what that context is — including that it writes no query row
+    anywhere, because a review is not a run.
 
     NOT a `WorldRegistry`. The world's difference is applied by `replay_one`, which stages the
     call itself and then asks the world what it did to the answer; a world registry underneath
@@ -109,10 +156,8 @@ def adapter_seam(episode_dir: Path) -> Any:
     from defender.runtime.driver import GATHER_DEF
     from defender.runtime.verbs import ModuleVerbRegistry
 
-    registry = ModuleVerbRegistry(DEFENDER_DIR / "scripts" / "adapters", GATHER_DEF.verb_grant)
-    ctx = verb_context(Path(episode_dir))
-
-    def adapters(system: str, verb: str, **params: Any) -> Any:
-        return registry.verbs(system)[verb](ctx, **params)  # lint-verb-dispatch: ok — the review's own replay, not the fault seam: a system whose adapter fails to import raises here, inside `replay_one`, where the review records the failure against the world rather than losing a row
-
-    return adapters
+    return EpisodeAdapters(
+        registry=ModuleVerbRegistry(
+            DEFENDER_DIR / "scripts" / "adapters", GATHER_DEF.verb_grant),
+        ctx=verb_context(Path(episode_dir)),
+    )
