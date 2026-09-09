@@ -109,7 +109,7 @@ def test_effort_for_role_anthropic_is_none_for_every_role():
 
 
 def test_effort_for_role_fireworks_main_default_is_low(monkeypatch):
-    """Fireworks MAIN, no env override → "low" (the production DEFAULT_MODEL=glm-5.2 main
+    """Fireworks MAIN, no env override → "low" (the production DEFAULT_MODEL main
     effort). This is the value the live main loop must keep running under."""
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     assert providers.effort_for_role("glm-5.2", AgentRole.MAIN) == "low"

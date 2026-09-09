@@ -18,6 +18,8 @@ FIREWORKS = OpenAICompatProvider(
     aliases={
         "glm-5.2": "accounts/fireworks/models/glm-5p2",
         "glm-5p2": "accounts/fireworks/models/glm-5p2",
+        "glm-5.3": "accounts/fireworks/models/glm-5p3",
+        "glm-5p3": "accounts/fireworks/models/glm-5p3",
         "kimi-k2.6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k2p6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k3": "accounts/fireworks/models/kimi-k3",

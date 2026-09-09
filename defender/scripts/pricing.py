@@ -21,6 +21,11 @@ PRICING = {
     "deepseek-v4-flash": {"in": 0.22, "out": 0.66, "cache_w": 0.22, "cache_r": 0.007},
     # docs.fireworks.ai/serverless/pricing 2026-09-01, Standard: GLM 5.3 Flash $0.15 / $0.03 / $0.50.
     "glm-5.3-flash":     {"in": 0.15, "out": 0.50, "cache_w": 0.15, "cache_r": 0.03},
+    # docs.fireworks.ai/serverless/pricing 2026-09-09, Standard: GLM 5.3 $1.40 / $0.26 / $4.40.
+    # IDENTICAL to 5.2 on input and output, and that is the trap: only `cache_r` differs
+    # (0.26 vs 0.14), so 5.3 billed on 5.2's row costs out ~7% light on a cache-heavy run
+    # and nothing downstream reads as wrong.
+    "glm-5.3":           {"in": 1.40, "out": 4.40, "cache_w": 1.40, "cache_r": 0.26},
 }
 
 
@@ -28,9 +33,12 @@ def model_key(model: str) -> str:
     if not model:
         return "claude-sonnet-4-6"
     m = model.lower()
-    # Must precede the generic glm branch, or 5.3 Flash bills at 5.2's rate.
+    # Must precede the generic glm branch, or 5.3 Flash bills at 5.2's rate. Flash first
+    # of the two, or `glm-5p3-flash` matches the plain-5.3 test and bills at 5.3's rate.
     if "glm-5p3-flash" in m or "glm-5.3-flash" in m:
         return "glm-5.3-flash"
+    if "glm-5p3" in m or "glm-5.3" in m:
+        return "glm-5.3"
     if "glm" in m:
         return "glm-5.2"
     if "deepseek" in m:

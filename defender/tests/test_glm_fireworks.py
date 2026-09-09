@@ -1,5 +1,5 @@
-"""Unit tests for the LLM provider abstraction + the Fireworks integration: GLM 5.2
-as the MAIN default, Kimi K2.6 as the GATHER default.
+"""Unit tests for the LLM provider abstraction + the Fireworks integration: GLM 5.3
+as the MAIN default (#1023), Kimi K2.6 as the GATHER default.
 
 Hermetic — no API key, no network. Model construction only builds the provider
 client (no request is made), so these run in the default suite. Covers the provider
@@ -34,6 +34,8 @@ from defender._env import FatalConfigError  # noqa: E402
 from defender.runtime import driver, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.runtime import review_roles  # noqa: E402
+from defender.runtime.driver import _prompts  # noqa: E402
 from defender.scripts import pricing  # noqa: E402
 
 _GLM_ID = "accounts/fireworks/models/glm-5p2"
@@ -55,7 +57,7 @@ def _role_settings(provider, role):
 def test_role_model_defaults(monkeypatch):
     for k in ("DEFENDER_MODEL", "DEFENDER_GATHER_MODEL"):
         monkeypatch.delenv(k, raising=False)
-    assert driver.resolve_main_model() == "glm-5.2"
+    assert driver.resolve_main_model() == "glm-5.3"
     assert driver.gather_model() == "kimi-k2.6"
 
 
@@ -362,10 +364,70 @@ def test_preflight_missing_required_key_exits_2(monkeypatch):
 
 
 def test_preflight_unknown_model_exits_2(monkeypatch, capsys):
-    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.3", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
+    # The sentinel is a name NO vendor can ship, not a plausible next version. This test
+    # used "glm-5.3" until #1023 registered it, at which point the preflight succeeded and
+    # the assertion read as a regression in the preflight rather than as a claimed name.
+    monkeypatch.setattr(agents, "AGENTS", _registry("no-such-vendor/no-such-model", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
     assert run.preflight_role_models() == 2
     err = capsys.readouterr().err
     assert "[run.py] preflight" in err
     # The fault names the ROLE at fault, not just the model — an operator with eleven roles
     # configured cannot act on "some model is unknown".
     assert AgentRole.MAIN.name in err
+
+
+# --- #1023: GLM 5.3 ---------------------------------------------------------
+
+_GLM53_ID = "accounts/fireworks/models/glm-5p3"
+
+
+@pytest.mark.parametrize(("model", "key"), [
+    ("glm-5.3", "glm-5.3"),
+    ("glm-5p3", "glm-5.3"),
+    (f"fireworks:{_GLM53_ID}", "glm-5.3"),
+    (_GLM53_ID, "glm-5.3"),
+    # Flash is a DIFFERENT row ($0.15/$0.50), and its name CONTAINS the plain-5.3 name, so
+    # the two branches are order-dependent: flash has to be tested first or every flash call
+    # bills at 5.3's nine-times-higher input rate. Nothing pinned this before #1023.
+    ("glm-5.3-flash", "glm-5.3-flash"),
+    ("glm-5p3-flash", "glm-5.3-flash"),
+    ("accounts/fireworks/models/glm-5p3-flash", "glm-5.3-flash"),
+])
+def test_pricing_model_key_routes_5p3_to_its_own_row(model, key):
+    """5.3 is not 5.2. The generic `"glm" in m` fallthrough answers `glm-5.2` for every GLM
+    spelling it is reached with, and 5.2's row is RIGHT on input and output ($1.40/$4.40) —
+    which is what makes the miss quiet. Only the cached-input rate differs."""
+    assert pricing.model_key(model) == key
+
+
+def test_pricing_5p3_cached_input_is_not_5p2s():
+    """$0.26/M against 5.2's $0.14/M (docs.fireworks.ai/serverless/pricing, 2026-09-09).
+    Cache reads are the bulk of a run's tokens — 265K of one 349K main-model lane — so
+    pricing 5.3's read at 5.2's rate under-reports a real run by ~7%."""
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000,
+             "cache_read_input_tokens": 1_000_000}
+    assert pricing.usage_cost("glm-5p3", usage) == pytest.approx(1.40 + 4.40 + 0.26)
+    assert pricing.usage_cost("glm-5p2", usage) == pytest.approx(1.40 + 4.40 + 0.14)
+
+
+def _own_row_key(model: str) -> str:
+    """The row name a model spells for itself: `kimi-k2p6` -> `kimi-k2.6`. Compared against
+    `model_key`, this is what separates a row a model OWNS from a neighbour's row it merely
+    falls through to."""
+    import re
+    bare = model.split(":", 1)[-1].rsplit("/", 1)[-1]
+    return re.sub(r"(?<=\d)p(?=\d)", ".", bare)
+
+
+@pytest.mark.parametrize("model", [
+    _prompts.DEFAULT_MODEL,
+    _prompts.DEFAULT_GATHER_MODEL,
+    review_roles.DEFAULT_REVIEW_MODEL,
+])
+def test_every_shipped_default_model_owns_its_pricing_row(model):
+    """A shipped default that falls through to a NEIGHBOUR's row costs every run out at the
+    wrong rate, and the run still looks priced. This is the guard #1023 was missing: 5.3
+    shipped as a reachable model with no row of its own, and only the cached-input rate
+    disagreed, so nothing downstream read as broken."""
+    assert pricing.model_key(model) == _own_row_key(model)
+    assert _own_row_key(model) in pricing.PRICING
