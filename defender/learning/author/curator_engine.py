@@ -77,8 +77,8 @@ _SEG = r"(?!\.\.(?:/| |$))[^/ ]+"
 _CORPUS_AUTHOR_DENY_REASON = (
     "Blocked: the lesson curator writes and edits .md lessons under its OWN corpus only. It reads the "
     "corpus (cat, or `cat <file> | grep <pattern>`), takes its inventory from the corpus manifest, "
-    "and rm's a single draft it promotes or discards — no writes outside the corpus, no other "
-    "corpus, no arbitrary shell. Forward-check with the forward_check tool."
+    "and rm's a single draft it promotes or discards — no WRITES outside the corpus, and no "
+    "arbitrary shell. Forward-check with the forward_check tool."
 )
 
 

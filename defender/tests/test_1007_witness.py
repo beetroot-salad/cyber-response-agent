@@ -19,6 +19,7 @@ from pathlib import Path
 
 
 from defender.tests import _world_1007 as W
+from defender.tests import test_1007_ladder as L
 
 
 BASE_PAYLOAD = {"rows": [{"host": "canary-1", "owner": "base-team", "status": "up"}]}
@@ -82,13 +83,21 @@ def test_a_staged_row_carries_differs_from_base_and_a_digest(tmp_path, monkeypat
     """
     ep, family = staged_scene(tmp_path, monkeypatch)
 
-    rows, _ctx = serve_one_call(ep, family, "b", tmp_path=tmp_path,
-                                answers={"*": BASE_PAYLOAD})
+    rows, ctx = serve_one_call(ep, family, "b", tmp_path=tmp_path,
+                               answers={"*": BASE_PAYLOAD})
 
     staged = [r for r in rows if r.get("source") == "staged"]
     assert staged, f"no staged row was written: {rows}"
     assert "differs_from_base" in staged[0], f"the staged row is {sorted(staged[0])}"
     assert "base_pattern_digest" in staged[0]
+    # EXACTLY ONE EXTRA READ, counted here because nothing else counts it. The control's twin
+    # below pins `== 1` for a world that stages nothing; without this pin a staged serve's live
+    # read budget was unbounded on the one path that adds a read, and #947's own
+    # "no query reaches an adapter unasked" census was rescoped to a control-only family
+    # precisely because M1 and M2 both legitimately reach the estate now.
+    assert len(W.estate_calls(ctx)) == 2, (
+        f"one staged serve took {len(W.estate_calls(ctx))} live reads — the served call and "
+        "M2's witness are the two this design spends")
 
 
 def test_a_staged_row_equal_to_the_base_answer_is_not_a_difference_shown(
@@ -306,28 +315,40 @@ def test_the_control_world_takes_no_base_witness(tmp_path, monkeypatch):
         f"the control's rows carry a base witness: {rows}")
 
 
-def test_a_pre_change_staged_row_reads_as_unmeasured_not_as_no_difference(tmp_path):
+def test_a_pre_change_staged_row_is_not_read_as_a_measured_absence(tmp_path, monkeypatch):
     """A staged row written BEFORE this change — carrying no `differs_from_base` key at all —
-    reads as unmeasured.
+    is not read as "measured, and showed nothing".
 
     Observably true: the grading pass over a served ledger whose staged row has no witness key
-    reports `difference_shown: None` for that world, not `False`. Episodes archived before this
-    change are still gradable, and "the field is absent" is a different fact from "the field
-    said no".
+    reports `difference_shown: true` for that world, while the same ledger with an explicit
+    `differs_from_base: false` reports `false`. Episodes archived before this change are still
+    gradable, and "the field is absent" stays a different fact from "the field said no" — the
+    absent case leaning toward NOT excusing the defender, which is the direction O4's ladder
+    takes everywhere else.
 
     What failure looks like: `row.get("differs_from_base", False)`. Every pre-change episode
     then grades as if every staged call had been measured and shown nothing — a whole archive
-    silently relabelled.
+    silently relabelled, and every defender finding in it excused.
+
+    ASSERTED ON THE GRADING PASS, which is the only reader of this pair. The demand used to be
+    asserted against a second, exported `episode.difference_shown` that answered `None` here —
+    no production caller, and the opposite answer to the one that decides a real episode.
     """
-    episode_mod = W.mod("learning.branch.episode")
     old_row = {k: v for k, v in W.served_row(world="b").items()
                if k not in ("differs_from_base", "base_pattern_digest")}
 
-    shown = episode_mod.difference_shown([old_row])
+    absent = L.rows_of(L.grade(L.graded_episode(
+        tmp_path / "absent", monkeypatch, served={"b": [old_row]})))["b"]
+    measured = L.rows_of(L.grade(L.graded_episode(
+        tmp_path / "measured", monkeypatch,
+        served={"b": [W.served_row(world="b", differs_from_base=False)]})))["b"]
 
-    assert shown is None, (
-        f"a pre-change staged row reads as {shown!r} — an absent field was defaulted to a "
-        "measurement")
+    assert measured["difference_shown"] is False, (
+        "the control failed — an explicit `differs_from_base: false` did not read as a "
+        "measured absence, so the contrast below says nothing")
+    assert absent["difference_shown"] is True, (
+        f"a pre-change staged row reads as {absent['difference_shown']!r} — an absent field "
+        "was defaulted to a measurement that showed nothing")
 
 
 def test_the_reachability_block_is_written_in_the_one_guarded_whole_record_write(

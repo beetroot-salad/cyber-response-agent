@@ -48,10 +48,17 @@ _LOG_PREFIX = "questioner_curator"
 
 @dataclass(frozen=True, kw_only=True)
 class QuestionerAuthorConfig(CorpusAuthorConfig):
-    """The questioner curator's drain config: the shared corpus-author core, no held report
-    (its gate never holds — idempotency only, so there is nothing a report would explain) and
-    the same env-backed model knobs the defender curator carries."""
+    """The questioner curator's drain config: the shared corpus-author core, its own skip
+    report, and the same env-backed model knobs the defender curator carries.
 
+    NO HOLD REPORT, and a SKIP report all the same — the distinction the field's absence used
+    to blur. This channel's gate is idempotency only, so it genuinely never holds and a hold
+    report would explain nothing. But `QUESTIONER_BUCKETS` declares `consumed_skip`, and a skip
+    is TERMINAL: the agent's verdict consumes the row, the rotation removes it, and with no
+    line written anywhere an operator has no way to learn the finding was ever seen, let alone
+    why it was declined."""
+
+    skip_report: Path
     manifest_seed: str | None = None
     author_model: str = field(default_factory=_author_model)
     author_timeout: int = field(default_factory=_author_timeout)
@@ -67,6 +74,7 @@ def build_questioner_config(
         corpus_dir_rel=paths.lessons_questioner_dir_rel,
         runs_dir=paths.runs_dir,
         pending_dir=paths.pending_dir,
+        skip_report=paths.pending_dir / "questioner_findings.skip_report.log",
         channel=paths.questioner_findings,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
@@ -75,6 +83,7 @@ def build_questioner_config(
         invoke_agent=invoke_agent,
         gate=_gate_questioner,
         buckets=QUESTIONER_BUCKETS,
+        post_rotate=_write_skip_report_after_rotate,
         commit_fn=commit_questioner_lessons,
         noun="world findings",
         max_attempts=author_max_attempts(),
@@ -166,6 +175,19 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfi
             runs_dir=cfg.runs_dir, pending=cfg.channel.file,
             exempt_ids=questioner_exempt_ids(findings)),
         log=_log,
+    )
+
+
+def _write_skip_report_after_rotate(outcome, cfg: QuestionerAuthorConfig) -> None:
+    """The tick's closing edge — after both the corpus commit and the queue rotation.
+
+    `gate_held` is carried too even though this channel's gate is idempotency-only: the field
+    exists on every outcome, and a row appearing there would be a gate this config does not
+    think it has. Better named in the report than invisible."""
+    _shared.write_disposition_report(
+        cfg.skip_report, cfg.pending_dir, batch_id=outcome.batch_id,
+        groups={"skipped": outcome.consumed.get("consumed_skip", []),
+                "gate_held": outcome.gate_held},
     )
 
 

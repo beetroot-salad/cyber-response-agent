@@ -22,6 +22,14 @@ import pytest
 from defender.tests import _world_1007 as W
 
 
+#: A pointer the FAMILY-level call is actually shown. Its default evidence is
+#: `samples.yaml#<pattern>`, and `_build_family_prompt` renders no sample section at
+#: all — so a family finding citing one is grounded in a document that call never saw,
+#: which `_resolves` now refuses for `scope="family"`. These cells are about `world`,
+#: `source_run_dir` and who mints the id; the pointer is incidental to every one of them.
+FAMILY_EVIDENCE = ["review.yaml#worlds"]
+
+
 def episode_with_worlds(tmp_path: Path, monkeypatch, *, labels=("b",)) -> Path:
     _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
     docs = [W.base_world()] + [W.world_doc(x) for x in labels]
@@ -585,7 +593,8 @@ def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
     judge_mod = W.mod("learning.judge")
     ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
     judge = W.FakeJudge(W.reply_document(
-        findings=[W.world_finding(bucket="undiscriminating-family")]))
+        findings=[W.world_finding(bucket="undiscriminating-family",
+                                  evidence=FAMILY_EVIDENCE)]))
 
     judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir)
 
@@ -615,8 +624,8 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
     judge_mod = W.mod("learning.judge")
     ep = episode_with_worlds(tmp_path, monkeypatch)
     judge = W.FakeJudge(W.reply_document(findings=[
-        W.world_finding(bucket="undiscriminating-family"),
-        W.world_finding(bucket="a-second-family-reading"),
+        W.world_finding(bucket="undiscriminating-family", evidence=FAMILY_EVIDENCE),
+        W.world_finding(bucket="a-second-family-reading", evidence=FAMILY_EVIDENCE),
     ]))
 
     judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir)

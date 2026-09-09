@@ -251,6 +251,13 @@ def _drain_one_curator(
     sibling statement, never inside this one's `try`, so it still runs."""
     from defender._io import read_jsonl_rows
 
+    # WHAT THE STUCK REPORT HELD BEFORE THIS CURATOR RAN. `run_batch` records every
+    # non-`RETIRE_SET` fault before it re-raises, so on the ordinary path this frame's own
+    # record would be the SECOND for one tick — and the two frames hold different row sets
+    # (the rows in flight there, the whole queue here), so the next tick's record matched
+    # neither and `consecutive_ticks` reset to 1 forever. Comparing the count is what tells
+    # "already recorded" from "raised by the seam above `run_batch`, recorded nowhere".
+    recorded_before = drain.stuck_record_count(channel)
     try:
         trigger_author(paths, channel.file, threshold_env, module_name, pending_label, box=box)
     except drain.RETIRE_SET:
@@ -273,10 +280,13 @@ def _drain_one_curator(
     except KeyboardInterrupt:
         raise
     except (Exception, SystemExit) as e:  # noqa: BLE001 — A2's third clause: EVERY other fault class is recorded, never silently swallowed
-        rows = read_jsonl_rows(channel.file) if channel.file.is_file() else []
-        drain._record_stuck(channel, e, rows)
+        already = drain.stuck_record_count(channel) > recorded_before
+        if not already:
+            rows = read_jsonl_rows(channel.file) if channel.file.is_file() else []
+            drain.record_stuck(channel, e, rows)
         _log(f"{module_name}: {type(e).__name__} took this curator out of the tick "
-             f"(recorded to {drain.stuck_report_file(channel)}); the other curator still ran")
+             f"({'already recorded in' if already else 'recorded to'} "
+             f"{drain.stuck_report_file(channel)}); the other curator still ran")
 
 
 def _drain_curators(

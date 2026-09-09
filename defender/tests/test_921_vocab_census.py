@@ -235,8 +235,13 @@ def test_921_the_three_judge_write_sinks_are_the_only_ones_and_land_on_distinct_
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     before = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
+    # `findings=[]` SO THE FAMILY CALL'S DRAWS ALSO LAND. This suite's default finding carries
+    # `subject: defender`, which the family scope refuses — so both family draws came back
+    # malformed, wrote nothing, and the family sink was invisible to the census that exists to
+    # catch exactly a new sink. A findings-free reply validates in both scopes, so all three
+    # callers write and the count below is over the whole write surface.
     J.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
+        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(findings=[]))),
         runs_base=tmp_path / "defender-runs", draws=2)
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     created = sorted(after - before)
@@ -253,7 +258,9 @@ def test_921_the_three_judge_write_sinks_are_the_only_ones_and_land_on_distinct_
             pytest.fail(f"grading wrote a FOURTH sink nobody censused: {rel}")
 
     assert len(sinks["judge.yaml"]) == 1
-    assert len(sinks["worlds"]) == 4, "two worlds x two draws did not give four reply files"
+    assert len(sinks["worlds"]) == 6, (
+        "three callers (two worlds and #1007 M5's family-level draw) x two draws did not give "
+        f"six reply files: {sinks['worlds']}")
     # #1007 M5 adds a THIRD caller (the family-level draw) beside the two per-world ones —
     # 3 callers x 2 draws = 6 wire logs, not 4.
     assert len(sinks["wire_logs"]) == 6, (

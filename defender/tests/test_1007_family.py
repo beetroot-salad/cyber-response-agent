@@ -21,6 +21,14 @@ import pytest
 from defender.tests import _world_1007 as W
 
 
+#: A pointer the FAMILY-level call is actually shown. Its default evidence is
+#: `samples.yaml#<pattern>`, and `_build_family_prompt` renders no sample section at
+#: all — so a family finding citing one is grounded in a document that call never saw,
+#: which `_resolves` now refuses for `scope="family"`. These cells are about `world`,
+#: `source_run_dir` and who mints the id; the pointer is incidental to every one of them.
+FAMILY_EVIDENCE = ["review.yaml#worlds"]
+
+
 def family_episode(tmp_path: Path, monkeypatch, *, labels=("b", "c"),
                    stories=None) -> Path:
     _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
@@ -102,7 +110,8 @@ def test_the_family_reply_admits_a_family_level_finding(tmp_path, monkeypatch):
     paths = W.loop_paths(tmp_path)
     ep = family_episode(tmp_path, monkeypatch)
     judge = W.FakeJudge(W.reply_document(
-        findings=[W.world_finding(bucket="undiscriminating-family")]))
+        findings=[W.world_finding(bucket="undiscriminating-family",
+                                  evidence=FAMILY_EVIDENCE)]))
 
     grade(ep, judge, queue_dir=paths.pending_dir)
 

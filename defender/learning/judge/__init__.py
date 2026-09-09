@@ -327,7 +327,7 @@ def _run_world_draws(
                 # index n" true on disk as well as in memory.
                 (draw_dir / f"{n}.yaml").unlink(missing_ok=True)
                 continue
-            doc = run_mod._draw_document(reply, world_dir=world_dir)
+            doc = run_mod._draw_document(reply, world_dir=world_dir, scope=scope)
             completed += 1
             for finding in doc["findings"]:
                 spread[finding["bucket"]] += 1

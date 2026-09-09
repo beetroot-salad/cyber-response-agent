@@ -405,15 +405,24 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     }
     if subject == SUBJECT_WORLD:
         row["world"] = None if label == "family" else label
-        # THE MODEL'S OWN VALUE WHEN IT GAVE ONE, the PASS's stamp otherwise. Both keys are
+        # THE PASS'S OWN STAMP FIRST, the model's value only where the pass has none — the same
+        # precedence the `row["world"]` line above applies unconditionally. Both keys are
         # required by `_validate_world_row` (the questioner channel's last screen, since that
         # curator's gate is idempotency-only), and until the prompts named them no reply
         # carried either — so every model-drawn world finding was refused one row at a time and
         # filed under `unqueueable_findings`, and the questioner corpus was fed the mechanical
-        # `unreachable-difference` rows alone. The fallback is the pass's own derivation, never
-        # a guess: `family._grade_world` stamps `pattern`/`holding_system` on the world's row.
-        row["pattern"] = _first_nonempty(finding.get("pattern"), pattern)
-        row["holding_system"] = _first_nonempty(finding.get("holding_system"), holding_system)
+        # `unreachable-difference` rows alone. That is what the model's value is here FOR: a
+        # world the pass could derive neither key for.
+        #
+        # AND NOT THE OTHER WAY ROUND, which is how this line was first written. `pattern` is
+        # the questioner corpus's ONLY selection key — a lesson is shown at call 1 iff its
+        # `pattern` is one the next episode staged — so a model-chosen string that is not a real
+        # staged pattern makes the lesson permanently unselectable, silently, exactly the way a
+        # holding-system name did for the family lane below. The pass's stamp is derived from
+        # what the world was actually staged on (`family._grade_world`); the model's is a label
+        # it wrote about a corpus an intrusion influenced.
+        row["pattern"] = _first_nonempty(pattern, finding.get("pattern"))
+        row["holding_system"] = _first_nonempty(holding_system, finding.get("holding_system"))
         row["provenance"] = provenance
     return row
 
@@ -529,7 +538,8 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     index; `family_drawn` is likewise the family-level call's own draws (M5). A caller that has
     them hands them over rather than having every file it wrote read back, and one that does
     not (a bare re-enqueue) falls back to the world draw directories on disk — the family call
-    has no such directory and is `family_drawn=None` on that path (nothing to re-derive).
+    writes its draws to `worlds/family/judge/` like every other caller, so the bare path reads
+    that directory back too.
 
     THE TWO LANES DO NOT SHARE ONE EARLY RETURN. A `discard`/`corpus-contradiction`
     `verdict_word` (O7) means no DEFENDER row may reach the queue — that episode's whole
@@ -598,7 +608,17 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     # ahead of the per-world walk so a family-level finding is never shadowed, on the channel's
     # own written order, by a per-world finding that happens to share its bucket string (the
     # vocabulary is open — R2 — so nothing else distinguishes them positionally).
-    for draw, draw_doc in (family_drawn or {}).items():
+    # THE SAME DISK FALLBACK THE PER-WORLD WALK TAKES. `family_drawn=None` on a bare re-enqueue
+    # used to mean "there is nothing to re-derive", which was simply false: M5 writes its draws
+    # to `worlds/family/judge/<n>.yaml` like every other caller, so a re-enqueue over an
+    # existing episode silently dropped every family-level finding while queueing all the
+    # per-world ones. `is None` rather than truthiness, for the reason the per-world walk states
+    # below: an EMPTY map is a pass that produced no family draw, and folding it back onto disk
+    # would queue an earlier, wider attempt's leftovers as this pass's own findings.
+    family_documents = (
+        _draws_on_disk(episode_dir / "worlds" / "family" / "judge")
+        if family_drawn is None else family_drawn)
+    for draw, draw_doc in family_documents.items():
         findings = draw_doc.get("findings") or []
         for index, finding in enumerate(findings):
             if not isinstance(finding, dict):
@@ -606,15 +626,16 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                     f"{run_id}/family/{draw}/{index}: the family draw's finding[{index}] is "
                     f"{type(finding).__name__}, not a mapping")
                 continue
-            # NO A1(b) GATE ON THIS LANE, deliberately and as the committed spec pins it
-            # (`test_every_family_level_finding_carries_a_null_world` and siblings enqueue a
-            # family finding whose evidence IS `samples.yaml#<pattern>`). The gap is real —
-            # `_build_family_prompt` renders the manifest, the review record and the mechanical
-            # rows, never a sample, so every pattern is unavailable to THIS call and a
-            # `samples.yaml` citation off it is evidence the judge was never shown — but
-            # closing it here would drop findings the spec says reach the curator. The half
-            # that IS closed is the invitation: `run._FAMILY_EVIDENCE_FILES` no longer
-            # advertises `samples.yaml` to this call.
+            # NO A1(b) GATE ON THIS LANE, and it needs none: A1(b) refuses a `samples.yaml`
+            # citation for a pattern a world's row says was unavailable, and the family call
+            # cannot carry such a citation at all. `_build_family_prompt` renders the manifest,
+            # the review record and the mechanical rows and no sample, so `_resolves` refuses
+            # `samples.yaml` outright for `scope="family"` — the pointer never resolves, and a
+            # finding whose ONLY evidence is one is dropped by `_draw_document` before it
+            # reaches this loop. Refused at resolution rather than here, because that is the
+            # one place both lanes pass through and the only place that knows which documents
+            # the call was actually shown. `run._FAMILY_EVIDENCE_FILES` is the same narrowing
+            # stated to the model, so the prompt does not invite what the resolver refuses.
             row = build_finding_row(
                 run_id=run_id, label="family", draw=str(draw), index=index,
                 subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,

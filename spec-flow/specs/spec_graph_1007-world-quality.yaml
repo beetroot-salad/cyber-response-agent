@@ -534,7 +534,7 @@ demands:
              "interacts(append_rows->questioner_findings_channel)"]}
   - {id: d_a_staged_row_without_the_witness_field_reads_unmeasured, kind: survival, form: test,
      minted_from: "consensus test_served_ledger_row_missing_differs_from_base_key",
-     discharged_by: test_a_pre_change_staged_row_reads_as_unmeasured_not_as_no_difference,
+     discharged_by: test_a_pre_change_staged_row_is_not_read_as_a_measured_absence,
      binds: ["served_ledger.payload", differs_from_base]}
   - {id: d_defender_queue_row_carries_its_subject_key, kind: shape, form: test,
      minted_from: "consensus test_defender_row_carries_a_subject_key",

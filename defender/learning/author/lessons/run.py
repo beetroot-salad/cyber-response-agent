@@ -29,7 +29,6 @@ from defender.learning.core.config import (
     author_max_attempts,
     author_timeout as _author_timeout,
     make_logger,
-    now_iso,
 )
 
 
@@ -235,7 +234,13 @@ def write_held_report(
     skipped: list[dict],
     gate_held: list[dict],
 ) -> None:
-    """@owns gate_held_ids — the operator's one written trace of a pre-author gate hold.
+    """The lessons channel's three decline reasons, as the labels its report line carries.
+
+    The ownership tag that stood here — claiming the `gate_held` id list as this function's own
+    field — is gone with the thing it claimed: the line is now composed by
+    `shared.write_disposition_report`, which both curators call and which derives every
+    `<label>_ids` key from the caller's own group names. What this function owns is WHICH labels
+    the lessons channel reports, not the spelling of the keys.
 
     THREE REASONS UNDER THREE LABELS, never merged: a `forward_bad` hold is the forward
     check's verdict on a lesson the agent wrote, a skip is terminal, and a `gate_held` row
@@ -244,20 +249,10 @@ def write_held_report(
 
     Nothing is written when the tick held and skipped nothing: a report that gains a line per
     tick names nothing."""
-    if not held_forward_bad and not skipped and not gate_held:
-        return
-    cfg.pending_dir.mkdir(parents=True, exist_ok=True)
-    line = (
-        f"{now_iso()} batch={batch_id} "
-        f"forward_bad={len(held_forward_bad)} "
-        f"skipped={len(skipped)} "
-        f"gate_held={len(gate_held)} "
-        f"forward_bad_ids={[h.get('finding_id') for h in held_forward_bad]} "
-        f"skipped_ids={[s.get('finding_id') for s in skipped]} "
-        f"gate_held_ids={[g.get('finding_id') for g in gate_held]}\n"
+    _shared.write_disposition_report(
+        cfg.held_report, cfg.pending_dir, batch_id=batch_id,
+        groups={"forward_bad": held_forward_bad, "skipped": skipped, "gate_held": gate_held},
     )
-    with cfg.held_report.open("a", encoding="utf-8") as fh:
-        fh.write(line)
 
 
 

@@ -17,7 +17,7 @@
 | **the branch** / **the episode** | `learning/branch/` — forks a finished run at a chosen message and runs a family of sibling worlds from it; `cli.py` is the composition root, `estate/` is what a sibling's queries are answered from |
 | **the questioner** | `learning/branch/questioner/` — a deny-all role that authors the family manifest: sibling worlds differing by one deliberate fact. Runs no tools; its whole input is inlined by the host |
 | **the judge** | `learning/judge/` — grades an archived episode (`gradable\|discard\|corpus-contradiction`) and enqueues its findings. Holds its own deny-all role since #1008 — one such role per package, so the branch package's comparator stays under the questioner's |
-| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons (`author/lessons/`), gated by the **forward-check** (`author/verify_forward/`) |
+| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons. TWO of them since #1007, one per queue channel and one per corpus: `author/lessons/` folds DEFENDER findings into `defender/lessons/`, gated by the **forward-check** (`author/verify_forward/`); `author/questioner/` folds WORLD findings — observations about the instrument, not the investigation — into `defender/lessons-questioner/`, with no forward check (there is no defender behaviour a world lesson could regress) and an idempotency-only gate. Both run in one drain tick, one commit, one PR |
 | **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
 | **lessons** | `defender/lessons/` — authored by the loop, retrieved by two pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, and the `append_block`/`fix_row` block keyed on the invlang frontier (`scripts/lessons/lessons_frontier.py`, #919). Grep, no index |
 | **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
@@ -46,7 +46,8 @@ defender/
                     #   estate/ is what a sibling world queries through. judge/ grades the archived episode.
                     #   The four-stage actor/oracle/judge pipeline that used to live here was deleted (#922)
   evals/            # metrics + harness-on-the-harness (scenarios/)
-  lessons/          # checked-in lesson corpus
+  lessons/          # checked-in lesson corpus (the defender's; read at PLAN time)
+  lessons-questioner/ # the questioner's own corpus — lessons about authoring worlds, never read by the runtime agent
   fixtures/         # alert.json (+ optional gather_raw payloads) used as runtime inputs
   run-transcripts/  # curated transcripts of past real-alert runs
   tests/            # THE test tree — every collected suite lives here, none in the source dirs (#720).
@@ -68,10 +69,12 @@ python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>   # fork a
 python3 defender/learning/loop.py --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
 ```
 
-**Running the suite as root fails four tests that are not broken.** The
+**Running the suite as root fails five tests that are not broken.** Four are the
 accounting-failure tests in `tests/test_budget_enforcement_631.py`
 (`test_one_failed_accounting_write_costs_one_call_of_overshoot` and its three
-siblings) simulate a failing write by chmod'ing the run dir to `r-x`, and root
+siblings); the fifth is
+`tests/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.
+All five simulate a failing write by chmod'ing a directory to `r-x`, and root
 ignores permission bits — so the write lands and the test asserts "the failed
 write landed anyway". CI runs non-root and they pass there. Confirm against CI
 before chasing them; don't "fix" the tests.
@@ -101,9 +104,15 @@ reach, ends the whole episode before any sibling runs. The accepted worlds then 
 `run.py --resume` processes, and the **judge** grades the archived episode and appends its
 findings to `_pending/findings.jsonl`.
 
-From there it is unchanged, and that queue is the joint the cutover swung on: findings accumulate
-until the **curator** folds them into `defender/lessons/`, each edit gated by the same-case
-**forward-check** regression (BAD = the lesson would flip a correctly-resolved case → revert).
+That queue is the joint the cutover swung on — and since #1007 it is TWO queues, partitioned by
+what a finding is ABOUT. A finding about the defender's conduct lands on `_pending/findings.jsonl`
+and accumulates until the **lessons curator** folds it into `defender/lessons/`, each edit gated by
+the same-case **forward-check** regression (BAD = the lesson would flip a correctly-resolved case →
+revert). A finding about the WORLD — an invented field shape, a story the overlay never backed, a
+family that failed to discriminate — lands on `_pending/questioner_findings.jsonl` and is folded by
+the **questioner curator** into `defender/lessons-questioner/`, which the questioner reads back when
+it authors the next family. That corpus has no forward check: there is no defender behaviour a
+lesson about a world could regress. Both curators run inside one drain tick.
 Each worker commits from its own git worktree off `origin/main`, one PR per batch — the loop is
 the sole committer, and spawned agents run no git. Lessons feed back into the runtime twice: at
 PLAN time via `defender-lessons`, and on every write that moves the investigation's open set via

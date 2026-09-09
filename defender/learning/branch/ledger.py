@@ -270,12 +270,13 @@ class ServedCall:
             # WRITTEN WHENEVER THIS ROW IS STAGED, whatever `differs_from_base` holds — `None`
             # is itself a fact (the witness was not measured), so omitting the key on that value
             # would make it indistinguishable from a pre-#1007 row that never took a witness at
-            # all. TWO READERS, AND THEY DO NOT AGREE about that pair: `episode.difference_shown`
-            # answers `None` (unmeasured) for both, while the reader O4's withholding ladder
-            # actually consults — `judge/family._grade_world`'s own `is not False` — answers
-            # "shown" for both, deliberately leaning toward not excusing the defender. The
-            # GRADING answer is family.py's; `episode.difference_shown` has no production caller
-            # and must not be adopted as one without reconciling the unmeasured case first.
+            # all. ONE READER decides what the pair MEANS: `judge/family._grade_world`'s own
+            # `is not False`, which answers "shown" for both, deliberately leaning toward not
+            # excusing the defender rather than withholding a real finding. There used to be a
+            # second, exported `episode.difference_shown` answering `None` (unmeasured) for the
+            # same pair — no production caller, an `__all__` entry advertising it as THE reader,
+            # and the opposite answer. Deleted rather than reconciled: a future author reaching
+            # for the public name would have flipped every unmeasured episode's decision.
             row["differs_from_base"] = self.differs_from_base
             row["base_pattern_digest"] = self.base_pattern_digest
         return row

@@ -447,11 +447,20 @@ _WORLD_EVIDENCE_FILES = ("samples.yaml", "review.yaml", "judge.yaml")
 _FAMILY_EVIDENCE_FILES = tuple(n for n in _WORLD_EVIDENCE_FILES if n != "samples.yaml")
 
 
-def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER) -> bool:
+def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER,
+              scope: str = "world") -> bool:
     """J13(a): does this evidence pointer resolve inside the GRADED WORLD's own subtree — never
     a sibling's archive, whatever bytes exist at the target. For a `subject: world` finding
-    ONLY, S7 widens this to also admit exactly the three episode-level files named above, by
-    NAME — never a directory prefix, never the episode dir wholesale."""
+    ONLY, S7 widens this to also admit the episode-level files named above, by NAME — never a
+    directory prefix, never the episode dir wholesale.
+
+    `scope` NARROWS that widening to what the call was actually SHOWN. The family-level call
+    (M5) is rendered the manifest, the review record and every world's mechanical row — and no
+    sample at all — so `samples.yaml` from THAT call cites a document the judge never saw. It
+    used to resolve anyway, and the family lane runs no A1(b) citation screen, so a fabricated
+    shape-invention claim grounded in an unseen document reached the questioner curator intact.
+    Refused where the pointer is resolved instead, which is the one place both lanes pass
+    through."""
     if not isinstance(pointer, str) or not pointer:
         return False
     path_part = pointer.split("#", 1)[0]
@@ -478,7 +487,8 @@ def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER)
     # path_part` already refuses every traversal shape in the negative test, since a hostile
     # operand's `.name` is never equal to the whole pointer), never by a stat this pass cannot
     # honestly perform on its own future output.
-    return subject == SUBJECT_WORLD and path_part in _WORLD_EVIDENCE_FILES \
+    allowed = _FAMILY_EVIDENCE_FILES if scope == "family" else _WORLD_EVIDENCE_FILES
+    return subject == SUBJECT_WORLD and path_part in allowed \
         and Path(path_part).name == path_part
 
 
@@ -518,16 +528,20 @@ def cites_sample(finding: dict[str, Any], *, unavailable_patterns: Any = None) -
     return False
 
 
-def _draw_document(reply: JudgeReply, *, world_dir: Path) -> dict[str, Any]:
+def _draw_document(reply: JudgeReply, *, world_dir: Path,
+                   scope: str = "world") -> dict[str, Any]:
     """O1: a finding with no resolving pointer is dropped and the drop is counted; a finding
-    with one resolving pointer stands, with its unresolved pointers recorded on it."""
+    with one resolving pointer stands, with its unresolved pointers recorded on it.
+
+    `scope` is the call this reply came from, passed straight to `_resolves` — the family-level
+    call may cite a narrower set of episode-level files, because it is shown fewer of them."""
     kept: list[dict[str, Any]] = []
     dropped = 0
     for finding in reply.findings:
         # ONE resolution pass per pointer: "did any resolve" and "which did not" are two reads
         # of the same answer, and asking twice `stat`s every pointer of every finding twice.
         unresolved = [p for p in finding.evidence
-                     if not _resolves(p, world_dir, subject=finding.subject)]
+                     if not _resolves(p, world_dir, subject=finding.subject, scope=scope)]
         if len(unresolved) == len(finding.evidence):
             dropped += 1
             continue
