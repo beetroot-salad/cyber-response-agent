@@ -225,11 +225,19 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
         pre_871.pop(key)
     no_class = _row(2, exit_code=64, payload_status="error", payload_digest="exit=64; x")
     no_class.pop("error_class")
-    _table(tmp_path, [full, pre_871, no_class])
+    # NON-CANONICAL BYTES in every column the typed view coerces: a re-projection of the typed
+    # fields over the retained dict agrees with the raw line on writer-canonical rows and
+    # differs on this one (adversary H6) — the record must be the line, coercions and all.
+    odd = _row(3, system=None, verb=7, params="not-a-dict", exit_code="64",
+               payload_digest=5, payload_status=None)
+    odd["seq"] = "3"
+    _table(tmp_path, [full, pre_871, no_class, odd])
 
     rows = load_queries(tmp_path)
-    assert [r.record() for r in rows] == [full, pre_871, no_class], \
+    assert [r.record() for r in rows] == [full, pre_871, no_class, odd], \
         "record() is not the row as read"
+    assert (rows[3].seq, rows[3].system, rows[3].params, rows[3].exit_code) == (3, "None", {}, 64), \
+        "the typed view stopped coercing — the equality above is then a tautology"
     assert "system_key" not in rows[1].record(), \
         "record() invented the coerced `\"\"` into a pre-#871 row — the guard would then read " \
         "a column the run never wrote"
@@ -351,3 +359,68 @@ def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
     (RunPaths(regular).gather_raw / f"{LEAD}.lead.json").write_text(
         elsewhere.read_text(encoding="utf-8"), encoding="utf-8")
     assert lead_repository.load_leads(regular)[LEAD]["goal"] == "PLANTED_GOAL"
+
+
+# ---------------------------------------------------------------------------------------
+# D1 / O6 — the row literal exists ONCE, inside the constructor
+# ---------------------------------------------------------------------------------------
+
+#: The modules C1's census names as reaching the queries table (the two writer sites and the
+#: two `append_query_row` callers), plus the read surface — every place a row literal could
+#: hide beside the constructor.
+_ROW_MODULES = (
+    "scripts/gather_tools/record_query.py",
+    "runtime/lead_zero/_capture.py",
+    "runtime/query_tool.py",
+    "runtime/tools/_bash.py",
+    "learning/lead_repository.py",
+)
+
+
+def _row_literals(source: str) -> list[str | None]:
+    """The name of the enclosing function for every dict DISPLAY in `source` whose string
+    keys include both `lead_id` and `system_key` — the shape of a hand-spelled row."""
+    import ast
+
+    tree = ast.parse(source)
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    found: list[str | None] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        if not {"lead_id", "system_key"} <= keys:
+            continue
+        owner = node
+        while owner in parents and not isinstance(owner, ast.FunctionDef):
+            owner = parents[owner]
+        found.append(owner.name if isinstance(owner, ast.FunctionDef) else None)
+    return found
+
+
+def test_the_row_literal_is_spelled_once_inside_the_constructor():
+    """D1/O6 — "every writer builds through it": across the writer census and the surface, the
+    ONLY dict display keyed by both `lead_id` and `system_key` is the one inside
+    `append_query_row`. A second writer that kept its own fourteen-key literal and merely
+    asserted it against `QUERY_ROW_COLUMNS` afterwards (adversary H1) agrees on the day it is
+    written and drifts on the day a column is added — which is the class of bug D1 exists to
+    end, and one no run-time test can see until the drift happens.
+
+    The positive control is the constructor's own literal: exactly one is found, and it is
+    `append_query_row`'s — an oracle finding zero literals would be scanning the wrong shape."""
+    root = Path(__file__).resolve().parents[1]
+    owners = {
+        module: _row_literals((root / module).read_text(encoding="utf-8"))
+        for module in _ROW_MODULES
+    }
+    assert owners["scripts/gather_tools/record_query.py"] == ["append_query_row"], \
+        f"the constructor's own literal was not found where expected: {owners}"
+    for module, found in owners.items():
+        if module == "scripts/gather_tools/record_query.py":
+            continue
+        assert found == [], \
+            f"{module} spells a queries row as its own literal (in {found}) instead of " \
+            "building through append_query_row"

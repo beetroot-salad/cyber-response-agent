@@ -126,6 +126,16 @@ def _registry_rows(rows: list[dict]) -> list[dict]:
     return [row for row in _above_guard_rows(rows) if row.get("error_class") == INFRA_ERROR_CLASS]
 
 
+def _assert_nothing_printed(err: str) -> None:
+    """D4: the ROW is the trace, and nothing about the registry fault reaches stderr. Asserted
+    on the FAULT'S OWN TEXT — the exception class and its message, which any print of the
+    fault must carry however it is worded or prefixed — rather than on the old line's
+    `[query_tool]` / "could not list" spelling, which a reworded print would not contain."""
+    for named in ("PermissionError", "Permission denied", "[query_tool]"):
+        assert named not in err, \
+            f"the registry fault is still reported on stderr instead of the row: {err!r}"
+
+
 def _corrected(rec: VerbRecorder) -> int:
     """How many calls reached a backend — the corrected `q("elastic", "query", …)` turn every
     scenario ends on, which proves the lead ran on past its rejections."""
@@ -479,16 +489,59 @@ def test_where_the_surface_and_the_old_raw_grouping_disagree_the_surface_wins(tm
     assert "DIGEST_NONDICT" in text2, "the row was dropped rather than read the surface's way"
 
 
+def test_the_judges_chain_is_the_surfaces_own_reading_on_a_row_that_stresses_every_coercion(
+    tmp_path, judge_roots,
+):
+    """D3/N8/O1 — the chain is compared against `lead_repository.joined` ITSELF, not against
+    literals, over rows whose every coerced column is non-canonical at once: a string `seq`,
+    an integer `payload_digest`, a non-dict `params`, and a lead file with no `goal` key (the
+    surface reads that as `""`; a private `.lead.json` read returned `None`). A private
+    grouping that re-implemented the two coercions the literal test enumerated (adversary H5)
+    drifts from the surface on at least one of these; the only reader that agrees on all of
+    them is the surface.
+
+    Observed failing by: any link of the chain differing from the surface's reading."""
+    from defender.learning.lead_repository import joined
+
+    stressed = _world_row(1, params="not-a-dict", payload_digest=5)
+    stressed["seq"] = "1"
+    rows = [
+        stressed,
+        _world_row(0, params={"native_query": "SEQ_ZERO"}, payload_digest="DIGEST_0"),
+    ]
+    ep, base, world = _judge_world(tmp_path, rows)
+    (world / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"what_to_summarize": ["auth events"]}), encoding="utf-8")
+    leads, text = _leads_view(ep, base)
+    surface = {lead.lead_id: lead for lead in joined(world)}["l-001"]
+    assert len(surface.queries) == 2, "the surface dropped a stressed row — the claim is vacuous"
+
+    chain = leads["l-001"]
+    assert chain["goal"] == surface.goal
+    assert chain["goal"] == "", "the surface reads an absent goal as \"\"; the judge did not"
+    assert chain["params"] == surface.queries[0].params == {"native_query": "SEQ_ZERO"}
+    assert chain["payload"] == [q.payload_digest for q in surface.queries] == ["DIGEST_0", "5"]
+    assert "not-a-dict" not in text
+    assert "SEQ_ZERO" in text
+
+
 # ---------------------------------------------------------------------------------------
 # O4 / O5 / D4 — a registry that cannot list is an infra fault, on the row
 # ---------------------------------------------------------------------------------------
 
 
-def _assert_registry_row(row: dict, *, system: str) -> None:
+def _assert_registry_row(row: dict, *, system: str, verb: str = "ghostverb",
+                         params: dict = PARAMS) -> None:
     """The D4 row contract, at either placement: an `infra` above-guard row carrying the
-    model's RAW string as `system`, `system_key=""`, and the registry's failure in its digest
-    detail — the row IS the trace, and it must say what failed."""
+    model's RAW string as `system`, the call's own `verb` and `params` (O5: the fact is stated
+    ON THE ROW OF THE CALL IT AFFECTED — at the schema placement those are extracted from the
+    raw arguments, and an implementation that extracted them after the coarsening would write
+    `verb=""`, `params={}`, a row that names no call), `system_key=""`, and the registry's
+    failure in its digest detail — the row IS the trace, and it must say what failed."""
     assert row["query_id"] == ABOVE_GUARD_QUERY_ID
+    assert row["verb"] == verb, f"the infra row does not carry the call's verb: {row['verb']!r}"
+    assert row["params"] == params, \
+        f"the infra row does not carry the call's params: {row['params']!r}"
     assert row["exit_code"] == DEFAULT_FAULT_EXIT, \
         f"the registry fault was recorded as exit {row['exit_code']}, not the infra exit"
     assert row["error_class"] == INFRA_ERROR_CLASS
@@ -535,9 +588,7 @@ def test_at_the_schema_placement_a_broken_registry_records_an_infra_row_and_keep
         "the model did not receive its original schema rejection"
     assert not any(RegistryUnavailable.__name__ in seen for seen in broken.gather.seen), \
         "the host's registry fault replaced the model's own rejection"
-    for printed in ("[query_tool]", "could not list"):
-        assert printed not in err, \
-            f"the registry fault is still reported on stderr instead of the row: {err!r}"
+    _assert_nothing_printed(err)
 
     healthy = _run(tmp_path / "healthy", run_id="d1017-schema-healthy",
                    verbs=elastic_ok(VerbRecorder()), turns=turns)
@@ -607,10 +658,7 @@ def test_at_the_grant_placement_a_broken_registry_records_an_infra_row_and_keeps
             f"{name}: the model did not receive the grant refusal for its call"
         assert not any(RegistryUnavailable.__name__ in seen for seen in broken.gather.seen), \
             f"{name}: the host's registry fault replaced the model's own refusal"
-    err = capsys.readouterr().err
-    for printed in ("[query_tool]", "could not list"):
-        assert printed not in err, \
-            f"the registry fault is still reported on stderr instead of the row: {err!r}"
+    _assert_nothing_printed(capsys.readouterr().err)
 
     healthy = _run(tmp_path / "healthy", run_id="d1017-grant-healthy",
                    verbs=elastic_ok(VerbRecorder()), turns=[
@@ -724,6 +772,63 @@ def test_the_run_kill_names_the_registry_not_the_models_strings(tmp_path, capsys
     for reached in ("'elastic'", "ghostone"):
         assert reached not in aborts[0], \
             "the abort names a system the model reached (or one it invented) as unreachable"
+
+
+@pytest.mark.parametrize(
+    ("placement", "killing_turn"),
+    [
+        ("schema", _bad_args("elastic", verb="ghostverb")),
+        ("grant", q("ghostone", "ghostverb", PARAMS)),
+    ],
+)
+def test_a_registry_row_that_reaches_the_kill_limit_aborts_the_run_from_either_placement(
+    tmp_path, capsys, placement, killing_turn,
+):
+    """D4/S3 — `RunAborted` PROPAGATES out of the placement's handler when the registry row is
+    the failure that reaches `RUN_FAIL_KILL_LIMIT`: "it is the same abort the adapter-load path
+    raises, and S3 says so". The kill test above drives the fifth failure from
+    `wrap_tool_execute`, so an implementation that swallowed the abort at the placements —
+    "so the model's rejection is never replaced" — stayed green there (adversary H4). Here the
+    ORDER puts the registry row fifth: two transport faults on `cmdb`, one on `identity`, then
+    the registry rejection at the placement under test. The run must end AT that call: MAIN
+    never resumes, the gather script stops on the killing turn, the breaker document holds the
+    kill-limit total with the registry key among its systems.
+
+    The positive control is the same script against the healthy registry: the fifth call is
+    an ordinary exit-64 rejection, no abort, the lead runs to DONE.
+
+    Observed failing by: `gather.calls == len(turns)` (the lead ran on past the abort)."""
+    from defender.runtime.query_tool import REGISTRY_BREAKER_KEY
+
+    rec = VerbRecorder()
+    faulting = raising(rec, TransportFault("down"), systems=("elastic", "cmdb", "identity"))
+    turns = [
+        q("cmdb", "probe", {}), q("cmdb", "probe", {}), q("identity", "probe", {}),
+        killing_turn, q("elastic", "probe", {}), DONE,
+    ]
+    capsys.readouterr()
+    r = _run(tmp_path / "broken", run_id=f"d1017-kill-{placement}",
+             verbs=_RegistryCannotList(faulting), turns=turns)
+    err = capsys.readouterr().err
+    breaker = _breaker(r)
+    # Lead-0's own item-1 call reaches the grant placement first, so the registry key already
+    # holds one failure when the lead starts; the killing turn is then the second registry
+    # row and the fifth failure overall.
+    assert breaker["total_failures"] == RUN_FAIL_KILL_LIMIT, \
+        f"{placement}: the killing turn did not reach the kill limit: {breaker}"
+    assert REGISTRY_BREAKER_KEY in breaker["systems"]
+    assert r.main.calls == 1, f"{placement}: RunAborted was swallowed at the placement"
+    assert r.gather.calls == turns.index(killing_turn) + 1, \
+        f"{placement}: the lead did not stop at the registry rejection that reached the kill limit"
+    aborts = [line for line in err.splitlines() if "run aborted by circuit breaker" in line]
+    assert len(aborts) == 1, f"{placement}: the driver did not report the abort once: {err!r}"
+    assert REGISTRY_BREAKER_KEY in aborts[0], f"{placement}: the abort does not name the registry"
+
+    healthy = _run(tmp_path / "healthy", run_id=f"d1017-kill-{placement}-healthy",
+                   verbs=faulting, turns=turns)
+    assert healthy.main.calls == 2, f"{placement}: the healthy control aborted"
+    assert healthy.gather.calls == len(turns)
+    assert [row["exit_code"] for row in healthy.own_rows][3] == 64
 
 
 # ---------------------------------------------------------------------------------------

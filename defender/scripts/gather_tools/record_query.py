@@ -159,9 +159,9 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     `raw_system` is COERCED rather than trusted, like every other value on this path
     (`_text.as_str`, `_as_dict`) — the coercion is `names_something_readable`'s,
     so the two seams cannot disagree about what a non-`str` means. Both ABOVE-GUARD call sites
-    run inside a rejection handler that has no `try` of its own, so a raise here would replace
-    the rejection — no row for the guard to count, and the fault unwinds past the lead's own
-    catch. (`lead_zero._record_manual_row` is the third caller and is not in a handler; it
+    run inside a rejection handler whose only `try` catches `query_tool.RegistryUnavailable`
+    (#1017 D4), so a raise HERE would still replace the rejection — no row for the guard to
+    count, and the fault unwinds past the lead's own catch. (`lead_zero._record_manual_row` is the third caller and is not in a handler; it
     passes a host constant, so it can only ever be answered `""`.)
 
     Otherwise: `sha256` over the raw string, at FULL width, exactly as `payload_sha256` spends
