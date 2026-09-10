@@ -23,6 +23,7 @@ from defender._run_paths import (
     artifact_file,
     contained_payload,
 )
+from defender._text import as_str
 from defender.runtime.circuit_breaker import error_class_for_exit
 from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
@@ -42,6 +43,14 @@ def _as_int(value, default: int = 0) -> int:
 
 @dataclass(frozen=True)
 class QueryRow:
+    """One queries-table row as the canonical surface reads it: EVERY column
+    `record_query.QUERY_ROW_COLUMNS` declares, with the writer's own coercions, and
+    `payload_path` read as the containment-checked `raw_ref` (the one recorded derivation).
+
+    The typed fields are a READER'S view — `error_class` is derived from `exit_code` when the
+    key is absent, a missing `system_key` reads as `""`. The row as the writer left it is kept
+    beside them and returned by `record()`, for the reader that must see what the live guard
+    saw (#1017 D2)."""
 
     lead_id: str
     seq: int
@@ -55,6 +64,37 @@ class QueryRow:
     payload_status: str
     payload_digest: str
     raw_ref: Path | None
+    #: #877's content identity of the payload — `sha256` of the persisted sidecar text. `""`
+    #: on a row written before the column existed, and on a keyword-built fixture.
+    payload_sha256: str = ""
+    #: #871's hash half of an above-guard rejection's identity: `sha256` of a model-authored
+    #: system string the writer coarsened to `system=""`, `""` everywhere else. Coerced the way
+    #: the guard's own `_trip` coerces the stored column (`as_str`: absent, `None` and
+    #: non-string all read as `""`), so a table from before the column replays through this
+    #: surface exactly as it ran. NOT model-facing content: the renders that reach a model
+    #: (`actor_view`, `render_joined_yaml`, the judge's leads view) enumerate their fields and
+    #: none of them names it.
+    system_key: str = ""
+    #: The parsed JSON record this row was read from, untouched — see `record()`. Excluded from
+    #: equality and repr because it is the SOURCE of the typed fields, not a fifteenth column.
+    _record: dict | None = field(default=None, repr=False, compare=False)
+
+    def record(self) -> dict:
+        """The row AS READ — the parsed JSON record, byte-for-byte what `record_query.lead_rows`
+        hands the guard live, never a re-projection of the typed fields.
+
+        The distinction is load-bearing (#1017 C16): the typed view DERIVES `error_class` from
+        `exit_code` when the key is absent, while the guard's domain predicate reads the key
+        verbatim, so a replay over re-projected rows would count a pre-`error_class` rejection
+        the live run never counted and trip a lead the run let run on. Likewise `system_key`
+        is coerced to `""` on the typed view and left absent here. An offline replay is
+        `rejection_trip([r.record() for r in load_queries(run_dir)], ...)`, and it reaches the
+        run's own verdict because it reads the run's own bytes.
+
+        A row built by keyword (a fixture) has no record to return."""
+        if self._record is None:
+            raise ValueError("QueryRow.record(): this row was not read from a queries table")
+        return self._record
 
     @property
     def is_sentinel(self) -> bool:
@@ -113,6 +153,13 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
     for path in sorted(gather.glob(f"*{_LEAD_SUFFIX}")):
         lead_id = path.name[: -len(_LEAD_SUFFIX)]
         if not lead_id:
+            continue
+        # `artifact_file` on the ENTRY, not only on the directory: the glob yields a link
+        # planted at a lead's name as readily as the file, and `read_text_utf8` follows it. The
+        # judge's leads view gated each lead file this way before it read the surface (#1017
+        # D3), and the surface is the one reader now — a goal off another tree would otherwise
+        # reach a prompt as this run's own.
+        if not artifact_file(path):
             continue
         try:
             data = json.loads(read_text_utf8(path))
@@ -180,6 +227,11 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
                 payload_status=str(rec.get("payload_status", "")),
                 payload_digest=str(rec.get("payload_digest", "")),
                 raw_ref=raw_ref,
+                # `as_str`, not `str(...)`: the guard's own coercion of a stored column, so
+                # absent / `None` / non-string read as the `""` a live call carries (#1017 D2).
+                payload_sha256=as_str(rec.get("payload_sha256")),
+                system_key=as_str(rec.get("system_key")),
+                _record=rec,
             )
         )
     return rows, unreadable

@@ -24,7 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import read_jsonl_rows
-from defender._run_paths import artifact_dir, artifact_file
+from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender.learning.lead_repository import JoinedLead, joined
 from defender.learning.branch.archive import (
     ALERT_NAME,
     GATHER_SUMMARIES_DIRNAME,
@@ -90,9 +91,11 @@ class JudgeInput:
         """Each view as the text that goes inside its frame, the SET of them under the cap.
 
         THE CAP IS CHARGED OVER THE WHOLE SET, not per section. It first bounded one file — a
-        lead's `gather_summaries/<lead>.md` — while `document_rows` embedded every executed
-        query for that lead, `_render_lessons` embedded each lesson's whole body at its recorded
-        commit, and the document and report were whole files. Charging it per section instead
+        lead's `gather_summaries/<lead>.md` — while the leads view embedded every executed
+        query's whole row for that lead (the `document_rows` dump #1017 removed — the view now
+        names `params` and the payload digests and nothing else of the row), `_render_lessons`
+        embedded each lesson's whole body at its recorded commit, and the document and report
+        were whole files. Charging it per section instead
         fixed that and introduced its own version of it: eight sections each at the cap is eight
         times the bound, and the knob still reported success. What the operator is bounding is
         the bytes that reach the model, so that is the quantity measured."""
@@ -155,7 +158,6 @@ def _render_leads(leads: dict[str, dict[str, Any]]) -> str:
         lines.append(f"- params: {chain.get('params')}")
         lines.append(f"- payload: {chain.get('payload')}")
         lines.append(f"- summary: {chain.get('summary')}")
-        lines.append(f"- document_rows: {chain.get('document_rows')}")
         lines.append(f"- resolutions: {chain.get('resolutions')}")
     return "\n".join(lines) + "\n"
 
@@ -321,58 +323,54 @@ def _manifest_text(doc: dict[str, Any], graded_label: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _queries_by_lead(world_dir: Path) -> dict[str, list[dict[str, Any]]]:
-    """The world's ISSUED queries, grouped by lead, in ONE parse.
+def _leads_by_id(world_dir: Path) -> dict[str, JoinedLead]:
+    """The world's leads off the CANONICAL surface — `lead_repository.joined` over the archived
+    world dir, which has the run-dir shape it reads (C10) — indexed by lead id, in ONE parse.
 
     Called once per world rather than once per lead: the per-lead chain used to re-read and
     re-parse `executed_queries.jsonl` inside its own comprehension, so a world with N leads
     parsed the same table N times.
 
-    THE SENTINEL PARTITION IS THE WRITER'S OWN, through `is_reserved_query_id` — the same
-    predicate `lead_repository.QueryRow.is_sentinel` asks, so a fourth sentinel partitions here
-    on the day it is defined. A `∅.`-prefixed row records the lead's CONDUCT (a repeat the
-    guard refused, a call the argument schema turned back, a failed reducer shim); nothing it
-    describes reached a system of record. Grouped in with the rest they reached VIEW 1 as
-    queries the world issued and payload digests it read — under a task that asks the model to
-    say, per held row, "whether it was derived from a payload the defender actually read, or
-    invented". That is a defender failure invented out of a call the defender was refused.
-    `lead_repository.actor_view`'s docstring records this exact bug being fixed once already,
-    for the actor."""
-    from defender.scripts.gather_tools.record_query import is_reserved_query_id
+    THE SURFACE'S READING WINS (#1017 D3/N8). This module used to keep a private grouping of
+    the raw rows — its own sentinel filter, its own `lead_id` check, file order for seq order,
+    a raw `params` of whatever shape the row held — which is the second-reader drift
+    `lead_repository` exists to end. `JoinedLead.queries` is already the sentinel-split set
+    (the same `is_reserved_query_id` this module re-implemented: a `∅.`-prefixed row records
+    the lead's CONDUCT — a repeat the guard refused, a call the argument schema turned back —
+    and nothing it describes reached a system of record, so shown as an issued query it is a
+    defender failure invented out of a call the defender was refused), seq-ordered, with the
+    surface's coercions; `JoinedLead.goal` is the lead file's goal, read once for the world.
 
-    eq_path = world_dir / "executed_queries.jsonl"
-    # `artifact_file` on every entry this module admits out of the archived world dir — the same
-    # `lstat` posture `lead_repository.load_leads` takes on the very same table, and the one
-    # `archive.py` applies when it WRITES these names. A link admitted here puts another tree's
-    # rows into VIEW 1 as this world's own conduct.
-    if not artifact_file(eq_path):
+    THE LINK-REFUSING GATE STAYS AHEAD OF THE SURFACE. `artifact_file` on the table is the same
+    `lstat` posture `archive.py` applies when it WRITES these names, whereas the surface's
+    reader (`read_jsonl_rows_report`) follows a link. A link admitted here puts another tree's
+    rows into VIEW 1 as this world's own conduct, so a world whose table is not a regular file
+    renders every lead with no queries at all."""
+    if not artifact_file(RunPaths(world_dir).executed_queries):
         return {}
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in read_jsonl_rows(eq_path):
-        lead_id = row.get("lead_id")
-        query_id = row.get("query_id")
-        if isinstance(query_id, str) and is_reserved_query_id(query_id):
-            continue
-        if isinstance(lead_id, str):
-            grouped.setdefault(lead_id, []).append(row)
-    return grouped
+    return {lead.lead_id: lead for lead in joined(world_dir)}
 
 
 def _lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, list[dict]],
-                *, queries_by_lead: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    goal = None
+                *, leads_by_id: dict[str, JoinedLead]) -> dict[str, Any]:
+    """One lead's chain for VIEW 1: goal -> params -> payload -> summary -> resolutions.
+
+    EVERY LINK IS NAMED FROM A `QueryRow` FIELD; no row object is stringified (#1017 D3/O3).
+    The chain used to carry the lead's raw rows whole under `document_rows`, which put every
+    column of every executed query — `payload_sha256`, `payload_path`, `raw_command`,
+    `exit_code`, `error_class`, and since #871 `system_key` — into the prompt as bytes the
+    judge cannot act on, charged against the operator's payload cap ahead of the evidence the
+    cap exists to keep."""
     # THE ID IS MODEL-AUTHORED and this is where it becomes a path. `names_one_file` refuses a
     # token that would read outside the graded world — a `[../../c/report ...]` resolution row
     # otherwise put a counterfactual sibling's whole `report.md` into this world's own prompt,
-    # under `- summary:`, as a fact about the world being graded (O5/J14).
+    # under `- summary:`, as a fact about the world being graded (O5/J14). The surface is keyed
+    # by the ids the world's OWN files and rows carry, so a token like that names no lead there.
     safe = names_one_file(lead_id)
-    lead_file = world_dir / "gather_raw" / f"{lead_id}.lead.json"
-    if safe and artifact_file(lead_file):
-        data = json_mapping(lead_file)
-        if data is not None:
-            goal = data.get("goal")
-    queries = queries_by_lead.get(lead_id, [])
-    params = queries[0].get("params") if queries else None
+    lead = leads_by_id.get(lead_id)
+    goal = lead.goal if lead is not None else None
+    queries = lead.queries if lead is not None else []
+    params = queries[0].params if queries else None
     summary_path = world_dir / GATHER_SUMMARIES_DIRNAME / f"{lead_id}.md"
     summary = None
     if not safe:
@@ -385,8 +383,8 @@ def _lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, li
         # character is exactly what the judge should be shown of a byte nobody can read.
         summary = summary_path.read_text(encoding="utf-8", errors="replace")
     return {
-        "goal": goal, "params": params, "payload": [q.get("payload_digest") for q in queries],
-        "summary": summary, "document_rows": queries,
+        "goal": goal, "params": params, "payload": [q.payload_digest for q in queries],
+        "summary": summary,
         "resolutions": resolutions_by_lead.get(lead_id, []),
     }
 
@@ -758,10 +756,9 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
         for k, v in sorted(spread.items(), key=lambda kv: (kv[0] is None, str(kv[0])))
     ] if siblings else []
 
-    queries_by_lead = _queries_by_lead(world_dir)
-    leads = {lid: _lead_chain(world_dir, lid, resolutions_by_lead,
-                             queries_by_lead=queries_by_lead)
-            for lid in sorted(lead_ids)}
+    leads_by_id = _leads_by_id(world_dir)
+    leads = {lid: _lead_chain(world_dir, lid, resolutions_by_lead, leads_by_id=leads_by_id)
+             for lid in sorted(lead_ids)}
 
     manifest_text = _manifest_text(doc, world_label)
 

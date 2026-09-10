@@ -192,71 +192,55 @@ _UNMAPPED_FAULT_EXIT = 2
 def _record_manual_row(
     deps: _CaptureDeps, verb: str, params: dict, payload: Any, *, exit_code: int,
 ) -> None:
-    """Write a queries-table row with the SAME fourteen-key shape `QueryCapture._record` writes
-    — including `error_class`/`payload_status` DERIVED the same way
-    (`circuit_breaker.error_class_for_exit`, `query_tool._payload_status`'s rule) rather than
-    hardcoded, since a hardcoded `error_class="infra"` mis-files an agent-fixable capped-path
-    fault out of `collect_general_failures`' pitfalls curation.
+    """Write a queries-table row through THE constructor — `record_query.append_query_row`,
+    the same call `QueryCapture._record` and the gather bash lane make — so item 1's rows carry
+    the columns `QUERY_ROW_COLUMNS` declares, in its order, and gain a fifteenth on the day the
+    writer does (#1017 D1/O6). This function used to spell the fourteen keys as its own literal,
+    which is how #877 (`payload_sha256`) and #871 (`system_key`) each had to reach in here by
+    hand; what stays here is only what this CALLER decides: `payload_status` by
+    `query_tool._payload_status`'s rule, the display digest, and the host constant in `system`.
 
-    Deliberately WITHOUT feeding `circuit_breaker.record_outcome`: that is what lets item 1's
-    calls past its first recorded failure keep running without pushing the breaker's per-system
-    counter over the trip boundary on lead-0's behalf. The cap bounds RECORDED failures, not
-    calls."""
+    Deliberately WITHOUT feeding `circuit_breaker.record_outcome` — `append_query_row` does
+    not, and that is what lets item 1's calls past its first recorded failure keep running
+    without pushing the breaker's per-system counter over the trip boundary on lead-0's behalf.
+    The cap bounds RECORDED failures, not calls."""
     import shlex
 
-    from defender._io import guarded_mkdir, write_guarded
-    from defender.runtime.circuit_breaker import error_class_for_exit
     from defender.scripts.gather_tools.record_query import (
-        _json_safe_params,
-        _next_seq,
+        append_query_row,
         payload_digest,
-        payload_sha256,
         system_fingerprint,
     )
 
-    seq = _next_seq(deps.run_dir, deps.lead_id)
-    lead_dir = RunPaths(deps.run_dir).gather_raw / deps.lead_id
-    payload_name = f"gather_raw/{deps.lead_id}/{seq}.json"
-    payload_rel: str | None = payload_name
     text = json.dumps(payload, default=str) if exit_code == 0 else ""
-    try:
-        guarded_mkdir(lead_dir, base=deps.run_dir)
-        write_guarded(deps.run_dir / payload_name, text)
-    except (OSError, ValueError):
-        payload_rel = None
     if exit_code != 0:
         payload_status = "error"
     elif payload is None or (isinstance(payload, (dict, list, tuple, set, str)) and len(payload) == 0):
         payload_status = "empty"
     else:
         payload_status = "ok"
-    row = {
-        "lead_id": deps.lead_id, "seq": seq, "system": ITEM1_SYSTEM, "verb": verb,
-        "query_id": f"{ITEM1_SYSTEM}.{verb}", "params": _json_safe_params(dict(params)),
-        "raw_command": shlex.join(
+    append_query_row(
+        deps.run_dir,
+        lead_id=deps.lead_id,
+        system=ITEM1_SYSTEM,
+        verb=verb,
+        query_id=f"{ITEM1_SYSTEM}.{verb}",
+        params=params,
+        raw_command=shlex.join(
             [ITEM1_SYSTEM, verb, *(f"{k}={v}" for k, v in params.items())]
         ),
-        "payload_path": payload_rel, "exit_code": exit_code,
-        "error_class": error_class_for_exit(exit_code),
-        "payload_status": payload_status,
-        "payload_digest": (
+        payload_text=text,
+        exit_code=exit_code,
+        payload_status=payload_status,
+        payload_digest=(
             payload_digest(text, "", 0) if exit_code == 0 else f"exit={exit_code}; capped"
         ),
-        # Over the SAME text the sidecar above holds — the content identity `repeat_note` keys
-        # byte-identity on. Derived rather than defaulted, so this second writer's rows can
-        # never read as "no payload evidence" beside `_record`'s.
-        "payload_sha256": payload_sha256(text),
-        # DERIVED through the column's owner, like `error_class` and `payload_sha256` above and
-        # for the same reason (#871): this writer assembles the row itself instead of going
-        # through `append_query_row`, so routing the answer through `system_fingerprint` is what
-        # keeps it tracking the owner's rule rather than a literal that agrees by coincidence.
-        # The ARGUMENTS say what is true here and are not the same value twice: nothing
+        # Through the column's owner, like the writer's other derived columns (#871). The
+        # ARGUMENTS say what is true here and are not the same value twice: nothing
         # model-authored named a system on this path (`raw_system` is `""`), and the system of
         # record is the host's own constant — the DECLARED case, whose answer is `""`.
-        # Written rather than omitted, because a key it skips is a key the frozen contract loses.
-        "system_key": system_fingerprint("", ITEM1_SYSTEM),
-    }
-    write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
+        system_key=system_fingerprint("", ITEM1_SYSTEM),
+    )
 
 
 def _breaker_failures(run_dir: Path) -> int:
