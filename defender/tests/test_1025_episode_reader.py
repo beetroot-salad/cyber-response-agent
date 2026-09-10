@@ -8,14 +8,19 @@ today, plus a fifth spelled `REVIEW_FILENAME`), or the page re-implementing a le
 input builder already computes. Three decisions are pinned here:
 
 1. **The file names live in `learning/branch/archive.py`** — `REVIEW_NAME`, `SAMPLES_NAME`,
-   `JUDGE_NAME` — and NOWHERE ELSE: across the shipped code roots the literals `"review.yaml"`,
-   `"samples.yaml"` and `"judge.yaml"` each occur in exactly one module, and the three
-   assignments occur only there. O8's observable IS a name census, so this is the one suite
-   where a grep over the tree is the honest test rather than a proxy for one.
+   `JUDGE_NAME` — and NOWHERE ELSE: across the shipped code roots the strings `review.yaml`,
+   `samples.yaml` and `judge.yaml` each occur as a constant in exactly one module, the three
+   assignments occur only there, and every module that reads a record holds `archive`'s own
+   object (an import, `is`-identical). O8's observable IS a name census, so this is the one
+   suite where a walk over the tree's syntax is the honest test rather than a proxy for one —
+   over the AST, because a text regex misses `"review" ".yaml"` and its cousins.
 2. **The derived accessors live in `learning/judge/family.py` under PUBLIC names** —
    `world_review_block`, `staged_patterns`, `world_pattern`, `own_h_rows`, `raw_manifest`, and,
    moved off `render.py`, `queries_by_lead`, `lead_chain` and `json_mapping`. The private
-   spellings that crossed module lines are gone. Each accessor's behaviour is driven on the
+   spellings that crossed module lines are gone, the input builder IMPORTS the lead-chain trio
+   (its attributes are `family`'s objects, and no constant in `render.py` names the queries
+   table or the lead files), and the `leads` view a real `render()` produces equals what
+   `family.lead_chain` answers over the same world. Each accessor's behaviour is driven on the
    public name against a real archived world, so the move is a move and not a rename plus a
    rewrite.
 3. **The tolerant `judge.yaml` reader is public: `judge.read_grade(episode_dir)`** — `None`
@@ -28,15 +33,20 @@ which the pass computed and never wrote. It is now on every world row `judge.yam
 beside the other flags — true iff the world's served ledger holds a row on the holding system
 whose `source` is the ledger's own `refused` — and it survives the round trip through
 `read_grade`. The ladder pairing (a refused H row buckets `None`, the same world without one
-buckets `lead-quality`) is the positive/negative control, driven through the real pass.
+buckets `lead-quality`) is the positive/negative control, driven through the real pass; the
+flag is then pinned as a fact about the ROWS on every ladder branch where a bucket-derived
+reading would answer differently (doctored + refused, fault-only, `" Elastic "`), and J3's
+first-row-wins dedup — a refused row sharing the served row's pair-key never reaches the
+ladder — is made explicit so a change to it is visible here.
 
-RED AGAINST HEAD is the expected state: the constants, the public names and the field do not
-exist yet, and the census finds five modules spelling `review.yaml`. Every import goes through
-`J.mod` / `J.sym` PER TEST so a missing target is one failure per test, never a collection
-error.
+RED AGAINST THE PRE-CHANGE TREE was the expected state (the constants, the public names and
+the field did not exist; the census found five modules spelling `review.yaml`), and the tests
+were then tightened against an adversarial implementation. Every import goes through `J.mod`
+/ `J.sym` PER TEST so a missing target is one failure per test, never a collection error.
 """
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -125,6 +135,23 @@ _CONSTANT_NAMES = ("REVIEW_NAME", "SAMPLES_NAME", "JUDGE_NAME")
 _ASSIGNMENT = re.compile(
     r"^\s*(?:" + "|".join(_CONSTANT_NAMES) + r")\s*=(?!=)", re.MULTILINE)
 
+#: Every shipped module that reads one of the three records, and the attribute it reads the
+#: name through. Each must be `archive`'s OWN object — an import, never a re-spelling.
+#: `staging.REVIEW_FILENAME` is that module's historical alias for `REVIEW_NAME`.
+_IMPORTERS: tuple[tuple[str, str, str], ...] = (
+    ("learning.branch.cli", "REVIEW_NAME", "REVIEW_NAME"),
+    ("learning.branch.cli", "SAMPLES_NAME", "SAMPLES_NAME"),
+    ("learning.branch.episode", "REVIEW_NAME", "REVIEW_NAME"),
+    ("learning.branch.review", "REVIEW_NAME", "REVIEW_NAME"),
+    ("learning.branch.staging", "REVIEW_FILENAME", "REVIEW_NAME"),
+    ("learning.judge.family", "REVIEW_NAME", "REVIEW_NAME"),
+    ("learning.judge.family", "SAMPLES_NAME", "SAMPLES_NAME"),
+    ("learning.judge.run", "REVIEW_NAME", "REVIEW_NAME"),
+    ("learning.judge.run", "SAMPLES_NAME", "SAMPLES_NAME"),
+    ("learning.judge.run", "JUDGE_NAME", "JUDGE_NAME"),
+    ("learning.judge", "JUDGE_NAME", "JUDGE_NAME"),
+)
+
 
 def _shipped_modules() -> dict[str, str]:
     """`{relative posix path: source text}` for every `.py` under the shipped roots. The
@@ -140,6 +167,30 @@ def _shipped_modules() -> dict[str, str]:
             out[path.relative_to(package).as_posix()] = path.read_text(encoding="utf-8")
     assert _ARCHIVE_MODULE in out, f"the census never saw {_ARCHIVE_MODULE}: {sorted(out)[:5]}"
     return out
+
+
+def _folded_string(node: ast.AST) -> str | None:
+    """The string a node denotes when it is a constant expression, else `None`.
+
+    The parser already folds `"review" ".yaml"` into ONE `Constant`; this folds the two other
+    spellings that survive parsing as an expression over constants — `"review" + ".yaml"` and
+    `f"review.yaml"` — so a literal dressed up as arithmetic is still the literal.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _folded_string(node.left), _folded_string(node.right)
+        return None if left is None or right is None else left + right
+    if isinstance(node, ast.JoinedStr):
+        parts = [_folded_string(v) for v in node.values]
+        return None if any(p is None for p in parts) else "".join(parts)
+    return None
+
+
+def _string_constants(source: str, path: str) -> set[str]:
+    """Every string a module's AST denotes as a constant expression — see `_folded_string`."""
+    tree = ast.parse(source, filename=path)
+    return {s for node in ast.walk(tree) if (s := _folded_string(node)) is not None}
 
 
 def test_archive_is_the_one_home_for_the_three_episode_record_names():
@@ -161,33 +212,58 @@ def test_archive_is_the_one_home_for_the_three_episode_record_names():
 
 
 def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
-    """O8's census, run as a grep over the tree: across the shipped code roots the literals
-    `"review.yaml"`, `"samples.yaml"` and `"judge.yaml"` each occur in ONE module — `archive.py`
-    — and an ASSIGNMENT to `REVIEW_NAME` / `SAMPLES_NAME` / `JUDGE_NAME` occurs only there.
-    Every other module imports the name; an import is not an assignment and does not count.
+    """O8's census, run over the tree's SYNTAX: across the shipped code roots the strings
+    `review.yaml`, `samples.yaml` and `judge.yaml` each occur as a constant in ONE module —
+    `archive.py` — and an ASSIGNMENT to `REVIEW_NAME` / `SAMPLES_NAME` / `JUDGE_NAME` occurs
+    only there. Every other module imports the name; an import is not an assignment.
 
-    Observably true: the set of modules containing each literal is `{archive.py}`, and so is
-    the set of modules assigning any of the three names.
+    Through `ast`, not a regex over the text: a regex sees `"review.yaml"` and misses
+    `"review" ".yaml"` (folded by the parser into one constant), `"review" + ".yaml"` and
+    `f"review.yaml"` — every one of which is the same second home wearing a disguise.
 
-    What failure looks like: today — `family.py`, `branch/episode.py`, `branch/review.py`,
-    `branch/cli.py` and `branch/staging.py` (as `REVIEW_FILENAME`) each spell `review.yaml`,
-    `judge/__init__.py` and `judge/run.py` spell `judge.yaml` and `samples.yaml` inline. A
-    fourth definition is exactly O8's named failing: a rename of the file reaches some readers
-    and not others, and the page reads a record the pass never wrote.
+    Observably true: the set of modules whose AST denotes each name is `{archive.py}`, and so
+    is the set of modules assigning any of the three constants.
+
+    What failure looks like: before the change, `family.py`, `branch/episode.py`,
+    `branch/review.py`, `branch/cli.py` and `branch/staging.py` (as `REVIEW_FILENAME`) each
+    spelled `review.yaml`, and `judge/__init__.py` / `judge/run.py` spelled `judge.yaml` and
+    `samples.yaml` inline. A fourth definition is exactly O8's named failing: a rename of the
+    file reaches some readers and not others, and the page reads a record the pass never wrote.
     """
     modules = _shipped_modules()
+    constants = {path: _string_constants(text, path) for path, text in modules.items()}
 
     for file_name in _FILE_NAMES:
-        literal = re.compile(r"""["']""" + re.escape(file_name) + r"""["']""")
-        spelled_in = sorted(m for m, text in modules.items() if literal.search(text))
+        spelled_in = sorted(m for m, strings in constants.items() if file_name in strings)
         assert spelled_in == [_ARCHIVE_MODULE], (
-            f"{file_name!r} is spelled as a literal in {spelled_in}; O8 wants exactly one "
+            f"{file_name!r} is spelled as a constant in {spelled_in}; O8 wants exactly one "
             f"home, {_ARCHIVE_MODULE}, with every other module importing the name")
 
     assigned_in = sorted(m for m, text in modules.items() if _ASSIGNMENT.search(text))
     assert assigned_in == [_ARCHIVE_MODULE], (
         f"REVIEW_NAME / SAMPLES_NAME / JUDGE_NAME are ASSIGNED in {assigned_in}; only "
         f"{_ARCHIVE_MODULE} may define them — a re-export is an import, not an assignment")
+
+
+def test_every_reader_of_a_record_name_holds_the_archives_own_object():
+    """Every shipped module that names one of the three records holds `archive`'s OWN string
+    — the attribute `is` the archive's, which only an import produces. A module that
+    re-spelled the value under the same name would compare `==` and not `is`.
+
+    Observably true: for each `(module, attribute)` in `_IMPORTERS`, the attribute exists and
+    is identical to the archive's constant it stands for.
+
+    What failure looks like: `cli.REVIEW_NAME == "review.yaml"` holds while `cli` never
+    imported it — the census above catches the spelling; this catches the object.
+    """
+    archive = _archive()
+
+    for module_name, attribute, archive_name in _IMPORTERS:
+        module = J.mod(module_name)
+        assert hasattr(module, attribute), f"{module_name}.{attribute} is gone"
+        assert getattr(module, attribute) is getattr(archive, archive_name), (
+            f"{module_name}.{attribute} is not archive.{archive_name}'s own object — a "
+            "re-spelling, not an import")
 
 
 # ---------------------------------------------------------------------------------------
@@ -214,12 +290,14 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
     Observably true: `family` exposes `world_review_block`, `staged_patterns`, `world_pattern`,
     `own_h_rows`, `raw_manifest`, `queries_by_lead`, `lead_chain` and `json_mapping` as
     callables; neither `family` nor `render` carries the underscore spelling of any of them;
-    and where `render` still exposes one of the public names (it imports them), it is the
-    SAME object `family` owns — never a second implementation under the same name.
+    the input builder IMPORTS the lead-chain trio — `render.lead_chain`, `render.queries_by_
+    lead` and `render.json_mapping` are `family`'s own objects — and no constant in `render.py`
+    names `executed_queries.jsonl` or `gather_raw`, the two reads that belong to the accessors.
 
     This is a name census, which is what O8's observable is. What failure looks like: the page
-    imports `render._lead_chain` (a private, across a module line — today's state), or the
-    accessor is copied into a second home so the two drift.
+    imports `render._lead_chain` (a private, across a module line — the state before this
+    change), or a second copy of the chain lives on in `render.py` under fresh private names
+    with `family.lead_chain` called by nothing, so the prompt and the page drift.
     """
     family, render = _family(), _render()
 
@@ -230,14 +308,58 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
             assert not hasattr(module, name), (
                 f"{module.__name__}.{name} still exists; the private spelling crosses a module "
                 f"line and O8 wants one public home, family.{public}")
-        if hasattr(render, public):
-            assert getattr(render, public) is getattr(family, public), (
-                f"render.{public} is not family.{public} — two homes for one accessor")
     assert callable(getattr(family, "json_mapping", None)), (
         "family.json_mapping is absent — the JSON tolerance policy has no home in the reader")
-    if hasattr(render, "json_mapping"):
-        assert render.json_mapping is family.json_mapping, (
-            "render.json_mapping is not family.json_mapping — two homes for one policy")
+    for name in ("lead_chain", "queries_by_lead", "json_mapping"):
+        assert getattr(render, name, None) is getattr(family, name), (
+            f"render.{name} is not family.{name} — the input builder does not import the "
+            "accessor it renders the per-lead chain with; that IS the one-home observable")
+
+    render_source = Path(render.__file__).read_text(encoding="utf-8")
+    leftover = {"executed_queries.jsonl", "gather_raw"} & _string_constants(
+        render_source, render.__file__)
+    assert not leftover, (
+        f"render.py still names {sorted(leftover)} as a constant — the queries table and the "
+        "lead files are read by family's accessors now, so a spelling here is a second reader")
+
+
+def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_path):
+    """The per-lead chain the judge is SHOWN is the chain `family.lead_chain` computes — the
+    behavioural half of "one home": a real `render()` over an archived world produces a
+    `leads` view equal, lead for lead, to `lead_chain` over the same world's own facts.
+
+    Observably true: `render(ep, "b").leads["l-001"]` equals `family.lead_chain(world_dir,
+    "l-001", facts.resolutions_by_lead, queries_by_lead=family.queries_by_lead(world_dir))`,
+    with a real lead file and two issued queries on disk so every link carries a value.
+
+    What failure looks like: the builder keeps its own chain (a private copy) and the page,
+    reading through `family`, describes a lead the judge was never shown.
+    """
+    family = _family()
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    world_dir = ep / "worlds" / "b"
+    rows = [
+        {"lead_id": "l-001", "query_id": "q1", "params": {"index": "logs-*"},
+         "payload_digest": "d1"},
+        {"lead_id": "l-001", "query_id": "q2", "params": {"index": "logs-2"},
+         "payload_digest": "d2"},
+    ]
+    (world_dir / "executed_queries.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    (world_dir / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
+    base, _src = J.runs_base(tmp_path)
+
+    shown = _render().render(ep, "b", runs_base=base).leads
+    facts = family.read_world_facts(ep, "b", episode_token=J.EPISODE_TOKEN)
+    expected = family.lead_chain(world_dir, "l-001", facts.resolutions_by_lead,
+                                 queries_by_lead=family.queries_by_lead(world_dir))
+
+    assert expected["goal"] == "find the pivot", "the fixture's lead file was not read"
+    assert expected["payload"] == ["d1", "d2"], "the fixture's queries were not read"
+    assert shown["l-001"] == expected, (
+        "the judge is shown a per-lead chain that differs from family.lead_chain's over the "
+        f"same world:\n{shown['l-001']}\n!=\n{expected}")
 
 
 def test_queries_by_lead_groups_issued_rows_and_drops_conduct_rows_in_one_parse(tmp_path):
@@ -520,16 +642,22 @@ def test_read_grade_is_none_before_a_grade_and_the_same_record_grade_episode_ret
             f"grade_episode's existing-record path and read_grade disagree on {field!r}")
 
 
-def test_read_grade_refuses_a_planted_link_and_a_non_mapping_record(tmp_path):
-    """The idempotency record is read through the screened read: a link at `judge.yaml`'s
-    name and a document that is not a mapping are refusals, never a grade.
+def test_read_grade_refuses_a_planted_link_a_non_mapping_and_a_torn_record(tmp_path):
+    """The idempotency record is read through the screened read AND the pass's own conversion:
+    a link at `judge.yaml`'s name, a document that is not a mapping, and a document torn
+    mid-write are all `JudgeRefused` — this design's one refusal class — never a grade and
+    never a bare `yaml.YAMLError`.
 
     Observably true: the same mapping bytes as a regular `judge.yaml` read back (positive
     control); as a real symlink to that file outside the episode they raise `JudgeRefused`;
-    a `judge.yaml` holding a YAML list raises `JudgeRefused`.
+    a `judge.yaml` holding a YAML list raises `JudgeRefused`; a `judge.yaml` cut off inside
+    an open flow mapping (`worlds: [\n  {world: b`) raises `JudgeRefused`.
 
     What failure looks like: a planted document parses as a mapping and `grade_episode` hands
-    back an attacker-supplied grade without running the pass at all.
+    back an attacker-supplied grade without running the pass at all; or `read_grade` is a
+    second parser that lets the YAML library's own error out past the boundary every other
+    reader in this package converts at, so the page meets a traceback where the pass meets a
+    refusal.
     """
     read_grade, refused = J.sym("learning.judge", "read_grade"), _refused()
     ep = J.accepted_episode(tmp_path)
@@ -552,6 +680,10 @@ def test_read_grade_refuses_a_planted_link_and_a_non_mapping_record(tmp_path):
     with pytest.raises(refused):
         read_grade(ep)
 
+    record.write_text("worlds: [\n  {world: b", encoding="utf-8")
+    with pytest.raises(refused):
+        read_grade(ep)
+
 
 def test_read_grade_reads_a_pre_1007_record_with_defaults_and_invents_nothing(tmp_path):
     """A record in the pre-#1007 shape — no `family_outcome`, no `world_enqueued_rows`, no
@@ -559,17 +691,25 @@ def test_read_grade_reads_a_pre_1007_record_with_defaults_and_invents_nothing(tm
     reader's defaults for the family-level absences and NOTHING invented on the rows.
 
     Observably true: `family_outcome is None`, `world_enqueued_rows == 0`,
-    `withheld_findings == []`, `graded_worlds == {"b"}`, and the world row comes back as
-    written — no `has_refused` key the archive never stored (O3: where the ladder's branch
+    `withheld_findings == []`, `graded_worlds == {"b", "c"}`, and BOTH world rows come back
+    as written — no `has_refused` key the archive never stored (O3: where the ladder's branch
     depends on a fact the archive does not store, the page says so rather than inventing one).
-    Positive control: the same record carrying the fields reads them back.
+    Row `c` is the TEMPTING one: queried, undoctored, `bucket: None` — exactly the shape the
+    ladder's refused branch produces, and exactly the shape a fault-adjacent or pre-#1007 row
+    also has; a reader that back-fills `has_refused: True` there is inventing the fact, and
+    the page then reports a refusal the archive never recorded. Positive control: the same
+    record carrying the fields reads them back.
     """
     read_grade = J.sym("learning.judge", "read_grade")
     ep = J.accepted_episode(tmp_path)
     old_row = {"world": "b", "bucket": "lead-quality", "holding_queried": True,
                "doctored_answer_served": False, "difference_shown": False,
                "withheld_reason": None}
-    old = {"worlds": [old_row], "verdict_word": "caught", "episode_outcome": "gradable",
+    tempting_row = {"world": "c", "bucket": None, "holding_queried": True,
+                    "doctored_answer_served": False, "difference_shown": False,
+                    "withheld_reason": None}
+    old = {"worlds": [old_row, tempting_row], "verdict_word": "caught",
+           "episode_outcome": "gradable",
            "enqueued_rows": 0, "enqueued_to": "", "draws": {"completed": 1}, "knobs": {},
            "lessons_commit": None, "discard_evidence": {}, "queue_malformed_rows": 0,
            "unqueueable_findings": []}
@@ -580,17 +720,23 @@ def test_read_grade_reads_a_pre_1007_record_with_defaults_and_invents_nothing(tm
     assert grade.family_outcome is None
     assert grade.world_enqueued_rows == 0
     assert grade.withheld_findings == []
-    assert grade.graded_worlds == frozenset({"b"})
+    assert grade.graded_worlds == frozenset({"b", "c"})
     assert _rows(grade)["b"] == old_row, (
         "the reader rewrote a pre-#1007 world row — it invented a fact the archive never stored")
-    assert "has_refused" not in _rows(grade)["b"]
+    assert _rows(grade)["c"] == tempting_row, (
+        "the reader rewrote a queried, undoctored, bucket-None row — it back-filled a "
+        f"`has_refused` the archive never stored: {_rows(grade)['c']}")
+    for label in ("b", "c"):
+        assert "has_refused" not in _rows(grade)[label]
 
     new = dict(old, family_outcome="gradable", withheld_findings=[{"world": "b"}],
-               worlds=[dict(old_row, has_refused=True)])
+               worlds=[dict(old_row, has_refused=True), dict(tempting_row, has_refused=False)])
     (ep / "judge.yaml").write_text(yaml.safe_dump(new, sort_keys=False), encoding="utf-8")
     grade = read_grade(ep)
     assert (grade.family_outcome, grade.withheld_findings) == ("gradable", [{"world": "b"}])
     assert _rows(grade)["b"]["has_refused"] is True, "positive control: a stored flag read back"
+    assert _rows(grade)["c"]["has_refused"] is False, (
+        "a stored `has_refused: False` on a bucket-None row was overridden by the reader")
 
 
 def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
@@ -687,6 +833,84 @@ def test_a_refused_h_row_is_the_stored_fact_that_turns_lead_quality_into_no_buck
     assert (rows["c"]["has_refused"], rows["c"]["bucket"]) == (False, "lead-quality")
     assert (rows["b"]["has_refused"], rows["b"]["bucket"]) == (True, None), (
         f"a refused H row: {rows['b'].get('has_refused')!r} / {rows['b']['bucket']!r}")
+
+
+def test_has_refused_is_read_off_the_refused_rows_on_every_ladder_branch(tmp_path):
+    """`has_refused` is a fact about the ROWS — "is there a `refused` row on H" — and not a
+    reading of the bucket the ladder landed in. Three worlds through the real pass, one per
+    branch where a bucket-derived flag would answer differently:
+
+    * `b` — a `staged` row AND a `refused` row on H: the ladder takes the DOCTORED branch (the
+      refused row plays no part in its bucket), and the row still stores `has_refused: True`.
+    * `c` — a `fault` row as its ONLY H interaction: J5's tier rule makes it ungradable with
+      `bucket: None`, `holding_queried: True`, `doctored_answer_served: False` — the exact shape
+      a refused world has — and it stores `has_refused: False`, because nothing was refused.
+    * `d` — a `refused` row whose `system` is spelled `" Elastic "`: `own_h_rows`' own
+      strip+casefold rule makes it an H row, so it stores `has_refused: True` and buckets
+      `None`.
+
+    What failure looks like: `has_refused = holding_queried and not doctored and bucket is
+    None` — a flag re-derived from the bucket, which reads `False` on `b` and `True` on `c`,
+    and reports the ladder's OUTPUT as the fact it was supposed to have branched on (O3).
+    """
+    fault = J.sym("learning.branch.ledger", "FAULT")
+    ep = J.accepted_episode(
+        tmp_path, labels=("a", "b", "c", "d"),
+        dispositions={"a": "benign", "b": "malicious", "c": "malicious", "d": "malicious"},
+        ledgers={
+            "b": [J.staged_row("b"), _refused_row("b")],
+            "c": [J.ledger_row(source=fault, world_label="c",
+                               payload="missing required config keys: ELASTIC_EVENTS_INDEX")],
+            "d": [_passthrough("d"), _refused_row("d", system=" Elastic ")],
+        })
+
+    rows = _rows(_grade(ep, tmp_path))
+
+    assert rows["b"]["doctored_answer_served"] is True, "the doctored branch was not taken"
+    assert rows["b"]["has_refused"] is True, (
+        "a refused H row beside a staged one was not recorded — the flag follows the bucket, "
+        "not the rows")
+    assert rows["c"]["ungradable"] is True, "positive control: the faulted world is ungradable"
+    assert (rows["c"]["holding_queried"], rows["c"]["doctored_answer_served"],
+            rows["c"]["bucket"]) == (True, False, None)
+    assert rows["c"]["has_refused"] is False, (
+        "a world whose only H row FAULTED stores has_refused: True — the flag was read off the "
+        "bucket-None shape, and a fault is not a refusal")
+    assert (rows["d"]["has_refused"], rows["d"]["bucket"]) == (True, None), (
+        "a refused row on `\" Elastic \"` did not count as H's — the flag compares `system` "
+        "differently from own_h_rows' strip+casefold rule")
+
+
+def test_a_refused_row_sharing_a_served_rows_key_is_the_duplicate_j3_drops(tmp_path):
+    """J3's first-row-wins reading, made explicit so a later change to the dedup rule is
+    visible here rather than silently moving this flag: a `refused` row that carries the SAME
+    pair-key as the `passthrough` row before it is read as that row's duplicate and never
+    reaches the ladder — `has_refused: False`, bucket `lead-quality`.
+
+    This is TODAY's reading, pinned, not a claim that it is the right one: a refusal of the
+    very query that was also served is a shape the seam does not produce (a call is refused
+    or answered, not both), and the fixture in `_refused_row` gives the refused row its own
+    params for that reason. Positive control: the same two rows with distinct params read
+    `has_refused: True`, bucket `None`.
+    """
+    refused = J.sym("learning.branch.ledger", "REFUSED")
+    same_key = J.ledger_row(source=refused, world_label="b",
+                            payload="this ES|QL query's FROM clause addresses several corpora")
+    key_of = _family().mapping_key
+    assert key_of(same_key) == key_of(_passthrough("b")), "the fixture's keys do not collide"
+    assert key_of(_refused_row("c")) != key_of(_passthrough("c")), "the control's keys collide"
+    ep = J.accepted_episode(tmp_path, ledgers={
+        "b": [_passthrough("b"), same_key],
+        "c": [_passthrough("c"), _refused_row("c")],
+    })
+
+    rows = _rows(_grade(ep, tmp_path))
+
+    assert (rows["c"]["has_refused"], rows["c"]["bucket"]) == (True, None), (
+        "positive control: a refused row with its own key did not reach the ladder")
+    assert (rows["b"]["has_refused"], rows["b"]["bucket"]) == (False, "lead-quality"), (
+        "a refused row sharing the served row's pair-key reached the ladder — J3's first-row-"
+        f"wins dedup changed: {rows['b'].get('has_refused')!r} / {rows['b']['bucket']!r}")
 
 
 def test_has_refused_survives_the_round_trip_through_read_grade(tmp_path):
