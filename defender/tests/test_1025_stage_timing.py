@@ -1,17 +1,18 @@
 """#1025 O7 — the episode's stage timing record, written at the source.
 
-One record at the episode root, `episodes/<id>/timing.jsonl`, appended by the launcher AFTER
-each step completes: one row `{step, started_at, ended_at}` per step, in launch order —
-`questioner`, `staging`, `review`, `runs`, `verify`, `judge`. The launcher (`cli._run_episode`,
-and `cli._release_and_grade` for the judge's clock) is the only frame that sees every step
-boundary, so it is the one writer; written after the step and never before, an aborted episode
-leaves exactly the steps that ran, and a row the record refuses is printed and absent, never a
-failure of the step it clocks. The timestamps are a clock's (`_clock.now_iso`), not file
-mtimes — O4's named failing is a wall time reconstructed from timestamps on disk.
+One record at the episode root, `episodes/<id>/timing.json` — `{"steps": [...]}`, one entry
+`{step, started_at, ended_at}` per completed step, in launch order — `questioner`, `staging`,
+`review`, `runs`, `verify`, `judge`. The launcher (`cli._run_episode`) is the only frame that
+sees every step boundary, so it holds the one `StageClock` and rewrites the WHOLE document
+after each step, never before: an aborted episode leaves exactly the steps that ran, a reader
+sees the previous whole document or the new one and never a torn part, and an entry the record
+refuses is printed and absent, never a failure of the step it clocks. The timestamps are a
+clock's (`_clock.now_iso`), not file mtimes — O4's named failing is a wall time reconstructed
+from timestamps on disk.
 
 `learning/branch/steps.py` owns the step sequence (`Step`, `STEPS`) — the ONE declaration the
 launcher's step frames, the record's writer and the page all read. `learning/branch/timing.py`
-owns the row's shape (`record_step`) and the tolerant reader (`read_stage_timings`). All are
+owns the clock (`StageClock`) and the reader (`read_stage_timings`). All are
 imported PER TEST through `T.mod`, so a module that does not exist yet is one failure per test
 rather than a collection error.
 
@@ -69,13 +70,17 @@ def _steps(episode_dir) -> list[str]:
 
 
 def _raw_rows(episode_dir) -> list[dict]:
-    """The record's rows in FILE order, read without the reader — so an order assertion cannot
-    be satisfied by a reader that sorts what a writer wrote out of order."""
+    """The record's entries in DOCUMENT order, read without the reader — so an order assertion
+    cannot be satisfied by a reader that sorts what a writer wrote out of order — and parsed
+    strictly: a document that is not whole is a failure here, not a skipped line."""
     path = Path(episode_dir) / _timing().TIMING_NAME
     if not path.is_file():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()  # noqa: E501 # lint-jsonl-io: ok — the raw file-order oracle: the reader under test IS `read_jsonl_rows`, which must not be its own oracle
-            if line.strip()]
+    return json.loads(path.read_text(encoding="utf-8"))["steps"]
+
+
+def _clock(episode_dir):
+    return _timing().StageClock(episode_dir)
 
 
 def _clocked(rows: list[dict], *, before: str, after: str) -> list[tuple[Any, Any]]:
@@ -180,7 +185,7 @@ class _Interrupting:
 
     `KeyboardInterrupt` and not an `Exception`, because every boundary holds the latter:
     `start_family` files one arm's `Exception` as a non-zero exit and the family goes on to be
-    archived, `_release_and_grade` holds whatever the judge raises, and the review's fault arms
+    archived, the `JUDGE` frame's body holds whatever the judge raises, and the review's fault arms
     record a failed replay rather than aborting. An interrupt is the one thing that really ends
     a step mid-way at all six boundaries.
     """
@@ -243,31 +248,32 @@ class _PlantingSibling(J.FakeSibling):
 
 
 def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
-    """`record_step` appends one JSON row `{step, started_at, ended_at}` to `timing.jsonl` at
+    """`StageClock.record` adds one entry `{step, started_at, ended_at}` to `timing.json` at
     the episode root and returns it; `read_stage_timings` hands back exactly what was written,
-    in file order, and every timestamp parses through `parse_iso_utc`.
+    in the order written, and every timestamp parses through `parse_iso_utc`. The file is ONE
+    JSON document, `{"steps": [...]}`, with sorted keys — a function of the steps and nothing
+    else.
 
     The timestamps handed in are DISTINCT LITERALS and come back verbatim: a writer that
     stamps its own clock and ignores its arguments returns something else.
 
-    Fails when the row's shape drifts (a key renamed, added or dropped), when the record lands
-    under any other name, when a timestamp is not the one handed in, or when a reader and
-    writer disagree about the row.
+    Fails when the entry's shape drifts (a key renamed, added or dropped), when the record lands
+    under any other name, when a timestamp is not the one handed in, when the document is not
+    the whole list of entries, or when a reader and writer disagree about the entry.
     """
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    assert timing.TIMING_NAME == "timing.jsonl"
+    assert timing.TIMING_NAME == "timing.json"
     assert list(_steps_mod().STEPS) == EXPECTED_STEPS
     assert [s.value for s in _steps_mod().Step] == EXPECTED_STEPS, (
         "the enum's member order is not launch order, or STEPS is not derived from it")
 
-    first = timing.record_step(episode_dir, "questioner",
-                               started_at="2026-01-01T00:00:00+00:00",
-                               ended_at="2026-01-01T00:00:05+00:00")
-    second = timing.record_step(episode_dir, "staging",
-                                started_at="2026-01-01T00:00:07+00:00",
-                                ended_at="2026-01-01T00:01:30+00:00")
+    clock = timing.StageClock(episode_dir)
+    first = clock.record("questioner", started_at="2026-01-01T00:00:00+00:00",
+                         ended_at="2026-01-01T00:00:05+00:00")
+    second = clock.record("staging", started_at="2026-01-01T00:00:07+00:00",
+                          ended_at="2026-01-01T00:01:30+00:00")
 
     assert first == {"step": "questioner", "started_at": "2026-01-01T00:00:00+00:00",
                      "ended_at": "2026-01-01T00:00:05+00:00"}
@@ -276,16 +282,17 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
     record = episode_dir / timing.TIMING_NAME
     assert record.is_file(), "the record is not at the episode root under TIMING_NAME"
     assert record.read_text(encoding="utf-8") == (
-        json.dumps(first) + "\n" + json.dumps(second) + "\n"), (
-        "the file does not hold one JSON row per recorded step, verbatim")
+        json.dumps({"steps": [first, second]}, indent=2, sort_keys=True) + "\n"), (
+        "the file is not the one whole document holding every entry, verbatim")
     assert timing.read_stage_timings(episode_dir) == [first, second]
     for row in (first, second):
         for key in ("started_at", "ended_at"):
             assert parse_iso_utc(row[key]) is not None, f"{key}={row[key]!r} is not a timestamp"
 
 
-def test_1025_the_reader_returns_file_order_not_step_order(tmp_path):
-    """The reader returns rows in FILE order — it does not sort them into `STEPS` order.
+def test_1025_the_reader_returns_record_order_not_step_order(tmp_path):
+    """The reader returns entries in the order they were RECORDED — it does not sort them into
+    `STEPS` order.
 
     A reader that sorts by step would make a launcher that writes `verify` before `runs`
     indistinguishable from one that writes at each boundary, which is the one property the
@@ -295,20 +302,19 @@ def test_1025_the_reader_returns_file_order_not_step_order(tmp_path):
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    later = timing.record_step(episode_dir, "staging",
-                               started_at="2026-01-01T00:00:07+00:00",
-                               ended_at="2026-01-01T00:01:30+00:00")
-    earlier = timing.record_step(episode_dir, "questioner",
-                                 started_at="2026-01-01T00:00:00+00:00",
-                                 ended_at="2026-01-01T00:00:05+00:00")
+    clock = timing.StageClock(episode_dir)
+    later = clock.record("staging", started_at="2026-01-01T00:00:07+00:00",
+                         ended_at="2026-01-01T00:01:30+00:00")
+    earlier = clock.record("questioner", started_at="2026-01-01T00:00:00+00:00",
+                           ended_at="2026-01-01T00:00:05+00:00")
 
     assert timing.read_stage_timings(episode_dir) == [later, earlier], (
-        "the reader reordered the rows")
-    assert _raw_rows(episode_dir) == [later, earlier], "the writer reordered the rows"
+        "the reader reordered the entries")
+    assert _raw_rows(episode_dir) == [later, earlier], "the writer reordered the entries"
 
 
 def test_1025_an_absent_record_reads_as_no_rows(tmp_path):
-    """An episode with no `timing.jsonl` reads as `[]` — an aborted-before-any-step episode is
+    """An episode with no `timing.json` reads as `[]` — an aborted-before-any-step episode is
     a legitimate state, not an error — and reading does not bring the file into existence.
 
     Positive control in the same test: once one step is recorded, the reader returns it.
@@ -320,47 +326,79 @@ def test_1025_an_absent_record_reads_as_no_rows(tmp_path):
     assert timing.read_stage_timings(episode_dir) == []
     assert not (episode_dir / timing.TIMING_NAME).exists(), "reading created the record"
 
-    row = timing.record_step(episode_dir, "questioner", started_at=now_iso(), ended_at=now_iso())
+    row = _clock(episode_dir).record("questioner", started_at=now_iso(), ended_at=now_iso())
     assert timing.read_stage_timings(episode_dir) == [row], "the control failed"
 
 
-def test_1025_a_torn_line_is_skipped_and_the_good_rows_still_read(tmp_path):
-    """A line the reader cannot parse — here a REAL torn write, half a JSON object and NO
-    newline, what a process that died mid-append actually leaves — is skipped, and the rows
-    on either side of it are still returned in order. The record is written after each step
-    by a process that can be killed at any moment; a reader that raises on one torn line loses
-    every step that did complete.
+def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tmp_path):
+    """Each `record` swaps a NEW whole document into place; the file that was there is never
+    opened, truncated or appended to. A handle opened on the record before a write still reads
+    the previous whole document after it — the property an in-place rewrite (truncate then
+    write, or an append) does not have, and the one that makes a torn document impossible for
+    this writer to leave: a reader concurrent with the launcher sees the old whole or the new
+    whole, and nothing between. The inode changes on every write for the same reason.
 
-    The row written AFTER the fragment is the one that exercises the writer: appended straight
-    onto a tail with no newline, it and the fragment become one unreadable line and the
-    completed step is lost with the torn one. The writer closes the fragment's line first and
-    leaves the fragment's own bytes exactly as they were.
+    Fails on a writer that appends a line, or that truncates and rewrites the existing file.
     """
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    before = timing.record_step(episode_dir, "questioner",
-                                started_at=now_iso(), ended_at=now_iso())
     record = episode_dir / timing.TIMING_NAME
-    torn = json.dumps({"step": "staging", "started_at": now_iso(), "ended_at": now_iso()})
-    fragment = torn[: len(torn) // 2]
-    with record.open("a", encoding="utf-8") as fh:
-        fh.write(fragment)
-    after = timing.record_step(episode_dir, "review", started_at=now_iso(), ended_at=now_iso())
+    clock = timing.StageClock(episode_dir)
+    first = clock.record("questioner", started_at=now_iso(), ended_at=now_iso())
+    before_text = record.read_text(encoding="utf-8")
+    before_inode = os.stat(record).st_ino
 
-    assert timing.read_stage_timings(episode_dir) == [before, after], (
-        "a torn line either raised or was returned as a row, or the row appended after it "
-        "was lost with it")
-    assert record.read_text(encoding="utf-8") == (
-        json.dumps(before) + "\n" + fragment + "\n" + json.dumps(after) + "\n"), (
-        "the fragment's bytes were changed, or the row after it was not put on its own line")
+    with record.open("r", encoding="utf-8") as held_open:
+        second = clock.record("staging", started_at=now_iso(), ended_at=now_iso())
+        assert held_open.read() == before_text, (
+            "a handle opened before the write saw the new bytes — the existing file was written "
+            "in place rather than replaced")
+    assert os.stat(record).st_ino != before_inode, "the write reused the existing file"
+    assert json.loads(record.read_text(encoding="utf-8")) == {"steps": [first, second]}
+    assert timing.read_stage_timings(episode_dir) == [first, second]
+
+
+def test_1025_a_document_that_is_not_the_record_raises_rather_than_reading_as_no_steps(tmp_path):
+    """A file at the record's name that is not the record — not JSON, not an object with a
+    `steps` list, an entry missing a key or carrying an extra one, a non-string moment — RAISES
+    `ValueError` naming the file. The writer replaces the whole document atomically, so none of
+    these is something it left; reading them as `[]` would make tampering, or a foreign file,
+    look like an episode that aborted before its first step.
+
+    Positive control: the writer's own document, hand-written, reads.
+    """
+    timing = _timing()
+    good = {"step": "questioner", "started_at": "2026-01-01T00:00:00+00:00",
+            "ended_at": "2026-01-01T00:00:05+00:00"}
+    foreign = [
+        "{not json\n",
+        json.dumps([good]) + "\n",
+        json.dumps({"rows": [good]}) + "\n",
+        json.dumps({"steps": {"questioner": good}}) + "\n",
+        json.dumps({"steps": [{"step": "questioner", "started_at": good["started_at"]}]}) + "\n",
+        json.dumps({"steps": [{**good, "duration_ms": 5}]}) + "\n",
+        json.dumps({"steps": [{**good, "ended_at": None}]}) + "\n",
+        json.dumps(good) + "\n" + json.dumps(good) + "\n",
+    ]
+    for n, text in enumerate(foreign):
+        episode_dir = tmp_path / f"episode-{n}"
+        episode_dir.mkdir()
+        (episode_dir / timing.TIMING_NAME).write_text(text, encoding="utf-8")
+        with pytest.raises(ValueError, match=timing.TIMING_NAME):
+            timing.read_stage_timings(episode_dir)
+
+    plain = tmp_path / "plain-episode"
+    plain.mkdir()
+    (plain / timing.TIMING_NAME).write_text(json.dumps({"steps": [good]}), encoding="utf-8")
+    assert timing.read_stage_timings(plain) == [good], "the control failed"
 
 
 def test_1025_an_unknown_step_is_refused_and_nothing_is_written(tmp_path):
     """A step name outside `STEPS` is refused with a `ValueError` naming it, and the refusal
     writes nothing: an absent record stays absent, and an existing record's bytes are
     unchanged. The step names are what every reader of the record keys on, so a misspelt step
-    is an unreadable row.
+    is an unreadable entry.
 
     Positive control: a name in `STEPS` is written.
     """
@@ -368,34 +406,35 @@ def test_1025_an_unknown_step_is_refused_and_nothing_is_written(tmp_path):
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
     record = episode_dir / timing.TIMING_NAME
+    clock = timing.StageClock(episode_dir)
 
     with pytest.raises(ValueError, match="questionner"):
-        timing.record_step(episode_dir, "questionner", started_at=now_iso(), ended_at=now_iso())
+        clock.record("questionner", started_at=now_iso(), ended_at=now_iso())
     assert not record.exists(), "a refused step brought the record into existence"
 
-    good = timing.record_step(episode_dir, "questioner", started_at=now_iso(), ended_at=now_iso())
+    good = clock.record("questioner", started_at=now_iso(), ended_at=now_iso())
     bytes_before = record.read_bytes()
     with pytest.raises(ValueError, match="teardown"):
-        timing.record_step(episode_dir, "teardown", started_at=now_iso(), ended_at=now_iso())
+        clock.record("teardown", started_at=now_iso(), ended_at=now_iso())
     assert record.read_bytes() == bytes_before, "a refused step still wrote to the record"
     assert timing.read_stage_timings(episode_dir) == [good], "the control failed"
 
 
 def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_path):
-    """The record is appended through `_io.write_guarded`: an entry planted at
-    `episodes/<id>/timing.jsonl` that is not a plain single-linked regular file is REFUSED
-    rather than written through, and the file it aliases keeps its bytes.
+    """The record is written through `_io.write_guarded`: an entry planted at
+    `episodes/<id>/timing.json` that is not a plain single-linked regular file is REFUSED
+    rather than written through or replaced, and the file it aliases keeps its bytes.
 
     Three plants, each its own episode dir. A symlink and a HARD LINK (`st_nlink > 1`, which
     `O_NOFOLLOW` alone never stops) both raise the seam's own alias refusal — `OSError` carrying
     `write_guarded_alias is True`, which only `_io._mark_alias` sets, so a hand-rolled
-    `is_symlink()` check in front of a bare `os.open` cannot satisfy this. A DIRECTORY at the
+    `is_symlink()` check in front of a bare `os.replace` cannot satisfy this. A DIRECTORY at the
     name is refused by the same seam with the mark set `False`.
 
-    Positive control: the same row lands at a plain path.
+    Positive control: the same entry lands at a plain path.
     """
     timing = _timing()
-    outside = tmp_path / "outside.jsonl"
+    outside = tmp_path / "outside.json"
     outside.write_text("untouched\n", encoding="utf-8")
     original_links = os.stat(outside).st_nlink
 
@@ -403,7 +442,7 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
     symlinked.mkdir()
     (symlinked / timing.TIMING_NAME).symlink_to(outside)
     with pytest.raises(OSError, match="aliased") as refusal:
-        timing.record_step(symlinked, "questioner", started_at=now_iso(), ended_at=now_iso())
+        _clock(symlinked).record("questioner", started_at=now_iso(), ended_at=now_iso())
     assert refusal.value.write_guarded_alias is True, (
         "the symlink was refused by something other than the guarded write seam")
     assert (symlinked / timing.TIMING_NAME).is_symlink(), "the planted link was replaced"
@@ -413,7 +452,7 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
     os.link(outside, hardlinked / timing.TIMING_NAME)
     assert os.stat(outside).st_nlink == original_links + 1, "the control failed: no hard link"
     with pytest.raises(OSError, match="aliased") as refusal:
-        timing.record_step(hardlinked, "questioner", started_at=now_iso(), ended_at=now_iso())
+        _clock(hardlinked).record("questioner", started_at=now_iso(), ended_at=now_iso())
     assert refusal.value.write_guarded_alias is True, (
         "the hard link was not refused as an alias — a symlink check alone lets it through")
 
@@ -421,7 +460,7 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
     squatted.mkdir()
     (squatted / timing.TIMING_NAME).mkdir()
     with pytest.raises(OSError, match="aliased") as refusal:
-        timing.record_step(squatted, "questioner", started_at=now_iso(), ended_at=now_iso())
+        _clock(squatted).record("questioner", started_at=now_iso(), ended_at=now_iso())
     assert refusal.value.write_guarded_alias is False, (
         "a directory at the record's name was not refused by the guarded write seam")
 
@@ -430,41 +469,42 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
 
     plain = tmp_path / "plain-episode"
     plain.mkdir()
-    row = timing.record_step(plain, "questioner", started_at=now_iso(), ended_at=now_iso())
+    row = _clock(plain).record("questioner", started_at=now_iso(), ended_at=now_iso())
     assert timing.read_stage_timings(plain) == [row], "the control failed"
 
 
 def test_1025_the_reader_does_not_follow_a_link_the_writer_refuses(tmp_path):
-    """`read_stage_timings` takes the same `lstat` posture as the writer and as every other
-    reader of the episode tree: a symlink planted at `episodes/<id>/timing.jsonl` reads as NO
-    record — never as the rows of whatever it points at — and so does a directory squatting
-    the name. The target holds a real, parseable row, so an answer of `[]` is the reader
-    refusing the entry rather than finding nothing to parse.
+    """`read_stage_timings` reads through `_io.read_guarded`, the posture of every other reader
+    of the episode tree: a symlink planted at `episodes/<id>/timing.json` reads as NO record —
+    never as the document it points at — and so does a directory squatting the name. The
+    target holds a real, well-formed record, so an answer of `[]` is the reader refusing the
+    entry rather than finding nothing to parse.
 
-    Positive control: the same row, at a plain path, is read.
+    Positive control: the same document, at a plain path, is read.
     """
     timing = _timing()
-    planted = tmp_path / "planted.jsonl"
+    planted = tmp_path / "planted.json"
     stray = {"step": "judge", "started_at": "2020-01-01T00:00:00+00:00",
              "ended_at": "2020-01-01T09:00:00+00:00"}
-    planted.write_text(json.dumps(stray) + "\n", encoding="utf-8")
+    planted.write_text(json.dumps({"steps": [stray]}) + "\n", encoding="utf-8")
 
     symlinked = tmp_path / "symlinked-episode"
     symlinked.mkdir()
     (symlinked / timing.TIMING_NAME).symlink_to(planted)
     assert timing.read_stage_timings(symlinked) == [], (
-        "the reader followed a planted link and returned another file's rows as this "
+        "the reader followed a planted link and returned another file's entries as this "
         "episode's clock")
     assert (symlinked / timing.TIMING_NAME).is_symlink(), "the planted link was replaced"
 
     squatted = tmp_path / "squatted-episode"
     squatted.mkdir()
     (squatted / timing.TIMING_NAME).mkdir()
-    assert timing.read_stage_timings(squatted) == [], "a directory at the name read as rows"
+    assert timing.read_stage_timings(squatted) == [], "a directory at the name read as entries"
 
     plain = tmp_path / "plain-episode"
     plain.mkdir()
-    (plain / timing.TIMING_NAME).write_text(json.dumps(stray) + "\n", encoding="utf-8")
+    (plain / timing.TIMING_NAME).write_text(json.dumps({"steps": [stray]}) + "\n",
+                                            encoding="utf-8")
     assert timing.read_stage_timings(plain) == [stray], "the control failed"
 
 
@@ -657,13 +697,13 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
 
 
 def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, capsys):
-    """A judge failure is non-fatal to the episode — `_release_and_grade` holds it and the
-    launcher returns — so the boundary is crossed and the `judge` row is on the record with the
-    five before it, inside the launch's clock bracket.
+    """A judge failure is non-fatal to the episode — the `JUDGE` frame's body holds it and the
+    launcher returns — so the boundary is crossed and the `judge` entry is on the record with
+    the five before it, inside the launch's clock bracket.
 
     Two failures, each under its own episodes root. The grade itself fails: the learning state
     root the enqueue appends to is a regular FILE, so the family grade cannot land and
-    `grade_episode` raises into `_release_and_grade`'s catch (control: the launcher reports
+    `grade_episode` raises into the frame body's catch (control: the launcher reports
     "the judge pass failed" and writes no `judge.yaml`). The seam fails: the judge's model call
     raises on every draw, which the grade holds per draw (control: the seam was reached).
     """
@@ -701,14 +741,16 @@ class _StickyDoor(T.FakeDoor):
 
 
 def test_1025_a_held_teardown_failure_still_leaves_the_judge_row(tmp_path):
-    """A teardown that cannot verify a staged name gone is HELD by `_release_and_grade`, the
-    grade runs to completion, and only then is the failure raised. The judge step therefore
-    completed — `judge.yaml` certifies it — and its row is on the record with the five before
-    it, even though the launch itself leaves through the held refusal.
+    """A teardown that cannot verify a staged name gone is HELD by the launcher's hand-back
+    frame (`_cluster_released`), the grade runs to completion, and only then is the failure
+    raised. The judge step therefore completed — `judge.yaml` certifies it — and its entry is
+    on the record with the five before it, even though the launch itself leaves through the
+    held refusal.
 
-    Drawn around the whole of `_release_and_grade`, the `judge` clock saw that deferred
-    re-raise as the judge step raising and wrote nothing: a graded episode whose record said
-    the judge never finished. The clock is drawn around the grade alone.
+    The hand-back frame closes AROUND the `JUDGE` frame: drawn the other way — the clock around
+    the hand-back and the grade together — the clock saw that deferred re-raise as the judge
+    step raising and wrote nothing: a graded episode whose record said the judge never
+    finished.
 
     Controls: the judge seam was reached, `judge.yaml` exists, and the launch leaves through
     `LauncherRefused` naming the teardown.
@@ -726,15 +768,15 @@ def test_1025_a_held_teardown_failure_still_leaves_the_judge_row(tmp_path):
 
 
 def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path, capsys):
-    """A timing row the record cannot take — here a DIRECTORY squatting `timing.jsonl` before
-    the launch, so every append is refused by the guarded seam — is printed and absent, and
+    """A timing entry the record cannot take — here a DIRECTORY squatting `timing.json` before
+    the launch, so every write is refused by the guarded seam — is printed and absent, and
     the episode is otherwise untouched: it runs to completion, every world is archived, the
-    judge is called and grades, and the launch returns 0. The record is observability; an
-    append that could refuse used to end the episode from inside whichever step had just
+    judge is called and grades, and the launch returns 0. The record is observability; a
+    write that could refuse used to end the episode from inside whichever step had just
     finished — after `runs`, as "no sibling started" with the family never archived; after
     the judge, as a bare `OSError` out of `main` for a fully graded episode.
 
-    Six refusals, one per step, each named on stderr; the reader answers no rows for the
+    Six refusals, one per step, each named on stderr; the reader answers no entries for the
     squatted name rather than raising.
     """
     episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
@@ -742,13 +784,13 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
     (episode_dir / _timing().TIMING_NAME).mkdir()
 
     launch = _launch(tmp_path)
-    assert launch.rc == 0, "a refused timing append ended the episode"
+    assert launch.rc == 0, "a refused timing write ended the episode"
     assert T.review_doc(launch.episode_dir)["episode"]["outcome"] == "accepted", (
-        "the family was not archived after the refused append")
-    assert launch.judge.calls > 0, "the judge was never reached after the refused append"
+        "the family was not archived after the refused write")
+    assert launch.judge.calls > 0, "the judge was never reached after the refused write"
     assert (launch.episode_dir / "judge.yaml").exists(), "the grade did not land"
     err = capsys.readouterr().err
     for step in EXPECTED_STEPS:
-        assert f"the {step} row could not be written" in err, (
+        assert f"the {step} entry could not be written" in err, (
             f"the refused {step} row was not reported")
-    assert _steps(launch.episode_dir) == [], "a squatted record read as rows"
+    assert _steps(launch.episode_dir) == [], "a squatted record read as entries"

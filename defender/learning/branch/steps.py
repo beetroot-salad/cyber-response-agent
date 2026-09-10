@@ -24,9 +24,10 @@ for the outer clock to write and nowhere to write it. The episode's claim and pr
 the clock either — the record's six rows start at the questioner, so a total over them
 excludes the prime. Teardown is not a step either: it runs
 on EVERY exit but never as one — on a rejection or an abort from `_launch`'s `finally`, after
-the last frame has closed or unwound; on the clean path as the first thing inside
-`_release_and_grade`, BEFORE the `JUDGE` clock starts — and the record's rule is that a step
-which raised is not on it.
+the last frame has closed or unwound; on the clean path as the launcher's own hand-back frame
+(`cli._cluster_released`), which closes around the `JUDGE` frame from the outside, so the
+cluster is released before the judge's clock starts and the judge's entry is written before a
+held hand-back failure is raised.
 """
 from __future__ import annotations
 

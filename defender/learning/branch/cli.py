@@ -69,7 +69,6 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _provenance
-from defender._clock import now_iso
 from defender._io import guarded_mkdir, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
@@ -1226,10 +1225,14 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     `teardown` is `_launch`'s one-shot guard, called here once the archive is written so the
     cluster is released before the grade spends its model calls; `_launch`'s `finally` covers
     every path that does not reach that call."""
-    with _timed(episode_dir, Step.QUESTIONER):
+    # ONE CLOCK FOR THE EPISODE, and every frame below is drawn with it: the six steps are
+    # visible here, in launch order, in one function — `steps.Step` declares them, this runs
+    # them, and nothing else draws a frame.
+    clock = timing_mod.StageClock(episode_dir)
+    with clock.step(Step.QUESTIONER):
         family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
                          questioner=questioner, patterns=patterns, lessons_dir=lessons_dir)
-    with _timed(episode_dir, Step.STAGING):
+    with clock.step(Step.STAGING):
         # THE STAGING RECORD EXISTS FROM THE MOMENT STAGING BEGINS, empty if nothing is staged.
         # It is the SOLE account of a cluster write — the write door bypasses `guard_outbound`,
         # which is also the capture recorder — so its ABSENCE has to mean "staging never
@@ -1252,7 +1255,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
                                     configured_patterns=patterns, door=door)
     from defender.learning.branch import review as review_mod
 
-    with _timed(episode_dir, Step.REVIEW):
+    with clock.step(Step.REVIEW):
         record = review_mod.review(family, episode_dir=episode_dir, adapters=adapters,
                                    door=door, invoke=invoke)
     if record.get("episode", {}).get("decision") == REJECTED:
@@ -1269,10 +1272,10 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         return 1
 
     labels = [w.world_id for w in runnable_worlds(family)]
-    with _timed(episode_dir, Step.RUNS):
+    with clock.step(Step.RUNS):
         exits = start_family(episode_dir, labels, spawn=spawn, model=ns.model)
     runs = sibling_runs_base(episode_dir)
-    with _timed(episode_dir, Step.VERIFY):
+    with clock.step(Step.VERIFY):
         report = verify_family(
             episode_dir, [runs / f"{episode_id}-{label}" for label in labels],
             allow_dirty=ns.allow_dirty)
@@ -1283,10 +1286,13 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
           f"({len(report['scrub_verified'])}/{len(labels)} verified)", file=sys.stderr)
     # J10: the judge runs at the TAIL of the step runner, after the archive step and before the
     # return — never in `_launch`'s post-teardown path, which is production-dead on this route.
-    # Its own frame, so the tear-down/grade/re-raise rule is one readable unit and this function
-    # keeps the branch count the shared complexity gate allows it. The `Step.JUDGE` clock is
-    # drawn INSIDE it, around the grade alone — see there for why not around the whole call.
-    _release_and_grade(episode_dir, episode_id=episode_id, judge=judge, teardown=teardown)
+    # THE HAND-BACK IS THE OUTER FRAME AND THE CLOCK THE INNER ONE, in that order: the cluster
+    # is released before the judge's clock starts (teardown is not a step — `steps.py`), and
+    # the judge's entry is on the record before a held hand-back failure is raised. Drawn the
+    # other way round, the judge was booked for every delete-and-verify the teardown made, and
+    # a held cleanup fault re-raised after a COMPLETED grade erased the judge's entry.
+    with _cluster_released(teardown, episode_id=episode_id), clock.step(Step.JUDGE):
+        _grade(episode_dir, episode_id=episode_id, judge=judge)
     # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
     # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
     # launch that did exactly what it was asked and found the results not comparable, which is a
@@ -1298,51 +1304,9 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
 
 
 @contextlib.contextmanager
-def _timed(episode_dir: Path, step: Step) -> Iterator[None]:
-    """One step of the episode on the outer clock — its row lands on the timing record AFTER
-    the step returns (#1025 O7).
-
-    AFTER, never before, and only on a normal return: a step that raised is not on the record,
-    so an aborted episode's record reads as exactly the steps that ran, and a reader never
-    meets a row claiming a step whose end this frame never saw. The moments are the launcher's
-    own clock at the step's real start and end — the one outer clock the archive has; every
-    other timestamp on it is an inner duration or a file's mtime.
-
-    THE APPEND IS BEST-EFFORT, like every other observability writer in this repo
-    (`judge._write_wire_log`, `_deps._record_lesson_load` take the same posture for the same
-    reason). The record sits in the episode dir, so the guarded append can refuse (an alias
-    planted at its name) or fail (`ENOSPC`, a read-only root), and raised through this frame
-    that refusal was the STEP's own failure: after `RUNS` it reached `_launch`'s abort arm —
-    "no sibling started and every staged name is torn down", false of every arm that had just
-    run — and no world was archived, no outcome recorded, no grade made; after `JUDGE`, past
-    the hand-back, it left `main` as a bare `OSError` traceback for a fully graded episode. A
-    clock that costs the archive is the wrong trade, so the fault is printed and the step's
-    row is simply absent — which the record's own rule already reads as "not seen to finish".
-    A step name outside `Step` is a programming error, not an I/O fault, and still raises.
-
-    WHILE A STEP RUNS, ITS OWN ROW IS NOT YET ON THE RECORD. A reader called from INSIDE the
-    judge pass — the episode page, if it is rendered there as #1025's key flow says — sees the
-    five rows before `JUDGE` and no judge wall; anything that needs the whole record has to run
-    from the launcher after the `Step.JUDGE` frame has closed.
-    """
-    started_at = now_iso()
-    yield
-    ended_at = now_iso()
-    try:
-        timing_mod.record_step(episode_dir, step, started_at=started_at, ended_at=ended_at)
-    except OSError as unwritable:
-        print(f"[branch] the {step} row could not be written to the timing record "
-              f"({unwritable!r}); the episode itself is unaffected", file=sys.stderr)
-
-
-def _release_and_grade(
-    episode_dir: Path, *, episode_id: str, judge: Any, teardown: Any,
-) -> None:
-    """Hand the cluster back, then grade — J10's tail of the step runner.
-
-    A judge failure is NON-FATAL to the episode (F-5): the launcher's own exit status stays
-    about the LAUNCH, never about the grade, so a malformed reply or an unreachable model does
-    not turn an otherwise-clean episode into a `LauncherRefused`.
+def _cluster_released(teardown: Any, *, episode_id: str) -> Iterator[None]:
+    """Hand the cluster back, then run the body; a hand-back failure is HELD until the body
+    has completed, and never masks a failure of the body's own.
 
     THE CLUSTER IS HANDED BACK BEFORE THE GRADE. Everything the judge reads is on disk — the
     archived episode and the operator's runs base — so there is nothing left for the staged
@@ -1350,57 +1314,47 @@ def _release_and_grade(
 
     HELD, NOT RAISED THROUGH. `_teardown_without_masking` re-raises when `aborting` is False,
     and calling it ahead of the grade therefore made a CLEANUP failure preempt the grade
-    entirely: a fully archived, fully reviewed episode ended with no draws, no queue rows and no
-    `judge.yaml` — the file whose presence certifies the pass — and the operator saw only the
-    staging refusal, indistinguishable from an episode that was never graded for any other
+    entirely: a fully archived, fully reviewed episode ended with no draws, no queue rows and
+    no `judge.yaml` — the file whose presence certifies the pass — and the operator saw only
+    the staging refusal, indistinguishable from an episode that was never graded for any other
     reason. The refusal is still this episode's answer; it is raised AFTER the grade it has
     nothing to do with (nothing the judge reads is on the cluster).
 
-    THE `Step.JUDGE` CLOCK IS DRAWN HERE, AROUND THE GRADE ALONE — not around this whole call
-    from `_run_episode`. Drawn there, the row's `started_at` preceded the hand-back, so the
-    judge was booked for every delete-and-verify the teardown made on the cluster (`steps.py`:
-    teardown is not a step); and the held cleanup fault, re-raised below after a COMPLETED
-    grade, passed through the frame as if the judge had raised, so an episode whose
-    `judge.yaml` certifies the pass had no `judge` row at all. Here the row spans exactly the
-    grade, and it is written before the held fault is raised.
+    IN A `finally`, so the held fault survives a class the body does not catch. Raised only
+    after the block, it was DROPPED whenever the grade exited on a `BaseException` — an
+    operator's interrupt during minutes of model calls, a `SystemExit` out of an import — and
+    because `_OneShotTeardown` latches `_done` BEFORE it calls, `_launch`'s `finally` was
+    already a no-op: nothing retried, nothing reported, and the names stayed live under a
+    token the next launch's sweep will refuse to touch. NEVER MASKING, which is
+    `_teardown_without_masking`'s own rule at the frame that first had to make this choice —
+    answered from a FRAME-LOCAL flag, never `sys.exc_info()`, which is thread-global and
+    answers for whatever is being handled anywhere up this thread's stack: `completed` is set
+    only when the body leaves normally, so it is False exactly when something is still on its
+    way to the operator, and then the cleanup fault is printed (its unverified names are
+    already in the review record, which is the obligation) rather than raised.
     """
-    teardown_failed: BaseException | None = None
-    graded = False
+    held: BaseException | None = None
     if teardown is not None:
         try:
             teardown(aborting=False)
         except Exception as cleanup_failed:  # noqa: BLE001 — re-raised below, unchanged
-            teardown_failed = cleanup_failed
-
+            held = cleanup_failed
+    completed = False
     try:
-        with _timed(episode_dir, Step.JUDGE):
-            _grade(episode_dir, episode_id=episode_id, judge=judge)
-        graded = True
+        yield
+        completed = True
     finally:
-        # IN A `finally`, so the held cleanup fault survives a class the arm above does not
-        # catch. Raised only after the block, it was DROPPED whenever the grade exited on a
-        # `BaseException` — an operator's interrupt during minutes of model calls, a `SystemExit`
-        # out of an import — and because `_OneShotTeardown` latches `_done` BEFORE it calls,
-        # `_launch`'s `finally` was already a no-op: nothing retried, nothing reported, and the
-        # names stayed live under a token the next launch's sweep will refuse to touch.
-        if teardown_failed is not None:
-            # NEVER MASKING, which is `_teardown_without_masking`'s own rule at the frame that
-            # first had to make this choice — and answered from a FRAME-LOCAL flag, never
-            # `sys.exc_info()`, which is thread-global and answers for whatever is being handled
-            # anywhere up this thread's stack. `graded` is set only when the block leaves
-            # normally, so it is False exactly when something is still on its way to the
-            # operator: then the cleanup fault is printed (its unverified names are already in
-            # the review record, which is the obligation), and otherwise it is the answer.
-            if graded:
-                raise teardown_failed
-            print(f"[branch] episode {episode_id}: teardown also failed ({teardown_failed!r}); "
+        if held is not None:
+            if completed:
+                raise held
+            print(f"[branch] episode {episode_id}: teardown also failed ({held!r}); "
                   "the names it could not verify gone are in the review record, and the failure "
                   "that ended the episode is what follows", file=sys.stderr)
 
 
 def _grade(episode_dir: Path, *, episode_id: str, judge: Any) -> None:
-    """The grade itself, holding every failure it can have (F-5) — `_release_and_grade`'s
-    middle, on its own so the `Step.JUDGE` clock can be drawn around exactly this."""
+    """The grade itself, holding every failure it can have (F-5): the body of the `JUDGE`
+    frame, so the clock is drawn around exactly this and nothing else."""
     try:
         from defender.learning import judge as judge_mod
         from defender.run_common import resolve_runs_base
