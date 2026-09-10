@@ -24,6 +24,11 @@ the part no seam can enforce about itself:
    is checked; agreeing stamps write the family stamp, and anything else marks the episode
    `incomplete` — a modelled outcome with a reason, not the absence of a file (§7 FORK-1).
 
+The numbering above is prose; the steps' one declaration in code is `branch/steps.py::Step`,
+in launch order, and every frame below that names a step names that member (#1025 O7 — the
+timing record refuses any other spelling). Step 1 is not on it: preflight refuses before the
+episode has a directory to record into.
+
 THIS MODULE DRIVES NO INVESTIGATION IN ITS OWN PROCESS, and has no path to one: it neither
 imports the driver's entry point nor awaits anything. D1's whole content is that a sibling is a
 `run.py` PROCESS, which is what gets it the box lifecycle, the reap scan, its own role preflight
@@ -72,6 +77,7 @@ from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
 from defender.learning.branch import timing as timing_mod
+from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.estate.stagers.elastic import configured_patterns  # noqa: E501 # lint-shippable: ok — the one import of the per-vendor stager's configured-pattern reader; the vendor knowledge stays behind it
@@ -1219,7 +1225,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     `teardown` is `_launch`'s one-shot guard, called here once the archive is written so the
     cluster is released before the grade spends its model calls; `_launch`'s `finally` covers
     every path that does not reach that call."""
-    with _timed(episode_dir, "questioner"):
+    with _timed(episode_dir, Step.QUESTIONER):
         family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
                          questioner=questioner, patterns=patterns, lessons_dir=lessons_dir)
     # THE STAGING RECORD EXISTS FROM THE MOMENT STAGING BEGINS, empty if nothing is staged.
@@ -1228,7 +1234,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     # and never "staging wrote something this file does not name". An empty record is the
     # honest statement that a family declared no corpus difference.
     staged = staging_mod.staged_path(episode_dir)
-    with _timed(episode_dir, "staging"):
+    with _timed(episode_dir, Step.STAGING):
         if not staged.exists():
             # A COMMENT LINE, not `[]`. The record is APPENDED to, one YAML list item per
             # created name, so a literal empty-list document would make every later append
@@ -1245,7 +1251,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
                                     configured_patterns=patterns, door=door)
     from defender.learning.branch import review as review_mod
 
-    with _timed(episode_dir, "review"):
+    with _timed(episode_dir, Step.REVIEW):
         record = review_mod.review(family, episode_dir=episode_dir, adapters=adapters,
                                    door=door, invoke=invoke)
     if record.get("episode", {}).get("decision") == REJECTED:
@@ -1262,10 +1268,10 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         return 1
 
     labels = [w.world_id for w in runnable_worlds(family)]
-    with _timed(episode_dir, "runs"):
+    with _timed(episode_dir, Step.RUNS):
         exits = start_family(episode_dir, labels, spawn=spawn, model=ns.model)
     runs = sibling_runs_base(episode_dir)
-    with _timed(episode_dir, "verify"):
+    with _timed(episode_dir, Step.VERIFY):
         report = verify_family(
             episode_dir, [runs / f"{episode_id}-{label}" for label in labels],
             allow_dirty=ns.allow_dirty)
@@ -1278,7 +1284,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     # return — never in `_launch`'s post-teardown path, which is production-dead on this route.
     # Its own frame, so the tear-down/grade/re-raise rule is one readable unit and this function
     # keeps the branch count the shared complexity gate allows it.
-    with _timed(episode_dir, "judge"):
+    with _timed(episode_dir, Step.JUDGE):
         _release_and_grade(episode_dir, episode_id=episode_id, judge=judge, teardown=teardown)
     # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
     # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
@@ -1291,7 +1297,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
 
 
 @contextlib.contextmanager
-def _timed(episode_dir: Path, step: str) -> Iterator[None]:
+def _timed(episode_dir: Path, step: Step) -> Iterator[None]:
     """One step of the episode on the outer clock — its row lands on the timing record AFTER
     the step returns (#1025 O7).
 

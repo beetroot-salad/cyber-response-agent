@@ -18,13 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import read_jsonl_rows, write_guarded
+from defender.learning.branch.steps import STEPS
 
 #: The record's name at the episode root — sibling of `review.yaml` and `staged.yaml`.
 TIMING_NAME = "timing.jsonl"
-
-#: The launcher's steps, in launch order. A row's `step` is one of these and nothing else:
-#: they are what every reader of the record keys on, so a misspelt step is an unreadable row.
-STEPS: tuple[str, ...] = ("questioner", "staging", "review", "runs", "verify", "judge")
 
 
 def timing_path(episode_dir: Path) -> Path:
@@ -38,11 +35,15 @@ def record_step(episode_dir: Path, step: str, *, started_at: str, ended_at: str)
     @owns the timing row: `{step, started_at, ended_at}`, timestamps as `_clock.now_iso` spells
     them. Through `write_guarded(mode="append")`, so an alias planted at the record's name is
     refused rather than written through — the episode dir is a tree a sibling's box can write
-    into. A `step` outside `STEPS` is refused BEFORE anything is opened.
+    into. A `step` outside `steps.STEPS` — the launcher's one declaration of its sequence — is
+    refused BEFORE anything is opened: the step names are what every reader of the record keys
+    on, so a misspelt step is an unreadable row.
     """
     if step not in STEPS:
-        raise ValueError(f"unknown episode step {step!r}; the record's steps are {STEPS}")
-    row = {"step": step, "started_at": started_at, "ended_at": ended_at}
+        raise ValueError(
+            f"unknown episode step {step!r}; the record's steps are {', '.join(STEPS)}")
+    # `str(...)`: a `Step` member in, the bare name out — the row returned IS the row read back.
+    row = {"step": str(step), "started_at": started_at, "ended_at": ended_at}
     write_guarded(timing_path(episode_dir), json.dumps(row) + "\n", mode="append")
     return row
 

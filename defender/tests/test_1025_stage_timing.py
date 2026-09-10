@@ -8,9 +8,11 @@ step and never before, an aborted episode leaves exactly the steps that ran. The
 a clock's (`_clock.now_iso`), not file mtimes — O4's named failing is a wall time reconstructed
 from timestamps on disk.
 
-`learning/branch/timing.py` owns the row's shape (`record_step`) and the tolerant reader
-(`read_stage_timings`). Both are imported PER TEST through `T.mod`, so a module that does not
-exist yet is one failure per test rather than a collection error.
+`learning/branch/steps.py` owns the step sequence (`Step`, `STEPS`) — the ONE declaration the
+launcher's step frames, the record's writer and the page all read. `learning/branch/timing.py`
+owns the row's shape (`record_step`) and the tolerant reader (`read_stage_timings`). All are
+imported PER TEST through `T.mod`, so a module that does not exist yet is one failure per test
+rather than a collection error.
 
 THE CLOCK IS WHOLE-SECOND AND A FAKED EPISODE TAKES WELL UNDER ONE, so every row of a launch
 usually carries one string, and a timestamp assertion that only compares rows to each other
@@ -53,6 +55,10 @@ def _cli():
 
 def _timing():
     return T.mod("learning.branch.timing")
+
+
+def _steps_mod():
+    return T.mod("learning.branch.steps")
 
 
 def _steps(episode_dir) -> list[str]:
@@ -234,7 +240,9 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
     assert timing.TIMING_NAME == "timing.jsonl"
-    assert list(timing.STEPS) == EXPECTED_STEPS
+    assert list(_steps_mod().STEPS) == EXPECTED_STEPS
+    assert [s.value for s in _steps_mod().Step] == EXPECTED_STEPS, (
+        "the enum's member order is not launch order, or STEPS is not derived from it")
 
     first = timing.record_step(episode_dir, "questioner",
                                started_at="2026-01-01T00:00:00+00:00",
@@ -431,7 +439,7 @@ def test_1025_an_accepted_episode_leaves_all_six_steps_in_launch_order(tmp_path)
     rows = _raw_rows(launch.episode_dir)
     assert [row["step"] for row in rows] == EXPECTED_STEPS
     assert _steps(launch.episode_dir) == EXPECTED_STEPS
-    assert list(_timing().STEPS) == EXPECTED_STEPS
+    assert list(_steps_mod().STEPS) == EXPECTED_STEPS
 
     previous_end = None
     for row, (started, ended) in zip(rows, _clocked(rows, before=launch.before,
