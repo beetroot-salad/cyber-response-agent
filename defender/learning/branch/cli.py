@@ -40,13 +40,14 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import json
 import os
 import sqlite3
 import sys
 import threading
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -64,11 +65,13 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _provenance
+from defender._clock import now_iso
 from defender._io import guarded_mkdir, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
+from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.estate.stagers.elastic import configured_patterns  # noqa: E501 # lint-shippable: ok — the one import of the per-vendor stager's configured-pattern reader; the vendor knowledge stays behind it
@@ -1216,32 +1219,35 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     `teardown` is `_launch`'s one-shot guard, called here once the archive is written so the
     cluster is released before the grade spends its model calls; `_launch`'s `finally` covers
     every path that does not reach that call."""
-    family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
-                     questioner=questioner, patterns=patterns, lessons_dir=lessons_dir)
+    with _timed(episode_dir, "questioner"):
+        family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
+                         questioner=questioner, patterns=patterns, lessons_dir=lessons_dir)
     # THE STAGING RECORD EXISTS FROM THE MOMENT STAGING BEGINS, empty if nothing is staged.
     # It is the SOLE account of a cluster write — the write door bypasses `guard_outbound`,
     # which is also the capture recorder — so its ABSENCE has to mean "staging never started"
     # and never "staging wrote something this file does not name". An empty record is the
     # honest statement that a family declared no corpus difference.
     staged = staging_mod.staged_path(episode_dir)
-    if not staged.exists():
-        # A COMMENT LINE, not `[]`. The record is APPENDED to, one YAML list item per created
-        # name, so a literal empty-list document would make every later append unparseable —
-        # and an unparseable staging record is the one thing teardown refuses to act on, which
-        # would leave every name this episode creates live on the cluster forever. A comment
-        # parses to nothing, so an episode that staged no corpus reads back as no rows, while
-        # the FILE still exists from the moment staging began.
-        write_guarded(
-            staged,
-            f"# staged names for episode {episode_id} — one row per name, appended BEFORE the "
-            "name is created\n")
-    for world in runnable_worlds(family):
-        staging_mod.stage_world(world, episode_dir=episode_dir, episode_token=token,
-                                configured_patterns=patterns, door=door)
+    with _timed(episode_dir, "staging"):
+        if not staged.exists():
+            # A COMMENT LINE, not `[]`. The record is APPENDED to, one YAML list item per
+            # created name, so a literal empty-list document would make every later append
+            # unparseable — and an unparseable staging record is the one thing teardown refuses
+            # to act on, which would leave every name this episode creates live on the cluster
+            # forever. A comment parses to nothing, so an episode that staged no corpus reads
+            # back as no rows, while the FILE still exists from the moment staging began.
+            write_guarded(
+                staged,
+                f"# staged names for episode {episode_id} — one row per name, appended BEFORE "
+                "the name is created\n")
+        for world in runnable_worlds(family):
+            staging_mod.stage_world(world, episode_dir=episode_dir, episode_token=token,
+                                    configured_patterns=patterns, door=door)
     from defender.learning.branch import review as review_mod
 
-    record = review_mod.review(family, episode_dir=episode_dir, adapters=adapters, door=door,
-                               invoke=invoke)
+    with _timed(episode_dir, "review"):
+        record = review_mod.review(family, episode_dir=episode_dir, adapters=adapters,
+                                   door=door, invoke=invoke)
     if record.get("episode", {}).get("decision") == REJECTED:
         # ANY REJECTED WORLD ENDS THE EPISODE (§7 FORK-14). Not the rejected one alone: a world
         # is a difference against its siblings, so a family missing an arm measures nothing the
@@ -1256,11 +1262,13 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         return 1
 
     labels = [w.world_id for w in runnable_worlds(family)]
-    exits = start_family(episode_dir, labels, spawn=spawn, model=ns.model)
+    with _timed(episode_dir, "runs"):
+        exits = start_family(episode_dir, labels, spawn=spawn, model=ns.model)
     runs = sibling_runs_base(episode_dir)
-    report = verify_family(
-        episode_dir, [runs / f"{episode_id}-{label}" for label in labels],
-        allow_dirty=ns.allow_dirty)
+    with _timed(episode_dir, "verify"):
+        report = verify_family(
+            episode_dir, [runs / f"{episode_id}-{label}" for label in labels],
+            allow_dirty=ns.allow_dirty)
     failed = sorted(label for label, code in exits.items() if code)
     for label in failed:
         print(f"[branch] world {label} exited {exits[label]}", file=sys.stderr)
@@ -1270,7 +1278,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     # return — never in `_launch`'s post-teardown path, which is production-dead on this route.
     # Its own frame, so the tear-down/grade/re-raise rule is one readable unit and this function
     # keeps the branch count the shared complexity gate allows it.
-    _release_and_grade(episode_dir, episode_id=episode_id, judge=judge, teardown=teardown)
+    with _timed(episode_dir, "judge"):
+        _release_and_grade(episode_dir, episode_id=episode_id, judge=judge, teardown=teardown)
     # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
     # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
     # launch that did exactly what it was asked and found the results not comparable, which is a
@@ -1279,6 +1288,22 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     # a real finding indistinguishable from a crashed child.
     return 1 if failed else 0
 
+
+
+@contextlib.contextmanager
+def _timed(episode_dir: Path, step: str) -> Iterator[None]:
+    """One step of the episode on the outer clock — its row lands on the timing record AFTER
+    the step returns (#1025 O7).
+
+    AFTER, never before, and only on a normal return: a step that raised is not on the record,
+    so an aborted episode's record reads as exactly the steps that ran, and a reader never
+    meets a row claiming a step whose end this frame never saw. The moments are the launcher's
+    own clock at the step's real start and end — the one outer clock the archive has; every
+    other timestamp on it is an inner duration or a file's mtime.
+    """
+    started_at = now_iso()
+    yield
+    timing_mod.record_step(episode_dir, step, started_at=started_at, ended_at=now_iso())
 
 
 def _release_and_grade(
