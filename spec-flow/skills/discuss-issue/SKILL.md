@@ -1,38 +1,22 @@
 ---
 name: discuss-issue
-description: "Explain a GitHub issue to someone who hasn't read it, ground it in the current code, and settle what gates a design — closing, when the issue heads to implementation, with the typed intent+design doc write-tests consumes. Use before designing on a bare issue report."
-argument-hint: "[issue number]"
-effort: medium
+description: "Explain a GitHub issue to someone who hasn't read it, ground it in the current code, and say plainly what in it takes judgement — closing, when the issue heads to implementation, with the typed intent+design doc write-tests consumes. Use before designing on a bare issue report."
+argument-hint: "[issue number, what to discuss]"
+effort: high
 ---
 
 # Discuss issue
 
-Explain the issue, check it against the code, settle what has to be settled before anyone designs on it. The thinking is yours; this file only says where to point it.
+Explain the issue, check it against the code, say what in it takes judgement. The thinking is yours; this file only says where to point it.
 
-Load it first — `gh issue view <n> --comments` (empty output is a failed read, not an empty issue; retry with `--json title,body,comments`), or take it from the conversation, a path, or pasted text. Read the comments; some of this may already be settled.
+Load it first — `gh issue view [issue number] --comments` (empty output is a failed read, not an empty issue; retry with `--json title,body,comments`), or take it from the conversation, a path, or pasted text. Read the comments; some of this may already be settled.
 
-## Open with the problem
+Ground the issue against the code base. Explore it, read it and execute small snippets when relevant. The goal is to run the discussion against the correct model of the code base, less so to nitpick the issue (so try to avoid claims like "The issue says X but it is actually Y").
 
-Your first message establishes what the problem is, and stops there. Explain it to a colleague who knows the system but hasn't read this issue: what it is, where it lives, why it surfaces. Hand-waving the mechanism means you haven't read enough code yet.
+Then it depends on whether "what to discuss" was specified or not. If yes, answer that based on the knowledge you gathered about the code base. If not, explain what the problem is, why it is a problem, and what takes judgement, **plainly**. Ignore the suggested solution or fix the issue proposes; take only the problem statement from there.
 
-Issues assert "X works like Y" from stale memory, so ground the claims as you go, cited `file:line` — against the right tree when the issue is premised on an open branch, and against history when a later merge may already have fixed it. A corrected premise is the first finding, sometimes the only one.
+## Meta Note: the issue holds the state
 
-Success criteria, scope, and design come later, as the discussion earns them.
-
-## As it develops
-
-**Climb.** Issues are filed at instance level — one failing run, one alert, one call site. The design lives a level up: the mechanism that produced the instance, and the class of case it belongs to. The sites the issue names are a sample, not a census — derive the rest at that altitude and give each an in-or-out verdict; **symbol-refs** resolves the census past grep when "the same thing" is a symbol.
-
-**Evaluate the oracle.** What will say this is fixed, and can it be wrong? An oracle that cannot fail, or that stands in for the property actually wanted, passes a broken implementation just as happily. When the judging thing is itself what the issue is about — a scorer, an eval, a detection rule, an assertion — that circularity decides whether the issue is ready to implement at all.
-
-**Narrow.** An issue turns on one or two things that genuinely have to be nailed down; once those are settled the rest follows. Lead with them and your read on each, not five decisions handed back as equals. Skip whatever the codebase or an existing convention already answers.
-
-**Put the shape to the human, here, before the doc compiles.** This is the seam where their judgment is worth most and the only one upstream of everything else — the decomposition (what the pieces are, where the cut falls, what ships in which round) and the **data model** (the types that cross the seams, what each one owns, what is derived and what is stored). Ask with AskUserQuestion, recommendation first, each option stating what it forecloses. Downstream seams argue about the wording of an obligation; this one decides what the obligations are *about*, and a wrong answer here is not repairable by any amount of test rigour.
-
-Keep it to the decisions that carry consequence — two or three, not a survey. A choice the codebase already answers, or one where both readings produce the same types and the same surfaces, is yours to make and record, not theirs to ratify.
-
-## The issue holds the state
-
-The conversation is where the discussion happens; the issue is where its state lives — for the next agent to pick up cold, and for a human to debug from months later. So what got settled goes in a comment, typed and terse rather than a narrative: the corrected premise, the census, the decisions and what they turned on. Won't-fix and already-resolved are state too — post the disposition and stop there.
+The conversation is where the discussion happens; the issue is where its state lives — for the next worker to pick up cold, or to debug months later. So what got settled goes in a comment, typed and terse rather than a narrative: the corrected premise, the decisions and what they turned on. Won't-fix and already-resolved are state too — post the disposition and stop there.
 
 When the issue is heading to implementation, that closing comment is the intent+design doc write-tests consumes. **references/design-doc.md** carries its sections, the claims sweep that probes them, and the cold review before it posts; read it then, and scale the ceremony to the issue.
