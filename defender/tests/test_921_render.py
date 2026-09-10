@@ -64,21 +64,29 @@ def _prompts(tmp_path, ep, **kw):
 
 
 def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread(tmp_path):
-    """The rendered input carries, PER LEAD, goal -> params -> payload -> summary -> document
-    rows -> resolutions, plus coverage against the discriminator, the sibling trials of the same
+    """The rendered input carries, PER LEAD, goal -> params -> payload -> summary ->
+    resolutions, plus coverage against the discriminator, the sibling trials of the same
     alert, the lessons loaded, and the trial spread.
 
     A judge input built from the two documents alone is O4's stated failing mode and is exactly
     what scored 0.2-0.3/3 while inventing 2.0-2.8 false findings per reply (C9). All four views
     are asserted as present, because the measured collapse was of the whole set.
+
+    `document_rows` — the lead's raw queries-table rows, stringified whole — left the chain with
+    #1017 (D3): nothing in the prompt can act on `system_key`, `payload_sha256`, `payload_path`,
+    `raw_command`, `exit_code` or `error_class`, and under an operator's cap the dump crowded
+    out real evidence. `params` and `payload` are the semantic content and stay;
+    `tests/e2e/test_1017_query_row_surface.py` pins what the leads view may and may not carry.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     judge_input = _render().render(ep, "b", runs_base=base)
 
     chain = judge_input.leads["l-001"]
-    for link in ("goal", "params", "payload", "summary", "document_rows", "resolutions"):
+    for link in ("goal", "params", "payload", "summary", "resolutions"):
         assert link in chain, f"the per-lead chain is missing its {link} link"
+    assert "document_rows" not in chain, \
+        "the per-lead chain still carries the raw row dump #1017 removed"
     assert judge_input.coverage, "the coverage view is empty"
     assert judge_input.siblings is not None, "the sibling-trials view is absent, not empty"
     assert judge_input.lessons, "the lessons-loaded view is empty"

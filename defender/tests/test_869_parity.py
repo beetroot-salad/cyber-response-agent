@@ -63,8 +63,13 @@ class _RaisingRegistry:
 
 def test_runtime_system_of_record_is_unchanged(tmp_path, capsys):
     """The runtime's own reader of the adapter source is untouched by the widening: it still
-    coarsens an undeclared system to `''`, and it still says so on stderr when the registry
-    cannot list at all.
+    coarsens an undeclared system to `''`. A registry that cannot list at all is a different
+    matter since #1017: it RAISES `RegistryUnavailable` rather than answering `''` and saying
+    so on stderr — the swallow recorded a declared system's rejection as a ghost's (`system=""`
+    with a fingerprint of the real name, which `system_fingerprint`'s contract forbids) and left
+    a stderr line no run reader consults. The raise is what lets both above-guard placements
+    record the fault as the `infra` row it is; the stderr line goes with it, since the row is
+    the trace.
 
     N1, bound at THIS READER'S OWN EDGE because that is what R7 asks. This change is the
     offline half plus the one writer; the runtime dispatch keeps answering the narrower
@@ -73,6 +78,10 @@ def test_runtime_system_of_record_is_unchanged(tmp_path, capsys):
     only membership value that diverges from the runtime's is the path-composition lane's,
     which none of them consults.
     """
+    # #1017's name, imported here rather than at module scope: the rest of this module pins
+    # #869 and must keep running while the runtime half of #1017 is still red.
+    from defender.runtime.query_tool import RegistryUnavailable
+
     adapters = tmp_path / "adapters"
     adapters.mkdir()
     write(adapters / "elastic_adapter.py", "VERBS = {}\n")
@@ -87,10 +96,10 @@ def test_runtime_system_of_record_is_unchanged(tmp_path, capsys):
     assert capture._system_of_record("") == ""
 
     capsys.readouterr()
-    assert QueryCapture(_RaisingRegistry())._system_of_record("elastic") == ""
-    err = capsys.readouterr().err
-    assert "query_tool" in err
-    assert "PermissionError" in err
+    with pytest.raises(RegistryUnavailable):
+        QueryCapture(_RaisingRegistry())._system_of_record("elastic")
+    assert capsys.readouterr().err == "", \
+        "the registry fault is still reported on stderr — the row is its trace since #1017"
 
 
 def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkeypatch):
