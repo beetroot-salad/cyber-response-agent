@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import read_jsonl_rows
-from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender._run_paths import artifact_dir, artifact_file
 from defender.learning.lead_repository import JoinedLead, joined
 from defender.learning.branch.archive import (
     ALERT_NAME,
@@ -341,13 +341,14 @@ def _leads_by_id(world_dir: Path) -> dict[str, JoinedLead]:
     defender failure invented out of a call the defender was refused), seq-ordered, with the
     surface's coercions; `JoinedLead.goal` is the lead file's goal, read once for the world.
 
-    THE LINK-REFUSING GATE STAYS AHEAD OF THE SURFACE. `artifact_file` on the table is the same
-    `lstat` posture `archive.py` applies when it WRITES these names, whereas the surface's
-    reader (`read_jsonl_rows_report`) follows a link. A link admitted here puts another tree's
-    rows into VIEW 1 as this world's own conduct, so a world whose table is not a regular file
-    renders every lead with no queries at all."""
-    if not artifact_file(RunPaths(world_dir).executed_queries):
-        return {}
+    THE LINK-REFUSING GATE IS THE SURFACE'S OWN, not a private check ahead of it: `load_leads`
+    reads each lead file through `read_guarded` and `load_queries_report` `lstat`s the table
+    before it reads — the posture `archive.py` applies when it WRITES these names. A link
+    admitted at either name would put another tree's bytes into VIEW 1 as this world's own
+    conduct. The two halves are refused SEPARATELY, so a world whose table is not a regular
+    file (or is absent — the shape `archive.py` records for "the run produced none") renders
+    every lead with its goal and no queries; gated as a whole ahead of `joined()`, as this
+    module first did, a bad table cost every lead its goal too."""
     return {lead.lead_id: lead for lead in joined(world_dir)}
 
 
@@ -393,11 +394,13 @@ def json_mapping(path: Path) -> dict[str, Any] | None:
     """One JSON artifact as a mapping, or `None` when it is not readable as one.
 
     ONE HOME for the tolerance policy — which exception classes are survivable and whether a
-    non-mapping counts as unreadable — because five readers in this package want the same
-    answer (`alert.json` twice, `provenance.json`, a lead's `.lead.json`, and the enqueue's own
-    episode alert). Spelled per site, a class that has to be added later (a `RecursionError` out
-    of a deeply nested document is neither `OSError` nor `ValueError`) has to be found five
-    times, and the sites are far enough apart that only a grep finds them."""
+    non-mapping counts as unreadable — because four readers in this package want the same
+    answer (`alert.json` twice, `provenance.json`, and the enqueue's own episode alert; a
+    lead's `.lead.json` was the fifth until #1017 moved that read onto
+    `lead_repository.load_leads`, which keeps the same three classes). Spelled per site, a
+    class that has to be added later (a `RecursionError` out of a deeply nested document is
+    neither `OSError` nor `ValueError`) has to be found at every site, and the sites are far
+    enough apart that only a grep finds them."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):

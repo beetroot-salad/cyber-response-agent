@@ -6,29 +6,30 @@ read surface (`lead_repository.QueryRow`) and in the judge's raw dump — so a c
 writer reached a reader only when someone remembered each list. `system_key` (#871) reached none
 of them, and it is half the rejection guard's identity.
 
-THE CODE DOES NOT EXIST YET. Every test below names the surface #1017's design settles, and each
-imports the new names INSIDE the test rather than at module scope, so a missing target is one
-failure per test rather than one collection error hiding the rest.
-
 What is pinned here, at the unit level (the driven-run half lives in
-`tests/e2e/test_1017_query_row_surface.py`):
+`tests/e2e/test_1017_query_row_surface.py`, which imports this module's fixtures):
 
 * **D1 / O6** — `record_query.QUERY_ROW_COLUMNS`, a tuple in writer order, is THE declaration
   of the row's fourteen columns.
 * **D2 / O1** — `QueryRow`'s field set is that tuple with `payload_path` read as `raw_ref`; the
-  two new columns coerce the way the guard's own `as_str` does, so a pre-#871 table replays
-  through the surface exactly as it ran; keyword-built fixtures keep working.
+  two new columns coerce with `as_str` — `_trip`'s own coercion of `system_key` — so a
+  pre-#871 table replays through the surface exactly as it ran; keyword-built fixtures keep
+  working.
 * **D2 / O2** — `QueryRow.record()` is the row AS READ, not a re-projection of the typed fields.
   C16 is the reason: the surface DERIVES `error_class` from `exit_code` when the key is absent,
   the guard's domain predicate reads it verbatim, and a re-projection would replay a trip the
   run never took.
-* **S2** — the two model-facing renders the surface already owns (`actor_view`,
-  `render_joined_yaml`) enumerate their fields and gain neither new column.
+* **S2** — the model-facing renders that reach the rows (`actor_view`, `render_joined_yaml`,
+  and the questioner's `repr`-based row dump) carry neither new column.
+* **D3** — the surface refuses a link at a lead file's name and at the table's name, and
+  tolerates a lead file nested past the parser's limit, the way the judge's own readers did
+  before the reads moved here.
 """
 from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,7 @@ from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
 from defender.scripts.gather_tools import record_query
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
+    QUERY_ROW_COLUMNS,
     in_rejection_domain,
     rejection_trip,
 )
@@ -109,8 +111,6 @@ def test_the_writer_declares_the_fourteen_columns_once_in_writer_order():
 
     Observed failing by: the name missing, or a column added to the writer's dict literal
     without reaching the declaration (the two drift the way #877 and #871 did)."""
-    from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
-
     assert isinstance(QUERY_ROW_COLUMNS, tuple), \
         "the column declaration is not ordered, so it cannot pin the row's byte order"
     assert QUERY_ROW_COLUMNS == EXPECTED_COLUMNS, \
@@ -131,8 +131,6 @@ def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref
 
     Observed failing by: a column present in a written row and absent from `QueryRow` — today
     `system_key` and `payload_sha256`, the two the issue names."""
-    from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
-
     # The PUBLIC fields: D2 also keeps the parsed record on the row for `record()`, and a
     # retained record is not a projection of a column — however the implementer stores it, an
     # underscore-prefixed slot is the one shape that says so.
@@ -165,18 +163,22 @@ def test_keyword_built_rows_default_the_two_new_columns_to_empty():
         ("absent", {}),
         ("none", {"system_key": None, "payload_sha256": None}),
         ("present", {"system_key": KEY_MARKER, "payload_sha256": SHA_MARKER}),
-        # Not a string at all: the guard's `as_str` answers `""` and the surface must agree —
-        # it is the ONE coercion `_trip` applies to both sides of the identity comparison.
+        # Not a string at all: `as_str` answers `""` and the surface must agree — for
+        # `system_key` it is the ONE coercion `_trip` applies to both sides of the identity
+        # comparison; `payload_sha256` has no guard reader and takes the same coercion by
+        # design (its one live reader, `repeat_note`'s `_result_identity`, reads any falsy
+        # value as "no identity", and no writer stores anything but the hex digest).
         ("non-string", {"system_key": 123, "payload_sha256": 456}),
     ],
 )
 def test_the_surface_coerces_the_two_columns_exactly_as_the_guard_does(tmp_path, shape, written):
     """D2/O2 — `system_key` and `payload_sha256` read as `""` when the key is absent (a
-    pre-#871 / pre-#877 table) or `None`, and verbatim when present — the SAME coercion
-    `record_query._trip` applies (`as_str`) to the stored column before comparing it with the
-    live call's key. Asserted AGAINST `as_str` over the raw record rather than against a
-    literal, so the two readers cannot drift apart: a surface that read absent as `None` would
-    make a pre-#871 row stop matching the `""` the live guard passes.
+    pre-#871 / pre-#877 table) or `None`, and verbatim when present — for `system_key` the
+    SAME coercion `record_query._trip` applies (`as_str`) to the stored column before
+    comparing it with the live call's key, and for `payload_sha256` the same one by design.
+    Asserted AGAINST `as_str` over the raw record rather than against a literal, so the two
+    readers cannot drift apart: a surface that read absent as `None` would make a pre-#871 row
+    stop matching the `""` the live guard passes.
 
     Observed failing by: a `QueryRow` whose `system_key` differs from `as_str(rec["system_key"])`
     on any of the four shapes."""
@@ -299,15 +301,23 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
 # ---------------------------------------------------------------------------------------
 
 
-def test_the_two_model_facing_renders_emit_neither_new_column(tmp_path):
+def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
     """S2 — `actor_view` / `render_actor_view_yaml` and `render_joined_yaml` enumerate their
-    fields; D2 putting `system_key` and `payload_sha256` on `QueryRow` must reach neither. Each
-    render is checked for the two MARKER VALUES and the two KEY NAMES, beside the positive
-    control on the same string: the row's `query_id` and its `params` marker DO appear, so an
-    empty render cannot satisfy the negatives.
+    fields, and the questioner's "joined leads" section (`branch/cli._joined_leads` through
+    `_prompt.titled_section`) does NOT: it stringifies each `JoinedLead.__dict__` — rows
+    included, sentinels included — through `json.dumps(default=str)`, i.e. `QueryRow.__repr__`.
+    D2 putting `system_key` and `payload_sha256` on `QueryRow` must reach none of the three,
+    which for the third means the fields stay off the `repr`. Each render is checked for the
+    two MARKER VALUES and the two KEY NAMES, beside the positive control on the same string:
+    the row's `query_id` and its `params` marker DO appear, so an empty render cannot satisfy
+    the negatives.
 
-    Observed failing by: either render stringifying a `QueryRow` whole (an `asdict`, a
-    `__dict__`) once the two fields exist on it."""
+    Observed failing by: a render stringifying a `QueryRow` whole (an `asdict`, a `__dict__`,
+    a `repr`) once the two fields exist on it — the questioner's did, until the two fields
+    were declared `repr=False`."""
+    from defender.learning._prompt import titled_section
+    from defender.learning.branch.cli import _joined_leads
+
     _lead_file(tmp_path)
     _table(tmp_path, [
         _row(0, params={"native_query": "PARAMS_MARKER"}, system_key=KEY_MARKER),
@@ -321,6 +331,10 @@ def test_the_two_model_facing_renders_emit_neither_new_column(tmp_path):
         "render_joined_yaml": lead_repository.render_joined_yaml(tmp_path),
         "render_actor_view_yaml": lead_repository.render_actor_view_yaml(tmp_path),
         "actor_view": json.dumps(lead_repository.actor_view(tmp_path), default=str),
+        "questioner_joined_leads": titled_section(
+            "The joined leads at the branch point",
+            _joined_leads(tmp_path, lead_repository.joined),
+        ),
     }
     for name, text in renders.items():
         assert "elastic.ad-hoc" in text, f"{name} renders no query at all — its negatives are vacuous"
@@ -360,6 +374,62 @@ def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
         elsewhere.read_text(encoding="utf-8"), encoding="utf-8")
     assert lead_repository.load_leads(regular)[LEAD]["goal"] == "PLANTED_GOAL"
 
+    # A HARD link is a regular file to an `lstat`, which is why the read goes through
+    # `read_guarded` (the open's own `fstat` sees the link count) and not `artifact_file`
+    # then a read: the same planted file under a lead's name, as a second name for one inode.
+    hard = tmp_path / "hard"
+    RunPaths(hard).gather_raw.mkdir(parents=True)
+    os.link(elsewhere, RunPaths(hard).gather_raw / f"{LEAD}.lead.json")
+    assert lead_repository.load_leads(hard) == {}, "the surface read a hard link at a lead's name"
+
+
+def test_the_surface_tolerates_a_lead_file_nested_past_the_parsers_limit(tmp_path):
+    """D3 — the judge read the lead file through `render.json_mapping`, whose tolerance names
+    `RecursionError` beside the decode errors; the surface's `load_leads` keeps that class. A
+    `.lead.json` of 200,000 nested lists is a `RuntimeError` out of `json.loads`, which no
+    reader of `joined()` catches — one such planted file would otherwise end the judge pass
+    for every world of the episode. It reads as no lead, beside a healthy one that still joins.
+
+    Observed failing by: `load_leads` raising `RecursionError`."""
+    gather = RunPaths(tmp_path).gather_raw
+    gather.mkdir(parents=True)
+    (gather / "l-999.lead.json").write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
+    _lead_file(tmp_path, "a goal beside a bomb")
+    leads = lead_repository.load_leads(tmp_path)
+    assert set(leads) == {LEAD}, f"the nested file was admitted or the healthy one lost: {leads}"
+    assert leads[LEAD]["goal"] == "a goal beside a bomb"
+    assert [lead.lead_id for lead in lead_repository.joined(tmp_path)] == [LEAD]
+
+
+def test_the_surface_refuses_a_link_at_the_tables_name_and_reads_an_absent_table_as_none(tmp_path):
+    """D3 — the table's `lstat` gate is the surface's own, not the judge's private check ahead
+    of it (which threw the lead files' goals away with the rows): a SYMLINK at
+    `executed_queries.jsonl` reads as no rows and ONE unreadable record — the count a table the
+    reader could not open already reports, and what the capture priming counts — while an
+    ABSENT table (the ordinary "no query landed" shape) reads as no rows and nothing
+    unreadable, and the lead files join either way.
+
+    Observed failing by: the linked run's rows, or an absent table counted as unreadable."""
+    elsewhere = tmp_path / "elsewhere"
+    _table(elsewhere, [_row(0, params={"native_query": "LINKED"})])
+
+    linked = tmp_path / "linked"
+    _lead_file(linked, "kept")
+    RunPaths(linked).executed_queries.symlink_to(RunPaths(elsewhere).executed_queries)
+    assert lead_repository.load_queries_report(linked) == ([], 1), \
+        "the surface followed a link at the table's name, or counted it as nothing"
+    assert [(lead.lead_id, lead.goal, lead.queries)
+            for lead in lead_repository.joined(linked)] == [(LEAD, "kept", [])]
+
+    absent = tmp_path / "absent"
+    _lead_file(absent, "kept")
+    assert lead_repository.load_queries_report(absent) == ([], 0)
+    assert [(lead.lead_id, lead.goal, lead.queries)
+            for lead in lead_repository.joined(absent)] == [(LEAD, "kept", [])]
+
+    assert len(lead_repository.load_queries(elsewhere)) == 1, \
+        "the positive control's regular table did not read"
+
 
 # ---------------------------------------------------------------------------------------
 # D1 / O6 — the row literal exists ONCE, inside the constructor
@@ -382,6 +452,7 @@ def _row_literals(source: str) -> list[str | None]:
     keys include both `lead_id` and `system_key` — the shape of a hand-spelled row."""
     import ast
 
+    _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
     tree = ast.parse(source)
     parents: dict[ast.AST, ast.AST] = {}
     for node in ast.walk(tree):
@@ -394,10 +465,12 @@ def _row_literals(source: str) -> list[str | None]:
         keys = {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
         if not {"lead_id", "system_key"} <= keys:
             continue
+        # BOTH def shapes: the census scans `query_tool.py`, whose writers are `async def`,
+        # and an owner the climb walked past reads as a module-level literal (`None`).
         owner = node
-        while owner in parents and not isinstance(owner, ast.FunctionDef):
+        while owner in parents and not isinstance(owner, _DEFS):
             owner = parents[owner]
-        found.append(owner.name if isinstance(owner, ast.FunctionDef) else None)
+        found.append(owner.name if isinstance(owner, _DEFS) else None)
     return found
 
 

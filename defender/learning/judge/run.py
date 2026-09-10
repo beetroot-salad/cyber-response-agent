@@ -235,8 +235,7 @@ _ROLE_PROMPT = Path(__file__).resolve().parent / "role.md"
 #: report are the graded world's own bytes and are titled for what they are.
 SECTION_TITLES: dict[str, str] = {
     "manifest": "THE FAMILY MANIFEST (the graded world last; every other world counterfactual)",
-    "leads": "VIEW 1 — PER-LEAD CHAIN (goal -> params -> payload -> summary -> document rows "
-             "-> resolutions)",
+    "leads": "VIEW 1 — PER-LEAD CHAIN (goal -> params -> payload -> summary -> resolutions)",
     "coverage": "VIEW 2 — COVERAGE (what this world asked on the family's holding system)",
     "siblings": "VIEW 3 — SIBLING TRIALS OF THIS SAME ALERT",
     "lessons": "VIEW 4 — LESSONS LOADED INTO THIS WORLD (name, path, and the body at its "
@@ -575,7 +574,7 @@ def _build_prompt(judge_input: JudgeInput) -> str:
     task = (
         f"World {label} has run; grade it.\n\n"
         "Compare it against the four joined views below: its per-lead chain (goal, params, "
-        "payload, summary, document rows, resolutions), its coverage of the family's "
+        "payload, summary, resolutions), its coverage of the family's "
         "discriminator, the sibling trials of this same alert, and the lessons it loaded — "
         "plus the trial spread. Every OTHER world is marked counterfactual: withhold its "
         "overlay from your reasoning and never cite its facts as facts about the graded "

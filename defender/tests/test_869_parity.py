@@ -20,7 +20,7 @@ from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curator
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
 from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
-from defender.runtime.query_tool import QueryCapture
+from defender.runtime.query_tool import QueryCapture, RegistryUnavailable
 from defender.runtime.verb_grant import DENY_ALL
 from defender.runtime.verbs import ModuleVerbRegistry
 from defender.tests._declared869 import (
@@ -55,7 +55,9 @@ def _lead(query_id: str, *, system: str) -> ExecutedLead:
 class _RaisingRegistry:
     """A registry that cannot list its systems — the fault C16/G8 executed against the real
     one, injected here as its exception class and nothing else. It classifies nothing and
-    decides nothing; the coarsening and the stderr line below are production code's."""
+    decides nothing; what the runtime does with the fault — since #1017, raise
+    `RegistryUnavailable` for the placement to record as an `infra` row, with no stderr line —
+    is production code's, and `tests/e2e/test_1017_query_row_surface.py` drives it."""
 
     def systems(self):
         raise PermissionError(13, "Permission denied")
@@ -78,10 +80,6 @@ def test_runtime_system_of_record_is_unchanged(tmp_path, capsys):
     only membership value that diverges from the runtime's is the path-composition lane's,
     which none of them consults.
     """
-    # #1017's name, imported here rather than at module scope: the rest of this module pins
-    # #869 and must keep running while the runtime half of #1017 is still red.
-    from defender.runtime.query_tool import RegistryUnavailable
-
     adapters = tmp_path / "adapters"
     adapters.mkdir()
     write(adapters / "elastic_adapter.py", "VERBS = {}\n")

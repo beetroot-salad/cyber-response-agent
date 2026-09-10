@@ -3,16 +3,12 @@ registry that cannot list recorded as the infra fault it is.
 
 THE ROOT. The queries row's shape was spelled by hand in more than one place — the writer
 (`record_query.append_query_row`), the second writer (`lead_zero._record_manual_row`), the read
-surface (`lead_repository.QueryRow`) and the judge's raw dump (`render._queries_by_lead`) — so a
-column added at the writer reached a reader only when someone remembered each list. `system_key`
-(#871) reached none of them, and it is half the rejection guard's identity: an auditor who
-reconstructs a run's dead ends THE WAY THE REPO TELLS THEM TO (through the surface) sees three
-sentinel rows keyed alike and concludes the guard should have tripped where the live run ran on.
-
-THE CODE DOES NOT EXIST YET. The names #1017's design fixes — `record_query.QUERY_ROW_COLUMNS`,
-`QueryRow.system_key` / `.payload_sha256` / `.record()`, `query_tool.RegistryUnavailable`,
-`query_tool.REGISTRY_BREAKER_KEY` — are imported INSIDE the tests that need them, so a missing
-target is one failure per test rather than one collection error hiding the other assertions.
+surface (`lead_repository.QueryRow`) and the judge's own raw grouping of the table (a private
+reader the judge kept beside the surface, since deleted) — so a column added at the writer
+reached a reader only when someone remembered each list. `system_key` (#871) reached none of
+them, and it is half the rejection guard's identity: an auditor who reconstructs a run's dead
+ends THE WAY THE REPO TELLS THEM TO (through the surface) sees three sentinel rows keyed alike
+and concludes the guard should have tripped where the live run ran on.
 
 WHAT IS DRIVEN, and why live rather than over hand-built rows: every claim below is about what a
 REAL writer leaves on disk, what the REAL surface reads back off it, what the REAL judge render
@@ -28,10 +24,12 @@ D4 IN ONE PARAGRAPH. `_system_of_record` used to swallow a registry that could n
 contract forbids, keyed on a string the guard would then count as a ghost; the only trace was a
 stderr line no reader consults. Now the registry raises `RegistryUnavailable`, both above-guard
 placements catch it and take the adapter-load branch's path: breaker check, then an `infra`
-row (exit `DEFAULT_FAULT_EXIT`) carrying the model's RAW string as `system` and `system_key=""`,
-keyed on the host constant `REGISTRY_BREAKER_KEY` — never on the model's string, which for an
-empty or unreadable system the breaker skips (C17). The model still receives its ORIGINAL
-rejection. No guard is consulted, so no fingerprint is minted on this path at all (O4).
+row (exit `DEFAULT_FAULT_EXIT`) carrying the model's RAW string as `system` when it has a
+system name's shape (`""` otherwise — the adapter-load branch's row is name-shaped by
+construction, and every reader treats the column as a name) and `system_key=""`, keyed on the
+host constant `REGISTRY_BREAKER_KEY` — never on the model's string, which for an empty or
+unreadable system the breaker skips (C17). The model still receives its ORIGINAL rejection.
+No guard is consulted, so no fingerprint is minted on this path at all (O4).
 """
 from __future__ import annotations
 
@@ -46,7 +44,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import append_jsonl, read_jsonl_rows, read_text_utf8  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
-from defender.learning.lead_repository import load_queries  # noqa: E402
+from defender.learning.lead_repository import joined, load_queries  # noqa: E402
 from defender.learning.leads.lead_extraction import collect_general_failures  # noqa: E402
 from defender.runtime import lead_zero  # noqa: E402
 from defender.runtime.circuit_breaker import (  # noqa: E402
@@ -55,12 +53,20 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
     PER_SYSTEM_FAIL_LIMIT,
     RUN_FAIL_KILL_LIMIT,
 )
-from defender.runtime.query_tool import DEFAULT_FAULT_EXIT, QueryCapture  # noqa: E402
+from defender.runtime.query_tool import (  # noqa: E402
+    DEFAULT_FAULT_EXIT,
+    REGISTRY_BREAKER_KEY,
+    QueryCapture,
+    RegistryUnavailable,
+)
 from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
+from defender.runtime.verbs import ModuleVerbRegistry, is_system_name  # noqa: E402
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
-from defender.scripts.gather_tools.record_query import ABOVE_GUARD_QUERY_ID  # noqa: E402
+from defender.scripts.gather_tools.record_query import (  # noqa: E402
+    ABOVE_GUARD_QUERY_ID,
+    QUERY_ROW_COLUMNS,
+)
 from defender.tests import _judge_921 as J  # noqa: E402
 from defender.tests._declared869 import write  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -76,6 +82,7 @@ from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
     ZERO_WIDTH,
     _bad_args,
     _detail,
+    _raw_command_system,
 )
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _reduce, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, ROW_KEYS, elastic_ok, q, raising  # noqa: E402
@@ -83,14 +90,19 @@ from defender.tests.e2e.test_query_tool_611 import DONE, ROW_KEYS, elastic_ok, q
 # replay built from the SURFACE reaches the live verdict, and a second copy of the oracle here
 # could only ever agree with itself.
 from defender.tests.e2e.test_repeat_breaker_807 import _replay_rejections  # noqa: E402
+# The unit suite's fixtures for the same schema — the row literal, the markers no real value
+# hashes to, and the two run-dir builders — imported rather than re-spelled: a fifteenth
+# column is then added to ONE fixture row, not to one per suite.
+from defender.tests.test_1017_row_schema import (  # noqa: E402
+    KEY_MARKER,
+    SHA_MARKER,
+    _lead_file,
+    _row,
+    _table,
+)
 from defender.tests.test_869_parity import _RaisingRegistry  # noqa: E402
 
 pytestmark = pytest.mark.e2e
-
-#: The fault the registry raises here — the SAME one `_RaisingRegistry` raises, and the one
-#: #869's C16/G8 executed against the real `ModuleVerbRegistry` (a filesystem error while
-#: globbing / resolving the adapters dir; C15 records that nothing else can raise there).
-REGISTRY_FAULT = PermissionError(13, "Permission denied")
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
 
@@ -101,13 +113,20 @@ class _RegistryCannotList(FakeVerbs):
     fake's own table so that every grant, every verb signature and every recorded call is the
     same as the healthy run's — the ONLY difference between the two arms of each test below is
     `systems()`. It classifies nothing and decides nothing: the row, the breaker key and the
-    model's answer are all production code's."""
+    model's answer are all production code's.
+
+    `systems()` raises the fault `tests/test_869_parity.py::_RaisingRegistry` raises — the one
+    #869's C16/G8 executed against the real `ModuleVerbRegistry` (a filesystem error while
+    globbing / resolving the adapters dir; note the real registry answers an EMPTY roster,
+    not a raise, for a directory removed or made unreadable — `Path.glob` swallows those). A
+    FRESH instance per call: `RegistryUnavailable(...) from e` keeps the instance's traceback,
+    and re-raising one shared instance grows that chain by every frame of every raise."""
 
     def __init__(self, healthy: FakeVerbs):
         super().__init__({s: healthy.verbs(s) for s in healthy.systems()})
 
     def systems(self) -> tuple[str, ...]:
-        raise REGISTRY_FAULT
+        raise PermissionError(13, "Permission denied")
 
 
 def _breaker(r: _Res) -> dict:
@@ -130,8 +149,9 @@ def _assert_nothing_printed(err: str) -> None:
     """D4: the ROW is the trace, and nothing about the registry fault reaches stderr. Asserted
     on the FAULT'S OWN TEXT — the exception class and its message, which any print of the
     fault must carry however it is worded or prefixed — rather than on the old line's
-    `[query_tool]` / "could not list" spelling, which a reworded print would not contain."""
-    for named in ("PermissionError", "Permission denied", "[query_tool]"):
+    `[query_tool]` / "could not list" spelling, which a reworded print would not contain (and
+    which `_granted_systems`' unrelated stderr line still legitimately carries)."""
+    for named in ("PermissionError", "Permission denied"):
         assert named not in err, \
             f"the registry fault is still reported on stderr instead of the row: {err!r}"
 
@@ -156,8 +176,6 @@ def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_pat
 
     Observed failing by: the declaration missing, or a writer whose row keys (or their order)
     differ from it — `_record_manual_row`'s inline dict is the writer this exists for."""
-    from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
-
     run_dir = materialize(tmp_path / "live", GOLDEN_AB3)
     r = _run(tmp_path / "live", run_dir=run_dir, run_id="d1017-writers", turns=[
         q("elastic", "query", PARAMS), _reduce(run_dir),
@@ -192,8 +210,6 @@ def test_the_suites_frozen_key_set_is_the_writers_declaration():
     drift: a fifteenth column declared at the writer fails here until the suite's set follows.
 
     Observed failing by: the two disagreeing."""
-    from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
-
     assert set(QUERY_ROW_COLUMNS) == ROW_KEYS
 
 
@@ -332,10 +348,6 @@ def test_a_pre_871_table_replays_the_same_through_the_surface_as_over_raw_rows(t
 # O3 / D3 — the judge reads the surface and dumps no row
 # ---------------------------------------------------------------------------------------
 
-KEY_MARKER = "c0ffee" * 10 + "abcd"
-SHA_MARKER = "5ha256" * 10 + "feed"
-
-
 @pytest.fixture
 def judge_roots(tmp_path, monkeypatch):
     """The three roots #921's suite points inside `tmp_path` — the runs base, the episodes
@@ -346,31 +358,28 @@ def judge_roots(tmp_path, monkeypatch):
 
 
 def _world_row(seq: int, **overrides) -> dict:
-    """One archived-world queries row carrying a DISTINCTIVE value in every column the judge
-    cannot act on, so each can be searched for in the rendered leads section."""
-    row = {
-        "lead_id": "l-001", "seq": seq, "system": "elastic", "verb": "query",
-        "query_id": "elastic.ad-hoc", "params": {"native_query": f"PARAMS_MARKER_{seq}"},
-        "raw_command": f"RAWCMD_MARKER_{seq}", "payload_path": f"gather_raw/l-001/{seq}.json",
-        "exit_code": 0, "error_class": None, "payload_status": "ok",
-        "payload_digest": f"DIGEST_MARKER_{seq}", "payload_sha256": SHA_MARKER,
-        "system_key": "",
+    """The unit suite's full row (`_row`, lead `l-001`) with a DISTINCTIVE value in every
+    column the judge cannot act on, so each can be searched for in the rendered leads
+    section. One row literal for the schema, in the unit module; this is a re-marking of it."""
+    marked = {
+        "params": {"native_query": f"PARAMS_MARKER_{seq}"},
+        "raw_command": f"RAWCMD_MARKER_{seq}",
+        "payload_digest": f"DIGEST_MARKER_{seq}",
     }
-    row.update(overrides)
-    return row
+    return _row(seq, **{**marked, **overrides})
 
 
 def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER"):
     """An accepted #947 episode whose graded world `b` carries `rows` as its archived
     `executed_queries.jsonl` and `goal` on lead `l-001`'s `.lead.json` — the two files
-    `lead_repository.joined` reads off a run-dir-shaped tree (C10). Returns
-    `(episode_dir, runs_base, world_dir)`."""
+    `lead_repository.joined` reads off a run-dir-shaped tree (C10), written through the unit
+    suite's own builders (`_table`, `_lead_file`), since the world dir IS run-dir shaped.
+    Returns `(episode_dir, runs_base, world_dir)`."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     world = ep / "worlds" / "b"
-    (world / "gather_raw" / "l-001.lead.json").write_text(
-        json.dumps({"goal": goal, "what_to_summarize": ["auth events"]}), encoding="utf-8")
-    append_jsonl(world / "executed_queries.jsonl", rows)
+    _lead_file(world, goal)
+    _table(world, rows)
     return ep, base, world
 
 
@@ -420,14 +429,19 @@ def test_the_judges_leads_view_carries_no_column_it_cannot_act_on(tmp_path, judg
 
 
 def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots):
-    """D3 — the lstat gate STAYS ahead of `joined()`: a world whose `executed_queries.jsonl`
-    is a SYMLINK to a real table elsewhere renders a lead with no params and no payload, while
-    the SAME table as a regular file (the positive control, same rows, same lead) renders
-    both. `read_jsonl_rows_report` — what `joined()` reads through — FOLLOWS a link, so a render
-    that dropped the `artifact_file` check would put another tree's rows into VIEW 1 as this
-    world's own conduct.
+    """D3 — the lstat gate is the SURFACE's (`load_queries_report`), refusing the table's rows
+    and nothing else: a world whose `executed_queries.jsonl` is a SYMLINK to a real table
+    elsewhere renders a lead with no params and no payload — AND WITH ITS GOAL, which comes
+    off the lead file the same surface read behind its own gate — while the SAME table as a
+    regular file (the positive control, same rows, same lead) renders all three. A world with
+    NO table at all (the shape `archive.py` records for "the run produced none") keeps its
+    goal the same way. `read_jsonl_rows` FOLLOWS a link, so a surface that dropped the check
+    would put another tree's rows into VIEW 1 as this world's own conduct; a judge that gated
+    the whole join on the table, as it first did, told the judge `goal: None` for every lead
+    of such a world.
 
-    Observed failing by: the linked world's chain carrying the target's params or digests."""
+    Observed failing by: the linked world's chain carrying the target's params or digests, or
+    either refused world's chain losing its goal."""
     target_rows = [_world_row(0, params={"native_query": "LINKED_PARAMS"},
                               payload_digest="LINKED_DIGEST")]
     elsewhere = tmp_path / "elsewhere" / "executed_queries.jsonl"
@@ -443,8 +457,19 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
     leads, text = _leads_view(ep, base)
     assert leads["l-001"]["params"] is None, "the judge followed a link at the table's name"
     assert leads["l-001"]["payload"] == []
+    assert leads["l-001"]["goal"] == "GOAL_MARKER", \
+        "refusing the table cost the lead its goal, which the lead file carries"
     assert "LINKED_PARAMS" not in text
     assert "LINKED_DIGEST" not in text
+    assert "GOAL_MARKER" in text
+
+    ep0, base0, world0 = _judge_world(tmp_path / "tableless", [])
+    (world0 / "executed_queries.jsonl").unlink()
+    leads0, text0 = _leads_view(ep0, base0)
+    assert leads0["l-001"] == {**leads0["l-001"], "goal": "GOAL_MARKER", "params": None,
+                               "payload": []}, \
+        f"a world without a table lost its lead's goal: {leads0['l-001']!r}"
+    assert "GOAL_MARKER" in text0
 
     ep2, base2, _world2 = _judge_world(tmp_path / "regular", target_rows)
     leads2, text2 = _leads_view(ep2, base2)
@@ -501,8 +526,6 @@ def test_the_judges_chain_is_the_surfaces_own_reading_on_a_row_that_stresses_eve
     them is the surface.
 
     Observed failing by: any link of the chain differing from the surface's reading."""
-    from defender.learning.lead_repository import joined
-
     stressed = _world_row(1, params="not-a-dict", payload_digest=5)
     stressed["seq"] = "1"
     rows = [
@@ -567,8 +590,6 @@ def test_at_the_schema_placement_a_broken_registry_records_an_infra_row_and_keep
 
     Observed failing by (today): `system=""` with `system_key=sha256("elastic")` — a real
     name fingerprinted — and a stderr line."""
-    from defender.runtime.query_tool import RegistryUnavailable
-
     turns = [_bad_args("elastic", verb="ghostverb"), q("elastic", "query", PARAMS), DONE]
 
     rec = VerbRecorder()
@@ -640,8 +661,6 @@ def test_at_the_grant_placement_a_broken_registry_records_an_infra_row_and_keeps
     against the healthy registry: exit 64, and a fingerprint for the ghost only.
 
     Observed failing by (today): both rows coarsened to `""`, the declared one fingerprinted."""
-    from defender.runtime.query_tool import RegistryUnavailable
-
     capsys.readouterr()
     for name, system in (("declared", "elastic"), ("ghost", "ghostone")):
         turns = [q(system, "ghostverb", PARAMS), q("elastic", "query", PARAMS), DONE]
@@ -690,8 +709,6 @@ def test_a_loop_against_a_broken_registry_is_bounded_by_the_breaker_on_the_host_
 
     Observed failing by: more than two registry rows, a model string among the breaker's
     systems, an agent-fixable row, or a dead lead."""
-    from defender.runtime.query_tool import REGISTRY_BREAKER_KEY
-
     turns = [
         _bad_args("elastic", verb="ghostverb"), q("ghostone", "ghostverb", PARAMS),
         _bad_args(ZERO_WIDTH, verb="ghostverb"), q("ghosttwo", "ghostverb", PARAMS),
@@ -720,6 +737,11 @@ def test_a_loop_against_a_broken_registry_is_bounded_by_the_breaker_on_the_host_
     breaker = _breaker(broken)
     assert set(breaker["systems"]) == {REGISTRY_BREAKER_KEY}, \
         f"the breaker is keyed on {sorted(breaker['systems'])}, not on the host's registry key"
+    # The host key shares the breaker document's namespace with every adapter's counter AND
+    # with the shape-checked `system` a `gather(...)` dispatch reads its own breaker state
+    # under — so it must be a string no adapter file can derive and no dispatch can name.
+    assert not is_system_name(REGISTRY_BREAKER_KEY), \
+        f"{REGISTRY_BREAKER_KEY!r} is a well-formed system name: an adapter could share its counter"
     assert breaker["systems"][REGISTRY_BREAKER_KEY]["failures"] == PER_SYSTEM_FAIL_LIMIT
     assert "tripped_at" in breaker["systems"][REGISTRY_BREAKER_KEY], "the registry key never tripped"
     assert breaker["total_failures"] == PER_SYSTEM_FAIL_LIMIT < RUN_FAIL_KILL_LIMIT, \
@@ -746,8 +768,6 @@ def test_the_run_kill_names_the_registry_not_the_models_strings(tmp_path, capsys
 
     Observed failing by: `"elastic"` or `"ghostone"` among the breaker's systems, or the
     registry key absent from them."""
-    from defender.runtime.query_tool import REGISTRY_BREAKER_KEY
-
     rec = VerbRecorder()
     faulting = raising(rec, TransportFault("down"), systems=("elastic", "cmdb", "identity"))
     turns = [
@@ -798,8 +818,6 @@ def test_a_registry_row_that_reaches_the_kill_limit_aborts_the_run_from_either_p
     an ordinary exit-64 rejection, no abort, the lead runs to DONE.
 
     Observed failing by: `gather.calls == len(turns)` (the lead ran on past the abort)."""
-    from defender.runtime.query_tool import REGISTRY_BREAKER_KEY
-
     rec = VerbRecorder()
     faulting = raising(rec, TransportFault("down"), systems=("elastic", "cmdb", "identity"))
     turns = [
@@ -843,8 +861,6 @@ def test_system_of_record_raises_registry_unavailable_and_prints_nothing(tmp_pat
     answers are unchanged (`"elastic"` / `""`), as `test_869_parity` pins them.
 
     Observed failing by (today): `""` returned and a `[query_tool]` line printed."""
-    from defender.runtime.query_tool import RegistryUnavailable
-
     capsys.readouterr()
     capture = QueryCapture(_RaisingRegistry())
     with pytest.raises(RegistryUnavailable):
@@ -870,23 +886,32 @@ def test_system_of_record_raises_registry_unavailable_and_prints_nothing(tmp_pat
 # ---------------------------------------------------------------------------------------
 
 
+#: A model-named ghost with a SYSTEM NAME'S SHAPE — the segment an injected subagent would
+#: name to steer a corpus write, since `_build_pitfalls_handoffs` spends `system` as a path
+#: and a path segment is name-shaped or it is nothing. `PHANTOM` (spaces, capitals) is the
+#: other half of the pair below: the string a schema placement can see and a path cannot be.
+NAME_SHAPED_PHANTOM = "phantom-skill"
+
+
 def test_an_infra_rows_raw_model_string_composes_no_corpus_record(tmp_path):
-    """S1 census — the D4 row carries the model's RAW string (here `PHANTOM`, the segment an
-    injected subagent would name to steer a corpus write) as `system`; driven through the real
-    join and `collect_general_failures`, it composes NO record, because the collector keeps
-    only `agent-fixable` rows (C8) and this one is `infra`. The positive control is the same
+    """S1 census — the D4 row carries the model's RAW string as `system` when that string has
+    a system name's shape (here `NAME_SHAPED_PHANTOM`, the segment an injected subagent would
+    name to steer a corpus write); driven through the real join and
+    `collect_general_failures`, it composes NO record, because the collector keeps only
+    `agent-fixable` rows (C8) and this one is `infra`. The positive control is the same
     schema-rejected shape against a declared system under the healthy registry: one record,
     `system="elastic"`, the pitfalls channel's ordinary input.
 
-    Observed failing by: a record whose `system` is `PHANTOM` — the #855 leak reopened by way
-    of the infra class."""
-    turns = [_bad_args(PHANTOM, verb="ghostverb"), q("elastic", "query", PARAMS), DONE]
+    Observed failing by: a record whose `system` is the phantom — the #855 leak reopened by
+    way of the infra class."""
+    turns = [_bad_args(NAME_SHAPED_PHANTOM, verb="ghostverb"), q("elastic", "query", PARAMS), DONE]
     broken = _run(tmp_path / "broken", run_id="d1017-census",
                   verbs=_RegistryCannotList(elastic_ok(VerbRecorder())), turns=turns)
     row = broken.own_rows[0]
-    _assert_registry_row(row, system=PHANTOM)
+    _assert_registry_row(row, system=NAME_SHAPED_PHANTOM)
     leads = broken.own_leads()
-    assert any(lead.system == PHANTOM and lead.error_class == INFRA_ERROR_CLASS for lead in leads), \
+    assert any(lead.system == NAME_SHAPED_PHANTOM and lead.error_class == INFRA_ERROR_CLASS
+               for lead in leads), \
         "the infra row did not reach the join, so the census below is over nothing"
     records = collect_general_failures(leads, broken.run_dir, catalog=[])
     assert [rec["system"] for rec in records] == [], \
@@ -899,3 +924,28 @@ def test_an_infra_rows_raw_model_string_composes_no_corpus_record(tmp_path):
     assert [rec["system"] for rec in records] == ["elastic"], \
         "a declared system's agent-fixable rejection no longer reaches the pitfalls channel"
     assert records[0]["error_class"] == AGENT_FIXABLE_ERROR_CLASS
+
+
+def test_a_registry_row_records_a_string_without_a_systems_shape_as_no_system(tmp_path):
+    """The D4 row's `system` is bounded to a SYSTEM NAME'S SHAPE. At the schema placement the
+    string is whatever the model sent — the argument the schema may just have refused, at any
+    length, holding spaces, newlines or path separators — where every other writer's `system`
+    is name-shaped by construction (`decide` refuses a non-name before an adapter load can
+    fail) and every reader of the column treats it as a name. `PHANTOM` (spaces, capitals)
+    is recorded as `""`, the table's own spelling for "not a system", on the row and in the
+    host-composed half of `raw_command`; the row still carries the call's verb and params
+    and the registry's failure as its detail, so the trace is intact and the raw bytes live
+    only where the rejection already put them. The name-shaped ghost of the census above is
+    the positive control: recorded raw.
+
+    Observed failing by: `PHANTOM` on the row (verbatim, un-coarsened) — the schema
+    placement's registry row carrying text the adapter-load branch it mirrors never can."""
+    turns = [_bad_args(PHANTOM, verb="ghostverb"), q("elastic", "query", PARAMS), DONE]
+    broken = _run(tmp_path / "broken", run_id="d1017-shape",
+                  verbs=_RegistryCannotList(elastic_ok(VerbRecorder())), turns=turns)
+    row = broken.own_rows[0]
+    _assert_registry_row(row, system="")
+    assert PHANTOM not in json.dumps(row), \
+        f"the model's non-name string reached the registry row: {row!r}"
+    assert _raw_command_system(row) == "", \
+        "the host-composed half of raw_command names the non-name string"

@@ -750,9 +750,11 @@ def test_only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest(tmp_path):
 
 def test_the_tables_second_writer_grows_the_column_too(tmp_path):
     """The fourteenth column is a ROW contract, not a `QueryCapture` one, and the queries table
-    has a writer that does not go through `append_query_row` at all: `lead_zero`'s item-1
-    capture spells the keys INLINE (`runtime/lead_zero/_capture.py:_record_manual_row`), which
-    is why #877 had to reach in there for `payload_sha256` when it added that column.
+    has a second writer: `lead_zero`'s item-1 capture
+    (`runtime/lead_zero/_capture.py:_record_manual_row`). Until #1017 it spelled the keys
+    INLINE — which is why #877 had to reach in there for `payload_sha256` when it added that
+    column, and why this test exists; since #1017 it builds through `append_query_row`, and
+    this test pins that the second writer's rows still carry the column.
 
     A row missing the key is not a guard bug — `_trip` coerces it to `""` and lead-0's rows are
     outside the gather lead's count anyway. It is a CONTRACT break: `set(row) == ROW_KEYS` is
