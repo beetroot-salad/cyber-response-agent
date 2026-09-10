@@ -26,10 +26,10 @@ downstream it would read as a measurement. Refusing is what keeps "no difference
 comparison was possible" from being the same empty dict.
 
 **An episode with no archived worlds answers EMPTY rather than refusing** (§7 FORK-18). An
-episode rejected before `Step.RUNS` (`branch/steps.py`) never ran a sibling and is a legitimate archived state — its
-manifest, staging record and review are the artifacts, and `{}` is the honest reading of "no
-world produced anything". That is only safe because the recorded outcome above distinguishes
-it from "the worlds ran and agreed".
+episode rejected before `Step.RUNS` (`branch/steps.py`) never ran a sibling and is a legitimate
+archived state — its manifest, staging record and review are the artifacts, and `{}` is the
+honest reading of "no world produced anything". That is only safe because the recorded outcome
+above distinguishes it from "the worlds ran and agreed".
 """
 
 from __future__ import annotations

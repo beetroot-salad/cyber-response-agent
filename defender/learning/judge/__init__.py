@@ -34,7 +34,6 @@ from typing import Any
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._io import guarded_mkdir, read_guarded, write_guarded  # noqa: E402
-from defender.learning.branch.steps import Step  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
 from defender.learning.judge import family as family_mod  # noqa: E402
 from defender.learning.judge import render as render_mod  # noqa: E402
@@ -440,7 +439,7 @@ def _default_judge_seam(episode_dir: Path) -> Any:
                 f"the judge seam was called for {agent_id!r} with no StageWiring — the model, "
                 "the effort and the trace name all arrive on it, so there is nothing to call")
         return run_stage(
-            stage=Step.JUDGE, wiring=wiring,
+            stage="judge", wiring=wiring,
             ctx=StageContext(learning_run_dir=Path(episode_dir), user=prompt, request_limit=1,
                              wall_clock_timeout=subagent_timeout()),
             deps=JudgeDeps(),

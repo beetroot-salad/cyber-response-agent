@@ -27,8 +27,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from defender.learning.branch.steps import Step
-
 #: The questioner's standing system prompt. The per-call task — the base story, one world's
 #: elaboration, one payload comparison — is composed into the USER message by its own caller,
 #: because this role's whole input is inlined by the host; what belongs here is only what is
@@ -70,7 +68,7 @@ def model_seam(episode_dir: Path) -> Any:
 
     def invoke(prompt: str, *, role: Any = None, agent_id: str = "questioner") -> str:  # noqa: ARG001 — the role is the caller's declaration and is fixed by `QuestionerDeps`; taken so the seam matches the call every caller already makes
         return run_stage(
-            stage=Step.QUESTIONER,
+            stage="questioner",
             wiring=StageWiring(
                 prompt_path=_ROLE_PROMPT,
                 model=questioner_model(),

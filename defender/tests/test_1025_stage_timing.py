@@ -2,11 +2,12 @@
 
 One record at the episode root, `episodes/<id>/timing.jsonl`, appended by the launcher AFTER
 each step completes: one row `{step, started_at, ended_at}` per step, in launch order —
-`questioner`, `staging`, `review`, `runs`, `verify`, `judge`. The launcher (`cli._run_episode`)
-is the only frame that sees every step boundary, so it is the one writer; written after the
-step and never before, an aborted episode leaves exactly the steps that ran. The timestamps are
-a clock's (`_clock.now_iso`), not file mtimes — O4's named failing is a wall time reconstructed
-from timestamps on disk.
+`questioner`, `staging`, `review`, `runs`, `verify`, `judge`. The launcher (`cli._run_episode`,
+and `cli._release_and_grade` for the judge's clock) is the only frame that sees every step
+boundary, so it is the one writer; written after the step and never before, an aborted episode
+leaves exactly the steps that ran, and a row the record refuses is printed and absent, never a
+failure of the step it clocks. The timestamps are a clock's (`_clock.now_iso`), not file
+mtimes — O4's named failing is a wall time reconstructed from timestamps on disk.
 
 `learning/branch/steps.py` owns the step sequence (`Step`, `STEPS`) — the ONE declaration the
 launcher's step frames, the record's writer and the page all read. `learning/branch/timing.py`
@@ -22,6 +23,7 @@ seam open across a second boundary so `started_at < ended_at` is actually observ
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -72,16 +74,26 @@ def _raw_rows(episode_dir) -> list[dict]:
     path = Path(episode_dir) / _timing().TIMING_NAME
     if not path.is_file():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()  # noqa: E501 # lint-jsonl-io: ok — the raw file-order oracle: the reader under test IS `read_jsonl_rows`, which must not be its own oracle
             if line.strip()]
 
 
 def _clocked(rows: list[dict], *, before: str, after: str) -> list[tuple[Any, Any]]:
     """Every row's `(started_at, ended_at)` as aware datetimes, each pair inside the real
-    clock's `[before, after]` bracket and in order — the launch's own wall time, not a
-    constant, and not a value from any clock but the one bracketing it."""
+    clock's `[before, after]` bracket, in order, and starting no earlier than the previous row
+    ended — the launch's own wall time, not a constant, and not a value from any clock but
+    the one bracketing it.
+
+    THE NO-OVERLAP CHAIN IS CHECKED HERE, on every launch, and not only on the sub-second
+    accepted one: there every stamp is the same whole second and the chain is vacuous, so a
+    writer whose `started_at` is the LAUNCH's start rather than the step's own passed it —
+    and passed the one launch that straddles a second boundary, which never asked. Asked on
+    that launch, `verify` starting at the launch's first second while `runs` ended in the
+    next is the overlap it exists to catch.
+    """
     lo, hi = parse_iso_utc(before), parse_iso_utc(after)
     out = []
+    previous_end = None
     for row in rows:
         started, ended = parse_iso_utc(row["started_at"]), parse_iso_utc(row["ended_at"])
         assert started is not None, f"{row['step']}: started_at={row['started_at']!r}"
@@ -89,6 +101,9 @@ def _clocked(rows: list[dict], *, before: str, after: str) -> list[tuple[Any, An
         assert lo <= started, f"{row['step']} started before the launch did"
         assert started <= ended, f"{row['step']} ended before it started"
         assert ended <= hi, f"{row['step']} ended after the launch returned"
+        if previous_end is not None:
+            assert started >= previous_end, f"{row['step']} started before its predecessor ended"
+        previous_end = ended
         out.append((started, ended))
     return out
 
@@ -214,7 +229,10 @@ class _PlantingSibling(J.FakeSibling):
         rc = super().__call__(argv, env=env, **kw)
         world = self.episode_dir / "worlds" / "b"
         world.mkdir(parents=True, exist_ok=True)
-        if not (world / "report.md").is_symlink():
+        # N arms, released from one barrier, race to plant ONE link; the loser's
+        # `FileExistsError` would otherwise leave `start_family` as a second, unintended fault
+        # ("world b was never started") in a scenario whose only fault is the planted alias.
+        with contextlib.suppress(FileExistsError):
             (world / "report.md").symlink_to(self.outside)
         return rc
 
@@ -257,8 +275,8 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
                       "ended_at": "2026-01-01T00:01:30+00:00"}
     record = episode_dir / timing.TIMING_NAME
     assert record.is_file(), "the record is not at the episode root under TIMING_NAME"
-    lines = record.read_text(encoding="utf-8").splitlines()
-    assert [json.loads(line) for line in lines] == [first, second], (
+    assert record.read_text(encoding="utf-8") == (
+        json.dumps(first) + "\n" + json.dumps(second) + "\n"), (
         "the file does not hold one JSON row per recorded step, verbatim")
     assert timing.read_stage_timings(episode_dir) == [first, second]
     for row in (first, second):
@@ -307,10 +325,16 @@ def test_1025_an_absent_record_reads_as_no_rows(tmp_path):
 
 
 def test_1025_a_torn_line_is_skipped_and_the_good_rows_still_read(tmp_path):
-    """A line the reader cannot parse — here a REAL torn write, half a JSON object left by a
-    process that died mid-append — is skipped, and the rows on either side of it are still
-    returned in order. The record is written after each step by a process that can be killed
-    at any moment; a reader that raises on one torn line loses every step that did complete.
+    """A line the reader cannot parse — here a REAL torn write, half a JSON object and NO
+    newline, what a process that died mid-append actually leaves — is skipped, and the rows
+    on either side of it are still returned in order. The record is written after each step
+    by a process that can be killed at any moment; a reader that raises on one torn line loses
+    every step that did complete.
+
+    The row written AFTER the fragment is the one that exercises the writer: appended straight
+    onto a tail with no newline, it and the fragment become one unreadable line and the
+    completed step is lost with the torn one. The writer closes the fragment's line first and
+    leaves the fragment's own bytes exactly as they were.
     """
     timing = _timing()
     episode_dir = tmp_path / "episode"
@@ -319,12 +343,17 @@ def test_1025_a_torn_line_is_skipped_and_the_good_rows_still_read(tmp_path):
                                 started_at=now_iso(), ended_at=now_iso())
     record = episode_dir / timing.TIMING_NAME
     torn = json.dumps({"step": "staging", "started_at": now_iso(), "ended_at": now_iso()})
+    fragment = torn[: len(torn) // 2]
     with record.open("a", encoding="utf-8") as fh:
-        fh.write(torn[: len(torn) // 2] + "\n")
+        fh.write(fragment)
     after = timing.record_step(episode_dir, "review", started_at=now_iso(), ended_at=now_iso())
 
     assert timing.read_stage_timings(episode_dir) == [before, after], (
-        "a torn line either raised or was returned as a row")
+        "a torn line either raised or was returned as a row, or the row appended after it "
+        "was lost with it")
+    assert record.read_text(encoding="utf-8") == (
+        json.dumps(before) + "\n" + fragment + "\n" + json.dumps(after) + "\n"), (
+        "the fragment's bytes were changed, or the row after it was not put on its own line")
 
 
 def test_1025_an_unknown_step_is_refused_and_nothing_is_written(tmp_path):
@@ -405,6 +434,40 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
     assert timing.read_stage_timings(plain) == [row], "the control failed"
 
 
+def test_1025_the_reader_does_not_follow_a_link_the_writer_refuses(tmp_path):
+    """`read_stage_timings` takes the same `lstat` posture as the writer and as every other
+    reader of the episode tree: a symlink planted at `episodes/<id>/timing.jsonl` reads as NO
+    record — never as the rows of whatever it points at — and so does a directory squatting
+    the name. The target holds a real, parseable row, so an answer of `[]` is the reader
+    refusing the entry rather than finding nothing to parse.
+
+    Positive control: the same row, at a plain path, is read.
+    """
+    timing = _timing()
+    planted = tmp_path / "planted.jsonl"
+    stray = {"step": "judge", "started_at": "2020-01-01T00:00:00+00:00",
+             "ended_at": "2020-01-01T09:00:00+00:00"}
+    planted.write_text(json.dumps(stray) + "\n", encoding="utf-8")
+
+    symlinked = tmp_path / "symlinked-episode"
+    symlinked.mkdir()
+    (symlinked / timing.TIMING_NAME).symlink_to(planted)
+    assert timing.read_stage_timings(symlinked) == [], (
+        "the reader followed a planted link and returned another file's rows as this "
+        "episode's clock")
+    assert (symlinked / timing.TIMING_NAME).is_symlink(), "the planted link was replaced"
+
+    squatted = tmp_path / "squatted-episode"
+    squatted.mkdir()
+    (squatted / timing.TIMING_NAME).mkdir()
+    assert timing.read_stage_timings(squatted) == [], "a directory at the name read as rows"
+
+    plain = tmp_path / "plain-episode"
+    plain.mkdir()
+    (plain / timing.TIMING_NAME).write_text(json.dumps(stray) + "\n", encoding="utf-8")
+    assert timing.read_stage_timings(plain) == [stray], "the control failed"
+
+
 # ---------------------------------------------------------------------------------------
 # the launcher writes it — one row per completed step, through `cli.main`
 # ---------------------------------------------------------------------------------------
@@ -441,12 +504,7 @@ def test_1025_an_accepted_episode_leaves_all_six_steps_in_launch_order(tmp_path)
     assert _steps(launch.episode_dir) == EXPECTED_STEPS
     assert list(_steps_mod().STEPS) == EXPECTED_STEPS
 
-    previous_end = None
-    for row, (started, ended) in zip(rows, _clocked(rows, before=launch.before,
-                                                    after=launch.after), strict=True):
-        if previous_end is not None:
-            assert started >= previous_end, f"{row['step']} started before its predecessor ended"
-        previous_end = ended
+    _clocked(rows, before=launch.before, after=launch.after)
 
     assert sibling.seen, "the control failed: no sibling was spawned"
     assert all(seen == ["questioner", "staging", "review"] for seen in sibling.seen), (
@@ -474,6 +532,9 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
     assert sibling.stamps, "the control failed: no sibling was spawned"
 
     rows = _raw_rows(launch.episode_dir)
+    # `_clocked`'s chain is what makes THIS launch tell a step's own start from the launch's:
+    # `verify` must start no earlier than `runs` ended, which is one second later than a
+    # `started_at` frozen at the launch's first moment.
     _clocked(rows, before=launch.before, after=launch.after)
     runs = next(row for row in rows if row["step"] == "runs")
     started, ended = parse_iso_utc(runs["started_at"]), parse_iso_utc(runs["ended_at"])
@@ -482,6 +543,9 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
         assert started < inside, "`runs` started after a sibling it started was already running"
         assert inside <= ended, "`runs` ended before a sibling it started had returned"
     assert started < ended, "the `runs` row does not span the second the siblings ran across"
+    verify = next(row for row in rows if row["step"] == "verify")
+    assert parse_iso_utc(verify["started_at"]) >= ended, (
+        "`verify` started before `runs` ended — a `started_at` that is not the step's own")
 
 
 def test_1025_a_rejected_episode_stops_the_record_at_the_review(tmp_path, monkeypatch):
@@ -608,7 +672,7 @@ def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, c
     blocker.write_text("not a directory\n", encoding="utf-8")
     monkeypatch.setenv(J.STATE_DIR_ENV, str(blocker))
     launch = _launch(tmp_path)
-    assert launch.rc in (0, 1), "a failed grade ended the episode instead of being held"
+    assert launch.rc == 0, "a failed grade ended the episode instead of being held"
     assert launch.judge.calls > 0, "the control failed: the judge seam was never reached"
     assert "the judge pass failed" in capsys.readouterr().err, (
         "the control failed: the grade did not fail")
@@ -621,8 +685,70 @@ def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, c
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-seam-failed"))
     monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
     launch = _launch(tmp_path, judge=J.FakeJudge(fault=J.Fault(raise_after=0)))
-    assert launch.rc in (0, 1), "a raising judge seam ended the episode"
+    assert launch.rc == 0, "a raising judge seam ended the episode"
     assert launch.judge.calls > 0, "the control failed: the judge seam was never reached"
     rows = _raw_rows(launch.episode_dir)
     assert [row["step"] for row in rows] == EXPECTED_STEPS, "a raising judge seam lost a row"
     _clocked(rows, before=launch.before, after=launch.after)
+
+
+class _StickyDoor(T.FakeDoor):
+    """`FakeDoor` whose deletes are accepted and do nothing — every staged name is "still
+    present after delete", so teardown reports a failure for each and raises."""
+
+    def delete(self, name: str) -> None:
+        self._gate("delete", name, {})
+
+
+def test_1025_a_held_teardown_failure_still_leaves_the_judge_row(tmp_path):
+    """A teardown that cannot verify a staged name gone is HELD by `_release_and_grade`, the
+    grade runs to completion, and only then is the failure raised. The judge step therefore
+    completed — `judge.yaml` certifies it — and its row is on the record with the five before
+    it, even though the launch itself leaves through the held refusal.
+
+    Drawn around the whole of `_release_and_grade`, the `judge` clock saw that deferred
+    re-raise as the judge step raising and wrote nothing: a graded episode whose record said
+    the judge never finished. The clock is drawn around the grade alone.
+
+    Controls: the judge seam was reached, `judge.yaml` exists, and the launch leaves through
+    `LauncherRefused` naming the teardown.
+    """
+    judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
+    with pytest.raises(_cli().LauncherRefused, match="teardown did not verify"):
+        _launch(tmp_path, door=_StickyDoor(), judge=judge)
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    assert judge.calls > 0, "the control failed: the judge seam was never reached"
+    assert (episode_dir / "judge.yaml").exists(), "the control failed: the grade did not land"
+    rows = _raw_rows(episode_dir)
+    assert [row["step"] for row in rows] == EXPECTED_STEPS, (
+        "a judge step that ran to completion has no row because the held teardown failure "
+        "was raised through its clock")
+
+
+def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path, capsys):
+    """A timing row the record cannot take — here a DIRECTORY squatting `timing.jsonl` before
+    the launch, so every append is refused by the guarded seam — is printed and absent, and
+    the episode is otherwise untouched: it runs to completion, every world is archived, the
+    judge is called and grades, and the launch returns 0. The record is observability; an
+    append that could refuse used to end the episode from inside whichever step had just
+    finished — after `runs`, as "no sibling started" with the family never archived; after
+    the judge, as a bare `OSError` out of `main` for a fully graded episode.
+
+    Six refusals, one per step, each named on stderr; the reader answers no rows for the
+    squatted name rather than raising.
+    """
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    episode_dir.mkdir(parents=True)
+    (episode_dir / _timing().TIMING_NAME).mkdir()
+
+    launch = _launch(tmp_path)
+    assert launch.rc == 0, "a refused timing append ended the episode"
+    assert T.review_doc(launch.episode_dir)["episode"]["outcome"] == "accepted", (
+        "the family was not archived after the refused append")
+    assert launch.judge.calls > 0, "the judge was never reached after the refused append"
+    assert (launch.episode_dir / "judge.yaml").exists(), "the grade did not land"
+    err = capsys.readouterr().err
+    for step in EXPECTED_STEPS:
+        assert f"the {step} row could not be written" in err, (
+            f"the refused {step} row was not reported")
+    assert _steps(launch.episode_dir) == [], "a squatted record read as rows"
