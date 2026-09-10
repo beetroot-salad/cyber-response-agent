@@ -33,8 +33,13 @@ from typing import Any
 # caller — including `_triplet_947.refusals()`'s `sym("learning.judge", "JudgeRefused")` — sees.
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender._io import guarded_mkdir, read_guarded, write_guarded  # noqa: E402
-from defender.learning.branch.archive import JUDGE_NAME  # noqa: E402
+from defender._io import guarded_mkdir, write_guarded  # noqa: E402
+from defender.learning.branch.archive import (  # noqa: E402
+    DRAWS_DIRNAME,
+    JUDGE_NAME,
+    REVIEW_NAME,
+    WORLDS_DIRNAME,
+)
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
 from defender.learning.judge import family as family_mod  # noqa: E402
 from defender.learning.judge import render as render_mod  # noqa: E402
@@ -143,36 +148,21 @@ def _judge_yaml_path(episode_dir: Path) -> Path:
 
 
 def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
-    import yaml
-
-    from defender._yaml import safe_load
-
-    path = _judge_yaml_path(episode_dir)
-    # THE SCREENED READ, the same one `family.raw_manifest` makes and for the same stated
-    # reason: this file sits in the episode dir, a tree a sibling box's rw bind reaches, so an
-    # entry at its name may be a link the model planted — and `is_file()`/`read_text` follow the
-    # link the write side refuses. This is the IDEMPOTENCY record: a planted document that parses
-    # as a mapping and carries no `not_graded` makes `_grade_from_document` return an
-    # attacker-supplied grade and the pass never runs at all. `read_guarded` folds ABSENT in with
-    # the alias refusal, and here they must stay apart: NOTHING AT THIS NAME is an ordinary
-    # ungraded episode, while SOMETHING that is not the record is the refusal.
-    if not (path.exists() or path.is_symlink()):
-        return None
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise JudgeRefused(f"{path} could not be read as a family grade: {refusal}")
-    try:
-        doc = safe_load(text)
-    except (OSError, yaml.YAMLError) as bad:
-        raise JudgeRefused(f"{path} exists but could not be read as a family grade: {bad}") from bad
-    if not isinstance(doc, dict):
-        raise JudgeRefused(f"{path} exists but is not a family grade document")
-    return doc
+    # THE SCREENED READ, the ONE `family.screened_yaml_mapping` makes for the manifest too and
+    # for the same stated reason: this file sits in the episode dir, a tree a sibling box's rw
+    # bind reaches, so an entry at its name may be a link the model planted — and `is_file()`/
+    # `read_text` follow the link the write side refuses. This is the IDEMPOTENCY record: a
+    # planted document that parses as a mapping and carries no `not_graded` makes
+    # `_grade_from_document` return an attacker-supplied grade and the pass never runs at all.
+    # NOTHING AT THIS NAME (`None`) is an ordinary ungraded episode, while SOMETHING that is not
+    # the record is the refusal.
+    return family_mod.screened_yaml_mapping(_judge_yaml_path(episode_dir),
+                                            what="the family grade")
 
 
 def _episode_outcome_from_review(review: dict[str, Any]) -> tuple[str, str]:
     if not review:
-        return "incomplete", "no review.yaml on disk"
+        return "incomplete", f"no {REVIEW_NAME} on disk"
     episode = review.get("episode")
     outcome = episode.get("outcome") if isinstance(episode, dict) else None
     reason = episode.get("reason") if isinstance(episode, dict) else None
@@ -258,7 +248,7 @@ def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threade
         episode_dir, label, git_show=git_show, payload_cap=payload_cap, facts=facts,
         lessons_commit=lessons_commit, union=union, manifest=manifest,
         review=review, samples=samples)
-    guarded_mkdir(Path(episode_dir) / "worlds" / label / "judge", base=episode_dir)
+    guarded_mkdir(Path(episode_dir) / WORLDS_DIRNAME / label / DRAWS_DIRNAME, base=episode_dir)
     return run_mod._build_prompt(judge_input)
 
 
@@ -277,8 +267,8 @@ def _run_world_draws(
     from defender.learning.core.config import StageWiring
     from defender.runtime.agent_role import AgentRole
 
-    world_dir = Path(episode_dir) / "worlds" / label
-    draw_dir = world_dir / "judge"
+    world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
+    draw_dir = world_dir / DRAWS_DIRNAME
 
     completed = 0
     spread: Counter[str] = Counter()
@@ -482,14 +472,19 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     # attempt and returned as though it were the grade, so a repaired episode answered with the
     # old refusal forever.
     # THROUGH `read_grade`, the one reader (#1025 O8) — the page reads the record the same way.
+    # `is None`, THE WRITER'S OWN PREDICATE (`_write_judge_yaml` stamps the key iff the value is
+    # not `None`), never truthiness: read by truthiness, an empty stamp (`not_graded: {}` — a
+    # hand-cleared or planted file in a tree a box can reach) counted as a GRADE and was
+    # returned on every call, which is the "old refusal forever" trap described above in a
+    # different costume.
     existing = read_grade(episode_dir)
-    if existing is not None and not existing.not_graded:
+    if existing is not None and existing.not_graded is None:
         return existing
 
     review = family_mod.read_review_record(episode_dir)
     outcome, reason = _episode_outcome_from_review(review)
     if outcome != "accepted":
-        reason = reason or f"the episode's review.yaml outcome is {outcome!r}, not 'accepted'"
+        reason = reason or f"the episode's {REVIEW_NAME} outcome is {outcome!r}, not 'accepted'"
         # `episode_outcome` says NOT-GRADED, never the `gradable` default: the field is what a
         # reader keys on to tell what happened to an episode, and an episode nothing looked at
         # reporting the same word as one the judge cleared is the one answer it must not give.
@@ -637,7 +632,8 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     try:
         family_prompt = run_mod._build_family_prompt(manifest=manifest, grade=grade,
                                                       review=review)
-        guarded_mkdir(Path(episode_dir) / "worlds" / "family" / "judge", base=episode_dir)
+        guarded_mkdir(Path(episode_dir) / WORLDS_DIRNAME / "family" / DRAWS_DIRNAME,
+                      base=episode_dir)
         family_completed, _family_spread, family_documents, family_malformed = (
             _run_world_draws(episode_dir, "family", judge=judge, draws=configured_draws,
                              model=model, effort=effort, prompt=family_prompt,
@@ -657,7 +653,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     episode_outcome = "gradable"
     discard_evidence = {
         "review_pointer":
-            f"{episode_dir.name}/review.yaml#worlds.*.consistency.{_DRIFT_KEYS_FIELD}"}
+            f"{episode_dir.name}/{REVIEW_NAME}#worlds.*.consistency.{_DRIFT_KEYS_FIELD}"}
     # DISCARD IS MECHANICAL-FIRST, and that has to mean first across the WHOLE family, not
     # first within whichever world the loop reached first. Checking both words per world and
     # breaking on either made the episode's outcome depend on manifest order: one world voting
@@ -741,7 +737,8 @@ def _pass_lessons_commit(episode_dir: Path, labels: list[str]) -> str | None:
     resolving it here rather than letting each world fall back to its own inside `render` is
     what makes the record's value and the rendered value the same value."""
     for label in labels:
-        commit = render_mod._read_provenance(Path(episode_dir) / "worlds" / label).get("commit")
+        commit = render_mod._read_provenance(
+            Path(episode_dir) / WORLDS_DIRNAME / label).get("commit")
         if commit is not None:
             return str(commit)
     return None
@@ -764,10 +761,16 @@ def read_grade(episode_dir: Path) -> EpisodeGrade | None:
     THE ONE READER (#1025 O8): the same screened read and the same tolerant conversion
     `grade_episode` itself uses when it finds an existing record, exposed so the episode page
     reads the record through this package rather than re-parsing the YAML. A record that is
-    not one — a planted link at the name, a document that is not a mapping — is `JudgeRefused`,
-    exactly as it is for the pass. A `not_graded` stamp reads back as a grade carrying that
-    stamp; deciding what to do about it is the caller's.
+    not one — a planted link at the name, a document that is not a mapping, a `not_graded`
+    stamp that is not a mapping — is `JudgeRefused`, exactly as it is for the pass; a field of
+    the wrong shape inside an otherwise well-formed record reads as that field's default. A
+    `not_graded` stamp reads back as a grade carrying that stamp; deciding what to do about it
+    is the caller's.
     """
+    # COERCED HERE, as `grade_episode` coerces its own argument: the record's `episode_dir` is
+    # typed `Path`, and a `str` caller (a page reading the path off YAML) otherwise got a record
+    # unequal to the one `grade_episode` returns for the same episode.
+    episode_dir = Path(episode_dir)
     doc = _existing_grade(episode_dir)
     return None if doc is None else _grade_from_document(episode_dir, doc)
 
@@ -793,7 +796,24 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
     # returned `verdict_word=None` and `draws=None` from fields typed `str` and `dict`, so
     # `grade.draws["completed"]` raised `TypeError` in the caller and `verdict_word in
     # _UNQUEUEABLE_VERDICTS` silently answered False for an episode whose record said `discard`.
+    #
+    # AND THE COLLECTION FIELDS ARE NARROWED BY SHAPE, not merely defaulted. `list(5)` raises
+    # `TypeError` — a class in NO conversion set — so a scalar where the record keeps a list
+    # (`world_findings: 5`, the same one-field damage as above) left `read_grade` as a bare
+    # traceback, and, because `_grade_episode` now reads a `not_graded` stamp through this
+    # frame before deciding to re-grade, a damaged stamp failed the pass on every launch where
+    # it used to be skipped and re-graded. A scalar where the record keeps a mapping read back
+    # AS the scalar into a `dict`-typed field. The rule is the one `worlds` already follows: a
+    # value of the wrong shape is the default, never a raise and never passed through.
     graded = frozenset(r["world"] for r in worlds if family_mod.is_gradable_row(r))
+    # THE STAMP IS THE ONE EXCEPTION: `not_graded` present and not a mapping is a record that is
+    # not one (the writer emits a mapping or nothing), and it is REFUSED rather than defaulted —
+    # defaulted to `None` it would read as a grade and be returned forever; defaulted to `{}`
+    # it would invent a stamp the archive never wrote.
+    not_graded = doc.get("not_graded")
+    if not_graded is not None and not isinstance(not_graded, dict):
+        raise JudgeRefused(f"{_judge_yaml_path(episode_dir)} carries a not_graded stamp that is "
+                           f"not a mapping: {not_graded!r}")
     # `measuring_worlds`/`withheld_worlds` are RE-DERIVED from the rows' own `withheld_reason`
     # (#1007), the same way `graded_worlds` is already re-derived from `ungradable` — one fewer
     # pair of top-level lists that could disagree with what the rows themselves say.
@@ -806,22 +826,35 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
         episode_outcome=doc.get("episode_outcome") or "gradable",
         enqueued_rows=doc.get("enqueued_rows") or 0,
         enqueued_to=doc.get("enqueued_to") or "",
-        draws=doc.get("draws") or {}, knobs=doc.get("knobs") or {},
+        draws=_mapping_field(doc, "draws"), knobs=_mapping_field(doc, "knobs"),
         lessons_commit=doc.get("lessons_commit"),
-        discard_evidence=doc.get("discard_evidence") or {},
+        discard_evidence=_mapping_field(doc, "discard_evidence"),
         queue_malformed_rows=doc.get("queue_malformed_rows") or 0,
         world_queue_malformed_rows=doc.get("world_queue_malformed_rows") or 0,
-        unqueueable_findings=list(doc.get("unqueueable_findings") or []),
-        not_graded=doc.get("not_graded"),
+        unqueueable_findings=_list_field(doc, "unqueueable_findings"),
+        not_graded=not_graded,
         family_outcome=doc.get("family_outcome"),
         family_failed_reason=doc.get("family_failed_reason"),
         family_malformed_replies=doc.get("family_malformed_replies") or 0,
         world_enqueued_rows=doc.get("world_enqueued_rows") or 0,
         world_enqueued_to=doc.get("world_enqueued_to") or "",
         withheld_worlds=graded - measuring, measuring_worlds=measuring,
-        world_findings=list(doc.get("world_findings") or []),
-        withheld_findings=list(doc.get("withheld_findings") or []),
+        world_findings=_list_field(doc, "world_findings"),
+        withheld_findings=_list_field(doc, "withheld_findings"),
     )
+
+
+def _list_field(doc: dict[str, Any], key: str) -> list[Any]:
+    """The record's list at `key`, or `[]` for an absent, null or wrong-shaped value — see
+    `_grade_from_document` for why a wrong shape is the default and never a raise."""
+    value = doc.get(key)
+    return list(value) if isinstance(value, list) else []
+
+
+def _mapping_field(doc: dict[str, Any], key: str) -> dict[str, Any]:
+    """The record's mapping at `key`, or `{}` for an absent, null or wrong-shaped value."""
+    value = doc.get(key)
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _write_judge_yaml(episode_dir: Path, record: EpisodeGrade) -> None:

@@ -763,14 +763,14 @@ def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
         f"finding may cite ONLY these episode-level files by bare name: "
         f"{', '.join(f'`{name}`' for name in _FAMILY_EVIDENCE_FILES)}, optionally with a "
         "`#fragment` naming what in the file you mean (for example "
-        "`review.yaml#worlds.b.reachability`). Any other path fails to resolve, and A FINDING "
+        f"`{REVIEW_NAME}#worlds.b.reachability`). Any other path fails to resolve, and A FINDING "
         "WHOSE POINTERS ALL FAIL TO RESOLVE IS DISCARDED.\n\n"
         f"{_outcome_guidance()}"
     )
     sections = {
         "manifest": _render_family_manifest(manifest),
         "review": yaml.safe_dump(review, sort_keys=False) if review else
-                 "no review.yaml is recorded for this episode\n",
+                 f"no {REVIEW_NAME} is recorded for this episode\n",
         "mechanical": _render_family_mechanical_rows(grade),
     }
     titled = [titled_section(name.upper(), body) for name, body in sections.items()]

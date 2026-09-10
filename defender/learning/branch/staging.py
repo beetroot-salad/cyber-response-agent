@@ -46,7 +46,6 @@ from defender import _yaml
 from defender._clock import now_iso
 from defender._io import guarded_mkdir, open_guarded, write_guarded
 from defender._run_paths import artifact_file
-from defender.learning.branch.archive import REVIEW_NAME
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
 from defender.scripts.adapters.elastic_adapter import (
@@ -68,11 +67,9 @@ from defender.scripts.adapters.faults import TransportFault
 #: corpus nobody reads while every row still read honestly.
 INJECT_SUFFIX = ".inject"
 
-#: The staging record's filename under the episode dir.
+#: The staging record's filename under the episode dir. (The review record a teardown failure
+#: is reported into is the caller's `review_path=`, never a name this module spells.)
 STAGED_FILENAME = "staged.yaml"
-
-#: The review record a teardown failure is reported into — the archive's one spelling.
-REVIEW_FILENAME = REVIEW_NAME
 
 #: The two kinds of thing staging creates. Recorded per row because teardown deletes them
 #: through different cluster APIs and a row that cannot say which is a row teardown has to
@@ -1015,7 +1012,6 @@ __all__ = [
     "INJECT_SUFFIX",
     "KIND_ALIAS",
     "KIND_INDEX",
-    "REVIEW_FILENAME",
     "STAGED_FILENAME",
     "StagingRefused",
     "check_configured_patterns",

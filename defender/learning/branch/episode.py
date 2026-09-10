@@ -61,10 +61,6 @@ from defender.runtime.branch._family import (
     world_token_for,
 )
 
-# `REVIEW_NAME` — the launcher's record, under the episode — is the archive's one spelling,
-# imported above and re-exported below. Read for ONE field here — the episode's own recorded
-# outcome — and read through the same loader that wrote it.
-
 #: The outcome that withholds comparability. Spelled once: the launcher writes it, both
 #: readers refuse on it, and a second spelling is a refusal that stops firing.
 INCOMPLETE = "incomplete"
@@ -409,7 +405,6 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
 
 __all__ = [
     "INCOMPLETE",
-    "REVIEW_NAME",
     "EpisodeError",
     "delta_o",
     "verdicts",

@@ -24,11 +24,12 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import read_jsonl_rows
-from defender._run_paths import artifact_dir, artifact_file
+from defender._run_paths import PROVENANCE, artifact_dir, artifact_file
 from defender.learning.branch.archive import (
     ALERT_NAME,
     GATHER_SUMMARIES_DIRNAME,
     LESSONS_LOADED_NAME,
+    WORLDS_DIRNAME,
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender._report import read_report
@@ -44,9 +45,8 @@ from defender.learning.judge.family import (
     read_review_record,
     read_samples_record,
     read_world_facts,
+    sample_patterns,
     scope_params,
-    staged_patterns,
-    world_pattern,
     world_review_block,
 )
 from defender.run_common import REPO_ROOT
@@ -437,7 +437,7 @@ def episode_alert(episode_dir: Path, labels: list[str]) -> dict[str, Any]:
     """
     fallback: dict[str, Any] = {}
     for label in labels:
-        data = json_mapping(Path(episode_dir) / "worlds" / label / ALERT_NAME)
+        data = json_mapping(Path(episode_dir) / WORLDS_DIRNAME / label / ALERT_NAME)
         if data is None:
             continue
         if data.get("alert_id") is not None:
@@ -557,7 +557,7 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     # exactly this hand-over; the manifest simply was not put through it.
     doc = manifest if manifest is not None else raw_manifest(episode_dir)
     episode_token = episode_token_for(episode_id_of(doc))
-    world_dir = episode_dir / "worlds" / world_label
+    world_dir = episode_dir / WORLDS_DIRNAME / world_label
     world_entry = _world_entry(doc, world_label)  # validates the graded world is actually declared
     show = git_show if git_show is not None else _git_show_default
     record = facts if facts is not None else read_world_facts(
@@ -589,14 +589,13 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
         if isinstance(raw_holding_system, str) else []
 
     # #1007 M4/O5: this world's own sample(s) and its own reachability block — off the SAME
-    # `staged_patterns`/`world_pattern` and `world_review_block` helpers `family._grade_world`
-    # uses, so the prompt names the same pattern(s) and the same block the mechanical row was
-    # computed from. EVERY staged pattern, never just one (O5's own falsifier) — the patch-only
-    # fallback (`world_pattern`'s single holding-system name) stays for a world with no
-    # staged pattern to enumerate.
+    # `sample_patterns` and `world_review_block` helpers `family._grade_world` uses, so the
+    # prompt names the same pattern(s) and the same block the mechanical row was computed from.
+    # EVERY staged pattern, never just one (O5's own falsifier) — the patch-only fallback (the
+    # holding system's own name, `world_pattern`'s single anchor) is `sample_patterns`' own,
+    # spelled once for both sites.
     overlay = world_entry.get("overlay")
-    world_staged_patterns = staged_patterns(overlay) or [
-        world_pattern(overlay, holding_system=resolved_holding_system)]
+    world_staged_patterns = sample_patterns(overlay, holding_system=resolved_holding_system)
     # THE PASS'S OWN PARSES, when the caller has them — the same hand-over `manifest`/`facts`/
     # `union` already take, and for the reason `read_review_record`'s own docstring gives ("the
     # episode dir is a tree a box can reach — two independent parses had no guarantee of
@@ -675,7 +674,7 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     ] if siblings else []
 
     issued = queries_by_lead(world_dir)
-    leads = {lid: lead_chain(world_dir, lid, resolutions_by_lead, queries_by_lead=issued)
+    leads = {lid: lead_chain(world_dir, lid, resolutions_by_lead, issued=issued)
             for lid in sorted(lead_ids)}
 
     manifest_text = _manifest_text(doc, world_label)
@@ -740,7 +739,7 @@ def _lesson_paths_for(lesson_name: Any) -> list[str]:
 
 
 def _read_provenance(world_dir: Path) -> dict[str, Any]:
-    return json_mapping(world_dir / "provenance.json") or {}
+    return json_mapping(world_dir / PROVENANCE) or {}
 
 
 #: A commit this pass will spend in a subprocess argv. Nothing else is: `provenance.json` lives

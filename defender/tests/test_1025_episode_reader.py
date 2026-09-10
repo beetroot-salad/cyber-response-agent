@@ -4,20 +4,23 @@
 O8 (maintainer): the page, the grading pass and the judge input builder read the episode
 archive through ONE reader — one spelling of each file name, one home for each derived
 accessor. The observed failing is a fourth `REVIEW_NAME = "review.yaml"` (there are four
-today, plus a fifth spelled `REVIEW_FILENAME`), or the page re-implementing a lead chain the
+today, plus a fifth under another name), or the page re-implementing a lead chain the
 input builder already computes. Three decisions are pinned here:
 
 1. **The file names live in `learning/branch/archive.py`** — `REVIEW_NAME`, `SAMPLES_NAME`,
    `JUDGE_NAME` — and NOWHERE ELSE: across the shipped code roots the strings `review.yaml`,
-   `samples.yaml` and `judge.yaml` each occur as a constant in exactly one module, the three
-   assignments occur only there, and every module that reads a record holds `archive`'s own
-   object (an import, `is`-identical). O8's observable IS a name census, so this is the one
-   suite where a walk over the tree's syntax is the honest test rather than a proxy for one —
-   over the AST, because a text regex misses `"review" ".yaml"` and its cousins.
+   `samples.yaml` and `judge.yaml` each occur INSIDE a code string constant in exactly one
+   module (a docstring may mention them; a pointer, a prompt example or a message may not
+   spell them), the three names are BOUND only there, and every module that reads a record
+   holds `archive`'s own object (an import, `is`-identical). O8's observable IS a name census,
+   so this is the one suite where a walk over the tree's syntax is the honest test rather than
+   a proxy for one — over the AST, because a text regex misses `"review" ".yaml"` and its
+   cousins, and by CONTAINMENT, because the spellings that actually drift are embedded ones
+   (`f"{ep}/review.yaml#..."`, "for example `review.yaml#worlds.b...`").
 2. **The derived accessors live in `learning/judge/family.py` under PUBLIC names** —
    `world_review_block`, `staged_patterns`, `world_pattern`, `own_h_rows`, `raw_manifest`, and,
-   moved off `render.py`, `queries_by_lead`, `lead_chain` and `json_mapping`. The private
-   spellings that crossed module lines are gone, the input builder IMPORTS the lead-chain trio
+   moved off `render.py`, `queries_by_lead`, `lead_chain` and `json_mapping`. Those seven
+   private spellings are gone, the input builder IMPORTS the lead-chain trio
    (its attributes are `family`'s objects, and no constant in `render.py` names the queries
    table or the lead files), and the `leads` view a real `render()` produces equals what
    `family.lead_chain` answers over the same world. Each accessor's behaviour is driven on the
@@ -29,8 +32,9 @@ input builder already computes. Three decisions are pinned here:
    and the SAME record `grade_episode` returns on an already-graded episode.
 
 Prep 2b / O3: the `lead-quality` vs `None` branch of the bucket ladder turns on `has_refused`,
-which the pass computed and never wrote. It is now on every world row `judge.yaml` writes,
-beside the other flags — true iff the world's served ledger holds a row on the holding system
+which the pass computed and never wrote. It is now on every world row `judge.yaml` writes
+that carries the other ladder flags (a tier-1/tier-2 ungradable early return carries none of
+them, as before) — true iff the world's served ledger holds a row on the holding system
 whose `source` is the ledger's own `refused` — and it survives the round trip through
 `read_grade`. The ladder pairing (a refused H row buckets `None`, the same world without one
 buckets `lead-quality`) is the positive/negative control, driven through the real pass; the
@@ -48,14 +52,14 @@ from __future__ import annotations
 
 import ast
 import json
-import re
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
 
+from defender._run_paths import RunPaths
 from defender.tests import _judge_921 as J
+from defender.tests._spec791 import PROJECT_PROFILE
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -97,13 +101,19 @@ def _grade(ep: Path, tmp_path: Path):
     return _judge().grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs")
 
 
-def _rows(grade: Any) -> dict[str, dict]:
-    return {row["world"]: row for row in grade.worlds}
-
-
 def _passthrough(label: str) -> dict:
     """A queried-and-undoctored H row: the shape that lands in `lead-quality` on its own."""
     return J.ledger_row(source="passthrough", world_label=label)
+
+
+def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
+    """The world's queries table, written the one way this file writes it: one JSON object per
+    line at the writer's own path (`RunPaths.executed_queries`), so the four scenarios that
+    need a table spell neither the name nor the JSONL join."""
+    table = RunPaths(world_dir).executed_queries
+    table.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    return table
 
 
 def _refused_row(label: str, *, system: str = J.HOLDING_SYSTEM) -> dict:
@@ -123,33 +133,33 @@ def _refused_row(label: str, *, system: str = J.HOLDING_SYSTEM) -> dict:
 # Decision 1 — the file names: one home, one spelling
 # ---------------------------------------------------------------------------------------
 
-#: The shipped code roots (the project profile's `specGraph.codeRoots`), relative to the
-#: `defender/` package the code under test is actually IMPORTED from — so a worktree census
-#: reads the worktree, never the checkout the shared venv's editable install points at.
-_CODE_ROOTS = ("learning", "runtime", "scripts", "evals", "run.py")
+#: The shipped code roots — the project profile's `specGraph.codeRoots`, READ from the profile
+#: rather than re-spelled so a root added there is censused here — relative to the `defender/`
+#: package the code under test is actually IMPORTED from, so a worktree census reads the
+#: worktree, never the checkout the shared venv's editable install points at.
+_CODE_ROOTS = tuple(
+    Path(root).relative_to("defender").as_posix()
+    for root in json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))["specGraph"]["codeRoots"])
 _ARCHIVE_MODULE = "learning/branch/archive.py"
-_FILE_NAMES = ("review.yaml", "samples.yaml", "judge.yaml")
-_CONSTANT_NAMES = ("REVIEW_NAME", "SAMPLES_NAME", "JUDGE_NAME")
-#: An ASSIGNMENT to one of the three names at the start of a line — `NAME = ...` — and never
-#: an `==`, an import, or a longer name that merely starts the same way (`REVIEW_FILENAME`).
-_ASSIGNMENT = re.compile(
-    r"^\s*(?:" + "|".join(_CONSTANT_NAMES) + r")\s*=(?!=)", re.MULTILINE)
+#: The three names and the three files, one mapping.
+_RECORD_NAMES = {"REVIEW_NAME": "review.yaml", "SAMPLES_NAME": "samples.yaml",
+                 "JUDGE_NAME": "judge.yaml"}
 
 #: Every shipped module that reads one of the three records, and the attribute it reads the
 #: name through. Each must be `archive`'s OWN object — an import, never a re-spelling.
-#: `staging.REVIEW_FILENAME` is that module's historical alias for `REVIEW_NAME`.
-_IMPORTERS: tuple[tuple[str, str, str], ...] = (
-    ("learning.branch.cli", "REVIEW_NAME", "REVIEW_NAME"),
-    ("learning.branch.cli", "SAMPLES_NAME", "SAMPLES_NAME"),
-    ("learning.branch.episode", "REVIEW_NAME", "REVIEW_NAME"),
-    ("learning.branch.review", "REVIEW_NAME", "REVIEW_NAME"),
-    ("learning.branch.staging", "REVIEW_FILENAME", "REVIEW_NAME"),
-    ("learning.judge.family", "REVIEW_NAME", "REVIEW_NAME"),
-    ("learning.judge.family", "SAMPLES_NAME", "SAMPLES_NAME"),
-    ("learning.judge.run", "REVIEW_NAME", "REVIEW_NAME"),
-    ("learning.judge.run", "SAMPLES_NAME", "SAMPLES_NAME"),
-    ("learning.judge.run", "JUDGE_NAME", "JUDGE_NAME"),
-    ("learning.judge", "JUDGE_NAME", "JUDGE_NAME"),
+_IMPORTERS: tuple[tuple[str, str], ...] = (
+    ("learning.branch.cli", "REVIEW_NAME"),
+    ("learning.branch.cli", "SAMPLES_NAME"),
+    ("learning.branch.episode", "REVIEW_NAME"),
+    ("learning.branch.review", "REVIEW_NAME"),
+    ("learning.judge.enqueue", "SAMPLES_NAME"),
+    ("learning.judge.family", "REVIEW_NAME"),
+    ("learning.judge.family", "SAMPLES_NAME"),
+    ("learning.judge.run", "REVIEW_NAME"),
+    ("learning.judge.run", "SAMPLES_NAME"),
+    ("learning.judge.run", "JUDGE_NAME"),
+    ("learning.judge", "JUDGE_NAME"),
+    ("learning.judge", "REVIEW_NAME"),
 )
 
 
@@ -187,10 +197,37 @@ def _folded_string(node: ast.AST) -> str | None:
     return None
 
 
-def _string_constants(source: str, path: str) -> set[str]:
-    """Every string a module's AST denotes as a constant expression — see `_folded_string`."""
+def _census(source: str, path: str) -> tuple[set[str], set[str]]:
+    """`(code strings, bound names)` for one module, off ONE parse.
+
+    The code strings are every string the AST denotes as a constant expression (see
+    `_folded_string`) EXCEPT docstrings — a module, class or function docstring is prose and
+    may mention a file by name; a pointer, a prompt example or a message is code and may not.
+    The bound names are every `Name` in Store context — an assignment, an annotated or tuple
+    assignment, a walrus, a loop or `with` target — which is what "this module DEFINES the
+    name" means; an import is an `alias`, not a `Name`, so a re-export never counts.
+    """
     tree = ast.parse(source, filename=path)
-    return {s for node in ast.walk(tree) if (s := _folded_string(node)) is not None}
+    docstrings = {
+        id(node.value) for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    }
+    strings: set[str] = set()
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if id(node) in docstrings:
+            continue
+        if (folded := _folded_string(node)) is not None:
+            strings.add(folded)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+    return strings, bound
+
+
+def _string_constants(source: str, path: str) -> set[str]:
+    """Every code string a module's AST denotes as a constant expression — see `_census`."""
+    return _census(source, path)[0]
 
 
 def test_archive_is_the_one_home_for_the_three_episode_record_names():
@@ -206,23 +243,29 @@ def test_archive_is_the_one_home_for_the_three_episode_record_names():
     """
     archive = _archive()
 
-    for name, value in zip(_CONSTANT_NAMES, _FILE_NAMES, strict=True):
+    for name, value in _RECORD_NAMES.items():
         assert getattr(archive, name) == value, (
             f"archive.{name} is {getattr(archive, name)!r}, not {value!r}")
 
 
 def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
     """O8's census, run over the tree's SYNTAX: across the shipped code roots the strings
-    `review.yaml`, `samples.yaml` and `judge.yaml` each occur as a constant in ONE module —
-    `archive.py` — and an ASSIGNMENT to `REVIEW_NAME` / `SAMPLES_NAME` / `JUDGE_NAME` occurs
-    only there. Every other module imports the name; an import is not an assignment.
+    `review.yaml`, `samples.yaml` and `judge.yaml` each occur INSIDE a code string in ONE
+    module — `archive.py` — and a BINDING of `REVIEW_NAME` / `SAMPLES_NAME` / `JUDGE_NAME`
+    occurs only there. Every other module imports the name; an import is not a binding.
 
     Through `ast`, not a regex over the text: a regex sees `"review.yaml"` and misses
     `"review" ".yaml"` (folded by the parser into one constant), `"review" + ".yaml"` and
-    `f"review.yaml"` — every one of which is the same second home wearing a disguise.
+    `f"review.yaml"` — every one of which is the same second home wearing a disguise. And by
+    CONTAINMENT, not equality: the spellings that drift are the embedded ones — a pointer
+    written into `judge.yaml` (`f"{ep}/review.yaml#..."`), the family prompt's worked example,
+    an unqueueable reason — which an exact-match census walked straight past while the
+    allowlist beside them followed the constant. Docstrings are exempt: prose may name a file.
+    Bindings off the same AST, in Store context, so `NAME: str = ...`, a tuple target and a
+    walrus all count and a docstring line that merely looks like an assignment does not.
 
-    Observably true: the set of modules whose AST denotes each name is `{archive.py}`, and so
-    is the set of modules assigning any of the three constants.
+    Observably true: the set of modules whose code strings contain each name is `{archive.py}`,
+    and so is the set of modules binding any of the three constants.
 
     What failure looks like: before the change, `family.py`, `branch/episode.py`,
     `branch/review.py`, `branch/cli.py` and `branch/staging.py` (as `REVIEW_FILENAME`) each
@@ -231,18 +274,21 @@ def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
     file reaches some readers and not others, and the page reads a record the pass never wrote.
     """
     modules = _shipped_modules()
-    constants = {path: _string_constants(text, path) for path, text in modules.items()}
+    census = {path: _census(text, path) for path, text in modules.items()}
 
-    for file_name in _FILE_NAMES:
-        spelled_in = sorted(m for m, strings in constants.items() if file_name in strings)
+    for file_name in _RECORD_NAMES.values():
+        spelled_in = sorted(
+            m for m, (strings, _bound) in census.items() if any(file_name in s for s in strings))
         assert spelled_in == [_ARCHIVE_MODULE], (
-            f"{file_name!r} is spelled as a constant in {spelled_in}; O8 wants exactly one "
-            f"home, {_ARCHIVE_MODULE}, with every other module importing the name")
+            f"{file_name!r} is spelled inside a code string in {spelled_in}; O8 wants exactly "
+            f"one home, {_ARCHIVE_MODULE}, with every other module importing the name — a "
+            "pointer, a prompt example or a message spells it as f\"...{REVIEW_NAME}...\"")
 
-    assigned_in = sorted(m for m, text in modules.items() if _ASSIGNMENT.search(text))
-    assert assigned_in == [_ARCHIVE_MODULE], (
-        f"REVIEW_NAME / SAMPLES_NAME / JUDGE_NAME are ASSIGNED in {assigned_in}; only "
-        f"{_ARCHIVE_MODULE} may define them — a re-export is an import, not an assignment")
+    bound_in = sorted(
+        m for m, (_strings, bound) in census.items() if bound & _RECORD_NAMES.keys())
+    assert bound_in == [_ARCHIVE_MODULE], (
+        f"REVIEW_NAME / SAMPLES_NAME / JUDGE_NAME are BOUND in {bound_in}; only "
+        f"{_ARCHIVE_MODULE} may define them — a re-export is an import, not a binding")
 
 
 def test_every_reader_of_a_record_name_holds_the_archives_own_object():
@@ -258,11 +304,11 @@ def test_every_reader_of_a_record_name_holds_the_archives_own_object():
     """
     archive = _archive()
 
-    for module_name, attribute, archive_name in _IMPORTERS:
+    for module_name, attribute in _IMPORTERS:
         module = J.mod(module_name)
         assert hasattr(module, attribute), f"{module_name}.{attribute} is gone"
-        assert getattr(module, attribute) is getattr(archive, archive_name), (
-            f"{module_name}.{attribute} is not archive.{archive_name}'s own object — a "
+        assert getattr(module, attribute) is getattr(archive, attribute), (
+            f"{module_name}.{attribute} is not archive.{attribute}'s own object — a "
             "re-spelling, not an import")
 
 
@@ -292,9 +338,12 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
     callables; neither `family` nor `render` carries the underscore spelling of any of them;
     the input builder IMPORTS the lead-chain trio — `render.lead_chain`, `render.queries_by_
     lead` and `render.json_mapping` are `family`'s own objects — and no constant in `render.py`
-    names `executed_queries.jsonl` or `gather_raw`, the two reads that belong to the accessors.
+    names `executed_queries.jsonl` or `gather_raw`, the two reads that belong to the accessors
+    (which spell them through `RunPaths`, the writer's own accessor, not as literals).
 
-    This is a name census, which is what O8's observable is. What failure looks like: the page
+    This is a name census over the seven accessors the design named (`render.py`'s other
+    readers — `episode_alert`, `_read_provenance` — and `enqueue.draws_on_disk` stay where they
+    are for now), which is what O8's observable is. What failure looks like: the page
     imports `render._lead_chain` (a private, across a module line — the state before this
     change), or a second copy of the chain lives on in `render.py` under fresh private names
     with `family.lead_chain` called by nothing, so the prompt and the page drift.
@@ -329,7 +378,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     `leads` view equal, lead for lead, to `lead_chain` over the same world's own facts.
 
     Observably true: `render(ep, "b").leads["l-001"]` equals `family.lead_chain(world_dir,
-    "l-001", facts.resolutions_by_lead, queries_by_lead=family.queries_by_lead(world_dir))`,
+    "l-001", facts.resolutions_by_lead, issued=family.queries_by_lead(world_dir))`,
     with a real lead file and two issued queries on disk so every link carries a value.
 
     What failure looks like: the builder keeps its own chain (a private copy) and the page,
@@ -344,8 +393,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
         {"lead_id": "l-001", "query_id": "q2", "params": {"index": "logs-2"},
          "payload_digest": "d2"},
     ]
-    (world_dir / "executed_queries.jsonl").write_text(
-        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    _write_issued(world_dir, rows)
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
     base, _src = J.runs_base(tmp_path)
@@ -353,7 +401,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     shown = _render().render(ep, "b", runs_base=base).leads
     facts = family.read_world_facts(ep, "b", episode_token=J.EPISODE_TOKEN)
     expected = family.lead_chain(world_dir, "l-001", facts.resolutions_by_lead,
-                                 queries_by_lead=family.queries_by_lead(world_dir))
+                                 issued=family.queries_by_lead(world_dir))
 
     assert expected["goal"] == "find the pivot", "the fixture's lead file was not read"
     assert expected["payload"] == ["d1", "d2"], "the fixture's queries were not read"
@@ -371,8 +419,8 @@ def test_queries_by_lead_groups_issued_rows_and_drops_conduct_rows_in_one_parse(
     id`) and a row with no `lead_id` are in neither group.
 
     What failure looks like: the sentinel reaches VIEW 1 as a query the world issued — a
-    defender failure invented out of a call the defender was refused (the bug `render.py`'s own
-    docstring records being fixed once already).
+    defender failure invented out of a call the defender was refused (the bug
+    `family.queries_by_lead`'s docstring records being fixed once already, for the actor).
     """
     ep = J.accepted_episode(tmp_path)
     world_dir = ep / "worlds" / "b"
@@ -387,8 +435,7 @@ def test_queries_by_lead_groups_issued_rows_and_drops_conduct_rows_in_one_parse(
          "payload_digest": "dx"},
         {"query_id": "q9", "params": {}},
     ]
-    (world_dir / "executed_queries.jsonl").write_text(
-        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    _write_issued(world_dir, rows)
 
     grouped = _family().queries_by_lead(world_dir)
 
@@ -408,14 +455,13 @@ def test_queries_by_lead_refuses_a_planted_link_at_the_table_name(tmp_path):
     """
     ep = J.accepted_episode(tmp_path)
     world_dir = ep / "worlds" / "b"
-    table = world_dir / "executed_queries.jsonl"
-    line = json.dumps({"lead_id": "l-001", "query_id": "q1", "params": {}}) + "\n"
-    table.write_text(line, encoding="utf-8")
+    row = {"lead_id": "l-001", "query_id": "q1", "params": {}}
+    table = _write_issued(world_dir, [row])
     assert list(_family().queries_by_lead(world_dir)) == ["l-001"], (
         "positive control: a regular table did not group")
 
     outside = tmp_path / "planted.jsonl"
-    outside.write_text(line, encoding="utf-8")
+    outside.write_text(table.read_text(encoding="utf-8"), encoding="utf-8")
     table.unlink()
     table.symlink_to(outside)
 
@@ -425,7 +471,7 @@ def test_queries_by_lead_refuses_a_planted_link_at_the_table_name(tmp_path):
 
 
 def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_lead(tmp_path):
-    """`lead_chain(world_dir, lead_id, resolutions_by_lead, *, queries_by_lead=...)` is the
+    """`lead_chain(world_dir, lead_id, resolutions_by_lead, *, issued=...)` is the
     per-lead join the page needs and the input builder already computes: goal (off the lead's
     own `gather_raw/<lead>.lead.json`), params (the first issued query's), payload digests (in
     issue order), the gather summary, the document rows, and this lead's resolutions.
@@ -448,14 +494,13 @@ def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_l
         {"lead_id": "l-002", "query_id": "q3", "params": {"index": "alerts-*"},
          "payload_digest": "d3"},
     ]
-    (world_dir / "executed_queries.jsonl").write_text(
-        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    _write_issued(world_dir, rows)
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
     resolutions = {"l-001": [{"before": "open", "after": "held"}]}
     grouped = family.queries_by_lead(world_dir)
 
-    chain = family.lead_chain(world_dir, "l-001", resolutions, queries_by_lead=grouped)
+    chain = family.lead_chain(world_dir, "l-001", resolutions, issued=grouped)
 
     assert chain["goal"] == "find the pivot"
     assert chain["params"] == {"index": "logs-*"}, "params is not the FIRST issued query's"
@@ -465,7 +510,7 @@ def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_l
     assert chain["document_rows"] == grouped["l-001"]
     assert chain["resolutions"] == resolutions["l-001"]
 
-    bare = family.lead_chain(world_dir, "l-002", resolutions, queries_by_lead=grouped)
+    bare = family.lead_chain(world_dir, "l-002", resolutions, issued=grouped)
     assert (bare["goal"], bare["summary"], bare["resolutions"]) == (None, None, [])
     assert bare["payload"] == ["d3"], "a lead with queries but no lead file lost its payload"
 
@@ -475,8 +520,10 @@ def test_lead_chain_never_reads_outside_the_graded_world_for_a_traversing_lead_i
     graded world reads nothing — not the sibling's lead file, not the sibling's summary.
 
     Observably true: with world `c`'s `gather_raw/l-001.lead.json` and `gather_summaries/
-    l-001.md` both really on disk, a lead id that resolves to them from `b` yields `goal: None`
-    and a summary that is not `c`'s text. Positive control: the honest id reads `b`'s own.
+    l-001.md` both really on disk, a lead id that resolves to EACH of them from `b` — the two
+    joins read different subdirectories, so one id cannot reach both — yields `goal: None` for
+    the one aimed at the lead file and a summary that is not `c`'s text for the one aimed at
+    the summary. Positive control: the honest id reads `b`'s own lead file and summary.
 
     What failure looks like: a counterfactual sibling's report enters this world's prompt as
     a fact about the world being graded (O5/J14).
@@ -484,18 +531,22 @@ def test_lead_chain_never_reads_outside_the_graded_world_for_a_traversing_lead_i
     family = _family()
     ep = J.accepted_episode(tmp_path)
     b_dir, c_dir = ep / "worlds" / "b", ep / "worlds" / "c"
+    (b_dir / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"lead_id": "l-001", "goal": "OWN GOAL"}), encoding="utf-8")
     (c_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "SIBLING GOAL"}), encoding="utf-8")
     sibling_summary = (c_dir / "gather_summaries" / "l-001.md").read_text(encoding="utf-8")
     assert "world c" in sibling_summary, "the fixture's sibling summary does not name world c"
-    traversing = "../../c/gather_summaries/l-001"
 
-    honest = family.lead_chain(b_dir, "l-001", {}, queries_by_lead={})
-    leaked = family.lead_chain(b_dir, traversing, {}, queries_by_lead={})
+    honest = family.lead_chain(b_dir, "l-001", {}, issued={})
+    leaked_goal = family.lead_chain(b_dir, "../../c/gather_raw/l-001", {}, issued={})
+    leaked_summary = family.lead_chain(b_dir, "../../c/gather_summaries/l-001", {}, issued={})
 
+    assert honest["goal"] == "OWN GOAL", "positive control: b's own lead file not read"
     assert "world b" in (honest["summary"] or ""), "positive control: b's own summary not read"
-    assert leaked["goal"] is None, f"the sibling's lead file was read: {leaked['goal']!r}"
-    assert "world c" not in (leaked["summary"] or ""), (
+    assert leaked_goal["goal"] is None, (
+        f"a traversing lead id read world c's lead file: {leaked_goal['goal']!r}")
+    assert "world c" not in (leaked_summary["summary"] or ""), (
         "a traversing lead id read world c's gather summary into world b's chain")
 
 
@@ -518,6 +569,68 @@ def test_json_mapping_answers_a_mapping_and_none_for_everything_else(tmp_path):
     path.write_text("{not json", encoding="utf-8")
     assert family.json_mapping(path) is None, "a corrupt document raised or was answered"
     assert family.json_mapping(tmp_path / "absent.json") is None
+
+
+def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regular_file(
+        tmp_path):
+    """`json_mapping` is ONE home for the link policy as well as the tolerance policy: three of
+    its five callers (`_world_alert_id`, `episode_alert`, `_read_provenance`) have no `lstat`
+    screen of their own, and `provenance.json` is screened nowhere else in the judge — so a
+    bare `read_text` here followed a link planted at `worlds/<X>/provenance.json` and handed the
+    pass an attacker-chosen `commit` to `git show` every lesson at.
+
+    Observably true: a regular file reads as its mapping (positive control); the same bytes
+    behind a real symlink at the same name read as `None`; and `render._read_provenance` over a
+    world whose stamp is such a link answers `{}` — no commit, rather than the planted one.
+    """
+    family, render = _family(), _render()
+    outside = tmp_path / "planted.json"
+    outside.write_text(json.dumps({"commit": "a" * 40, "dirty": False}), encoding="utf-8")
+    regular = tmp_path / "artifact.json"
+    regular.write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
+    assert family.json_mapping(regular) == {"commit": "a" * 40, "dirty": False}, (
+        "positive control: a regular file did not read")
+
+    linked = tmp_path / "linked.json"
+    linked.symlink_to(outside)
+    assert family.json_mapping(linked) is None, "a symlink at the artifact's name was followed"
+
+    ep = J.accepted_episode(tmp_path)
+    stamp = ep / "worlds" / "b" / "provenance.json"
+    stamp.unlink()
+    stamp.symlink_to(outside)
+    assert render._read_provenance(ep / "worlds" / "b") == {}, (
+        "a planted link at provenance.json handed the pass the planted commit")
+
+
+def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path):
+    """The lead file is screened at the DIRECTORY as well as the leaf: `artifact_file` lstats
+    the entry it is given, so a link planted at `gather_raw/` itself put another tree's regular
+    `.lead.json` through a leaf check that passes — the opposite posture from
+    `lead_repository.load_leads`, which `artifact_dir`s the same directory.
+
+    Observably true: a real `gather_raw/l-001.lead.json` reads its goal (positive control);
+    with `gather_raw/` replaced by a symlink to a directory holding the same file, the chain
+    reads `goal: None`.
+    """
+    family = _family()
+    ep = J.accepted_episode(tmp_path)
+    world_dir = ep / "worlds" / "b"
+    (world_dir / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
+    assert family.lead_chain(world_dir, "l-001", {}, issued={})["goal"] == "find the pivot", (
+        "positive control: the real lead file was not read")
+
+    outside = tmp_path / "planted-gather_raw"
+    outside.mkdir()
+    (outside / "l-001.lead.json").write_text(
+        json.dumps({"lead_id": "l-001", "goal": "SIBLING GOAL"}), encoding="utf-8")
+    import shutil
+    shutil.rmtree(world_dir / "gather_raw")
+    (world_dir / "gather_raw").symlink_to(outside, target_is_directory=True)
+
+    assert family.lead_chain(world_dir, "l-001", {}, issued={})["goal"] is None, (
+        "a link planted at gather_raw/ was followed to another tree's lead file")
 
 
 def test_world_review_block_joins_by_label_and_answers_none_for_an_absent_or_odd_entry():
@@ -546,11 +659,15 @@ def test_staged_patterns_and_world_pattern_read_the_overlay_the_same_way():
     """`staged_patterns(overlay)` is EVERY staged pattern in a stable (sorted) order — O5's
     per-pattern domain; `world_pattern(overlay, *, holding_system=)` is the single
     representative anchor: the first of those, or the holding system's own name for a
-    patch-only world.
+    patch-only world; and `sample_patterns(overlay, *, holding_system=)` is the list the row's
+    `sample_unavailable_patterns` and the prompt's sample section BOTH quantify over — every
+    staged pattern, or the fallback — spelled ONCE (at each site as `staged_patterns(o) or
+    [...]`, the patch-only fallback could change in one and not the other with no test between).
 
     Observably true: a two-pattern overlay enumerates both, sorted, and anchors on the first;
     a patch-only overlay enumerates nothing and anchors on `holding_system`; an overlay that is
-    not a mapping enumerates nothing.
+    not a mapping enumerates nothing; `sample_patterns` is the enumeration or `[holding_system]`,
+    and `world_pattern` is its first element for both shapes.
     """
     family = _family()
     two = J.overlay(elastic={
@@ -565,6 +682,11 @@ def test_staged_patterns_and_world_pattern_read_the_overlay_the_same_way():
     assert family.world_pattern(patch_only, holding_system="elastic") == "elastic"
     assert family.staged_patterns(None) == []
     assert family.staged_patterns({"elastic": {}}) == []
+    assert family.sample_patterns(two, holding_system="elastic") == ["alerts-a", "logs-b"]
+    assert family.sample_patterns(patch_only, holding_system="elastic") == ["elastic"]
+    for overlay in (two, patch_only):
+        assert family.world_pattern(overlay, holding_system="elastic") == (
+            family.sample_patterns(overlay, holding_system="elastic")[0])
 
 
 def test_own_h_rows_selects_the_holding_systems_rows_after_strip_and_casefold():
@@ -721,21 +843,21 @@ def test_read_grade_reads_a_pre_1007_record_with_defaults_and_invents_nothing(tm
     assert grade.world_enqueued_rows == 0
     assert grade.withheld_findings == []
     assert grade.graded_worlds == frozenset({"b", "c"})
-    assert _rows(grade)["b"] == old_row, (
+    assert J.rows(grade)["b"] == old_row, (
         "the reader rewrote a pre-#1007 world row — it invented a fact the archive never stored")
-    assert _rows(grade)["c"] == tempting_row, (
+    assert J.rows(grade)["c"] == tempting_row, (
         "the reader rewrote a queried, undoctored, bucket-None row — it back-filled a "
-        f"`has_refused` the archive never stored: {_rows(grade)['c']}")
+        f"`has_refused` the archive never stored: {J.rows(grade)['c']}")
     for label in ("b", "c"):
-        assert "has_refused" not in _rows(grade)[label]
+        assert "has_refused" not in J.rows(grade)[label]
 
     new = dict(old, family_outcome="gradable", withheld_findings=[{"world": "b"}],
                worlds=[dict(old_row, has_refused=True), dict(tempting_row, has_refused=False)])
     (ep / "judge.yaml").write_text(yaml.safe_dump(new, sort_keys=False), encoding="utf-8")
     grade = read_grade(ep)
     assert (grade.family_outcome, grade.withheld_findings) == ("gradable", [{"world": "b"}])
-    assert _rows(grade)["b"]["has_refused"] is True, "positive control: a stored flag read back"
-    assert _rows(grade)["c"]["has_refused"] is False, (
+    assert J.rows(grade)["b"]["has_refused"] is True, "positive control: a stored flag read back"
+    assert J.rows(grade)["c"]["has_refused"] is False, (
         "a stored `has_refused: False` on a bucket-None row was overridden by the reader")
 
 
@@ -763,14 +885,132 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     assert read_grade(graded).not_graded is None, "positive control: a graded episode"
 
 
+def test_read_grade_narrows_a_wrong_shaped_collection_field_rather_than_raising(tmp_path):
+    """A record that is a mapping but keeps a scalar where a list or a mapping belongs reads
+    with the reader's default for that field — never a bare `TypeError` (`list(5)`), which is in
+    NO conversion set and left the package as a traceback past the docstring's promise of a
+    refusal, and never the scalar passed through into a `dict`-typed field.
+
+    Observably true: `world_findings: 5`, `unqueueable_findings: true`,
+    `withheld_findings: 1.5`, `draws: 5`, `knobs: "x"`, `discard_evidence: [1]` read back as
+    `[]`/`{}` each; the record's other fields still read.
+    """
+    read_grade = J.sym("learning.judge", "read_grade")
+    ep = J.accepted_episode(tmp_path)
+    (ep / "judge.yaml").write_text(yaml.safe_dump({
+        "worlds": [], "verdict_word": "caught", "world_findings": 5,
+        "unqueueable_findings": True, "withheld_findings": 1.5, "draws": 5, "knobs": "x",
+        "discard_evidence": [1]}), encoding="utf-8")
+
+    grade = read_grade(ep)
+
+    assert grade.verdict_word == "caught", "the record's well-shaped fields stopped reading"
+    for field in ("world_findings", "unqueueable_findings", "withheld_findings"):
+        assert getattr(grade, field) == [], f"{field} did not narrow to the empty list"
+    for field in ("draws", "knobs", "discard_evidence"):
+        assert getattr(grade, field) == {}, f"{field} did not narrow to the empty mapping"
+
+
+def test_a_damaged_not_graded_stamp_is_still_a_stamp_the_pass_re_grades(tmp_path):
+    """The existing record is read through `read_grade` BEFORE the pass decides whether it is a
+    stamp to re-grade past, so the conversion has to be total: a `not_graded` stamp with one
+    damaged list field (`world_findings: 5` — the episode dir is a tree a box can reach) used
+    to fall through and be re-graded; converted first, it raised out of every launch and the
+    repaired episode was never re-graded.
+
+    Observably true: over an ACCEPTED episode carrying such a stamp, `grade_episode` re-grades
+    — the returned record has no stamp and names graded worlds, and the stamp on disk is
+    replaced by the grade.
+    """
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    (ep / "judge.yaml").write_text(yaml.safe_dump({
+        "not_graded": {"outcome": "incomplete", "reason": "x"},
+        "episode_outcome": "not-graded", "worlds": [], "world_findings": 5}), encoding="utf-8")
+
+    grade = _grade(ep, tmp_path)
+
+    assert grade.not_graded is None, "the damaged stamp was returned as the grade"
+    assert grade.graded_worlds, "the pass did not re-grade past the stamp"
+    assert "not_graded" not in J.judge_record(ep), "the stamp on disk was not replaced"
+
+
+def test_an_empty_not_graded_stamp_is_a_stamp_and_a_non_mapping_one_is_refused(tmp_path):
+    """"Is this record a grade" is decided the way the WRITER decides whether to stamp:
+    `not_graded is None`, never truthiness. Read by truthiness, `not_graded: {}` (a hand-cleared
+    or planted stamp) counted as a grade and was returned on every call — the "old refusal
+    forever" trap in a different costume. And a stamp that is not a mapping at all is a record
+    that is not one: refused, not defaulted to `None` (a grade forever) or invented as `{}`.
+
+    Observably true: `not_graded: {}` over an accepted episode is re-graded; `not_graded: "yes"`
+    is `JudgeRefused` from `read_grade` and from `grade_episode` alike.
+    """
+    read_grade, refused = J.sym("learning.judge", "read_grade"), _refused()
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    (ep / "judge.yaml").write_text(
+        yaml.safe_dump({"not_graded": {}, "worlds": []}), encoding="utf-8")
+
+    assert _grade(ep, tmp_path).graded_worlds, "an empty stamp was returned as the grade"
+
+    (ep / "judge.yaml").write_text(
+        yaml.safe_dump({"not_graded": "yes", "worlds": []}), encoding="utf-8")
+    with pytest.raises(refused):
+        read_grade(ep)
+    with pytest.raises(refused):
+        _grade(ep, tmp_path)
+
+
+def test_read_grade_hands_back_the_same_record_for_a_str_episode_dir(tmp_path):
+    """`read_grade` coerces its argument as `grade_episode` does, so a caller holding the path
+    as text (a page reading it off YAML) gets a record whose `Path`-typed `episode_dir` IS a
+    `Path` — and equal to the one `grade_episode` returns for the same episode.
+    """
+    read_grade = J.sym("learning.judge", "read_grade")
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    live = _grade(ep, tmp_path)
+
+    stored = read_grade(str(ep))
+
+    assert isinstance(stored.episode_dir, Path), type(stored.episode_dir)
+    assert stored == live, "read_grade(str) is not the record grade_episode returned"
+
+
+def test_the_draws_directory_has_one_name_and_one_public_reader(tmp_path):
+    """The per-draw documents `worlds/<X>/judge/<n>.yaml` are the page's findings source (design
+    §3), so their reader is PUBLIC — `enqueue.draws_on_disk`, in `__all__` — and the directory
+    is `archive.DRAWS_DIRNAME`, held by the writer and the reader as the archive's own object.
+
+    Observably true: after a real pass, `draws_on_disk(ep / WORLDS_DIRNAME / "b" /
+    DRAWS_DIRNAME)` answers that world's completed draws keyed by draw index — the reader finds
+    the directory the writer wrote.
+    """
+    archive, enqueue = _archive(), J.mod("learning.judge.enqueue")
+    assert "draws_on_disk" in enqueue.__all__, "the per-draw reader is not exported"
+    for module_name in ("learning.judge", "learning.judge.enqueue"):
+        module = J.mod(module_name)
+        assert module.DRAWS_DIRNAME is archive.DRAWS_DIRNAME, f"{module_name} re-spells it"
+        assert module.WORLDS_DIRNAME is archive.WORLDS_DIRNAME, f"{module_name} re-spells it"
+    assert not hasattr(J.mod("learning.branch.cli"), "WORLDS_SUBDIR"), (
+        "cli.py still carries a second constant for the worlds directory")
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+
+    grade = _grade(ep, tmp_path)
+    draws = enqueue.draws_on_disk(ep / archive.WORLDS_DIRNAME / "b" / archive.DRAWS_DIRNAME)
+
+    assert grade.draws["completed"] > 0, "positive control: the pass completed no draw"
+    assert sorted(draws) == list(range(grade.draws["completed"])), (
+        f"the reader did not find the draws the pass wrote: {sorted(draws)}")
+
+
 # ---------------------------------------------------------------------------------------
 # Prep 2b / O3 — `has_refused`, stored beside the flags the ladder reads
 # ---------------------------------------------------------------------------------------
 
 
 def test_every_graded_world_row_stores_has_refused_beside_the_other_flags(tmp_path):
-    """`has_refused: bool` is on every world row the pass writes, beside `holding_queried`,
-    `doctored_answer_served` and `difference_shown` — true iff the world's served ledger holds
+    """`has_refused: bool` is on every world row the pass writes that carries the other ladder
+    flags — beside `holding_queried`, `doctored_answer_served` and `difference_shown`; a tier-1
+    or tier-2 ungradable early return carries none of the four — true iff the world's served
+    ledger holds
     a row on the HOLDING SYSTEM whose `source` is the ledger's `refused`.
 
     Observably true, three worlds through the real pass: `b` (a passthrough plus a refused row
@@ -793,7 +1033,7 @@ def test_every_graded_world_row_stores_has_refused_beside_the_other_flags(tmp_pa
 
     grade = _grade(ep, tmp_path)
 
-    for rows in (_rows(grade), J.world_rows(J.judge_record(ep))):
+    for rows in (J.rows(grade), J.world_rows(J.judge_record(ep))):
         for label, row in rows.items():
             if "holding_queried" in row:
                 assert isinstance(row.get("has_refused"), bool), (
@@ -824,7 +1064,7 @@ def test_a_refused_h_row_is_the_stored_fact_that_turns_lead_quality_into_no_buck
         "c": [_passthrough("c")],
     })
 
-    rows = _rows(_grade(ep, tmp_path))
+    rows = J.rows(_grade(ep, tmp_path))
 
     for label in ("b", "c"):
         assert rows[label]["holding_queried"] is True
@@ -864,7 +1104,7 @@ def test_has_refused_is_read_off_the_refused_rows_on_every_ladder_branch(tmp_pat
             "d": [_passthrough("d"), _refused_row("d", system=" Elastic ")],
         })
 
-    rows = _rows(_grade(ep, tmp_path))
+    rows = J.rows(_grade(ep, tmp_path))
 
     assert rows["b"]["doctored_answer_served"] is True, "the doctored branch was not taken"
     assert rows["b"]["has_refused"] is True, (
@@ -904,7 +1144,7 @@ def test_a_refused_row_sharing_a_served_rows_key_is_the_duplicate_j3_drops(tmp_p
         "c": [_passthrough("c"), _refused_row("c")],
     })
 
-    rows = _rows(_grade(ep, tmp_path))
+    rows = J.rows(_grade(ep, tmp_path))
 
     assert (rows["c"]["has_refused"], rows["c"]["bucket"]) == (True, None), (
         "positive control: a refused row with its own key did not reach the ladder")
@@ -929,9 +1169,9 @@ def test_has_refused_survives_the_round_trip_through_read_grade(tmp_path):
         "c": [_passthrough("c")],
     })
 
-    live = _rows(_grade(ep, tmp_path))
+    live = J.rows(_grade(ep, tmp_path))
     on_disk = J.world_rows(J.judge_record(ep))
-    stored = _rows(read_grade(ep))
+    stored = J.rows(read_grade(ep))
 
     assert {label: row.get("has_refused") for label, row in on_disk.items()} == {
         "b": True, "c": False}, "judge.yaml does not carry the flag the pass computed"
