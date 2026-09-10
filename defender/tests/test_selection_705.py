@@ -290,7 +290,7 @@ def test_an_analysis_read_is_not_stopped_at_the_last_complete_pair(tmp_path):
 
     R8 amends R5: truncation is a property of the `send` role only. Under the rejected
     reading an analysis read could not observe the orphan terminal response M3's run-end
-    flush exists to capture, so the moved `transcript.html` would silently drop the last
+    flush exists to capture, so an analysis-role reader would silently drop the last
     response of every truncated run — a live equivalence break (P1/P5)."""
     ss = store_mod()
     store = make_store(tmp_path)

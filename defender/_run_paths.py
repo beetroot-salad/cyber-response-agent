@@ -58,13 +58,13 @@ from pathlib import Path
 #: lenses' replies — the blindness the gate is built on. `challenge_gate.review_trace_path`
 #: owns the filename.
 #:
-#: `transcript.html`/`runtime.html` are the ONE exception, recorded so it is not inferred:
-#: they DO inline MAIN's transcript verbatim (rendered from this log by `visualize_messages`)
-#: and sit at the run root inside GATHER's shape. They are out of reach on TIMING, not on
-#: content — `run.py` renders them after `run_investigation` returns, so no agent of that run
-#: is still alive. That is a thinner guarantee than a directory, and anything that moves the
-#: render INTO the run (a mid-flight `--visualize`, a live page) must move these two under
-#: `wire_logs/` in the same change.
+#: `runtime.html` is the ONE exception, recorded so it is not inferred: it DOES inline
+#: MAIN's transcript verbatim (rendered from this log by `visualize_messages`) and sits at
+#: the run root inside GATHER's shape. It is out of reach on TIMING, not on content —
+#: `run.py` renders it after `run_investigation` returns, so no agent of that run is still
+#: alive. That is a thinner guarantee than a directory, and anything that moves the render
+#: INTO the run (a mid-flight `--visualize`, a live page) must move it under `wire_logs/`
+#: in the same change.
 WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 

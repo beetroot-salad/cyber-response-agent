@@ -5,7 +5,6 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -35,12 +34,9 @@ from defender.scripts.visualize.visualize_data import (
 )
 from defender.scripts.visualize.visualize_primitives import (
     esc,
-    esc_untrusted,
     fmt_duration,
     parse_report,
     render_alert_block,
-    render_lead_sequence_compact,
-    render_report_card,
     section,
 )
 from defender.scripts.visualize.visualize_runtime import (
@@ -54,7 +50,6 @@ from defender.scripts.visualize.visualize_runtime import (
 )
 
 
-TRANSCRIPT_FILENAME = "transcript.html"
 RUNTIME_FILENAME = "runtime.html"
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
@@ -62,36 +57,37 @@ _REPO_ROOT = _DEFENDER_DIR.parent
 
 
 def render_and_mirror(run_dir: Path) -> list[Path]:
-    (run_dir / TRANSCRIPT_FILENAME).write_text(render_transcript_page(run_dir), encoding="utf-8")
+    """Render the run's page, and refuse a directory that is not a run.
+
+    The store resolve is a PRECONDITION, not a data dependency: nothing on the page reads
+    the session store. It is here because a run dir relocated by an allowlist copy arrives
+    without its pointer, and rendering one anyway hands the operator a page that looks
+    complete for a run whose own record could not be found. Fail before writing, so no page
+    is left behind for a reader to trust.
+    """
+    from defender.runtime import session_store as ss
+
+    ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
     (run_dir / RUNTIME_FILENAME).write_text(render_runtime_page(run_dir), encoding="utf-8")
+    src = run_dir / RUNTIME_FILENAME
+    if not src.is_file():
+        return []
     dest_dir = _DEFENDER_DIR / "run-visualizations" / run_dir.name
-    mirrored: list[Path] = []
-    for fname in (TRANSCRIPT_FILENAME, RUNTIME_FILENAME):
-        src = run_dir / fname
-        if not src.is_file():
-            continue
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / fname
-        shutil.copyfile(src, dest)
-        mirrored.append(dest)
-    return mirrored
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / RUNTIME_FILENAME
+    shutil.copyfile(src, dest)
+    return [dest]
 
 
 
 
-def render_header(case_id: str, active: str, byline: str, stats_html: str = "") -> str:
-    judge_active = " active" if active == "judge" else ""
-    runtime_active = " active" if active == "runtime" else ""
+def render_header(case_id: str, byline: str, stats_html: str = "") -> str:
     stats = f'<div class="top-stats">{stats_html}</div>' if stats_html else ""
     return f"""
 <header class="top">
   <div class="top-row">
     <h1>defender run: {esc(case_id)}</h1>
     {stats}
-    <nav class="tabs">
-      <a class="tab{judge_active}" href="{TRANSCRIPT_FILENAME}">Judge eval</a>
-      <a class="tab{runtime_active}" href="{RUNTIME_FILENAME}">Runtime inspection</a>
-    </nav>
   </div>
   <div class="byline">{byline}</div>
 </header>
@@ -104,30 +100,6 @@ def _byline(parts: list[str]) -> str:
     )
 
 
-
-
-def render_transcript_headline(report: ReportRead) -> str:
-    """The page's tiles. Until #922 the left tile was the OLD PIPELINE JUDGE's outcome and
-    finding count, read off a per-direction `judge_findings.yaml` written by a stage that no
-    longer exists; the tile and the artifact went together. What is left is the defender's own
-    verdict on its own run, which is what the rest of this page is about.
-
-    A branched episode's judge writes its verdicts under the episode, per world and per draw,
-    not into a run dir — so there is no per-run judge outcome for this page to show, and a tile
-    reading "—" forever would be worse than none."""
-    disposition = report.disposition_or_unknown
-    confidence = str(report.frontmatter.get("confidence", "?"))
-    return f"""
-<section class="headline">
-  <div class="tiles">
-    <div class="tile tile-disp disp-{esc(disposition)}">
-      <div class="tile-label">defender disposition</div>
-      <div class="tile-value">{esc(disposition)}</div>
-      <div class="tile-sub">confidence: {esc(confidence)}</div>
-    </div>
-  </div>
-</section>
-"""
 
 
 _HEALTH_ICON = {"good": "✓", "warn": "⚠", "bad": "✗"}
@@ -332,108 +304,6 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
     return n_events, n_tool_calls, cost
 
 
-def _main_session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
-    """The store's own `analysis`-role read of this run's MAIN session, paired with each row's
-    `actor`-role coordinate — resolved fresh from `run_dir` rather than from an on-disk
-    projection, so an unresolvable store raises here instead of rendering a stale or empty
-    page."""
-    from defender.runtime import session_store as ss
-
-    store_path = ss.resolve_store_path(run_dir)
-    store = ss.open_store_for_read(store_path)
-    try:
-        # THE RUN'S OWN main session. A resumed run forks into the SOURCE's database, so the
-        # root of the lineage is the source's session and rendering it here would show a
-        # sibling the transcript of the run it branched from. The pointer names the run's own
-        # session when they differ; `main_session_id` — which owns the schema knowledge
-        # (`agent_id`/`parent_session_id`), never restated as inline SQL — is the fallback for
-        # every run where they do not.
-        session_id = ss.resolve_session_id(run_dir) or ss.main_session_id(store)
-        messages = ss.hydrate(store, session_id, role="analysis")
-        coords = ss.hydrate(store, session_id, role="actor")
-        return list(zip(messages, [c["coord"] for c in coords], strict=True))
-    finally:
-        store.connection.close()
-
-
-def render_store_transcript_section(run_dir: Path) -> str:
-    """Model-authored text is attacker-influenced by construction (`session_store`'s own
-    access table), so it is rendered through `esc_untrusted`, not `esc` — see that
-    function's docstring."""
-    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-
-    blocks: list[str] = []
-    for message, coord in _main_session_analysis(run_dir):
-        if not isinstance(message, ModelResponse):
-            continue
-        body: list[str] = []
-        for part in message.parts:
-            if isinstance(part, TextPart) and part.content.strip():
-                body.append(f'<pre class="text">{esc_untrusted(part.content)}</pre>')
-            elif isinstance(part, ToolCallPart):
-                body.append(f'<div class="tx-call">→ {esc(part.tool_name)}</div>')
-        if body:
-            blocks.append(f'<div class="tx-entry" data-coord="{esc(coord)}">'
-                          f'{"".join(body)}</div>')
-    section_body = "".join(blocks) if blocks else '<div class="empty">no model transcript</div>'
-    return section("sec-store-transcript", "defender", "Model transcript",
-                    "— a preview of each response the store recorded for this run",
-                    section_body)
-
-
-def _defender_summary(run_dir: Path) -> str:
-    """The defender's own output: its report card and the sequence of leads it worked.
-
-    MOVED HERE BY #922, out of the deleted judge page. Its subtitle used to read "what the
-    judge graded", which was true when the sections below it were that judge's verdict on
-    exactly these two artifacts. Nothing on this page grades anything now, so the section
-    describes what it shows instead of what used to read it."""
-    body = f"""<h3>report.md</h3>
-  {render_report_card(run_dir)}
-
-  <h3>lead sequence ({len(lead_repository.joined(run_dir))} lead(s))</h3>
-  {render_lead_sequence_compact(run_dir)}"""
-    return section("sec-defender-summary", "defender", "Defender summary",
-                   "— the report it wrote and the leads it worked", body)
-
-
-def render_transcript_page(run_dir: Path) -> str:
-    """The run's own page: what the defender was given, what it concluded, and what it said.
-
-    #922 REMOVED TWO OF ITS SECTIONS, not the page. It carried the old pipeline's per-direction
-    actor story and judge verdict, plus a raw bundle of that pipeline's inputs — all read out
-    of `defender/learning/runs/<run_id>/`, which no stage writes any more. The alert, the
-    defender's own summary and the model transcript are the run's own and stay. The layout's
-    table of contents went with them: it indexed the per-direction sections and had nothing
-    left to index."""
-    case_id = run_dir.name
-    events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
-    n_events, n_tool_calls, cost = _stats(events)
-    report = parse_report(run_dir)
-
-    byline = _byline([
-        f"events={n_events}",
-        f"tool_calls={n_tool_calls}",
-        f"cost=${cost:.4f}",
-        f"run_dir={esc(str(run_dir))}",
-    ])
-
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>transcript — {esc(case_id)}</title>
-<style>{CSS}</style></head><body id="top">
-{render_header(case_id, active="judge", byline=byline)}
-{render_transcript_headline(report)}
-<div class="layout">
-  <article class="content">
-    {render_alert_block(run_dir, open_=True)}
-    {_defender_summary(run_dir)}
-    {render_store_transcript_section(run_dir)}
-  </article>
-</div>
-</body></html>
-"""
-
-
 def _render_policy_denials_section(run_dir: Path) -> str:
     """A denial is durable on disk (`observe.POLICY_DENIALS`) and unrelated to every other
     record kind this page filters on — folding it into an existing filtered stream is exactly
@@ -569,7 +439,7 @@ def render_runtime_page(run_dir: Path) -> str:
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>runtime — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
-{render_header(case_id, active="runtime", byline=byline, stats_html=stats_html)}
+{render_header(case_id, byline=byline, stats_html=stats_html)}
 <div class="layout">
   {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads, n_reviewed)}
   <article class="content content-runtime">
@@ -581,7 +451,6 @@ def render_runtime_page(run_dir: Path) -> str:
     {review_html}
     {leads_html}
     {transcript_html}
-    {render_store_transcript_section(run_dir)}
   </article>
 </div>
 {render_footer(run_dir, case_id)}
@@ -599,7 +468,6 @@ def main(argv: list[str]) -> int:
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
     mirrored = render_and_mirror(run_dir)
-    print(f"wrote {run_dir / TRANSCRIPT_FILENAME}")
     print(f"wrote {run_dir / RUNTIME_FILENAME}")
     for dest in mirrored:
         print(f"mirrored {dest.relative_to(_REPO_ROOT)}")

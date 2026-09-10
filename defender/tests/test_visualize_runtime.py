@@ -66,7 +66,7 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
     # for this fixture (`runs_base = run.parent = tmp_path`) is the shared parent every
     # test in this file's pytest run gets its own `tmp_path` under — so a fixed case_id
     # collides across tests into one shared store file and one shared `main` session
-    # lineage. #754's `_main_session_analysis` refuses that ambiguity outright instead of
+    # lineage. #754's session pick refuses that ambiguity outright instead of
     # silently picking one, which is what surfaces this fixture's own pre-existing
     # cross-test collision.
     store = ss.open_store(

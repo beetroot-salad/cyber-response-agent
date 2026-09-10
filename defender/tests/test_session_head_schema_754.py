@@ -25,7 +25,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.scripts.visualize import visualize_run  # noqa: E402
 from defender.tests._session_head_754 import (  # noqa: E402
     DELIBERATE,
     file_shape,
@@ -36,6 +35,7 @@ from defender.tests._session_head_754 import (  # noqa: E402
     log_rows,
     message_ids,
     raised_by,
+    session_analysis,
     sidecars,
 )
 from defender.tests._session_store_705 import (  # noqa: E402
@@ -633,11 +633,10 @@ def test_no_alter_shim_reshapes_an_existing_store(tmp_path):
         "control: the fresh path still builds the current shape")
 
 
-# the visualizer's pick
+# the store's session pick
 
 def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
-    """A run dir whose pointer resolves a real store — the only thing `_main_session_analysis`
-    is given."""
+    """A run dir whose pointer resolves a real store — the only thing the pick is given."""
     ss = store_mod()
     base = runs_base(tmp_path)
     run_dir = tmp_path / f"run-{case_id}"
@@ -647,8 +646,8 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
     return run_dir, store
 
 
-def test_the_visualizer_picks_the_root_of_lineage_main_session(tmp_path):
-    """    The transcript the visualizer renders is the ROOT-OF-LINEAGE main session's — the one whose
+def test_the_session_pick_resolves_the_root_of_lineage_main_session(tmp_path):
+    """    The session the pick resolves is the ROOT-OF-LINEAGE main session — the one whose
     `parent_session_id` is NULL — so a fork of main, which inherits `agent_id`, and a gather
     leg's session are both excluded from the pick even when the row ordering favours them.
 
@@ -656,7 +655,7 @@ def test_the_visualizer_picks_the_root_of_lineage_main_session(tmp_path):
     is given a LOWER rowid than the session it forked from, which the API cannot produce but
     which a rowid-ordered pick would follow straight into the wrong transcript. The pick runs
     in the VISUALIZER'S process, and a wrong pick renders the wrong run silently — no error,
-    just the wrong transcript."""
+    just the wrong one."""
     # provenance: P113, grounded in B14 (executed): today's picker returns the true main only
     # because rowid ordering happens to favour it, and a fork of main is a second agent_id
     # 'main' row.
@@ -676,7 +675,7 @@ def test_the_visualizer_picks_the_root_of_lineage_main_session(tmp_path):
         "about ordering and not about the predicate")
     store.close()
 
-    picked = visualize_run._main_session_analysis(run_dir)
+    picked = session_analysis(run_dir)
 
     coords = [coord for _message, coord in picked]
     assert coords, "the pick must resolve a session and render its path"
@@ -689,8 +688,8 @@ def test_the_visualizer_picks_the_root_of_lineage_main_session(tmp_path):
 
 
 def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
-    """    When the root-of-lineage query does not resolve to exactly one session the visualizer
-    RAISES instead of picking one: a store with no root-of-lineage main session at all fails
+    """    When the root-of-lineage query does not resolve to exactly one session the pick
+    RAISES instead of choosing one: a store with no root-of-lineage main session at all fails
     loudly rather than falling back to whatever row happens to sort first, and a store with TWO
     independently-created main sessions fails loudly rather than rendering one of them
     silently.
@@ -707,7 +706,7 @@ def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
     linear_turns(empty_store, leg, 1, agent_id="gather-l1", label="leg")
     empty_store.close()
 
-    missing = raised_by(visualize_run._main_session_analysis, empty_dir)
+    missing = raised_by(session_analysis, empty_dir)
     assert missing is not None, (
         "with no root-of-lineage row the deleted fallback would have rendered the gather "
         "leg's transcript as the run's own")
@@ -723,7 +722,7 @@ def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
                           "AND agent_id = 'main'") == [(2,)]
     two_store.close()
 
-    ambiguous = raised_by(visualize_run._main_session_analysis, two_dir)
+    ambiguous = raised_by(session_analysis, two_dir)
     assert ambiguous is not None, "two roots of lineage must be a caught error"
     assert not isinstance(ambiguous, DELIBERATE), f"{ambiguous!r}"
 
@@ -731,5 +730,5 @@ def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
     only = one_store.new_session(agent_id="main")
     linear_turns(one_store, only, 1, label="the only main")
     one_store.close()
-    assert visualize_run._main_session_analysis(one_dir), (
+    assert session_analysis(one_dir), (
         "control: exactly one root of lineage renders its transcript")

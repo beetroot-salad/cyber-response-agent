@@ -117,7 +117,7 @@
           "defender/runtime/selection.py::ingest",
           "defender/runtime/selection.py::fold",
           "defender/runtime/observe.py::write_trace",
-          "defender/scripts/visualize/visualize_run.py::_main_session_analysis"
+          "defender/scripts/visualize/visualize_run.py::render_and_mirror"
         ],
         "grep": [
           "session_store",

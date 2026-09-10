@@ -18,9 +18,9 @@ would otherwise have had to state — so three of the four readers assert equiva
 exception, a materially stronger bar than "equivalent except the coordinate" applied
 uniformly. Do not write the blanket tolerance.
 
-`gl1` lives here too: R4 moves `transcript.html` onto the store, so model-authored payload
-text — attacker-influenced by construction, per `session_store`'s own access table — reaches
-a NEW render path whose HTML escaping is not inherited from the log-derived renderer.
+`gl1` lives here too: model-authored payload text is attacker-influenced by construction,
+per `session_store`'s own access table, so the rendered page's HTML escaping of it is a
+demand in its own right.
 """
 from __future__ import annotations
 
@@ -280,12 +280,12 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
 # gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
 
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
-    """`render_and_mirror` writes `transcript.html` and `runtime.html` with a truncating
-    write under ONE `run_id`, and it has two drivers: `run_common.visualize()`'s subprocess
-    and the in-process transcript render. Driven in turn over one run dir,
-    the second render does not silently replace the first's pages with emptier ones — both
-    pages still carry the run's own event content after each driver has run, and the two
-    drivers agree on how many assistant events the page shows.
+    """`render_and_mirror` writes `runtime.html` with a truncating write under ONE
+    `run_id`, and it has two drivers: `run_common.visualize()`'s subprocess and the
+    in-process render. Driven in turn over one run dir, the second render does not silently
+    replace the first's page with an emptier one — the page still carries the run's own
+    event content after each driver has run, and the two drivers agree on how many
+    assistant entries it shows.
 
     R2's `unique-key` + `serial` form: drive the writers IN TURN and pin that the second
     `w`-open does not lose the first's real content. The positive control is that each
@@ -299,13 +299,12 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
     marker = "RENDERED-RUN-MARKER-705-b7c8d9"
     run_dir, store, _replay = _driven_run(tmp_path, run_id="two-drivers", text=marker)
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
-    assistant_ids = [e["message"]["id"] for e in _trace_events(run_dir)
-                     if e.get("type") == "assistant"]
-    assert assistant_ids, "the run produced no projection for either driver to render from"
+    assistant_events = [e for e in _trace_events(run_dir) if e.get("type") == "assistant"]
+    assert assistant_events, "the run produced no projection for either driver to render from"
 
     def pages() -> dict:
         return {name: (run_dir / name).read_text()
-                for name in ("transcript.html", "runtime.html")}
+                for name in ("runtime.html",)}
 
     # driver A — the in-process transcript render
     visualize_run.render_and_mirror(run_dir)
@@ -314,8 +313,10 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
         assert marker in page, (
             f"positive control: {name} must carry the run's own final turn, or the "
             f"no-clobber assertions below are satisfied by two empty pages")
-    assert all(i in after_a["runtime.html"] for i in assistant_ids), (
-        "positive control: runtime.html must show every assistant event of the run")
+    shown_a = after_a["runtime.html"].count('class="tx-entry tx-assistant"')
+    assert shown_a, (
+        "positive control: runtime.html must render the run's assistant entries, or the "
+        "count comparison below is between two zeroes")
 
     # driver B — the subprocess hop `run_common.visualize()` takes, over the SAME run_id
     run_common.visualize(run_dir)
@@ -325,8 +326,9 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
             f"{name} was clobbered by the second driver under one run_id — a truncating "
             f"write replaced the first driver's real content with a page that no longer "
             f"carries the run")
-    assert all(i in after_b["runtime.html"] for i in assistant_ids), (
-        "the second render dropped assistant events the first one showed")
+    assert after_b["runtime.html"].count('class="tx-entry tx-assistant"') == shown_a, (
+        "the second render shows fewer assistant entries than the first — a truncating "
+        "write replaced a full page with a partial one")
 
     assert _trace_events(run_dir), "the second render dropped the projection it renders from"
     assert sql(store, "SELECT COUNT(*) FROM message WHERE session_id = ?",
@@ -358,7 +360,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
 
     # positive control — intact, the wrapper renders both pages and does not raise
     run_common.visualize(run_dir)
-    for name in ("transcript.html", "runtime.html"):
+    for name in ("runtime.html",):
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
         (run_dir / name).unlink()
 
@@ -389,22 +391,17 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         "a failed render must not leave a page behind that a reader would trust")
 
 
-# gl1 — the store-backed render path's escaping
+# gl1 — the render path's escaping of model-authored payload text
 
-def test_transcript_html_escapes_message_payload_content_reaching_the_store_backed_render(
-        tmp_path):
+def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
     """Model-authored payload text that is HTML/script-shaped cannot break out of its
-    rendered container on the NEW store-backed render path: the crafted markup appears in
-    `transcript.html` — and in `runtime.html`, the other page `render_and_mirror` writes —
-    only in escaped form, with no live `<script>` element and no `onerror` attribute
-    introduced by the payload.
+    rendered container: the crafted markup appears in `runtime.html` only in escaped form,
+    with no live `<script>` element and no `onerror` attribute introduced by the payload.
 
-    R4 moves `transcript.html` onto the store, so payload content the model produced —
-    fully attacker-influenced, per `session_store`'s own access table — reaches a path whose
-    escaping is NOT inherited from the log-derived renderer (FK17's second open surface,
-    R16's escaping demand). The POSITIVE CONTROL is that the crafted text is present at all:
-    an escaping assertion over a page that never rendered the payload passes vacuously, and
-    the negative binds BOTH pages because both are out-edges of the same render."""
+    Payload content the model produced is fully attacker-influenced, per `session_store`'s
+    own access table (FK17, R16's escaping demand). The POSITIVE CONTROL is that the crafted
+    text is present at all: an escaping assertion over a page that never rendered the
+    payload passes vacuously."""
     from defender.scripts.visualize import visualize_run
 
     payload = crafted_html_payload()
@@ -429,7 +426,7 @@ def test_transcript_html_escapes_message_payload_content_reaching_the_store_back
         "would be what this test measured")
 
     visualize_run.render_and_mirror(run_dir)
-    for page_name in ("transcript.html", "runtime.html"):
+    for page_name in ("runtime.html",):
         page = (run_dir / page_name).read_text()
         assert html.escape(payload) in page or "&lt;script&gt;" in page, (
             f"{page_name}: positive control — the payload must be RENDERED, escaped, or "
