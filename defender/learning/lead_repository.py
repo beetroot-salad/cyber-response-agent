@@ -23,6 +23,7 @@ from defender._run_paths import (
     artifact_file,
     contained_payload,
 )
+from defender._text import as_str
 from defender.runtime.circuit_breaker import error_class_for_exit
 from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
@@ -42,6 +43,14 @@ def _as_int(value, default: int = 0) -> int:
 
 @dataclass(frozen=True)
 class QueryRow:
+    """One queries-table row as the canonical surface reads it: EVERY column
+    `record_query.QUERY_ROW_COLUMNS` declares, with the writer's own coercions, and
+    `payload_path` read as the containment-checked `raw_ref` (the one recorded derivation).
+
+    The typed fields are a READER'S view — `error_class` is derived from `exit_code` when the
+    key is absent, a missing `system_key` reads as `""`. The row as the writer left it is kept
+    beside them and returned by `record()`, for the reader that must see what the live guard
+    saw (#1017 D2)."""
 
     lead_id: str
     seq: int
@@ -55,6 +64,56 @@ class QueryRow:
     payload_status: str
     payload_digest: str
     raw_ref: Path | None
+    #: #877's content identity of the payload — `sha256` of the persisted sidecar text. `""`
+    #: on a row written before the column existed, and on a keyword-built fixture. Coerced
+    #: with `as_str` like `system_key` below (absent, `None` and non-string all read as `""`);
+    #: no guard reads this column — its one live reader, `repeat_note`'s `_result_identity`,
+    #: treats any falsy value as "no identity", so the two agree on every value a writer
+    #: stores (`append_query_row` always writes the hex digest).
+    #:
+    #: `repr=False`, like `_record` below and for the same reason as `system_key`: NOT
+    #: model-facing content. The renders that reach a model by NAME (`actor_view`,
+    #: `render_joined_yaml`, the judge's leads view) enumerate their fields and none names it —
+    #: but the questioner's "joined leads" section (`branch/cli._joined_leads`) stringifies
+    #: whole rows through `json.dumps(default=str)`, i.e. this dataclass's `repr`, so a
+    #: repr-visible column IS a model-facing column there. Kept off the repr, the row prints as
+    #: it did before the column existed.
+    payload_sha256: str = field(default="", repr=False)
+    #: #871's hash half of an above-guard rejection's identity: `sha256` of a model-authored
+    #: system string the writer coarsened to `system=""`, `""` everywhere else. Coerced the way
+    #: the guard's own `_trip` coerces the stored column (`as_str`: absent, `None` and
+    #: non-string all read as `""`), so a table from before the column replays through this
+    #: surface exactly as it ran. `repr=False` — see `payload_sha256`: the questioner's prompt
+    #: renders rows by `repr`, and a fingerprint is `_trip`'s to read, not a model's.
+    system_key: str = field(default="", repr=False)
+    #: The parsed JSON record this row was read from, untouched — see `record()`. Excluded from
+    #: equality and repr because it is the SOURCE of the typed fields, not a fifteenth column.
+    _record: dict | None = field(default=None, repr=False, compare=False)
+
+    def record(self) -> dict:
+        """The row AS READ — the parsed JSON record, byte-for-byte what `record_query.lead_rows`
+        hands the guard live, never a re-projection of the typed fields.
+
+        The distinction is load-bearing (#1017 C16): the typed view COERCES — `error_class`
+        derived from `exit_code` when the key is absent, `system_key` and `params` and `seq`
+        normalised — while the guard's predicates read the keys verbatim, so a replay over
+        re-projected rows can reach a verdict the live run never reached (a rejection counted
+        that the run did not count, an identity that matches where the run's did not). No
+        writer of this repo has emitted an above-guard row without `error_class`, so today the
+        two views agree on every real table; the guarantee is against re-projection in
+        general, and it is what makes `rejection_trip([r.record() for r in
+        load_queries(run_dir)], ...)` the run's own verdict rather than a reading of it. That
+        replay's consumer is the offline oracle in the test tree (`_replay_rejections`); no
+        shipped code calls this yet.
+
+        The dict is the parsed record ITSELF, shared with the typed view (`params` is the same
+        object), not a copy: a caller that mutates it rewrites what every later reader of this
+        row sees as "what the guard read". Read it; do not write to it.
+
+        A row built by keyword (a fixture) has no record to return."""
+        if self._record is None:
+            raise ValueError("QueryRow.record(): this row was not read from a queries table")
+        return self._record
 
     @property
     def is_sentinel(self) -> bool:
@@ -114,9 +173,25 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
         lead_id = path.name[: -len(_LEAD_SUFFIX)]
         if not lead_id:
             continue
+        # `read_guarded` on the ENTRY, not only `artifact_dir` on the directory: the glob
+        # yields a link planted at a lead's name as readily as the file, and a plain read
+        # follows it. The judge's leads view gated each lead file (`artifact_file`, an `lstat`)
+        # until #1017 D3 moved that read onto the surface, and the surface is the one reader
+        # now — a goal off another tree would otherwise reach a prompt as this run's own. The
+        # guarded read
+        # rather than the lstat-then-read pair, for the reason `corpus_samples` gives below:
+        # `O_NOFOLLOW` + `fstat` judge the very object opened, so a link swapped in between a
+        # check and a read, or a hard link (a regular file to `lstat`), is refused too.
+        text, _refused = read_guarded(path)
+        if text is None:
+            continue
         try:
-            data = json.loads(read_text_utf8(path))
-        except (OSError, json.JSONDecodeError, ValueError):
+            data = json.loads(text)
+        except (ValueError, RecursionError):
+            # `RecursionError` beside the decode error, as `judge.render.json_mapping` (this
+            # file's reader before #1017) tolerates it: a lead file nested past the parser's
+            # limit is a `RuntimeError`, which no reader of this surface catches, and one
+            # planted file would otherwise end the judge pass for every world in the episode.
             continue
         if not isinstance(data, dict):
             continue
@@ -150,6 +225,17 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
     log = RunPaths(run_dir).executed_queries
     rows: list[QueryRow] = []
     try:
+        # `artifact_file` (an `lstat`) AHEAD of the read, the posture `load_leads` takes on
+        # each lead file: `read_jsonl_rows_report` follows a link, and a link (or FIFO, or
+        # device) planted at the table's name would read another tree's rows as this run's
+        # own — for EVERY consumer of this surface, not only the judge, which used to keep
+        # this gate privately ahead of `joined()` and threw the lead files' goals away with
+        # the rows (#1017 D3). ABSENT is the ordinary "no query landed" shape and counts
+        # nothing; something ELSE wearing the name is one unreadable record, like a table the
+        # reader could not open. Inside the `try`: pathlib re-raises what `artifact_file`
+        # swallows (an `EACCES` on the run dir), and that is the `OSError` arm's case.
+        if not artifact_file(log):
+            return [], (1 if log.is_symlink() or log.exists() else 0)
         raw_rows, unreadable = read_jsonl_rows_report(log)
     except OSError:
         return [], 1
@@ -180,6 +266,11 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
                 payload_status=str(rec.get("payload_status", "")),
                 payload_digest=str(rec.get("payload_digest", "")),
                 raw_ref=raw_ref,
+                # `as_str`, not `str(...)`: the guard's own coercion of a stored column, so
+                # absent / `None` / non-string read as the `""` a live call carries (#1017 D2).
+                payload_sha256=as_str(rec.get("payload_sha256")),
+                system_key=as_str(rec.get("system_key")),
+                _record=rec,
             )
         )
     return rows, unreadable

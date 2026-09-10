@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+import shlex
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -62,12 +63,13 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
     `_result_identity`'s only consumer is `repeat_note`, which skips every
     `ABOVE_GUARD_QUERY_ID` row, so no collapsed pair is ever compared, and
     `collect_general_failures` drops a systemless row before `pitfall_key` merges on the digest.
-    `system_key` separates two READABLE ghosts for the companion guard alone, and only in the
-    raw table: it is `""` for the whole N5 group and `lead_repository.QueryRow` does not project
-    it. For that group there is no fallback at all — two rejections naming two different
-    invisible strings are byte-identical in every column, and neither string is recoverable.
-    That is #855 and #1016's trade, not an oversight, but a reader sent to the raw table for
-    that class would be sent to a surface that cannot answer."""
+    `system_key` separates two READABLE ghosts for the companion guard alone: it is `""` for
+    the whole N5 group. For that group there is no fallback at all — two rejections naming two
+    different invisible strings are byte-identical in every column, and neither string is
+    recoverable. That is #855 and #1016's trade, not an oversight, but a reader sent to the
+    table for that class would be sent to a surface that cannot answer. Since #1017 the
+    canonical surface (`lead_repository.QueryRow`) projects the column like every other, so an
+    offline replay of the guard reads the same identity the live guard did."""
     if exit_code != 0:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0
@@ -158,10 +160,12 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     `raw_system` is COERCED rather than trusted, like every other value on this path
     (`_text.as_str`, `_as_dict`) — the coercion is `names_something_readable`'s,
     so the two seams cannot disagree about what a non-`str` means. Both ABOVE-GUARD call sites
-    run inside a rejection handler that has no `try` of its own, so a raise here would replace
-    the rejection — no row for the guard to count, and the fault unwinds past the lead's own
-    catch. (`lead_zero._record_manual_row` is the third caller and is not in a handler; it
-    passes a host constant, so it can only ever be answered `""`.)
+    run inside a rejection handler that catches nothing this function could raise (#1017 D4
+    added a catch there for `query_tool.RegistryUnavailable` alone, raised BEFORE this function
+    is asked), so a raise HERE would replace the rejection — no row for the guard to count,
+    and the fault unwinds past the lead's own catch. (`lead_zero._record_manual_row` is the
+    third caller and is not in a handler; it passes a host constant, so it can only ever be
+    answered `""`.)
 
     Otherwise: `sha256` over the raw string, at FULL width, exactly as `payload_sha256` spends
     it on the neighbouring column of the same row. It is not truncated, and an earlier draft
@@ -178,8 +182,20 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
 
     The digest is name-shaped at either width — `is_system_name` accepts a 64-character hex
     run as readily as a 16-character one — which is why it lives in its own column instead of
-    being folded into `system`: the corpus-path consumer reads `system`, and nothing reads
-    this."""
+    being folded into `system`: the corpus-path consumer reads `system`, and the only readers
+    of this column are the guard's own predicates (`_trip`, live over `lead_rows` and offline
+    over `lead_repository.QueryRow.record()` — #1017). No model-facing render enumerates it.
+
+    NOT MINTED FOR A DECLARED NAME the registry could not LIST (#1017 O4): that case used to
+    reach here with a real name and `recorded_system=""` — the caller coarsened the failure to
+    `""` — and now raises `query_tool.RegistryUnavailable` before this function is asked, and
+    that call is recorded as an `infra` row with `system_key=""`. The guarantee is exactly as
+    wide as the registry's raising: `ModuleVerbRegistry.systems()` globs its adapters
+    directory, and a directory removed or made unreadable under a live run answers an EMPTY
+    roster without raising (`Path.glob` swallows `ENOENT`/`EACCES`), which coarsens a declared
+    name to `""` and mints its digest here as a ghost's. Closing that needs the registry to
+    tell "nothing declared" from "could not look"; until it does, the docstring's claim stops
+    at the faults that surface as an exception."""
     if recorded_system or not names_something_readable(raw_system):
         return ""
     return _sha256_hex(raw_system)
@@ -215,6 +231,32 @@ def lead_rows(run_dir: Path, lead: str) -> list[dict]:
     return [r for r in rows if isinstance(r, dict) and r.get("lead_id") == lead]
 
 
+def payload_status(exit_code: int, payload: Any) -> str:
+    """The `payload_status` column's rule — `error` / `empty` / `ok` — for a decoded payload.
+
+    Owned HERE, beside the other derived columns (`error_class`, `payload_sha256`), because two
+    writers decide it: `QueryCapture._record` and `lead_zero._record_manual_row`, which until
+    #1017 each carried its own copy of this `if`/`elif`. A copy agrees on the day it is written
+    and drifts on the day the rule changes (a `{"rows": []}` envelope read as empty, say),
+    and the offline loop reads this column to tell a query that found nothing from one that
+    failed. Not derived inside `append_query_row` because the constructor is handed the
+    payload's TEXT, not the decoded value — `None` and `"null"` are the same bytes."""
+    if exit_code != 0:
+        return "error"
+    if payload is None:
+        return "empty"
+    if isinstance(payload, (dict, list, tuple, set, str)) and len(payload) == 0:
+        return "empty"
+    return "ok"
+
+
+def raw_command(system: str, verb: str, params: dict) -> str:
+    """The `raw_command` column's spelling — the call as one shell-quoted line — for the same
+    two writers and the same reason as `payload_status`. `shlex.join`, so a value carrying a
+    space or a quote stays one argument when a reader splits the line back."""
+    return shlex.join([system, verb, *(f"{k}={v}" for k, v in params.items())])
+
+
 def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | None:
     """The payload sidecar at `gather_raw/{lead_id}/{seq}.json`, best-effort.
 
@@ -234,18 +276,50 @@ def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | N
     return str(payload_path.relative_to(run_dir))
 
 
+#: THE queries row's column set, in writer order — the ONE declaration every writer builds
+#: through and every reader is measured against (#1017 D1/O6). `append_query_row` assembles its
+#: row from this tuple and refuses to write one whose keys differ; `lead_repository.QueryRow`
+#: projects exactly these columns (with `payload_path` read as `raw_ref`), and the test suite's
+#: frozen key set is asserted equal to it. A column added here without a reader is a column
+#: that fails a test on the day it is declared, which is the drift #877 (`payload_sha256`) and
+#: #871 (`system_key`) each shipped once: added at the writer, reaching the readers only where
+#: someone remembered each hand-spelled list.
+QUERY_ROW_COLUMNS: tuple[str, ...] = (
+    "lead_id",
+    "seq",
+    "system",
+    "verb",
+    "query_id",
+    "params",
+    "raw_command",
+    "payload_path",
+    "exit_code",
+    "error_class",
+    "payload_status",
+    "payload_digest",
+    "payload_sha256",
+    "system_key",
+)
+
+
 def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the caller must decide
     run_dir: Path, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
     payload_digest: str, system_key: str,
 ) -> dict:
-    """THE append to the queries table: allocate this lead's next seq, persist the payload
-    sidecar, assemble the fourteen frozen keys, append one line.
+    """@owns QUERY_ROW_COLUMNS — THE append to the queries table: allocate this lead's next seq,
+    persist the payload sidecar, assemble the columns `QUERY_ROW_COLUMNS` declares in the order
+    it declares them, append one line.
 
-    THE one writer for both callers (`QueryCapture._record` and the gather bash lane), so the row
-    shape has a single place to drift. `error_class` is DERIVED here from `exit_code` rather than
-    accepted from the caller: a writer that could disagree with `error_class_for_exit` is exactly
-    the divergence the offline loop's `agent-fixable` filter cannot see.
+    THE one writer for EVERY caller — `QueryCapture._record`, the gather bash lane, and since
+    #1017 `lead_zero._record_manual_row`, which used to spell the row as a second literal — so
+    the row shape has a single place to drift. The row literal below is checked against the
+    declaration as an ordered tuple: a column added to one and not the other, or spelled in a
+    different order, is a `RuntimeError` at the first write, not a reader silently missing a
+    key or two writers agreeing on a set and differing on the bytes. `error_class` is DERIVED here from
+    `exit_code` rather than accepted from the caller: a writer that could disagree with
+    `error_class_for_exit` is exactly the divergence the offline loop's `agent-fixable` filter
+    cannot see.
 
     `system_key` is REQUIRED and not defaulted, like every other column the caller decides:
     `""` is a real answer here (this row's `system` already identifies the call), so a default
@@ -264,7 +338,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     concurrent needs a real cross-writer lock here first."""
     seq = _next_seq(run_dir, lead_id)
     payload_rel = persist_payload(run_dir, lead_id, seq, payload_text)
-    row = {
+    row: dict[str, Any] = {
         "lead_id": lead_id,
         "seq": seq,
         "system": system,
@@ -286,6 +360,15 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         # above-guard placements that mint one still hold the string to give it.
         "system_key": system_key,
     }
+    # The literal against the declaration as a TUPLE, not a set: the byte order every row on
+    # disk carries is the declaration's, so a literal that agrees on the column set and differs
+    # on the order is as much a disagreement as a missing column — and it is refused here, at
+    # the first write, rather than silently reordered to the tuple.
+    if tuple(row) != QUERY_ROW_COLUMNS:
+        raise RuntimeError(
+            "internal: append_query_row's row disagrees with QUERY_ROW_COLUMNS: "
+            f"{tuple(row)} != {QUERY_ROW_COLUMNS}"
+        )
     write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
     return row
 

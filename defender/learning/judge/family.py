@@ -558,9 +558,11 @@ def names_one_file(lead_id: object) -> bool:
     """Is `lead_id` a name this pass may join into a path?
 
     A lead id is MODEL-AUTHORED. `iter_resolutions` hands back whatever token the document's own
-    `:T resolutions` row put where a lead id goes — any non-whitespace text — and every per-lead
-    read joins it straight into `worlds/<X>/gather_summaries/<lead>.md` and
-    `gather_raw/<lead>.lead.json`. A token carrying a separator or `..` therefore reads OUT of
+    `:T resolutions` row put where a lead id goes — any non-whitespace text — and the per-lead
+    summary read joins it straight into `worlds/<X>/gather_summaries/<lead>.md` (the lead file's
+    goal used to be joined the same way, into `gather_raw/<lead>.lead.json`, until #1017 moved
+    that read onto `lead_repository`, which is keyed by the ids the world's own files carry and
+    joins no token into a path). A token carrying a separator or `..` therefore reads OUT of
     the graded world, and the leads view puts what it read INTO the prompt: a `[../../c/report
     ...]` row makes a counterfactual sibling's whole `report.md` — its disposition included —
     read as a fact about the graded world, which is the one thing O5/J14's withholding exists to
