@@ -772,8 +772,8 @@ def own_h_rows(rows: list[dict[str, Any]], holding_system: str) -> list[dict[str
 
     PRECONDITION: `holding_system` is ALREADY the folded spelling — `_holding_system(doc)`'s
     answer, which is also what every world row carries as its own `holding_system` field. The
-    manifest's raw `discriminator.holding_system` (`"Elastic"`) compared here answers no rows
-    at all; a reader outside the pass takes H off the row, not off the manifest."""
+    manifest's raw `discriminator.holding_system` (unfolded, mixed case) compared here answers
+    no rows at all; a reader outside the pass takes H off the row, not off the manifest."""
     out = []
     for row in rows:
         system = row.get("system")

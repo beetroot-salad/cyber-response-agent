@@ -867,8 +867,9 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     say "not graded, and here is why" rather than "graded, undecidable".
 
     Observably true: after a pass over an `incomplete` review, `read_grade(ep).not_graded` is
-    the `{outcome, reason}` mapping the pass wrote and `episode_outcome == judge.NOT_GRADED`;
-    positive control — a graded episode reads `not_graded is None`.
+    the `NotGradedStamp` the pass wrote, carrying the review's outcome word, and
+    `episode_outcome == judge.NOT_GRADED`; positive control — a graded episode reads
+    `not_graded is None`.
     """
     judge = _judge()
     read_grade = J.sym("learning.judge", "read_grade")
@@ -880,83 +881,54 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
 
     stamp = read_grade(skipped)
     assert stamp.not_graded is not None, "the not-graded stamp did not read back"
-    assert stamp.not_graded.get("outcome") == "incomplete", repr(stamp.not_graded)
+    assert stamp.not_graded.outcome == "incomplete", repr(stamp.not_graded)
     assert stamp.episode_outcome == judge.NOT_GRADED
     assert read_grade(graded).not_graded is None, "positive control: a graded episode"
 
 
-def test_read_grade_narrows_a_wrong_shaped_collection_field_rather_than_raising(tmp_path):
-    """A record that is a mapping but keeps a scalar where a list or a mapping belongs reads
-    with the reader's default for that field — never a bare `TypeError` (`list(5)`), which is in
-    NO conversion set and left the package as a traceback past the docstring's promise of a
-    refusal, and never the scalar passed through into a `dict`-typed field.
+@pytest.mark.parametrize("damage", [
+    pytest.param({"world_findings": 5}, id="scalar-for-list"),
+    pytest.param({"draws": 5}, id="scalar-for-mapping"),
+    pytest.param({"verdict_word": None}, id="null-for-str"),
+    pytest.param({"enqueued_rows": "3"}, id="numeric-text-for-int"),
+    pytest.param({"worlds": [{"bucket": None}]}, id="row-naming-no-world"),
+    pytest.param({"not_graded": {}}, id="empty-stamp"),
+    pytest.param({"not_graded": "yes"}, id="non-mapping-stamp"),
+    pytest.param({"not_graded": {"outcome": "incomplete", "reason": "x"},
+                  "episode_outcome": "not-graded", "world_findings": 5}, id="damaged-stamp"),
+])
+def test_a_record_of_the_wrong_shape_is_refused_not_defaulted_and_not_re_graded(
+        tmp_path, damage):
+    """The record is validated against `EpisodeGrade`'s own schema, strictly, and one that fails
+    is `JudgeRefused` — from `read_grade` and from `grade_episode` alike — never a field
+    defaulted to hide the damage, never a scalar passed through into a `dict`-typed field,
+    never a bare `TypeError` (`list(5)`) past the docstring's promise of a refusal, and never a
+    silent re-grade: the writer stages and `os.replace`s, so a record the pass could not have
+    written is a planted or hand-edited file in a tree a box can reach, and a planted record
+    must not buy three model calls per launch.
 
-    Observably true: `world_findings: 5`, `unqueueable_findings: true`,
-    `withheld_findings: 1.5`, `draws: 5`, `knobs: "x"`, `discard_evidence: [1]` read back as
-    `[]`/`{}` each; the record's other fields still read.
-    """
-    read_grade = J.sym("learning.judge", "read_grade")
-    ep = J.accepted_episode(tmp_path)
-    (ep / "judge.yaml").write_text(yaml.safe_dump({
-        "worlds": [], "verdict_word": "caught", "world_findings": 5,
-        "unqueueable_findings": True, "withheld_findings": 1.5, "draws": 5, "knobs": "x",
-        "discard_evidence": [1]}), encoding="utf-8")
-
-    grade = read_grade(ep)
-
-    assert grade.verdict_word == "caught", "the record's well-shaped fields stopped reading"
-    for field in ("world_findings", "unqueueable_findings", "withheld_findings"):
-        assert getattr(grade, field) == [], f"{field} did not narrow to the empty list"
-    for field in ("draws", "knobs", "discard_evidence"):
-        assert getattr(grade, field) == {}, f"{field} did not narrow to the empty mapping"
-
-
-def test_a_damaged_not_graded_stamp_is_still_a_stamp_the_pass_re_grades(tmp_path):
-    """The existing record is read through `read_grade` BEFORE the pass decides whether it is a
-    stamp to re-grade past, so the conversion has to be total: a `not_graded` stamp with one
-    damaged list field (`world_findings: 5` — the episode dir is a tree a box can reach) used
-    to fall through and be re-graded; converted first, it raised out of every launch and the
-    repaired episode was never re-graded.
-
-    Observably true: over an ACCEPTED episode carrying such a stamp, `grade_episode` re-grades
-    — the returned record has no stamp and names graded worlds, and the stamp on disk is
-    replaced by the grade.
-    """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    (ep / "judge.yaml").write_text(yaml.safe_dump({
-        "not_graded": {"outcome": "incomplete", "reason": "x"},
-        "episode_outcome": "not-graded", "worlds": [], "world_findings": 5}), encoding="utf-8")
-
-    grade = _grade(ep, tmp_path)
-
-    assert grade.not_graded is None, "the damaged stamp was returned as the grade"
-    assert grade.graded_worlds, "the pass did not re-grade past the stamp"
-    assert "not_graded" not in J.judge_record(ep), "the stamp on disk was not replaced"
-
-
-def test_an_empty_not_graded_stamp_is_a_stamp_and_a_non_mapping_one_is_refused(tmp_path):
-    """"Is this record a grade" is decided the way the WRITER decides whether to stamp:
-    `not_graded is None`, never truthiness. Read by truthiness, `not_graded: {}` (a hand-cleared
-    or planted stamp) counted as a grade and was returned on every call — the "old refusal
-    forever" trap in a different costume. And a stamp that is not a mapping at all is a record
-    that is not one: refused, not defaulted to `None` (a grade forever) or invented as `{}`.
-
-    Observably true: `not_graded: {}` over an accepted episode is re-graded; `not_graded: "yes"`
-    is `JudgeRefused` from `read_grade` and from `grade_episode` alike.
+    Observably true: for each damage — a scalar where a list or a mapping belongs, `null`
+    where a word belongs, `"3"` where a count belongs (no coercion), a world row naming no
+    world, a `not_graded` stamp that is empty, not a mapping, or beside a damaged field — the
+    positive control (the same record without the damage) reads, the damaged record raises
+    `JudgeRefused` from both entry points, and the file on disk is left exactly as planted.
     """
     read_grade, refused = J.sym("learning.judge", "read_grade"), _refused()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    (ep / "judge.yaml").write_text(
-        yaml.safe_dump({"not_graded": {}, "worlds": []}), encoding="utf-8")
+    sound = {"worlds": [{"world": "b", "bucket": None}], "verdict_word": "caught"}
+    record = ep / "judge.yaml"
 
-    assert _grade(ep, tmp_path).graded_worlds, "an empty stamp was returned as the grade"
+    record.write_text(yaml.safe_dump(sound), encoding="utf-8")
+    assert read_grade(ep).verdict_word == "caught", "positive control: the sound record"
 
-    (ep / "judge.yaml").write_text(
-        yaml.safe_dump({"not_graded": "yes", "worlds": []}), encoding="utf-8")
+    planted = yaml.safe_dump({**sound, **damage})
+    record.write_text(planted, encoding="utf-8")
     with pytest.raises(refused):
         read_grade(ep)
     with pytest.raises(refused):
         _grade(ep, tmp_path)
+    assert record.read_text(encoding="utf-8") == planted, (
+        "the pass re-graded past a record it could not read, replacing the planted file")
 
 
 def test_read_grade_hands_back_the_same_record_for_a_str_episode_dir(tmp_path):
