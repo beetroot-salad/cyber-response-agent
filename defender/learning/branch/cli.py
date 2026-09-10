@@ -3,31 +3,30 @@
 
 The composition root for #947's episode. The operator names two things — a source run and the
 message to branch at — and this module decides the ORDER everything else happens in, which is
-the part no seam can enforce about itself:
+the part no seam can enforce about itself. The sequence is `branch/steps.py::Step`'s — that
+module OWNS the episode lifecycle, and every frame, banner and message here that names a step
+names one of its members; this module only runs them in that order (#1025 O7 — the timing
+record refuses any other spelling):
 
-1. **Step 1, the preflight block.** Everything that can refuse before anything is spent, asked
-   in one place: the branch point is in range, the source alert is a plain file, the configured
+1. **Preflight** — not a `Step`; `steps.py` says why. Everything that can refuse before
+   anything is spent, asked in one place: the branch point is in range, the source alert is a plain file, the configured
    corpus patterns can carry a view name, the write door reaches the cluster, the sweep of this
    episode's own namespace completes, and every registered role has a usable model. A refusal
    here costs no model call, no staged name and no primed capture.
-2. **Step 2, the questioner.** A deny-all role authors the triplet; its raw output is validated
+2. **`Step.QUESTIONER`.** A deny-all role authors the triplet; its raw output is validated
    into `Family` and held to ONE identity gate before anything is staged.
-3. **Step 3, staging.** Each world's corpus is written into the `wv-` namespace, every name
+3. **`Step.STAGING`.** Each world's corpus is written into the `wv-` namespace, every name
    write-ahead-recorded in `staged.yaml` before it is created.
-4. **Step 4, review by replay.** The captured set is replayed through each world; any world
+4. **`Step.REVIEW`, by replay.** The captured set is replayed through each world; any world
    that contradicts the capture, or whose declared difference is unreachable, REJECTS — and any
    rejected world ends the EPISODE (§7 FORK-14), so no sibling starts at all.
-5. **Step 5, the family as processes.** Each accepted world runs as its own `run.py --resume`
-   child, started together, under `{episode_dir}/runs/` — never beside the source run and never
+5. **`Step.RUNS`, the family as processes.** Each accepted world runs as its own
+   `run.py --resume` child, started together, under `{episode_dir}/runs/` — never beside the source run and never
    under the operator's runs base (§7 FORK-13).
-6. **Step 6, verification and the archive.** Every sibling's scrub verdict and provenance stamp
+6. **`Step.VERIFY`, then `Step.JUDGE`.** Every sibling's scrub verdict and provenance stamp
    is checked; agreeing stamps write the family stamp, and anything else marks the episode
    `incomplete` — a modelled outcome with a reason, not the absence of a file (§7 FORK-1).
-
-The numbering above is prose; the steps' one declaration in code is `branch/steps.py::Step`,
-in launch order, and every frame below that names a step names that member (#1025 O7 — the
-timing record refuses any other spelling). Step 1 is not on it: preflight refuses before the
-episode has a directory to record into.
+   The judge grades the archive once the cluster is handed back.
 
 THIS MODULE DRIVES NO INVESTIGATION IN ITS OWN PROCESS, and has no path to one: it neither
 imports the driver's entry point nor awaits anything. D1's whole content is that a sibling is a
@@ -256,7 +255,7 @@ def refuse_distant_source(source_run_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------------------
-# step 1 — the preflight block
+# preflight — before the first `Step`
 # ---------------------------------------------------------------------------------------
 
 
@@ -470,7 +469,7 @@ def _probe_cluster(door: Any, patterns: Sequence[str]) -> None:
 
     Asked with the door's own connecting call rather than by trusting its construction: the door
     is built from configuration and its failure mode is at USE — a container that is not
-    running, a docker context that does not resolve. Discovered at step 3 instead, the refusal
+    running, a docker context that does not resolve. Discovered at `Step.STAGING` instead, the refusal
     arrives after the questioner has been paid for and the base primed.
     """
     if not patterns:
@@ -603,7 +602,7 @@ def branch_point_clock(source_run_dir: Path, branch_message_id: int) -> Any:
 
 
 # ---------------------------------------------------------------------------------------
-# step 5 — the family as processes
+# `Step.RUNS` — the family as processes
 # ---------------------------------------------------------------------------------------
 
 
@@ -719,7 +718,7 @@ def _default_spawn(argv: list[str], *, env: dict[str, str] | None = None) -> int
 
 
 # ---------------------------------------------------------------------------------------
-# step 6 — verification, the family stamp, and the archive
+# `Step.VERIFY` — verification, the family stamp, and the archive
 # ---------------------------------------------------------------------------------------
 
 
@@ -1028,12 +1027,12 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its seven injection se
     printed cleanly: two spellings of "you cannot branch this" from one command.
 
     THE STORE FAULTS RIDE HERE TOO, and for the reason the driver's own setup handler names
-    them: every step-1 check reads the source's sqlite database, so a file that is not one
+    them: every preflight check reads the source's sqlite database, so a file that is not one
     raises `sqlite3.DatabaseError` — never a `BranchError` — and left out, the corrupt-store
     case printed a traceback while the pointer-mismatch case one line away printed a clean
     refusal.
 
-    ANYTHING ELSE RAISED FROM STEPS 2 TO 4 IS ALSO A REFUSAL (§7 FORK-9: one abort rule, not a
+    ANYTHING ELSE RAISED FROM `Step.QUESTIONER` THROUGH `Step.REVIEW` IS ALSO A REFUSAL (§7 FORK-9: one abort rule, not a
     six-way taxonomy). A questioner call that fails, a staging door that fails mid-way and a
     review whose replay cannot reach the cluster are three different exception classes and one
     outcome: teardown has already fired in `_launch`'s own `finally`, no sibling has started,
@@ -1106,12 +1105,13 @@ def _launch(  # noqa: PLR0913 — see `main`
     except Exception as unbuildable:  # noqa: BLE001 — every seam's own fault class, and the answer is the same refusal
         raise LauncherRefused(
             f"[branch] the launcher could not build its model and adapter seams "
-            f"({unbuildable!r}) — steps 2 and 4 drive a questioner and the estate's read side, "
+            f"({unbuildable!r}) — the {Step.QUESTIONER} and {Step.REVIEW} steps drive a questioner "
+            f"and the estate's read side, "
             "and an episode that cannot reach either has nothing to measure") from unbuildable
 
-    # STEP 2 ONWARD IS THE PART THAT SPENDS. Everything from here to the archive runs inside the
+    # `Step.QUESTIONER` ONWARD IS THE PART THAT SPENDS. Everything from here to the archive runs inside the
     # teardown guard, because from the first staging append onward there are names live on the
-    # cluster that only this process knows about (§7 FORK-9: ONE abort rule for steps 2-4).
+    # cluster that only this process knows about (§7 FORK-9: ONE abort rule from `Step.QUESTIONER` through `Step.REVIEW`).
     episode_dir = prepare_episode(episode_id, source)
     # SET ON THE WAY OUT OF EVERY ABORT ARM, and read by the `finally`. The one thing the
     # teardown frame has to know is whether an exception is already on its way to the operator,
@@ -1220,7 +1220,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     patterns: Sequence[str], door: Any, questioner: Any, adapters: Any, invoke: Any, spawn: Any,
     lessons_dir: Path, judge: Any = None, teardown: Any = None,
 ) -> int:
-    """Steps 2 to 6, inside the teardown guard.
+    """Every `Step`, `QUESTIONER` through `JUDGE`, inside the teardown guard.
 
     `teardown` is `_launch`'s one-shot guard, called here once the archive is written so the
     cluster is released before the grade spends its model calls; `_launch`'s `finally` covers
@@ -1389,7 +1389,7 @@ def _release_and_grade(
 
 
 def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
-    """Step 2 (#1007 M4/O5): `samples.yaml`, the questioner's own reference document per staged
+    """`Step.QUESTIONER` (#1007 M4/O5): `samples.yaml`, the questioner's own reference document per staged
     pattern, moved into the EPISODE archive — not left in the source run, which a later prune
     removes, and not kept only in memory. This is the ONE thing that makes a `shape-invention`
     claim decidable at grading time: the judge is shown the same bytes the questioner was.
@@ -1403,7 +1403,7 @@ def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
 
     OVERWRITES WHOLESALE on a re-entered episode (H3/RS-1) — no merge, no second file, no
     refusal. O5's byte-identity obligation is scoped to ONE ATTEMPT; the accepted cost of
-    keeping the episode resumable is that a re-entered step 2 may hand the judge attempt N's
+    keeping the episode resumable is that a re-entered `Step.QUESTIONER` may hand the judge attempt N's
     samples for a world authored in attempt N-1 (accepted gap G-2).
     """
     import yaml
@@ -1419,7 +1419,7 @@ def _author(
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
     questioner: Any, lessons_dir: Path, patterns: Sequence[str] = (),
 ) -> Family:
-    """Step 2: the questioner authors the triplet, and it is validated before anything reads it.
+    """`Step.QUESTIONER`: the questioner authors the triplet, and it is validated before anything reads it.
 
     THE DERIVED HALF IS THE LAUNCHER'S, and it is written over whatever the model returned. The
     episode id, the source run, the branch point, T0 and the operator's continuation prompt are

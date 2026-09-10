@@ -149,7 +149,7 @@ def _default_samples_reader(path: Path) -> dict[str, Any]:
 
 def read_samples_record(episode_dir: Path, *, reader: Any = None) -> dict[str, Any]:
     """`samples.yaml`, parsed once per caller — the questioner's own reference document per
-    staged pattern, moved into the episode archive at step 2 so it survives a pruned source run
+    staged pattern, moved into the episode archive at `Step.QUESTIONER` (`branch/steps.py`) so it survives a pruned source run
     (#1007 O5/M4)."""
     read = reader if reader is not None else _default_samples_reader
     return read(Path(episode_dir) / SAMPLES_NAME)
@@ -986,8 +986,8 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
             else _withheld_reason(difference_shown=difference_shown, facts=facts_o2))
 
     # THE MECHANICAL WORLD FINDING IS NOT GATED ON `episode_incomplete`. Reachability is a
-    # REVIEW-TIME fact (M1's capture re-ask, step 4) — decided before any sibling even runs
-    # (step 5) — so it exists independently of whether the sibling ever queried anything; only
+    # REVIEW-TIME fact (M1's capture re-ask, `Step.REVIEW`) — decided before any sibling even
+    # runs (`Step.RUNS`) — so it exists independently of whether the sibling ever queried anything; only
     # the DEFENDER lane's withholding depends on whether the episode ran at all
     # (`test_unreachable_difference_fires_even_with_no_row_on_the_holding_system`, whose own
     # served ledger is empty and still mints this finding).

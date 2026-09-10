@@ -149,21 +149,26 @@ gather query catalog and per-system skills from its own queues.
 
 `branch/cli.py` is the composition root: the operator names a source run and a
 message to branch at, and this module decides the ORDER everything else happens
-in — the part no seam can enforce about itself.
+in — the part no seam can enforce about itself. The sequence itself is
+`branch/steps.py::Step`'s — that module owns the episode lifecycle (one
+declaration, launch order), the launcher runs it, the timing record
+(`branch/timing.py`, one row per completed step at the episode root) refuses
+any other spelling, and the numbers below are this doc's own. Preflight is not
+a `Step`: it refuses before anything is spent or recorded.
 
 **1. Preflight.** Everything that can refuse before anything is spent, in one
 place: branch point in range, source alert a plain file, corpus patterns able to
 carry a view name, write door reaching the cluster, namespace sweep complete,
 every role holding a usable model.
 
-**2. The questioner** (`branch/questioner/`) is a **deny-all** role — no tools,
+**2. `Step.QUESTIONER`** (`branch/questioner/`) is a **deny-all** role — no tools,
 its whole input inlined by the host, its whole output one YAML manifest. It
 authors the **discriminator** (the fact the verdict turns on, the system holding
 it, the query that would establish it — a discriminator no single query could
 settle makes the episode unreadable however good the worlds are) and the
 **family** (world A, the capture unchanged, plus one-axis counterfactuals).
 
-**3. Staging** (`branch/staging.py`, `estate/`) writes each world's corpus into
+**3. `Step.STAGING`** (`branch/staging.py`, `estate/`) writes each world's corpus into
 its own namespace, every name write-ahead-recorded in `staged.yaml` *before* it
 is created, so teardown finds what a crashed run left behind. `branch/ledger.py`
 records every response the estate served with the decision behind it — what
@@ -177,7 +182,7 @@ makes the difference between worlds checkable rather than asserted.
 > `tests/test_947_triplet_isolation.py` sweeps `defender/{docs,skills,knowledge}`
 > for the prefix, the label template and world labels on every run.
 
-**4. Review by replay** asks two questions per world before any sibling runs.
+**4. `Step.REVIEW`**, by replay, asks two questions per world before any sibling runs.
 *Does this world contradict the capture?* World A — the control — replays
 **first**, and the keys it mismatches on are the estate's own drift since the
 source run; those are subtracted from every other world's result, so what is
@@ -193,20 +198,20 @@ declared — a comparator that could would have a verdict predictable from the
 label, and the label is what the measurement must be independent of. The same
 function serves the review and `delta_o` on the read side.
 
-**5. The family as processes.** Each accepted world runs as its own `run.py
+**5. `Step.RUNS`, the family as processes.** Each accepted world runs as its own `run.py
 --resume` **child process**, started together under `{episode_dir}/runs/`. The
 launcher drives no investigation in its own process and has no path to one:
 being a process is what gets a sibling the box lifecycle, the reap scan, its own
 role preflight and its own provenance stamp.
 
-**6. Archive** (`branch/archive.py`) copies each world into
+**6. `Step.VERIFY`** (`branch/archive.py`) copies each world into
 `episodes/<id>/worlds/<label>/` so later readers answer from the episode
 directory alone — sibling run dirs are disposable. Every sibling's scrub verdict
 and provenance stamp is checked; agreeing stamps write the family stamp, and
 anything else marks the episode `incomplete` — a modelled outcome with a reason,
 not a missing file. The derived readers (`branch/episode.py`) refuse an
 `incomplete` episode, so "no differences" and "no comparison was possible" stay
-different answers.
+different answers. `Step.JUDGE` follows, once the cluster is handed back.
 
 ## The Judge
 
