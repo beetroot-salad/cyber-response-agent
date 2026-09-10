@@ -319,3 +319,35 @@ def test_the_two_model_facing_renders_emit_neither_new_column(tmp_path):
         assert "PARAMS_MARKER" in text, f"{name} lost the params it is for"
         for needle in (KEY_MARKER, SHA_MARKER, "system_key", "payload_sha256"):
             assert needle not in text, f"{name} now carries {needle!r} to a model"
+
+
+# ---------------------------------------------------------------------------------------
+# D3 — the surface refuses a link at a lead file's name, as the judge's own read did
+# ---------------------------------------------------------------------------------------
+
+
+def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
+    """D3 — the judge's per-lead goal used to be read behind its own `artifact_file` gate; with
+    the read moved to the surface (`load_leads`), the surface keeps that posture: a SYMLINK at
+    `gather_raw/<lead>.lead.json` pointing at a real lead file elsewhere yields no lead, while
+    the same file copied in as a regular file (the positive control) yields its goal. The
+    directory gate alone would admit the link's target as this run's own lead.
+
+    Observed failing by: the linked run reporting the planted goal."""
+    elsewhere = tmp_path / "elsewhere" / "planted.lead.json"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(
+        json.dumps({"goal": "PLANTED_GOAL", "what_to_summarize": []}), encoding="utf-8")
+
+    linked = tmp_path / "linked"
+    RunPaths(linked).gather_raw.mkdir(parents=True)
+    (RunPaths(linked).gather_raw / f"{LEAD}.lead.json").symlink_to(elsewhere)
+    assert (RunPaths(linked).gather_raw / f"{LEAD}.lead.json").is_symlink()
+    assert lead_repository.load_leads(linked) == {}, "the surface followed a link at a lead's name"
+    assert lead_repository.joined(linked) == []
+
+    regular = tmp_path / "regular"
+    RunPaths(regular).gather_raw.mkdir(parents=True)
+    (RunPaths(regular).gather_raw / f"{LEAD}.lead.json").write_text(
+        elsewhere.read_text(encoding="utf-8"), encoding="utf-8")
+    assert lead_repository.load_leads(regular)[LEAD]["goal"] == "PLANTED_GOAL"
