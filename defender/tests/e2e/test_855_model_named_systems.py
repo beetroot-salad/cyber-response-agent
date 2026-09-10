@@ -79,7 +79,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.learning.leads.pitfalls_curator import _build_pitfalls_handoffs  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
-from defender.scripts.gather_tools.record_query import ABOVE_GUARD_QUERY_ID  # noqa: E402
+from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.runtime import lead_zero  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, Turn, materialize  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _dispatch, _run  # noqa: E402
@@ -235,8 +235,11 @@ def _dead_end(r: _Res) -> bool:
     exhaustion a reachable end for a rejection loop — a lead naming a fresh ghost each turn
     now runs to `DEFAULT_TOOL_RETRIES` instead of stopping at three. So every POSITIVE use of
     this helper is paired with `_trip_row_written`, which reads the guard's own row; a
-    NEGATIVE use is safe on its own only while the lead under it makes fewer than ten
-    rejections, and an arm that drives more must assert the run-on some other way.
+    NEGATIVE use is safe on its own only while the lead under it makes fewer than
+    `REJECTION_BUDGET` rejections, and an arm that drives more must assert the run-on some
+    other way. (#1015 moved that ceiling from the framework's ten to the host's own budget:
+    past it the lead now ends by the host's decision, and this helper cannot tell that from
+    any other terminator either.)
 
     The idiom is `test_repeat_breaker_807.INCOMPLETE_IDIOM` WHOLE, not a prefix of it: G19
     names that sentence as the only vocabulary any prompt teaches main, and a truncated copy
@@ -245,9 +248,16 @@ def _dead_end(r: _Res) -> bool:
 
 
 def _trip_row_written(r: _Res) -> bool:
-    """Whether the COMPANION GUARD is what ended the lead, read off the table rather than the
-    summary: `rejection_trip_detail` leads the last rejection row's digest, and no other
-    terminator writes it."""
+    """Whether the companion guard's REPEAT branch is what ended the lead, read off the table
+    rather than the summary: `rejection_trip_detail` leads the last rejection row's digest, and
+    no other terminator writes it.
+
+    THE REPEAT BRANCH ONLY, since #1015. The companion placement now carries a second guard —
+    the per-lead rejection budget — whose trip row leads with its own phrase, so this helper
+    reads False for a lead the companion placement demonstrably ended. A positive use still
+    means "the repeat branch stopped this lead"; a NEGATIVE one means only that, and an arm
+    that wants "no host guard stopped this lead" must read the terminator
+    (`test_1015_rejection_budget._terminator`) instead."""
     rows = _above_guard(r)
     return bool(rows) and "turned back at seq" in rows[-1]["payload_digest"]
 
@@ -257,7 +267,15 @@ def _summary(r: _Res) -> str:
 
 
 def _above_guard(r: _Res) -> list[dict]:
-    return [row for row in r.own_rows if row["query_id"] == ABOVE_GUARD_QUERY_ID]
+    """The rows the above-guard placements' two guards COUNT — spent from
+    `record_query.in_rejection_domain`, the predicate #1015 made public for exactly this.
+
+    NARROWER than `query_id == ABOVE_GUARD_QUERY_ID` alone, and the difference is a row no
+    guard wrote: `_grant_check`'s adapter-load branch is the THIRD above-guard writer and its
+    rows are `infra` (exit 2), outside both predicates' domain. Every caller here reads
+    `rows[-1]` as "the trip row" or counts the population against a guard's threshold, so a
+    row that reached no guard must not be in the list."""
+    return [row for row in r.own_rows if record_query.in_rejection_domain(row)]
 
 
 def _queued(rows: list[dict]) -> list[dict]:
@@ -277,6 +295,34 @@ def _queued(rows: list[dict]) -> list[dict]:
         }
         for row in rows
     ]
+
+
+#: The most above-guard rejections any arm in this FILE drives on ONE lead —
+#: `test_only_a_coarsened_row_...` at four. `_dead_end`'s negative uses read the summary alone,
+#: and past `REJECTION_BUDGET` rejections the host now ends the lead itself, so every
+#: `assert not _dead_end(...)` below silently changes meaning once the headroom is gone.
+#:
+#: A HAND-MAINTAINED CENSUS, and that is its limit: the assertion below relates two CONSTANTS,
+#: so it catches a budget that moved down and NOT an arm that started driving more. The
+#: durable oracle is `test_1015_rejection_budget._terminator` — a negative arm that read the
+#: lead's terminator instead of the summary would need no census at all. Until the four
+#: `assert not _dead_end(...)` sites are converted, re-count this when adding an arm.
+_MOST_REJECTIONS_ANY_ARM_DRIVES = 4
+
+
+def test_this_files_negative_dead_end_arms_still_have_budget_headroom():
+    """The precondition `_dead_end`'s docstring states, asserted rather than described (#1015).
+
+    What it catches: `REJECTION_BUDGET` lowered to `_MOST_REJECTIONS_ANY_ARM_DRIVES` or below.
+    At three or under, the negative `_dead_end` arms here flip from "the guard correctly let
+    calls that DIFFER run on" to "the budget ended the lead" while staying GREEN, because they
+    read only the summary and `INCOMPLETE_IDIOM` is written by all four `_run_gather` arms.
+
+    What it does NOT catch: a new arm driving more than the census records — see the
+    constant's own note. Nothing here reads the arms."""
+    assert _MOST_REJECTIONS_ANY_ARM_DRIVES < REJECTION_BUDGET, \
+        "an arm here drives as many above-guard rejections as the budget allows, so its " \
+        "`assert not _dead_end(...)` no longer says what it claims"
 
 
 def test_a_schema_rejected_call_cannot_name_a_system_of_record(tmp_path):
@@ -766,7 +812,7 @@ def test_the_replay_of_the_recorded_table_agrees_with_the_live_run(tmp_path):
     assert _trip_row_written(same), \
         "the live run ended on something other than the guard, so the parity below is over " \
         "the wrong table"
-    assert _replay_rejections(same.rows) == [(LEAD, 2)], \
+    assert _replay_rejections(same.rows) == [(LEAD, 2, "repeat")], \
         "the replay misses the trip the live run took, on the table that run wrote"
 
 
@@ -933,38 +979,60 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
     Remaining vacuity guards are inline: each row is bound to its turn by its own `params`, the
     model's verb must still be in the columns O1 exempts, and every digest's detail half must be
     non-empty."""
+    # TWO LEADS OF THREE SHAPES AND A CONTROL, not one lead of seven — and the split is #1015's,
+    # not a preference. That issue bounds a lead at `REJECTION_BUDGET` above-guard rejections
+    # over its LIFETIME, so a seventh row cannot exist on one lead: the host ends the lead at
+    # the sixth and the control never runs. Every claim below is preserved by the split because
+    # none of them is about a lead. The six coarsened rows are ACCUMULATED across both runs for
+    # the report at the end, each negative is still paired with a control written by the same
+    # writer in the same run, and `ghostkeyname` is still spelled on exactly one call of its
+    # own lead. What a single lead bought — and what #1015 takes away — is nothing this test
+    # asserts.
     rec = VerbRecorder()
-    r = _run(tmp_path, run_id="d1016-shapes", verbs=elastic_ok(rec), turns=[
+    first = _run(tmp_path / "a", run_id="d1016-shapes-a", verbs=elastic_ok(rec), turns=[
         q("ghosttwo", "ghostverb", {"native_query": "FROM one"}),
         q(ZERO_WIDTH, "ghostverb", {"native_query": "FROM two"}),
         _bad_args("ghostone", {"native_query": "FROM three"}, verb="ghostverb"),
+        _bad_args("elastic", {"native_query": "FROM control a"}, verb="ghostverb",
+                  extra_key="elastickeyname"),
+        DONE,
+    ])
+    # `r` is the run holding the ghost-key shape, so the O2 read of `r.gather.seen` below is a
+    # statement about THAT call: `ghostkeyname` is spelled here and nowhere else in this lead.
+    r = _run(tmp_path / "b", run_id="d1016-shapes-b", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone", {"native_query": "FROM four"}, verb="ghostverb",
                   extra_key="ghostkeyname"),
         _bad_args([PHANTOM], {"native_query": "FROM five"}, verb="ghostverb"),
         _bad_args([LONG_GHOST_VALUE], {"native_query": "FROM six"}, verb="ghostverb"),
-        _bad_args("elastic", {"native_query": "FROM seven"}, verb="ghostverb",
+        _bad_args("elastic", {"native_query": "FROM control b"}, verb="ghostverb",
                   extra_key="elastickeyname"),
         DONE,
     ])
 
-    rows = _above_guard(r)
-    assert len(rows) == 7, \
-        "the seven shapes did not all leave their rows — every negative below is vacuous"
+    first_rows, rows = _above_guard(first), _above_guard(r)
+    assert len(first_rows) == 4, \
+        "the first lead's four shapes did not all leave their rows — its negatives are vacuous"
+    assert len(rows) == 4, \
+        "the second lead's four shapes did not all leave their rows — its negatives are vacuous"
     # Bind each row to the turn that wrote it, so a per-row negative names a KNOWN call. Read
     # off `params`, a column O1 exempts, which is why it is still readable here at all.
+    assert [row["params"]["native_query"] for row in first_rows] == [
+        "FROM one", "FROM two", "FROM three", "FROM control a",
+    ], "the rows are not the first lead's calls in order — the claims below are misaddressed"
     assert [row["params"]["native_query"] for row in rows] == [
-        "FROM one", "FROM two", "FROM three", "FROM four", "FROM five", "FROM six",
-        "FROM seven",
-    ], "the rows are not the seven calls in order, so the per-shape claims below are misaddressed"
-    assert not _dead_end(r), \
-        "the lead ended early: either the shapes tripped the companion guard (so one of " \
-        "these rows is a trip row and they are not distinct calls) or this lead now makes " \
-        "more rejections than `DEFAULT_TOOL_RETRIES` allows — `_trip_row_written` tells the " \
-        "two apart. At the seven rejections this lead drives only the FIRST is reachable: the " \
-        "budget is 10, measured on this harness as surviving ten consecutive rejections and " \
-        "ending on the eleventh, so four more shapes fit before the second explains anything"
+        "FROM four", "FROM five", "FROM six", "FROM control b",
+    ], "the rows are not the second lead's calls in order — the claims below are misaddressed"
+    for ended in (first, r):
+        assert not _dead_end(ended), \
+            "a lead ended early: either the shapes tripped one of the companion placement's " \
+            "guards (so one of these rows is a trip row and they are not distinct calls) or " \
+            "the lead outran `DEFAULT_TOOL_RETRIES` — `_trip_row_written` tells the repeat " \
+            "branch from the rest. At the FOUR rejections each lead here drives, neither is " \
+            "reachable: `REJECTION_BUDGET` is the tighter of the two ceilings and the " \
+            "headroom census below tracks it"
 
-    coarsened, control = rows[:6], rows[6]
+    coarsened = [*first_rows[:3], *rows[:3]]
+    control = first_rows[3]
     assert {row["system"] for row in coarsened} == {""}, \
         "a shape was not coarsened at all, so O1 does not even apply to it"
     ghost_key = record_query.system_fingerprint("ghostone", "")
@@ -973,13 +1041,17 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
     ], "N5's fold or the two placements' fingerprints changed under #1016 — the identity is " \
        "#871's and this issue does not touch it"
 
-    assert control["system"] == "elastic", \
-        "the control lost its declared system, so it is not the complementary condition"
-    assert control["system_key"] == "", \
-        "the control was coarsened after all, so it is not the complementary condition"
-    assert "elastickeyname" in _host_authored(control), \
-        "a row that KEPT its system stopped recording the model's own argument name (#1016 " \
-        "N3) — so the negatives below are satisfied by a writer that records nothing"
+    # BOTH controls, one per lead: each run's negatives are paired with a row its OWN writer
+    # produced under the complementary condition, which is what the single-lead form bought
+    # before #1015 split the shapes.
+    for kept in (control, rows[3]):
+        assert kept["system"] == "elastic", \
+            "a control lost its declared system, so it is not the complementary condition"
+        assert kept["system_key"] == "", \
+            "a control was coarsened after all, so it is not the complementary condition"
+        assert "elastickeyname" in _host_authored(kept), \
+            "a row that KEPT its system stopped recording the model's own argument name " \
+            "(#1016 N3) — so the negatives below are satisfied by a writer that records nothing"
 
     # #1016 O2 at the SCHEMA placement, which had nothing pinning it (the grant half is two
     # tests up). The whole of M2 is that the ROW stops carrying pydantic's text while the MODEL

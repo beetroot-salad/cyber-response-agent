@@ -41,7 +41,16 @@ HEAD_MOVE_REASONS = ("fork", "fold")
 #: writers (the driver's run-end flush on the MAIN session, the gather dispatch's terminator
 #: stamp on a lead's) spelling the same shape differently would make "was this cut off, and by
 #: what" a per-session-kind question for every reader joining `session` rows. `dead-end` is the
-#: only value with no main-session analogue: only a lead can be stopped by the repeat guard.
+#: only value with no main-session analogue: only a lead can be stopped by a host guard, and
+#: since #1015 there are THREE of them — `wrap_tool_execute`'s repeat guard, the above-guard
+#: repeat guard, and the rejection budget. All three stamp this one value: the terminator
+#: column says a HOST guard ended the lead, and WHICH of them is recovered from the last trip
+#: row's `payload_digest` (the queries table has no `detail` column — `QueryCapture._record`
+#: folds the detail into that digest behind an `exit={code}; ` prefix), not from a second
+#: stamp. Which row that is depends on the guard: `wrap_tool_execute`'s writes a
+#: `REPEAT_TRIP_QUERY_ID` row whose phrase `record_query.repeat_trip_detail` owns, the two
+#: above-guard guards write an ordinary `ABOVE_GUARD_QUERY_ID` row whose phrase
+#: `record_query.rejection_detail` owns.
 TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
 TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"
 TRUNCATED_BY_ABORTED = "aborted"

@@ -32,6 +32,7 @@ from defender.scripts.gather_tools.record_query import (
     REPEAT_ESCAPE,
     REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
+    RejectionBudgetTrip,
     RepeatTrip,
     _json_safe_params,  # noqa: F401 — re-export: test_repeat_breaker_807 imports it from here
     append_query_row,
@@ -43,9 +44,10 @@ from defender.scripts.gather_tools.record_query import (
     # Re-exported under its old private name: `_spec771` measures the site
     # `query_tool._persist_payload` by that name.
     persist_payload as _persist_payload,  # noqa: F401
-    rejection_dead_end_reason,
+    rejection_budget_trip,
+    rejection_dead_end,
+    rejection_detail,
     rejection_trip,
-    rejection_trip_detail,
     repeat_note,
     repeat_trip,
     repeat_trip_detail,
@@ -440,21 +442,41 @@ class QueryCapture(AbstractCapability[Any]):
 
     def _rejection_guard(
         self, deps, system: str, verb: str, params: dict, *, system_key: str,
-    ) -> RepeatTrip | None:
-        """The companion repeat guard, shared by the two placements that reject a call ABOVE
-        `wrap_tool_execute`'s guard: the argument schema, and the grant check's
-        unresolvable-verb branch. Its counted domain (`rejection_trip`) is the complement of
-        the first guard's, so the two can never both own one call. The identity is extracted at
-        the CALLER, because the two placements read different argument surfaces — raw
-        pre-validation arguments at the schema, validated ones at the grant check — and
-        `system_key` for the same reason: each placement holds the RAW string this coarsened
-        `system` was made from, and only there can `system_fingerprint` still see it."""
+    ) -> RepeatTrip | RejectionBudgetTrip | None:
+        """The two guards on the calls rejected ABOVE `wrap_tool_execute`'s own guard — the
+        argument schema, and the grant check's unresolvable-verb branch. Its counted domain is
+        the complement of the first guard's, so `wrap_tool_execute`'s guard and these can never
+        both own one call. The identity is extracted at the CALLER, because the two placements
+        read different argument surfaces — raw pre-validation arguments at the schema,
+        validated ones at the grant check — and `system_key` for the same reason: each
+        placement holds the RAW string this coarsened `system` was made from, and only there
+        can `system_fingerprint` still see it.
+
+        ONE `lead_rows` READ feeds both predicates. They count the same domain and differ only
+        in whether identity is read, so a second load would be a second answer to the same
+        question over a table another process may have appended to in between — and this sits
+        on the per-call path.
+
+        REPEAT IS ASKED FIRST, and the order is the answer main gets, not an optimisation: a
+        call that is both the third repeat and the B-th rejection is described by BOTH, and the
+        repeat sentence is the more specific one — it names the earlier request being repeated,
+        which the lead can act on. The budget's sentence can only say "you have spent the
+        allowance". Reversed, every repeat loop long enough to reach the budget would lose the
+        specific explanation it had before #1015.
+
+        The budget is IDENTITY-BLIND, so it is asked with neither `system_key` nor the request
+        triple — which is exactly why it catches the family the guard above cannot: an
+        undeclared name per turn, whitespace drift, assigned-but-font-blank codepoints."""
         if deps.lead_id is None:
             return None
-        return rejection_trip(
-            lead_rows(deps.run_dir, deps.lead_id), deps.lead_id,
+        rows = lead_rows(deps.run_dir, deps.lead_id)
+        trip = rejection_trip(
+            rows, deps.lead_id,
             system=system, verb=verb, params=params, system_key=system_key,
         )
+        if trip is not None:
+            return trip
+        return rejection_budget_trip(rows, deps.lead_id)
 
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
@@ -478,10 +500,28 @@ class QueryCapture(AbstractCapability[Any]):
             # offending KEY when the model invented one — so on a row whose `system` this writer
             # just threw away it puts the model's text back in a host-authored column. Asked of
             # `system`, the value the ROW records and the population O1 is stated over.
-            detail = (
+            rejection = (
                 self._coarse_schema_detail(e)
                 if self._was_coarsened(system) else str(e)
             )
+            # #1015. THE TRIP PHRASE WRAPS WHATEVER #1016 JUST DECIDED, rather than either
+            # choosing the tail itself: the two changes own different halves of this string —
+            # #1016 owns what the CALL's own error may say on a coarsened row, #1015 owns which
+            # GUARD's phrase leads it — and composing them in this order keeps the coarsening
+            # in force on a trip row too. Spelled the other way round, a lead's LAST rejection
+            # (the one that ends it, and the one an operator reads first) would be the single
+            # row where the model's text came back.
+            #
+            # `rejection_detail`, not `rejection_trip_detail`: since #1015 two guards write
+            # this row and only the dispatcher knows both their sentences.
+            #
+            # BOUND before the `_record` call rather than spelled in its argument list: the
+            # dispatcher is TOTAL over the trip types and RAISES on one it does not know, and
+            # an argument expression is evaluated BEFORE the call it belongs to — so inlined, a
+            # future third guard would cost this rejection its row entirely and the append-only
+            # table would forget the call happened at all. Bound here, the raise happens where
+            # a row was never owed.
+            detail = rejection if trip is None else rejection_detail(trip, rejection)
             await self._record(
                 ctx.deps,
                 system=system, verb=verb, system_key=system_key,
@@ -489,14 +529,13 @@ class QueryCapture(AbstractCapability[Any]):
                 params=params,
                 payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=detail if trip is None else rejection_trip_detail(trip, detail),
+                detail=detail,
             )
             if trip is not None:
-                raise GatherDeadEnd(
-                    reason=rejection_dead_end_reason(
-                        self._undeclared_target(recorded=system, raw=raw_system),
-                        verb, trip),
-                    escape=REPEAT_ESCAPE,
+                raise rejection_dead_end(
+                    trip,
+                    target=self._undeclared_target(recorded=system, raw=raw_system),
+                    verb=verb,
                 ) from e
             raise
 
@@ -560,23 +599,25 @@ class QueryCapture(AbstractCapability[Any]):
             # whole) and wrong for the row, which just coarsened that system to `""`. A host
             # literal when coarsened; `refusal` verbatim otherwise, since a rejection against a
             # DECLARED system is the pitfalls channel's input and must keep naming the verb.
-            detail = (
+            rejection = (
                 UNDECLARED_SYSTEM_DETAIL
                 if self._was_coarsened(recorded_system)
                 else (decision.refusal or "unresolvable")
             )
+            # #1015's trip phrase wraps it, and bound before the call — both for the reasons
+            # the schema placement's twin gives.
+            detail = rejection if trip is None else rejection_detail(trip, rejection)
             await self._record(
                 deps, system=recorded_system, verb=verb, system_key=system_key,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=detail if trip is None else rejection_trip_detail(trip, detail),
+                detail=detail,
             )
             if trip is not None:
-                raise GatherDeadEnd(
-                    reason=rejection_dead_end_reason(
-                        self._undeclared_target(recorded=recorded_system, raw=system),
-                        verb, trip),
-                    escape=REPEAT_ESCAPE,
+                raise rejection_dead_end(
+                    trip,
+                    target=self._undeclared_target(recorded=recorded_system, raw=system),
+                    verb=verb,
                 )
             raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")
 
