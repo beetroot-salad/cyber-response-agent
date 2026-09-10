@@ -481,9 +481,10 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     # afterwards; reading the outcome first meant the refusal stamp was found on the second
     # attempt and returned as though it were the grade, so a repaired episode answered with the
     # old refusal forever.
-    existing = _existing_grade(episode_dir)
-    if existing is not None and not existing.get("not_graded"):
-        return _grade_from_document(episode_dir, existing)
+    # THROUGH `read_grade`, the one reader (#1025 O8) — the page reads the record the same way.
+    existing = read_grade(episode_dir)
+    if existing is not None and not existing.not_graded:
+        return existing
 
     review = family_mod.read_review_record(episode_dir)
     outcome, reason = _episode_outcome_from_review(review)
