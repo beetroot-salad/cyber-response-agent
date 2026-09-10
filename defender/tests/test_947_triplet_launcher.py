@@ -1,4 +1,5 @@
-"""#947 — the launcher: what it checks, what it starts, what it refuses (steps 1, 5, 6; M7, M9).
+"""#947 — the launcher: what it checks, what it starts, what it refuses (preflight, `Step.RUNS`,
+`Step.VERIFY`; M7, M9).
 
 The launcher is a composition, and under D1 everything it composes is a PROCESS: it writes the
 manifest, stages the corpus, reviews, starts N `run.py --resume` children together, waits, then
@@ -78,7 +79,7 @@ def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), capture=(), **sea
 
 
 # ---------------------------------------------------------------------------------------
-# step 1 — what is checked before anything is spent
+# preflight — what is checked before anything is spent
 # ---------------------------------------------------------------------------------------
 
 
@@ -141,7 +142,7 @@ def test_947_sweep_runs_before_the_questioner_is_called(tmp_path):
 
 
 def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_path):
-    """Step 1 checks every precondition in ONE block before anything is spent, and EACH of them
+    """Preflight checks every precondition in ONE block before anything is spent, and EACH of them
     refuses before the questioner is called: the branch point out of range for the derived fence
     count, an absent source alert, a cluster the write door cannot reach, and a sweep that did
     not complete. (The alert's LINK SCREEN is the same block's fifth check and has its own
@@ -227,7 +228,7 @@ def test_947_all_siblings_in_one_family_share_one_continuation_prompt(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# step 4/5 — rejection, and starting the family
+# `Step.REVIEW` / `Step.RUNS` — rejection, and starting the family
 # ---------------------------------------------------------------------------------------
 
 
@@ -436,27 +437,27 @@ def test_947_rejected_episode_archives_manifest_staging_and_review(tmp_path):
 
 def test_947_any_failure_in_steps_two_to_four_aborts_the_episode(tmp_path, monkeypatch):
     """ONE rule for all three steps, not a six-way taxonomy: a questioner call that fails
-    (step 2), a staging door that fails mid-way (step 3) and a review whose replay cannot reach
-    the cluster (step 4) each abort the episode the same way — teardown fires and no sibling
-    process starts."""
+    (`Step.QUESTIONER`), a staging door that fails mid-way (`Step.STAGING`) and a review whose
+    replay cannot reach the cluster (`Step.REVIEW`) each abort the episode the same way —
+    teardown fires and no sibling process starts."""
     cases = {
         # `staged` is whether the abort happens AFTER the first name was created. It is not a
         # softer expectation for the questioner arm: teardown removes exactly what the staging
-        # record names, so an abort in step 2 leaves an empty record and a correct teardown makes
-        # no delete call at all. What that arm can be held to — and is — is the stronger claim
-        # that nothing was created in the first place.
+        # record names, so an abort in `Step.QUESTIONER` leaves an empty record and a correct
+        # teardown makes no delete call at all. What that arm can be held to — and is — is the
+        # stronger claim that nothing was created in the first place.
         "questioner": ({"questioner": T.FakeAgent(T.family_doc(),
                                                   fault=T.Fault(raise_after=1))}, False),
-        # `raise_after=2` and not 1: step 1's own reachability probe and the sweep each open a
-        # connection, so a door that dies on the second one never reaches step 3 at all and this
-        # arm would be a second reading of the preflight rather than of staging.
+        # `raise_after=2` and not 1: preflight's own reachability probe and the sweep each open a
+        # connection, so a door that dies on the second one never reaches `Step.STAGING` at all
+        # and this arm would be a second reading of the preflight rather than of staging.
         "staging": ({"door": T.FakeDoor(fault=T.Fault(raise_after=2))}, True),
-        # STEP 4 FAILS ON THE COMPARATOR, not on a cluster the review cannot reach: a review
+        # `Step.REVIEW` FAILS ON THE COMPARATOR, not on a cluster the review cannot reach: a review
         # replays and does not gather evidence, so its only outbound call is the discriminating
         # envelope and a failing one is a recorded reachability result rather than an abort. What
-        # can still end step 4 is the judgment itself — here the model answers `mutation` on the
-        # review seat, which admits three verdicts and not that one, and the comparator refuses a
-        # wrong-seat answer rather than filing it as a contradiction.
+        # can still end `Step.REVIEW` is the judgment itself — here the model answers `mutation`
+        # on the review seat, which admits three verdicts and not that one, and the comparator
+        # refuses a wrong-seat answer rather than filing it as a contradiction.
         "review": ({"capture": [{"system": "identity", "verb": "get-user",
                                  "payload": {"hits": [{"host": "web-1", "owner": "soc"}]}}],
                     "invoke": T.FakeAgent(*["mutation"] * 8)}, True),
@@ -507,7 +508,7 @@ def test_947_teardown_runs_on_rejection_completion_and_exception(tmp_path, monke
 
 
 # ---------------------------------------------------------------------------------------
-# step 6 — verification, the family stamp and the incomplete outcome
+# `Step.VERIFY` — verification, the family stamp and the incomplete outcome
 # ---------------------------------------------------------------------------------------
 
 

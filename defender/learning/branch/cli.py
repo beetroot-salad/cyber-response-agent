@@ -1337,7 +1337,7 @@ def _cluster_released(teardown: Any, *, episode_id: str) -> Iterator[None]:
     if teardown is not None:
         try:
             teardown(aborting=False)
-        except Exception as cleanup_failed:  # noqa: BLE001 — re-raised below, unchanged
+        except Exception as cleanup_failed:  # noqa: BLE001 — held: raised unchanged after a body that completed, printed under one that did not (see the docstring)
             held = cleanup_failed
     completed = False
     try:

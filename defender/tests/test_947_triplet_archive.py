@@ -236,7 +236,7 @@ def test_947_verdicts_refuses_disposition_outside_enum(tmp_path):
 
 def test_947_readers_over_an_episode_with_no_archived_worlds_return_empty(tmp_path):
     """Both readers answer EMPTY on an archived episode holding no worlds rather than raising:
-    an episode rejected before step 5 is a legitimate archived state, and the episode's own
+    an episode rejected before `Step.RUNS` is a legitimate archived state, and the episode's own
     recorded outcome is what tells "no worlds" apart from "no differences"."""
     ep = T.episode(tmp_path)
     (ep / "worlds").mkdir(exist_ok=True)

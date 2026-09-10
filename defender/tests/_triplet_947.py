@@ -555,7 +555,8 @@ def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
 
 def episode(tmp_path: Path, *, doc: dict | None = None,
             episode_id: str = EPISODE_ID, root: Path | None = None) -> Path:
-    """An episode dir with its manifest and an empty `served/` — the shape step 2 leaves.
+    """An episode dir with its manifest and an empty `served/` — the shape `Step.QUESTIONER`
+    leaves.
 
     HAND-BUILT, and deliberately so: this is the episode's CONTENTS for the scenarios that are
     not about where an episode lives. Where it lives is a demand of its own — the episodes root

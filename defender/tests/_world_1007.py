@@ -34,10 +34,11 @@ FOUR THINGS THIS SUITE DELIBERATELY DOES NOT ASSERT, each a decision on the reco
    closed vocabulary too, and `test_a_lesson_frontmatter_value_cannot_forge_the_key_the_selector
    _reads` pins it: a model-chosen value may not stop being a value and become a lesson's own
    structure. That test reads no bucket against a set, and no test here does.
-3. **O5 is scoped to one attempt** (RS-1 / accepted gap G-2). A re-entered step 2 overwrites
-   `samples.yaml`, so the byte-identity obligation holds WITHIN ONE ATTEMPT. A byte-identity
-   test that never exercises a re-entry would pass while the obligation is false, so the
-   re-entry's accepted behaviour (the second attempt's samples win) is pinned by its own test.
+3. **O5 is scoped to one attempt** (RS-1 / accepted gap G-2). A re-entered `Step.QUESTIONER`
+   overwrites `samples.yaml`, so the byte-identity obligation holds WITHIN ONE ATTEMPT. A
+   byte-identity test that never exercises a re-entry would pass while the obligation is false,
+   so the re-entry's accepted behaviour (the second attempt's samples win) is pinned by its own
+   test.
 4. **H1's applied-counter change has three independent consumers**, each with its own test:
    the serve path's `PATCHED`/`PASSTHROUGH` ledger source, `_patched_visible` ->
    `_rejection`'s world-rejection gate, and `judge/family.py`'s `doctored_answer_served` ->
@@ -279,10 +280,10 @@ def write_review(episode_dir: Path, *, worlds: dict[str, dict] | None = None,
     """Materialise `<episode>/review.yaml` AS THE LAUNCHER LEAVES IT for the judge.
 
     Delegated to `_judge_921.review_record` rather than composed here, because the key the
-    judge reads is not the key `review._record` writes: step 4 puts a human sentence in
-    `episode.outcome` and step 6 overwrites the same key with the enum word, so by grading time
-    it always holds step 6's. A fixture that spelled step 4's shape would make every judge
-    scenario grade `not-graded` for a reason no scenario is about.
+    judge reads is not the key `review._record` writes: `Step.REVIEW` puts a human sentence in
+    `episode.outcome` and `Step.VERIFY` overwrites the same key with the enum word, so by
+    grading time it always holds `Step.VERIFY`'s. A fixture that spelled `Step.REVIEW`'s shape
+    would make every judge scenario grade `not-graded` for a reason no scenario is about.
     """
     return _review_record_921(episode_dir, outcome=outcome, decision=decision,
                               worlds=dict(worlds or {}))

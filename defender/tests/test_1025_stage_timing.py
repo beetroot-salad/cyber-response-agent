@@ -361,8 +361,10 @@ def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tm
 
 def test_1025_a_document_that_is_not_the_record_raises_rather_than_reading_as_no_steps(tmp_path):
     """A file at the record's name that is not the record — not JSON, not an object with a
-    `steps` list, an entry missing a key or carrying an extra one, a non-string moment — RAISES
-    `ValueError` naming the file. The writer replaces the whole document atomically, so none of
+    `steps` list, an entry missing a key or carrying an extra one, a step outside `Step`, a
+    moment that is not a timestamp, JSON nested past the parser's recursion limit (which
+    leaves `json.loads` through `RecursionError`, not `ValueError`) — RAISES `ValueError`
+    naming the file. The writer replaces the whole document atomically, so none of
     these is something it left; reading them as `[]` would make tampering, or a foreign file,
     look like an episode that aborted before its first step.
 
@@ -379,7 +381,10 @@ def test_1025_a_document_that_is_not_the_record_raises_rather_than_reading_as_no
         json.dumps({"steps": [{"step": "questioner", "started_at": good["started_at"]}]}) + "\n",
         json.dumps({"steps": [{**good, "duration_ms": 5}]}) + "\n",
         json.dumps({"steps": [{**good, "ended_at": None}]}) + "\n",
+        json.dumps({"steps": [{**good, "step": "teardown"}]}) + "\n",
+        json.dumps({"steps": [{**good, "started_at": "not a moment"}]}) + "\n",
         json.dumps(good) + "\n" + json.dumps(good) + "\n",
+        "[" * 100_000 + "]" * 100_000,
     ]
     for n, text in enumerate(foreign):
         episode_dir = tmp_path / f"episode-{n}"
@@ -473,12 +478,14 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
     assert timing.read_stage_timings(plain) == [row], "the control failed"
 
 
-def test_1025_the_reader_does_not_follow_a_link_the_writer_refuses(tmp_path):
+def test_1025_the_reader_refuses_what_it_cannot_read_and_only_absence_is_empty(tmp_path):
     """`read_stage_timings` reads through `_io.read_guarded`, the posture of every other reader
-    of the episode tree: a symlink planted at `episodes/<id>/timing.json` reads as NO record —
-    never as the document it points at — and so does a directory squatting the name. The
-    target holds a real, well-formed record, so an answer of `[]` is the reader refusing the
-    entry rather than finding nothing to parse.
+    of the episode tree, and splits ABSENT from REFUSED the way the judge's readers do: no
+    entry at `episodes/<id>/timing.json` is `[]`; a symlink planted there, a directory
+    squatting the name, or a plain file whose bytes are not text RAISES `ValueError` naming
+    the file — never `[]`, which would read a refused or tampered record as an episode that
+    aborted before its first step, and never the document a link points at. The link's target
+    holds a real, well-formed record, so the raise is the reader refusing the entry.
 
     Positive control: the same document, at a plain path, is read.
     """
@@ -491,21 +498,57 @@ def test_1025_the_reader_does_not_follow_a_link_the_writer_refuses(tmp_path):
     symlinked = tmp_path / "symlinked-episode"
     symlinked.mkdir()
     (symlinked / timing.TIMING_NAME).symlink_to(planted)
-    assert timing.read_stage_timings(symlinked) == [], (
-        "the reader followed a planted link and returned another file's entries as this "
-        "episode's clock")
+    with pytest.raises(ValueError, match=timing.TIMING_NAME):
+        timing.read_stage_timings(symlinked)
     assert (symlinked / timing.TIMING_NAME).is_symlink(), "the planted link was replaced"
 
     squatted = tmp_path / "squatted-episode"
     squatted.mkdir()
     (squatted / timing.TIMING_NAME).mkdir()
-    assert timing.read_stage_timings(squatted) == [], "a directory at the name read as entries"
+    with pytest.raises(ValueError, match=timing.TIMING_NAME):
+        timing.read_stage_timings(squatted)
+
+    binary = tmp_path / "binary-episode"
+    binary.mkdir()
+    (binary / timing.TIMING_NAME).write_bytes(b"\xff\xfe not text")
+    with pytest.raises(ValueError, match=timing.TIMING_NAME):
+        timing.read_stage_timings(binary)
 
     plain = tmp_path / "plain-episode"
     plain.mkdir()
     (plain / timing.TIMING_NAME).write_text(json.dumps({"steps": [stray]}) + "\n",
                                             encoding="utf-8")
     assert timing.read_stage_timings(plain) == [stray], "the control failed"
+
+
+def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_path):
+    """A step the clock saw finish stays on the clock even when the disk refused THAT write:
+    the next boundary's rewrite carries it. Here the record's name is squatted by a directory
+    for the `review` write alone and freed before `runs` — the document after `runs` holds
+    `[questioner, staging, review, runs]`, not a record with a hole in it that no launch can
+    produce and that the record's rule reads as a review that never finished.
+
+    Fails on a clock that keeps a step only once its write succeeded.
+    """
+    timing = _timing()
+    episode_dir = tmp_path / "episode"
+    episode_dir.mkdir()
+    record = episode_dir / timing.TIMING_NAME
+    clock = timing.StageClock(episode_dir)
+    clock.record("questioner", started_at=now_iso(), ended_at=now_iso())
+    clock.record("staging", started_at=now_iso(), ended_at=now_iso())
+
+    good = record.read_bytes()
+    record.unlink()
+    record.mkdir()
+    with pytest.raises(OSError, match="aliased"):
+        clock.record("review", started_at=now_iso(), ended_at=now_iso())
+    record.rmdir()
+    record.write_bytes(good)
+
+    clock.record("runs", started_at=now_iso(), ended_at=now_iso())
+    assert _steps(episode_dir) == ["questioner", "staging", "review", "runs"], (
+        "the step whose own write was refused is missing from the document written after it")
 
 
 # ---------------------------------------------------------------------------------------
@@ -776,8 +819,8 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
     finished — after `runs`, as "no sibling started" with the family never archived; after
     the judge, as a bare `OSError` out of `main` for a fully graded episode.
 
-    Six refusals, one per step, each named on stderr; the reader answers no entries for the
-    squatted name rather than raising.
+    Six refusals, one per step, each named on stderr; the reader refuses the squatted name
+    rather than answering no entries for an episode that ran every step.
     """
     episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
     episode_dir.mkdir(parents=True)
@@ -793,4 +836,5 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
     for step in EXPECTED_STEPS:
         assert f"the {step} entry could not be written" in err, (
             f"the refused {step} row was not reported")
-    assert _steps(launch.episode_dir) == [], "a squatted record read as entries"
+    with pytest.raises(ValueError, match=_timing().TIMING_NAME):
+        _steps(launch.episode_dir)
