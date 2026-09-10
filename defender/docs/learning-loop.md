@@ -20,8 +20,8 @@ so they are recorded here rather than left in the commit:
   only their producers were.** The directories and their authored lessons stay
   on disk as frozen archives — see §One corpus, one queue.
 - **The defender's own report card moved rather than went.** It lived inside the
-  deleted judge visualizer, so `transcript.html` still carries it and there is no
-  judge view.
+  deleted judge visualizer and now renders in `runtime.html`'s headline. There is
+  no judge view; #1025 tracks the one the branched-episode judge needs.
 
 Dead names from that pipeline (`actor_story.md`, `projected_telemetry.yaml`,
 `run_cycle.py`, `lead_sequence.yaml`, …) still appear in superseded design docs,

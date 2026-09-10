@@ -60,14 +60,14 @@ def test_922_the_live_investigations_renderer_still_imports_and_runs(tmp_path):
     witness nothing about the import that C12 is about.
     """
     run_dir = driven_run(tmp_path)
-    for page in ("transcript.html", "runtime.html"):
+    for page in ("runtime.html",):
         assert not (run_dir / page).exists(), (
             f"{page} exists before the renderer ran — the assertions below would be satisfied "
             "by a stale page rather than by this render")
 
     run_common.visualize(run_dir)
 
-    for page in ("transcript.html", "runtime.html"):
+    for page in ("runtime.html",):
         rendered = (run_dir / page)
         assert rendered.is_file(), f"the renderer exited 0 without writing {page}"
         assert MARKER in rendered.read_text(encoding="utf-8"), (
@@ -126,3 +126,32 @@ def test_922_the_renderers_own_import_surface_resolves_in_a_child_interpreter(tm
         assert missing == [], (
             f"visualize_run.py imports {missing} from {dotted}, which no longer provides them "
             "— the live investigation's renderer breaks at import (C12/D7)")
+
+
+def test_the_two_column_wrapper_never_ships_without_the_sidebar_that_fills_it(tmp_path):
+    """GUARD — the sidebar and the space reserved for it are one decision, not two.
+
+    The page shell reserves a fixed 240px first column for the table of contents and gives
+    the article the rest. A page that opens the shell without rendering a sidebar puts its
+    ARTICLE in that track: a 240px column of text on a 1600px page, everything inside it
+    wrapping against a width meant for nav links.
+
+    Neither half of the pairing shows the other, so it is asserted rather than left to a
+    comment: a page may have both, or neither, never only the wrapper.
+    """
+    run_dir = driven_run(tmp_path)
+    run_common.visualize(run_dir)
+
+    checked = 0
+    for page in ("runtime.html",):
+        html = (run_dir / page).read_text(encoding="utf-8")
+        if '<div class="layout">' not in html:
+            continue
+        checked += 1
+        assert '<nav class="toc"' in html, (
+            f'{page} opens the two-column shell but renders no sidebar into it — its article '
+            "lands in the 240px track the sidebar was supposed to occupy")
+
+    assert checked, (
+        "positive control: neither page uses the two-column shell any more, so this guard "
+        "witnesses nothing — retire it or re-point it at whatever replaced the shell")

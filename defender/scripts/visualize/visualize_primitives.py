@@ -11,7 +11,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 from defender._report import ReportRead, read_report  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
-from defender.learning import lead_repository  # noqa: E402
 
 
 
@@ -137,48 +136,3 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
         except json.JSONDecodeError:
             body = pre_text(p.read_text(encoding="utf-8"))
     return section(anchor, "alert", "Alert", "— input to the defender runtime", body)
-
-
-def render_lead_sequence_compact(run_dir: Path) -> str:
-    leads = lead_repository.joined(run_dir)
-    if not leads:
-        return '<div class="empty">no leads recorded</div>'
-    rows: list[str] = []
-    for jl in leads:
-        goal = jl.goal or ""
-        q_rows: list[str] = []
-        for q in jl.rows:  # run inspection — the whole table, sentinels included (#841)
-            params_str = json.dumps(q.params, ensure_ascii=False) if q.params else ""
-            q_rows.append(
-                f'<div class="lead-query"><span class="qid">{esc(q.query_id or "?")}</span> '
-                f'<span class="qparams">{esc(params_str)}</span></div>'
-            )
-        q_html = "".join(q_rows)
-        rows.append(
-            f'<div class="lead-row">'
-            f'<div class="lead-head"><span class="lead-pos">{esc(jl.lead_id)}</span></div>'
-            f'<div class="lead-body">'
-            f'<div class="lead-goal">{esc(goal)}</div>'
-            f'{q_html}'
-            f'</div>'
-            f'</div>'
-        )
-    return f'<div class="lead-list">{"".join(rows)}</div>'
-
-
-def render_report_card(run_dir: Path) -> str:
-    report = parse_report(run_dir)
-    disposition = report.disposition_or_unknown
-    confidence = str(report.frontmatter.get("confidence", "?"))
-    body = report.body.strip() or "(no report body)"
-    return (
-        f'<div class="report-card">'
-        f'<div class="report-meta">'
-        f'<span class="rm-key">disposition:</span> '
-        f'<span class="rm-val disp-{esc(disposition)}">{esc(disposition)}</span>'
-        f'  ·  <span class="rm-key">confidence:</span> '
-        f'<span class="rm-val">{esc(confidence)}</span>'
-        f'</div>'
-        f'<div class="report-body">{esc(body)}</div>'
-        f'</div>'
-    )

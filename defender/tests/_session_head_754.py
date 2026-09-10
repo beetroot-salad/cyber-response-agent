@@ -53,7 +53,11 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.tests._session_store_705 import DEFENDER, user_request  # noqa: E402
+from defender.tests._session_store_705 import (  # noqa: E402
+    DEFENDER,
+    store_mod,
+    user_request,
+)
 
 
 # the observation channel for the two new pieces of state
@@ -238,6 +242,27 @@ class NotSerializable:
     """
 
     parts: tuple = ()
+
+
+def session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
+    """Resolve the run's OWN session — else the store's root-of-lineage main — and hydrate
+    its path in both roles.
+
+    This composition used to live in the deleted transcript renderer, which is why the tests
+    that pin it read as being about a page. They are not: what they pin is
+    `resolve_session_id` falling back to `main_session_id`, and that pick refusing zero or
+    several roots rather than choosing one. `runtime/branch/_frontier.py` is the production
+    caller that still depends on both.
+    """
+    ss = store_mod()
+    store = ss.open_store_for_read(ss.resolve_store_path(Path(run_dir)))
+    try:
+        session_id = ss.resolve_session_id(Path(run_dir)) or ss.main_session_id(store)
+        messages = ss.hydrate(store, session_id, role="analysis")
+        coords = ss.hydrate(store, session_id, role="actor")
+        return list(zip(messages, [c["coord"] for c in coords], strict=True))
+    finally:
+        store.connection.close()
 
 
 def raised_by(fn: Any, *args: Any, **kwargs: Any) -> BaseException | None:

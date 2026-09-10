@@ -26,8 +26,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.scripts.visualize import visualize_run  # noqa: E402
 from defender.tests._session_head_754 import (  # noqa: E402
+    session_analysis,
     head_of,
     legacy_v1_store_file,
     log_rows,
@@ -174,7 +174,7 @@ def test_the_pointer_path_is_trusted_verbatim_across_a_relocated_run_dir(tmp_pat
 
     original = Path(result["store_path"])
     assert ss.resolve_store_path(run_dir) == original
-    here = visualize_run._main_session_analysis(run_dir)
+    here = session_analysis(run_dir)
     assert here, "the run must have rendered a transcript from its own run dir"
 
     relocated = tmp_path / "elsewhere" / "copied-run"
@@ -188,5 +188,5 @@ def test_the_pointer_path_is_trusted_verbatim_across_a_relocated_run_dir(tmp_pat
     reader = ss.open_store_for_read(ss.resolve_store_path(relocated))
     assert sql(reader, "SELECT COUNT(*) FROM session")[0][0] >= 1, (
         "and the reader opens it and serves a live query from there")
-    assert [coord for _m, coord in visualize_run._main_session_analysis(relocated)] == [
+    assert [coord for _m, coord in session_analysis(relocated)] == [
         coord for _m, coord in here], "the copy renders the same transcript as the original"

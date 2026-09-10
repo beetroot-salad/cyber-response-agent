@@ -645,7 +645,7 @@ demands:
      # boundary, which is precisely what a single-role test would leave unpinned.
 
   - {id: the_visualizer_picks_the_root_of_lineage_main_session, kind: behavior, form: test,
-     discharged_by: test_the_visualizer_picks_the_root_of_lineage_main_session,
+     discharged_by: test_the_session_pick_resolves_the_root_of_lineage_main_session,
      binds: ["interacts(_main_session_analysis->session)", "session.parent_session_id",
              "session.agent_id", "drives(visualize_run->_main_session_analysis)"]}
      # consensus: P113, grounded in B14 (executed): today's picker returns the true main only

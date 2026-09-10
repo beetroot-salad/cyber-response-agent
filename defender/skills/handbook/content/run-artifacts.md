@@ -20,8 +20,8 @@ writable scratch space.
   review_{role}_trace.jsonl  # one per review role: support, ablation, composer
   executed_queries.jsonl  # the QUERIES table — one row per executed query (FK lead_id)
   tool_trace.jsonl        # stream-json events captured by run.py
-  transcript.html         # the run's alert, report card and model transcript (run.py post-step)
-  runtime.html            # run inspection — phases, metrics, § Review gate
+  runtime.html            # the run's one page — alert, report card, phases, metrics,
+                          # § Review gate, transcript (run.py post-step)
   gather_raw/
     {lead_id}.lead.json   # the LEADS table — dispatch goal + dimensions (record_lead.py)
     {lead_id}/{seq}.json  # raw query payloads, by-ref (record_query.py)
@@ -90,14 +90,11 @@ writable scratch space.
   without forcing payload inspection. The agent works from gather's summary and
   Reads raw only on demand (and the main loop is blocked from doing so casually
   — see `content/runtime-loop.md`).
-- **`tool_trace.jsonl` / `transcript.html` / `runtime.html`** — written by
-  `run.py` from the stream-json events; the two HTML pages are the post-run
-  inspection surface. `transcript.html` carries the run's alert, its report card
-  and the model transcript; `runtime.html` is the run inspection, including
-  § Review gate. There is no judge view: the page that held one
-  (`visualize_judge.py`) rendered the retired pipeline's artifacts and was
-  deleted in #922, and the defender's own report card moved into
-  `transcript.html` rather than going with it.
+- **`tool_trace.jsonl` / `runtime.html`** — written by `run.py` from the
+  stream-json events; `runtime.html` is the post-run inspection surface, carrying
+  the run's alert, its report card, the phase and cost breakdown, § Review gate,
+  the leads/queries join and the full transcript. There is no judge view — #1025
+  tracks the one the branched-episode judge needs.
 
 ## Two-table schema
 
@@ -135,7 +132,7 @@ ANALYZE in `investigation.md`). The learning loop joins across cases on
 
 ## Debugging a run
 
-- Start with `transcript.html` for the narrative + artifact panel.
+- Start with `runtime.html` — the run's alert, report card and transcript in one page.
 - `investigation.md` shows the agent's reasoning (the `:R`/`:T` blocks carry
   the assessments and the disposition).
 - **When the committed disposition is `unresolved` but the investigation reads

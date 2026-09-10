@@ -639,7 +639,7 @@ demands:
 
   - {id: gl1_transcript_html_escapes_message_payload_content_reaching_the_store_backed_render,
      kind: negative, form: test,
-     discharged_by: test_transcript_html_escapes_message_payload_content_reaching_the_store_backed_render,
+     discharged_by: test_the_rendered_page_escapes_model_authored_payload_content,
      binds: ["interacts(visualize_run->session_store).response", "message_payload.payload",
              "run_visualizations"]}
      # R6 finding, highest-impact in this residue: R4 moves transcript.html onto the store, so
