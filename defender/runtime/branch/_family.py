@@ -481,7 +481,7 @@ def _parse_worlds(raw_worlds: Any) -> list[World]:
     if not raw_worlds:
         raise FamilyError(
             "the manifest declares no worlds — the questioner's flow produces the base plus "
-            "two by construction, and step 5 would have nothing to start")
+            "two by construction, and the family would have nothing to run")
     worlds = [parse_world(entry) for entry in raw_worlds]
     bases = [w.world_id for w in worlds if w.role == BASE_ROLE]
     if len(bases) != 1:
