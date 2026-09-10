@@ -55,6 +55,7 @@ from typing import Any, ClassVar
 from defender._run_paths import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
+from defender.learning.branch.archive import JUDGE_NAME, REVIEW_NAME, SAMPLES_NAME
 from defender.learning.core.config import (
     QUEUEABLE_FINDING_TYPES,
     judge_effort,
@@ -437,14 +438,14 @@ def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
 #: — an allowlist of resolved TARGETS (bare names only, never a prefix a traversal could dress
 #: up to pass), never a widen of the whole episode dir. The defender arm is unchanged: world-
 #: subtree-only.
-_WORLD_EVIDENCE_FILES = ("samples.yaml", "review.yaml", "judge.yaml")
+_WORLD_EVIDENCE_FILES = (SAMPLES_NAME, REVIEW_NAME, JUDGE_NAME)
 
 #: The subset of the above the FAMILY-level call is actually shown. `_build_family_prompt`
 #: renders the manifest, the review record and every world's mechanical row — and no sample at
 #: all — so advertising `samples.yaml` to that call invited a citation of a document it never
 #: saw, which `enqueue_report`'s family lane then refuses under A1(b). Named here beside the
 #: allowlist it narrows, so the two cannot drift.
-_FAMILY_EVIDENCE_FILES = tuple(n for n in _WORLD_EVIDENCE_FILES if n != "samples.yaml")
+_FAMILY_EVIDENCE_FILES = tuple(n for n in _WORLD_EVIDENCE_FILES if n != SAMPLES_NAME)
 
 
 def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER,
@@ -515,7 +516,7 @@ def cites_sample(finding: dict[str, Any], *, unavailable_patterns: Any = None) -
         if not isinstance(pointer, str):
             continue
         prefix, has_fragment, fragment = pointer.partition("#")
-        if prefix != "samples.yaml":
+        if prefix != SAMPLES_NAME:
             continue
         if unavailable_patterns is None:
             return True

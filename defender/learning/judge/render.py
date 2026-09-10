@@ -34,18 +34,20 @@ from defender.learning.judge._errors import JudgeRefused
 from defender._report import read_report
 from defender.learning.judge.family import (
     WorldFacts,
-    _own_h_rows,
-    _staged_patterns,
-    _world_pattern,
-    _world_review_block,
-    _raw_manifest,
     discriminator_of,
     episode_id_of,
-    names_one_file,
+    json_mapping,
+    lead_chain,
+    own_h_rows,
+    queries_by_lead,
+    raw_manifest,
     read_review_record,
     read_samples_record,
     read_world_facts,
     scope_params,
+    staged_patterns,
+    world_pattern,
+    world_review_block,
 )
 from defender.run_common import REPO_ROOT
 from defender.runtime.branch._family import episode_token_for
@@ -321,92 +323,6 @@ def _manifest_text(doc: dict[str, Any], graded_label: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _queries_by_lead(world_dir: Path) -> dict[str, list[dict[str, Any]]]:
-    """The world's ISSUED queries, grouped by lead, in ONE parse.
-
-    Called once per world rather than once per lead: the per-lead chain used to re-read and
-    re-parse `executed_queries.jsonl` inside its own comprehension, so a world with N leads
-    parsed the same table N times.
-
-    THE SENTINEL PARTITION IS THE WRITER'S OWN, through `is_reserved_query_id` — the same
-    predicate `lead_repository.QueryRow.is_sentinel` asks, so a fourth sentinel partitions here
-    on the day it is defined. A `∅.`-prefixed row records the lead's CONDUCT (a repeat the
-    guard refused, a call the argument schema turned back, a failed reducer shim); nothing it
-    describes reached a system of record. Grouped in with the rest they reached VIEW 1 as
-    queries the world issued and payload digests it read — under a task that asks the model to
-    say, per held row, "whether it was derived from a payload the defender actually read, or
-    invented". That is a defender failure invented out of a call the defender was refused.
-    `lead_repository.actor_view`'s docstring records this exact bug being fixed once already,
-    for the actor."""
-    from defender.scripts.gather_tools.record_query import is_reserved_query_id
-
-    eq_path = world_dir / "executed_queries.jsonl"
-    # `artifact_file` on every entry this module admits out of the archived world dir — the same
-    # `lstat` posture `lead_repository.load_leads` takes on the very same table, and the one
-    # `archive.py` applies when it WRITES these names. A link admitted here puts another tree's
-    # rows into VIEW 1 as this world's own conduct.
-    if not artifact_file(eq_path):
-        return {}
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in read_jsonl_rows(eq_path):
-        lead_id = row.get("lead_id")
-        query_id = row.get("query_id")
-        if isinstance(query_id, str) and is_reserved_query_id(query_id):
-            continue
-        if isinstance(lead_id, str):
-            grouped.setdefault(lead_id, []).append(row)
-    return grouped
-
-
-def _lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, list[dict]],
-                *, queries_by_lead: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    goal = None
-    # THE ID IS MODEL-AUTHORED and this is where it becomes a path. `names_one_file` refuses a
-    # token that would read outside the graded world — a `[../../c/report ...]` resolution row
-    # otherwise put a counterfactual sibling's whole `report.md` into this world's own prompt,
-    # under `- summary:`, as a fact about the world being graded (O5/J14).
-    safe = names_one_file(lead_id)
-    lead_file = world_dir / "gather_raw" / f"{lead_id}.lead.json"
-    if safe and artifact_file(lead_file):
-        data = json_mapping(lead_file)
-        if data is not None:
-            goal = data.get("goal")
-    queries = queries_by_lead.get(lead_id, [])
-    params = queries[0].get("params") if queries else None
-    summary_path = world_dir / GATHER_SUMMARIES_DIRNAME / f"{lead_id}.md"
-    summary = None
-    if not safe:
-        summary = ("(this lead id does not name a file inside this world, so no gather summary "
-                   "was read for it)")
-    elif artifact_file(summary_path):
-        # `errors="replace"`, not a bare read. This is MODEL-WRITTEN text in a tree the box can
-        # write, so an undecodable byte in it is an ordinary thing to meet; raising here would
-        # be an unreadable summary costing the whole episode its grade, and the substitution
-        # character is exactly what the judge should be shown of a byte nobody can read.
-        summary = summary_path.read_text(encoding="utf-8", errors="replace")
-    return {
-        "goal": goal, "params": params, "payload": [q.get("payload_digest") for q in queries],
-        "summary": summary, "document_rows": queries,
-        "resolutions": resolutions_by_lead.get(lead_id, []),
-    }
-
-
-def json_mapping(path: Path) -> dict[str, Any] | None:
-    """One JSON artifact as a mapping, or `None` when it is not readable as one.
-
-    ONE HOME for the tolerance policy — which exception classes are survivable and whether a
-    non-mapping counts as unreadable — because five readers in this package want the same
-    answer (`alert.json` twice, `provenance.json`, a lead's `.lead.json`, and the enqueue's own
-    episode alert). Spelled per site, a class that has to be added later (a `RecursionError` out
-    of a deeply nested document is neither `OSError` nor `ValueError`) has to be found five
-    times, and the sites are far enough apart that only a grep finds them."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, RecursionError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def _sibling_row(
     entry: Path, *, alert_id: str | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
@@ -639,7 +555,7 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     # episode parsed one file four times — and, since the episode dir is a tree a box can reach,
     # with no guarantee the four documents agreed. `facts=` and `union=` already exist for
     # exactly this hand-over; the manifest simply was not put through it.
-    doc = manifest if manifest is not None else _raw_manifest(episode_dir)
+    doc = manifest if manifest is not None else raw_manifest(episode_dir)
     episode_token = episode_token_for(episode_id_of(doc))
     world_dir = episode_dir / "worlds" / world_label
     world_entry = _world_entry(doc, world_label)  # validates the graded world is actually declared
@@ -669,18 +585,18 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     resolved_holding_system = (
         raw_holding_system.strip().casefold()
         if isinstance(raw_holding_system, str) else "")
-    h_rows = _own_h_rows(record.ledger_rows, resolved_holding_system) \
+    h_rows = own_h_rows(record.ledger_rows, resolved_holding_system) \
         if isinstance(raw_holding_system, str) else []
 
     # #1007 M4/O5: this world's own sample(s) and its own reachability block — off the SAME
-    # `_staged_patterns`/`_world_pattern` and `_world_review_block` helpers `family._grade_world`
+    # `staged_patterns`/`world_pattern` and `world_review_block` helpers `family._grade_world`
     # uses, so the prompt names the same pattern(s) and the same block the mechanical row was
     # computed from. EVERY staged pattern, never just one (O5's own falsifier) — the patch-only
-    # fallback (`_world_pattern`'s single holding-system name) stays for a world with no
+    # fallback (`world_pattern`'s single holding-system name) stays for a world with no
     # staged pattern to enumerate.
     overlay = world_entry.get("overlay")
-    staged_patterns = _staged_patterns(overlay) or [
-        _world_pattern(overlay, holding_system=resolved_holding_system)]
+    world_staged_patterns = staged_patterns(overlay) or [
+        world_pattern(overlay, holding_system=resolved_holding_system)]
     # THE PASS'S OWN PARSES, when the caller has them — the same hand-over `manifest`/`facts`/
     # `union` already take, and for the reason `read_review_record`'s own docstring gives ("the
     # episode dir is a tree a box can reach — two independent parses had no guarantee of
@@ -688,9 +604,9 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     # parses of two box-reachable files the pass had already read, and let the mechanical row
     # and the prompt section that claims to render it come off different documents.
     samples_doc = read_samples_record(episode_dir) if samples is None else samples
-    sample_text = _render_samples(staged_patterns, samples_doc)
+    sample_text = _render_samples(world_staged_patterns, samples_doc)
     review_doc = read_review_record(episode_dir) if review is None else review
-    review_block = _world_review_block(review_doc, world_label)
+    review_block = world_review_block(review_doc, world_label)
     review_text = _render_review_block(review_block)
     coverage = []
     for row in h_rows:
@@ -758,9 +674,8 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
         for k, v in sorted(spread.items(), key=lambda kv: (kv[0] is None, str(kv[0])))
     ] if siblings else []
 
-    queries_by_lead = _queries_by_lead(world_dir)
-    leads = {lid: _lead_chain(world_dir, lid, resolutions_by_lead,
-                             queries_by_lead=queries_by_lead)
+    issued = queries_by_lead(world_dir)
+    leads = {lid: lead_chain(world_dir, lid, resolutions_by_lead, queries_by_lead=issued)
             for lid in sorted(lead_ids)}
 
     manifest_text = _manifest_text(doc, world_label)
@@ -848,4 +763,4 @@ def _usable_commit(commit: Any) -> str | None:
     return commit if isinstance(commit, str) and _COMMIT_RE.match(commit) else None
 
 
-__all__ = ["JudgeInput", "episode_alert", "json_mapping", "render", "sibling_union"]
+__all__ = ["JudgeInput", "episode_alert", "render", "sibling_union"]

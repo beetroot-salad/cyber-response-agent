@@ -77,6 +77,7 @@ from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
 from defender.learning.branch import timing as timing_mod
+from defender.learning.branch.archive import REVIEW_NAME, SAMPLES_NAME
 from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
@@ -111,8 +112,6 @@ RUNS_SUBDIR = "runs"
 #: The archived worlds' directory, and the family stamp's filename.
 WORLDS_SUBDIR = "worlds"
 FAMILY_STAMP_NAME = "provenance.json"
-REVIEW_NAME = "review.yaml"
-SAMPLES_NAME = "samples.yaml"
 
 #: The three outcomes an episode can end in. `incomplete` is a MODELLED outcome carrying a
 #: reason rather than the absence of a file (§7 FORK-1): every question about a partially good

@@ -97,9 +97,15 @@ def _passthrough(label: str) -> dict:
 
 
 def _refused_row(label: str, *, system: str = J.HOLDING_SYSTEM) -> dict:
-    """The ledger's own `refused` word, imported rather than re-spelled — the flag keys on it."""
+    """The ledger's own `refused` word, imported rather than re-spelled — the flag keys on it.
+
+    Its OWN params: the ledger reader is first-row-wins on a duplicate pair-key (J3), so a
+    refused row sharing the passthrough row's query would be read as that row's duplicate and
+    never reach the flag — a real refusal is of a different query than the one that was served.
+    """
     refused = J.sym("learning.branch.ledger", "REFUSED")
     return J.ledger_row(source=refused, world_label=label, system=system,
+                        params={"index": f"{J.EVENTS_PATTERN},audit-*"},
                         payload="this ES|QL query's FROM clause addresses several corpora")
 
 

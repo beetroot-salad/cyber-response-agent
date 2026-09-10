@@ -34,6 +34,7 @@ from typing import Any
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._io import guarded_mkdir, read_guarded, write_guarded  # noqa: E402
+from defender.learning.branch.archive import JUDGE_NAME  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
 from defender.learning.judge import family as family_mod  # noqa: E402
 from defender.learning.judge import render as render_mod  # noqa: E402
@@ -138,7 +139,7 @@ class EpisodeGrade:
 
 
 def _judge_yaml_path(episode_dir: Path) -> Path:
-    return Path(episode_dir) / "judge.yaml"
+    return Path(episode_dir) / JUDGE_NAME
 
 
 def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
@@ -147,7 +148,7 @@ def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
     from defender._yaml import safe_load
 
     path = _judge_yaml_path(episode_dir)
-    # THE SCREENED READ, the same one `family._raw_manifest` makes and for the same stated
+    # THE SCREENED READ, the same one `family.raw_manifest` makes and for the same stated
     # reason: this file sits in the episode dir, a tree a sibling box's rw bind reaches, so an
     # entry at its name may be a link the model planted — and `is_file()`/`read_text` follow the
     # link the write side refuses. This is the IDEMPOTENCY record: a planted document that parses
@@ -500,7 +501,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     model, effort, cap = _judge_model(), _judge_effort(), _judge_cap()
     knobs = {"draws": configured_draws, "model": model, "effort": effort, "payload_cap": cap}
 
-    manifest = family_mod._raw_manifest(episode_dir)
+    manifest = family_mod.raw_manifest(episode_dir)
     # THE PARSE THIS PASS ALREADY MADE. `grade_family` read and parsed `family.yaml` a second
     # time from the same directory — a tree a box can reach — so nothing held the two documents
     # in agreement, and one pass paid for two reads of the file that says which worlds exist.
@@ -756,6 +757,20 @@ def _pass_alert_id(episode_dir: Path, labels: list[str]) -> Any:
     return render_mod.episode_alert(Path(episode_dir), labels).get("alert_id")
 
 
+def read_grade(episode_dir: Path) -> EpisodeGrade | None:
+    """The episode's recorded grade, read off `judge.yaml` — or `None` when there is none.
+
+    THE ONE READER (#1025 O8): the same screened read and the same tolerant conversion
+    `grade_episode` itself uses when it finds an existing record, exposed so the episode page
+    reads the record through this package rather than re-parsing the YAML. A record that is
+    not one — a planted link at the name, a document that is not a mapping — is `JudgeRefused`,
+    exactly as it is for the pass. A `not_graded` stamp reads back as a grade carrying that
+    stamp; deciding what to do about it is the caller's.
+    """
+    doc = _existing_grade(episode_dir)
+    return None if doc is None else _grade_from_document(episode_dir, doc)
+
+
 def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade:
     # THE ROWS ARE NARROWED HERE, and that is not defensiveness. `judge.yaml` lives in the
     # episode dir — a tree a box can reach — and `_existing_grade` validates only that the
@@ -833,4 +848,4 @@ def _write_judge_yaml(episode_dir: Path, record: EpisodeGrade) -> None:
                  mode="replace")
 
 
-__all__ = ["EpisodeGrade", "JudgeRefused", "grade_episode"]
+__all__ = ["EpisodeGrade", "JudgeRefused", "grade_episode", "read_grade"]

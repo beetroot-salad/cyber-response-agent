@@ -46,6 +46,7 @@ from defender import _yaml
 from defender._clock import now_iso
 from defender._io import guarded_mkdir, open_guarded, write_guarded
 from defender._run_paths import artifact_file
+from defender.learning.branch.archive import REVIEW_NAME
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
 from defender.scripts.adapters.elastic_adapter import (
@@ -70,8 +71,8 @@ INJECT_SUFFIX = ".inject"
 #: The staging record's filename under the episode dir.
 STAGED_FILENAME = "staged.yaml"
 
-#: The review record a teardown failure is reported into.
-REVIEW_FILENAME = "review.yaml"
+#: The review record a teardown failure is reported into — the archive's one spelling.
+REVIEW_FILENAME = REVIEW_NAME
 
 #: The two kinds of thing staging creates. Recorded per row because teardown deletes them
 #: through different cluster APIs and a row that cannot say which is a row teardown has to

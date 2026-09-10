@@ -45,7 +45,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_guarded, read_jsonl_rows
 from defender._run_paths import artifact_dir, artifact_file
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
-from defender.learning.branch.archive import WORLDS_DIRNAME
+from defender.learning.branch.archive import REVIEW_NAME, WORLDS_DIRNAME
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
 from defender.learning.branch.ledger import (
     Ledger,
@@ -61,9 +61,9 @@ from defender.runtime.branch._family import (
     world_token_for,
 )
 
-#: The launcher's record, under the episode. Read for ONE field here — the episode's own
-#: recorded outcome — and read through the same loader that wrote it.
-REVIEW_NAME = "review.yaml"
+# `REVIEW_NAME` — the launcher's record, under the episode — is the archive's one spelling,
+# imported above and re-exported below. Read for ONE field here — the episode's own recorded
+# outcome — and read through the same loader that wrote it.
 
 #: The outcome that withholds comparability. Spelled once: the launcher writes it, both
 #: readers refuse on it, and a second spelling is a refusal that stops firing.

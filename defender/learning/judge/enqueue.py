@@ -593,7 +593,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     family_holding_system = _first_nonempty(
         *(w.get("holding_system") for w in world_rows if isinstance(w, dict)), "")
     #: And a STAGED PATTERN for the family lane's own `pattern`, off the same rows. The holding
-    #: system's name is what `_world_pattern` falls back to for a world with no staged pattern,
+    #: system's name is what `world_pattern` falls back to for a world with no staged pattern,
     #: but it is never a member of `stageable_patterns` — and `pattern` is the questioner
     #: corpus's ONLY selection key (`branch/questioner/_questioner_lessons_section` keeps a
     #: lesson iff `fm["pattern"] in stageable`), so a family-level lesson stamped with it can

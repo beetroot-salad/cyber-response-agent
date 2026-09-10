@@ -70,6 +70,16 @@ SCRUB_VERDICT_NAME = "scrub_verdict.json"
 #: The run-dir pointer's name. A TEXT file, never a link — see the module docstring.
 RUN_DIR_POINTER = "run_dir"
 
+#: The three episode-level records, spelled ONCE (#1025 O8). The review's own record, beside
+#: the manifest it reviewed (kept on a rejection too — the measurement of a family that did not
+#: run is what O4's drift obligation is observed by); the questioner's reference document per
+#: staged pattern, moved into the archive at step 2 so it survives a pruned source run; and the
+#: judge's family record, written last. Every writer and reader imports these — a second
+#: spelling is a reader that opens a file nobody writes the day one of them is renamed.
+REVIEW_NAME = "review.yaml"
+SAMPLES_NAME = "samples.yaml"
+JUDGE_NAME = "judge.yaml"
+
 
 class ArchiveRefused(ValueError):
     """A world that cannot be archived honestly.
