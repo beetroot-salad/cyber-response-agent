@@ -39,6 +39,7 @@ from defender._paths import adapters_under
 from defender.runtime.verb_grant import DENY_ALL
 from defender.runtime.verbs import (
     ModuleVerbRegistry,
+    RegistryError,
     Verb,
     engine_of,
     model_facing_params,
@@ -254,7 +255,15 @@ class VerbResolver:
 
     def __init__(self, defender_dir: Path) -> None:
         self._adapters_dir = adapters_under(Path(defender_dir))
-        self._registry = ModuleVerbRegistry(self._adapters_dir, DENY_ALL)
+        # A tree whose adapters directory cannot be listed fails HERE, as "could not check"
+        # (`ScaffoldRuleError`, the error both production callers already catch) — not later
+        # as a clean empty roster, which is #901's own defect one step earlier. Since #1031 the
+        # registry reads the roster once at construction and raises for a missing or
+        # unreadable directory; wrapped so the resolver's callers keep catching one type.
+        try:
+            self._registry = ModuleVerbRegistry(self._adapters_dir, DENY_ALL)
+        except RegistryError as e:
+            raise ScaffoldRuleError(str(e)) from e
         self._cache: dict[str, Mapping[str, Verb]] = {}
 
     def is_system(self, system: str) -> bool:
@@ -275,8 +284,10 @@ class VerbResolver:
         return system in self._systems()
 
     def _systems(self) -> frozenset[str]:
-        # Not memoized: the callers that matter check a handful of paths against a tree that is
-        # being written, and a glob of one directory is cheaper than a stale answer about it.
+        # The roster is fixed at this resolver's construction (#1031) — which is AFTER the
+        # writes it checks: the lead author builds one resolver per batch once the agent's
+        # writes are in, and the connect skill builds a fresh one per call. The tree being
+        # written under those callers is the skills/catalog tree, never the adapters dir.
         return frozenset(self._registry.systems())
 
     def verbs(self, system: str) -> Mapping[str, Verb]:

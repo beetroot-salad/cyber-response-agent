@@ -160,10 +160,9 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     `raw_system` is COERCED rather than trusted, like every other value on this path
     (`_text.as_str`, `_as_dict`) — the coercion is `names_something_readable`'s,
     so the two seams cannot disagree about what a non-`str` means. Both ABOVE-GUARD call sites
-    run inside a rejection handler that catches nothing this function could raise (#1017 D4
-    added a catch there for `query_tool.RegistryUnavailable` alone, raised BEFORE this function
-    is asked), so a raise HERE would replace the rejection — no row for the guard to count,
-    and the fault unwinds past the lead's own catch. (`lead_zero._record_manual_row` is the
+    run inside a rejection handler that catches nothing this function could raise, so a raise
+    HERE would replace the rejection — no row for the guard to count, and the fault unwinds
+    past the lead's own catch. (`lead_zero._record_manual_row` is the
     third caller and is not in a handler; it passes a host constant, so it can only ever be
     answered `""`.)
 
@@ -186,16 +185,12 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     of this column are the guard's own predicates (`_trip`, live over `lead_rows` and offline
     over `lead_repository.QueryRow.record()` — #1017). No model-facing render enumerates it.
 
-    NOT MINTED FOR A DECLARED NAME the registry could not LIST (#1017 O4): that case used to
-    reach here with a real name and `recorded_system=""` — the caller coarsened the failure to
-    `""` — and now raises `query_tool.RegistryUnavailable` before this function is asked, and
-    that call is recorded as an `infra` row with `system_key=""`. The guarantee is exactly as
-    wide as the registry's raising: `ModuleVerbRegistry.systems()` globs its adapters
-    directory, and a directory removed or made unreadable under a live run answers an EMPTY
-    roster without raising (`Path.glob` swallows `ENOENT`/`EACCES`), which coarsens a declared
-    name to `""` and mints its digest here as a ghost's. Closing that needs the registry to
-    tell "nothing declared" from "could not look"; until it does, the docstring's claim stops
-    at the faults that surface as an exception."""
+    NEVER MINTED FOR A DECLARED NAME: `recorded_system` is `""` exactly when the registry does
+    not declare `raw_system`, and since #1031 that is a membership test over a roster fixed at
+    the registry's construction — there is no "could not look" state (a registry over a
+    directory it cannot list fails when built). Before that the roster was re-globbed per
+    call, a directory removed under a live run answered an EMPTY roster without raising, and a
+    declared name was coarsened to `""` and its digest minted here as a ghost's."""
     if recorded_system or not names_something_readable(raw_system):
         return ""
     return _sha256_hex(raw_system)

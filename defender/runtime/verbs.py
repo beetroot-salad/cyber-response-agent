@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
+import os
 import re
 import threading
 import types
@@ -15,6 +16,16 @@ from pathlib import Path
 from typing import Any, Union, get_args, get_origin
 
 from .verb_grant import GrantError, VerbGrant
+
+
+class RegistryError(Exception):
+    """The adapters directory a registry is being built over cannot be LISTED — absent, a
+    regular file, unreadable. Raised at construction, for every grant including `DENY_ALL`
+    and by every subclass, so a tree that cannot be read fails before any model call rather
+    than surfacing as an empty roster (#1031): `Path.glob` answers `[]` for a directory that
+    is not there, and a registry built on that answer declares nothing and refuses every
+    name as a ghost. Not a `GrantError` — that one points its reader at the disposition
+    table, and the table is not what is wrong here."""
 
 #: The alphabet of a system name, UNANCHORED, so a scanner that must recognise a name INSIDE
 #: surrounding text embeds this rather than respelling it (`verb_roster`'s `query(system="…"`
@@ -407,6 +418,12 @@ class VerbRegistry:
         self.grant = grant
 
     def systems(self) -> tuple[str, ...]:
+        """The systems this registry declares — a pure read of state fixed at construction.
+        It does not raise and it does no I/O: a registry that cannot learn its roster fails
+        when it is built (`ModuleVerbRegistry` raises `RegistryError` there), never here. The
+        query tool consults this on every rejected call to decide whether the model's `system`
+        is a declared name or a ghost, and that decision has no third answer (#1031); a
+        subclass or fake whose `systems()` raises is broken, not a case to handle."""
         raise NotImplementedError
 
     def verbs(self, system: str) -> Mapping[str, Verb]:
@@ -515,6 +532,22 @@ class ModuleVerbRegistry(VerbRegistry):
     def __init__(self, adapters_dir: Path, grant: VerbGrant):
         super().__init__(grant)
         self.adapters_dir = Path(adapters_dir)
+        # LISTED EXPLICITLY, FIRST, before the grant check and before the roster glob: a
+        # missing, unreadable, or non-directory path must fail here as what it is. Neither
+        # later step would say so — `Path.glob` yields `[]` for a path that is not there (so the
+        # roster would be empty and every name a ghost), and the grant check below would
+        # blame the grant ("names verb(s) the adapters do not declare") for a tree that was
+        # never read. `DENY_ALL` has no entries to fail on at all, which is how a resolver
+        # over a bare directory used to construct and answer an empty roster (#1031 O2).
+        # Consumed, not just opened: `scandir` on an unreadable directory raises at the first
+        # read on some platforms and at open on others.
+        try:
+            with os.scandir(self.adapters_dir) as it:
+                list(it)
+        except OSError as e:
+            raise RegistryError(
+                f"adapters directory {self.adapters_dir} cannot be listed ({e})"
+            ) from e
         # One cold read+parse per SYSTEM, not per grant entry: `declared_verb_names` re-reads
         # and re-parses the adapter every call, and the shipped gather grant names 30 entries
         # across 8 systems.
@@ -522,10 +555,21 @@ class ModuleVerbRegistry(VerbRegistry):
         # `decide` also cold-reads on the refusal path for a system the grant does not reach
         # at all, which a model looping on one ungranted name would otherwise pay a fresh
         # read+parse for on every call. An adapters tree does not change under a live
-        # registry — `verbs()` memoizes the loaded module on the same assumption.
+        # registry — `verbs()` memoizes the loaded module on the same assumption, and since
+        # #1031 the roster below is read ONCE here on the same assumption too.
         self._cold: dict[str, frozenset[str]] = {
             s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries
         }
+        # THE ROSTER, fixed at construction. `systems()` used to re-glob the directory on every
+        # call, and the query tool asks it on every above-guard rejection — I/O on the per-call
+        # path, which can fail mid-run, and #1017 D4 grew a fault path (an exception class, a
+        # reserved breaker key, an `infra` row at two placements) to handle exactly that. Read
+        # once, "the registry cannot list" is not a runtime event and that apparatus is gone.
+        # A snapshot is also the only answer that is CORRECT for the directory the constructor
+        # just validated: a tree removed under a live registry is unsupported (above), and a
+        # per-call glob over it would answer `[]` without raising, coarsening a declared
+        # system's rejection to a ghost's.
+        self._systems: tuple[str, ...] = self._read_roster()
         # THE registry that resolves a real adapters tree, which is the deployment shape the
         # disposition table governs — every grant reaching this constructor that a model ever
         # calls through is one the table projects — so a refusal from here may name the table
@@ -552,10 +596,15 @@ class ModuleVerbRegistry(VerbRegistry):
             )
 
     def systems(self) -> tuple[str, ...]:
-        """The systems this adapters directory declares — every one resolved through
-        `_adapter_path`, the SAME call `verbs()` dispatches with. A name this roster carries is
-        a name that dispatches; without the filter, `verbs()` raises `KeyError` for a system the
-        registry just said it had.
+        """The roster read at construction (`_read_roster`), and nothing else: no I/O, no raise.
+        See `VerbRegistry.systems` for the contract this keeps."""
+        return self._systems
+
+    def _read_roster(self) -> tuple[str, ...]:
+        """The roster: the systems this adapters directory declares — every one resolved
+        through `_adapter_path`, the SAME call `verbs()` dispatches with. A name this roster
+        carries is a name that dispatches; without the filter, `verbs()` raises `KeyError` for
+        a system the registry just said it had. Called ONCE, by the constructor.
 
         `_adapter_path`, not `is_system_name` alone: shape is only half of what makes a name
         dispatchable. `_system_of` maps `_`->`-` and the inverse is NOT onto — a
@@ -605,6 +654,7 @@ __all__ = [
     "SYSTEM_PATTERN",
     "UNDECLARED",
     "ModuleVerbRegistry",
+    "RegistryError",
     "Verb",
     "VerbContext",
     "VerbDecision",
