@@ -35,7 +35,7 @@ from defender.learning.branch.estate.registry import WorldRegistry  # noqa: E402
 from defender.runtime import query_tool, verbs  # noqa: E402
 from defender.runtime.query_tool import QueryCapture, _registry_declares  # noqa: E402
 from defender.runtime.verb_grant import DENY_ALL, GrantError  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
+from defender.runtime.verbs import ModuleVerbRegistry, VerbRegistry  # noqa: E402
 from defender.scripts.gather_tools.record_query import system_fingerprint  # noqa: E402
 from defender.tests._declared869 import ADAPTER_BODY, write  # noqa: E402
 from defender.tests._verb_authorization_632 import grant_of  # noqa: E402
@@ -82,8 +82,16 @@ def test_the_roster_is_the_construction_time_one_after_the_directory_is_removed(
     The positive control is the roster before the removal; the two must be equal, and both
     must be the filtered one, so a snapshot taken with a looser filter fails here too.
 
-    Observed failing by (today): `()` after the removal — `Path.glob` over a directory that
-    no longer exists yields nothing and raises nothing."""
+    ONE file first, then the whole directory: an implementation that re-globs per call and
+    answers `snapshot ∩ live`, falling back to the snapshot only when the glob comes back
+    empty, is indistinguishable from the snapshot under an all-or-nothing removal (the
+    adversary's H1). Unlinking `cmdb_adapter.py` alone leaves a non-empty glob that no longer
+    names `cmdb`, so only a roster read from no I/O still answers the same tuple — which is
+    also N4's stated shape ("an adapter FILE removed under a live run").
+
+    Observed failing by (today): `("elastic", "host-state")` after the one file goes, `()`
+    after the directory does — `Path.glob` over a directory that no longer exists yields
+    nothing and raises nothing."""
     adapters = _adapters(tmp_path, "elastic", "cmdb", "host-state")
     write(adapters / "host-state_adapter.py", ADAPTER_BODY)     # derives `host-state` again
     write(adapters / "change-mgmt_adapter.py", ADAPTER_BODY)    # derives a name that resolves to nothing
@@ -92,6 +100,11 @@ def test_the_roster_is_the_construction_time_one_after_the_directory_is_removed(
 
     registry = ModuleVerbRegistry(adapters, DENY_ALL)
     assert registry.systems() == expected, "the roster before the removal is not the filtered one"
+
+    (adapters / "cmdb_adapter.py").unlink()
+    assert sorted(adapters.glob("*_adapter.py")), "the fixture emptied the directory"
+    assert registry.systems() == expected, \
+        "the roster followed one file off the disk: it is re-read per call, not fixed"
 
     shutil.rmtree(adapters)
     assert not adapters.exists(), "the fixture did not remove the directory"
@@ -278,17 +291,27 @@ def test_the_scaffold_resolver_reads_the_snapshot(tmp_path):
     written after construction is not a system to that resolver, and is one to a fresh
     resolver over the same tree.
 
-    Observed failing by (today): the first resolver answering True — `_systems` was
+    Two resolvers, because the ORDER of the first question matters: `untouched` is never
+    asked anything until after the write, so a resolver that globs lazily and memoises on
+    its first `is_system` call (the adversary's H3) would mint its roster from a tree that
+    already has `cmdb` and answer True. `asked` is asked before the write, which is the arm
+    a lazy cache passes; both must answer False after it.
+
+    Observed failing by (today): the first resolvers answering True — `_systems` was
     deliberately un-memoised."""
     write(tmp_path / "scripts" / "adapters" / "elastic_adapter.py", ADAPTER_BODY)
-    before = _scaffold_rules.VerbResolver(tmp_path)
-    assert before.is_system("elastic")
-    assert not before.is_system("cmdb")
+    untouched = _scaffold_rules.VerbResolver(tmp_path)
+    asked = _scaffold_rules.VerbResolver(tmp_path)
+    assert asked.is_system("elastic")
+    assert not asked.is_system("cmdb")
 
     write(tmp_path / "scripts" / "adapters" / "cmdb_adapter.py", ADAPTER_BODY)
-    assert not before.is_system("cmdb"), "the resolver's roster followed the disk"
+    assert not untouched.is_system("cmdb"), \
+        "the roster was read at the first question, not at construction"
+    assert untouched.is_system("elastic"), "the untouched resolver's roster is not the tree's"
+    assert not asked.is_system("cmdb"), "the resolver's roster followed the disk"
     assert _scaffold_rules.VerbResolver(tmp_path).is_system("cmdb"), \
-        "a fresh resolver does not see the new adapter, so the control above is vacuous"
+        "a fresh resolver does not see the new adapter, so the controls above are vacuous"
 
 
 # ---------------------------------------------------------------------------------------
@@ -300,8 +323,12 @@ def test_the_registry_cannot_list_apparatus_is_gone_and_declares_is_membership(t
     """D4 — the four names #1017 D4 added to `query_tool` no longer exist (`RegistryUnavailable`,
     `REGISTRY_BREAKER_KEY`, `_coarsen_or_record_fault`, `_record_registry_fault`), the two
     public ones are out of `__all__`, and `_registry_declares` is a plain membership test over
-    `systems()`: True for a name the registry declares, False for one it does not. Absence is
-    the claim, so `hasattr` is the instrument — the one place in this suite it is.
+    `systems()`: True for a name the registry declares, False for one it does not — AND still
+    True for the declared name after the directory is removed, so it reads the roster and not
+    the disk (the adversary's H2: `_adapter_path(...) is not None` answers the intact-dir arm
+    identically and then disagrees with `_system_of_record` over a removed one). Absence is
+    the claim for the four names, so `hasattr` is the instrument — the one place in this
+    suite it is.
 
     Observed failing by (today): the names existing."""
     for name in ("RegistryUnavailable", "REGISTRY_BREAKER_KEY",
@@ -310,7 +337,45 @@ def test_the_registry_cannot_list_apparatus_is_gone_and_declares_is_membership(t
         assert name not in query_tool.__all__
     assert "RegistryError" in verbs.__all__, "the construction-time error is not exported"
 
-    registry = ModuleVerbRegistry(_adapters(tmp_path, "elastic"), DENY_ALL)
+    adapters = _adapters(tmp_path, "elastic")
+    registry = ModuleVerbRegistry(adapters, DENY_ALL)
     assert registry.systems() == ("elastic",)
     assert _registry_declares(registry, "elastic") is True
     assert _registry_declares(registry, "cmdb") is False
+    shutil.rmtree(adapters)
+    assert _registry_declares(registry, "elastic") is True, \
+        "`_registry_declares` read the disk, not the roster; it now disagrees with `_system_of_record`"
+    assert _registry_declares(registry, "cmdb") is False
+
+
+class _RaisingRoster(VerbRegistry):
+    """A registry whose `systems()` raises — a BROKEN registry by `VerbRegistry.systems`'s
+    contract (N1). Not a case the readers handle; the instrument for asserting they do not."""
+
+    def __init__(self):
+        super().__init__(DENY_ALL)
+
+    def systems(self) -> tuple[str, ...]:
+        raise PermissionError(13, "Permission denied")
+
+    def verbs(self, system: str):
+        return {}
+
+
+def test_neither_reader_swallows_a_registry_that_raises():
+    """D4 / X1 — the exception arms are GONE, not re-spelled as the pre-#1017 swallow: a
+    `systems()` that raises propagates out of `_system_of_record` and `_registry_declares`
+    alike. N1 says the runtime mounts no defence against a raising registry — this is that,
+    pinned: a defence that answers `""` would mint `("", sha256("elastic"))` from a real
+    name (the adversary's H4, and #1017's original defect), and one that answers `False` on
+    the `list_verbs` path would send the lead to "confirm the name" for a host fault.
+
+    Observed failing by (today): `RegistryUnavailable` out of the first, `False` from the
+    second."""
+    capture = QueryCapture(_RaisingRoster())
+    with pytest.raises(PermissionError):
+        capture._system_of_record("elastic")
+    with pytest.raises(PermissionError):
+        capture._coarsen("elastic")
+    with pytest.raises(PermissionError):
+        _registry_declares(_RaisingRoster(), "elastic")
