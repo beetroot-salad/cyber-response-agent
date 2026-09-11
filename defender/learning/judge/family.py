@@ -51,8 +51,9 @@ the derived accessors named in `__all__` (#1025 O8, prep 2), imported by the jud
 builder (`render.py`) and by the episode page rather than re-implemented. NOT YET HERE, and
 still read by the input builder on its own: `render.episode_alert` / `_world_alert_id` /
 `_read_provenance`, its `lessons_loaded.jsonl` read and its `gather_summaries/*.md` walk, and
-`enqueue.draws_on_disk` (the per-draw documents). The record NAMES are `branch/archive.py`'s
-and the world-table paths are `RunPaths`'s — imported, not re-spelled.
+`enqueue.draws_on_disk` (the per-draw documents). The record NAMES are `branch/archive.py`'s,
+and the world's leads and queries come off `lead_repository.joined`, the canonical surface
+(#1017) — imported, not re-spelled and not re-parsed.
 """
 
 from __future__ import annotations
@@ -62,8 +63,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from defender._io import read_guarded, read_jsonl_rows, read_jsonl_rows_report
-from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender._io import read_guarded, read_jsonl_rows_report
+from defender._run_paths import artifact_dir, artifact_file
 from defender._report import ReportRead, read_report
 from defender._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
@@ -85,6 +86,7 @@ from defender.learning.branch.archive import (
     WORLDS_DIRNAME,
 )
 from defender.learning.judge._errors import JudgeRefused
+from defender.learning.lead_repository import JoinedLead, joined
 from defender.run_common import resolve_runs_base
 from defender.runtime.branch._family import (
     BASE_ROLE,
@@ -195,8 +197,8 @@ def _default_samples_reader(path: Path) -> dict[str, Any]:
 
 def read_samples_record(episode_dir: Path, *, reader: Any = None) -> dict[str, Any]:
     """`samples.yaml`, parsed once per caller — the questioner's own reference document per
-    staged pattern, moved into the episode archive at step 2 so it survives a pruned source run
-    (#1007 O5/M4)."""
+    staged pattern, moved into the episode archive at `Step.QUESTIONER` (`branch/steps.py`) so
+    it survives a pruned source run (#1007 O5/M4)."""
     read = reader if reader is not None else _default_samples_reader
     return read(Path(episode_dir) / SAMPLES_NAME)
 
@@ -420,67 +422,60 @@ def raw_manifest(episode_dir: Path) -> dict[str, Any]:
     return doc
 
 
-def queries_by_lead(world_dir: Path) -> dict[str, list[dict[str, Any]]]:
-    """The world's ISSUED queries, grouped by lead, in ONE parse.
+def leads_by_id(world_dir: Path) -> dict[str, JoinedLead]:
+    """The world's leads off the CANONICAL surface — `lead_repository.joined` over the archived
+    world dir, which has the run-dir shape it reads (C10) — indexed by lead id, in ONE parse.
 
     Called once per world rather than once per lead: the per-lead chain used to re-read and
     re-parse `executed_queries.jsonl` inside its own comprehension, so a world with N leads
     parsed the same table N times.
 
-    THE SENTINEL PARTITION IS THE WRITER'S OWN, through `is_reserved_query_id` — the same
-    predicate `lead_repository.QueryRow.is_sentinel` asks, so a fourth sentinel partitions here
-    on the day it is defined. A `∅.`-prefixed row records the lead's CONDUCT (a repeat the
-    guard refused, a call the argument schema turned back, a failed reducer shim); nothing it
-    describes reached a system of record. Grouped in with the rest they reached VIEW 1 as
-    queries the world issued and payload digests it read — under a task that asks the model to
-    say, per held row, "whether it was derived from a payload the defender actually read, or
-    invented". That is a defender failure invented out of a call the defender was refused.
-    `lead_repository.actor_view`'s docstring records this exact bug being fixed once already,
-    for the actor."""
-    from defender.scripts.gather_tools.record_query import is_reserved_query_id
+    THE SURFACE'S READING WINS (#1017 D3/N8). This module used to keep a private grouping of
+    the raw rows — its own sentinel filter, its own `lead_id` check, file order for seq order,
+    a raw `params` of whatever shape the row held — which is the second-reader drift
+    `lead_repository` exists to end. `JoinedLead.queries` is already the sentinel-split set
+    (the same `is_reserved_query_id` this module re-implemented: a `∅.`-prefixed row records
+    the lead's CONDUCT — a repeat the guard refused, a call the argument schema turned back —
+    and nothing it describes reached a system of record, so shown as an issued query it is a
+    defender failure invented out of a call the defender was refused), seq-ordered, with the
+    surface's coercions; `JoinedLead.goal` is the lead file's goal, read once for the world.
 
-    eq_path = RunPaths(world_dir).executed_queries
-    # `artifact_file` on every entry this module admits out of the archived world dir — the
-    # `lstat` posture `archive.py` applies when it WRITES these names (`lead_repository`'s own
-    # readers of this table still follow a link at it; the two are reconciled in a follow-up).
-    # A link admitted here puts another tree's rows into VIEW 1 as this world's own conduct.
-    if not artifact_file(eq_path):
-        return {}
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in read_jsonl_rows(eq_path):
-        lead_id = row.get("lead_id")
-        query_id = row.get("query_id")
-        if isinstance(query_id, str) and is_reserved_query_id(query_id):
-            continue
-        if isinstance(lead_id, str):
-            grouped.setdefault(lead_id, []).append(row)
-    return grouped
+    THE LINK-REFUSING GATE IS THE SURFACE'S OWN, not a private check ahead of it: `load_leads`
+    `artifact_dir`s `gather_raw/` and reads each lead file through `read_guarded`, and
+    `load_queries_report` `lstat`s the table before it reads — the posture `archive.py` applies
+    when it WRITES these names. A link admitted at either name would put another tree's bytes
+    into VIEW 1 as this world's own conduct. The two halves are refused SEPARATELY, so a world
+    whose table is not a regular file (or is absent — the shape `archive.py` records for "the
+    run produced none") renders every lead with its goal and no queries; gated as a whole
+    ahead of `joined()`, as this module first did, a bad table cost every lead its goal too."""
+    return {lead.lead_id: lead for lead in joined(world_dir)}
 
 
 def lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, list[dict]],
-               *, issued: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    """One lead's chain — goal, first params, payload digests, gather summary, the issued rows
-    and the lead's resolutions — off the world's archived files, with `issued` being
-    `queries_by_lead(world_dir)` computed ONCE by the caller (a world with N leads used to
-    parse the queries table N times)."""
-    goal = None
+               *, leads: dict[str, JoinedLead]) -> dict[str, Any]:
+    """One lead's chain for VIEW 1: goal -> params -> payload -> summary -> resolutions, with
+    `leads` being `leads_by_id(world_dir)` computed ONCE by the caller.
+
+    EVERY LINK IS NAMED FROM A `QueryRow` FIELD; no row object is stringified (#1017 D3/O3).
+    The chain used to carry the lead's raw rows whole under `document_rows`, which put every
+    column of every executed query — `payload_sha256`, `payload_path`, `raw_command`,
+    `exit_code`, `error_class`, and since #871 `system_key` — into the prompt as bytes the
+    judge cannot act on, charged against the operator's payload cap ahead of the evidence the
+    cap exists to keep."""
     # THE ID IS MODEL-AUTHORED and this is where it becomes a path. `names_one_file` refuses a
     # token that would read outside the graded world — a `[../../c/report ...]` resolution row
     # otherwise put a counterfactual sibling's whole `report.md` into this world's own prompt,
-    # under `- summary:`, as a fact about the world being graded (O5/J14).
+    # under `- summary:`, as a fact about the world being graded (O5/J14). The surface is keyed
+    # by the ids the world's OWN files and rows carry, so a token like that names no lead there.
     safe = names_one_file(lead_id)
+    lead = leads.get(lead_id)
+    goal = lead.goal if lead is not None else None
+    queries = lead.queries if lead is not None else []
+    params = queries[0].params if queries else None
     # THE DIRECTORY IS SCREENED AS WELL AS THE LEAF. `artifact_file` lstats the entry it is
-    # given, so a link planted at `gather_raw/` (or `gather_summaries/`) itself would put
-    # another tree's regular files through a leaf check that passes — the same `artifact_dir`
-    # posture `lead_repository.load_leads` takes on the lead table.
-    gather_raw = RunPaths(world_dir).gather_raw
-    lead_file = gather_raw / f"{lead_id}.lead.json"
-    if safe and artifact_dir(gather_raw) and artifact_file(lead_file):
-        data = json_mapping(lead_file)
-        if data is not None:
-            goal = data.get("goal")
-    queries = issued.get(lead_id, [])
-    params = queries[0].get("params") if queries else None
+    # given, so a link planted at `gather_summaries/` itself would put another tree's regular
+    # files through a leaf check that passes — the same `artifact_dir` posture `load_leads`
+    # takes on `gather_raw/`.
     summaries_dir = world_dir / GATHER_SUMMARIES_DIRNAME
     summary_path = summaries_dir / f"{lead_id}.md"
     summary = None
@@ -494,8 +489,8 @@ def lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, lis
         # character is exactly what the judge should be shown of a byte nobody can read.
         summary = summary_path.read_text(encoding="utf-8", errors="replace")
     return {
-        "goal": goal, "params": params, "payload": [q.get("payload_digest") for q in queries],
-        "summary": summary, "document_rows": queries,
+        "goal": goal, "params": params, "payload": [q.payload_digest for q in queries],
+        "summary": summary,
         "resolutions": resolutions_by_lead.get(lead_id, []),
     }
 
@@ -504,14 +499,16 @@ def json_mapping(path: Path) -> dict[str, Any] | None:
     """One JSON artifact as a mapping, or `None` when it is not readable as one.
 
     ONE HOME for the tolerance policy — which exception classes are survivable and whether a
-    non-mapping counts as unreadable — because five readers in this package want the same
-    answer (`alert.json` twice, `provenance.json`, a lead's `.lead.json`, and the enqueue's own
-    episode alert). Spelled per site, a class that has to be added later (a `RecursionError` out
-    of a deeply nested document is neither `OSError` nor `ValueError`) has to be found five
-    times, and the sites are far enough apart that only a grep finds them.
+    non-mapping counts as unreadable — because four readers in this package want the same
+    answer (`alert.json` twice, `provenance.json`, and the enqueue's own episode alert; a
+    lead's `.lead.json` was the fifth until #1017 moved that read onto
+    `lead_repository.load_leads`, which keeps the same three classes). Spelled per site, a
+    class that has to be added later (a `RecursionError` out of a deeply nested document is
+    neither `OSError` nor `ValueError`) has to be found at every site, and the sites are far
+    enough apart that only a grep finds them.
 
-    AND ONE HOME FOR THE LINK POLICY. Every one of those five files sits in a tree a box can
-    reach, and three of the five callers have no `lstat` screen of their own — a plain
+    AND ONE HOME FOR THE LINK POLICY. Every one of those files sits in a tree a box can
+    reach, and three of the four callers have no `lstat` screen of their own — a plain
     `read_text` at `worlds/<X>/provenance.json` followed a planted link and handed the pass an
     attacker-chosen `commit` to `git show` every lesson at. `read_guarded` asks the plainness
     question of the open descriptor itself (`O_NOFOLLOW`, a link count of one, a regular file),
@@ -709,9 +706,11 @@ def names_one_file(lead_id: object) -> bool:
     """Is `lead_id` a name this pass may join into a path?
 
     A lead id is MODEL-AUTHORED. `iter_resolutions` hands back whatever token the document's own
-    `:T resolutions` row put where a lead id goes — any non-whitespace text — and every per-lead
-    read joins it straight into `worlds/<X>/gather_summaries/<lead>.md` and
-    `gather_raw/<lead>.lead.json`. A token carrying a separator or `..` therefore reads OUT of
+    `:T resolutions` row put where a lead id goes — any non-whitespace text — and the per-lead
+    summary read joins it straight into `worlds/<X>/gather_summaries/<lead>.md` (the lead file's
+    goal used to be joined the same way, into `gather_raw/<lead>.lead.json`, until #1017 moved
+    that read onto `lead_repository`, which is keyed by the ids the world's own files carry and
+    joins no token into a path). A token carrying a separator or `..` therefore reads OUT of
     the graded world, and the leads view puts what it read INTO the prompt: a `[../../c/report
     ...]` row makes a counterfactual sibling's whole `report.md` — its disposition included —
     read as a fact about the graded world, which is the one thing O5/J14's withholding exists to
@@ -1148,9 +1147,9 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
             else _withheld_reason(difference_shown=difference_shown, facts=facts_o2))
 
     # THE MECHANICAL WORLD FINDING IS NOT GATED ON `episode_incomplete`. Reachability is a
-    # REVIEW-TIME fact (M1's capture re-ask, step 4) — decided before any sibling even runs
-    # (step 5) — so it exists independently of whether the sibling ever queried anything; only
-    # the DEFENDER lane's withholding depends on whether the episode ran at all
+    # REVIEW-TIME fact (M1's capture re-ask, `Step.REVIEW`) — decided before any sibling even
+    # runs (`Step.RUNS`) — so it exists independently of whether the sibling ever queried
+    # anything; only the DEFENDER lane's withholding depends on whether the episode ran at all
     # (`test_unreachable_difference_fires_even_with_no_row_on_the_holding_system`, whose own
     # served ledger is empty and still mints this finding).
     mechanical_findings: list[dict[str, Any]] = []
@@ -1423,8 +1422,8 @@ def grade_family(
 __all__ = [
     "FamilyGrade", "MECHANICAL_WORLD_BUCKET", "ReachabilityFacts", "WorldFacts",
     "declares_difference", "discriminator_of", "episode_id_of", "grade_family",
-    "is_gradable_row", "json_mapping", "lead_chain", "mapping_key", "names_one_file",
-    "own_h_rows", "queries_by_lead", "raw_manifest", "read_review_record",
+    "is_gradable_row", "json_mapping", "lead_chain", "leads_by_id", "mapping_key",
+    "names_one_file", "own_h_rows", "raw_manifest", "read_review_record",
     "read_samples_record", "read_world_facts", "sample_patterns", "scope_params",
     "screened_yaml_mapping", "staged_patterns", "world_pattern", "world_review_block",
 ]

@@ -39,8 +39,8 @@ from defender.learning.judge.family import (
     episode_id_of,
     json_mapping,
     lead_chain,
+    leads_by_id,
     own_h_rows,
-    queries_by_lead,
     raw_manifest,
     read_review_record,
     read_samples_record,
@@ -92,9 +92,11 @@ class JudgeInput:
         """Each view as the text that goes inside its frame, the SET of them under the cap.
 
         THE CAP IS CHARGED OVER THE WHOLE SET, not per section. It first bounded one file — a
-        lead's `gather_summaries/<lead>.md` — while `document_rows` embedded every executed
-        query for that lead, `_render_lessons` embedded each lesson's whole body at its recorded
-        commit, and the document and report were whole files. Charging it per section instead
+        lead's `gather_summaries/<lead>.md` — while the leads view embedded every executed
+        query's whole row for that lead (the `document_rows` dump #1017 removed — the view now
+        names `params` and the payload digests and nothing else of the row), `_render_lessons`
+        embedded each lesson's whole body at its recorded commit, and the document and report
+        were whole files. Charging it per section instead
         fixed that and introduced its own version of it: eight sections each at the cap is eight
         times the bound, and the knob still reported success. What the operator is bounding is
         the bytes that reach the model, so that is the quantity measured."""
@@ -157,7 +159,6 @@ def _render_leads(leads: dict[str, dict[str, Any]]) -> str:
         lines.append(f"- params: {chain.get('params')}")
         lines.append(f"- payload: {chain.get('payload')}")
         lines.append(f"- summary: {chain.get('summary')}")
-        lines.append(f"- document_rows: {chain.get('document_rows')}")
         lines.append(f"- resolutions: {chain.get('resolutions')}")
     return "\n".join(lines) + "\n"
 
@@ -673,9 +674,9 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
         for k, v in sorted(spread.items(), key=lambda kv: (kv[0] is None, str(kv[0])))
     ] if siblings else []
 
-    issued = queries_by_lead(world_dir)
-    leads = {lid: lead_chain(world_dir, lid, resolutions_by_lead, issued=issued)
-            for lid in sorted(lead_ids)}
+    by_id = leads_by_id(world_dir)
+    leads = {lid: lead_chain(world_dir, lid, resolutions_by_lead, leads=by_id)
+             for lid in sorted(lead_ids)}
 
     manifest_text = _manifest_text(doc, world_label)
 

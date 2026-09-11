@@ -492,16 +492,18 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
 
     "Derived, never authoritative" forbids a row's correctness from depending on what the gate
     later decides for the model-visible text. BOUND PER WRITER EDGE, not at the boundary, for
-    the reason coherence always is: the table has THREE independently spelled writers — the
+    the reason coherence always is: the table had THREE independently spelled writers — the
     shared `append_query_row` helper reached by the query tool and the gather bash lane,
-    `lead_zero`'s copy of the frozen key set assembled INLINE, and the judge's closed-ticket
-    tool appending its
+    `lead_zero`'s copy of the frozen key set assembled INLINE (folded into `append_query_row`
+    by #1017, which is what makes the two lanes below agree by construction rather than by
+    coincidence), and the judge's closed-ticket tool appending its
     own — and a demand at the table's altitude is green when two of the three agree.
 
     TWO WRITERS ARE DRIVEN AND THE THIRD IS OUT OF REACH BY CONSTRUCTION
     (`92-reconciliation.md` F9). The demand states the per-writer rule and this test used to
     exercise one lane, which is weaker than the altitude the rule was written to avoid. The
-    query tool's lane and `lead_zero._record_manual_row`'s inline assembly both append to THIS
+    query tool's lane and `lead_zero._record_manual_row` (its own assembly until #1017, the
+    shared constructor since) both append to THIS
     run's `executed_queries.jsonl`, so both are inside the differential below. The judge's
     appender writes a file of the same NAME in the LEARNING run dir
     (the retired closed-ticket tool, `run_dir / "executed_queries.jsonl"` where `run_dir` is the
@@ -515,13 +517,13 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     from defender.runtime import lead_zero
 
     def _manual_row(run_dir: Path) -> None:
-        """`lead_zero`'s SECOND spelling of the row, written into the run under test.
+        """`lead_zero`'s row — the table's second writer — written into the run under test.
 
-        Called through the module's own function rather than re-assembled here: the frozen
-        keys are spelled INLINE at that site — a count this docstring deliberately does not
-        restate, having been stale through two column additions (#877's `payload_sha256`,
-        #871's `system_key`) — and a copy in this test would compare the test's idea of the row
-        against itself."""
+        Called through the module's own function rather than re-assembled here: until #1017
+        the frozen keys were spelled INLINE at that site (a count this docstring deliberately
+        does not restate, having been stale through two column additions — #877's
+        `payload_sha256`, #871's `system_key`), and a copy in this test would compare the
+        test's idea of the row against itself either way."""
         deps = lead_zero._CaptureDeps(
             run_dir=run_dir, defender_dir=DEFENDER, run_id=RUN_ID,
             lead_id="l-000",

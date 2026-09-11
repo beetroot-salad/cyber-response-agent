@@ -19,13 +19,15 @@ input builder already computes. Three decisions are pinned here:
    (`f"{ep}/review.yaml#..."`, "for example `review.yaml#worlds.b...`").
 2. **The derived accessors live in `learning/judge/family.py` under PUBLIC names** —
    `world_review_block`, `staged_patterns`, `world_pattern`, `own_h_rows`, `raw_manifest`, and,
-   moved off `render.py`, `queries_by_lead`, `lead_chain` and `json_mapping`. Those seven
+   moved off `render.py`, `leads_by_id`, `lead_chain` and `json_mapping`. Those seven
    private spellings are gone, the input builder IMPORTS the lead-chain trio
    (its attributes are `family`'s objects, and no constant in `render.py` names the queries
    table or the lead files), and the `leads` view a real `render()` produces equals what
-   `family.lead_chain` answers over the same world. Each accessor's behaviour is driven on the
-   public name against a real archived world, so the move is a move and not a rename plus a
-   rewrite.
+   `family.lead_chain` answers over the same world. `leads_by_id` is the canonical
+   `lead_repository.joined` surface indexed once (#1017) — the judge keeps no parser of the
+   queries table of its own, so the table's own screens and partitions are the surface's and
+   tested there. Each accessor's behaviour is driven on the public name against a real
+   archived world, so the move is a move and not a rename plus a rewrite.
 3. **The tolerant `judge.yaml` reader is public: `judge.read_grade(episode_dir)`** — `None`
    for an ungraded episode, a refusal for a planted link or a non-mapping (real faults through
    the real primitive), a pre-#1007 record read with today's defaults and nothing invented,
@@ -324,7 +326,7 @@ _MOVED = (
     ("_world_pattern", "world_pattern"),
     ("_own_h_rows", "own_h_rows"),
     ("_raw_manifest", "raw_manifest"),
-    ("_queries_by_lead", "queries_by_lead"),
+    ("_leads_by_id", "leads_by_id"),
     ("_lead_chain", "lead_chain"),
 )
 
@@ -334,12 +336,12 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
     names — nothing crosses a module line as a private any more.
 
     Observably true: `family` exposes `world_review_block`, `staged_patterns`, `world_pattern`,
-    `own_h_rows`, `raw_manifest`, `queries_by_lead`, `lead_chain` and `json_mapping` as
+    `own_h_rows`, `raw_manifest`, `leads_by_id`, `lead_chain` and `json_mapping` as
     callables; neither `family` nor `render` carries the underscore spelling of any of them;
-    the input builder IMPORTS the lead-chain trio — `render.lead_chain`, `render.queries_by_
-    lead` and `render.json_mapping` are `family`'s own objects — and no constant in `render.py`
-    names `executed_queries.jsonl` or `gather_raw`, the two reads that belong to the accessors
-    (which spell them through `RunPaths`, the writer's own accessor, not as literals).
+    the input builder IMPORTS the lead-chain trio — `render.lead_chain`, `render.leads_by_id`
+    and `render.json_mapping` are `family`'s own objects — and no constant in `render.py` OR
+    `family.py` names `executed_queries.jsonl` or `gather_raw`, the two reads that belong to
+    `lead_repository`, the canonical surface `leads_by_id` indexes (#1017).
 
     This is a name census over the seven accessors the design named (`render.py`'s other
     readers — `episode_alert`, `_read_provenance` — and `enqueue.draws_on_disk` stay where they
@@ -359,17 +361,19 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
                 f"line and O8 wants one public home, family.{public}")
     assert callable(getattr(family, "json_mapping", None)), (
         "family.json_mapping is absent — the JSON tolerance policy has no home in the reader")
-    for name in ("lead_chain", "queries_by_lead", "json_mapping"):
+    for name in ("lead_chain", "leads_by_id", "json_mapping"):
         assert getattr(render, name, None) is getattr(family, name), (
             f"render.{name} is not family.{name} — the input builder does not import the "
             "accessor it renders the per-lead chain with; that IS the one-home observable")
 
-    render_source = Path(render.__file__).read_text(encoding="utf-8")
-    leftover = {"executed_queries.jsonl", "gather_raw"} & _string_constants(
-        render_source, render.__file__)
-    assert not leftover, (
-        f"render.py still names {sorted(leftover)} as a constant — the queries table and the "
-        "lead files are read by family's accessors now, so a spelling here is a second reader")
+    for module in (render, family):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        leftover = {"executed_queries.jsonl", "gather_raw"} & _string_constants(
+            source, module.__file__)
+        assert not leftover, (
+            f"{module.__name__} still names {sorted(leftover)} as a constant — the queries "
+            "table and the lead files are lead_repository's to read, so a spelling here is a "
+            "second reader")
 
 
 def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_path):
@@ -378,7 +382,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     `leads` view equal, lead for lead, to `lead_chain` over the same world's own facts.
 
     Observably true: `render(ep, "b").leads["l-001"]` equals `family.lead_chain(world_dir,
-    "l-001", facts.resolutions_by_lead, issued=family.queries_by_lead(world_dir))`,
+    "l-001", facts.resolutions_by_lead, leads=family.leads_by_id(world_dir))`,
     with a real lead file and two issued queries on disk so every link carries a value.
 
     What failure looks like: the builder keeps its own chain (a private copy) and the page,
@@ -401,7 +405,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     shown = _render().render(ep, "b", runs_base=base).leads
     facts = family.read_world_facts(ep, "b", episode_token=J.EPISODE_TOKEN)
     expected = family.lead_chain(world_dir, "l-001", facts.resolutions_by_lead,
-                                 issued=family.queries_by_lead(world_dir))
+                                 leads=family.leads_by_id(world_dir))
 
     assert expected["goal"] == "find the pivot", "the fixture's lead file was not read"
     assert expected["payload"] == ["d1", "d2"], "the fixture's queries were not read"
@@ -410,71 +414,63 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
         f"same world:\n{shown['l-001']}\n!=\n{expected}")
 
 
-def test_queries_by_lead_groups_issued_rows_and_drops_conduct_rows_in_one_parse(tmp_path):
-    """`queries_by_lead(world_dir)` reads the world's `executed_queries.jsonl` ONCE and hands
-    back `{lead_id: [rows in file order]}` — the issued queries only.
+def test_leads_by_id_is_the_canonical_surface_indexed_once(tmp_path):
+    """`leads_by_id(world_dir)` is `lead_repository.joined` over the archived world, keyed by
+    lead id — the judge keeps NO parser of the queries table of its own (#1017 D3/N8), so the
+    surface's partitions and screens are what the chain sees.
 
-    Observably true: two rows for `l-001` and one for `l-002` group under their leads in file
-    order; a `∅.`-prefixed sentinel row (the writer's own conduct partition, `is_reserved_query_
-    id`) and a row with no `lead_id` are in neither group.
+    Observably true: the issued rows group under their leads in seq order with the `∅.`
+    sentinel row in `sentinels`, not `queries`; a lead with a lead file and no rows is present
+    with its goal; and with the table replaced by a symlink the leads are still present with
+    their goals and NO queries — the two halves refused separately, the surface's own posture.
 
-    What failure looks like: the sentinel reaches VIEW 1 as a query the world issued — a
-    defender failure invented out of a call the defender was refused (the bug
-    `family.queries_by_lead`'s docstring records being fixed once already, for the actor).
+    What failure looks like: a second grouping of the raw rows lives in the judge and drifts
+    from the surface on the sentinel split, the seq order or the link posture.
     """
+    family = _family()
     ep = J.accepted_episode(tmp_path)
     world_dir = ep / "worlds" / "b"
     rows = [
-        {"lead_id": "l-001", "query_id": "q1", "params": {"index": "logs-*"},
-         "payload_digest": "d1"},
-        {"lead_id": "l-002", "query_id": "q3", "params": {"index": "alerts-*"},
-         "payload_digest": "d3"},
-        {"lead_id": "l-001", "query_id": "q2", "params": {"index": "logs-2"},
+        {"lead_id": "l-001", "seq": 2, "query_id": "q2", "params": {"index": "logs-2"},
          "payload_digest": "d2"},
-        {"lead_id": "l-001", "query_id": "∅.above-repeat-guard", "params": {},
+        {"lead_id": "l-001", "seq": 1, "query_id": "q1", "params": {"index": "logs-*"},
+         "payload_digest": "d1"},
+        {"lead_id": "l-001", "seq": 3, "query_id": "∅.above-repeat-guard", "params": {},
          "payload_digest": "dx"},
-        {"query_id": "q9", "params": {}},
     ]
-    _write_issued(world_dir, rows)
+    table = _write_issued(world_dir, rows)
+    for lid, goal in (("l-001", "find the pivot"), ("l-002", "queryless")):
+        (world_dir / "gather_raw" / f"{lid}.lead.json").write_text(
+            json.dumps({"lead_id": lid, "goal": goal}), encoding="utf-8")
 
-    grouped = _family().queries_by_lead(world_dir)
+    by_id = family.leads_by_id(world_dir)
 
-    assert {lead: [r["query_id"] for r in group] for lead, group in grouped.items()} == {
-        "l-001": ["q1", "q2"], "l-002": ["q3"]}, (
-        f"the sentinel or the lead-less row reached a lead's group, or order was lost: {grouped}")
-
-
-def test_queries_by_lead_refuses_a_planted_link_at_the_table_name(tmp_path):
-    """The queries table is read through the archive's own `lstat` posture: a link at
-    `executed_queries.jsonl` reads as NO table, not as the target's rows.
-
-    Observably true: the same bytes as a regular file group into leads (positive control); as
-    a real symlink to a file outside the world they group into nothing.
-
-    What failure looks like: another tree's rows enter VIEW 1 as this world's own conduct.
-    """
-    ep = J.accepted_episode(tmp_path)
-    world_dir = ep / "worlds" / "b"
-    row = {"lead_id": "l-001", "query_id": "q1", "params": {}}
-    table = _write_issued(world_dir, [row])
-    assert list(_family().queries_by_lead(world_dir)) == ["l-001"], (
-        "positive control: a regular table did not group")
+    assert [q.query_id for q in by_id["l-001"].queries] == ["q1", "q2"], (
+        "the sentinel reached the issued queries, or seq order was lost")
+    assert [q.query_id for q in by_id["l-001"].sentinels] == ["∅.above-repeat-guard"]
+    assert (by_id["l-002"].goal, by_id["l-002"].queries) == ("queryless", [])
 
     outside = tmp_path / "planted.jsonl"
     outside.write_text(table.read_text(encoding="utf-8"), encoding="utf-8")
     table.unlink()
     table.symlink_to(outside)
-
-    assert _family().queries_by_lead(world_dir) == {}, (
-        "a symlink at the queries table's name was followed and its target's rows read as this "
-        "world's issued queries")
+    linked = family.leads_by_id(world_dir)
+    assert {lid: lead.goal for lid, lead in linked.items()} == {
+        "l-001": "find the pivot", "l-002": "queryless"}, (
+        "a link at the table cost the leads their goals — the two halves are refused "
+        "separately")
+    assert all(not lead.queries for lead in linked.values()), (
+        "a symlink at the queries table's name was followed and its target's rows read as "
+        "this world's issued queries")
 
 
 def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_lead(tmp_path):
-    """`lead_chain(world_dir, lead_id, resolutions_by_lead, *, issued=...)` is the
-    per-lead join the page needs and the input builder already computes: goal (off the lead's
-    own `gather_raw/<lead>.lead.json`), params (the first issued query's), payload digests (in
-    issue order), the gather summary, the document rows, and this lead's resolutions.
+    """`lead_chain(world_dir, lead_id, resolutions_by_lead, *, leads=...)` is the
+    per-lead join the page needs and the input builder already computes: goal (the surface's,
+    off the lead's own `gather_raw/<lead>.lead.json`), params (the first issued query's),
+    payload digests (in issue order), the gather summary, and this lead's resolutions — and
+    NOT the raw rows: `document_rows` put every column of every query into the prompt as bytes
+    the judge cannot act on (#1017 D3/O3).
 
     Observably true: each link carries the value the archived world actually holds. A lead
     with queries but no lead file and no summary reads `goal: None`, `summary: None` — absence
@@ -498,19 +494,19 @@ def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_l
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
     resolutions = {"l-001": [{"before": "open", "after": "held"}]}
-    grouped = family.queries_by_lead(world_dir)
+    by_id = family.leads_by_id(world_dir)
 
-    chain = family.lead_chain(world_dir, "l-001", resolutions, issued=grouped)
+    chain = family.lead_chain(world_dir, "l-001", resolutions, leads=by_id)
 
     assert chain["goal"] == "find the pivot"
     assert chain["params"] == {"index": "logs-*"}, "params is not the FIRST issued query's"
     assert chain["payload"] == ["d1", "d2"]
     assert chain["summary"] == (world_dir / "gather_summaries" / "l-001.md").read_text(
         encoding="utf-8")
-    assert chain["document_rows"] == grouped["l-001"]
+    assert "document_rows" not in chain, "the raw rows are back in the chain"
     assert chain["resolutions"] == resolutions["l-001"]
 
-    bare = family.lead_chain(world_dir, "l-002", resolutions, issued=grouped)
+    bare = family.lead_chain(world_dir, "l-002", resolutions, leads=by_id)
     assert (bare["goal"], bare["summary"], bare["resolutions"]) == (None, None, [])
     assert bare["payload"] == ["d3"], "a lead with queries but no lead file lost its payload"
 
@@ -538,9 +534,11 @@ def test_lead_chain_never_reads_outside_the_graded_world_for_a_traversing_lead_i
     sibling_summary = (c_dir / "gather_summaries" / "l-001.md").read_text(encoding="utf-8")
     assert "world c" in sibling_summary, "the fixture's sibling summary does not name world c"
 
-    honest = family.lead_chain(b_dir, "l-001", {}, issued={})
-    leaked_goal = family.lead_chain(b_dir, "../../c/gather_raw/l-001", {}, issued={})
-    leaked_summary = family.lead_chain(b_dir, "../../c/gather_summaries/l-001", {}, issued={})
+    by_id = family.leads_by_id(b_dir)
+    honest = family.lead_chain(b_dir, "l-001", {}, leads=by_id)
+    leaked_goal = family.lead_chain(b_dir, "../../c/gather_raw/l-001", {}, leads=by_id)
+    leaked_summary = family.lead_chain(b_dir, "../../c/gather_summaries/l-001", {},
+                                       leads=by_id)
 
     assert honest["goal"] == "OWN GOAL", "positive control: b's own lead file not read"
     assert "world b" in (honest["summary"] or ""), "positive control: b's own summary not read"
@@ -604,22 +602,23 @@ def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regul
 
 
 def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path):
-    """The lead file is screened at the DIRECTORY as well as the leaf: `artifact_file` lstats
-    the entry it is given, so a link planted at `gather_raw/` itself put another tree's regular
-    `.lead.json` through a leaf check that passes — the opposite posture from
-    `lead_repository.load_leads`, which `artifact_dir`s the same directory.
+    """The lead file is screened at the DIRECTORY as well as the leaf, and the screen is the
+    surface's own: `lead_repository.load_leads` `artifact_dir`s `gather_raw/` before it reads
+    a lead file, so a link planted at the directory itself cannot put another tree's regular
+    `.lead.json` through a leaf check that passes. The judge used to keep its own leaf-only
+    read of the lead file beside the surface's, and the two disagreed here.
 
-    Observably true: a real `gather_raw/l-001.lead.json` reads its goal (positive control);
-    with `gather_raw/` replaced by a symlink to a directory holding the same file, the chain
-    reads `goal: None`.
+    Observably true: a real `gather_raw/l-001.lead.json` reads its goal through the chain
+    (positive control); with `gather_raw/` replaced by a symlink to a directory holding the
+    same file, the chain reads `goal: None`.
     """
     family = _family()
     ep = J.accepted_episode(tmp_path)
     world_dir = ep / "worlds" / "b"
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
-    assert family.lead_chain(world_dir, "l-001", {}, issued={})["goal"] == "find the pivot", (
-        "positive control: the real lead file was not read")
+    chain = family.lead_chain(world_dir, "l-001", {}, leads=family.leads_by_id(world_dir))
+    assert chain["goal"] == "find the pivot", "positive control: the real lead file was not read"
 
     outside = tmp_path / "planted-gather_raw"
     outside.mkdir()
@@ -629,7 +628,8 @@ def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path)
     shutil.rmtree(world_dir / "gather_raw")
     (world_dir / "gather_raw").symlink_to(outside, target_is_directory=True)
 
-    assert family.lead_chain(world_dir, "l-001", {}, issued={})["goal"] is None, (
+    chain = family.lead_chain(world_dir, "l-001", {}, leads=family.leads_by_id(world_dir))
+    assert chain["goal"] is None, (
         "a link planted at gather_raw/ was followed to another tree's lead file")
 
 

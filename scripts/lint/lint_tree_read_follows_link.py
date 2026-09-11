@@ -98,6 +98,11 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/branch/episode.py",
     "learning/branch/review.py",
     "learning/branch/staging.py",
+    # #1025's stage timing record at the episode root, read back by the page: its reader goes
+    # through `read_guarded` like the rest of this census, and is listed here for the reason
+    # the comment above gives — a module that reads the episode tree and is not listed is one
+    # this gate has stopped covering.
+    "learning/branch/timing.py",
     "learning/branch/questioner/__init__.py",
     "runtime/branch/_family.py",
     # #921's family judge, whose whole input is that same episode tree read back: the archived

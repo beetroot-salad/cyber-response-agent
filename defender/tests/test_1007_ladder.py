@@ -628,7 +628,7 @@ def test_an_episode_killed_before_the_sibling_ran_withholds_with_episode_incompl
 
     Observably true: with no served row anywhere in the episode — not merely none on the
     holding system — every world's row reads `withheld_reason: episode_incomplete` and no
-    defender finding is enqueued. Without this cell an episode killed before step 5 is
+    defender finding is enqueued. Without this cell an episode killed before `Step.RUNS` is
     indistinguishable from a defender that queried nothing, and the defender is falsely accused
     at O4's own falsifier.
 

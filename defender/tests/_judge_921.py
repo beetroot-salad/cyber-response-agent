@@ -225,13 +225,15 @@ def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
 def review_record(episode_dir: Path, *, outcome: str = "accepted",
                   decision: str = "accepted", reason: str | None = None,
                   worlds: dict | None = None) -> Path:
-    """`review.yaml` as the launcher leaves it — ONE `episode.outcome` key, holding step 6's word.
+    """`review.yaml` as the launcher leaves it — ONE `episode.outcome` key, holding
+    `Step.VERIFY`'s word.
 
-    P8, EXECUTED: step 4 (`review._record`) writes a human sentence into `episode.outcome`
-    ("N worlds reviewed, none rejected") and step 6 (`cli._record_episode_outcome` ->
+    P8, EXECUTED: `Step.REVIEW` (`review._record`) writes a human sentence into `episode.outcome`
+    ("N worlds reviewed, none rejected") and `Step.VERIFY` (`cli._record_episode_outcome` ->
     `staging.merge_review`) does `held.update(block)` on the SAME key with an enum value, so by
-    the time the judge runs the key always holds step 6's word and step 4's sentence is absent
-    from the file entirely. `decision` beside it is step 4's and survives untouched.
+    the time the judge runs the key always holds `Step.VERIFY`'s word and `Step.REVIEW`'s
+    sentence is absent from the file entirely. `decision` beside it is `Step.REVIEW`'s and
+    survives untouched.
     """
     import yaml
 

@@ -155,7 +155,7 @@ def test_947_family_validation_refusal_names_the_offending_field():
 
 def test_947_a_manifest_declaring_no_worlds_is_refused():
     """A manifest whose world list is empty is refused: the questioner's flow produces the base
-    plus two by construction, and step 5 would have nothing to start."""
+    plus two by construction, and the family would have nothing to run."""
     with pytest.raises(_refusal()) as bad:
         _load(T.family_doc(worlds=[]))
     assert "worlds" in str(bad.value)

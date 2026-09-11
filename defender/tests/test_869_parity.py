@@ -20,7 +20,7 @@ from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curator
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
 from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
-from defender.runtime.query_tool import QueryCapture
+from defender.runtime.query_tool import QueryCapture, RegistryUnavailable
 from defender.runtime.verb_grant import DENY_ALL
 from defender.runtime.verbs import ModuleVerbRegistry
 from defender.tests._declared869 import (
@@ -55,7 +55,9 @@ def _lead(query_id: str, *, system: str) -> ExecutedLead:
 class _RaisingRegistry:
     """A registry that cannot list its systems — the fault C16/G8 executed against the real
     one, injected here as its exception class and nothing else. It classifies nothing and
-    decides nothing; the coarsening and the stderr line below are production code's."""
+    decides nothing; what the runtime does with the fault — since #1017, raise
+    `RegistryUnavailable` for the placement to record as an `infra` row, with no stderr line —
+    is production code's, and `tests/e2e/test_1017_query_row_surface.py` drives it."""
 
     def systems(self):
         raise PermissionError(13, "Permission denied")
@@ -63,8 +65,13 @@ class _RaisingRegistry:
 
 def test_runtime_system_of_record_is_unchanged(tmp_path, capsys):
     """The runtime's own reader of the adapter source is untouched by the widening: it still
-    coarsens an undeclared system to `''`, and it still says so on stderr when the registry
-    cannot list at all.
+    coarsens an undeclared system to `''`. A registry that cannot list at all is a different
+    matter since #1017: it RAISES `RegistryUnavailable` rather than answering `''` and saying
+    so on stderr — the swallow recorded a declared system's rejection as a ghost's (`system=""`
+    with a fingerprint of the real name, which `system_fingerprint`'s contract forbids) and left
+    a stderr line no run reader consults. The raise is what lets both above-guard placements
+    record the fault as the `infra` row it is; the stderr line goes with it, since the row is
+    the trace.
 
     N1, bound at THIS READER'S OWN EDGE because that is what R7 asks. This change is the
     offline half plus the one writer; the runtime dispatch keeps answering the narrower
@@ -87,10 +94,10 @@ def test_runtime_system_of_record_is_unchanged(tmp_path, capsys):
     assert capture._system_of_record("") == ""
 
     capsys.readouterr()
-    assert QueryCapture(_RaisingRegistry())._system_of_record("elastic") == ""
-    err = capsys.readouterr().err
-    assert "query_tool" in err
-    assert "PermissionError" in err
+    with pytest.raises(RegistryUnavailable):
+        QueryCapture(_RaisingRegistry())._system_of_record("elastic")
+    assert capsys.readouterr().err == "", \
+        "the registry fault is still reported on stderr — the row is its trace since #1017"
 
 
 def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkeypatch):

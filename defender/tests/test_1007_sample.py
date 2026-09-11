@@ -14,10 +14,11 @@ TWO RECORDED DECISIONS SHAPE WHAT IS AND IS NOT ASSERTED HERE:
   an adapter fault's detail verbatim into `review.yaml`, which M4 renders into this prompt, and
   the human declined the filter knowingly (accepted gap G-1). The frame stops the text being
   read as instruction; it does not remove the names.
-* **H3 / RS-1 — O5 holds WITHIN ONE ATTEMPT.** A re-entered step 2 overwrites `samples.yaml`,
-  so the byte-identity obligation is scoped to a single attempt, and the accepted re-entry
-  behaviour (the second attempt's samples win) is pinned by its own test — because a
-  byte-identity test that never exercises a re-entry would pass while the obligation is false.
+* **H3 / RS-1 — O5 holds WITHIN ONE ATTEMPT.** A re-entered `Step.QUESTIONER` overwrites
+  `samples.yaml`, so the byte-identity obligation is scoped to a single attempt, and the
+  accepted re-entry behaviour (the second attempt's samples win) is pinned by its own test —
+  because a byte-identity test that never exercises a re-entry would pass while the obligation
+  is false.
 
 RED AGAINST HEAD is the expected state.
 """
@@ -64,8 +65,8 @@ def render_prompt(ep: Path, label: str = "b") -> str:
 
 
 def test_the_launcher_writes_samples_yaml_at_step_2(tmp_path, monkeypatch):
-    """The launcher writes `samples.yaml` at step 2, holding exactly what the questioner was
-    handed.
+    """The launcher writes `samples.yaml` at `Step.QUESTIONER`, holding exactly what the
+    questioner was handed.
 
     Observably true: driving the questioner step with a corpus-sample mapping leaves
     `<episode>/samples.yaml` on disk carrying that mapping, keyed by staged pattern. It lives
@@ -82,7 +83,8 @@ def test_the_launcher_writes_samples_yaml_at_step_2(tmp_path, monkeypatch):
 
     cli.write_questioner_samples(ep, samples)
 
-    assert (ep / W.SAMPLES_NAME).is_file(), "step 2 wrote no samples.yaml into the episode"
+    assert (ep / W.SAMPLES_NAME).is_file(), (
+        "`Step.QUESTIONER` wrote no samples.yaml into the episode")
     assert W.read_yaml(ep / W.SAMPLES_NAME) == samples
     assert not (src / W.SAMPLES_NAME).exists(), (
         "the samples were written into the SOURCE run, which a later prune removes")
@@ -632,8 +634,8 @@ def test_a_second_attempts_step_2_overwrites_the_first_attempts_samples(
 
     Observably true: an episode dir carrying attempt 1's `samples.yaml` is adopted (the adopt
     predicate is `refuse_claimed_episode` plus no `served/*.jsonl` besides `base.jsonl`, and
-    neither inspects this file), and a re-entered step 2 replaces the file wholesale — no
-    merge, no refusal, no second file.
+    neither inspects this file), and a re-entered `Step.QUESTIONER` replaces the file wholesale
+    — no merge, no refusal, no second file.
 
     This test exists BECAUSE the obligation above it is scoped. O5's byte-identity holds within
     one attempt only; on a resumed episode the judge may grade a world authored in attempt N-1
@@ -655,8 +657,8 @@ def test_a_second_attempts_step_2_overwrites_the_first_attempts_samples(
     cli.write_questioner_samples(ep, second)
 
     assert W.read_yaml(ep / W.SAMPLES_NAME) == second, (
-        "a re-entered step 2 did not overwrite — H3 chose overwrite-and-re-derive, and an "
-        "implementation that merges or refuses has changed the decision")
+        "a re-entered `Step.QUESTIONER` did not overwrite — H3 chose overwrite-and-re-derive, "
+        "and an implementation that merges or refuses has changed the decision")
     assert "FIRST-ATTEMPT" not in (ep / W.SAMPLES_NAME).read_text(encoding="utf-8")
     assert list((ep).glob("samples*.yaml")) == [ep / W.SAMPLES_NAME], (
         "the first attempt's samples survive under a second filename")
@@ -669,8 +671,8 @@ def test_a_re_entered_episode_is_adopted_and_the_second_attempts_samples_win(
     Observably true: `cli.prepare_episode` — the one door a re-entered attempt comes through —
     ADOPTS an episode dir already carrying attempt 1's `samples.yaml`, `review.yaml` and
     `judge.yaml` (returns that dir, raises nothing, runs the primer once), and leaves all three
-    untouched; a re-entered step 2 then replaces `samples.yaml` wholesale through that same
-    adopted dir. The admission predicate H3 chose to KEEP is `refuse_claimed_episode` (no
+    untouched; a re-entered `Step.QUESTIONER` then replaces `samples.yaml` wholesale through
+    that same adopted dir. The admission predicate H3 chose to KEEP is `refuse_claimed_episode` (no
     `family.yaml`) plus no `served/*.jsonl` besides `base.jsonl`, and it inspects none of the
     three files this change adds — e68-4 executed that exact scenario.
 

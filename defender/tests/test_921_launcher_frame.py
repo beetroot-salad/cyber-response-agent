@@ -143,11 +143,11 @@ def test_921_rejected_and_incomplete_episodes_are_not_graded(tmp_path):
 def test_921_the_trigger_reads_the_single_episode_outcome_key_step_six_wrote(tmp_path):
     """`review.yaml` carries ONE `episode.outcome` key, not two.
 
-    Step 4 writes a human sentence into it and step 6's `merge_review` OVERWRITES that with its
-    enum value on every episode that reaches step 6 (P8, executed end to end: the step-4
-    sentence is then absent from the file entirely), so by the time the judge runs the key
-    always holds step 6's word; `decision` beside it is step 4's and is not the trigger. Drive a
-    full episode and read the key back off disk.
+    `Step.REVIEW` writes a human sentence into it and `Step.VERIFY`'s `merge_review` OVERWRITES
+    that with its enum value on every episode that reaches `Step.VERIFY` (P8, executed end to
+    end: the review step's sentence is then absent from the file entirely), so by the time the
+    judge runs the key always holds `Step.VERIFY`'s word; `decision` beside it is
+    `Step.REVIEW`'s and is not the trigger. Drive a full episode and read the key back off disk.
     """
     import yaml
 
@@ -156,11 +156,11 @@ def test_921_the_trigger_reads_the_single_episode_outcome_key_step_six_wrote(tmp
 
     assert isinstance(record["episode"]["outcome"], str)
     assert "worlds reviewed" not in record["episode"]["outcome"], (
-        "step 4's descriptive sentence survived into the archived record; P8 says step 6 "
-        "overwrites it, and a judge reading a sentence where an enum is expected reads the "
-        "wrong half")
+        "`Step.REVIEW`'s descriptive sentence survived into the archived record; P8 says "
+        "`Step.VERIFY` overwrites it, and a judge reading a sentence where an enum is expected "
+        "reads the wrong half")
     assert record["episode"]["outcome"] in ("accepted", "rejected", "incomplete")
-    # `decision` is step 4's, sits beside it, and is NOT what the trigger reads.
+    # `decision` is `Step.REVIEW`'s, sits beside it, and is NOT what the trigger reads.
     assert "decision" in record["episode"]
     graded = J.judge_record(ep) if (ep / "judge.yaml").exists() else {}
     assert bool(graded) is (record["episode"]["outcome"] == "accepted"), (
