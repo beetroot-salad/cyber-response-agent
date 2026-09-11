@@ -22,11 +22,12 @@ from typing import Any
 
 import yaml
 
-from defender._io import guarded_mkdir, read_jsonl_rows_report, write_guarded
+from defender._io import guarded_mkdir, read_guarded, read_jsonl_rows_report, write_guarded
 from defender._run_paths import artifact_dir, artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome
+from defender.learning.branch.archive import DRAWS_DIRNAME, SAMPLES_NAME, WORLDS_DIRNAME
 from defender.learning.core.config import (
     QUEUEABLE_FINDING_TYPES,
     learning_state_root,
@@ -323,7 +324,7 @@ def _resolving_citations(finding: dict[str, Any]) -> list[str]:
     the row rather than riding under a fourteenth key — the queue's shape is thirteen keys the
     shared validator reads — and remain readable in full on the draw document the row's own
     `source_run_dir` names."""
-    # EVERY VALUE HERE IS MODEL-AUTHORED YAML off a tree a box can reach (`_draws_on_disk`), so
+    # EVERY VALUE HERE IS MODEL-AUTHORED YAML off a tree a box can reach (`draws_on_disk`), so
     # neither key is a list until this frame has looked. `set(3)` raises `TypeError`, `set([[a]])`
     # raises `TypeError: unhashable`, and a bare string `evidence` iterates into one-character
     # citations — none of which `enqueue_report`'s per-row drop arm (which catches `JudgeRefused`
@@ -436,9 +437,12 @@ def _first_nonempty(*values: Any) -> Any:
     return values[-1] if values else None
 
 
-def _draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
+def draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
     """Every draw document in `draw_dir`, keyed by draw index, in draw order.
 
+    PUBLIC, as the one reader of `worlds/<X>/judge/<n>.yaml` (#1025 O8): the episode page's
+    findings table joins these documents to `judge.yaml`'s rows by `(world, draw, index)`, and
+    a second reader that admits `01.yaml` or sorts the stems as text joins different rows.
     The fallback for a caller that did not just produce them — a bare re-enqueue over an
     episode's existing draws. Ordered NUMERICALLY: `sorted` on the file stem is lexicographic,
     which puts draw 10 between 1 and 2 the moment an operator asks for ten draws. A caller that
@@ -465,12 +469,22 @@ def _draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
         # finding or gives two different ones the same id.
         if path.stem != str(int(path.stem)):
             continue
+        # THE SCREENED READ, like every other reader of this tree (`family.json_mapping`,
+        # `family.screened_yaml_mapping`): the directory was judged by `lstat` above, but the
+        # LEAF was read through a plain `read_text`, which follows a link — a symlink planted
+        # at `worlds/<X>/judge/3.yaml` had the target's findings queued as this episode's own
+        # on the bare re-enqueue path. `read_guarded` asks the plainness question of the open
+        # descriptor; a link, a hard link, an unreadable or undecodable entry is SKIPPED, the
+        # same answer a torn document gets below — the draw is not there to read.
+        text, _refusal = read_guarded(path)
+        if text is None:
+            continue
         try:
             # `_yaml.safe_load` for the same reason every other parse in this package uses it:
             # a `RecursionError` out of a deeply nested draw file is neither a `ValueError` nor
             # a `YAMLError`, so it escaped this handler and every one above it.
-            doc = _yaml_safe_load(path.read_text(encoding="utf-8")) or {}
-        except (OSError, ValueError, yaml.YAMLError):
+            doc = _yaml_safe_load(text) or {}
+        except (ValueError, yaml.YAMLError):
             continue
         if isinstance(doc, dict):
             out[int(path.stem)] = doc
@@ -593,7 +607,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     family_holding_system = _first_nonempty(
         *(w.get("holding_system") for w in world_rows if isinstance(w, dict)), "")
     #: And a STAGED PATTERN for the family lane's own `pattern`, off the same rows. The holding
-    #: system's name is what `_world_pattern` falls back to for a world with no staged pattern,
+    #: system's name is what `world_pattern` falls back to for a world with no staged pattern,
     #: but it is never a member of `stageable_patterns` — and `pattern` is the questioner
     #: corpus's ONLY selection key (`branch/questioner/_questioner_lessons_section` keeps a
     #: lesson iff `fm["pattern"] in stageable`), so a family-level lesson stamped with it can
@@ -616,7 +630,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     # below: an EMPTY map is a pass that produced no family draw, and folding it back onto disk
     # would queue an earlier, wider attempt's leftovers as this pass's own findings.
     family_documents = (
-        _draws_on_disk(episode_dir / "worlds" / "family" / "judge")
+        draws_on_disk(episode_dir / WORLDS_DIRNAME / "family" / DRAWS_DIRNAME)
         if family_drawn is None else family_drawn)
     for draw, draw_doc in family_documents.items():
         findings = draw_doc.get("findings") or []
@@ -655,13 +669,13 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
         # draw for a world would then queue whatever an earlier, wider attempt left in that
         # world's draw directory as its own findings (P4: a retry clobbers, it cleans nothing
         # up), under THIS pass's `verdict_word`.
-        documents = (drawn.get(label) or {}) if drawn is not None else _draws_on_disk(
-            episode_dir / "worlds" / label / "judge")
+        documents = (drawn.get(label) or {}) if drawn is not None else draws_on_disk(
+            episode_dir / WORLDS_DIRNAME / label / DRAWS_DIRNAME)
         for draw, draw_doc in documents.items():
             findings = draw_doc.get("findings") or []
             for index, finding in enumerate(findings):
                 if not isinstance(finding, dict):
-                    # NAMED, like every other drop in this loop. `_draws_on_disk` parses
+                    # NAMED, like every other drop in this loop. `draws_on_disk` parses
                     # model-authored draw YAML off a tree a box can reach, where `findings:` can
                     # legitimately be a list of scalars — dropped in silence those vanished with
                     # no line on `unqueueable_findings`, whose whole job is that a drop is said
@@ -670,7 +684,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                         f"{run_id}/{label}/{draw}/{index}: the draw's finding[{index}] is "
                         f"{type(finding).__name__}, not a mapping")
                     continue
-                # ABSENT means a pre-#1007 draw read back off disk (`_draws_on_disk`, the
+                # ABSENT means a pre-#1007 draw read back off disk (`draws_on_disk`, the
                 # bare-re-enqueue path), which is the only shape that legitimately carries no
                 # `subject` — every reply `validate_reply` admits has one. Anything else that
                 # is neither literal is a DROP, said out loud: routed to the defender lane it
@@ -697,7 +711,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                         unavailable_patterns=world_row.get("sample_unavailable_patterns"),
                     ):
                         unqueueable.append(
-                            f"{run_id}/{label}/{draw}/{index}: cites `samples.yaml` for a "
+                            f"{run_id}/{label}/{draw}/{index}: cites `{SAMPLES_NAME}` for a "
                             "pattern this world had no sample for (A1(b))")
                         continue
                     row = build_finding_row(
@@ -769,5 +783,6 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
 
 __all__ = [
     "EnqueueReport", "append_rows", "append_rows_report", "append_world_rows",
-    "append_world_rows_report", "build_finding_row", "enqueue", "enqueue_report",
+    "append_world_rows_report", "build_finding_row", "draws_on_disk", "enqueue",
+    "enqueue_report",
 ]

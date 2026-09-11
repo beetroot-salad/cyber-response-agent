@@ -339,7 +339,7 @@ def test_a_two_pattern_world_names_each_patterns_sample_availability_independent
     the AVAILABLE pattern survives while one citing the UNAVAILABLE pattern is refused — in the
     SAME grading pass, over the SAME world.
 
-    What failure looks like: `_world_pattern`'s single-value reduction (the first staged
+    What failure looks like: `world_pattern`'s single-value reduction (the first staged
     pattern alone) makes `sample_unavailable` read `false` because SOME pattern had a sample,
     while the judge is rendered nothing for the pattern it was never shown — a
     `shape-invention` claim then gets made, or refused, against the wrong pattern's evidence.

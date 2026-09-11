@@ -102,7 +102,9 @@ def test_grade_episode_returns_extended_record(tmp_path, monkeypatch):
 
 
 def test_judge_yaml_round_trips_every_new_field(tmp_path, monkeypatch):
-    """Every new field written by `_write_judge_yaml` is read back by `_grade_from_document`.
+    """Every new field written by `_write_judge_yaml` is read back by `judge.read_grade` — the
+    one tolerant reader of `judge.yaml` (#1025 prep 2), which the existing-record path goes
+    through.
 
     Observably true: grading an episode twice — the second time off the `judge.yaml` the first
     wrote — yields an equal record. The two sites are hand-written enumerations (C32), which is

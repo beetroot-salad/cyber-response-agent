@@ -49,7 +49,7 @@ import sys
 from pathlib import Path
 
 from defender._io import guarded_mkdir, write_guarded
-from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file
 from defender.learning.lead_repository import (
     refuse_non_artifacts,
     refusing_copy2,
@@ -69,6 +69,22 @@ SCRUB_VERDICT_NAME = "scrub_verdict.json"
 
 #: The run-dir pointer's name. A TEXT file, never a link — see the module docstring.
 RUN_DIR_POINTER = "run_dir"
+
+#: The three episode-level records, spelled ONCE (#1025 O8). The review's own record, beside
+#: the manifest it reviewed (kept on a rejection too — the measurement of a family that did not
+#: run is what O4's drift obligation is observed by); the questioner's reference document per
+#: staged pattern, moved into the archive at step 2 so it survives a pruned source run; and the
+#: judge's family record, written last. Every writer and reader imports these — a second
+#: spelling is a reader that opens a file nobody writes the day one of them is renamed.
+REVIEW_NAME = "review.yaml"
+SAMPLES_NAME = "samples.yaml"
+JUDGE_NAME = "judge.yaml"
+
+#: The judge's per-draw documents, `worlds/<X>/judge/<n>.yaml` (and `worlds/family/judge/` for
+#: the family-level call) — the directory the pass creates under each archived world, spelled
+#: once for the same reason as the three records above: the writer (`judge/__init__.py`), the
+#: enqueue's re-read and the episode page all address it.
+DRAWS_DIRNAME = "judge"
 
 
 class ArchiveRefused(ValueError):
@@ -105,7 +121,7 @@ def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
     return (
         (paths.report, "report.md"),
         (paths.investigation, "investigation.md"),
-        (paths.provenance, "provenance.json"),
+        (paths.provenance, PROVENANCE),
         # The SIDECAR beside the run dir, not a path inside it (G17).
         (verdict_path(run_dir), SCRUB_VERDICT_NAME),
         (run_dir / LESSONS_LOADED_NAME, LESSONS_LOADED_NAME),
@@ -254,14 +270,19 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
 
 
 __all__ = [
-    # The three D7 names are EXPORTED, not private constants: the judge reads every one of them
-    # back out of the archive this module writes, and a name spelled here and re-spelled there
-    # is a rename that leaves the writer and the reader looking at two different files with no
-    # error anywhere — an absent `gather_summaries/` is a note on the record, not a refusal.
+    # The three D7 names, the three #1025 O8 record names and the draws directory are
+    # EXPORTED, not private constants: the judge reads every one of them back out of the
+    # archive this module writes, and a name spelled here and re-spelled there is a rename that
+    # leaves the writer and the reader looking at two different files with no error anywhere —
+    # an absent `gather_summaries/` is a note on the record, not a refusal.
     "ALERT_NAME",
+    "DRAWS_DIRNAME",
     "GATHER_SUMMARIES_DIRNAME",
+    "JUDGE_NAME",
     "LESSONS_LOADED_NAME",
+    "REVIEW_NAME",
     "RUN_DIR_POINTER",
+    "SAMPLES_NAME",
     "SCRUB_VERDICT_NAME",
     "WORLDS_DIRNAME",
     "ArchiveRefused",

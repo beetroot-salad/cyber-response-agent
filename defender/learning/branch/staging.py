@@ -67,11 +67,9 @@ from defender.scripts.adapters.faults import TransportFault
 #: corpus nobody reads while every row still read honestly.
 INJECT_SUFFIX = ".inject"
 
-#: The staging record's filename under the episode dir.
+#: The staging record's filename under the episode dir. (The review record a teardown failure
+#: is reported into is the caller's `review_path=`, never a name this module spells.)
 STAGED_FILENAME = "staged.yaml"
-
-#: The review record a teardown failure is reported into.
-REVIEW_FILENAME = "review.yaml"
 
 #: The two kinds of thing staging creates. Recorded per row because teardown deletes them
 #: through different cluster APIs and a row that cannot say which is a row teardown has to
@@ -1014,7 +1012,6 @@ __all__ = [
     "INJECT_SUFFIX",
     "KIND_ALIAS",
     "KIND_INDEX",
-    "REVIEW_FILENAME",
     "STAGED_FILENAME",
     "StagingRefused",
     "check_configured_patterns",

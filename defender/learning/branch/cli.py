@@ -75,6 +75,7 @@ from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
 from defender.learning.branch import timing as timing_mod
+from defender.learning.branch.archive import REVIEW_NAME, SAMPLES_NAME, WORLDS_DIRNAME
 from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
@@ -106,11 +107,10 @@ EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
 #: beside the source run.
 RUNS_SUBDIR = "runs"
 
-#: The archived worlds' directory, and the family stamp's filename.
-WORLDS_SUBDIR = "worlds"
+#: The family stamp's filename. The archived worlds' directory is `archive.WORLDS_DIRNAME`,
+#: imported — a second constant here for the same segment was the exact second spelling
+#: #1025 O8 names.
 FAMILY_STAMP_NAME = "provenance.json"
-REVIEW_NAME = "review.yaml"
-SAMPLES_NAME = "samples.yaml"
 
 #: The three outcomes an episode can end in. `incomplete` is a MODELLED outcome carrying a
 #: reason rather than the absence of a file (§7 FORK-1): every question about a partially good
@@ -910,7 +910,7 @@ def verify_family(
     # and its ABSENCE would be a third spelling of "incomplete" beside the outcome field and the
     # withheld family stamp — which is the exact gap FORK-1 closed. An episode that archived no
     # world has an empty `worlds/`, and the recorded outcome is what says why.
-    guarded_mkdir(episode_dir / WORLDS_SUBDIR, base=episode_dir)
+    guarded_mkdir(episode_dir / WORLDS_DIRNAME, base=episode_dir)
     # PER WORLD, and only the individually clean ones: a sibling whose own scrub never ran has a
     # tree nothing certified, so copying out of it is the read the certification exists to gate.
     from defender.learning.branch import archive as archive_mod
@@ -1266,7 +1266,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         _record_episode_outcome(episode_dir, outcome=REJECTED, reason=str(
             record.get("episode", {}).get("reason") or "a world contradicted the capture"),
             decision=REJECTED)
-        guarded_mkdir(episode_dir / WORLDS_SUBDIR, base=episode_dir)
+        guarded_mkdir(episode_dir / WORLDS_DIRNAME, base=episode_dir)
         print(f"[branch] episode {episode_id}: rejected before any sibling started",
               file=sys.stderr)
         return 1

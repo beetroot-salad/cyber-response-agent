@@ -56,6 +56,7 @@ from defender.runtime.branch._family import (
 )
 from defender.runtime.verbs import VerbContext
 
+from .archive import REVIEW_NAME
 from .comparator import Verdict, compare, mechanical
 from .estate.applier import WorldApplier
 from .estate.lookups import apply_patches
@@ -71,11 +72,6 @@ from .ledger import (
     payload_text,
 )
 from .staging import INJECT_SUFFIX as _staging_inject_suffix
-
-#: The review's own record, beside the manifest it reviewed. Kept on a REJECTION too: the
-#: measurement of a family that did not run is the second thing O4's drift obligation is
-#: observed by, and deleting it would leave "we rejected it" as a claim with no reading behind.
-REVIEW_NAME = "review.yaml"
 
 #: The suffix staging gives a world's injection index, under its own view name. IMPORTED from
 #: the module that constructs the names rather than restated: this module only READS them, and
@@ -1133,7 +1129,6 @@ __all__ = [
     "ACCEPTED",
     "INJECT_SUFFIX",
     "REJECTED",
-    "REVIEW_NAME",
     "Replay",
     "ReviewError",
     "ScratchLedger",

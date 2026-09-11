@@ -44,10 +44,21 @@ O4's withholding ladder for what now distinguishes an honest agreement from a lu
 `fault` row on H makes the world `ungradable` (J5's tier rule) rather than any of the above; a
 `refused` row on H counts as having queried (F-1) and excludes the world from every failure
 bucket without making it ungradable.
+
+THIS MODULE IS ALSO THE ONE HOME of the episode archive's record readers (`raw_manifest`,
+`read_review_record`, `read_samples_record`, `read_world_facts`, `screened_yaml_mapping`) and of
+the derived accessors named in `__all__` (#1025 O8, prep 2), imported by the judge's input
+builder (`render.py`) and by the episode page rather than re-implemented. NOT YET HERE, and
+still read by the input builder on its own: `render.episode_alert` / `_world_alert_id` /
+`_read_provenance`, its `lessons_loaded.jsonl` read and its `gather_summaries/*.md` walk, and
+`enqueue.draws_on_disk` (the per-draw documents). The record NAMES are `branch/archive.py`'s,
+and the world's leads and queries come off `lead_repository.joined`, the canonical surface
+(#1017) — imported, not re-spelled and not re-parsed.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -67,8 +78,15 @@ from defender.learning.branch.ledger import (
     normalized_source,
     request_key,
 )
-from defender.learning.branch.archive import ALERT_NAME, GATHER_SUMMARIES_DIRNAME
+from defender.learning.branch.archive import (
+    ALERT_NAME,
+    GATHER_SUMMARIES_DIRNAME,
+    REVIEW_NAME,
+    SAMPLES_NAME,
+    WORLDS_DIRNAME,
+)
 from defender.learning.judge._errors import JudgeRefused
+from defender.learning.lead_repository import JoinedLead, joined
 from defender.run_common import resolve_runs_base
 from defender.runtime.branch._family import (
     BASE_ROLE,
@@ -91,8 +109,38 @@ WITHHELD_CAPTURE_UNADDRESSED = "capture_unaddressed"
 WITHHELD_REACHABILITY_UNMEASURED = "reachability_unmeasured"
 WITHHELD_EPISODE_INCOMPLETE = "episode_incomplete"
 
-REVIEW_NAME = "review.yaml"
-SAMPLES_NAME = "samples.yaml"
+
+def screened_yaml_mapping(path: Path, *, what: str) -> dict[str, Any] | None:
+    """A YAML mapping at `path` through THE SCREENED READ, or `None` only when NOTHING is at
+    the name.
+
+    ONE HOME for the read every episode-level record makes: the file sits in the episode dir,
+    a tree a sibling box's rw bind reaches, so an entry at its name may be a link the model
+    planted — and `is_file()`/`read_text` follow the link the write side refuses. `read_guarded`
+    asks the plainness question of the open descriptor itself. It folds ABSENT in with the
+    alias refusal, and here they must stay apart: nothing at the name is an ordinary absence
+    (an ungraded episode, an unwritten record) the caller decides about, while SOMETHING that
+    is not the record — a link, an unreadable entry, a torn document, a non-mapping — is
+    `JudgeRefused`. `_yaml.safe_load` is the hardened loader: a `RecursionError` out of a
+    deeply nested document is neither a `YAMLError` nor a `ValueError`, and it converts it.
+    Spelled twice (the manifest and the idempotency record), the two reads had already drifted
+    on their exception sets."""
+    import yaml
+
+    from defender._yaml import safe_load
+
+    if not (path.exists() or path.is_symlink()):
+        return None
+    text, refusal = read_guarded(path)
+    if text is None:
+        raise JudgeRefused(f"{what} at {path} could not be read: {refusal}")
+    try:
+        doc = safe_load(text)
+    except yaml.YAMLError as bad:
+        raise JudgeRefused(f"{what} at {path} could not be read: {bad}") from bad
+    if not isinstance(doc, dict):
+        raise JudgeRefused(f"{what} at {path} is not a mapping")
+    return doc
 
 
 def _default_review_reader(path: Path) -> dict[str, Any]:
@@ -155,7 +203,7 @@ def read_samples_record(episode_dir: Path, *, reader: Any = None) -> dict[str, A
     return read(Path(episode_dir) / SAMPLES_NAME)
 
 
-def _world_review_block(review: dict[str, Any], label: str) -> dict[str, Any] | None:
+def world_review_block(review: dict[str, Any], label: str) -> dict[str, Any] | None:
     """This world's own `reachability` sub-block off the review record, or `None` when the
     review carries no entry for this label at all (a manifest/review disagreement, J-shaped:
     joined BY NAME, never by position — #1007
@@ -294,7 +342,7 @@ def _mechanical_world_finding(
     }
 
 
-def _world_pattern(overlay: Any, *, holding_system: str) -> str:
+def world_pattern(overlay: Any, *, holding_system: str) -> str:
     """The pattern a world row's queue entry cites — the first staged corpus pattern the
     overlay names, or the holding system's own name for a patch-only world (no such pattern
     exists to name).
@@ -303,12 +351,12 @@ def _world_pattern(overlay: Any, *, holding_system: str) -> str:
     (the mechanical `unreachable-difference` finding's own `pattern` field, a per-WORLD claim
     about reachability that names no particular corpus). For anything that must be right per
     STAGED PATTERN — `sample_unavailable`, the judge's own `sample` prompt section (O5) — see
-    `_staged_patterns` below; `_world_pattern` reducing to "the first one" is exactly the gap
+    `staged_patterns` below; `world_pattern` reducing to "the first one" is exactly the gap
     O5's own falsifier names for those two."""
-    return next(iter(_staged_patterns(overlay)), holding_system)
+    return next(iter(staged_patterns(overlay)), holding_system)
 
 
-def _staged_patterns(overlay: Any) -> list[str]:
+def staged_patterns(overlay: Any) -> list[str]:
     """EVERY staged pattern this world's overlay names, in a stable order — the
     domain O5 quantifies over ("per staged pattern"), never reduced to one.
 
@@ -316,12 +364,21 @@ def _staged_patterns(overlay: Any) -> list[str]:
     falsifier: `sample_unavailable` read `false` (because SOME pattern had a sample) while the
     judge was rendered nothing for the pattern it was never shown. Empty for a patch-only world
     — no pattern exists to enumerate, and the caller falls back to the holding system's
-    own name (`_world_pattern`) for its single anchor use."""
+    own name (`world_pattern`) for its single anchor use."""
     if isinstance(overlay, dict):
         staged = overlay.get("elastic")  # lint-shippable: ok — the manifest's own field name; see runtime/branch/_family.py's own suppression on the same field
         if isinstance(staged, dict) and staged:
             return sorted(str(k) for k in staged)
     return []
+
+
+def sample_patterns(overlay: Any, *, holding_system: str) -> list[str]:
+    """The patterns a world is graded and rendered PER: `staged_patterns`, or for a patch-only
+    world the holding system's own name — the single anchor `world_pattern` also falls back
+    to. ONE spelling, so the row's `sample_unavailable_patterns` and the prompt's sample
+    section quantify over the same list; spelled at each site, the fallback for a patch-only
+    world could change in one and not the other with no test between them."""
+    return staged_patterns(overlay) or [holding_system]
 
 
 @dataclass
@@ -347,33 +404,124 @@ class FamilyGrade:
     withheld_worlds: frozenset[str] = field(default_factory=frozenset)
 
 
-def _raw_manifest(episode_dir: Path) -> dict[str, Any]:
-    import yaml
+def raw_manifest(episode_dir: Path) -> dict[str, Any]:
+    """The manifest as a mapping, or this design's refusal.
 
-    from defender._yaml import safe_load
-
+    THE SCREENED READ THE MANIFEST'S OWNER MAKES (`screened_yaml_mapping`), not a plain
+    `read_text`: `_family._read_document` reads this same file through `read_guarded` for a
+    stated reason — "the episode dir is reachable from a sibling box's rw bind, so an entry at
+    the manifest's name may be a link the model planted — and a plain `read_text` follows the
+    link the write side refuses". The judge reads the same bytes to decide which worlds there
+    are, what H is and what each world's ground truth is, so a link the launcher refuses must
+    not be one the grader honours. ABSENT is a refusal here too: an episode with no manifest
+    has nothing to grade."""
     path = Path(episode_dir) / MANIFEST_NAME
-    # THE SCREENED READ THE MANIFEST'S OWNER MAKES, not a plain `read_text`. `_family.
-    # _read_document` reads this same file through `read_guarded` for a stated reason — "the
-    # episode dir is reachable from a sibling box's rw bind, so an entry at the manifest's name
-    # may be a link the model planted — and a plain `read_text` follows the link the write side
-    # refuses". The judge reads the same bytes to decide which worlds there are, what H is and
-    # what each world's ground truth is, so a link the launcher refuses must not be one the
-    # grader honours. `read_guarded` folds ABSENT in with the alias refusal; both are "you have
-    # no content", and both were already this design's refusal here.
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise JudgeRefused(f"the manifest at {path} could not be read: {refusal}")
-    try:
-        # THE HARDENED LOADER. `RecursionError` out of a deeply nested manifest is neither a
-        # `YAMLError` nor a `ValueError`, so it escaped both this handler and `grade_episode`'s
-        # conversion set; `_yaml.safe_load` is the one home for that conversion.
-        doc = safe_load(text)
-    except yaml.YAMLError as bad:
-        raise JudgeRefused(f"the manifest at {path} could not be read: {bad}") from bad
-    if not isinstance(doc, dict):
-        raise JudgeRefused(f"the manifest at {path} is not a mapping")
+    doc = screened_yaml_mapping(path, what="the manifest")
+    if doc is None:
+        raise JudgeRefused(f"the manifest at {path} could not be read: nothing is at that name")
     return doc
+
+
+def leads_by_id(world_dir: Path) -> dict[str, JoinedLead]:
+    """The world's leads off the CANONICAL surface — `lead_repository.joined` over the archived
+    world dir, which has the run-dir shape it reads (C10) — indexed by lead id, in ONE parse.
+
+    Called once per world rather than once per lead: the per-lead chain used to re-read and
+    re-parse `executed_queries.jsonl` inside its own comprehension, so a world with N leads
+    parsed the same table N times.
+
+    THE SURFACE'S READING WINS (#1017 D3/N8). This module used to keep a private grouping of
+    the raw rows — its own sentinel filter, its own `lead_id` check, file order for seq order,
+    a raw `params` of whatever shape the row held — which is the second-reader drift
+    `lead_repository` exists to end. `JoinedLead.queries` is already the sentinel-split set
+    (the same `is_reserved_query_id` this module re-implemented: a `∅.`-prefixed row records
+    the lead's CONDUCT — a repeat the guard refused, a call the argument schema turned back —
+    and nothing it describes reached a system of record, so shown as an issued query it is a
+    defender failure invented out of a call the defender was refused), seq-ordered, with the
+    surface's coercions; `JoinedLead.goal` is the lead file's goal, read once for the world.
+
+    THE LINK-REFUSING GATE IS THE SURFACE'S OWN, not a private check ahead of it: `load_leads`
+    `artifact_dir`s `gather_raw/` and reads each lead file through `read_guarded`, and
+    `load_queries_report` `lstat`s the table before it reads — the posture `archive.py` applies
+    when it WRITES these names. A link admitted at either name would put another tree's bytes
+    into VIEW 1 as this world's own conduct. The two halves are refused SEPARATELY, so a world
+    whose table is not a regular file (or is absent — the shape `archive.py` records for "the
+    run produced none") renders every lead with its goal and no queries; gated as a whole
+    ahead of `joined()`, as this module first did, a bad table cost every lead its goal too."""
+    return {lead.lead_id: lead for lead in joined(world_dir)}
+
+
+def lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, list[dict]],
+               *, leads: dict[str, JoinedLead]) -> dict[str, Any]:
+    """One lead's chain for VIEW 1: goal -> params -> payload -> summary -> resolutions, with
+    `leads` being `leads_by_id(world_dir)` computed ONCE by the caller.
+
+    EVERY LINK IS NAMED FROM A `QueryRow` FIELD; no row object is stringified (#1017 D3/O3).
+    The chain used to carry the lead's raw rows whole under `document_rows`, which put every
+    column of every executed query — `payload_sha256`, `payload_path`, `raw_command`,
+    `exit_code`, `error_class`, and since #871 `system_key` — into the prompt as bytes the
+    judge cannot act on, charged against the operator's payload cap ahead of the evidence the
+    cap exists to keep."""
+    # THE ID IS MODEL-AUTHORED and this is where it becomes a path. `names_one_file` refuses a
+    # token that would read outside the graded world — a `[../../c/report ...]` resolution row
+    # otherwise put a counterfactual sibling's whole `report.md` into this world's own prompt,
+    # under `- summary:`, as a fact about the world being graded (O5/J14). The surface is keyed
+    # by the ids the world's OWN files and rows carry, so a token like that names no lead there.
+    safe = names_one_file(lead_id)
+    lead = leads.get(lead_id)
+    goal = lead.goal if lead is not None else None
+    queries = lead.queries if lead is not None else []
+    params = queries[0].params if queries else None
+    # THE DIRECTORY IS SCREENED AS WELL AS THE LEAF. `artifact_file` lstats the entry it is
+    # given, so a link planted at `gather_summaries/` itself would put another tree's regular
+    # files through a leaf check that passes — the same `artifact_dir` posture `load_leads`
+    # takes on `gather_raw/`.
+    summaries_dir = world_dir / GATHER_SUMMARIES_DIRNAME
+    summary_path = summaries_dir / f"{lead_id}.md"
+    summary = None
+    if not safe:
+        summary = ("(this lead id does not name a file inside this world, so no gather summary "
+                   "was read for it)")
+    elif artifact_dir(summaries_dir) and artifact_file(summary_path):
+        # `errors="replace"`, not a bare read. This is MODEL-WRITTEN text in a tree the box can
+        # write, so an undecodable byte in it is an ordinary thing to meet; raising here would
+        # be an unreadable summary costing the whole episode its grade, and the substitution
+        # character is exactly what the judge should be shown of a byte nobody can read.
+        summary = summary_path.read_text(encoding="utf-8", errors="replace")
+    return {
+        "goal": goal, "params": params, "payload": [q.payload_digest for q in queries],
+        "summary": summary,
+        "resolutions": resolutions_by_lead.get(lead_id, []),
+    }
+
+
+def json_mapping(path: Path) -> dict[str, Any] | None:
+    """One JSON artifact as a mapping, or `None` when it is not readable as one.
+
+    ONE HOME for the tolerance policy — which exception classes are survivable and whether a
+    non-mapping counts as unreadable — because four readers in this package want the same
+    answer (`alert.json` twice, `provenance.json`, and the enqueue's own episode alert; a
+    lead's `.lead.json` was the fifth until #1017 moved that read onto
+    `lead_repository.load_leads`, which keeps the same three classes). Spelled per site, a
+    class that has to be added later (a `RecursionError` out of a deeply nested document is
+    neither `OSError` nor `ValueError`) has to be found at every site, and the sites are far
+    enough apart that only a grep finds them.
+
+    AND ONE HOME FOR THE LINK POLICY. Every one of those files sits in a tree a box can
+    reach, and three of the four callers have no `lstat` screen of their own — a plain
+    `read_text` at `worlds/<X>/provenance.json` followed a planted link and handed the pass an
+    attacker-chosen `commit` to `git show` every lesson at. `read_guarded` asks the plainness
+    question of the open descriptor itself (`O_NOFOLLOW`, a link count of one, a regular file),
+    and answers absent, unreadable and undecodable the same way this reader already did:
+    `None`."""
+    text, _refusal = read_guarded(path)
+    if text is None:
+        return None
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def episode_id_of(doc: dict[str, Any]) -> str:
@@ -617,7 +765,14 @@ def _read_world_ledger(path: Path, world_token: str) -> tuple[list[dict[str, Any
     return [kept[k] for k in order], malformed
 
 
-def _own_h_rows(rows: list[dict[str, Any]], holding_system: str) -> list[dict[str, Any]]:
+def own_h_rows(rows: list[dict[str, Any]], holding_system: str) -> list[dict[str, Any]]:
+    """The world's ledger rows ON H — each row's `system`, after strip+casefold, equal to
+    `holding_system`.
+
+    PRECONDITION: `holding_system` is ALREADY the folded spelling — `_holding_system(doc)`'s
+    answer, which is also what every world row carries as its own `holding_system` field. The
+    manifest's raw `discriminator.holding_system` (unfolded, mixed case) compared here answers
+    no rows at all; a reader outside the pass takes H off the row, not off the manifest."""
     out = []
     for row in rows:
         system = row.get("system")
@@ -800,7 +955,7 @@ def world_ledger_path(episode_dir: Path, label: str, *, episode_token: str) -> P
 
 def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
     """Read one world's archived record: the ledger, the document and the report, once."""
-    world_dir = Path(episode_dir) / "worlds" / label
+    world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
     ledger_path = world_ledger_path(episode_dir, label, episode_token=episode_token)
     ledger_rows, malformed = _read_world_ledger(
         ledger_path, world_token_for(episode_token, label))
@@ -866,6 +1021,10 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     review_block: dict[str, Any] | None = None, episode_incomplete: bool = False,
     withholding_applies: bool = True, samples: dict[str, Any],
 ) -> tuple[dict[str, Any], WorldFacts | None]:
+    """@owns has_refused, @owns sample_unavailable, @owns sample_unavailable_patterns — the
+    SOLE producer of these three world-row fields; the comments beside each say why. In the
+    DOCSTRING, not a comment, because that is where `lint_unowned_field` reads the claim from:
+    a second producer anywhere fails the duplicate-owner gate only if this one is registered."""
     label = world["world_id"]
     raw_declared = world.get("disposition_declared")
     # ONE COLUMN, ONE VOCABULARY. `declared` is the NORMALIZED value on every row that has one
@@ -882,7 +1041,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # refused by `_validate_world_row`'s non-empty-string rule and filed as a model defect.
     row: dict[str, Any] = {"world": label, "declared": normalized_disposition(raw_declared),
                            "holding_system": holding_system}
-    world_dir = Path(episode_dir) / "worlds" / label
+    world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
     ledger_path = world_ledger_path(episode_dir, label, episode_token=episode_token)
     alert_path = world_dir / ALERT_NAME
 
@@ -921,7 +1080,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # artifact that is not there from one that is there and wrong.
     try:
         facts = read_world_facts(episode_dir, label, episode_token=episode_token)
-        h_rows = _own_h_rows(facts.ledger_rows, holding_system)
+        h_rows = own_h_rows(facts.ledger_rows, holding_system)
         faulted = next((r for r in h_rows if r.get("source") == FAULT), None)
 
         resolution_moved = facts.resolution_moved
@@ -994,32 +1153,39 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # (`test_unreachable_difference_fires_even_with_no_row_on_the_holding_system`, whose own
     # served ledger is empty and still mints this finding).
     mechanical_findings: list[dict[str, Any]] = []
-    pattern = _world_pattern(world.get("overlay"), holding_system=holding_system)
+    pattern = world_pattern(world.get("overlay"), holding_system=holding_system)
     if (not difference_shown and facts_o2.reachable_by_capture is False
             and declares_difference(world.get("overlay"))):
         mechanical_findings.append(_mechanical_world_finding(
             label=label, pattern=pattern, holding_system=holding_system))
-    # @owns sample_unavailable, @owns sample_unavailable_patterns — the SOLE producer of both
-    # row fields. #1007 M4/O5: no sample was captured for a staged pattern — matched by EXACT
-    # string, never case-folded (a differently-cased overlay pattern stages a different index
-    # and would otherwise be graded against another corpus's document). A pattern present but
-    # mapped to `null` reads identically to an absent key — both are "nothing to compare
-    # against" (`test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern`).
+    # `sample_unavailable` / `sample_unavailable_patterns` — the SOLE producer of both row
+    # fields (owned in the docstring). #1007 M4/O5: no sample was captured for a staged
+    # pattern — matched by EXACT string, never case-folded (a differently-cased overlay pattern
+    # stages a different index and would otherwise be graded against another corpus's
+    # document). A pattern present but mapped to `null` reads identically to an absent key —
+    # both are "nothing to compare against"
+    # (`test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern`).
     #
-    # OVER EVERY STAGED PATTERN, not `_world_pattern`'s single representative one — a world
+    # OVER EVERY STAGED PATTERN, not `world_pattern`'s single representative one — a world
     # staging into two staged patterns and shown a sample for only one is O5's own falsifier
     # (`test_a_two_pattern_world_names_each_patterns_sample_availability_independently`).
     # `sample_unavailable_patterns` is that per-pattern detail; `sample_unavailable` stays the
     # aggregate bool ("was ANY staged pattern's sample missing") the existing single-pattern
     # tests and `judge/__init__.py`'s blanket callers already read.
-    staged_patterns = _staged_patterns(world.get("overlay")) or [pattern]
+    world_staged_patterns = sample_patterns(world.get("overlay"), holding_system=holding_system)
     sample_unavailable_patterns = [
-        p for p in staged_patterns if samples.get(p) is None]
+        p for p in world_staged_patterns if samples.get(p) is None]
     sample_unavailable = bool(sample_unavailable_patterns)
 
     row.update(
         holding_queried=holding_queried, scope_discriminated=scope_discriminated,
         doctored_answer_served=doctored, resolution_moved=resolution_moved,
+        # `has_refused` (owned in the docstring) — STORED beside the flags the ladder below
+        # reads, because the `lead-quality` / `None` branch turns on it and a reader of the row
+        # (the episode page, #1025 O3) could otherwise not tell a world excused for a refusal
+        # from one that queried nothing worth grading. The SAME local the ladder branches on,
+        # never re-derived.
+        has_refused=has_refused,
         verdict=verdict, malformed_rows=facts.malformed_rows,
         # SAID SEPARATELY from `holding_queried: false`, because the two are different failures
         # and the lesson each deserves is different. A world with no rows on the holding system
@@ -1176,7 +1342,7 @@ def grade_family(
     absent/unparseable reads as `{}`), to compute each row's `sample_unavailable` (#1007
     M4/O5)."""
     episode_dir = Path(episode_dir)
-    doc = manifest if manifest is not None else _raw_manifest(episode_dir)
+    doc = manifest if manifest is not None else raw_manifest(episode_dir)
     holding_system = _holding_system(doc)
     worlds = _non_control_worlds(doc)
     episode_id = episode_id_of(doc)
@@ -1215,7 +1381,7 @@ def grade_family(
     facts: dict[str, WorldFacts] = {}
     for world in worlds:
         label = world.get("world_id")
-        block = (_world_review_block(review_doc, label)
+        block = (world_review_block(review_doc, label)
                 if m1_participates and isinstance(label, str) else None)
         row, read = _grade_world(episode_dir, world, episode_token=episode_token,
                                 holding_system=holding_system, review_block=block,
@@ -1256,6 +1422,8 @@ def grade_family(
 __all__ = [
     "FamilyGrade", "MECHANICAL_WORLD_BUCKET", "ReachabilityFacts", "WorldFacts",
     "declares_difference", "discriminator_of", "episode_id_of", "grade_family",
-    "is_gradable_row", "mapping_key", "names_one_file", "read_review_record",
-    "read_world_facts", "scope_params",
+    "is_gradable_row", "json_mapping", "lead_chain", "leads_by_id", "mapping_key",
+    "names_one_file", "own_h_rows", "raw_manifest", "read_review_record",
+    "read_samples_record", "read_world_facts", "sample_patterns", "scope_params",
+    "screened_yaml_mapping", "staged_patterns", "world_pattern", "world_review_block",
 ]
