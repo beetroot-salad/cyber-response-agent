@@ -20,9 +20,15 @@ FIREWORKS = OpenAICompatProvider(
         "glm-5p2": "accounts/fireworks/models/glm-5p2",
         "glm-5.3": "accounts/fireworks/models/glm-5p3",
         "glm-5p3": "accounts/fireworks/models/glm-5p3",
+        "glm-5.3-flash": "accounts/fireworks/models/glm-5p3-flash",
+        "glm-5p3-flash": "accounts/fireworks/models/glm-5p3-flash",
         "kimi-k2.6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k2p6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k3": "accounts/fireworks/models/kimi-k3",
+        # Fireworks spells 4.1 as `v4p1`; the pre-4.1 `deepseek-v4-flash` id is a compatibility
+        # route to the same model until 2026-09-25, so it gets no alias of its own.
+        "deepseek-v4.1-flash": "accounts/fireworks/models/deepseek-v4p1-flash",
+        "deepseek-v4p1-flash": "accounts/fireworks/models/deepseek-v4p1-flash",
     },
     main_effort="low",
     gather_effort="none",
