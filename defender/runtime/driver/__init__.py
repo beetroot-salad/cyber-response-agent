@@ -61,6 +61,7 @@ from ..tools import (
 )
 from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
+from defender.hooks.inject_system_skill_description import descriptor_catalog
 
 from defender import _clock
 from defender._env import env_bool
@@ -333,6 +334,28 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     return run, truncated_by, exit_reason
 
 
+def _dispatch_catalogs(defender_dir: Path) -> tuple[str | None, str | None]:
+    """The descriptor index each dispatch prompt opens with — MAIN's, narrowed to the gather
+    role's committed grant, and lead-0's, narrowed to the correlation grant — read from the
+    tree HERE, once, at run start, and handed down to the two dispatch sites rather than built
+    inside them per dispatch. Reading one builds a registry over the adapters directory,
+    which since #1031 fails for a tree that cannot be read; a run over such a tree must fail
+    at `run_investigation`'s own frame, before any model call, as the fault it is — not on the
+    first dispatch inside a tool the model is mid-run on, and not inside item 3's task, which
+    swallows its own failures into "injection skipped".
+
+    The ROLE's committed grant, never the injected `verbs=` registry's: a registry scoped
+    narrower than GATHER_DEF's real grant must not narrow what the catalog advertises (the
+    same decoupling `build_agent` states at the dispatch tool's registration)."""
+    from .. import lead_zero as lead_zero_mod
+
+    skills, adapters = defender_dir / "skills", defender_dir / "scripts" / "adapters"
+    return (
+        descriptor_catalog(skills, adapters, GATHER_DEF.verb_grant),
+        descriptor_catalog(skills, adapters, lead_zero_mod.CORRELATION_GRANT),
+    )
+
+
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
     *,
     alert_path: Path,
@@ -359,8 +382,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # ceiling's BASE), resolved once at the entry point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    adapters = defender_dir / "scripts" / "adapters"
-    verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    verbs = verbs if verbs is not None else ModuleVerbRegistry(defender_dir / "scripts" / "adapters", GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    catalog, correlation_catalog = _dispatch_catalogs(defender_dir)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
@@ -497,12 +520,13 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 # Share the RUN's own budget-clock origin rather than letting it default to a
                 # fresh `time.monotonic()` stamp taken whenever this task happens to start.
                 budget_started_monotonic=budget_started_monotonic,
+                catalog=correlation_catalog,
             ))
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
         store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
-        correlation_task=correlation_task, toolset=toolset,
+        correlation_task=correlation_task, toolset=toolset, catalog=catalog,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),

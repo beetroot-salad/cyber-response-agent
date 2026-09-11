@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -919,6 +920,24 @@ def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(
         lead_author._verify_skills_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED | {"ghost"},
         )
+
+
+def test_verify_skills_state_refuses_a_tree_whose_adapters_cannot_be_read(tmp_git_repo: Path):
+    """The construction-time arm of the case above (#1031): since the registry reads its
+    roster when it is built, a worktree whose `defender/scripts/adapters` cannot be read fails
+    when the batch's ONE resolver is built — before any path is checked — and that failure is
+    this lane's own refusal, `LeadAuthorError` naming the directory, not a bare
+    `ScaffoldRuleError` from a frame the lane never wrapped. The dead-letter reader greps for
+    one class; a second one is a refusal it misses.
+
+    The tree is otherwise clean (no working-tree edit at all), so the only thing that can
+    refuse is the resolver's construction."""
+    adapters = tmp_git_repo / "defender" / "scripts" / "adapters"
+    shutil.rmtree(adapters)
+    with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved") as exc:
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+    assert str(adapters) in str(exc.value), f"the refusal does not name the directory: {exc.value}"
+    assert "refusing to commit" in str(exc.value)
 
 
 def test_verify_skills_state_ignores_baseline_stray(tmp_git_repo: Path):

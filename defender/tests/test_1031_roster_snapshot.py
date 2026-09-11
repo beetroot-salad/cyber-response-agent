@@ -236,6 +236,94 @@ def test_an_unreadable_directory_fails_at_construction(tmp_path):
     assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == ("elastic",)
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores mode bits; the directory stays searchable")
+def test_a_listable_but_unsearchable_directory_fails_at_construction(tmp_path):
+    """O2/D2, the arm between "cannot list" and "fine" — a directory with its READ bit and not
+    its SEARCH bit (mode 0o400). `os.scandir` lists it, so a check that stops at the listing
+    passes; resolving any entry inside it then fails, which `Path.is_file` raises on 3.11/3.12
+    and SWALLOWS on 3.13+ — where the roster comes out empty with nothing said, the silent
+    shape this issue exists to close. `RegistryError` at construction, naming the directory,
+    under `DENY_ALL` and under a real grant alike (the grant's cold read walks the same
+    entries); the positive control restores the mode and constructs.
+
+    Observed failing by (today, as a non-root user): `PermissionError` out of the constructor
+    on 3.11/3.12 — not the registry's own error — and a clean empty roster on 3.13+."""
+    adapters = tmp_path / "adapters"
+    write(adapters / "elastic_adapter.py", QUERY_ADAPTER)
+    adapters.chmod(0o400)
+    try:
+        for grant in (DENY_ALL, GRANT):
+            with pytest.raises(verbs.RegistryError) as exc:
+                ModuleVerbRegistry(adapters, grant)
+            assert str(adapters) in str(exc.value)
+            assert not isinstance(exc.value, GrantError)
+    finally:
+        adapters.chmod(0o700)
+    assert ModuleVerbRegistry(adapters, GRANT).systems() == ("elastic",)
+
+
+def test_the_registry_error_names_the_directory_once(tmp_path):
+    """The message is read by an operator once, off a traceback: the directory it names is
+    named ONCE — not once by the registry and again inside the interpolated `OSError`, whose
+    `str()` already carries the path."""
+    missing = tmp_path / "nope"
+    with pytest.raises(verbs.RegistryError) as exc:
+        ModuleVerbRegistry(missing, DENY_ALL)
+    assert str(exc.value).count(str(missing)) == 1, str(exc.value)
+
+
+def test_decide_and_verbs_read_the_roster_not_the_disk(tmp_path):
+    """O1/D1 for the DISPATCH half — `verbs()` and `decide()` answer from the roster fixed at
+    construction, the same map `systems()` answers from, so the registry cannot contradict
+    itself once the directory is gone: a GRANTED `elastic.query` stays GRANTED after `rmtree`
+    (its module was loaded on the first decision and is memoized), the same function object
+    both times; an unknown VERB on `elastic` gets the SAME refusal it got before (the grant
+    placement's "no verb of that name", read cold off the roster), never "unknown system";
+    and a name off the roster is `KeyError` from `verbs()` as it always was. The positive
+    control is the same three answers before the removal.
+
+    A registry whose module was NEVER loaded is the other arm: over a removed directory the
+    first `decide` fails at the import, as the `OSError` it is — a host fault propagated as
+    one — and NOT as an UNDECLARED verdict the query tool would hand the model as its own
+    typo to fix.
+
+    Observed failing by (today): `UNDECLARED "unknown system 'elastic'"` from both registries
+    after the removal — `verbs()` re-resolved the adapter path against the disk per call,
+    while `systems()` still declared the name."""
+    adapters = tmp_path / "loaded" / "adapters"
+    write(adapters / "elastic_adapter.py", QUERY_ADAPTER)
+    registry = ModuleVerbRegistry(adapters, GRANT)
+    before = registry.decide("elastic", "query")
+    assert before.outcome == verbs.GRANTED
+    assert before.fn is not None
+    unknown_verb_before = registry.decide("elastic", "nope")
+    assert unknown_verb_before.outcome == verbs.UNDECLARED
+    assert "no verb of that name" in unknown_verb_before.refusal
+    with pytest.raises(KeyError):
+        registry.verbs("cmdb")
+
+    shutil.rmtree(adapters)
+    after = registry.decide("elastic", "query")
+    assert after.outcome == verbs.GRANTED, \
+        f"a granted call on a declared system was refused once the directory went: {after!r}"
+    assert after.fn is before.fn, "the dispatch resolved a different function after the removal"
+    assert registry.systems() == ("elastic",)
+    unknown_verb = registry.decide("elastic", "nope")
+    assert unknown_verb == unknown_verb_before, \
+        f"a declared system's unknown-verb refusal changed after the removal: {unknown_verb!r}"
+    assert "unknown system" not in unknown_verb.refusal
+    with pytest.raises(KeyError):
+        registry.verbs("cmdb")
+
+    fresh_dir = tmp_path / "fresh" / "adapters"
+    write(fresh_dir / "elastic_adapter.py", QUERY_ADAPTER)
+    fresh = ModuleVerbRegistry(fresh_dir, GRANT)
+    shutil.rmtree(fresh_dir)
+    assert fresh.systems() == ("elastic",)
+    with pytest.raises(FileNotFoundError):
+        fresh.decide("elastic", "query")
+
+
 def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_check(tmp_path):
     """O2/D1 through the subclass — `WorldRegistry` (the branch lane's registry, `run.py:288`)
     overrides neither the constructor's directory check nor `systems()`: over a missing

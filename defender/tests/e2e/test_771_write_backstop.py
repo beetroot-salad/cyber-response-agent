@@ -1098,7 +1098,7 @@ def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_pa
         request = type("R", (), {"lead_id": lead_id, "system": "elastic", "goal": "g",
                                  "what_to_summarize": []})()
         try:
-            asyncio.run(_run_gather(deps, None, 1, request, None))
+            asyncio.run(_run_gather(deps, None, 1, request, None, catalog=None))
         except Exception as e:  # noqa: BLE001 — anything past the gate means the gate passed
             return "invalid lead_id" in str(e)
         return False

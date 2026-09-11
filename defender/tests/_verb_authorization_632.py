@@ -512,8 +512,14 @@ class _Run:
 
     @property
     def breaker(self) -> dict:
-        p = self.run_dir / "circuit_breaker.json"
-        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        return breaker_doc(self.run_dir)
+
+
+def breaker_doc(run_dir: Path) -> dict:
+    """The run's circuit-breaker document, `{}` before the first write — THE reader, which the
+    harness result classes here and in `e2e/_lead_zero_808.py` expose as `.breaker`."""
+    p = run_dir / "circuit_breaker.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
 
 
 def q(system: str, verb: str, params: dict | None = None, query_id: str | None = None) -> Turn:
@@ -583,6 +589,7 @@ __all__ = [
     "VerbGrant",
     "VerbRegistry",
     "bare_only_surfaces",
+    "breaker_doc",
     "declared_verb_names",
     "declared_verbs_everywhere",
     "grant_of",

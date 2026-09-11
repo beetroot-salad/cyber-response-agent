@@ -23,7 +23,6 @@ of them against a declared system ends the lead as it did before #1030.
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -32,7 +31,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender._io import read_text_utf8  # noqa: E402
 from defender.agents import GATHER_DEF  # noqa: E402
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
@@ -45,7 +43,7 @@ from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests._declared869 import write  # noqa: E402
-from defender.tests._verb_authorization_632 import grant_of  # noqa: E402
+from defender.tests._verb_authorization_632 import breaker_doc, grant_of  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, materialize  # noqa: E402
 from defender.tests.e2e.test_1015_rejection_budget import _assert_budget_stop  # noqa: E402
 from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
@@ -207,11 +205,6 @@ def test_a_loop_of_rejections_against_a_declared_system_is_ended_by_the_budget(t
     _assert_no_forbidden_pair(r)
 
 
-def _breaker_doc(run_dir: Path) -> dict:
-    path = run_dir / "circuit_breaker.json"
-    return json.loads(read_text_utf8(path)) if path.is_file() else {}
-
-
 def _record(capture: QueryCapture, run_dir: Path, *, system: str, exit_code: int, **extra) -> dict:
     """One `_record` call the way `_spec771`'s writer probe makes it: real deps bound to the
     run dir, a dispatched lead id, every row column the caller decides spelled out."""
@@ -236,15 +229,15 @@ def test_record_charges_the_breaker_to_the_rows_own_system(tmp_path):
 
     Observed failing by (today): `TypeError` on the first call — `breaker_key` is required."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    capture = QueryCapture(ModuleVerbRegistry(_real_registry(tmp_path)[0], GRANT))
+    capture = QueryCapture(_real_registry(tmp_path)[1])
 
     row = _record(capture, run_dir, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
     assert row["system"] == "elastic"
-    assert _breaker_doc(run_dir)["systems"]["elastic"]["failures"] == 1
+    assert breaker_doc(run_dir)["systems"]["elastic"]["failures"] == 1
     assert not circuit_breaker.is_tripped(run_dir, "elastic"), "one infra row tripped the system"
 
     _record(capture, run_dir, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
-    doc = _breaker_doc(run_dir)
+    doc = breaker_doc(run_dir)
     assert set(doc["systems"]) == {"elastic"}, \
         f"the breaker is keyed on {sorted(doc['systems'])}, not on the row's own system alone"
     assert doc["systems"]["elastic"]["failures"] == PER_SYSTEM_FAIL_LIMIT
@@ -255,7 +248,7 @@ def test_record_charges_the_breaker_to_the_rows_own_system(tmp_path):
 
     _record(capture, run_dir, system="elastic", exit_code=64)
     _record(capture, run_dir, system="", exit_code=DEFAULT_FAULT_EXIT)
-    after = _breaker_doc(run_dir)
+    after = breaker_doc(run_dir)
     assert after["systems"] == doc["systems"], "a usage row or a systemless row charged the breaker"
     assert after["total_failures"] == PER_SYSTEM_FAIL_LIMIT
 

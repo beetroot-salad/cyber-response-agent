@@ -281,14 +281,12 @@ class VerbResolver:
         message — which is why the lead author's WRITE gate consumes this answer too, not only
         its commit gate.
         """
-        return system in self._systems()
-
-    def _systems(self) -> frozenset[str]:
-        # The roster is fixed at this resolver's construction (#1031) — which is AFTER the
-        # writes it checks: the lead author builds one resolver per batch once the agent's
-        # writes are in, and the connect skill builds a fresh one per call. The tree being
-        # written under those callers is the skills/catalog tree, never the adapters dir.
-        return frozenset(self._registry.systems())
+        # Membership in the registry's own roster — the tuple it fixed at construction (#1031),
+        # which is AFTER the writes this resolver checks: the lead author builds one resolver
+        # per batch once the agent's writes are in, and the connect skill builds a fresh one
+        # per call. The tree being written under those callers is the skills/catalog tree,
+        # never the adapters dir. A handful of names, so no set is built to ask.
+        return system in self._registry.systems()
 
     def verbs(self, system: str) -> Mapping[str, Verb]:
         # Cached per SYSTEM because the gate asks once per changed path and a batch routinely

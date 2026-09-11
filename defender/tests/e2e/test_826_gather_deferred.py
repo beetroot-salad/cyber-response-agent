@@ -147,7 +147,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         out = asyncio.run(tools_gather._run_gather(
             deps, _factory_raising(exc), 40,
             GatherRequest(lead, "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
-            lambda agent_id, reason: stamped.append((agent_id, reason)),
+            lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
         ))
         assert stamped[-1] == (f"gather:{lead}", expected)
         assert "Treat this lead as incomplete" in out, \
@@ -173,7 +173,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
             asyncio.run(tools_gather._run_gather(
                 deps, _factory_raising(exc), 40,
                 GatherRequest(lead, "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
-                lambda agent_id, reason: stamped.append((agent_id, reason)),
+                lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
             ))
         assert stamped[-1] == (f"gather:{lead}", expected), \
             "a run-level kill left its gather session reading as one that finished"
@@ -191,7 +191,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     asyncio.run(tools_gather._run_gather(
         deps, lambda agent_id, system, request_limit: _Clean(), 40,
         GatherRequest("l-009", "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
-        lambda agent_id, reason: stamped.append((agent_id, reason)),
+        lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
     ))
     assert len(stamped) == before, "a gather that finished was stamped as truncated"
 

@@ -390,7 +390,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     *, run_dir: Path, defender_dir: Path, run_id: str,
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
-    budget_started_monotonic: float = 0.0,
+    budget_started_monotonic: float = 0.0, catalog: str | None,
 ) -> str | None:
     """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
     shared terminator/bookkeeping seam (`tools_gather._run_gather`) with `pre_claimed=True` —
@@ -474,7 +474,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     try:
         return await _run_gather(
             gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, CORRELATION_GRANT,
-            stamp_terminator, pre_claimed=True,
+            stamp_terminator, catalog=catalog, pre_claimed=True,
         )
     except (BudgetKill, circuit_breaker.RunAborted):
         raise

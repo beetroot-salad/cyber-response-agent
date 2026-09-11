@@ -454,7 +454,18 @@ def _verify_skills_state(
     # process's own: the drain runs this from the main checkout against a `lead-author/<id>`
     # worktree, and `_load_adapter_module` keys its cache on the resolved absolute path, so this
     # is what makes the verdict a statement about the commit it is about to make.
-    resolver = _scaffold_rules.VerbResolver(repo_root / "defender")
+    #
+    # Wrapped like `_skills_content_rule`'s `resolver.verbs(...)`: since #1031 the resolver
+    # fails at CONSTRUCTION over a tree whose adapters directory cannot be read, and "could
+    # not check" is this lane's refusal — `LeadAuthorError`, the one class every other
+    # refusal here dead-letters under — not a bare `ScaffoldRuleError` a reader of the dead
+    # letters would not be looking for.
+    try:
+        resolver = _scaffold_rules.VerbResolver(repo_root / "defender")
+    except _scaffold_rules.ScaffoldRuleError as e:
+        raise LeadAuthorError(
+            f"the tree's systems could not be resolved ({e}); refusing to commit"
+        ) from e
     return _verify_corpus_scope(
         repo_root, baseline_stray, actor="agent",
         rule=functools.partial(_skills_rule, repo_root, resolver, systems=systems),
