@@ -83,16 +83,16 @@ def _wire(run_dir: Path) -> list[dict]:
     p = run_dir / "wire_logs" / "llm_requests.jsonl"
     if not p.is_file():
         return []
-    return [json.loads(l) for l in p.open(encoding="utf-8") if l.strip()]
+    return [json.loads(line) for line in p.open(encoding="utf-8") if line.strip()]
 
 
 def _queries(run_dir: Path) -> dict[str, list[dict]]:
     out = defaultdict(list)
     p = run_dir / "executed_queries.jsonl"
     if p.is_file():
-        for l in p.open(encoding="utf-8"):
-            if l.strip():
-                q = json.loads(l)
+        for line in p.open(encoding="utf-8"):
+            if line.strip():
+                q = json.loads(line)
                 out[q["lead_id"]].append(q)
     return out
 
@@ -390,9 +390,9 @@ def main() -> None:
     manifest = {}
     mp = RUNS / "manifest.jsonl"
     if mp.is_file():
-        for l in mp.open(encoding="utf-8"):
-            if l.strip():
-                m = json.loads(l)
+        for line in mp.open(encoding="utf-8"):
+            if line.strip():
+                m = json.loads(line)
                 manifest[m["run_id"]] = m
     run_ids = args.runs or sorted(r for r, m in manifest.items() if not m.get("excluded"))
     drows, rrows = [], []

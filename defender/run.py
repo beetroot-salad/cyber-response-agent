@@ -90,7 +90,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="Write/close a case-history ticket for this alert (default off)")
     p.add_argument("--model", default=None,
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
-                        "or 'glm-5.2' / 'fireworks:<id>' for the Fireworks-served GLM")
+                        "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
     ns = p.parse_args(argv)
     if ns.resume is not None and ns.alert is not None:
         p.error(

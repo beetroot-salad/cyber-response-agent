@@ -649,24 +649,24 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
 # config cross-product + defaults (FACT-EFFORT / F5) + build-fault → FatalConfigError
 
 def test_lead_author_config_defaults_glm_low():
-    """The migration flips the shipped defaults: model glm-5.2, effort low (matching the defender
-    MAIN + verifier), plus a generous request limit for a multi-file editor."""
-    assert config.lead_author_model() == "glm-5.2"
-    assert config.lead_author_effort() == "low"
+    """The shipped defaults: model glm-5.3, effort medium (the 5.2 → 5.3 port, alongside the
+    verifier and the findings author), plus a generous request limit for a multi-file editor."""
+    assert config.lead_author_model() == "glm-5.3"
+    assert config.lead_author_effort() == "medium"
     assert config.lead_author_request_limit() >= 50
 
 
 def test_effort_cross_product_builds(monkeypatch):
-    """FACT-EFFORT / F5. The default effort ``low`` is cross-provider-safe, so the documented
-    claude-* A/B override (harness_lead pins claude-sonnet-4-6) still BUILDS, and the glm-5.2
+    """FACT-EFFORT / F5. The default effort ``medium`` is cross-provider-safe, so the documented
+    claude-* A/B override (harness_lead pins claude-sonnet-4-6) still BUILDS, and the glm-5.3
     default builds. Guarded negative: claude-* + ``none`` (a Fireworks-only effort) raises
     ValueError — proving that had the default been ``none``, the claude pin would be dead on
-    arrival, so ``low`` is the load-bearing reconciled choice. (Fake keys; settings make no
+    arrival, so a named effort is the load-bearing reconciled choice. (Fake keys; settings make no
     request.)"""
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("glm-5.2", config.lead_author_effort())             # default builds
+    providers.build_for_effort("glm-5.3", config.lead_author_effort())             # default builds
     providers.build_for_effort("claude-sonnet-4-6", config.lead_author_effort())   # A/B override builds
     with pytest.raises(ValueError, match="none"):
         providers.build_for_effort("claude-sonnet-4-6", "none")                  # Fireworks-only effort

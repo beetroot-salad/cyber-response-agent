@@ -67,7 +67,7 @@ def test_no_module_level_env_read_in_loop_config():
 @pytest.mark.parametrize(
     ("accessor", "var", "raw", "expected"),
     [
-        ("judge_model", "JUDGE_MODEL", "kimi-k2.6", "kimi-k2.6"),
+        ("judge_model", "JUDGE_MODEL", "kimi-k3", "kimi-k3"),
         ("verifier_model", "LEARNING_VERIFIER_MODEL", "deepseek-v4", "deepseek-v4"),
         ("judge_effort", "JUDGE_EFFORT", "high", "high"),
         ("verifier_timeout", "LEARNING_VERIFIER_TIMEOUT_SECONDS", "42", 42),
@@ -90,7 +90,7 @@ def test_accessor_returns_the_default_when_unset(monkeypatch):
     monkeypatch.delenv("LEARNING_AUTHOR_MAX_ATTEMPTS", raising=False)
     monkeypatch.delenv("LEARNING_VERIFIER_MODEL", raising=False)
     assert config.author_max_attempts() == 3
-    assert config.verifier_model() == "glm-5.2"
+    assert config.verifier_model() == "glm-5.3"
 
 
 # #713 — the grouping objects must not re-freeze what #717 unfroze

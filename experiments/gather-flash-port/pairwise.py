@@ -87,7 +87,7 @@ def main() -> None:
     ap.add_argument("--arms", nargs=2, default=["glm-flash", "current"])
     args = ap.parse_args()
     a, b = args.arms
-    manifest = [json.loads(l) for l in (RUNS / "manifest.jsonl").open(encoding="utf-8") if l.strip()]
+    manifest = [json.loads(line) for line in (RUNS / "manifest.jsonl").open(encoding="utf-8") if line.strip()]
     ok = [m for m in manifest if m["fixture"] == args.fixture and not m.get("excluded") and (RUNS / m["run_id"] / "report.md").is_file()]
     ra = [m["run_id"] for m in ok if m["arm"] == a]
     rb = [m["run_id"] for m in ok if m["arm"] == b]

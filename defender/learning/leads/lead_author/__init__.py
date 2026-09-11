@@ -384,9 +384,9 @@ fault — no key / unroutable model / bad effort — propagates from the in-proc
 as exit 2 instead, halting the drain rather than quarantining every marker.)
 
 Environment
-  LEAD_AUTHOR_MODEL                          in-process model id (default glm-5.2; any
+  LEAD_AUTHOR_MODEL                          in-process model id (default glm-5.3; any
                                              provider providers.provider_for routes)
-  LEAD_AUTHOR_EFFORT                          reasoning effort (default low)
+  LEAD_AUTHOR_EFFORT                          reasoning effort (default medium)
   LEAD_AUTHOR_TIMEOUT_SECONDS                per-spawn wall-clock ceiling (default 1800)
   LEAD_AUTHOR_REQUEST_LIMIT                   tool-loop request cap (default 250)
   LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD        min pending-draft count to fire the

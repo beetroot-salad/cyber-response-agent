@@ -308,11 +308,11 @@ def subagent_timeout() -> int:
 
 
 def verifier_model() -> str:
-    return env_str("LEARNING_VERIFIER_MODEL", "glm-5.2")
+    return env_str("LEARNING_VERIFIER_MODEL", "glm-5.3")
 
 
 def verifier_effort() -> str:
-    return env_str("LEARNING_VERIFIER_EFFORT", "low")
+    return env_str("LEARNING_VERIFIER_EFFORT", "medium")
 
 
 def verifier_timeout() -> int:
@@ -327,7 +327,7 @@ def verify_batch_workers() -> int:
 
 
 def author_model() -> str:
-    return env_str("LEARNING_AUTHOR_MODEL", "glm-5.2")
+    return env_str("LEARNING_AUTHOR_MODEL", "glm-5.3")
 
 
 def author_timeout() -> int:
@@ -335,7 +335,7 @@ def author_timeout() -> int:
 
 
 def author_effort() -> str:
-    return env_str("LEARNING_AUTHOR_EFFORT", "low")
+    return env_str("LEARNING_AUTHOR_EFFORT", "medium")
 
 
 def author_request_limit() -> int:
@@ -347,11 +347,11 @@ def author_max_attempts() -> int:
 
 
 def lead_author_model() -> str:
-    return env_str("LEAD_AUTHOR_MODEL", "glm-5.2")
+    return env_str("LEAD_AUTHOR_MODEL", "glm-5.3")
 
 
 def lead_author_effort() -> str:
-    return env_str("LEAD_AUTHOR_EFFORT", "low")
+    return env_str("LEAD_AUTHOR_EFFORT", "medium")
 
 
 def lead_author_timeout() -> int:

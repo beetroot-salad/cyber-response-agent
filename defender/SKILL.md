@@ -377,7 +377,7 @@ read disposition off them.
 
 ### GATHER
 
-Dispatch the gather subagent (Kimi K2.6 by default) for a lead with the `gather` tool:
+Dispatch the gather subagent (GLM 5.3 Flash by default) for a lead with the `gather` tool:
 
 ```
 gather(
@@ -405,7 +405,7 @@ it to the subagent (to confirm relevance, then Read the full SKILL body),
 and runs the nested gather agent. Its returned summary is the only thing
 that enters your context — the raw payloads stay in the queries table.
 
-A cheaper model (Kimi K2.6) is the default because gather's job is mechanical — pick a
+A cheaper model (GLM 5.3 Flash) is the default because gather's job is mechanical — pick a
 template, bind params, run the CLI, summarize. Structural correctness
 is enforced by the system CLIs (e.g. `elastic_adapter.py` rejects JSON
 bodies missing a time-range filter), so the lighter model carries the

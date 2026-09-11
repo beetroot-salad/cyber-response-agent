@@ -14,6 +14,10 @@ PRICING = {
     # `cache_w` equals `in` for every Fireworks row — that is the price, not a placeholder:
     # Fireworks caching is automatic with no separate write price, so cache-populating tokens
     # bill as ordinary input. Only the Anthropic rows above carry a write premium.
+    # `glm-5.2`, `kimi-k2.6` and `deepseek-v4-flash` (0731) were decommissioned serverless on
+    # 2026-09-25 and have no alias any more. Their rows STAY: every archived trace that named
+    # them is still costed on them by the visualizers, and dropping a row turns those runs'
+    # bills into the table's honest $0.
     "glm-5.2":           {"in": 1.4,  "out": 4.4,  "cache_w": 1.40, "cache_r": 0.14},
     "kimi-k2.6":         {"in": 0.95, "out": 4.0,  "cache_w": 0.95, "cache_r": 0.16},
     "kimi-k3":           {"in": 3.0,  "out": 15.0, "cache_w": 3.00, "cache_r": 0.30},

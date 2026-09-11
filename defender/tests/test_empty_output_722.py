@@ -108,7 +108,7 @@ def _reader_stage(tmp_path: Path, text: str, tag: str) -> str:
         return run_stage(
             stage="questioner",
             wiring=StageWiring(
-                prompt_path=_prompt(tmp_path), model="glm-5.2", effort="none",
+                prompt_path=_prompt(tmp_path), model="kimi-k3", effort="none",
                 trace_name=f"questioner-{tag}.trace.jsonl", label=f"questioner:{tag}",
             ),
             ctx=StageContext(

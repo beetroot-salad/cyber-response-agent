@@ -30,7 +30,7 @@ def enforcement_enabled() -> bool:
     return env_bool(BUDGET_ENFORCE_FLAG, False)
 
 DEFAULT_MODEL = "glm-5.3"
-DEFAULT_GATHER_MODEL = "kimi-k2.6"
+DEFAULT_GATHER_MODEL = "glm-5.3-flash"
 DEFAULT_REQUEST_LIMIT = 60
 GATHER_REQUEST_LIMIT = 40
 DEFAULT_TOOL_RETRIES = 10

@@ -15,15 +15,15 @@ FIREWORKS = OpenAICompatProvider(
     id="fireworks",
     base_url="https://api.fireworks.ai/inference/v1",
     api_key_var="FIREWORKS_API_KEY",
+    # `glm-5.2` and `kimi-k2.6` are gone: Fireworks decommissioned both serverless on
+    # 2026-09-25 (5.2 → 5.3; K2.6 → GLM 5.3 Flash for gather, per experiments/gather-flash-port).
+    # A run that still names one fails at `provider_for` with the alias list, not at its
+    # first dispatch with the provider's 404.
     aliases={
-        "glm-5.2": "accounts/fireworks/models/glm-5p2",
-        "glm-5p2": "accounts/fireworks/models/glm-5p2",
         "glm-5.3": "accounts/fireworks/models/glm-5p3",
         "glm-5p3": "accounts/fireworks/models/glm-5p3",
         "glm-5.3-flash": "accounts/fireworks/models/glm-5p3-flash",
         "glm-5p3-flash": "accounts/fireworks/models/glm-5p3-flash",
-        "kimi-k2.6": "accounts/fireworks/models/kimi-k2p6",
-        "kimi-k2p6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k3": "accounts/fireworks/models/kimi-k3",
         # Fireworks spells 4.1 as `v4p1`; the pre-4.1 `deepseek-v4-flash` id is a compatibility
         # route to the same model until 2026-09-25, so it gets no alias of its own.
@@ -33,7 +33,8 @@ FIREWORKS = OpenAICompatProvider(
     main_effort="low",
     gather_effort="none",
     # GLM 5.3 and its Flash variant reason unconditionally; `none` is an API refusal, not a
-    # cheaper request. 5.2 and both Kimis take it.
+    # cheaper request. Kimi K3 and DeepSeek V4.1 Flash take it. Gather's shipped `none` is
+    # therefore a preference the Flash default cannot honour: it runs at `low`, the floor.
     thinking_only=frozenset({
         "accounts/fireworks/models/glm-5p3",
         "accounts/fireworks/models/glm-5p3-flash",

@@ -130,7 +130,7 @@ def _stage(tmp_path: Path, *, wiring: StageWiring | None = None, **over):
         **_check_args(tmp_path),
         repo_root=_repo_root(tmp_path),
         learning_run_dir=_run_dir(tmp_path),
-        model="glm-5.2",
+        model="glm-5.3",
         effort="low",
         request_limit=250,
         timeout=180,
@@ -235,7 +235,7 @@ def test_marker_commit_message_with_trailer_rejected(tmp_path):
             '"commit_message": "Fold obs-1\\n\\nGeneration: 5"}'
         ),
     )
-    trailers = [("Generation", "5"), ("Actor-Model", "glm-5.2")]
+    trailers = [("Generation", "5"), ("Actor-Model", "glm-5.3")]
     with pytest.raises(AuthorError):
         _shared.commit_corpus(
             _repo_root(tmp_path), _corpus(tmp_path), result["commit_message"], trailers=trailers
@@ -405,12 +405,12 @@ def test_key_sourced_before_spawn(tmp_path):
     key fault raises before the spawn, so the engine never runs."""
     events: list[tuple[str, object]] = []
     _stage(
-        tmp_path, model="glm-5.2",
+        tmp_path, model="glm-5.3",
         source_key=lambda model, label=None: events.append(("key", model)),
         run_author=lambda wiring, ctx, **kw: events.append(("run", wiring.model)) or _AUTHOR_RESULT_OK,
     )
     assert [e[0] for e in events] == ["key", "run"]
-    assert events[0][1] == "glm-5.2"
+    assert events[0][1] == "glm-5.3"
 
     ran: list[int] = []
 
@@ -456,7 +456,7 @@ def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path):
     pending dir would interleave into a single file — carries no batch and is refused BEFORE
     the spawn. A raise, not an assert: `python -O` strips asserts."""
     fixed = StageWiring(
-        prompt_path=_prompt(tmp_path), model="glm-5.2", effort="low",
+        prompt_path=_prompt(tmp_path), model="glm-5.3", effort="low",
         trace_name="curator_trace.jsonl", label="curator",
     )
     assert fixed.batch_id is None
@@ -469,7 +469,7 @@ def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path):
     # Positive control: the same call with the real builder runs, and the batch it reports is
     # the one the trace file is keyed on.
     from_builder = StageWiring.for_batch(
-        _prompt(tmp_path), "glm-5.2", "low", batch_id="batch-Z", label="curator",
+        _prompt(tmp_path), "glm-5.3", "low", batch_id="batch-Z", label="curator",
     )
     assert from_builder.batch_id == "batch-Z"
     assert "batch-Z" in from_builder.trace_name
@@ -480,20 +480,20 @@ def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path):
 
 
 def test_model_flip_glm_low_defaults_flow_to_transport(tmp_path):
-    """AUTHOR_MODEL defaults to glm-5.2 and AUTHOR_EFFORT to low. Leaving claude-sonnet-4-6 while
+    """AUTHOR_MODEL defaults to glm-5.3 and AUTHOR_EFFORT to medium. Leaving claude-sonnet-4-6 while
     routing in-process would silently move curator billing from the subscription to the metered
     first-party key. The flipped default is what the in-process transport is asked to build.
 
     The ACTOR and ENV pairs this once spanned went with their directions in #922; the surviving
     findings curator reads the un-suffixed pair."""
-    assert config.author_model() == "glm-5.2"
-    assert config.author_effort() == "low"
+    assert config.author_model() == "glm-5.3"
+    assert config.author_effort() == "medium"
     seen: list[tuple[object, object]] = []
     _stage(
         tmp_path, model=config.author_model(), effort=config.author_effort(),
         run_author=lambda wiring, ctx, **kw: seen.append((wiring.model, wiring.effort)) or _AUTHOR_RESULT_OK,
     )
-    assert seen == [("glm-5.2", "low")]
+    assert seen == [("glm-5.3", "medium")]
 
 
 
@@ -514,7 +514,7 @@ def test_model_override_claude_low_crosses_validation(tmp_path, monkeypatch):
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("glm-5.2", "low")
+    providers.build_for_effort("glm-5.3", "low")
     providers.build_for_effort("claude-sonnet-4-6", "low")
     with pytest.raises(ValueError, match="unsupported Anthropic effort"):
         providers.build_for_effort("claude-sonnet-4-6", "none")
