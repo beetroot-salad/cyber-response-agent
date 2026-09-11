@@ -1430,7 +1430,7 @@ def _author(
     from defender._corpus import iter_lesson_paths
     from defender.learning.branch import questioner as questioner_mod
     from defender.learning.branch.estate.stagers.elastic import source_pattern  # noqa: E501 # lint-shippable: ok — the per-vendor stager owns which key of a call names its corpus; the join surface holds no vendor knowledge and takes this as its `pattern_of`
-    from defender.learning.lead_repository import corpus_samples, joined
+    from defender.learning.lead_repository import corpus_samples, questioner_leads
 
     as_of = branch_point_clock(source, ns.branch_message_id)
     fences = _fence_count(source, ns.branch_message_id,
@@ -1456,7 +1456,7 @@ def _author(
     document = questioner_mod.author_family(
         source_run_dir=source, episode_dir=episode_dir,
         invoke=questioner,
-        leads=_joined_leads(source, joined),
+        leads=_joined_leads(source, questioner_leads),
         alert=_alert_document(source),
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
         # The SAME set `parse_family` below judges the authored overlays against, so the prompt
@@ -1551,11 +1551,12 @@ def _fence_count(source: Path, branch_message_id: int, *,
         store.close()
 
 
-def _joined_leads(source: Path, joined: Any) -> list[dict]:
-    """The joined leads at the branch point, through the ONE read/join surface."""
+def _joined_leads(source: Path, render: Any) -> list[dict]:
+    """The joined leads at the branch point, as the questioner is shown them: `render` is
+    `lead_repository.questioner_leads`, the named projection that owns the section's shape
+    (#1032) — this function adds nothing to it and dumps no object whole."""
     try:
-        return [lead.__dict__ if hasattr(lead, "__dict__") else dict(lead)
-                for lead in joined(source)]
+        return render(source)
     except Exception as unreadable:  # noqa: BLE001 — a missing table is an empty frontier
         print(f"[branch] could not join the source's leads ({unreadable!r}); the questioner is "
               "shown none", file=sys.stderr)

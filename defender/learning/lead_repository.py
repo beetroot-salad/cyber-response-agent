@@ -71,21 +71,21 @@ class QueryRow:
     #: treats any falsy value as "no identity", so the two agree on every value a writer
     #: stores (`append_query_row` always writes the hex digest).
     #:
-    #: `repr=False`, like `_record` below and for the same reason as `system_key`: NOT
-    #: model-facing content. The renders that reach a model by NAME (`actor_view`,
-    #: `render_joined_yaml`, the judge's leads view) enumerate their fields and none names it —
-    #: but the questioner's "joined leads" section (`branch/cli._joined_leads`) stringifies
-    #: whole rows through `json.dumps(default=str)`, i.e. this dataclass's `repr`, so a
-    #: repr-visible column IS a model-facing column there. Kept off the repr, the row prints as
-    #: it did before the column existed.
-    payload_sha256: str = field(default="", repr=False)
+    #: NOT model-facing content, and nothing here has to say so: every render that reaches a
+    #: model (`actor_view`, `render_joined_yaml`, `questioner_leads`, the judge's `lead_chain`)
+    #: enumerates its fields by NAME, so a column is model-facing only where a render names
+    #: it, and none names this one. Until #1032 the questioner's section stringified whole
+    #: rows through this dataclass's `repr`, which made every column model-facing unless
+    #: someone remembered `repr=False` — the flag this field carried. The rule is now the
+    #: renders' own, pinned by `tests/test_1017_row_schema.py`'s key-set census.
+    payload_sha256: str = ""
     #: #871's hash half of an above-guard rejection's identity: `sha256` of a model-authored
     #: system string the writer coarsened to `system=""`, `""` everywhere else. Coerced the way
     #: the guard's own `_trip` coerces the stored column (`as_str`: absent, `None` and
     #: non-string all read as `""`), so a table from before the column replays through this
-    #: surface exactly as it ran. `repr=False` — see `payload_sha256`: the questioner's prompt
-    #: renders rows by `repr`, and a fingerprint is `_trip`'s to read, not a model's.
-    system_key: str = field(default="", repr=False)
+    #: surface exactly as it ran. A fingerprint is `_trip`'s to read, not a model's — see
+    #: `payload_sha256` for why that no longer needs a `repr` flag.
+    system_key: str = ""
     #: The parsed JSON record this row was read from, untouched — see `record()`. Excluded from
     #: equality and repr because it is the SOURCE of the typed fields, not a fifteenth column.
     _record: dict | None = field(default=None, repr=False, compare=False)
@@ -585,6 +585,56 @@ def refuse_non_artifacts(refused: list[Path]):
 
 def render_actor_view_yaml(run_dir: Path) -> str:
     return yaml.safe_dump(actor_view(run_dir), sort_keys=False)
+
+
+def questioner_leads(run_dir: Path) -> list[dict]:
+    """The questioner's "joined leads" section (#1032): every lead `joined()` returns, in its
+    order, as dicts of NAMED fields — never a row object, never its `repr`.
+
+    @owns the questioner leads section shape. Per lead: `lead_id`, `goal`, `what_to_summarize`,
+    `provenance`, `queries`. Per query: `seq`, `system`, `verb`, `query_id`, `params`,
+    `exit_code`, `error_class`, `payload_status`, `payload_digest`. That is the whole census of
+    what the questioner is shown of a row; a column added to `QueryRow` reaches it only by
+    being added HERE, and `tests/test_1017_row_schema.py`'s key-set check says so.
+
+    `.queries`, never `.rows`: the sentinel rows are the defender's refusals and shims, not
+    queries it ran, and shown as queries they say the run asked something it never asked —
+    the same decision `actor_view` records, and a `∅.bash-shim` row carries model-authored
+    shell text besides. A lead whose only rows are sentinels is still a lead the run opened,
+    so it is kept with `queries: []`. Orphans (rows with no lead file) arrive as `joined()`
+    hands them: `goal` and `provenance` `None`, `what_to_summarize` empty.
+
+    What is NOT here, on purpose: `raw_command` and `raw_ref` (a shell string and the host's
+    absolute payload path — no other model-facing render shows either), `payload_sha256` and
+    `system_key` (identities for the guards, not for a model), `orphan` (a lead with no file
+    already reads as `goal: None`), `sentinels`.
+
+    Reads through `joined()` and tolerates exactly what it tolerates — a missing run dir, an
+    unreadable table — and no more: a fault the surface raises is the launcher's to report
+    (`branch/cli._joined_leads`), not this render's to swallow."""
+    return [
+        {
+            "lead_id": jl.lead_id,
+            "goal": jl.goal,
+            "what_to_summarize": jl.what_to_summarize,
+            "provenance": jl.provenance,
+            "queries": [
+                {
+                    "seq": q.seq,
+                    "system": q.system,
+                    "verb": q.verb,
+                    "query_id": q.query_id,
+                    "params": q.params,
+                    "exit_code": q.exit_code,
+                    "error_class": q.error_class,
+                    "payload_status": q.payload_status,
+                    "payload_digest": q.payload_digest,
+                }
+                for q in jl.queries
+            ],
+        }
+        for jl in joined(Path(run_dir))
+    ]
 
 
 def render_joined_yaml(run_dir: Path) -> str:
