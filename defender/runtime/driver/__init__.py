@@ -34,6 +34,7 @@ from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
 from defender._io import write_guarded
+from defender._paths import adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
 
 from .. import branch
@@ -349,7 +350,7 @@ def _dispatch_catalogs(defender_dir: Path) -> tuple[str | None, str | None]:
     same decoupling `build_agent` states at the dispatch tool's registration)."""
     from .. import lead_zero as lead_zero_mod
 
-    skills, adapters = defender_dir / "skills", defender_dir / "scripts" / "adapters"
+    skills, adapters = defender_dir / "skills", adapters_under(defender_dir)
     return (
         descriptor_catalog(skills, adapters, GATHER_DEF.verb_grant),
         descriptor_catalog(skills, adapters, lead_zero_mod.CORRELATION_GRANT),
@@ -382,7 +383,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # ceiling's BASE), resolved once at the entry point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    verbs = verbs if verbs is not None else ModuleVerbRegistry(defender_dir / "scripts" / "adapters", GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters_under(defender_dir), GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
     catalog, correlation_catalog = _dispatch_catalogs(defender_dir)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()

@@ -554,14 +554,13 @@ class ModuleVerbRegistry(VerbRegistry):
         # system's rejection gets coarsened to a ghost's.
         self._adapters: dict[str, Path] = self._read_roster()
         self._systems: tuple[str, ...] = tuple(sorted(self._adapters))
-        # One cold read+parse per SYSTEM, not per grant entry: the shipped gather grant names
-        # 30 entries across 8 systems. Kept as the cold cache rather than thrown away: since
-        # #995 `decide` also cold-reads on the refusal path for a system the grant does not
-        # reach at all, which a model looping on one ungranted name would otherwise pay a
-        # fresh read+parse for on every call.
+        # The cold cache `_cold_verb_names` fills — one read+parse per SYSTEM, not per grant
+        # entry (the shipped gather grant names 30 entries across 8 systems), which the load
+        # check below is what first fills. Kept rather than thrown away after it: since #995
+        # `decide` also cold-reads on the refusal path for a system the grant does not reach
+        # at all, which a model looping on one ungranted name would otherwise pay a fresh
+        # read+parse for on every call.
         self._cold: dict[str, frozenset[str]] = {}
-        for system, _, _ in grant.entries:
-            self._cold_verb_names(system)
         # THE registry that resolves a real adapters tree, which is the deployment shape the
         # disposition table governs — every grant reaching this constructor that a model ever
         # calls through is one the table projects — so a refusal from here may name the table
@@ -609,9 +608,9 @@ class ModuleVerbRegistry(VerbRegistry):
         resolving an entry inside it needs its SEARCH bit, and a directory with the first but
         not the second lists fine and then refuses every `_adapter_path` below — as a raise on
         3.11/3.12 and, on 3.13+ (where `Path.is_file` swallows `EACCES`), as a silent empty
-        roster. The `lstat` needs exactly the second bit and raises on every version, so the
-        one wrap here is the whole "cannot read" answer. `follow_symlinks=False` so a
-        dangling symlink is not that fault: `_adapter_path` drops it as it always has.
+        roster. The `lstat` needs exactly the second bit and raises on every version.
+        `follow_symlinks=False` so a dangling symlink is not that fault: `_adapter_path`
+        drops it as it always has.
 
         `_adapter_path`, not `is_system_name` alone, as the filter: shape is only half of what
         makes a name dispatchable. `_system_of` maps `_`->`-` and the inverse is NOT onto — a
@@ -619,22 +618,30 @@ class ModuleVerbRegistry(VerbRegistry):
         `change-mgmt`, which `_adapter_path` looks for at `change_mgmt_adapter.py` and does not
         find; so does a DIRECTORY named `foo_adapter.py`, which the listing yields and
         `is_file()` refuses. Keyed by name for the same reason: two filenames can derive one
-        system, and a roster naming it twice is not a set."""
+        system, and a roster naming it twice is not a set.
+
+        The filter sits INSIDE the one wrap, because it touches the disk too (`resolve`,
+        `is_file`) and what it can raise there is the same "cannot read" fault under another
+        name: an adapter symlinked into a subdirectory this process cannot search is
+        `PermissionError` out of `is_file` on 3.11/3.12, and a symlink loop named like an
+        adapter is what `Path.resolve` spells as `RuntimeError` on those versions (3.13+
+        drops both silently). Outside the wrap each escaped the constructor untyped — past
+        `VerbResolver`'s one-type wrap and the lead author's dead-letter class alike."""
         try:
             with os.scandir(self.adapters_dir) as it:
                 entries = [e for e in it if e.name.endswith(ADAPTER_SUFFIX)]
             for entry in entries:
                 entry.stat(follow_symlinks=False)
-        except OSError as e:
+            roster: dict[str, Path] = {}
+            for name in {_system_of(Path(entry.name)) for entry in entries}:
+                path = _adapter_path(self.adapters_dir, name)
+                if path is not None:
+                    roster[name] = path
+        except (OSError, RuntimeError) as e:
             raise RegistryError(
                 f"adapters directory {self.adapters_dir} cannot be read "
-                f"({e.strerror or e})"
+                f"({getattr(e, 'strerror', None) or e})"
             ) from e
-        roster: dict[str, Path] = {}
-        for name in {_system_of(Path(entry.name)) for entry in entries}:
-            path = _adapter_path(self.adapters_dir, name)
-            if path is not None:
-                roster[name] = path
         return roster
 
     def _cold_verb_names(self, system: str) -> frozenset[str]:

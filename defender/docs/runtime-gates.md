@@ -137,10 +137,11 @@ hooks). The gates:
   `_run_gather` could only test for the reuse code and an empty `goal` — which
   the tool schema admits — ran a gather session under an id with no leads row,
   where the reuse gate (that row's own exclusive create) could never see it
-  again (#855 F-12). The same module also imports
-  `inject_system_skill_description.descriptor_catalog` (the
-  progressive-disclosure descriptor catalog) and `_untrusted.wrap` (salted
-  untrusted-data tagging of adapter/alert reads + the gather return); its parent
+  again (#855 F-12). The same module also imports `_untrusted.wrap` (salted
+  untrusted-data tagging of adapter/alert reads + the gather return); the
+  progressive-disclosure descriptor catalog it renders
+  (`inject_system_skill_description.descriptor_catalog`) is read once by
+  `run_investigation` at run start and handed down as `catalog=` (#1031); its parent
   `runtime/tools.py` imports `record_lesson_load.lesson_name` (lesson→outcome
   traceability into `lessons_loaded.jsonl`). These anchor on the run dir from
   `AgentDeps`.

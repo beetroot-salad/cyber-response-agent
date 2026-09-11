@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -260,6 +261,39 @@ def test_a_listable_but_unsearchable_directory_fails_at_construction(tmp_path):
     finally:
         adapters.chmod(0o700)
     assert ModuleVerbRegistry(adapters, GRANT).systems() == ("elastic",)
+
+
+def test_a_symlink_loop_named_like_an_adapter_is_the_registrys_own_error(tmp_path):
+    """O2/D2, the arm the roster FILTER raises rather than the listing — an entry named like
+    an adapter that is a symlink to itself. `os.scandir` lists it and `lstat` succeeds on it
+    (the link exists), so the two cannot-list checks pass; `_adapter_path`'s `Path.resolve`
+    then spells ELOOP as `RuntimeError` on 3.11/3.12, which is not an `OSError` and was
+    raised OUTSIDE the constructor's wrap — untyped, past `VerbResolver`'s `RegistryError` ->
+    `ScaffoldRuleError` translation and the lead author's `LeadAuthorError` alike. The
+    construction must end in `RegistryError` naming the directory, and through the resolver
+    in `ScaffoldRuleError`; the positive control is the same tree with the loop removed. On
+    3.13+ `resolve` no longer raises for a loop and `is_file` swallows it, so the entry is
+    dropped and the roster is the control's — never an untyped raise on any version.
+
+    Observed failing by (before the fix): `RuntimeError("Symlink loop from ...")` out of
+    `ModuleVerbRegistry(...)` and out of `VerbResolver(...)`."""
+    adapters = _adapters(tmp_path / "defender" / "scripts", "elastic")
+    os.symlink("loop_adapter.py", adapters / "loop_adapter.py")
+    loops_raise = sys.version_info < (3, 13)
+
+    if loops_raise:
+        with pytest.raises(verbs.RegistryError) as exc:
+            ModuleVerbRegistry(adapters, DENY_ALL)
+        assert str(adapters) in str(exc.value), \
+            f"the registry error does not name the directory: {exc.value}"
+        with pytest.raises(_scaffold_rules.ScaffoldRuleError):
+            _scaffold_rules.VerbResolver(tmp_path / "defender")
+    else:
+        assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == ("elastic",)
+        assert _scaffold_rules.VerbResolver(tmp_path / "defender").is_system("elastic")
+
+    (adapters / "loop_adapter.py").unlink()
+    assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == ("elastic",)
 
 
 def test_the_registry_error_names_the_directory_once(tmp_path):
