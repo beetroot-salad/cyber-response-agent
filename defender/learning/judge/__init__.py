@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
-from dataclasses import field, replace
+from dataclasses import field
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -790,13 +790,16 @@ def _pass_alert_id(episode_dir: Path, labels: list[str]) -> Any:
 def read_grade(episode_dir: Path) -> EpisodeGrade | None:
     """The episode's recorded grade, read off `judge.yaml` — or `None` when there is none.
 
-    THE ONE READER (#1025 O8): the same screened read and the same tolerant conversion
+    THE ONE READER (#1025 O8): the same screened read and the same strict conversion
     `grade_episode` itself uses when it finds an existing record, exposed so the episode page
-    reads the record through this package rather than re-parsing the YAML. A record that is
-    not one — a planted link at the name, a document that is not a mapping, a record that
-    fails the schema (`EpisodeGrade`, strictly) — is `JudgeRefused`, exactly as it is for the
-    pass. A `not_graded` stamp reads back as a grade carrying that stamp; deciding what to do
-    about it is the caller's.
+    reads the record through this package rather than re-parsing the YAML. Tolerant only of
+    ABSENCE — a field the file does not carry takes the schema's default (a pre-#1007 record
+    reads with `family_outcome: None`), and a key the schema does not name is ignored. A record
+    that is not one — a planted link at the name, a document that is not a mapping, a record
+    that fails the schema (`EpisodeGrade`, strictly: a present field of the wrong type is
+    refused, never defaulted) — is `JudgeRefused`, exactly as it is for the pass. A
+    `not_graded` stamp reads back as a grade carrying that stamp; deciding what to do about it
+    is the caller's.
     """
     # COERCED HERE, as `grade_episode` coerces its own argument: the record's `episode_dir` is
     # typed `Path`, and a `str` caller (a page reading the path off YAML) otherwise got a record
@@ -815,24 +818,40 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
     # the pass never wrote, and the same answer the manifest gets — `JudgeRefused`, the one
     # class `grade_episode`'s handler converts at. Refused, not re-graded: a planted record
     # must not buy three model calls per launch, and the fix is a human deleting the file.
+    # `TypeError` BESIDE `ValidationError`: the keys are the file's, and a YAML mapping may key
+    # on `1:` / `true:` / `null:` — splatted as keywords those raise `TypeError: keywords must
+    # be strings` out of the constructor, before pydantic sees a single field, and `TypeError`
+    # is not in `grade_episode`'s conversion set — the bare traceback this comment promises
+    # never leaves.
     try:
         record = EpisodeGrade(
             **{k: v for k, v in doc.items() if k not in _DERIVED}, episode_dir=episode_dir)
-    except ValidationError as bad:
+    except (ValidationError, TypeError) as bad:
         raise JudgeRefused(
             f"{_judge_yaml_path(episode_dir)} is not a family grade record: {bad}") from bad
     graded = frozenset(r["world"] for r in record.worlds if family_mod.is_gradable_row(r))
     measuring = frozenset(
         r["world"] for r in record.worlds
         if r["world"] in graded and r.get("withheld_reason") is None)
-    return replace(record, graded_worlds=graded, withheld_worlds=graded - measuring,
-                   measuring_worlds=measuring)
+    # ASSIGNED, not `dataclasses.replace`d: `replace` re-runs the constructor — every field
+    # through the strict validator a second time, `worlds` and each row copied again — to set
+    # three sets derived off rows the constructor has just admitted. No `validate_assignment`
+    # is configured, so the three are plain attribute writes onto the validated record.
+    record.graded_worlds = graded
+    record.withheld_worlds = graded - measuring
+    record.measuring_worlds = measuring
+    return record
+
+
+#: The record's serializer, built ONCE: `TypeAdapter` construction is a schema build, and the
+#: writer is called once per pass — there is no reason to rebuild it per write.
+_GRADE_ADAPTER: TypeAdapter[EpisodeGrade] = TypeAdapter(EpisodeGrade)
 
 
 def _write_judge_yaml(episode_dir: Path, record: EpisodeGrade) -> None:
     import yaml
 
-    doc = TypeAdapter(EpisodeGrade).dump_python(record, mode="json", exclude=set(_DERIVED))
+    doc = _GRADE_ADAPTER.dump_python(record, mode="json", exclude=set(_DERIVED))
     # The stamp is a KEY THAT IS PRESENT OR ABSENT, never null: `not_graded is None` is what
     # `_grade_episode` reads to tell a grade from a stamp, and the file says it the same way.
     if doc["not_graded"] is None:

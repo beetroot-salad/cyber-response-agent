@@ -896,6 +896,9 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     pytest.param({"not_graded": "yes"}, id="non-mapping-stamp"),
     pytest.param({"not_graded": {"outcome": "incomplete", "reason": "x"},
                   "episode_outcome": "not-graded", "world_findings": 5}, id="damaged-stamp"),
+    # A YAML mapping may key on `1:` — splatted as keywords that is `TypeError: keywords must
+    # be strings` out of the constructor, a class no handler on the path converts.
+    pytest.param({1: "planted"}, id="non-string-key"),
 ])
 def test_a_record_of_the_wrong_shape_is_refused_not_defaulted_and_not_re_graded(
         tmp_path, damage):
@@ -909,9 +912,10 @@ def test_a_record_of_the_wrong_shape_is_refused_not_defaulted_and_not_re_graded(
 
     Observably true: for each damage — a scalar where a list or a mapping belongs, `null`
     where a word belongs, `"3"` where a count belongs (no coercion), a world row naming no
-    world, a `not_graded` stamp that is empty, not a mapping, or beside a damaged field — the
-    positive control (the same record without the damage) reads, the damaged record raises
-    `JudgeRefused` from both entry points, and the file on disk is left exactly as planted.
+    world, a `not_graded` stamp that is empty, not a mapping, or beside a damaged field, a
+    top-level key that is not a string — the positive control (the same record without the
+    damage) reads, the damaged record raises `JudgeRefused` from both entry points, and the
+    file on disk is left exactly as planted.
     """
     read_grade, refused = J.sym("learning.judge", "read_grade"), _refused()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
@@ -971,6 +975,34 @@ def test_the_draws_directory_has_one_name_and_one_public_reader(tmp_path):
     assert grade.draws["completed"] > 0, "positive control: the pass completed no draw"
     assert sorted(draws) == list(range(grade.draws["completed"])), (
         f"the reader did not find the draws the pass wrote: {sorted(draws)}")
+
+
+def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):
+    """The one reader of the draw files reads each leaf through the screened read, like every
+    other reader of the episode tree: a symlink planted at `worlds/<X>/judge/<n>.yaml` — a
+    tree a sibling's box can write — is SKIPPED, never followed, so the bare re-enqueue path
+    cannot queue another file's findings as this episode's own.
+
+    Observably true: a directory holding a regular `0.yaml` and a `1.yaml` that is a link to
+    a document outside the world answers `{0: ...}` — the link's target's findings are absent;
+    positive control — the same bytes as a regular `1.yaml` are read.
+    """
+    enqueue = J.mod("learning.judge.enqueue")
+    draw_dir = tmp_path / "judge"
+    draw_dir.mkdir()
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("findings: [{bucket: planted}]\n", encoding="utf-8")
+    (draw_dir / "0.yaml").write_text("findings: []\n", encoding="utf-8")
+    (draw_dir / "1.yaml").symlink_to(outside)
+
+    assert enqueue.draws_on_disk(draw_dir) == {0: {"findings": []}}, (
+        "a link planted at a draw's name was followed: its target's findings were read back "
+        "as this episode's draw")
+
+    (draw_dir / "1.yaml").unlink()
+    (draw_dir / "1.yaml").write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
+    assert sorted(enqueue.draws_on_disk(draw_dir)) == [0, 1], (
+        "positive control: the same bytes as a regular file were not read")
 
 
 # ---------------------------------------------------------------------------------------

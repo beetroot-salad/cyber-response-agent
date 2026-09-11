@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from defender._io import guarded_mkdir, read_jsonl_rows_report, write_guarded
+from defender._io import guarded_mkdir, read_guarded, read_jsonl_rows_report, write_guarded
 from defender._run_paths import artifact_dir, artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
@@ -469,12 +469,22 @@ def draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
         # finding or gives two different ones the same id.
         if path.stem != str(int(path.stem)):
             continue
+        # THE SCREENED READ, like every other reader of this tree (`family.json_mapping`,
+        # `family.screened_yaml_mapping`): the directory was judged by `lstat` above, but the
+        # LEAF was read through a plain `read_text`, which follows a link — a symlink planted
+        # at `worlds/<X>/judge/3.yaml` had the target's findings queued as this episode's own
+        # on the bare re-enqueue path. `read_guarded` asks the plainness question of the open
+        # descriptor; a link, a hard link, an unreadable or undecodable entry is SKIPPED, the
+        # same answer a torn document gets below — the draw is not there to read.
+        text, _refusal = read_guarded(path)
+        if text is None:
+            continue
         try:
             # `_yaml.safe_load` for the same reason every other parse in this package uses it:
             # a `RecursionError` out of a deeply nested draw file is neither a `ValueError` nor
             # a `YAMLError`, so it escaped this handler and every one above it.
-            doc = _yaml_safe_load(path.read_text(encoding="utf-8")) or {}
-        except (OSError, ValueError, yaml.YAMLError):
+            doc = _yaml_safe_load(text) or {}
+        except (ValueError, yaml.YAMLError):
             continue
         if isinstance(doc, dict):
             out[int(path.stem)] = doc
