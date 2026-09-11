@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether soc-playground (container db-1 / e5b0213bd690) is a documented host in the CMDB and what it is for": {
+   "status": "exact",
+   "note": "db-1 record fields (role db, prod, team.data, ubuntu 22.04, postgres 5432, change window, empty trust_edges_out) all match return 3; no 'soc-playground' entry among the 11 listed hosts in return 4"
+  },
+  "whether 147.235.199.7 appears in CMDB as a documented or approved source (bastion, provisioning node, admin workstation) with access to this environment": {
+   "status": "exact",
+   "note": "HTTP 404 matches return 2; total 11 hosts matches return 4; the five hosts with db-1 in trust_edges_out (jump-box-1, config-mgmt-1, scanner-1, web-1, web-2) are exactly the ones in the inventory; no IP field in any record"
+  }
+ },
+ "unsupported": []
+}

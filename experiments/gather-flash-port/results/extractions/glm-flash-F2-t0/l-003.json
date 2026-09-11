@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "how many authorized_keys-modification Falco events exist on this host over the prior 30 days, and whether any predate this event": {
+   "status": "exact",
+   "note": "94 = 15+13+13+12+12+12+9+8 across 8 containers; earliest 06-30T09:00:28Z; 1df4bcd65ee4 = 12 events 06-30T11:05:29 \u2192 07-28T16:00:26, all predating. The stated series 'last' of 16:12:37Z is the triggering event from returns 4/5, not the 30d query's max (16:00:26Z), but the value is observed and the 12-event range is stated correctly."
+  },
+  "what other Falco/security events occurred on this host or container 1df4bcd65ee4 in the ~30 minutes around 16:12:36Z (process, network, file events)": {
+   "status": "wrong",
+   "note": "Per-rule counts (48/40/20/14/14) and procs/parents match return 4, but the total '124 events across 5 rule types' is off: those five rows sum to 136 (138 including the 2 authorized_keys rows)."
+  },
+  "any evidence of an interactive session, docker exec, or process ancestry behind the bash write": {
+   "status": "exact",
+   "note": "parent <NA>, user root, bash -lc cmdline all in return 5; sshd redirect / nc\u2190runuser / curl\u2190bash from return 4; 'no docker-exec observed' is an honest absence."
+  }
+ },
+ "unsupported": [
+  "124 events on container 1df4bcd65ee4 in 15:42\u201316:43Z (no return yields 124; the rows sum to 136 excluding the authorized_keys rule)"
+ ]
+}

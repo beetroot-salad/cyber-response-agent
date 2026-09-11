@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "slight",
+ "reasons": "X's rows carry more that could change the verdict \u2014 the root password change 53s before login, the 30-day baseline showing zero sudo, the identity registry naming dba.ivy as the only db-1 sudoer, and the container-inspect tying the burst to the db-1 container \u2014 and all three authz contracts are refused with quoted registry results, while its failed host-state lead is flagged honestly as the ceiling rather than hidden. Y is leaner and its boot-sequence context (seed scripts, psql readiness checks) is a genuinely discriminating exculpatory find X lacks, but Y's 'nothing-to-try' ceiling is undercut by never attempting host-state or container identity, its closing archetype is invented outside its own hypothesis set, and its tacit-knowledge 'indeterminate' rests on 6 lookups versus X's 9. Both scope the claim to the same root session and name real open questions, so the edge goes to the run whose record a reader can audit more fully from the rows."
+}

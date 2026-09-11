@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "which identities (users or service accounts) are documented for access to or sudo on soc-playground": {
+   "status": "wrong",
+   "note": "Core answer (none listed for soc-playground) is supported, but the registry breakdown says 5 service accounts; the list-users payload has 6 (svc.backups, svc.reports, svc.monitoring, svc.config-mgmt, svc.deploy, svc.security) \u2014 the summary itself names all six while calling them 'All 5'."
+  },
+  "whether any such identity is an oncall/SRE role with elevated privileges": {
+   "status": "exact",
+   "note": "sre-ops sudo:true, shell /bin/bash, members sre.alice/sre.ben/sre.chen, and dba sudo_hosts [db-1] all match list-roles and list-users."
+  },
+  "if the identity registry has no entry for this host, that fact": {
+   "status": "exact",
+   "note": "soc-playground appears in no role's hosts or sudo_hosts in the list-roles payload; the 8-host sre-ops list matches."
+  }
+ },
+ "unsupported": []
+}

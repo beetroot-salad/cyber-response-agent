@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "slight",
+ "reasons": "Y's 'malicious' verdict is not earned by its own rows: the appended key was never observed in use, the only source IP is a pre-existing baseline actor (contradicting h-002's 'user/novel' parent), the same alert shape recurs 97x/30d on the host, and an empty registry and zero tickets were graded as 'unauthorized' rather than silence \u2014 escalation was forced by contract, but that is not evidence of malice, and Y never reconciles its own l-007 finding of sshd-session ancestry with the 'parent=NA atypical' argument it leans on. X's 'inconclusive' is what its evidence actually supports, its leads (change-mgmt, registry, CMDB, TI, identity, ticket, host-state) each targeted an anchor that could have flipped the verdict, and its open questions (exercise vs real persistence, unrecoverable launch mechanism) are the genuinely open ones. X loses margin because l-006/l-007/l-008 results and the '1923 nc/curl fires' baseline appear only in prose with no observation rows, so a reader cannot fully audit the verdict from the record alone."
+}

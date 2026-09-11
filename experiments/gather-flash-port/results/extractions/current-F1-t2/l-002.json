@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether an approved change or change window active around 2026-08-30 09:54-10:00Z covers soc-playground": {
+   "status": "exact",
+   "note": "Summary says none found; active-changes returned [] at both 09:54:00Z and 09:59:51.646Z, list-changes (approved, active_at) returned total 0."
+  },
+  "if so, the change record id, requester/approver, and what work it authorizes": {
+   "status": "exact",
+   "note": "Summary marks not applicable since no records exist; consistent with empty payloads."
+  },
+  "if not, that no change record matching this host and window exists": {
+   "status": "exact",
+   "note": "Summary states zero records at the queried timestamps and zero on the unrestricted list-changes for the host (total 0); all supported by returns 3-8."
+  }
+ },
+ "unsupported": []
+}

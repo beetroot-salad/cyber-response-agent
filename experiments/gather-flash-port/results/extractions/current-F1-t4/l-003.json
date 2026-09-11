@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "interactive logins (SSH/console) on soc-playground in the hours around the burst: source address, user, auth outcome, and timestamps \u2014 including sshd auth-log entry events, not just enrollment records": {
+   "status": "exact",
+   "note": "1 accepted publickey root from 147.235.199.7 at 09:54:41.339Z, 0 failed, 4 opened/2 closed sessions with the six session lines and timestamps all match returns 14/15/16/20."
+  },
+  "which session/process was open and acting when the sudo events fired, and whether the sudo burst was preceded by a shell/session that itself needs explaining": {
+   "status": "wrong",
+   "note": "The three sudo commands, container id, user=root, parent/proc.pname=<NA> and alert fire time are all supported. But the summary asserts the SSH session (09:54:41.341Z) opened '10 seconds before the first sudo event' and is 'the only preceding interactive session', while the Falco event times it itself quotes (09:53:56.983Z\u201309:53:57.310Z) put the sudo burst ~44s BEFORE the SSH login; the 10s gap only holds against the ingest @timestamp (09:54:51.724Z). The ordering conclusion contradicts the payload."
+  },
+  "any prior off-hours or unusual login history on this host indicating baseline": {
+   "status": "wrong",
+   "note": "Zero events 08-25\u219208-30, the 2 accepted on 08-22 from 147.235.199.7, and the 91-accepted lifetime row all match. But 'only publickey-authenticated root logins' is contradicted by an all-time row of 3 accepted with null method/ip/user, and the 21 failed root attempts (12 null-method + 8 password + 1 null) from 79.177.131.209 on 2026-06-14 are omitted despite being the only unusual history in the payload."
+  }
+ },
+ "unsupported": [
+  "exit 1 on `authorized-keys` for soc-playground \u2014 no authorized-keys query was ever run; only proc-tree and passwd returned the inventory error"
+ ]
+}

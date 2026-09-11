@@ -45,18 +45,18 @@ def test_the_investigator_s_env_var_does_not_reach_the_review(monkeypatch):
     default on every run that set one — including every hermetic replay, which sets it
     precisely to keep its two fakes distinguishable, so the un-pinning would be invisible
     exactly where a run is cheapest to get wrong."""
-    monkeypatch.setenv("DEFENDER_MODEL", "glm-5.2")
+    monkeypatch.setenv("DEFENDER_MODEL", "glm-5.3")
     assert resolve_review_model() == DEFAULT_REVIEW_MODEL
 
 
 def test_the_review_s_own_env_var_moves_it(monkeypatch):
-    monkeypatch.setenv(REVIEW_MODEL_ENV, "kimi-k2.6")
-    assert resolve_review_model() == "kimi-k2.6"
+    monkeypatch.setenv(REVIEW_MODEL_ENV, "kimi-k3")
+    assert resolve_review_model() == "kimi-k3"
 
 
 def test_an_explicit_override_wins_over_both(monkeypatch):
-    monkeypatch.setenv(REVIEW_MODEL_ENV, "kimi-k2.6")
-    monkeypatch.setenv("DEFENDER_MODEL", "glm-5.2")
+    monkeypatch.setenv(REVIEW_MODEL_ENV, "kimi-k3")
+    monkeypatch.setenv("DEFENDER_MODEL", "glm-5.3")
     assert resolve_review_model("claude-sonnet-5") == "claude-sonnet-5"
 
 

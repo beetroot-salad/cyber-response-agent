@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any change record, CR, or incident ticket active on soc-playground covering the burst window": {
+   "status": "exact",
+   "note": "Host-scoped list-changes returned total 0 and active-changes at 09:56Z returned []; summary reports none, matching both payloads."
+  },
+  "who the change was assigned to and what it authorized": {
+   "status": "exact",
+   "note": "Honest 'no record to assign'; the sre.alice / change-board names cited as the pattern on other hosts do appear in the all-hosts payload."
+  },
+  "confirmation that no window or record exists if none is found": {
+   "status": "exact",
+   "note": "Confirmed via two empty host-scoped returns plus a populated all-hosts control (14 rows, count verified; none list soc-playground; none fall near 2026-08-30)."
+  }
+ },
+ "unsupported": []
+}

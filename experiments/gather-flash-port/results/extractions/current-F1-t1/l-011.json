@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "any authorized_keys write, cron modification, or user/group creation event on soc-playground in the window": {
+   "status": "wrong",
+   "note": "Falco payload rows sum to 9 events (3+1+1+1+1+1+1), summary says 8; the per-process breakdown it gives (zeek 3, runcmd 1, curl 1, elastic-agent 3, python3 1) itself sums to 9. Rest (no authorized_keys/useradd/groupadd hits, cron session 2 open/2 close 09:55:01\u201310:05:01Z, rule window 09:54:51\u201309:56:19Z) matches."
+  },
+  "when the root ssh session opened at 09:54:41Z closed, or evidence it remained open at 11:00Z": {
+   "status": "exact",
+   "note": "Open 09:54:41.341Z (return 14), zero sshd closes through 12:00Z (returns 15/16), single close at 12:48:31.133Z (return 17); 1 sshd open in window matches 'no second session'; ~2h54m duration is arithmetically correct."
+  }
+ },
+ "unsupported": [
+  "Falco 'Write below root'/'Write below etc' alerts: 8 events total (payload rows sum to 9)"
+ ]
+}

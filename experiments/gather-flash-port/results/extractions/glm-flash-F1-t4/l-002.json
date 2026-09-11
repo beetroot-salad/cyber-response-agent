@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any approved change record names soc-playground with a window covering 2026-08-30 09:54-10:00Z": {
+   "status": "exact",
+   "note": "active-changes returned [], host-scoped list-changes returned total 0, and the estate-wide 11 approved CRs all target web-1/web-2 or db-1 with windows from 2026-04-28 to 2026-09-12 \u2014 all verifiable from return 4"
+  },
+  "who the requesting/oncall identity on any such record is": {
+   "status": "exact",
+   "note": "honest 'not applicable, no matching record' matches the empty host-scoped payloads"
+  }
+ },
+ "unsupported": []
+}

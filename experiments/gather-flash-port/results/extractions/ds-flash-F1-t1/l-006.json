@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether soc-playground exists in the CMDB and what role/owner/zone it carries": {
+   "status": "exact",
+   "note": "404 'host soc-playground not found' (exit 1) matches return 6; list-hosts total 11 with no soc-playground matches return 7; all 11 role/criticality/owner triples verified against rows; absence of zone field verified from schema"
+  },
+  "whether 147.235.199.7 is a documented host or assigned address in the estate": {
+   "status": "exact",
+   "note": "404 'host 147.235.199.7 not found' (exit 1) matches return 8; owner filter total 0 matches return 9; claim that no IP/address field exists in host records verified from the 11 rows"
+  }
+ },
+ "unsupported": []
+}

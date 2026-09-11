@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "X gathered more and sharper leads, but its closing claim outruns its own rows: the matched archetype is 'post-shell sudo burst' while X's timeline puts the sudo burst before sshd even started, the 'post-login' metadata contact and 42MB download are timestamped before the 09:54:41 login, and 'exceeds provisioning' was asserted without ever baselining the bring-up sequence beyond a 7-day window (threat-intel and ticket leads also have no recorded rows). Y's verdict is proportionate to what it quoted \u2014 30-day recurrence of the identical sudo psql and curl-to-internal-Kibana-Fleet commands, empty registry, no CMDB/change cover \u2014 and it honestly names its dead-ended leads and the genuinely open governance question, though it never resolved the root actor and its 'parent is not an interactive shell' claim is unsupported when the row says parent=NA. On 'earned' rather than 'thorough', Y's inconclusive-escalate is carried by its record while X's malicious-high is not."
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any open or recent tickets/incidents referencing soc-playground around 2026-08-30": {
+   "status": "exact",
+   "note": "Both list-tickets calls returned {\"total\": 0, \"tickets\": []}; summary reports total 0 / none observed, matching the payloads."
+  },
+  "whether an oncall responder is engaged on this host in that window": {
+   "status": "exact",
+   "note": "Honest 'not observed' backed by empty ticket payloads; no responder value asserted."
+  }
+ },
+ "unsupported": []
+}

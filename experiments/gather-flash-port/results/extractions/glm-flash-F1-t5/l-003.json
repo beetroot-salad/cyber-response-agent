@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "any change tickets or incident records active on 2026-08-30 mentioning soc-playground or covering its maintenance": {
+   "status": "exact",
+   "note": "active-changes returned [], host-filtered list-changes returned total 0, and none of the 14 CRs in the unfiltered list name soc-playground (hosts are only web-1/web-2/db-1/jump-box-1). Honest 'none found'."
+  },
+  "the scope and time window of any such record": {
+   "status": "exact",
+   "note": "No such record exists in the payloads; summary correctly reports none rather than inventing a window."
+  }
+ },
+ "unsupported": [
+  "'the latest window on any host is the standing web-patch on 2026-09-08' \u2014 contradicted by the payload: CHG-DB-BACKUP-20260912T0200Z (db-1) has a window ending 2026-09-12T03:00Z, later than 2026-09-08"
+ ]
+}

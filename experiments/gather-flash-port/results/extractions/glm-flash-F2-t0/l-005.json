@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "whether any registry entry covers authorized_keys modification or ssh-persistence exercise/simulation activity on soc-playground or its containers, including whether the recurring 'attacker@elsewhere' key-add pattern is documented as an exercise": {
+   "status": "exact",
+   "note": "All four lookups returned matched: null; summary reports no hit for actor/host across pattern variants and the container-shaped host, which matches the payloads"
+  },
+  "if a hit exists: its entry id, scope, and validity window": {
+   "status": "exact",
+   "note": "No hit exists; summary correctly says id/scope/window not observed"
+  }
+ },
+ "unsupported": [
+  "All five calls: exit 0, matched: null \u2014 only four query calls were made (returns 2, 3, 8, 9); no fifth lookup appears in the tool returns"
+ ]
+}

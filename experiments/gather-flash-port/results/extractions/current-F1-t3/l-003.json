@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "soc-playground's CMDB record: role, environment, owner team, expected sudo users if listed": {
+   "status": "exact",
+   "note": "get-host 404 and absence from the 11-host list-hosts result are both in the payloads; host names enumerated match exactly; honest 'no record / none listed'"
+  },
+  "whether soc-playground is a training/lab/experimental host vs production": {
+   "status": "exact",
+   "note": "addressed as undeterminable from CMDB; the cited sandbox (canary-1) and dev (dev-ws-1) hosts and their roles match the list-hosts rows"
+  }
+ },
+ "unsupported": []
+}

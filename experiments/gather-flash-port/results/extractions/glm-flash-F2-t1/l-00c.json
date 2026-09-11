@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "the count of alerts in the window scoped to the entities you judged central \u2014 one call, across any rule (the envelope's `total`)": {
+   "status": "exact",
+   "note": "Scoped via message:*1df4bcd65ee4* \u2192 total 15 (return 5); 1 own-rule + 14 other-rule split matches return 6 (total 1) and return 8 (total 14). Rule/nc-probe details for elided hits are plausibly in the cut part."
+  },
+  "the count for those same entities UNSCOPED \u2014 the same window with the narrowing predicate dropped, across any rule (the envelope's `total`)": {
+   "status": "exact",
+   "note": "native_query=* over the same window \u2192 total 248 (return 2)."
+  },
+  "which entities you correlated on, the field each came from, and why you judged them the discriminating ones for this alert": {
+   "status": "exact",
+   "note": "Container id 1df4bcd65ee4 from the ancestor's falco.output_fields.container.id, reached via message wildcard; rejected host.name (194, return 7) and typed container.id (0, positive control 0, returns 3\u20134) all match payloads."
+  }
+ },
+ "unsupported": []
+}

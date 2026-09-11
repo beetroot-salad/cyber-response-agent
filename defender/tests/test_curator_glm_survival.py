@@ -354,7 +354,7 @@ def _spawn_curator(**over):
         queued_ids=frozenset(),
         repo_root=Path("/tmp/wt"),
         learning_run_dir=Path("/tmp/state/_pending"),
-        model="glm-5.2",
+        model="glm-5.3",
         effort="low",
         request_limit=250,
         timeout=60,

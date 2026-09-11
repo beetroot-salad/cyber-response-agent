@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether any registry entry covers soc-playground or its expected root/operator access pattern": {
+   "status": "exact",
+   "note": "Queries 0,1,2 (host=soc-playground with actor root/*, pattern */ssh) and query 7 (pattern=root) all returned matched: null; summary reports exactly that."
+  },
+  "whether any entry documents the operator IPs 147.235.199.7 or 79.177.137.245 or external-root-SSH practice": {
+   "status": "exact",
+   "note": "Queries 3,4 (each IP as actor) and 5,6,8 (patterns external-root-SSH, operator, external) all returned matched: null; summary matches."
+  },
+  "if no entry matches, that fact": {
+   "status": "exact",
+   "note": "Summary states the registry has no matching entries; all 9 lookups (payloads 0-8) returned matched: null with exit 0, and the count of 9 is verifiable from the returns."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether an open or in-progress incident ticket around 2026-08-30 09:54-10:00Z involves soc-playground": {
+   "status": "exact",
+   "note": "Summary says none; all three list-tickets returns show total 0, empty tickets array."
+  },
+  "if so, the ticket id, severity, responders assigned, and what corrective work it describes": {
+   "status": "exact",
+   "note": "Conditional not triggered \u2014 no ticket found, so nothing to report; summary explicitly states none exists."
+  },
+  "if not, that no incident ticket matching this host and timeframe exists": {
+   "status": "exact",
+   "note": "Stated plainly and backed by the empty q=soc-playground, unfiltered, and status=open returns."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any approved change records or oncall windows covering soc-playground (or DB/postgres maintenance) active on 2026-08-30 around 09:54Z": {
+   "status": "exact",
+   "note": "active-changes returned [] and list-changes host=soc-playground returned total 0; '0 active' is supported. The 'no oncall window' part is inference \u2014 no oncall system was queried, only change-mgmt \u2014 but no concrete value is asserted for it."
+  },
+  "any change records referencing this host or this window at all, even non-matching, so absence can be graded": {
+   "status": "exact",
+   "note": "0 for soc-playground matches returns 5-7; 14 total, CHG-1043 details (title, planned, db-1, 2026-05-02T04:00-06:00Z), and the db-1 backup / web-1,web-2 patch standing changes all match return 8. Counting only CHG-1043 as 'DB/postgres maintenance' undercounts the 9 db-1 pg_dump backup windows, but the summary does name those separately and none touch Aug 30, so the absence grading holds."
+  }
+ },
+ "unsupported": []
+}

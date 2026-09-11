@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 147.235.199.7 appears in threat intelligence as scanning, brute-force, C2, or known-bad": {
+   "status": "exact",
+   "note": "lookup returned verdict unknown, score 0, empty sources/tags; summary reports none observed, matching payload"
+  },
+  "if it has no reputation record, that fact": {
+   "status": "exact",
+   "note": "summary states no reputation record; supported by unknown verdict, empty sources/tags, null first/last_seen"
+  }
+ },
+ "unsupported": []
+}

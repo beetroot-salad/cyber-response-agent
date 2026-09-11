@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "the container's image/name/purpose and whether it is an exercise or training target": {
+   "status": "exact",
+   "note": "Reports docker 'no such object' for 1df4bcd65ee4 (return 4) and the healthy context + 8-host inventory (return 7); honestly states image/name/purpose not observable. Falco <NA> remark traces to the catalog text (return 2)."
+  },
+  "how the bash process writing authorized_keys was launched (parent chain, exec session, docker exec, cron)": {
+   "status": "exact",
+   "note": "Addressed as not observed; no proc-tree was obtainable because the container did not resolve. Honest absence, no invented values."
+  },
+  "any sshd/auth log evidence on the host or container around 16:12Z showing who entered": {
+   "status": "exact",
+   "note": "199 accepted / 0 failed, root, publickey, 79.177.137.245, 15:48:38Z\u201316:16:39Z, plus root logged-on/logged-off rows all match return 9. Window bounds match the query run."
+  }
+ },
+ "unsupported": []
+}

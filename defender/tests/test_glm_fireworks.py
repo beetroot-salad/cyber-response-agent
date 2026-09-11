@@ -1,5 +1,6 @@
 """Unit tests for the LLM provider abstraction + the Fireworks integration: GLM 5.3
-as the MAIN default (#1023), Kimi K2.6 as the GATHER default.
+as the MAIN default (#1023), GLM 5.3 Flash as the GATHER default (experiments/gather-flash-port,
+the Kimi K2.6 decommission of 2026-09-25).
 
 Hermetic — no API key, no network. Model construction only builds the provider
 client (no request is made), so these run in the default suite. Covers the provider
@@ -39,8 +40,11 @@ from defender.runtime import review_roles  # noqa: E402
 from defender.runtime.driver import _prompts  # noqa: E402
 from defender.scripts import pricing  # noqa: E402
 
-_GLM_ID = "accounts/fireworks/models/glm-5p2"
-_KIMI_ID = "accounts/fireworks/models/kimi-k2p6"
+_GLM_ID = "accounts/fireworks/models/glm-5p3"
+_KIMI_ID = "accounts/fireworks/models/kimi-k3"
+#: Decommissioned serverless on 2026-09-25 and dropped from the alias map; their price rows
+#: stay so archived traces still cost out. The tests below hold both halves of that.
+_GONE = ("glm-5.2", "glm-5p2", "kimi-k2.6", "kimi-k2p6")
 _CACHE = {
     "anthropic_cache_instructions": "1h",
     "anthropic_cache_tool_definitions": "1h",
@@ -48,7 +52,7 @@ _CACHE = {
 }
 
 
-def _role_settings(provider, role, name="glm-5.2"):
+def _role_settings(provider, role, name="kimi-k3"):
     """The live role→settings path after `settings(role)` was retired (#493): resolve the
     role's default effort, then map it to settings.
 
@@ -63,7 +67,7 @@ def test_role_model_defaults(monkeypatch):
     for k in ("DEFENDER_MODEL", "DEFENDER_GATHER_MODEL"):
         monkeypatch.delenv(k, raising=False)
     assert driver.resolve_main_model() == "glm-5.3"
-    assert driver.gather_model() == "kimi-k2.6"
+    assert driver.gather_model() == "glm-5.3-flash"
 
 
 
@@ -71,11 +75,12 @@ def test_role_model_defaults(monkeypatch):
     ("claude-sonnet-4-6", "anthropic"),
     ("claude-haiku-4-5", "anthropic"),
     ("anthropic:claude-sonnet-4-6", "anthropic"),
-    ("glm-5.2", "fireworks"),
-    ("glm-5p2", "fireworks"),
-    ("GLM-5.2", "fireworks"),
-    ("kimi-k2.6", "fireworks"),
-    ("kimi-k2p6", "fireworks"),
+    ("glm-5.3", "fireworks"),
+    ("glm-5p3", "fireworks"),
+    ("GLM-5.3", "fireworks"),
+    ("glm-5.3-flash", "fireworks"),
+    ("kimi-k3", "fireworks"),
+    ("deepseek-v4.1-flash", "fireworks"),
     (f"fireworks:{_GLM_ID}", "fireworks"),
 ])
 def test_provider_routes_by_name(name, provider):
@@ -122,7 +127,7 @@ def test_build_model_routes_claude_to_anthropic(monkeypatch):
     assert isinstance(m, AnthropicModel)
 
 
-@pytest.mark.parametrize("name", ["glm-5.2", "glm-5p2", f"fireworks:{_GLM_ID}"])
+@pytest.mark.parametrize("name", ["glm-5.3", "glm-5p3", f"fireworks:{_GLM_ID}"])
 def test_build_model_fireworks_from_alias_or_prefix(name, monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     m = providers.FIREWORKS.build_model(name)
@@ -135,12 +140,12 @@ def test_build_model_fireworks_from_alias_or_prefix(name, monkeypatch):
 def test_build_model_fireworks_requires_key(monkeypatch):
     monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="FIREWORKS_API_KEY"):
-        providers.FIREWORKS.build_model("glm-5.2")
+        providers.FIREWORKS.build_model("glm-5.3")
 
 
 def test_build_model_kimi_alias(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    m = providers.FIREWORKS.build_model("kimi-k2.6")
+    m = providers.FIREWORKS.build_model("kimi-k3")
     assert isinstance(m, OpenAIChatModel)
     assert m.model_name == _KIMI_ID
 
@@ -148,7 +153,7 @@ def test_build_model_kimi_alias(monkeypatch):
 def test_build_pairs_model_with_settings(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
-    built = providers.build_for_effort("glm-5.2", providers.effort_for_role("glm-5.2", AgentRole.MAIN))
+    built = providers.build_for_effort("glm-5.3", providers.effort_for_role("glm-5.3", AgentRole.MAIN))
     assert isinstance(built, BuiltModel)
     assert isinstance(built.model, OpenAIChatModel)
     assert built.settings == {"extra_body": {"reasoning_effort": "low"}}
@@ -244,7 +249,7 @@ def test_cache_affinity_preserves_the_effort_setting_it_merges_into():
     single-call roles need it, and one that only created would silently drop
     `reasoning_effort` on every role that has one."""
     merged = providers.cache_affinity(
-        "glm-5.2", providers.FIREWORKS.settings_for_effort("low"), "sess-7:main"
+        "glm-5.3", providers.FIREWORKS.settings_for_effort("low"), "sess-7:main"
     )
     assert merged == {
         "extra_body": {"reasoning_effort": "low"},
@@ -270,9 +275,13 @@ def test_cache_affinity_passes_an_unroutable_name_through():
 
 
 @pytest.mark.parametrize(("model", "key"), [
-    (_GLM_ID, "glm-5.2"),
-    ("glm-5p2", "glm-5.2"),
-    (_KIMI_ID, "kimi-k2.6"),
+    (_GLM_ID, "glm-5.3"),
+    ("glm-5p3", "glm-5.3"),
+    (_KIMI_ID, "kimi-k3"),
+    ("kimi-k3", "kimi-k3"),
+    ("accounts/fireworks/models/deepseek-v4p1-flash", "deepseek-v4.1-flash"),
+    # decommissioned, still priced: an archived trace that named them keeps its bill
+    ("accounts/fireworks/models/glm-5p2", "glm-5.2"),
     ("kimi-k2p6", "kimi-k2.6"),
     ("claude-haiku-4-5", "claude-haiku-4-5"),
     ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),
@@ -314,7 +323,7 @@ def test_fireworks_cached_input_is_discounted_against_its_own_input():
     """Every Fireworks row prices a cache READ below its own input and a cache WRITE at
     exactly it. A row that priced the read at the input rate would silently make the
     highest-caching lane in the tree — gather runs at ~92% — look four times its real cost."""
-    for key in ("glm-5.2", "kimi-k2.6", "kimi-k3"):
+    for key in ("glm-5.2", "kimi-k2.6", "kimi-k3", "glm-5.3", "glm-5.3-flash", "deepseek-v4.1-flash"):
         row = pricing.PRICING[key]
         assert row["cache_r"] < row["in"], key
         assert row["cache_w"] == row["in"], key
@@ -355,7 +364,7 @@ def test_preflight_all_fireworks_needs_no_anthropic(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_ENV_FILE", str(env))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
-    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.2", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
+    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.3", "glm-5.3-flash"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
     assert run.preflight_role_models() == 0
     assert "ANTHROPIC_API_KEY" not in os.environ
 
@@ -363,7 +372,7 @@ def test_preflight_all_fireworks_needs_no_anthropic(tmp_path, monkeypatch):
 def test_preflight_missing_required_key_exits_2(monkeypatch):
     monkeypatch.setattr(run, "resolve_first_party_key", lambda **kw: (None, None))  # lint-monkeypatch: ok — isolate from the real repo .env
     monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
-    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.2", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
+    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.3", "glm-5.3-flash"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
     assert run.preflight_role_models() == 2
 
 
@@ -371,7 +380,7 @@ def test_preflight_unknown_model_exits_2(monkeypatch, capsys):
     # The sentinel is a name NO vendor can ship, not a plausible next version. This test
     # used "glm-5.3" until #1023 registered it, at which point the preflight succeeded and
     # the assertion read as a regression in the preflight rather than as a claimed name.
-    monkeypatch.setattr(agents, "AGENTS", _registry("no-such-vendor/no-such-model", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
+    monkeypatch.setattr(agents, "AGENTS", _registry("no-such-vendor/no-such-model", "glm-5.3-flash"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
     assert run.preflight_role_models() == 2
     err = capsys.readouterr().err
     assert "[run.py] preflight" in err
@@ -451,19 +460,30 @@ def test_gather_effort_is_floored_for_a_thinking_only_model():
 
 
 def test_flash_is_floored_too():
-    """5.3 Flash is the variant #1023's arm B and C actually ran as GATHER, and it refuses
-    `none` exactly as plain 5.3 does. It reaches the registry only through the `fireworks:`
-    passthrough — it has no alias — so a floor keyed on alias spellings would miss it, which
-    is why the set holds RESOLVED ids."""
-    flash = "fireworks:accounts/fireworks/models/glm-5p3-flash"
-    assert providers.effort_for_role(flash, AgentRole.GATHER) == "low"
+    """5.3 Flash — the shipped GATHER default — refuses `none` exactly as plain 5.3 does, so
+    gather's `none` preference lands at `low` for it under every spelling: the alias, the
+    Fireworks spelling, and the `fireworks:` passthrough. The floor set holds RESOLVED ids so
+    the passthrough cannot slip past a check keyed on aliases."""
+    for name in ("glm-5.3-flash", "glm-5p3-flash", "fireworks:accounts/fireworks/models/glm-5p3-flash"):
+        assert providers.effort_for_role(name, AgentRole.GATHER) == "low", name
 
 
 def test_a_model_that_accepts_none_still_gets_none():
-    """The floor is per-model, not a blanket raise of gather's effort. Kimi K2.6 — the shipped
-    gather default — takes `none` and must keep taking it, or every gather lane in the tree
-    silently starts paying for reasoning tokens it never asked for."""
-    assert providers.effort_for_role("kimi-k2.6", AgentRole.GATHER) == "none"
+    """The floor is per-model, not a blanket raise of gather's effort. Kimi K3 and DeepSeek
+    V4.1 Flash take `none` and must keep getting it under a gather override, or a lane on
+    them silently starts paying for reasoning tokens it never asked for."""
+    assert providers.effort_for_role("kimi-k3", AgentRole.GATHER) == "none"
+    assert providers.effort_for_role("deepseek-v4.1-flash", AgentRole.GATHER) == "none"
+
+
+@pytest.mark.parametrize("name", _GONE)
+def test_decommissioned_aliases_are_refused_at_routing(name):
+    """A run that still names `glm-5.2` or `kimi-k2.6` fails at `provider_for`, with the
+    alias list in the message, rather than at its first dispatch with the provider's 404.
+    The price rows for both survive (`test_pricing_model_key`), so this is the alias map
+    and only the alias map."""
+    with pytest.raises(ValueError, match="unknown model"):
+        providers.provider_for(name)
 
 
 def test_an_explicit_none_on_a_thinking_only_model_is_refused(monkeypatch):

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 147.235.199.7 has any threat-intel reputation (scanner, botnet, known-bad, clean residential/hosting)": {
+   "status": "exact",
+   "note": "lookup returned verdict unknown, score 0, empty sources/tags, null first/last_seen; summary reports exactly that and correctly refuses to call it clean"
+  },
+  "any attributed campaign or abuse reports tied to this IP": {
+   "status": "exact",
+   "note": "sources/tags empty on lookup; IP absent from all 15 list-indicators entries; summary says none observed"
+  }
+ },
+ "unsupported": []
+}

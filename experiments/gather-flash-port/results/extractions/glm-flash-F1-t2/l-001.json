@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "which user/identity executed sudo on soc-playground in the burst window around 2026-08-30T09:54-09:59Z, and whether it is consistent across the 3 events": {
+   "status": "exact",
+   "note": "root on all 3 rows, container e5b0213bd690, 09:54:51.724\u2013.725Z; proc null, pname <NA> \u2014 all in return 3"
+  },
+  "the commands run under sudo and whether they are administrative/corrective or discovery/persistence-shaped": {
+   "status": "exact",
+   "note": "all three cmdlines verbatim match return 3; shape characterization is interpretation"
+  },
+  "any surrounding context events on soc-playground in the same window (parent shells, logins, network tools) that indicate the session provenance": {
+   "status": "wrong",
+   "note": "SSH accepted publickey root from 147.235.199.7 @09:54:41.339Z and pam session-open are supported, but 'nothing else on that container' contradicts return 7, which has a 'Clear Log Activities' openat by agent-enroll.sh in e5b0213bd690 at 09:54:51.725Z (same ms as the sudo burst) that the summary omits"
+  },
+  "the sudo history baseline of the driving identity on this host over prior days, if visible": {
+   "status": "exact",
+   "note": "return 5 row_count 0 over 08-23\u219208-30 09:50Z"
+  }
+ },
+ "unsupported": []
+}

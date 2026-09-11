@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any approved change ticket or exercise window covers an authorized_keys modification on soc-playground / container 1df4bcd65ee4 around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "active-changes returned [], host-scoped list-changes returned total 0, unscoped list-changes returned 11 tickets all on db-1/web-1/web-2 with windows on 2026-04-28 and 2026-09-04..12 \u2014 the 'none covers' verdict, the 11 count, host set, and window/date claims all match the payloads"
+  },
+  "if a record exists, its id, scope, and validity window": {
+   "status": "exact",
+   "note": "honest 'no record exists' \u2014 payloads for soc-playground are empty and none of the 11 cross-host tickets names soc-playground or overlaps 2026-07-28"
+  }
+ },
+ "unsupported": []
+}

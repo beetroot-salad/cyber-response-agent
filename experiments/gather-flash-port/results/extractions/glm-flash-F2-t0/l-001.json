@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether an approved change record or authorized exercise window covers ssh authorized_keys changes on soc-playground around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "active-changes returned []; host+approved returned total 0; estate-wide approved returned 11 tickets (1 nginx, 9 db-1 backups, 1 web patch) with hosts web-1/web-2/db-1 only and windows in Apr/Sep 2026; status enum and NO-OP notes match returns 7-9"
+  },
+  "if such a record exists: its id, scope, and effective window": {
+   "status": "exact",
+   "note": "honest 'no ticket exists' \u2014 all host-scoped payloads empty"
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "how often Falco authorized_keys-modification alerts have fired on soc-playground over the past 30 days, and what key identities/comments those writes carried": {
+   "status": "wrong",
+   "note": "97 total, 92 <NA> / 5 root, per-container timestamps and attacker@elsewhere cmdline all match; but the payload's 10 rows cover only 8 distinct container ids (a36492b5172b and 1df4bcd65ee4 each appear twice), not 10"
+  },
+  "any successful sshd authentication on soc-playground or its containers after 2026-07-28T16:12Z, especially involving the key labeled attacker@elsewhere": {
+   "status": "exact",
+   "note": "338 root publickey from 79.177.137.245 (16:12:00.805Z\u201320:53:35Z), 64 pre-window, 994 earlier same day, 1456 on 07-27, and 0 attacker@elsewhere matches all match payloads"
+  },
+  "any other alerts on soc-playground in the hours around 16:12Z indicating a broader intrusion": {
+   "status": "exact",
+   "note": "742 / 11 / 1 with rule ids, severities and first/last timestamps match the detection-alerts payload"
+  }
+ },
+ "unsupported": []
+}

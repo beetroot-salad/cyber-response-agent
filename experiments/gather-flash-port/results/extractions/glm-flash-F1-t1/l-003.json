@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any open incident or oncall ticket mentioning soc-playground around 2026-08-30 09:55Z": {
+   "status": "exact",
+   "note": "All four list-tickets variants returned total:0 and health-check reported ticket_count:0; summary's 'no ticket exists' matches."
+  },
+  "the ticket's status and what activity it calls for": {
+   "status": "exact",
+   "note": "Honest 'no ticket, so no status or called-for activity' \u2014 payloads are empty for it."
+  }
+ },
+ "unsupported": []
+}

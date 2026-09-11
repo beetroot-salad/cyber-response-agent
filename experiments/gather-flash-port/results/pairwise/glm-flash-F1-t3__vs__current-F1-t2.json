@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "X labels the case 'malicious / adversarial-confirmed' while its own prose concedes intent cannot be discriminated, the commands are benign health probes, and the sudo-to-session link rests only on timing with null parent fields \u2014 the disposition outruns the rows. Y's 30-day SSH baseline (10,785 accepted external root logins, all root, prior dominant IP) and the pre-login root password change are the leads that actually test the 'novel external access' reading, and Y scopes its close to what survived: authorization refused on every anchor, adversary-vs-operator unresolved, with the unreachable host-state forensics named as the genuine open question. Y is not clean \u2014 impact_verdict 'none' sits awkwardly beside 'unauthorized root access to the prod DB container', and a container-inspect succeeded on a host the same system says it cannot see \u2014 but its verdict is auditable from the authz and attr_update rows, whereas X's headline claim is not."
+}

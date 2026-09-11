@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether an approved change record or maintenance window covers soc-playground around 2026-08-30T09:54Z": {
+   "status": "exact",
+   "note": "active-changes returned [] and list-changes returned total 0; summary reports none, matching both payloads"
+  },
+  "whether soc-playground is currently in an incident state with responders engaged": {
+   "status": "exact",
+   "note": "Summary addresses it honestly as not determinable from change-mgmt (only system queried); asserts no incident-state values"
+  },
+  "who the change/incident owner is and what activity it authorizes": {
+   "status": "exact",
+   "note": "Summary reports no ticket exists to attribute owner/scope; consistent with empty payloads"
+  }
+ },
+ "unsupported": []
+}

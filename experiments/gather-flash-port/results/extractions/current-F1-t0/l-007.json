@@ -1,0 +1,9 @@
+{
+ "dims": {
+  "whether 147.235.199.7 is known in threat intelligence as malicious, as a scanner, as a VPN/proxy/hosting range, or has no reputation records": {
+   "status": "exact",
+   "note": "lookup returned verdict unknown, score 0, empty sources/tags, null first/last seen; summary reports exactly that and correctly says no scanner/VPN/hosting classification is available"
+  }
+ },
+ "unsupported": []
+}

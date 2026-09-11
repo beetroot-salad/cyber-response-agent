@@ -608,7 +608,7 @@ def register_gather_tool(
         ctx: RunContext[AgentDeps], lead_id: str, system: str,
         goal: str, what_to_summarize: list[str],
     ) -> str:
-        """Dispatch the gather subagent (Kimi K2.6 by default) to measure one lead against a
+        """Dispatch the gather subagent (GLM 5.3 Flash by default) to measure one lead against a
         system of record. `lead_id` echoes this lead's `:L` row id (append-only —
         a retry is a new row with a new id). `system` is the `:L` row's system,
         `goal` a one-sentence measurement contract, `what_to_summarize` the

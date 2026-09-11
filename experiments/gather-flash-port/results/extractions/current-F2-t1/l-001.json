@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any approved change, exercise, or maintenance window covers key/authorized_keys modifications on soc-playground around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "active-changes returned [] and list-changes host=soc-playground returned total 0; summary reports both as 0 and concludes no covering window"
+  },
+  "any change records for container 1df4bcd65ee4 or the soc-playground host in the surrounding days, with their scope and approver": {
+   "status": "exact",
+   "note": "0 records for soc-playground (return 5); full list of 14 records (return 12) names only web-1, web-2, db-1, jump-box-1 and none mention soc-playground or the container ID; health-check count 14 / standing 2 matches return 11"
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 79.177.137.245 corresponds to any documented host, operator workstation, VPN egress, or sanctioned admin address in the CMDB": {
+   "status": "exact",
+   "note": "404 on direct lookup matches return 3; list-hosts payload has total=11 with 11 hosts and no field in any record contains the IP, so 'no record references it' is verifiable"
+  },
+  "what the record says about it, if found, including owning team and purpose": {
+   "status": "exact",
+   "note": "No record exists (HTTP 404); summary states absence honestly and the office-ws-1/office-ws-2 owners (dev.dana, dev.ethan) it cites match the payload"
+  }
+ },
+ "unsupported": []
+}

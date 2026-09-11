@@ -11,7 +11,7 @@ dependencies = [
 # Runtime investigation loop (in-process PydanticAI). Kept out of the core deps so
 # learning-loop / CI installs (which are SIEM- and runtime-free) don't pull
 # the Anthropic + MCP stack. Slim variant + extras: anthropic is the default
-# provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.2, selected
+# provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.3, selected
 # via a `fireworks:`/`glm-*` model id). Install with: uv pip install -e '.[runtime]'.
 runtime = [
     "pydantic-ai-slim[anthropic,mcp,openai]>=1.107",

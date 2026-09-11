@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y traced the sudo burst to its actual origin \u2014 a root publickey SSH login ten seconds earlier from 147.235.199.7, a source first seen 08-22 against a 30-day baseline of 10,782 logins from a different IP \u2014 and every one of its eight leads returned a quoted result that moved a hypothesis or discharged an anchor, with no dead ends. X refutes the adversary hypothesis on the claim that the parent 'is not an interactive shell' while its own row records parent=NA, never asks how root got the session, and two of its seven leads exhausted their budgets with nothing to show, so its 'both adversary hypotheses refuted by baseline' rests on command recurrence alone. Y's open question (who operates the new SSH source, who owns the host) is specific and genuinely unresolved, whereas X's 'escalate for governance confirmation' names a gap its record can't localize; Y has minor bookkeeping slips (CMDB result attributed to the wrong lead, an early weak '+' on h-002) but they don't undercut the verdict."
+}

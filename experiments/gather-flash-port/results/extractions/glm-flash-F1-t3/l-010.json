@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "all prior connections or auth attempts from 147.235.199.7 across any host in the estate, with timestamps, targets, and outcomes": {
+   "status": "exact",
+   "note": "2 events in system.auth on soc-playground, root/publickey/success/Accepted, timestamps 2026-08-22T08:53:21.548Z and 16:09:13.316Z all match query 0 and query 1 rows; with count=2 the min/max are the two events"
+  },
+  "whether those appearances form an automation/deploy pattern (e.g. recurring key-based logins, CI ranges) or are absent entirely": {
+   "status": "exact",
+   "note": "Addressed; 'zero failures' supported by query 1 returning only success rows; '8 days until the alert' consistent with alert_timestamp 2026-08-30T09:59 in return 0; rest is interpretation"
+  },
+  "any other identity or host associated with this IP in the telemetry": {
+   "status": "exact",
+   "note": "None reported; query 0 across logs-* returned a single host/dataset row, query 1 a single user row"
+  }
+ },
+ "unsupported": []
+}

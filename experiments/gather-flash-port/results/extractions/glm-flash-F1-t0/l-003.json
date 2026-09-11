@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "any interactive logins/sessions open on soc-playground around the burst, with source and identity": {
+   "status": "exact",
+   "note": "One accepted SSH auth: root, publickey, 147.235.199.7, 09:54:41.339Z, 0 failures \u2014 matches return 7 row exactly; ~10s-before-burst is consistent with the 09:54:51.724 Falco first_seen."
+  },
+  "prior baseline of sudo activity and logins on this host (which identities habitually act here, over the last weeks)": {
+   "status": "exact",
+   "note": "Sudo baseline 08-16\u219208-30 returned 0 rows (return 8); summary honestly reports none. Login baseline over weeks was never queried \u2014 summary only claims absence 'in the periods queried' (09:30\u201310:10), which is supported, but the multi-week login baseline is effectively unmeasured rather than misreported."
+  },
+  "anything anomalous on the host state: new accounts, authorized_keys changes, unusual processes": {
+   "status": "wrong",
+   "note": "host-state error correctly reported. Falco tallies are off: 'Launch Sensitive Mount Container' is 72+2=74, summary says 78; metadata-service rules sum to 214+43+7=264, summary says 258. 'Set Setuid or Setgid bit' (2) has null user.name, folded under 'by root'. Other counts (30, 6, 3, 2, unshare 09:53:56) match."
+  }
+ },
+ "unsupported": [
+  "\"Launch Sensitive Mount Container\" (78) \u2014 payload rows total 74 (72 root + 2 null)",
+  "\"Contact cloud/EC2 metadata service from container\" (258) \u2014 payload rows total 264 (214 + 43 + 7)"
+ ]
+}

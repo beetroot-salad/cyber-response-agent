@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "Y's 'malicious, high confidence' rests on absence-of-record in stores it itself found near-empty (14 change records, empty registry, zero tickets) and asserts 'persistence novel for this container' without any lead testing it, while X ran that baseline lead and found the identical write fired five times on the same container in July and that nc/curl alerts are routine background \u2014 evidence that actually moved the verdict and which Y never gathered. Y also grades the empty-registry miss as 'unauthorized' and relabels the source IP 'anonymous' with no supporting row, and it ignores its own observation that the key body literally reads 'fake_key' on a host named soc-playground. X's inconclusive close is scoped to the container and IP, names the genuinely open question (unrecorded simulation vs real persistence), and cites a ceiling (ticket store holds zero records at all); its only weakness is that the identity and threat-intel lead results appear in the summary prose rather than as observation rows."
+}

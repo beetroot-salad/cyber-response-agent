@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "how many times the Falco rule 'Adding ssh keys to authorized_keys' fired on soc-playground in the 30 days before 2026-07-28T16:12Z, and with what command shapes": {
+   "status": "wrong",
+   "note": "Summary labels the 30d-before-16:12Z window as 97 fires; 97 is the 06-28\u219207-29 count (92+5, return 6) and includes post-alert events. The strict-window query (return 4) sums to 94 (90 rotation + 4 fake_key), which the summary never states. Notes section discloses the window mismatch, but the headline number is attached to the wrong window. Command shapes, parents, and 8 containers are supported."
+  },
+  "whether prior events appended keys self-labeled attacker@elsewhere or with the fake_key_ pattern (exercise signature), and their cadence": {
+   "status": "exact",
+   "note": "All 5 timestamps, containers, and parents match return 5; cmdline with attacker@elsewhere/fake_key_ seen in returns 4 and 7; burst/pair spacing matches."
+  },
+  "whether the 2026-07-28T16:12Z event is a first-ever occurrence or part of a recurring pattern": {
+   "status": "exact",
+   "note": "5th fake_key fire, 2nd of day, prior at 16:00:26.997Z in same container, pattern start 07-27T20:11Z, alert ts 16:16:53Z, \u00b1window returning exactly 2 events \u2014 all supported by returns 0, 5, 7."
+  }
+ },
+ "unsupported": []
+}

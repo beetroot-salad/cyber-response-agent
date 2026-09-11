@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any change record or maintenance window covering soc-playground around 2026-08-30 09:55Z": {
+   "status": "exact",
+   "note": "active-changes at 09:55Z returned []; list-changes approved and unfiltered both returned total 0 \u2014 honest zero matches payloads. Summary's '09:54\u201309:59Z' phrasing is the goal window, but it correctly states the actual check was the single instant 09:55Z."
+  },
+  "who requested/approved it and what it authorized": {
+   "status": "exact",
+   "note": "Reported as not observed / nothing to attribute; payloads contain no tickets, so this is the correct honest answer."
+  }
+ },
+ "unsupported": []
+}

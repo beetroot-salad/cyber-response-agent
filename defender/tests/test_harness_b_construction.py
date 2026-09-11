@@ -112,7 +112,7 @@ def test_effort_for_role_fireworks_main_default_is_low(monkeypatch):
     """Fireworks MAIN, no env override → "low" (the production DEFAULT_MODEL main
     effort). This is the value the live main loop must keep running under."""
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
-    assert providers.effort_for_role("glm-5.2", AgentRole.MAIN) == "low"
+    assert providers.effort_for_role("glm-5.3", AgentRole.MAIN) == "low"
 
 
 def test_effort_for_role_fireworks_gather_default_is_none_string_not_None(monkeypatch):
@@ -120,14 +120,14 @@ def test_effort_for_role_fireworks_gather_default_is_none_string_not_None(monkey
     mechanical ES|QL loop), which is DISTINCT from None/omit — the knob is set, not absent.
     A regression collapsing "none" into None would silently re-enable gather reasoning."""
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
-    assert providers.effort_for_role("glm-5.2", AgentRole.GATHER) == "none"
+    assert providers.effort_for_role("kimi-k3", AgentRole.GATHER) == "none"
 
 
 def test_effort_for_role_fireworks_main_env_override(monkeypatch):
     """DEFENDER_MAIN_REASONING_EFFORT overrides the role default → the env value flows
     through effort_for_role verbatim."""
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "high")
-    assert providers.effort_for_role("glm-5.2", AgentRole.MAIN) == "high"
+    assert providers.effort_for_role("glm-5.3", AgentRole.MAIN) == "high"
 
 
 def test_effort_for_role_fireworks_env_default_sentinel_normalizes_to_None(monkeypatch):
@@ -136,7 +136,7 @@ def test_effort_for_role_fireworks_env_default_sentinel_normalizes_to_None(monke
     resolved fork: one omit spelling reaches the definition's effort.
     # rejected: return "default" — that would keep two omit spellings (None and "default")."""
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "default")
-    assert providers.effort_for_role("glm-5.2", AgentRole.MAIN) is None
+    assert providers.effort_for_role("glm-5.3", AgentRole.MAIN) is None
 
 
 def test_effort_for_role_fireworks_bad_env_fails_loud(monkeypatch):
@@ -144,7 +144,7 @@ def test_effort_for_role_fireworks_bad_env_fails_loud(monkeypatch):
     read (env_str choices), never a silently-forwarded bad reasoning_effort."""
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "hgih")
     with pytest.raises(FatalConfigError):
-        providers.effort_for_role("glm-5.2", AgentRole.MAIN)
+        providers.effort_for_role("glm-5.3", AgentRole.MAIN)
 
 
 def test_effort_for_role_unknown_model_fails_loud():
@@ -176,8 +176,8 @@ def test_settings_role_still_equals_pinned_values_after_collapse(monkeypatch):
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
     fw, an = providers.FIREWORKS, providers.ANTHROPIC
-    assert fw.settings_for_effort(fw.effort_for_role("glm-5.2", AgentRole.MAIN)) == {"extra_body": {"reasoning_effort": "low"}}
-    assert fw.settings_for_effort(fw.effort_for_role("glm-5.2", AgentRole.GATHER)) == {"extra_body": {"reasoning_effort": "none"}}
+    assert fw.settings_for_effort(fw.effort_for_role("glm-5.3", AgentRole.MAIN)) == {"extra_body": {"reasoning_effort": "low"}}
+    assert fw.settings_for_effort(fw.effort_for_role("kimi-k3", AgentRole.GATHER)) == {"extra_body": {"reasoning_effort": "none"}}
     assert an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.MAIN)) == _CACHE
     assert (an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.MAIN))
             == an.settings_for_effort(an.effort_for_role("claude-sonnet-4-6", AgentRole.GATHER)))
@@ -195,13 +195,13 @@ def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
     Agent is a failure here rather than something only the cache-key test below would see."""
     sentinel = {"SENTINEL": "s"}
     fake, calls = _capture_make_model(settings=sentinel)
-    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low")
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=fake,
         )
-    assert calls == [("glm-5.2", "low")]
+    assert calls == [("glm-5.3", "low")]
     assert isinstance(agent.model, FunctionModel)
     assert agent.model_settings == {**sentinel, "openai_prompt_cache_key": "main"}
 
@@ -215,7 +215,7 @@ def test_build_agent_core_keys_the_cache_on_the_conversation_when_there_is_one(l
     collapsed to one of them would be silently wrong in exactly the lane it did not fit: a
     per-run key on a lens defeats the only reuse it has, and a bare agent id on `main` points
     every concurrent run at one replica."""
-    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low")
     with override_allow_model_requests(False):
         in_session = driver.build_agent_core(
             defn, deps_type=AgentDeps, instructions="x", logger=logger,
@@ -239,7 +239,7 @@ def test_835_an_explicit_cache_key_overrides_both_derived_arms(logger):
     Pinned against the SESSION arm specifically: an override that only beat the session-less arm
     would be dead code on the one role that needs it. The two derived arms themselves stay
     pinned, untouched, by the test above."""
-    defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.2", effort="low")
+    defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.3", effort="low")
     with override_allow_model_requests(False):
         keyed = driver.build_agent_core(
             defn, deps_type=AgentDeps, instructions="x", logger=logger,
@@ -302,7 +302,7 @@ def test_build_agent_core_registers_read_only_pair(logger):
     """A read + bash ToolSet → build_agent_core registers ONLY the read-only pair; no file
     writers reach a read-only agent (the security-relevant default)."""
     fake, _ = _capture_make_model()
-    defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.2", effort=None,
+    defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.3", effort=None,
                            tools=ToolSet(read=True, bash=True))
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
@@ -316,7 +316,7 @@ def test_build_agent_core_registers_write_tools(logger):
     """A read + bash + write ToolSet → the full four tools incl. write_file/edit_file (MAIN's
     authoring surface). The writers bit is the one build-time permission the def carries."""
     fake, _ = _capture_make_model()
-    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low",
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low",
                            tools=ToolSet(read=True, bash=True, write=True))
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
@@ -332,7 +332,7 @@ def test_build_agent_core_propagates_make_model_error(logger):
     not as a half-built agent that 401s mid-run."""
     def boom(model, effort):
         raise RuntimeError("no key")
-    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low")
     with pytest.raises(RuntimeError), override_allow_model_requests(False):
         driver.build_agent_core(
             defn, deps_type=AgentDeps, instructions="x", logger=logger,

@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "X's high-confidence 'malicious' rests on evidence that does not separate its two hypotheses \u2014 a synthetic 'fake_key ... attacker@elsewhere' write on a host named soc-playground deviating from the rotation baseline is exactly what a simulation would look like, its registry check came back indeterminate, and it labels the prior-day matching fires an 'incident' without any row showing they were. Y's leads were more discriminating: it found the 199-login external root burst bracketing the write and then chased the one thing that could flip the verdict (source IP in CMDB, threat-intel, identity, tickets), and its inconclusive/escalate disposition matches what those leads returned. Y loses points because loop-3 results (no root principal, empty ticket store, 1923 routine nc/curl fires) appear only in the summary prose rather than in observation rows, so its record is less auditable than X's, which keeps the margin slight."
+}

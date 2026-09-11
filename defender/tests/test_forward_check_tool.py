@@ -564,7 +564,7 @@ def _curator_stage(scene, **over):
         runs_dir=scene.runs, pending=scene.pending, queued_ids=frozenset({"run-X"}),
         repo_root=scene.repo, learning_run_dir=scene.curdir,
         log=lambda *a, **k: None,
-        model="glm-5.2", effort="low", request_limit=250, timeout=180,
+        model="glm-5.3", effort="low", request_limit=250, timeout=180,
         source_key=lambda model, label=None: None,
         run_author=lambda *a, **kw: _AUTHOR_RESULT_OK,
         run_verify=FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD)),
@@ -932,7 +932,7 @@ def test_m7_verifier_effort_none_is_provider_gated(tmp_path, monkeypatch):
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("glm-5.2", "none")
+    providers.build_for_effort("kimi-k3", "none")
     with pytest.raises(ValueError, match="unsupported Anthropic effort"):
         providers.build_for_effort("claude-haiku-4-5", "none")
 

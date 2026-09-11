@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "how often sudo -u postgres psql db-init probes and elastic-agent/agent-enroll activity recur on soc-playground over the past 30 days, and at what cadence": {
+   "status": "wrong",
+   "note": "The 'unmeasured' framing and the 0-row / positive-control numbers (web-1 9,928, web-2 9,924, db-1 1,555) match the payloads, but the summary then states host.name==soc-playground 'carries 1,555 sudo lines (2026-07-31T03:30:55Z\u21922026-08-30T12:27:05Z)' \u2014 that row is db-1 in query 3, and query 1 returned 0 sudo rows for soc-playground. The '~10 min before 12:27:05Z' gap is also off (09:53\u219212:27 is ~2.5h). Falco 'Sudo execution' baseline (2,239 events, 07-31\u219208-30) was returned in query 0 but not used."
+  },
+  "prior appearances of root logins (publickey or otherwise) on soc-playground in the last 30 days, and whether 147.235.199.7 or its SSH key fingerprint has appeared before": {
+   "status": "exact",
+   "note": "5 accepted / 0 failed root publickey from 147.235.199.7 on soc-playground across 08-22 (2, 08:53:21\u201316:09:13Z) and 08-30 (3, 09:54:41\u201318:03:45Z), single host/actor, and the 79.177.137.245 row (10,782, 08-01T17:05:03Z\u219208-18T11:25:04Z) all match returns 24/25/26. Key fingerprint not addressed, but no payload carried it."
+  },
+  "whether prior Postgres auth-failure-for-root streams from localhost have occurred on this stack before": {
+   "status": "wrong",
+   "note": "Totals (6,753,581 / 3,376,212 / 3,376,212 / localhost 0), 18 days, and the 08-07/08-18/08-22/08-30 daily counts match returns 27/28. But 'daily 2026-07-31\u21922026-08-06 at exactly 483,840/day' contradicts the payload: 08-06 is 177,008 (ends 08:46Z); only 07-31\u219208-05 are 483,840."
+  }
+ },
+ "unsupported": [
+  "host.name == \"soc-playground\" carries 1,555 sudo lines (2026-07-31T03:30:55Z\u21922026-08-30T12:27:05Z) \u2014 that row belongs to db-1; the soc-playground sudo query returned 0 rows",
+  "One earlier call in the same dispatch also returned exit 2 (a postgres doc fetch) \u2014 only one exit-2 return exists (query 13); the other failed calls were defender-sql exit 1"
+ ]
+}

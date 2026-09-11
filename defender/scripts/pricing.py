@@ -14,6 +14,10 @@ PRICING = {
     # `cache_w` equals `in` for every Fireworks row — that is the price, not a placeholder:
     # Fireworks caching is automatic with no separate write price, so cache-populating tokens
     # bill as ordinary input. Only the Anthropic rows above carry a write premium.
+    # `glm-5.2`, `kimi-k2.6` and `deepseek-v4-flash` (0731) were decommissioned serverless on
+    # 2026-09-25 and have no alias any more. Their rows STAY: every archived trace that named
+    # them is still costed on them by the visualizers, and dropping a row turns those runs'
+    # bills into the table's honest $0.
     "glm-5.2":           {"in": 1.4,  "out": 4.4,  "cache_w": 1.40, "cache_r": 0.14},
     "kimi-k2.6":         {"in": 0.95, "out": 4.0,  "cache_w": 0.95, "cache_r": 0.16},
     "kimi-k3":           {"in": 3.0,  "out": 15.0, "cache_w": 3.00, "cache_r": 0.30},
@@ -21,6 +25,10 @@ PRICING = {
     # $0.22 in / $0.007 cached / $0.66 out per M. (An earlier row here used the TRAINING-API
     # table's prefill/sample prices by mistake — 8x too high.) Experiment invlang-clerk-986 arm D.
     "deepseek-v4-flash": {"in": 0.22, "out": 0.66, "cache_w": 0.22, "cache_r": 0.007},
+    # PROVISIONAL (2026-09-11): Fireworks serves `deepseek-v4p1-flash` and routes the 0731 name
+    # to it, but the pricing page still lists only V4 Flash 0731. This row copies 0731's until
+    # the page names a V4.1 price; a run costed on it before then is costed on that assumption.
+    "deepseek-v4.1-flash": {"in": 0.22, "out": 0.66, "cache_w": 0.22, "cache_r": 0.007},
     # docs.fireworks.ai/serverless/pricing 2026-09-01, Standard: GLM 5.3 Flash $0.15 / $0.03 / $0.50.
     "glm-5.3-flash":     {"in": 0.15, "out": 0.50, "cache_w": 0.15, "cache_r": 0.03},
     # docs.fireworks.ai/serverless/pricing 2026-09-09, Standard: GLM 5.3 $1.40 / $0.26 / $4.40.
@@ -57,6 +65,8 @@ _ROW_BY_NAME = {
     "kimi-k2p6": "kimi-k2.6",
     "kimi-k3": "kimi-k3",
     "deepseek-v4-flash": "deepseek-v4-flash",
+    "deepseek-v4.1-flash": "deepseek-v4.1-flash",
+    "deepseek-v4p1-flash": "deepseek-v4.1-flash",
 }
 
 #: An Anthropic id carries a release date the price does not vary by.

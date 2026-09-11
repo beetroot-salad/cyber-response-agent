@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "the name, image, entrypoint, and creation context of container 1df4bcd65ee4 on host soc-playground": {
+   "status": "exact",
+   "note": "Reported as not observed; container-inspect exit 2 with 'no such object: 1df4bcd65ee4', passwd/proc-tree exit 1 inventory rejections, health-check hosts list and exit codes all match the returns verbatim."
+  },
+  "whether the container is a registered/known exercise or training container on this host": {
+   "status": "exact",
+   "note": "Reported as not establishable from host-state; the 8 hosts_present and the not-in-inventory error are the only relevant payloads and are cited accurately."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any registry entry covering soc-playground, its build playbook, or expected root SSH/publickey access from external sources": {
+   "status": "exact",
+   "note": "root/ssh, root/publickey, build-runner/provisioning lookups all returned matched: null; summary reports each as a miss"
+  },
+  "any entry covering 147.235.199.7 or operator access patterns to lab/playground hosts": {
+   "status": "exact",
+   "note": "147.235.199.7/ssh lookup returned matched: null; summary reports miss"
+  },
+  "if no entry matches, that the registry holds nothing covering this host or source": {
+   "status": "exact",
+   "note": "summary states no entry found for host or source, consistent with four null payloads; residual-uncertainty caveat is interpretation, not a measurement"
+  }
+ },
+ "unsupported": []
+}

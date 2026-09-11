@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "the process ancestry/entry path of the bash writing authorized_keys in container 1df4bcd65ee4 around 2026-07-28T16:12:36Z (docker exec, container start, or other), including user and parent": {
+   "status": "exact",
+   "note": "2 fires at 16:00:26.997Z/16:12:37.250Z, proc bash, user root, pname <NA>, cmdline all match return 8; docker-exec suggestion is interpretation"
+  },
+  "ssh auth events on soc-playground in the hour before 16:12Z: accepted logins with source IP, user, and method; failed-auth bursts": {
+   "status": "exact",
+   "note": "141 accepted / 0 failed, 79.177.137.245, root, publickey, 15:48:38.438Z\u201316:11:58.180Z match returns 7 and 10"
+  },
+  "any other Falco rules that fired in container 1df4bcd65ee4 between 15:00Z and 17:00Z, with process and timing": {
+   "status": "exact",
+   "note": "all 7 rows, counts, procs, parents, first/last timestamps match return 6; 143 total sums correctly"
+  },
+  "whether any of this activity has precedent in earlier days for this host or container (is this container/host normally quiet)": {
+   "status": "exact",
+   "note": "0 prior authorized_keys fires (return 11), 20 baseline rule/proc rows incl. same sshd/nc/curl rules, elastic-agent, package mgmt (return 9)"
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether the actor identity found by the burst is provisioned and active in the identity system, and what kind of principal it is (sre oncall, service account, ordinary user)": {
+   "status": "exact",
+   "note": "Actor root from the Falco sudo aggregate (3 events, 09:54:51.724\u2013.725Z); identity get-user returned HTTP 404 'user root not found' (exit 1) \u2014 all matches returns 5 and 6"
+  },
+  "that identity's recent authentication and sudo history, especially prior activity on soc-playground": {
+   "status": "exact",
+   "note": "One accepted publickey SSH login as root from 147.235.199.7 at 09:54:41.339Z, 0 failed, single row (return 8); 2-day sudo lookback shows only the one 3-event burst (return 9); zero-row auth sudo query matches return 3"
+  }
+ },
+ "unsupported": []
+}

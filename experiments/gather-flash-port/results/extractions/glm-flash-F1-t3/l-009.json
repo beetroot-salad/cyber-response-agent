@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "every process execution event attributed to the root session beyond the three sudo/psql probes, with command lines": {
+   "status": "exact",
+   "note": "Session-parented query returned 1 row (sshd -D -R connect at 09:54:52.325Z) as stated; the 18 post-09:55 execve groups are all containerd-shim/sh-parented per payload 3; the three sudo cmdlines match payload 6."
+  },
+  "any file writes, cron persistence, downloads, or outbound network connections from the host during the session window": {
+   "status": "exact",
+   "note": "Named writers (elastic-agent, seed-users.py, agent-enroll.sh, zeek, runcmd) and connect sources (elastic-otel-co, iptables SNAT, apt-get/python3 https, curl/openssl under sh) all appear in payloads 0/1; 'all' claims fall partly in elided regions but nothing visible contradicts them."
+  },
+  "when the root SSH session closed, and whether the event stream shows any further interactive activity afterward": {
+   "status": "exact",
+   "note": "Payload 4 shows sshd open 09:54:41.341Z, systemd-user 09:54:41.383Z, cron open/close pairs at 09:55:01.743/.746 and 10:05:01.754/.760, and no sshd 'session closed'; opened=4/closed=2 in payload 2 is consistent. 'Not observed' is the honest reading."
+  }
+ },
+ "unsupported": []
+}

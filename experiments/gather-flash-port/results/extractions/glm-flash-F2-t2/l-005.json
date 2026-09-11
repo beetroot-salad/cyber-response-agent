@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any active or recorded session, login, or principal associated with soc-playground or container 1df4bcd65ee4 around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "8 roles, none covering soc-playground; 14 named accounts each returned authorized:false/via:null/sudo:false; dev.ethan and dev.gabe exit 2 then breaker tripped; 16 users all enabled \u2014 all verifiable from payloads. Honest 'identity holds no sessions/logins' is supported."
+  },
+  "if none exists, that the identity system holds no record binding an actor to this host/container at that time": {
+   "status": "exact",
+   "note": "Summary states the store has no container-level or time-scoped entities and no principal is authorized on the host; consistent with list-roles/list-users/can-access payloads and the stub's described surface."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "the resolved name, image, and entrypoint of container e5b0213bd690 on soc-playground": {
+   "status": "exact",
+   "note": "name db-1 and image soc-playground/host-db:22.04 match container-inspect; entrypoint matches PID 1 in the db-1 proc-tree; the soc-playground-not-in-inventory error text is quoted faithfully"
+  },
+  "whether the root SSH session from 147.235.199.7 spawned or is connected to the sudo/psql process tree at 09:54:51Z": {
+   "status": "wrong",
+   "note": "The honest 'not observable' core, the listener-only sshd (PID 6), captured_at, the root/postgres/sshd passwd fields and the empty authorized_keys are all supported \u2014 but the claim that only TWO login-shell accounts exist (root, postgres) under-reports the passwd payload, which has eight /bin/bash accounts (root, postgres, sre.alice, sre.ben, sre.chen, dba.ivy, svc.backups, svc.config-mgmt)"
+  },
+  "what else the root SSH session did on the host around 09:54\u201310:05Z": {
+   "status": "exact",
+   "note": "Addressed as absence of coverage; no values asserted beyond the single capture time, which matches the payloads"
+  }
+ },
+ "unsupported": [
+  "Two SSH-capable, login-shell accounts are seeded on the container (root, postgres) \u2014 the passwd payload lists eight accounts with /bin/bash"
+ ]
+}

@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's verdict rests on quoted rows (root password change, sshd start, external root login, metadata-service contact, log clearing, 42MB download) and resolves all three authorization contracts, while X's escalation rests mostly on registry absences plus a benign-looking psql burst and never examines post-login activity, leaving impact 'none' beside a 'malicious' call. Y's leads each split a live fork (scheduled routine vs interactive, provisioning vs unexplained source, post-login scope), whereas X's failed elastic lead, threat-intel miss, and redundant ticket-store recheck barely move the verdict. Y also correctly pins the entity \u2014 soc-playground is the db-1 prod container with documented inbound sources the attacker IP isn't on \u2014 while X leaves the host 'undocumented' and an unresolved clock discrepancy, so its closing claim is scoped to a host it never fully identified."
+}

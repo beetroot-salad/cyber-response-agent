@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "every distinct source IP with successful ssh authentication on soc-playground between 16:12Z and 23:59Z on 2026-07-28, with counts and users": {
+   "status": "exact",
+   "note": "One IP 79.177.137.245, 338 accepted, user root, publickey, first/last 16:12:00.805Z\u201320:53:35.040Z \u2014 all match returns 4/5/7/8"
+  },
+  "specifically whether any successful login came from a source other than the baseline IP 79.177.137.245": {
+   "status": "exact",
+   "note": "Summary says none; every success query returned a single row for 79.177.137.245"
+  },
+  "any failed-then-successful auth pattern suggesting use of a newly added key": {
+   "status": "exact",
+   "note": "Failure query (return 6) returned 0 rows and failed=0 in returns 5/8; summary's 'none observed' with the auth-method-bearing caveat is supported"
+  }
+ },
+ "unsupported": []
+}

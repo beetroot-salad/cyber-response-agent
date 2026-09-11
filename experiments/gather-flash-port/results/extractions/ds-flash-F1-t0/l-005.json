@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 147.235.199.7 has any threat-intelligence reputation (scanner, C2, anonymizer, clean residential/business)": {
+   "status": "exact",
+   "note": "verdict unknown, score 0, empty sources/tags, null first/last_seen all match return 4; correctly framed as absence of signal, not a clean verdict"
+  },
+  "any known malicious activity attributed to this IP": {
+   "status": "exact",
+   "note": "'none observed' matches empty tags/sources and null timestamps in the lookup payload"
+  }
+ },
+ "unsupported": []
+}

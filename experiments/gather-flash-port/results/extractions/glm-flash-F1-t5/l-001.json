@@ -1,0 +1,23 @@
+{
+ "dims": {
+  "each Falco sudo-execution event in the burst: executing user, command line, parent process, timestamps": {
+   "status": "exact",
+   "note": "3 events, root, parent <NA>, three psql command lines, 09:54:51.724\u2013.725Z all match return 2"
+  },
+  "any interactive logins (ssh/sudo/session starts) on soc-playground shortly before and during the burst, including failed attempts": {
+   "status": "exact",
+   "note": "publickey root login from 147.235.199.7 port 45835 at 09:54:41.339, session opens, cron pairs at 09:55:01/10:05:01, no failed rows \u2014 all supported by returns 4/5"
+  },
+  "the identity's prior sudo or login history on this host (is this actor first-seen or habitual)": {
+   "status": "exact",
+   "note": "return 6 is row_count 0 for the prior 24h; 'zero prior auth events / first-seen' is supported"
+  },
+  "any other suspicious process activity on the host in the surrounding minutes": {
+   "status": "wrong",
+   "note": "summary says 84 'Contact cloud metadata service from container' events; the visible rows alone sum to 16+8+80=104 (and 114 rows were elided, so the true total is \u2265104). The 'no nc/curl/nmap/authorized_keys/drop-and-execute' absence claim is also asserted over a view missing 114 of 141 rows and was not checked against the file"
+  }
+ },
+ "unsupported": [
+  "84 \"Contact cloud metadata service from container\" events \u2014 visible payload rows for that rule already total 104"
+ ]
+}

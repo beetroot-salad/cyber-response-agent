@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "slight",
+ "reasons": "X's verdict rests on recorded rows \u2014 root password change, sshd start then root publickey login from an IP absent from CMDB, cloud-metadata probing, log clearing, and a 42MB external download \u2014 each gathered by a lead tied to a live fork, whereas Y saw the same 'Clear Log Activities' and drop-and-execute signals in its own l-001 and waved them off as lab noise without ever dispatching a lead against them. Y's strongest work is its 30-day baseline showing the sudo cadence is routine, and its inconclusive close is honestly scoped, but its loops 2\u20134 are mostly redundant empty-registry lookups that could not have moved the verdict either way. X still overclaims: confidence=high and 'nothing unsettled' despite an untested scripted-bring-up alternative (h-004 p2), a self-contradictory burst timestamp (09:53:57 vs 09:54:51), and a thin 7-day sudo baseline that Y's fuller record contradicts."
+}

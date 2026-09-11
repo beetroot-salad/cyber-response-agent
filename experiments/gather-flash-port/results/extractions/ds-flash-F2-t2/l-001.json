@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any approved change, exercise, or training event covering SSH authorized_keys modification on soc-playground was active around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "active-changes \u2192 [] (return 5), list-changes host=soc-playground \u2192 total 0 (return 6), list-changes active_at \u2192 total 0 (return 15); health-check 14/2 and the 14-record unfiltered list (hosts web-1/web-2/db-1/jump-box-1, windows Apr\u2013May and Sep 2026, CHG-1038 jump-box reboot mentions SSH) all match return 8 exactly. Honest 'none' is supported."
+  },
+  "if such a record exists, its id, scope, and effective time span": {
+   "status": "exact",
+   "note": "Summary explicitly resolves to 'no such record observed'; all host-scoped and instant-scoped payloads are empty, so nothing to report is the correct answer."
+  }
+ },
+ "unsupported": []
+}

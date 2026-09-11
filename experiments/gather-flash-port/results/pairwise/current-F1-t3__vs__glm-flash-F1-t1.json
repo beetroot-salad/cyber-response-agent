@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's verdict rests on quoted rows that each moved the needle \u2014 the auth-log lead recovered the root password change and external publickey login, the CMDB lead tested the source IP against the host's documented inbound list and found it absent, and the egress lead tested whether post-login activity exceeded provisioning (metadata-service contact, log clearing, 42MB download) \u2014 so a reader can audit malicious from the rows alone, with the open items (threat-intel unknown on the download host, sudo actor's login ancestor unrecovered) named honestly. X refutes both adversary hypotheses solely on 30-day recurrence, which is not discriminating (a persistent compromise recurs too), never pursued the actor via session logs, and two of its leads dead-ended, so its 'inconclusive' is honest but its 'adversary refuted' claim is not earned. Y is not flawless \u2014 the sudo-burst timestamp shifts between 09:53:57 and 09:54:51 across rows and the 42MB TLS download is treated as adversarial without attribution \u2014 but these are minor next to X's reliance on baseline as exoneration."
+}

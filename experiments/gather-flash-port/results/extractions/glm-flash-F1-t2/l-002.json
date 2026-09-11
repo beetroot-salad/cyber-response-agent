@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "the registered role, zone, owner, and environment of host soc-playground": {
+   "status": "exact",
+   "note": "Direct lookup returned HTTP 404 (seen in return 1); summary honestly reports every field as not observed, and soc-playground is absent from all 11 list-hosts entries and all trust_edges_out lists."
+  },
+  "whether soc-playground is a documented/managed corporate asset or undocumented": {
+   "status": "exact",
+   "note": "Concludes undocumented/unmanaged, supported by the 404 and by the full 11-host inventory (count and all 11 names match the payload) containing no matching or aliased entry."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any threat-intel reputation, sightings, or classification for 147.235.199.7": {
+   "status": "exact",
+   "note": "Lookup return shows verdict unknown, score 0, empty sources/tags, null first/last seen; IP absent from the 15-item list. Total 15 matches; the '11 IPs/domains' figure is only correct if it counts the one URL (6 IPs + 4 domains + 1 URL) \u2014 phrasing is loose but not contradicted."
+  },
+  "whether it is known as an anonymous VPN/hosting scanner or has any legitimate corporate association": {
+   "status": "exact",
+   "note": "No tags on the IP; cited tor-exit 185.220.101.45 and ssh-scanner 5.188.87.12 match rows; the only clean IPs in the list are 8.8.8.8 and 1.1.1.1 as stated."
+  }
+ },
+ "unsupported": []
+}

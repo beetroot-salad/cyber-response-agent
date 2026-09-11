@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any ticket referencing soc-playground, SSH authorized_keys changes, key rotation, or exercise/training activity around 2026-07-28": {
+   "status": "exact",
+   "note": "All five list-tickets queries (authorized_keys, soc-playground, key rotation, exercise, change-window label, unfiltered) returned total: 0; summary reports each as 0, matching payloads"
+  },
+  "for any hit: ticket id, requester/owner, status, and what it authorizes": {
+   "status": "exact",
+   "note": "Summary states no hits, so no id/owner/status/scope to cite \u2014 honest none, consistent with empty payloads"
+  }
+ },
+ "unsupported": []
+}

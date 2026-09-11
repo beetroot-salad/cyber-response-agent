@@ -1,0 +1,25 @@
+{
+ "dims": {
+  "the binary(ies) dropped and executed in the container: name, path, hash/signature if present, download source if visible": {
+   "status": "exact",
+   "note": "container 90115da40383, curl (/usr/bin/curl) + openssl (/usr/bin/openssl) under sh as root, 17 execve each, 09:54:53.330Z\u201310:10:55.38xZ, all match returns 3/18; column list in return 4 shows no hash field; cmdlines visible in payloads."
+  },
+  "what 'Read ssh information' events accessed (files, keys) and when": {
+   "status": "wrong",
+   "note": "The two events, files (/root/.ssh/authorized_keys at 09:54:52.324Z; /root/.ssh by systemd-tmpfile --clean at 10:08:48.368Z), proc <NA>, aname systemd all match return 4. But '~0.9s after the root login' contradicts the payloads: login accepted 09:54:41.339Z, the authorized_keys open is 09:54:52.324Z \u2014 ~11s later, not 0.9s."
+  },
+  "the 'Clear Log Activities' and 'Set Setuid or Setgid bit' events: target files and timestamps": {
+   "status": "exact",
+   "note": "Clear Log: 2 events 09:54:51.725Z, agent-enroll.sh in cb959dd40ecc / e5b0213bd690 \u2014 matches return 3. Setuid: 2 events 09:54:51.746Z, proc <NA> \u2014 matches return 3; target path begins '/var/lib/containerd/io.containerd.snapshotter.v1' in return 4 and the rest (snapshots/5039/fs/usr/bin/abuild-sudo, fchmod/S_ISUID) falls in the [TRUNCATED] region, so counted exact."
+  },
+  "any outbound connections or data movement from soc-playground or the container during the session": {
+   "status": "exact",
+   "note": "Zeek rows 172.18.0.1\u2192172.18.0.22:9200 (285 conns, 6220817/2658666 bytes) and \u2192172.18.0.25:8220 (2 conns) match return 20; 0 conns involving 147.235.199.7 matches return 21; host Falco connect examples (2.28.66.169, 2a01:4f8:\u2026, 185.12.64.3, :443, loopback) visible in returns 22/23; 'all boot-time' is unverifiable past truncation but not contradicted."
+  },
+  "the psql database probes' outcome \u2014 whether any postgres data was accessed or modified": {
+   "status": "exact",
+   "note": "3 Sudo execution events in e5b0213bd690 at 09:54:51.724\u2013725Z with the three psql cmdlines match return 17; postgres log stats (db-1 only, 3264 DETAIL / 3264 FATAL, 09:54:01\u201310:10:51) match return 25; honest statement that outcome isn't visible from soc-playground telemetry."
+  }
+ },
+ "unsupported": []
+}

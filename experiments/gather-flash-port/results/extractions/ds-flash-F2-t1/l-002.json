@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any approved change, exercise, or red-team engagement record covering soc-playground on 2026-07-28 around 16:12Z": {
+   "status": "exact",
+   "note": "active-changes at 16:12Z returned [] and list-changes host=soc-playground returned total 0; both match payloads"
+  },
+  "any record mentioning authorized_keys modification or SSH persistence drill on this host": {
+   "status": "exact",
+   "note": "all 14 enumerated records (11 approved, 1 planned, 1 in_progress, 1 implemented, 0 cancelled) cover only web-1/web-2/db-1/jump-box-1 and none mention authorized_keys or an SSH drill; per-record details cited (CHG-1038, CHG-1050, CHG-1042) match payloads"
+  },
+  "if nothing covers it, that no applicable record exists": {
+   "status": "exact",
+   "note": "stated plainly and consistent with the empty host-scoped results and the positive control on web-1 returning CHG-1042"
+  }
+ },
+ "unsupported": []
+}

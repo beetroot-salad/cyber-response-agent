@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether a tacit-knowledge registry entry exists for soc-playground or SOC playground/training environments": {
+   "status": "exact",
+   "note": "All five lookups returned matched: null and the health-check reports entries: 0; 'no entry exists' is fully supported."
+  },
+  "what activity such an entry says is expected (container provisioning, sudo postgres init, agent enrollment, curl/openssl downloads) and its validity window": {
+   "status": "exact",
+   "note": "Honest 'not documented / not applicable' \u2014 no entry exists in the payloads, so no expected activity or review_by/added_at could be reported."
+  }
+ },
+ "unsupported": []
+}

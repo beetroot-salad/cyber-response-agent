@@ -1,0 +1,23 @@
+{
+ "dims": {
+  "commands or files touched by the root session opened at 09:54:41Z, and whether it matches a provisioning script or interactive attacker behavior": {
+   "status": "wrong",
+   "note": "Login row (1 success, root, publickey, 09:54:41.339Z) and logged-on \u00d74 09:54:41.341\u219210:05:01.754Z are supported, and the 'no sudo/command attributable' finding is consistent with the payloads; but '~20m session' contradicts the payload span (09:54:41\u219210:05:01 \u2248 10m)."
+  },
+  "the origin and content/purpose of agent-enroll.sh (who placed it, what it does)": {
+   "status": "exact",
+   "note": "Two Clear Log Activities fires at 09:53:57.513Z/09:53:57.633Z, containers e5b0213bd690/cb959dd40ecc, openat /var/log/elastic-agent.log, user root, exepath bash/tini, parent tini/null, plus 2\u00d7 'File was truncated' filebeat lines \u2014 all in returns 35/36; '44s before login' arithmetic is right. 'Image entrypoint helper' is inference, not a measured value."
+  },
+  "any persistence or log-clearing artifacts around the window (crontab entries, cleared log files, new authorized_keys entries, new binaries)": {
+   "status": "wrong",
+   "note": "Drop-and-execute (openssl/curl, 15 each, parent sh, 90115da40383 = fleet-outputs-reconciler alpine:3.20, 09:54:53.330\u219210:08:55.370Z), rule-mix counts, proc-trees, and web-1 authorized_keys empty are all supported; but web-1 /etc/passwd count is stated as 27 when the payload has 28 entries. Also omits the seen 'Read ssh information' fire on /root/.ssh/authorized_keys at 09:54:11.996Z."
+  }
+ },
+ "unsupported": [
+  "'~20m session' for the 147.235.199.7 root login \u2014 payload session lines span 09:54:41.341Z\u219210:05:01.760Z (~10m)",
+  "'docker image-pull activity at 09:54:51.758\u201352.320Z' \u2014 the row with those timestamps is 'Unexpected UDP Traffic' proc=https parent=apt-get on host, not docker image pulls",
+  "'/etc/passwd web-1: 27 entries' \u2014 the returned entries array has 28",
+  "'elastic_agent datasets for office-ws-1/2, dev-ws-1, scanner-1, config-mgmt-1, ci-1 ~363\u2013378 events each' \u2014 ci-1 is 348 and office-ws-2 is 356, outside the stated range",
+  "'Falco fired 340+ events at 09:54:51.72\u201309:54:52.3Z' \u2014 the 340-event BPF row spans 09:54:51.727Z\u219209:56:33.295Z, not a ~0.6s burst"
+ ]
+}

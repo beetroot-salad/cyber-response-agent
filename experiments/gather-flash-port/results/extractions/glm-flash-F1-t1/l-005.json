@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any registry entry covering postgres health-check / psql sudo activity on soc-playground or its monitoring routine": {
+   "status": "exact",
+   "note": "health-check returned entries: 0 and lookup returned matched: null; summary reports none found, matching both payloads"
+  },
+  "the entry's scope and validity window": {
+   "status": "exact",
+   "note": "no entry exists (registry empty, lookup null); summary honestly states no scope or validity window to report"
+  }
+ },
+ "unsupported": []
+}

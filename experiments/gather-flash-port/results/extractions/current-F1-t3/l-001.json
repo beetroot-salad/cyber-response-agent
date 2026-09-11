@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "each falco Sudo execution event on soc-playground in the burst window: user, process, parent, command line, outcome": {
+   "status": "exact",
+   "note": "3 events, root, parent <NA>, container e5b0213bd690, three psql cmdlines all match return 3; proc.name was null in payload and outcome is not a Falco field, so omitting both is fair"
+  },
+  "whether the actor identity has prior sudo or login activity on this host (baseline, e.g. prior 30 days)": {
+   "status": "wrong",
+   "note": "Summary says e5b0213bd690 had '2 prior events' but those rows (events=2, last_seen 2026-08-30T09:54:51) include the burst itself \u2014 only 1 prior per command on 08-22 (plus 1 each via role-start.sh on 08-18). Rest matches (a36492b5172b 8 via role-start.sh, zero auth-index sudo rows). Login baseline (root 10,785 accepted logins, return 7) not mentioned"
+  },
+  "any other suspicious activity on soc-playground by the same actor in the surrounding hour (shell spawns, network tools, file writes)": {
+   "status": "wrong",
+   "note": "Per-rule counts, cmdlines, containers, and the 09:54:53\u201310:12:55 span all match returns 9/10, but the stated total of 1,089 events is off \u2014 the 16 rule rows sum to 824"
+  }
+ },
+ "unsupported": [
+  "1,089 total Falco events for root on soc-playground 09:00\u201310:59 (rows sum to 824; 1,089 appears in no return)"
+ ]
+}

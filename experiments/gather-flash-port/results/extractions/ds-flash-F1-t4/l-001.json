@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "which user identity or identities executed the sudo commands in the burst, and the exact commands run": {
+   "status": "exact",
+   "note": "Single identity root in container e5b0213bd690; all three cmdlines, falco event times (09:53:56.983 / 57.182 / 57.310Z), ingest timestamps and pname=<NA> match returns 6, 10, 13."
+  },
+  "the process and session lineage behind the sudo events (interactive shell, SSH login, parent process), including any login/auth events on soc-playground shortly before the burst": {
+   "status": "wrong",
+   "note": "Every individual auth line (passwd, systemd-logind x3, polkitd x4, sshd listening x2, Accepted publickey root from 147.235.199.7:45835 with the ED25519 fingerprint, pam/session lines at 09:54:41.341/.363/.383), pname=<NA>, and the single ancestor event id all match returns 0, 12, 17. But the summary states the auth events span '~22s' \u2014 the payload runs 09:53:47.594 to 09:54:41.383, ~54s."
+  },
+  "any other telemetry on soc-playground in the surrounding hour suggesting discovery, persistence, or credential access, or conversely corrective/ops activity": {
+   "status": "exact",
+   "note": "Container e5b0213bd690 rule mix (6 groups / 63 events, per-rule counts) matches return 11; Clear Log Activities 2 events matches return 14 (note: parent tini is only on the cb959dd40ecc row, the e5b0 row has null parent \u2014 loose wording); syslog 4,918 events and per-process counts match returns 19/21 (the by-process rows sum to 4918); first-shipped 09:53:47.59Z matches."
+  },
+  "whether these identities have prior sudo or login history on this host (baseline presence or novelty)": {
+   "status": "exact",
+   "note": "Falco Sudo execution 08:00\u201312:00 = exactly 3, all e5b0213bd690/root (return 13); auth rows confined to 09:53:47\u201310:05:01 with CRON root x4 (return 12); 147.235.199.7 seen only in the one sshd Accepted line (return 18)."
+  }
+ },
+ "unsupported": []
+}

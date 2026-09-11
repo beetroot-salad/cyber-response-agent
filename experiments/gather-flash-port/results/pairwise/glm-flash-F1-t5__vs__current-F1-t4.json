@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "slight",
+ "reasons": "X's verdict is carried by its rows: both authorization contracts resolve to explicit unauthorized entries, the tacit-knowledge miss and the IP's exclusive-to-this-host login history are recorded as data, and impact is honestly left indeterminate, so a reader can audit the escalation from the record alone. Y gathered some genuinely useful extra facts (the estate's postgres host is db-1, five days of SSH silence, an honest ceiling note on the failed lead) but leaves real contradictions unresolved \u2014 host-state puts the sudo burst 45s before the root login it is blamed on, the 91-login baseline first refutes then supports the same hypothesis, the host keeps a known-corp class after a CMDB 404, and impact is asserted as none with no evidence \u2014 and its fourth loop admits it carried little discriminative weight. Same disposition on the same anchors, but X's claim is more consistently scoped and better supported by what it actually recorded."
+}

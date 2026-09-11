@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 79.177.137.245 is a documented host/device, and if so its role, owner, and zone": {
+   "status": "exact",
+   "note": "get-host returned HTTP 404 (return 5); IP absent from the 11-host list-hosts payload, which indeed has no IP field. 'Undocumented, no role/owner/zone' is supported."
+  },
+  "whether soc-playground is documented in the CMDB and with what role/purpose (e.g. training or exercise host)": {
+   "status": "exact",
+   "note": "get-host returned HTTP 404 (return 4); name absent from list-hosts. 'No CMDB record, no training/exercise role' is supported. Alert host.hostname=soc-playground is from return 0."
+  }
+ },
+ "unsupported": []
+}

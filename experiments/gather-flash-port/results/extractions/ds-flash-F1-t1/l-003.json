@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "whether any approved change record or window covers soc-playground around 2026-08-30 09:54\u201310:00Z": {
+   "status": "exact",
+   "note": "active-changes returned [] and list-changes host=soc-playground returned total 0; both payloads empty, summary reports absence. Positive-control values (14 records, connected/ok, standing_count 2, host groupings) all match return 7/8."
+  },
+  "if one exists, what it authorizes and who owns it": {
+   "status": "exact",
+   "note": "Summary states not applicable since no covering record exists; consistent with empty payloads."
+  }
+ },
+ "unsupported": [
+  "CHG-1043 described as 'the only record with an 09:00\u201310:00Z-shaped window' \u2014 its window in the payload is 2026-05-02T04:00\u201306:00Z; no record has a 09:00\u201310:00Z window"
+ ]
+}

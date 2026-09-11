@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "X's 'malicious / high confidence' rests on absence-of-records plus a 'no prior baseline' assertion that no row carries, and its own loop-2 grading admits the dropped binary is an enrollment script and the sudo commands are read-only health checks \u2014 the verdict contradicts the record it cites. Y's leads actually discriminated (30-day sudo baseline showing 3+/10min bursts in 88% of windows, two prior accepted logins from the same IP, container resolved to db-1 running Postgres) and each result is quoted in rows, so the inconclusive-but-escalate disposition is auditable from the table alone. Y's weakness is that it waved off the drop-and-execute/log-clear Falco events as 'chaotic lab host' without testing them, but its closing claim is scoped to what it did establish and names the genuinely open question (who holds the root key), whereas X names a compromise it did not demonstrate."
+}

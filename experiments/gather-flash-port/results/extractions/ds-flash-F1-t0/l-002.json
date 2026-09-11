@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "any change requests or maintenance windows active on soc-playground covering the burst time on 2026-08-30": {
+   "status": "exact",
+   "note": "active-changes returned [] at 09:59:51Z and 09:54:51Z; list-changes host=soc-playground returned total 0 \u2014 summary reports zero, matching payloads"
+  },
+  "whether any such window explicitly authorizes sudo/privilege-escalated activity, and by which identity": {
+   "status": "exact",
+   "note": "honest 'none / no identity' given empty host-scoped results"
+  }
+ },
+ "unsupported": [
+  "Two standing tickets are the nightly db-1 backup windows \u2014 health-check reports standing_count 2, but the list-changes payload shows two distinct standing ticket_refs (OPS-STANDING-DB-BACKUP and OPS-STANDING-WEB-PATCH); nothing in the returns identifies both standing tickets as db-1 backups"
+ ]
+}

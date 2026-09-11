@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "all SSH or other auth events from source 147.235.199.7 across all hosts in the 30 days before 2026-08-30T09:54Z (any prior appearance at all)": {
+   "status": "exact",
+   "note": "2 events on soc-playground (2026-08-22T08:53:21.548Z port 45824; 16:09:13.316Z port 45864), root/publickey/success, 0 failed \u2014 matches returns 4/5; wider logs-* sweep (return 8) and syslog text backstop (return 9, 0 rows) also reported correctly"
+  },
+  "any auth or network events from that IP on the alert day before the 09:54:41Z login": {
+   "status": "exact",
+   "note": "0 rows on logs-* for 00:00\u201309:54Z (return 6); single 09:54:41.339Z ssh_login success root/publickey through 10:30Z (return 10); positive-control dataset counts (12 datasets, syslog 2973, zeek.connection 511, system.auth 280) match return 7"
+  }
+ },
+ "unsupported": []
+}

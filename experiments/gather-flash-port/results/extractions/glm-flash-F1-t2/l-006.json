@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "the timing and session attribution of the 'password for root changed by root' event relative to the external SSH session": {
+   "status": "exact",
+   "note": "Two searches for 'password for root changed' (auth index 09:50\u201312:00Z and all logs-* 08-29..08-31) both returned row_count 0; honest 'not observed'. The pam.d/common-password read (09:54:41.382, systemd, uid 0) and the 09:54:11 authorized_keys read by systemd are both in the Falco payloads."
+  },
+  "all processes/commands run on soc-playground or its containers after 09:54Z attributable to the root SSH session, especially persistence primitives (user creation, key writes, cron, service edits) or discovery commands": {
+   "status": "exact",
+   "note": "3 sudo psql commands at 09:54:51.724\u2013.725Z with null container match return 9; apk/pip, curl\u00d719 from sh with the elastic:\u2026 credential, fleet-server, systemd-tmpfile --clean all match return 6. The 98-row useradd/usermod/crontab/authorized_keys sweep (not capped at LIMIT 100) and its defender-sql filter show only elastic_agent state changes plus the one authorized_keys read, so 'zero persistence events' holds."
+  },
+  "any outbound network connections from soc-playground after the login, with destinations": {
+   "status": "exact",
+   "note": "All 38 Zeek rows were visible: .24\u2192.22:9200 396 conns/12,477,681 B; .17\u219234.95.113.255:443 22 conns 09:54:47\u201310:10:21; .17\u219234.120.127.130:443 7; .25\u2192169.254.169.254:80 100 and :443 10 at 09:55:06\u201309:55:39; no 147.235.199.7 source. Kibana attribution of .17 comes from the Falco connect string 172.18.0.17:40246->169.254.169.254:80 process=node /usr/share/kibana. Host-level attribution is caveated (CMDB 404)."
+  },
+  "whether the sshd session on soc-playground is still active or when it ended": {
+   "status": "wrong",
+   "note": "Return 16 shows 3 pam_unix(sshd:session) opens for root (first 09:54:41.341Z, last 18:03:45.110Z) but only 1 close (12:48:31.133Z). The summary reports a single session that cleanly ended at 12:48:31Z (~2h54m), under-reporting the session count, omitting the later 18:03:45Z root login, and attributing the sole close to the 09:54 session without evidence that the close belongs to it rather than the second, un-timestamped open."
+  }
+ },
+ "unsupported": []
+}

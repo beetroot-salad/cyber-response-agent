@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether any approved change ticket or exercise window covers simulated attacker / SSH key activity on soc-playground around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "active-changes(host=soc-playground) returned [] and list-changes(active_at=..., all hosts) returned total 0; summary reports both as 0"
+  },
+  "the change record's id, scope, and effective time window if one exists": {
+   "status": "exact",
+   "note": "Correctly reports none exists; the three analogue tickets cited (CHG-1042, CHG-1050, CHG-WEB-PATCH-20260908T0200Z) have ids, hosts, and windows matching the payloads"
+  },
+  "whether any records mention soc-playground at all in the surrounding days": {
+   "status": "exact",
+   "note": "list-changes(host=soc-playground) \u2192 total 0; unfiltered 14 records with hosts limited to web-1/web-2/db-1/jump-box-1, as the summary states; web-1 count of 3 also matches"
+  }
+ },
+ "unsupported": []
+}

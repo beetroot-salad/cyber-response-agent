@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's rows carry the verdict: it recovered the sudo command lines and their boot/entrypoint context (which explains the sudo-before-login timing X flagged as a clock discrepancy and never resolved), and its login-baseline lead was genuinely discriminating \u2014 it surfaced the prior routine source (79.177.137.245, until 08-18) against which 147.235.199.7 is novel. X's 'malicious' disposition rests almost entirely on absence of records in stores it itself shows are estate-wide sparse (an empty ticket system, a host missing from every inventory), while its own evidence says commands were benign and the source had prior accepted logins; its failed l-001 and redundant loop-4 ticket recheck add no discriminating weight. Y's 'inconclusive, escalate for attribution' is scoped to what was actually established, and the open questions it names (who owns the host, who operates the new source IP) are the ones the record leaves open."
+}

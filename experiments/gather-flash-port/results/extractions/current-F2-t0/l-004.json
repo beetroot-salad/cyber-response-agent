@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any registry entry covering ssh authorized_keys modification or attacker-simulation exercises on soc-playground or its containers": {
+   "status": "exact",
+   "note": "Every lookup returned matched: null and health-check reports entries: 0; summary reports none found, matching payloads."
+  },
+  "the entry's id, scope and validity window if a hit": {
+   "status": "exact",
+   "note": "Correctly reported as N/A since no hit occurred; no fabricated fields."
+  },
+  "an explicit miss if no such entry exists": {
+   "status": "exact",
+   "note": "Explicit miss stated, backed by all-null lookups and the zero-entry health-check."
+  }
+ },
+ "unsupported": []
+}

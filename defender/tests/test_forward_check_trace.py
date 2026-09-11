@@ -149,7 +149,7 @@ def test_d12_curator_trace_in_a_separate_root(tmp_path):
             corpus_dir=scene.corpus, check=FINDINGS_CHECK,
             runs_dir=scene.runs, pending=scene.pending, queued_ids=frozenset({"run-X"}),
             repo_root=scene.repo, learning_run_dir=scene.curdir,
-            log=lambda *a, **k: None, model="glm-5.2", effort="low",
+            log=lambda *a, **k: None, model="glm-5.3", effort="low",
             request_limit=8, timeout=180,
             source_key=lambda model, label=None: None,
             run_author=lambda *a, **kw: _run_curator_pydantic(

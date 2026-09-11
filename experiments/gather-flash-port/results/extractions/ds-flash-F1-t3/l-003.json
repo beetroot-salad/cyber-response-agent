@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "how often sudo-execution events occur on this host normally (volume, cadence, typical hours)": {
+   "status": "exact",
+   "note": "Honestly reported as unmeasured: the single query returned exit 2 (Elasticsearch timed out); no volume/cadence/hour values asserted."
+  },
+  "which identities habitually run sudo on this host": {
+   "status": "exact",
+   "note": "Explicitly reported as no identity list returned due to source outage; no names asserted."
+  },
+  "whether 3-in-10-minutes bursts have precedent on this host in the baseline period": {
+   "status": "exact",
+   "note": "Reported as unaddressed for lack of a reachable source; no precedent claim made either way."
+  }
+ },
+ "unsupported": []
+}

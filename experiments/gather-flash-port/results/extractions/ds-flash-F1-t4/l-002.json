@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether an approved change record or change window was active covering soc-playground at burst time, with its id and scope": {
+   "status": "exact",
+   "note": "active-changes(host=soc-playground, at=09:54:51Z) returned [] in return 5; summary reports none, no id/scope \u2014 matches."
+  },
+  "if none was active, that no matching change record exists for this host and window": {
+   "status": "exact",
+   "note": "list-changes(host=soc-playground) returned total 0 (return 6); unfiltered list (14) and approved list (11) with their hosts/ids/windows all match returns 8\u20139, including the nine CHG-DB-BACKUP rows and the two web-tier rows. Only quibble is wording: the DB-BACKUP windows are Sep 4\u201312, not 'bracketing late August' \u2014 interpretive, not a wrong value."
+  }
+ },
+ "unsupported": []
+}

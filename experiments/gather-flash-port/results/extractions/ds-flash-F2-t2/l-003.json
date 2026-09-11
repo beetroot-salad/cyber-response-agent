@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "the session/process provenance of the bash write at 2026-07-28T16:12:37Z in container 1df4bcd65ee4 on soc-playground \u2014 what exec/login/remote activity preceded or spawned it": {
+   "status": "exact",
+   "note": "2 fires at 16:00:26.997Z/16:12:37.250Z, bash /usr/bin/bash, parent <NA>, root/uid 0/loginuid -1, tty 0, openat on /root/.ssh/authorized_keys all match returns 5/6/8/15; no execve for bash matches return 9; host auth counts (247 accepted publickey root from 79.177.137.245, 315 logged-on, 309 logged-off, 957 null; no failures; ports 12800\u201315759) match returns 14/16; alert 16:16:53Z matches return 0"
+  },
+  "any prior authorized_keys modification events on soc-playground or in this container over recent weeks, and their cadence/context": {
+   "status": "wrong",
+   "note": "49 groups, container list, and 1df4bcd65ee4 days (Jul 1,2,3,8,9,11,28) are supported, but 'Jul 27 (4 containers, 8 fires)' contradicts the payload: visible Jul 27 rows are ed96(1), ffbf(1), a364(4) = 3 containers/6 fires, and the single truncated row must be the Jul 28 1df4bcd65ee4 group (48 rows visible of 49). 'Continuous daily Jul 1\u201313' is also contradicted \u2014 no rows for Jul 5, 6, or 12"
+  },
+  "any other Falco alerts or notable activity from this container around the same time": {
+   "status": "exact",
+   "note": "Redirect STDOUT/STDIN 30, Unexpected UDP 15, Suspicious Network Tool 10 (nc, parent runuser), Ingress Remote File Copy 10 (curl, parent bash), with first/last seen, all match returns 5/9/17; no other rules in return 17"
+  }
+ },
+ "unsupported": [
+  "Jul 27: 4 containers, 8 fires of 'Adding ssh keys to authorized_keys' (payload shows 3 containers / 6 fires visible, with only one further row truncated, which must be the Jul 28 group)",
+  "Continuous daily fires Jul 1\u201313 (no rows for Jul 5, 6, 12 in the payload)",
+  "Every observed fire Jul 1\u201328 carries the same bash -lc / _fake_key_ / attacker@elsewhere script shape (cmdline was only seen for the two Jul 28 fires; the cadence query returned no cmdline)"
+ ]
+}

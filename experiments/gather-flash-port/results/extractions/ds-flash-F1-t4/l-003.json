@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any open incident, oncall, or response ticket referencing soc-playground at burst time, with id and owner": {
+   "status": "exact",
+   "note": "Reports total 0 for status=open q=soc-playground (seq 0) and for the any-status free-text search (seq 2); both payloads are {\"total\": 0, \"tickets\": []}. Honest none-found."
+  },
+  "if none exists, that no active ticket covers this host and window": {
+   "status": "exact",
+   "note": "Reports zero for in_progress (seq 1) and the unfiltered control (seq 4), all exit 0 and byte-identical per the NO-OP notices; correctly flags that the empty unfiltered control means the absence is not attributable to the host. All values match the payloads; the window-not-applicable note matches the verb signature from list_verbs."
+  }
+ },
+ "unsupported": []
+}

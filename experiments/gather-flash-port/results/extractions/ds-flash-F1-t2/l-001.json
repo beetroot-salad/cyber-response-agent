@@ -1,0 +1,23 @@
+{
+ "dims": {
+  "each sudo-execution event in the burst: timestamp, executing user, sudo command line, parent process / shell lineage, and tty": {
+   "status": "exact",
+   "note": "All three @timestamps, evt.time values, command lines, container e5b0213bd690, user root, and the null/<NA> proc/pname/uid/evt.type/fd fields match return 7; the raw Falco message JSON confirms no tty or parent field is populated."
+  },
+  "whether the activity traces to an interactive session (ssh login, shell) and which source identity it belongs to": {
+   "status": "exact",
+   "note": "All nine auth rows (passwd, systemd-logind x4, polkitd x4, sshd x2, ssh_login success root/147.235.199.7/publickey at 09:54:41.339Z, logged-on sshd/(systemd), CRON pairs) match return 13; the ~44s event-time-before-login observation is arithmetically correct (the '~10.7s' figure is actually ~10.4s, an approximation)."
+  },
+  "how this burst compares to this host's and identity's prior sudo activity pattern (cadence, hours, commands) over preceding weeks": {
+   "status": "wrong",
+   "note": "Cluster totals (3,550,212 / 40,388 / 42,813), per-host sudo counts, syslog 501,033 with 0 sudo, and the 0-row sudo queries are all supported. But 'No prior Sudo execution Falco fires on soc-playground \u2026 in a 46-day history' was never measured \u2014 no Falco query covered anything before 09:30Z on 08-30. Also 105,537 is the count for the window ending 10:10Z (return 12), not the 09:54:40Z window it is attributed to, whose rows sum to 105,527."
+  },
+  "any other Falco or audit events on soc-playground immediately before the burst that suggest shell access or reconnaissance": {
+   "status": "exact",
+   "note": "The three pre-burst Falco groups (unshare/runc at 09:53:56.879Z, BPF x6, iptables UDP at 09:53:57.881Z) match return 14; the claim that recon-style rules appear only from 09:54:51 on is consistent with the first_seen-sorted return 10 (truncated after that point, so the 121-row/34-rule count is credited as plausible)."
+  }
+ },
+ "unsupported": [
+  "No prior 'Sudo execution' Falco fires on soc-playground over the 46-day baseline (the host 'had none') \u2014 no Falco query was run over any window before 2026-08-30T09:30Z"
+ ]
+}

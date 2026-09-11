@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether any registry entry covers simulated attacker / exercise persistence activity on soc-playground or the SOC training range": {
+   "status": "exact",
+   "note": "Health-check returned entries: 0 and all six lookups (incl. host=*) returned matched: null; summary reports no covering entry, registry empty."
+  },
+  "the entry's id, scope, and validity window if found": {
+   "status": "exact",
+   "note": "Reported as not found; consistent with matched: null and zero entries."
+  },
+  "what the registry says generally about soc-playground's purpose": {
+   "status": "exact",
+   "note": "Summary says nothing is stated; supported by entries: 0 in the health-check payload."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any approved change record touching soc-playground or ssh key rotation in the 24h around 2026-07-28T16:12Z, with ticket ids and scope": {
+   "status": "exact",
+   "note": "0 for soc-playground (returns 4-6 empty); 14 estate-wide tickets, hosts web-1/web-2/db-1/jump-box-1 and scopes match return 7; none mention ssh keys"
+  },
+  "whether any such record covers container 1df4bcd65ee4 or authorized_keys modification specifically": {
+   "status": "exact",
+   "note": "no record in return 7 references the container or authorized_keys; summary says so"
+  },
+  "absence of any covering record if none exists": {
+   "status": "exact",
+   "note": "active-changes at 16:12Z returned [] and host-scoped list-changes returned total 0"
+  }
+ },
+ "unsupported": []
+}

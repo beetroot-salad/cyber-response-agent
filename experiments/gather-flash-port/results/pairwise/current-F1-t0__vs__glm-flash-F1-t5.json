@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "X's inconclusive verdict is carried by rows the reader can audit \u2014 a 30-day baseline showing 3+ sudo bursts in 88% of active windows and 11,403 root SSH logins from a second IP, the container identity matching the psql commands, and every authz registry queried and measured empty \u2014 and it honestly grades its own adversary predictions as non-discriminating because they match baseline too. Y's 'malicious' disposition rests on the same registry absences, which Y itself concedes is 'not tool-confirmed', while its record contradicts itself (root marked first-seen with zero prior auth, yet l-005 finds three prior root logins from the same IP since Aug 22) and its prose cites a boot-script sequence (agent-enroll.sh, seed-users.py) that appears in no observation row. Y never ran the host-baseline lead that would have tested whether the burst deviates at all, so its severe-weight refutation of the benign hypothesis and its 'exclusive' access claim are unearned."
+}

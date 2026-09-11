@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "whether soc-playground is a documented SOC training / playground host, and its owner and environment tier": {
+   "status": "exact",
+   "note": "404 on get-host, 11-host inventory with names and roles all match return 6; 'no owner/tier' is an honest absence"
+  },
+  "whether container 1df4bcd65ee4 or its image is documented in CMDB": {
+   "status": "exact",
+   "note": "no verb keys on container id (return 1), field set listed matches list-hosts records, no container/image references in payload; honest absence"
+  },
+  "any notes on expected alert or exercise activity for this host": {
+   "status": "exact",
+   "note": "no exercise/alert-expectation field in payload; change_window example 'sun 04:00-05:00 UTC' and alert id/timestamp are present in returns 6 and 0"
+  }
+ },
+ "unsupported": [
+  "container `1df4bcd65ee4` presented as an 'established anchor' for soc-playground \u2014 the id appears only in the lead goal, not in any tool return (the alert JSON in return 0 has containerized=false and no container id)"
+ ]
+}

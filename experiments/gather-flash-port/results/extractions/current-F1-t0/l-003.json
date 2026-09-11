@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "how often sudo executions normally occur on soc-playground, by which identities and at which hours, over the recent baseline period before 2026-08-30": {
+   "status": "exact",
+   "note": "2,629 events / all root match return 14; daily counts, active-day list and gap days match return 18 exactly; hourly min/max/avg/median match return 19; 'all 24 hours' plausibly sits in truncated return 15"
+  },
+  "whether bursts of 3+ sudo events in 10 minutes are routine on this host": {
+   "status": "exact",
+   "note": "542/476/245/32/max 24/avg 4.85 match return 17; percentages recompute correctly; max-burst window 2026-08-17 11:20 matches return 16"
+  }
+ },
+ "unsupported": []
+}

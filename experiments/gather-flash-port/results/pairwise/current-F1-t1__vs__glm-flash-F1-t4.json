@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "slight",
+ "reasons": "X actually tested what would separate the two stories \u2014 what the root session did after login, where traffic went (only internal Kibana, quoted in e-006), and whether persistence landed \u2014 while Y inferred 'no persistence commands' from the three psql commands alone and never examined the rest of the session. Y's record is tidier and each of its leads is non-redundant, whereas X burned four leads re-asking one question and cites l-011 and the '7x/30d' baseline in prose without backing rows, so X's audit trail is weaker. But X's named open questions (audit-level session record, Falco network payloads) are the genuinely open ones, and Y's ceiling omits the untested session activity, so X's inconclusive verdict is the better earned of the two."
+}

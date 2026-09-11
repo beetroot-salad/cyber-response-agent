@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "soc-playground's CMDB record: role, environment, owner, criticality": {
+   "status": "exact",
+   "note": "get-host returned HTTP 404 and the 11-host list contains no soc-playground; honest 'not in CMDB' matches payloads"
+  },
+  "whether this host class commonly carries admin/sudo activity or is a lab/playground machine": {
+   "status": "wrong",
+   "note": "role-class list and sandbox sudo:true claim are correct, but the enumeration of hosts with change_window null and non-prod criticality (canary-1, dev-ws-1) omits office-ws-1 and office-ws-2 (preprod, change_window null) \u2014 under-reported cardinality"
+  }
+ },
+ "unsupported": []
+}

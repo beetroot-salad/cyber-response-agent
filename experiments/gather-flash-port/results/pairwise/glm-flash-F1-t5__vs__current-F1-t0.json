@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "X labels the burst malicious while its own synthesis admits the adversary story is not tool-confirmed \u2014 every finding is an absence of authorization, not positive evidence of malice, so the disposition outruns the rows; it also cites a boot-time script sequence (agent-enroll.sh, seed-users.py) in a hypothesis that never appears in any observation row. Y ran the one lead that could have flipped the verdict either way \u2014 the host's 30-day sudo baseline \u2014 and it showed the alerted cadence is routine (88% of active windows, root-via-SSH dominant), plus it resolved the container as a postgres image, which explains the psql checks; that evidence is carried in consultation rows a reader can audit. Y's inconclusive-but-escalate verdict matches what was actually gathered, and the open question it names (who holds the root key behind 147.235.199.7) is the genuinely unresolved one, with an honest ceiling stating no deployed system can attribute it \u2014 Y's only real weakness is some redundancy (retry leads, overlapping ticket/change checks) and the odd known-corp class on root."
+}

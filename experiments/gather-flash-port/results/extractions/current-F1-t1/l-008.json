@@ -1,0 +1,9 @@
+{
+ "dims": {
+  "every process event in the window whose parent chain includes sshd or an interactive shell: process name, command line, container, and timestamp": {
+   "status": "exact",
+   "note": "859 total (return 7); 39 = 19+19+1 across 3 groups with proc/cmdline/parent/container/first_seen/last_seen/rule all matching returns 10-12; absence of bash/sudo parents matches returns 9 and 11; 820 remainder is 859-39 and the listed parent names appear in return 9. Note: measured direct parent (proc.pname) only, not full ancestor chain, but no value contradicts the payloads."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's malicious verdict rests on quoted rows it gathered \u2014 the root password change, external root publickey login from an IP absent from CMDB's 11-host inventory, cloud-metadata contact, log clearing, and a 42MB TLS download \u2014 and each loop's lead (scheduled-routine, provisioning-source, egress) tested a competing explanation that could have flipped the verdict. X gathered largely the same authorization refusals but stopped at 'inconclusive' when its host-state lead was refused, never pursuing the SIEM-side post-login activity that was reachable and that actually discriminates operator from adversary; its ceiling claim that the only remaining evidence was unreachable is not earned. X's record is also internally muddled (the sudo baseline is '0 in 30d' while the analyze summary treats external root SSH as the host's normal composition), whereas Y's rows carry the bring-up sequence and flows the prose asserts, and its open question at close is genuinely none."
+}

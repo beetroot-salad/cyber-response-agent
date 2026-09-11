@@ -1,0 +1,16 @@
+{
+ "dims": {
+  "any threat-intelligence records for 147.235.199.7 (reputation, tags, campaigns, scanners)": {
+   "status": "exact",
+   "note": "lookup payload: verdict unknown, score 0, sources [], tags [], first/last_seen null \u2014 summary reports exactly that"
+  },
+  "absence of any records, if the IP is unknown to all feeds": {
+   "status": "exact",
+   "note": "honest 'unknown to all feeds' matches the empty lookup; the 15-row indicator list contains no 147.235.199.7 entry"
+  }
+ },
+ "unsupported": [
+  "3 domains in the indicator store (payload has 4: evil-c2.example, update-check.example, github.com, registry-1.docker.io)",
+  "5 hashes in the indicator store (payload has 4: 2 sha256 + 2 md5)"
+ ]
+}

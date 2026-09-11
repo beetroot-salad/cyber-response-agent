@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Run X's verdict rests on assertions its rows never test \u2014 'persistence novel for this container', 'impact exceeds/high', and that the bash exec came from the 79.177.137.245 sessions \u2014 while its ticket lead (l-002) has no recorded result and no lead checked baseline or reputation; Run Y ran a baseline lead that actually moved the verdict (same rule fired 5x Jul 8\u201311, nc/curl routine at ~1900 fires/3wk), plus threat-intel and identity checks that could have rescued either story. Y's leads were discriminating rather than confirmatory, and it honestly weighted the same external-root-login burst as weak because container provenance (parent=NA, container removed) could not tie the write to those sessions. Y's closing claim is scoped to what was tested and names the genuinely open question (unrecorded playground simulation vs real persistence), though it too leaves the identity lead (l-007) result in prose only rather than a row."
+}

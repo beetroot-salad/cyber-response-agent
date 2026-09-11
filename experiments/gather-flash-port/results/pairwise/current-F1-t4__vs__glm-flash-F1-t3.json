@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's leads each tested something that could flip the verdict \u2014 IAM provisioning of root, a third provisioning-run hypothesis, residual persistence on the host, full session telemetry, 30-day source-IP history, and a threat-intel liveness check \u2014 and the record carries each result as quoted rows, while X's primary elastic lead failed outright, its loop-4 lead was confirmatory, and it never resolved that host-state places the sudo events ~45s before the SSH login it attributes them to. Y is also honest that Falco parent fields are null so attribution rests on timing, that the probes sit inside a cluster-wide seeding second, and it names the genuinely open questions (IP/key origin, undocumented lab host). Y's one real flaw is labelling the termination 'adversarial-confirmed' with impact 'exceeds' while admitting intent cannot be discriminated \u2014 X's 'unauthorized-escalation / impact none' is the better-scoped label \u2014 but that is a naming overreach on top of a far better-earned evidentiary record."
+}

@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any ticket referencing soc-playground, its provisioning, or the 2026-08-30 activity window": {
+   "status": "exact",
+   "note": "All three list-tickets calls returned {total:0, tickets:[]}; summary reports none found."
+  },
+  "who requested/owned any such ticket and what it authorized": {
+   "status": "exact",
+   "note": "Honest 'none exists' \u2014 no ticket rows, so no requester/owner/authorization to report."
+  },
+  "absence of any covering ticket, if none exists": {
+   "status": "exact",
+   "note": "Absence stated and backed by the unfiltered listing also returning zero; byte-identical NO-OP notes support the 'same empty set' claim."
+  }
+ },
+ "unsupported": []
+}

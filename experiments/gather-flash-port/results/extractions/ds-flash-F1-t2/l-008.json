@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "whether `sudo -u postgres psql` commands (especially the pg_database datname='app' existence probe) appear on other fleet hosts over the lookback, and with what cadence": {
+   "status": "exact",
+   "note": "db-1 only; 37/37/37 psql shapes + 12 createdb with first/last timestamps match return 24; fan-out (return 19) 4 rows all db-1; per-day 3/36/27/45 matches return 25; Falco per-container counts match return 29 (a36492b5172b trio plausibly in truncated tail)"
+  },
+  "whether such commands cluster at environment bring-up times or recurring schedules on those hosts": {
+   "status": "exact",
+   "note": "four discrete days (08-17, 08-18, 08-22, 08-30) with nothing between, supported by return 25 daily buckets and return 26 enrollment days"
+  },
+  "whether the elastic-agent / agent-enroll.sh / fleet-enrollment churn seen at 09:54:51Z on soc-playground also appears on other hosts at the same or other times \u2014 i.e. is it a standard environment build pattern": {
+   "status": "wrong",
+   "note": "syslog 4 rows/soc-playground-only with per-day counts and spans match return 26, fleet_server rollover ids/times match return 32; but the container-churn counts are off: return 31 shows 12 (13 with 9cb0d29040cc) container ids ending 08-17, not 14, and 12 (not 14) that begin 08-18 and run through 08-30 (bbc0ce213e6b, e1a2579de858, 47be7b82a802, 1dedd624e25a end 08-18)"
+  }
+ },
+ "unsupported": [
+  "pre-08-17 fleet of 14 container ids whose events all stop 2026-08-17T17:56Z (return 31 shows 12 ending ~17:56, 13 counting 9cb0d29040cc which ends 09:53)",
+  "14 distinct falco.output_fields.container.id values begin at 2026-08-18T08:05\u201309:45Z and are live through 08-30 (return 31 shows 12 such; 16 begin 08-18 in total)",
+  "agent telemetry shows 30 distinct container ids (30 is the LIMIT-capped row_count of return 31, a Falco query; return 32 groups by dataset/host and shows only 4 container-id hosts before truncation)"
+ ]
+}

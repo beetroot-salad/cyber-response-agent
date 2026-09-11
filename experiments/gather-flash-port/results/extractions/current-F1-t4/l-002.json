@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether an approved change ticket or change window covering soc-playground was active at burst time": {
+   "status": "exact",
+   "note": "active-changes at 09:57Z returned []; list-changes host=soc-playground returned total 0 \u2014 both in payloads"
+  },
+  "whether soc-playground is in an active incident state with responders assigned at burst time": {
+   "status": "exact",
+   "note": "Honestly reports the system cannot answer this and points to ticket-server; no incident values asserted, consistent with the knowledge doc's when_not_to_use"
+  },
+  "any change or incident records that name sudo, root, or privilege-escalating work on soc-playground near 2026-08-30": {
+   "status": "exact",
+   "note": "No soc-playground CRs (total 0); 14-CR catalog and its categories (nginx patch, postgres bump, jump-box reboot, TLS rotation, 9 db-1 backups, 1 web patch) match return 11; none mention sudo/root"
+  }
+ },
+ "unsupported": []
+}

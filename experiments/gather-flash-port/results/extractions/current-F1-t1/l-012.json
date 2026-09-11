@@ -1,0 +1,9 @@
+{
+ "dims": {
+  "every remote host or IP soc-playground connected to or accepted connections from in the window, with direction and rough volume, and whether any destination is outside the usual internal peers (kibana, web-1, containers, metadata service)": {
+   "status": "exact",
+   "note": "Zeek: single peer 172.18.0.17 outbound, 19 conns, 9671/34656 bytes, http/5601, local_orig/local_resp true, 09:54:53\u201310:12:54Z \u2014 all match returns 8/9/12/14/16/17/18 (distinct_peers=1, no inbound rows). Auth: 147.235.199.7, 1 accepted/0 failed, root, publickey, port 45835, 09:54:41.339Z \u2014 matches returns 10/15. External/Kibana classification is interpretation."
+  }
+ },
+ "unsupported": []
+}

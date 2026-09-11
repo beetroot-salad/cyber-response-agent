@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "X's 'inconclusive, escalate as unauthorized' matches what its rows carry \u2014 every authz anchor refused with quoted reasoning, a 30-day SSH baseline showing external root login is this host's normal pattern (the one lead that actually changed the reading), and an honestly flagged failed host-state lead naming the genuinely open question. Y claims 'malicious / high confidence' while its own l-006 found the commands were routine DB probes with no persistence or egress (its adversary prediction failed, yet weight was left unchanged), it never tested whether external root SSH was baseline, and its key post-login findings live only in prose, not in the record. Y earns 'unauthorized external root access' at best; X's claim is scoped to exactly that, so X's closing is the better-earned one despite some redundant registry leads."
+}

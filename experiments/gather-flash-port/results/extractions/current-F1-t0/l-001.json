@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "the individual Falco 'Sudo execution' events on soc-playground in the burst window: timestamps, the user/identity that ran sudo, the commands executed, and parent process or shell context": {
+   "status": "exact",
+   "note": "3 events at 09:54:51.724\u2013.725Z, user root, container e5b0213bd690, three psql cmdlines, parent <NA>, proc null \u2014 all match returns 5/7/17/18"
+  },
+  "any other notable host activity on soc-playground from the same identities around the burst (interactive logins, spawned shells, network tool use, file writes)": {
+   "status": "exact",
+   "note": "SSH login from 147.235.199.7 at 09:54:41.339Z, 3 logged-on, 1 logged-off at 09:55:01.746Z; 14 rules / 792 events (summary says 790+); per-rule counts, curl/openssl in 90115da40383 under sh, agent-enroll.sh in two containers, and the 0-hit rules all match returns 8/16/20/21/22/23/24"
+  },
+  "whether the events were captured at all \u2014 the alert ancestor resolution returned nothing, so report explicitly if the Falco events are or are not retrievable": {
+   "status": "wrong",
+   "note": "Retrievability conclusion (events are retrievable via index-pattern query) is supported, but the summary asserts the alert carries backing index '.ds-logs-falco.alerts-default-*' \u2014 return 0 shows the ancestor index as 'logs-falco.alerts-*'; no adapter allowlist error appears in any return"
+  }
+ },
+ "unsupported": [
+  "the alert carries a concrete backing index name `.ds-logs-falco.alerts-default-*` (alert payload shows index 'logs-falco.alerts-*')",
+  "the adapter does not allowlist the backing index name (no adapter error or allowlist message in any tool return)"
+ ]
+}

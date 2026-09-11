@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any registry entry covering soc-playground, SOC training/red-team exercises, or authorized key additions to containers": {
+   "status": "exact",
+   "note": "All four lookups returned matched: null and health-check reported entries: 0; summary's 'no entry / 0 entries' matches."
+  },
+  "the validity span and scope of any matching entry": {
+   "status": "exact",
+   "note": "Honest 'not applicable, registry empty' is supported by entries: 0 and the null matches."
+  }
+ },
+ "unsupported": []
+}

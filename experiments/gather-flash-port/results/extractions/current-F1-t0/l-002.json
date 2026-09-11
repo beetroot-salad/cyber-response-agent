@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether soc-playground is a documented host in CMDB, and its role/owner/environment (e.g. production, lab, training playground)": {
+   "status": "exact",
+   "note": "404 'host soc-playground not found' matches return 3; 11-host list and names match return 4; role/owner/env honestly reported as unavailable"
+  },
+  "any asset attributes indicating purpose or managed status": {
+   "status": "exact",
+   "note": "Honest 'not available' \u2014 no CMDB record in any payload"
+  }
+ },
+ "unsupported": []
+}

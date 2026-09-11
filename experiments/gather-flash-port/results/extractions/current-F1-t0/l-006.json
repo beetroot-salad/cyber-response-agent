@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "the container name and image behind container id e5b0213bd690 on soc-playground": {
+   "status": "exact",
+   "note": "name db-1, image soc-playground/host-db:22.04 match container-inspect return"
+  },
+  "the entrypoint/command of that container and whether it plausibly hosts the postgres sudo activity observed": {
+   "status": "exact",
+   "note": "PID 1 tini/host-entrypoint.sh/sshd -D, postgres 14 path, rsyslogd/cron/elastic-agent, postgres uid 103 with /bin/bash, and absence of sudo/shell processes all verifiable from proc-tree and passwd returns (taken via host db-1 after the container-id proc-tree call was rejected)"
+  }
+ },
+ "unsupported": []
+}

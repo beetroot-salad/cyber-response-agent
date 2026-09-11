@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "X's closing claim (inconclusive, escalate on unauthorized root access) matches exactly what its rows show \u2014 every authz anchor refused, plus a 30-day SSH baseline and container-identity lead that materially reframed the case (external root is this shadow host's norm; the burst ran inside the prod db-1 container) \u2014 and it names the genuinely open items (process parentage, the 09:53:47Z password change) that its failed host-state lead could not reach. Y's 'malicious' disposition is not earned by its record: its own synthesis says the adversary story is 'not tool-confirmed', its 'first-seen root' refutation of h-001 is contradicted by its own l-005 (recurring root logins from the same IP since Aug 22), it asserts an impact severity with no impact evidence, and its h-003 prediction cites boot-script artifacts (agent-enroll.sh, seed-users.py) that never appear in any observation row. Y's leads were reasonably discriminating, but the same unauthorized-on-every-anchor evidence supports only 'unexplained access, escalate', which is what X claimed and Y overshot."
+}

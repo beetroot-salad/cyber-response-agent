@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "what the container e5b0213bd690 is (image, purpose) and whether it maps to a known service": {
+   "status": "exact",
+   "note": "container-inspect returned name db-1, image soc-playground/host-db:22.04; Postgres role supported by db-1 proc-tree and inventory membership"
+  },
+  "process execution and session activity inside or around that container during 09:54-10:15Z on 2026-08-30, including any curl/openssl/sh processes and what they downloaded or executed": {
+   "status": "exact",
+   "note": "proc-tree by container id exit 1 (inventory rejection) and db-1 snapshot at 2026-09-11T07:52:30Z both match; process list, '0 of 10-100 startups', ELAPSED range 09:42\u201309:49, absence of curl/openssl/sh, health-check 8/0, and soc-playground rejection all supported; honest statement that the 08-30 window is unobservable. jump-box-1 proc-tree was run but not mentioned (omission, not a contradiction)"
+  },
+  "any persistence-relevant changes on the host around that window (new binaries, cron, ssh keys)": {
+   "status": "exact",
+   "note": "authorized_keys empty for root on db-1 and web-1 matches keys: []; correctly states no cron/binary/mtime view was obtained and fim-checksum was not run"
+  }
+ },
+ "unsupported": []
+}

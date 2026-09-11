@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "what installed or modified root's authorized_keys and when, and what process wrote it (provisioning tool vs unknown)": {
+   "status": "exact",
+   "note": "canary-1 single attacker key, sha256, and the 7 empty hosts all match payloads; proc-tree contents and capture time match; writer honestly reported unresolved"
+  },
+  "what caused the root password change and sshd restart at 09:53-09:54Z (cloud-init/provisioning vs unexplained)": {
+   "status": "exact",
+   "note": "honest 'not observable from host-state'; no verb returned anything on this and summary asserts no values"
+  },
+  "the image, entrypoint, and name of container e5b0213bd690, confirming whether the sudo psql probes are its normal entrypoint": {
+   "status": "exact",
+   "note": "name db-1 and image soc-playground/host-db:22.04 match return 6; correctly states entrypoint is not in the payload"
+  },
+  "any other host-state artifacts of provisioning (cloud-init logs, enrollment scripts) or, conversely, of tampering": {
+   "status": "exact",
+   "note": "canary-1 passwd identities/uids match return 18; fim hash is current-only as stated; nothing else claimed"
+  }
+ },
+ "unsupported": []
+}

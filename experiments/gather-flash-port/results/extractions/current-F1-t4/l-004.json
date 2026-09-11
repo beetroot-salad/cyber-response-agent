@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether soc-playground is a registered host in the CMDB, and if so its role, owner, environment, and any notes about its purpose": {
+   "status": "exact",
+   "note": "get-host returned HTTP 404; list-hosts total=11 with no soc-playground entry \u2014 absence and the 11 count both verified"
+  },
+  "whether IP 147.235.199.7 is a documented operator workstation, bastion, VPN egress, or other known source in the CMDB, and who or what it belongs to": {
+   "status": "exact",
+   "note": "get-host by IP returned HTTP 404; inventory carries no IP fields and no matching hostname \u2014 'undocumented' is supported"
+  },
+  "any CMDB records linking soc-playground to postgres or database maintenance responsibilities": {
+   "status": "exact",
+   "note": "soc-playground absent from inventory; db-1 attributes (role db, postgres:5432, team.data, prod) match; the five hosts with db-1 in trust_edges_out (web-1, web-2, config-mgmt-1, jump-box-1, scanner-1) match the payload exactly"
+  }
+ },
+ "unsupported": []
+}

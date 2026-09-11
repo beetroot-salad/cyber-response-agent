@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "the container's name, image, and entrypoint/command as recorded by the container platform on soc-playground": {
+   "status": "exact",
+   "note": "Summary reports none resolvable; container-inspect returned exit 2 'no such object: 1df4bcd65ee4' \u2014 honest absence matches payload"
+  },
+  "whether this container is a training/exercise/CTF workload or a production/service workload, and who or what launched it": {
+   "status": "exact",
+   "note": "Summary states it could not be measured because the daemon has no such object; no payload offers a value, honest none-found"
+  },
+  "any labels or ownership hints tying the container to a sanctioned SOC exercise": {
+   "status": "exact",
+   "note": "Summary states no labels/ownership hints could be measured; consistent with the inspect error and no other payload"
+  }
+ },
+ "unsupported": []
+}

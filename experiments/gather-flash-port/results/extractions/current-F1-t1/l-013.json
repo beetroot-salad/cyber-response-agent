@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any registry entry documenting routine or authorized operator behavior on soc-playground (provisioning, rebuilds, health-check runs, off-hours ssh access), with its scope and validity window": {
+   "status": "exact",
+   "note": "Summary reports none found; lookup returned matched: null and health-check reports entries: 0, so an honest absence with no scope/validity to report."
+  },
+  "whether the lookup found no entry covering this activity": {
+   "status": "exact",
+   "note": "Summary states matched: null and registry empty; both directly in returns 8 and 9."
+  }
+ },
+ "unsupported": []
+}

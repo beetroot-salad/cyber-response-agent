@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "which user/identity executed the sudo events in the burst, and the parent process/session chain (e.g. ssh session vs service)": {
+   "status": "exact",
+   "note": "root per Falco (return 4/10); proc.name null, pname <NA> as stated; ssh chain (publickey root from 147.235.199.7:45835 at 09:54:41.339Z, session 1) matches return 9; ~10s gap to 09:54:51.724Z checks out"
+  },
+  "the actual commands run via sudo and their shape (corrective vs discovery/persistence)": {
+   "status": "exact",
+   "note": "all three cmdlines match return 4 verbatim (added quotes around SELECT are formatting only); shape assessment is interpretation"
+  },
+  "whether the same identity has prior sudo-execution history on soc-playground or elsewhere, and its cadence": {
+   "status": "exact",
+   "note": "7-day cluster-wide Falco query (return 10) returns only the 3 soc-playground/root events; auth-log sudo query (return 6) row_count 0; auth stream first row 09:53:47.594Z matches return 9"
+  },
+  "whether any interactive shell or remote source (IP/session) preceded the sudo executions": {
+   "status": "exact",
+   "note": "147.235.199.7 publickey login at 09:54:41Z, cron session open/close at 09:55:01Z, and the listed Falco noise rules/agent-enroll.sh all present in returns 5 and 9"
+  }
+ },
+ "unsupported": []
+}

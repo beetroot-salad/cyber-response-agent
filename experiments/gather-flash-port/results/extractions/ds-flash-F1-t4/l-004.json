@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any threat-intel records on 147.235.199.7: scanning, brute-force, C2, hosting classification, or clean/benign standing": {
+   "status": "exact",
+   "note": "Lookup returned verdict unknown, score 0, empty sources/tags, null first/last_seen \u2014 summary reports exactly that and correctly says no classification record exists; seed enumeration values (total 6, each IP's verdict/score/tags) match return 7"
+  },
+  "if no record exists, that the IP is unknown to the intel source": {
+   "status": "exact",
+   "note": "Summary states the IP is not present in the seeded set / unknown to the intel seed, consistent with verdict: unknown and its absence from the 6-row list-indicators payload"
+  }
+ },
+ "unsupported": []
+}

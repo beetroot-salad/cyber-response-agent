@@ -133,7 +133,7 @@ def logger(tmp_path):
 
 
 def _glm_thunk() -> str:
-    return "glm-5.2"
+    return "glm-5.3"
 
 
 _EMPTY_TOOLSET = ToolSet()
@@ -175,11 +175,11 @@ def test_agentdefinition_shape():
     """AgentDefinition is a frozen dataclass carrying role/model(thunk)/effort/tools/
     corpus_dirs/bash_shapes/write_shapes/deps_cls/deny_reason; the tail fields default
     (ToolSet() / () / None / str)."""
-    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low")
     assert dataclasses.is_dataclass(defn)
     assert defn.role is AgentRole.MAIN
     assert callable(defn.model)
-    assert defn.model() == "glm-5.2"
+    assert defn.model() == "glm-5.3"
     assert defn.effort == "low"
     assert isinstance(defn.tools, ToolSet)
     assert defn.corpus_dirs == ()
@@ -548,11 +548,11 @@ def test_effort_none_vs_None_distinct(monkeypatch, logger):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     with override_allow_model_requests(False):
         omit = driver.build_agent_core(
-            _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort=None, tools=ToolSet()),
+            _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.3", effort=None, tools=ToolSet()),
             deps_type=QuestionerDeps, instructions="x", logger=logger, agent_id="o1",
         )
         disabled = driver.build_agent_core(
-            _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
+            _defn(role=AgentRole.QUESTIONER, model=lambda: "kimi-k3", effort="none", tools=ToolSet()),
             deps_type=QuestionerDeps, instructions="x", logger=logger, agent_id="o2",
         )
     # Read through `extra_body`, not off the settings object: both agents now also carry a
@@ -582,7 +582,7 @@ def test_effort_none_claude_crossing(monkeypatch, logger):
         )
     with override_allow_model_requests(False):
         ok = driver.build_agent_core(
-            _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
+            _defn(role=AgentRole.QUESTIONER, model=lambda: "kimi-k3", effort="none", tools=ToolSet()),
             deps_type=QuestionerDeps, instructions="x", logger=logger,
             agent_id="oracle", make_model=providers.build_for_effort,
         )
@@ -597,7 +597,7 @@ def test_effort_live_on_toolfree(logger, tmp_path):
     independent of, tool registration)."""
     settings = {"extra_body": {"reasoning_effort": "none"}}
     fake, reqs = _counting_make_model(text=_ORACLE_YAML, settings=settings)
-    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "kimi-k3", effort="none", tools=ToolSet(),
                  deps_cls=VerifierDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
@@ -625,7 +625,7 @@ def test_request_limit_one_sufficient(logger, tmp_path):
     request_limit=1 — 1 request is SUFFICIENT (not merely non-crashing): the tool-free
     predictor makes exactly one model request and returns its output."""
     fake, reqs = _counting_make_model(text=_ORACLE_YAML)
-    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "kimi-k3", effort="none", tools=ToolSet(),
                  deps_cls=VerifierDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
@@ -645,7 +645,7 @@ def test_request_limit_reject_below_one(logger, tmp_path):
     spec-assumption: the <1 floor is realized as usage-limit starvation through the real run,
     not a silent coerce-to-1."""
     fake, _ = _counting_make_model(text=_ORACLE_YAML)
-    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
+    defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "kimi-k3", effort="none", tools=ToolSet(),
                  deps_cls=VerifierDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(

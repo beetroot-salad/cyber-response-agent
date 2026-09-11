@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 79.177.137.245 appears in threat intelligence feeds, and with what classification/severity": {
+   "status": "exact",
+   "note": "lookup return shows verdict unknown, score 0, sources [], tags [], null timestamps; IP absent from the 15-row list-indicators payload, as stated"
+  },
+  "any known malware, scanning, or attacker infrastructure associations for this IP": {
+   "status": "exact",
+   "note": "honest 'none observed' \u2014 lookup tags/sources empty and no row for this IP in list-indicators"
+  }
+ },
+ "unsupported": []
+}

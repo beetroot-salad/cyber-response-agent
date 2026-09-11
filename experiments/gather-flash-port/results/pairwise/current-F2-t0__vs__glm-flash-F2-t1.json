@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "X's own rows undercut its 'malicious' verdict \u2014 the write pattern recurs 97x/30d on the host, the sole login source is pre-existing baseline, the appended key was never observed in use, and X itself concedes an exercise can't be excluded and that the contracts only force escalation \u2014 so the disposition outruns what its leads gathered. Y's 'inconclusive' matches its record, its leads (CMDB, threat-intel, identity, key-write baseline) each could have recovered the operator story, and it names the genuinely open question (unrecorded simulation vs real persistence) plus the unrecoverable container. Y loses ground on auditability: the identity and ticket results and the 'nc/curl routine background' figure live only in summary prose with no observation rows, and the ticket lead is largely redundant with change-mgmt, while X's ancestry and key-use rows are the more auditable record."
+}
