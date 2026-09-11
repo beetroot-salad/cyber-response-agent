@@ -20,7 +20,10 @@ What is pinned here, at the unit level (the driven-run half lives in
   the guard's domain predicate reads it verbatim, and a re-projection would replay a trip the
   run never took.
 * **S2** — the model-facing renders that reach the rows (`actor_view`, `render_joined_yaml`,
-  and the questioner's `repr`-based row dump) carry neither new column.
+  and since #1032 the questioner's NAMED projection `questioner_leads`) carry neither new
+  column; the questioner's carries exactly the key sets `QUESTIONER_LEAD_KEYS` /
+  `QUESTIONER_QUERY_KEYS` spell below (#1032 O1). The rest of #1032's obligations live in
+  `tests/test_1032_questioner_leads.py`, which imports this module's fixtures.
 * **D3** — the surface refuses a link at a lead file's name and at the table's name, and
   tolerates a lead file nested past the parser's limit, the way the judge's own readers did
   before the reads moved here.
@@ -61,6 +64,17 @@ EXPECTED_COLUMNS = (
     "system_key",
 )
 
+#: #1032 O1 — the questioner's "joined leads" section, per lead and per query, as EXACT key
+#: sets. Spelled as literals for the reason `EXPECTED_COLUMNS` is: an expectation recovered
+#: from the render under test could not fail. `payload_digest` is in (D3: it is how a model
+#: tells an empty answer from a real one, and two renders already show it); `raw_command`,
+#: `raw_ref`/`payload_path`, `payload_sha256`, `system_key`, `orphan` and `sentinels` are OUT.
+QUESTIONER_LEAD_KEYS = frozenset({"lead_id", "goal", "what_to_summarize", "provenance", "queries"})
+QUESTIONER_QUERY_KEYS = frozenset({
+    "seq", "system", "verb", "query_id", "params", "exit_code", "error_class",
+    "payload_status", "payload_digest",
+})
+
 #: A 64-hex digest shaped exactly like `system_fingerprint`'s answer, but searchable: no real
 #: name hashes to it, so its presence anywhere is this fixture's doing and nothing else's.
 KEY_MARKER = "c0ffee" * 10 + "abcd"
@@ -82,6 +96,20 @@ def _row(seq: int, **overrides) -> dict:
     return row
 
 
+def _searchable_row(seq: int, **overrides) -> dict:
+    """`_row` with a DISTINCTIVE value in the two columns `_row` leaves generic: `raw_command`
+    (`elastic query '...'`) and `payload_path` (`gather_raw/l-001/0.json`) are satisfiable by
+    coincidence as negatives, so a render that leaked either would pass a check for the
+    fixture's default bytes. The path marker sits in the LEAD-ID segment, the one part of a
+    payload path `_run_paths.contained_payload`'s shape admits free text in, so the marker
+    survives into `raw_ref` — the column a model-facing leak of the path would carry."""
+    marked = {
+        "raw_command": f"RAWCMD_MARKER_{seq}",
+        "payload_path": f"gather_raw/l-PAYLOADPATHMARKER{seq}/{seq}.json",
+    }
+    return _row(seq, **{**marked, **overrides})
+
+
 def _table(run_dir: Path, rows: list[dict]) -> Path:
     """`rows` written as `run_dir`'s queries table, byte for byte as the writer would leave
     them — through the canonical appender, so a row lacking a key is a row LACKING it on disk
@@ -92,11 +120,17 @@ def _table(run_dir: Path, rows: list[dict]) -> Path:
     return path
 
 
-def _lead_file(run_dir: Path, goal: str = "a goal") -> None:
+def _lead_file(run_dir: Path, goal: str = "a goal", *, lead_id: str = LEAD,
+               provenance: str | None = None) -> None:
+    """`lead_id`'s `.lead.json` under `run_dir`, the shape `claim_lead` writes. `provenance` is
+    written only when given, the way the writer leaves it: `load_leads` reads its absence as
+    model-authored (`None`), and #1032's tests need both shapes on one table."""
     gather = RunPaths(run_dir).gather_raw
     gather.mkdir(parents=True, exist_ok=True)
-    (gather / f"{LEAD}.lead.json").write_text(
-        json.dumps({"goal": goal, "what_to_summarize": ["auth events"]}), encoding="utf-8")
+    data: dict = {"goal": goal, "what_to_summarize": ["auth events"]}
+    if provenance is not None:
+        data["provenance"] = provenance
+    (gather / f"{lead_id}.lead.json").write_text(json.dumps(data), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------------------
@@ -302,30 +336,49 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
 
 
 def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
-    """S2 — `actor_view` / `render_actor_view_yaml` and `render_joined_yaml` enumerate their
-    fields, and the questioner's "joined leads" section (`branch/cli._joined_leads` through
-    `_prompt.titled_section`) does NOT: it stringifies each `JoinedLead.__dict__` — rows
-    included, sentinels included — through `json.dumps(default=str)`, i.e. `QueryRow.__repr__`.
-    D2 putting `system_key` and `payload_sha256` on `QueryRow` must reach none of the three,
-    which for the third means the fields stay off the `repr`. Each render is checked for the
-    two MARKER VALUES and the two KEY NAMES, beside the positive control on the same string:
-    the row's `query_id` and its `params` marker DO appear, so an empty render cannot satisfy
-    the negatives.
+    """S2, and #1032 O1 — every model-facing render of the rows ENUMERATES its fields:
+    `actor_view` / `render_actor_view_yaml`, `render_joined_yaml`, and (since #1032 M1) the
+    questioner's `lead_repository.questioner_leads`, driven through the shipped path
+    `branch/cli._joined_leads` → `_prompt.titled_section`. Each is checked for the two #1017
+    MARKER VALUES and KEY NAMES beside the positive control on the same string (the row's
+    `query_id` and its `params` marker DO appear, so an empty render cannot satisfy the
+    negatives). The questioner's render, the one that used to stringify each
+    `JoinedLead.__dict__` whole (`QueryRow.__repr__` through `json.dumps(default=str)`), is
+    held to more — in two forms, because the two catch different failures:
 
-    Observed failing by: a render stringifying a `QueryRow` whole (an `asdict`, a `__dict__`,
-    a `repr`) once the two fields exist on it — the questioner's did, until the two fields
-    were declared `repr=False`."""
+    * KEY-SET EQUALITY on every lead dict and every query dict it returns, against
+      `QUESTIONER_LEAD_KEYS` / `QUESTIONER_QUERY_KEYS`: a census of the output, which no marker
+      check is. A column added to `QueryRow` tomorrow, or `orphan` / `sentinels` carried along,
+      fails here without anyone planting a marker for it.
+    * MARKER ABSENCE on the rendered section text, with markers in `raw_command` and
+      `payload_path` planted by `_searchable_row` (the fixture's defaults are not distinctive —
+      M4's own note), plus the key names the old dump carried (`raw_ref`, `raw_command`,
+      `payload_path`, `sentinels`, `orphan`). Never the literal `∅`: `json.dumps` escapes it
+      (O3's cold-review finding).
+
+    Observed failing by: `questioner_leads` missing from `lead_repository`; a lead or query dict
+    with a key outside its set; or any planted value / old key name in the section text —
+    today's `__dict__` dump carries `raw_command`, `raw_ref` (the marker'd path), `sentinels`
+    and `orphan`, so the marker half is red on today's code even with the two `repr=False`
+    fields still hidden."""
     from defender.learning._prompt import titled_section
     from defender.learning.branch.cli import _joined_leads
 
-    _lead_file(tmp_path)
+    _lead_file(tmp_path, "GOAL_MARKER")
     _table(tmp_path, [
-        _row(0, params={"native_query": "PARAMS_MARKER"}, system_key=KEY_MARKER),
+        _searchable_row(0, params={"native_query": "PARAMS_MARKER"}, system_key=KEY_MARKER),
         # A sentinel row, keyed: the one class of row whose `system_key` is non-empty live.
-        _row(1, query_id=ABOVE_GUARD_QUERY_ID, system="", exit_code=64,
-             error_class=AGENT_FIXABLE_ERROR_CLASS, payload_status="error",
-             payload_digest="exit=64; rejected", system_key=KEY_MARKER),
+        _searchable_row(1, query_id=ABOVE_GUARD_QUERY_ID, system="", exit_code=64,
+                        error_class=AGENT_FIXABLE_ERROR_CLASS, payload_status="error",
+                        payload_digest="exit=64; rejected", system_key=KEY_MARKER),
     ])
+    # The premise: the SURFACE reads every planted marker, so each negative below refutes a
+    # render that leaks the column and not a fixture the reader never carried.
+    real = load_queries(tmp_path)[0]
+    assert (real.raw_command, real.system_key, real.payload_sha256) == \
+        ("RAWCMD_MARKER_0", KEY_MARKER, SHA_MARKER), "the surface lost a planted marker"
+    assert str(real.raw_ref).endswith("gather_raw/l-PAYLOADPATHMARKER0/0.json"), \
+        f"the path marker did not survive containment into raw_ref: {real.raw_ref!r}"
 
     renders = {
         "render_joined_yaml": lead_repository.render_joined_yaml(tmp_path),
@@ -333,7 +386,7 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
         "actor_view": json.dumps(lead_repository.actor_view(tmp_path), default=str),
         "questioner_joined_leads": titled_section(
             "The joined leads at the branch point",
-            _joined_leads(tmp_path, lead_repository.joined),
+            _joined_leads(tmp_path, lead_repository.questioner_leads),
         ),
     }
     for name, text in renders.items():
@@ -341,6 +394,26 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
         assert "PARAMS_MARKER" in text, f"{name} lost the params it is for"
         for needle in (KEY_MARKER, SHA_MARKER, "system_key", "payload_sha256"):
             assert needle not in text, f"{name} now carries {needle!r} to a model"
+
+    # The questioner's section: the wider negative set, beside the third positive control.
+    section = renders["questioner_joined_leads"]
+    assert "GOAL_MARKER" in section, "the questioner's section lost the lead's goal"
+    for needle in (
+        "RAWCMD_MARKER_0", "RAWCMD_MARKER_1", "PAYLOADPATHMARKER0", "PAYLOADPATHMARKER1",
+        "raw_command", "raw_ref", "payload_path", "sentinels", "orphan",
+    ):
+        assert needle not in section, f"the questioner's section carries {needle!r} to a model"
+
+    # The census: exactly the enumerated keys, on every lead and every query the render returns.
+    leads = lead_repository.questioner_leads(tmp_path)
+    assert [lead["lead_id"] for lead in leads] == [LEAD], f"the render returned {leads!r}"
+    assert leads[0]["queries"], "the lead's real query is missing — the query census is vacuous"
+    for lead in leads:
+        assert set(lead) == QUESTIONER_LEAD_KEYS, \
+            f"lead {lead['lead_id']!r} carries {sorted(set(lead) ^ QUESTIONER_LEAD_KEYS)}"
+        for query in lead["queries"]:
+            assert set(query) == QUESTIONER_QUERY_KEYS, \
+                f"a query dict carries {sorted(set(query) ^ QUESTIONER_QUERY_KEYS)}"
 
 
 # ---------------------------------------------------------------------------------------
