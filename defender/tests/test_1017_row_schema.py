@@ -177,6 +177,13 @@ def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref
     # are pinned outright.
     assert "system_key" in fields, "the rejection guard's identity half is not on the surface"
     assert "payload_sha256" in fields, "the payload's content identity is not on the surface"
+    # `_record` stays off the repr AND off equality (#1032 D4 keeps it so): it is the SOURCE
+    # of the typed fields, not a fifteenth column, and two rows read from byte-identical
+    # records must compare equal by their columns alone. The two columns #1032 un-flagged are
+    # deliberately NOT pinned either way — the repr is no model-facing contract any more.
+    flags = {f.name: (f.repr, f.compare) for f in dataclasses.fields(QueryRow)}
+    assert flags["_record"] == (False, False), \
+        f"_record is on the repr or in equality again: {flags['_record']}"
 
 
 def test_keyword_built_rows_default_the_two_new_columns_to_empty():

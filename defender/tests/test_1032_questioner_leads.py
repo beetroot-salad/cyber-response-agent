@@ -50,6 +50,8 @@ from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
+    REPEAT_TRIP_QUERY_ID,
+    RESERVED_QUERY_ID_PREFIX,
     append_query_row,
 )
 from defender.tests import _triplet_947 as T
@@ -110,13 +112,28 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     query. Beside it, a second lead whose ONLY row is a sentinel is kept — with its goal and no
     queries — the same decision `actor_view` records: the run did open it.
 
-    The premise is asserted first: the surface partitions the three rows as `queries=[0]`,
-    `sentinels=[1, 2]` (C10), so the negatives refute a render that reads `.rows` or
+    Two more sentinel shapes sit on the first lead, and they are what pins the RULE rather
+    than the two ids above: a `∅.repeat-trip` row, which the guard writes with the REAL
+    `system` and `verb` and the model's own `params` (so a filter on `system == ""` or on the
+    two literal tails keeps it), and a synthetic `∅.future-sentinel` id no writer spells today
+    — `is_sentinel` is the `∅.` prefix (`is_reserved_query_id`), so a sentinel defined
+    tomorrow partitions the day it is defined, and the render must follow the predicate, not
+    a list. (The adversary's replay of the tests-only commit greened both filters.)
+
+    The section is also held to O1 here — the key-set census and the `raw_command` /
+    `payload_path` marker negatives — because this is the one fixture with a bash-shim row,
+    and a render that leaked a column only in a sentinel's presence passed the O1 test's
+    fixture untouched.
+
+    The premise is asserted first: the surface partitions the five rows as `queries=[0]`,
+    `sentinels=[1, 2, 3, 4]` (C10), so the negatives refute a render that reads `.rows` or
     `.sentinels` and not a fixture the join never held.
 
     Observed failing by: `questioner_leads` missing; a sentinel's marker in the section text
     (today's `__dict__` dump renders them under `sentinels`, and so would a render over
-    `jl.rows`); the lead returned with more than one query; the sentinel-only lead absent."""
+    `jl.rows` filtered on the two known tails or on an empty `system`); the lead returned
+    with more than one query; the sentinel-only lead absent; a query dict with a key outside
+    the nine; a `raw_command` / path marker in the section."""
     _lead_file(tmp_path, "GOAL_MARKER")
     _lead_file(tmp_path, "GOAL_ONLY_TRIPS", lead_id="l-002")
     _table(tmp_path, [
@@ -131,9 +148,22 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         payload_text="", exit_code=1, payload_status="error",
         payload_digest="exit=1; SHIM_STDERR_MARKER",
     )
+    # After the shim took seq 2: the repeat-trip row as the guard writes it — REAL system and
+    # verb, the model's params — and a sentinel id nothing spells yet.
+    _table(tmp_path, [
+        _searchable_row(3, query_id=REPEAT_TRIP_QUERY_ID, exit_code=64,
+                        error_class=AGENT_FIXABLE_ERROR_CLASS, payload_status="error",
+                        payload_digest="exit=64; repeated",
+                        params={"native_query": "REPEATTRIP_PARAMS_MARKER"}),
+        _searchable_row(4, query_id=f"{RESERVED_QUERY_ID_PREFIX}future-sentinel",
+                        params={"native_query": "FUTURESENTINEL_PARAMS_MARKER"}),
+    ])
     by_id = {jl.lead_id: jl for jl in lead_repository.joined(tmp_path)}
     assert ([q.seq for q in by_id[LEAD].queries], [q.seq for q in by_id[LEAD].sentinels]) == \
-        ([0], [1, 2]), "the join no longer partitions the fixture as one query and two sentinels"
+        ([0], [1, 2, 3, 4]), "the join no longer partitions the fixture as one query and four sentinels"
+    assert [q.system for q in by_id[LEAD].sentinels][2:] == ["elastic", "elastic"], \
+        "the repeat-trip and future sentinels lost their real system — a `system == \"\"` " \
+        "filter would no longer be refuted"
     assert (by_id["l-002"].queries, [q.seq for q in by_id["l-002"].sentinels]) == ([], [0])
 
     text = _section(tmp_path)
@@ -141,12 +171,20 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         assert kept in text, f"the section lost {kept!r} — the negatives below are vacuous"
     for dropped in (
         "ABOVEGUARD_PARAMS_MARKER", "ONLYTRIPS_PARAMS_MARKER", "SHIM_SHELL_MARKER",
-        "SHIM_STDERR_MARKER", "above-repeat-guard", "bash-shim", "sentinels",
+        "SHIM_STDERR_MARKER", "REPEATTRIP_PARAMS_MARKER", "FUTURESENTINEL_PARAMS_MARKER",
+        "above-repeat-guard", "bash-shim", "repeat-trip", "future-sentinel", "sentinels",
+        "RAWCMD_MARKER_0", "RAWCMD_MARKER_1", "PAYLOADPATHMARKER0", "PAYLOADPATHMARKER1",
+        "raw_command", "raw_ref", "payload_path", "orphan",
     ):
-        assert dropped not in text, f"a sentinel row reached the questioner: {dropped!r}"
+        assert dropped not in text, f"a sentinel row or an unlisted column reached the questioner: {dropped!r}"
 
     leads = {lead["lead_id"]: lead for lead in lead_repository.questioner_leads(tmp_path)}
     assert set(leads) == {LEAD, "l-002"}, f"the render returned {sorted(leads)}"
+    for lead in leads.values():
+        assert set(lead) == QUESTIONER_LEAD_KEYS, f"lead {lead['lead_id']!r} carries other keys"
+        for query in lead["queries"]:
+            assert set(query) == QUESTIONER_QUERY_KEYS, \
+                f"a query dict carries {sorted(set(query) ^ QUESTIONER_QUERY_KEYS)}"
     assert [(q["seq"], q["params"]) for q in leads[LEAD]["queries"]] == \
         [(0, {"native_query": "REAL_PARAMS_MARKER"})], \
         f"the lead's queries are not its one real row: {leads[LEAD]['queries']!r}"
@@ -171,55 +209,80 @@ def _expected_query(seq: int, params: dict, **overrides) -> dict:
 
 
 def test_o2_every_joined_lead_reaches_the_questioner_in_joineds_order(tmp_path):
-    """O2 — four leads on one table, laid out so `joined()`'s order (ran leads by first-seen
+    """O2 — five leads on one table, laid out so `joined()`'s order (ran leads by first-seen
     row, then queryless lead files, then orphans) differs from BOTH the table's order and the
     lexical one: `l-003` has rows but no lead file (an orphan, first in the file), `l-002` and
-    `l-001` ran (`l-001`'s two rows written seq-1-before-seq-0, its seq 1 a FAILED real query),
-    `l-000` has a lead file and no rows. `questioner_leads` is compared WHOLE against the
-    literal list of dicts — the orphan with `goal: None`, `what_to_summarize: []`,
-    `provenance: None`; `l-002`'s `provenance` carried; queries in seq order; every outcome
-    column with its value — and its lead order against `joined()`'s own. Through the section,
-    the orphan's params marker, the provenance and the queryless lead's goal are all present.
+    `l-001` ran, `l-000` has a lead file and no rows, `l-004` has no file and only a sentinel
+    row (an orphan the render must keep with no queries). `questioner_leads` is compared WHOLE
+    against the literal list of dicts — the orphans with `goal: None`, `what_to_summarize:
+    []`, `provenance: None`; `l-002`'s `provenance` carried; queries in seq order; every
+    outcome column with its value — and its lead order against `joined()`'s own. Through the
+    section, the orphan's params marker, the provenance and the queryless lead's goal are all
+    present.
+
+    Every VALUE in the literal is one no constant or derivation reproduces, because the
+    adversary's replay of the tests-only commit greened three that did: `l-002`'s row is
+    `splunk` / `search` / `splunk.saved-search` (the fixture default is `elastic` / `query` /
+    `elastic.ad-hoc` everywhere else, and the id's prefix is NOT the system, so a render
+    hardcoding those, or deriving `system` or `verb` from `query_id`, fails here); `l-001`'s real rows sit at seq 1 and 2 BEHIND a sentinel at seq 0
+    (so `seq` from `enumerate` fails), written 2-before-1 with the FAILED query FIRST in seq
+    order (so a "failures last" sort fails); and `l-002`'s row is exit 0 with a planted
+    `error_class` / `payload_status` the surface reads verbatim (so re-deriving either from
+    `exit_code` — the C16 re-projection this module's own comments warn about — fails).
 
     Observed failing by: `questioner_leads` missing; a lead missing (an orphan filtered on
-    `goal is None`, a queryless lead filtered on empty `queries`); the order re-sorted; a query
-    dict with a key outside O1's nine or a value off the surface's typed field; `error_class`
-    / `payload_status` / `payload_digest` of the failed query not carried."""
+    `goal is None`, a queryless or sentinel-only lead filtered on empty `queries`); the order
+    re-sorted; a query dict with a key outside O1's nine or a value off the surface's typed
+    field; `error_class` / `payload_status` / `payload_digest` not read by name."""
     _lead_file(tmp_path, "GOAL_A", lead_id="l-001")
     _lead_file(tmp_path, "GOAL_B", lead_id="l-002", provenance="PROVENANCE_MARKER")
     _lead_file(tmp_path, "GOAL_QUERYLESS", lead_id="l-000")
     _table(tmp_path, [
         _searchable_row(0, lead_id="l-003", params={"native_query": "NOFILE_PARAMS_MARKER"},
                         payload_digest="DIGEST_MARKER_0"),
-        _searchable_row(0, lead_id="l-002", params={"native_query": "B0"},
+        _searchable_row(0, lead_id="l-002", system="splunk", verb="search",
+                        query_id="siem.saved-search", params={"saved": "B0"},
+                        error_class="PLANTED_CLASS", payload_status="PLANTED_STATUS",
                         payload_digest="DIGEST_MARKER_0"),
+        _searchable_row(2, lead_id="l-001", params={"native_query": "A2"},
+                        payload_digest="DIGEST_MARKER_2"),
         _searchable_row(1, lead_id="l-001", params={"native_query": "A1"}, exit_code=64,
                         error_class=AGENT_FIXABLE_ERROR_CLASS, payload_status="error",
                         payload_digest="exit=64; A1_FAILED_MARKER"),
-        _searchable_row(0, lead_id="l-001", params={"native_query": "A0"},
-                        payload_digest="DIGEST_MARKER_0"),
+        _above_guard_row(0, "A0_SENTINEL_MARKER", lead_id="l-001"),
+        _above_guard_row(0, "NOFILE_SENTINEL_MARKER", lead_id="l-004"),
     ])
     joined_order = [jl.lead_id for jl in lead_repository.joined(tmp_path)]
-    assert joined_order == ["l-002", "l-001", "l-000", "l-003"], \
+    assert joined_order == ["l-002", "l-001", "l-000", "l-003", "l-004"], \
         "the fixture no longer distinguishes joined()'s order from the table's or the lexical " \
         "one — rewrite it"
+    planted = lead_repository.joined(tmp_path)[0].queries[0]
+    assert (planted.exit_code, planted.error_class, planted.payload_status) == \
+        (0, "PLANTED_CLASS", "PLANTED_STATUS"), \
+        "the surface no longer reads a present error_class / payload_status verbatim — the " \
+        "re-derivation negative below is gone"
 
     expected = [
         {"lead_id": "l-002", "goal": "GOAL_B", "what_to_summarize": ["auth events"],
          "provenance": "PROVENANCE_MARKER",
-         "queries": [_expected_query(0, {"native_query": "B0"})]},
+         "queries": [_expected_query(0, {"saved": "B0"}, system="splunk", verb="search",
+                                     query_id="siem.saved-search",
+                                     error_class="PLANTED_CLASS",
+                                     payload_status="PLANTED_STATUS")]},
         {"lead_id": "l-001", "goal": "GOAL_A", "what_to_summarize": ["auth events"],
          "provenance": None,
          "queries": [
-             _expected_query(0, {"native_query": "A0"}),
              _expected_query(1, {"native_query": "A1"}, exit_code=64,
                     error_class=AGENT_FIXABLE_ERROR_CLASS, payload_status="error",
                     payload_digest="exit=64; A1_FAILED_MARKER"),
+             _expected_query(2, {"native_query": "A2"}),
          ]},
         {"lead_id": "l-000", "goal": "GOAL_QUERYLESS", "what_to_summarize": ["auth events"],
          "provenance": None, "queries": []},
         {"lead_id": "l-003", "goal": None, "what_to_summarize": [], "provenance": None,
          "queries": [_expected_query(0, {"native_query": "NOFILE_PARAMS_MARKER"})]},
+        {"lead_id": "l-004", "goal": None, "what_to_summarize": [], "provenance": None,
+         "queries": []},
     ]
     leads = lead_repository.questioner_leads(tmp_path)
     assert [lead["lead_id"] for lead in leads] == joined_order, \
@@ -232,9 +295,11 @@ def test_o2_every_joined_lead_reaches_the_questioner_in_joineds_order(tmp_path):
 
     text = _section(tmp_path)
     for kept in ("NOFILE_PARAMS_MARKER", "PROVENANCE_MARKER", "GOAL_QUERYLESS",
-                 "A1_FAILED_MARKER", AGENT_FIXABLE_ERROR_CLASS):
+                 "A1_FAILED_MARKER", AGENT_FIXABLE_ERROR_CLASS, "siem.saved-search",
+                 "PLANTED_CLASS", "l-004"):
         assert kept in text, f"the section lost {kept!r}"
-    assert "orphan" not in text, "the `orphan` flag reached the questioner (a non-obligation)"
+    for dropped in ("orphan", "A0_SENTINEL_MARKER", "NOFILE_SENTINEL_MARKER"):
+        assert dropped not in text, f"{dropped!r} reached the questioner"
 
 
 # ---------------------------------------------------------------------------------------
@@ -308,8 +373,16 @@ def test_o4b_the_launcher_shows_the_questioner_no_leads_and_says_so_when_the_ren
     (`joined` raises on it) is asserted so that a surface that later absorbs the shape fails
     here as "the premise is gone" rather than passing this test for the wrong reason.
 
+    The arm is `except Exception`, not the one class above: a second fake raises `OSError`
+    (the class the read surface's own `except` arm names) through the same seam, so an arm
+    narrowed to the observed fault — which greened the adversary's replay — is refuted. And
+    the seam is a PASSTHROUGH: handed the raw join surface `joined` it returns that surface's
+    own `JoinedLead` list unchanged, so a launcher that kept `joined` and had the seam
+    re-render behind it (the other replay that greened) has nowhere to hide.
+
     Observed failing by: `_joined_leads` propagating, or returning `[]` without the line, or
-    calling the render with something other than the source; `questioner_leads` missing."""
+    calling the render with something other than the source; the arm narrowed to one class;
+    the seam transforming a render's answer; `questioner_leads` missing."""
     handed: list[Path] = []
 
     def render_that_raises(source):
@@ -334,6 +407,23 @@ def test_o4b_the_launcher_shows_the_questioner_no_leads_and_says_so_when_the_ren
         "the arm changed a render's answer on the way through"
     assert handed == [tmp_path, tmp_path]
     assert capsys.readouterr().err == "", "the arm printed on a render that did not raise"
+
+    def render_that_raises_differently(source):
+        raise OSError(13, "Permission denied", str(source))
+
+    assert _joined_leads(tmp_path, render_that_raises_differently) == []
+    err = capsys.readouterr().err
+    for part in (LINE_HEAD, "PermissionError(", LINE_TAIL):
+        assert part in err, f"the arm does not cover a second fault class: {err!r}"
+
+    healthy = tmp_path / "healthy"
+    _lead_file(healthy, "kept")
+    _table(healthy, [_searchable_row(0)])
+    through = _joined_leads(healthy, lead_repository.joined)
+    assert through, "the healthy run dir joined to nothing — the passthrough check is vacuous"
+    assert through == lead_repository.joined(healthy), \
+        "the seam is not a passthrough — it re-rendered or dropped the join surface's answer"
+    assert capsys.readouterr().err == ""
 
     bomb = tmp_path / "bomb"
     _nested_bomb(bomb)
@@ -397,7 +487,8 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     start = prompt.index(f"## {SECTION_TITLE}")
     section = prompt[start:prompt.index("</run-", start)]
 
-    for kept in ("REAL_PARAMS_MARKER", "GOAL_MARKER", "elastic.ad-hoc", T.EVENTS_PATTERN):
+    for kept in ("REAL_PARAMS_MARKER", "GOAL_MARKER", "elastic.ad-hoc", "elastic.query",
+                 T.EVENTS_PATTERN):
         assert kept in section, f"the questioner was not shown {kept!r} — the negatives are vacuous"
     for dropped in (
         "SENTINEL_PARAMS_MARKER", "RAWCMD_MARKER_1", "RAWCMD_MARKER_2",
