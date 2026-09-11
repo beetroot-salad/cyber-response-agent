@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "threat-intel reputation of 147.235.199.7 (malicious, benign, unknown, any attribution)": {
+   "status": "exact",
+   "note": "verdict unknown, score 0, empty sources/tags, null first/last_seen all match return 1"
+  },
+  "any indication this IP is an operator/corporate/provisioning source rather than an anonymous internet host": {
+   "status": "exact",
+   "note": "15 indicators (count verified), types ipv4/domain/url/sha256/md5, no entry for the IP, no corporate/provisioning/admin tag, clean IPv4s are exactly 8.8.8.8 and 1.1.1.1 \u2014 all match return 2"
+  }
+ },
+ "unsupported": []
+}

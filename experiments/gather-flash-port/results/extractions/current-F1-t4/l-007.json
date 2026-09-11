@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether the ticket store contains ANY records at all \u2014 any ticket for any host at any time \u2014 proving the store is populated and queryable, or whether it is wholly empty": {
+   "status": "exact",
+   "note": "health-check connected:true/status:ok/ticket_count:0 and unfiltered list-tickets total:0 both in payloads; 'wholly empty' is supported"
+  },
+  "whether any ticket, incident, or acknowledged-alert record covers soc-playground or the v2-off-hours-sudo alert around 2026-08-30 09:54Z, including records created after the burst": {
+   "status": "exact",
+   "note": "all six q= filters returned total:0/tickets:[]; honest none-found"
+  },
+  "any on-call, assignment, or acknowledgement context in the store that touches this host, user root, or postgres work": {
+   "status": "exact",
+   "note": "q=root and q=postgres returned empty; 'none exists' consistent with zero-ticket store"
+  }
+ },
+ "unsupported": []
+}

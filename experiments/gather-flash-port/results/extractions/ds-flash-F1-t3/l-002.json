@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any approved change ticket or change window covering soc-playground on 2026-08-30": {
+   "status": "exact",
+   "note": "host-filtered list-changes total 0, active-changes at 09:57Z [], unfiltered total 14, web-1 positive control CHG-1050 \u2014 all match returns 5\u20138; host/date range claims fall within the truncated 14-row list"
+  },
+  "any active incident or oncall engagement involving soc-playground at that time": {
+   "status": "exact",
+   "note": "every list-tickets call returned {\"total\": 0, \"tickets\": []} exactly as reported; summary flags it as an unverifiable zero rather than a clean negative, which is faithful to the payloads"
+  },
+  "who the ticket assigns as executor, if any": {
+   "status": "exact",
+   "note": "no ticket names soc-playground so none to report; the CHG-1050 requester team.web / approver sre.alice aside matches return 8"
+  }
+ },
+ "unsupported": []
+}

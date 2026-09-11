@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether the registry contains an entry covering soc-playground as an exercise/training target for authorized_keys writes or SSH persistence drills, with its validity span": {
+   "status": "exact",
+   "note": "All five lookups returned matched: null and health-check reported entries: 0; summary reports a miss with no entry, so no validity span exists to state."
+  },
+  "the entry id if a hit, or a miss if none": {
+   "status": "exact",
+   "note": "Summary reports a miss and states no entry id exists, matching matched: null across returns 6-10."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's leads actually tested the triage question \u2014 who initiated the write \u2014 and returned quoted, recorded evidence (141 accepted root publickey logins from an undocumented external IP in the preceding 23 minutes, a second key append, nc/curl/redirect-to-net tooling in the same container, CMDB miss on the IP) that discriminates between exercise and adversary, whereas X never sought the exec origin and its one telemetry lead was, by its own admission, descriptive and 'buys nothing'. X's inconclusive close is honestly scoped and names real gaps (container identity, registry), but it stops at authority-system silence without exhausting the elastic evidence that was available, so its verdict is under-earned rather than well-earned. Y's record has weaknesses \u2014 'persistence novel for this container' is asserted with no supporting row (and contradicted by its own 16:00:26Z second append), l-002's ticket result has no result row, and 'high' confidence is a notch strong on a host named soc-playground \u2014 but the rows still let a reader audit the malicious verdict from the edges alone."
+}

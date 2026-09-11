@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "Y's rows carry more discriminating evidence for its verdict \u2014 the root password change 53s before login (e-006), the container locus of the burst tied to a CMDB-documented db-1 (v-008/e-009), and a named identity registry row showing only dba.ivy holds db-1 sudo \u2014 and it honestly records its wasted host-state lead and names concrete open questions (process parentage, password-change cause) rather than a registry-enumeration limitation. X is more careful in scope (it admits Falco gives no tty attribution and calls the case 'unattributable' rather than asserting the SSH session carried the burst), but it missed the password change, and its 'nothing-to-try' ceiling rests on a lookup-verb limitation rather than exhausted evidence. Y overreaches slightly by asserting the SSH\u2192sudo linkage and the 'prod' framing on a soc-playground image, so the margin is slight."
+}

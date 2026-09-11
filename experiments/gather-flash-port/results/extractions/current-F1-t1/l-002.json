@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether an approved change record or maintenance window covering soc-playground was active at 2026-08-30 09:54-10:00Z, including its scope and who it was for": {
+   "status": "exact",
+   "note": "active-changes at 09:54Z returned []; list-changes approved active_at 09:54Z and 10:00Z both returned total 0. Scope/who marked N/A is consistent with empty payloads."
+  },
+  "any scheduled or recent changes touching soc-playground that could explain a sudo burst at this hour": {
+   "status": "exact",
+   "note": "list-changes for host with no status filter and for each of planned/approved/in_progress/implemented/cancelled all returned total 0; the status list matches the adapter's error text."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "Y's inconclusive verdict is carried entirely by its rows: the 30-day baseline lead was genuinely discriminating (it refuted its own adversary-novelty prediction with 12 prior identical writes on this container), the container-identity and registry misses are recorded as ceiling tests with positive controls, and the miss on the tacit-knowledge registry is correctly graded indeterminate rather than unauthorized. X gathered the stronger raw evidence (141 root logins from an undocumented external IP, nc/curl activity, a second append) but its high-confidence 'malicious' overclaims: it asserts the persistence is 'novel for this container' without any lead testing novelty, grades an empty registry as 'unauthorized', collapses a CMDB miss into 'anonymous internet', and leaves l-002 and l-004 with no recorded results, so a reader cannot audit those legs from the rows. Y's real weakness is that it never ran the session-origin correlation X did and does not name 'who initiated the exec' as an open question, which keeps the margin slight rather than clear."
+}

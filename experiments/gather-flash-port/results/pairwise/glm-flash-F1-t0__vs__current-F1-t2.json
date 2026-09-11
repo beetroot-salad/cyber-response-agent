@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Run X closes 'adversarial-confirmed, high confidence' while its own loop-2 grading concedes the commands read as provisioning, and its summary asserts things no row carries ('no prior SSH baseline', 'cleared log activities' beyond a Falco rule-name count) \u2014 the rows support 'unauthorized', not 'malicious'. Run Y's leads actually discriminated: the 30-day SSH baseline overturned the 'novel external root' framing, the identity registry showed only dba.ivy holds db-1 sudo, and the container-inspect scoped the burst to the prod database, all quoted in rows an auditor can check. Y's inconclusive-but-escalate verdict is honestly scoped to what it could reach, and the open questions it names (the 09:53:47Z root password change, process parentage on a host host-state cannot see) are the genuinely unresolved ones, whereas X never tested whether the source IP was baseline and never revisited the 'playground' host name it flagged in orient."
+}

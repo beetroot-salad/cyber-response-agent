@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "destination hosts, ports, and protocols of outbound connections from soc-playground (container e5b0213bd690) in 09:54-10:15Z on 2026-08-30, especially those from curl/openssl processes": {
+   "status": "exact",
+   "note": "All three destinations, ports, protocols, conn counts, byte totals, timestamps, and TLSv13/x25519 match return 9/16; 6-conn total matches return 6; honest note that no falco curl/openssl rule fires exist matches return 5"
+  },
+  "any file-transfer or download volumes (zeek files/ssl) in that window and what was retrieved": {
+   "status": "exact",
+   "note": "4 files, text/plain, 76 seen bytes, null sha256/filename, 169.254.169.254:80 matches return 12; 42 MB TLS transfer having no files entry is consistent with the empty result"
+  },
+  "whether any destination is a known corporate/package-mirror address vs an unexplained external host": {
+   "status": "exact",
+   "note": "Both threat-intel lookups returned verdict unknown, score 0, empty sources/tags (returns 18/19); summary reports exactly that and does not claim a mirror identification"
+  }
+ },
+ "unsupported": [
+  "172.64.190.1 described as 'a Cloudflare-range address' \u2014 no tool return attributes the IP to Cloudflare (external knowledge presented as fact)",
+  "172.18.0.17:5601 labeled 'Kibana' \u2014 no tool return names the service on that host/port (port-convention inference presented as fact)"
+ ]
+}

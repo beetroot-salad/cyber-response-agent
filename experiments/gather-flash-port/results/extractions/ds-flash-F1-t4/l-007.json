@@ -1,0 +1,22 @@
+{
+ "dims": {
+  "commands, processes, and sessions attributable to the sshd session from 147.235.199.7 after login": {
+   "status": "exact",
+   "note": "Login event, fingerprint, port, session-open lines, 18 auth events / 8 distinct messages, cron open/close at 09:55:01 and 10:05:01, no session-close for root, 0 sudo in auth \u2014 all verifiable from returns 8/10/14/19. Only slip is a process claim (see unsupported: the '*sudo:*' query was never run; 0 is still inferable from the exhaustive 8-row message listing)."
+  },
+  "any outbound connections, file writes, user/credential changes, or persistence artifacts after login": {
+   "status": "wrong",
+   "note": "Core findings hold (IP search = 1 row, zeek.files 87/55/21=163, no connection dataset, 3 Sudo-execution rows in e5b0213bd690, curl w/ embedded credential from 90115da40383, alerts total 1). But 'the three Write below etc events' under-reports a count the payload gives as 6 (return 24), and a 'Write below etc' event is placed at 10:08:48 when that rule's last_seen is 09:56:19.282 (only 'Read ssh information' reaches 10:08:48). Also '867 events, 17 rules' pairs the 09:45-window total with a post-09:54:41 breakdown that sums to 859."
+  },
+  "whether post-login activity looks like operator/ops work or attacker-shaped behavior": {
+   "status": "exact",
+   "note": "Addressed as observables: all post-login activity characterized as container/cloud-init bootstrap with no interactive shell, commands, egress, or persistence attributable to the session; every cited value is in the payloads."
+  }
+ },
+ "unsupported": [
+  "`message LIKE \"*sudo:*\"` \u2192 0 rows in logs-system.auth-* \u2014 no such query was run (the only COMMAND/sudo-style text search, query 8, was against logs-system.syslog-*)",
+  "`podman`/`containerd` mount teardowns through 10:13:19 \u2014 'podman' appears in no return (syslog process list is complete: 8 rows, no podman); 10:13:19.402 is the elastic_agent dataset last_seen, syslog ends 10:13:12.037",
+  "a `Write below etc` event at 10:08:48 \u2014 Write below etc last_seen is 09:56:19.282Z (return 24); only Read ssh information has last_seen 10:08:48.368Z",
+  "\"The three `Write below etc` events\" \u2014 return 24 counts 6 Write below etc events in window"
+ ]
+}

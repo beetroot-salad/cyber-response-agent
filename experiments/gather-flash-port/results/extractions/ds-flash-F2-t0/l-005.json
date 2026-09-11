@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "the mix and timing of other Falco alerts from soc-playground in the hours around 16:12Z, and whether similar authorized_keys writes occurred before": {
+   "status": "exact",
+   "note": "Top-group counts (657/288/267-absent-but-fine/226/184/131/124/118/98/70/68), 111 groups, 15:48:16.761\u219217:59:56.745 all match query 0; lower nc counts and '11 container ids' fall in the truncated tail. Prior authorized_keys rows (4 groups on 07-27, timestamps, users, cmdlines) match query 2."
+  },
+  "any activity from container 1df4bcd65ee4 in other telemetry": {
+   "status": "exact",
+   "note": "155 = 143 falco.alerts + 12 system.syslog with matching first/last timestamps (query 3); the 7-row container Falco breakdown matches query 4 exactly; syslog 'Removing stale sandbox' line matches query 6; absence in auth/zeek/squid/etc. is supported by only 2 datasets returning."
+  },
+  "whether this authorized_keys write is a first-time event for this host or part of a recurring pattern": {
+   "status": "wrong",
+   "note": "Conclusion (recurring: 2 events on this container 16:00:26.997/16:12:37.250, same cmdline from a36492b5172b on 07-27) is supported, but '5 Falco fires' under-reports: the 5 rows sum to 10 events (2+2+1+3+2). '\u221220h' is also ~23.6h."
+  }
+ },
+ "unsupported": [
+  "burst at 15:49:28.710\u2013.711 \u2014 no return contains a .711 timestamp; query 4 shows 15:49:28.710 only",
+  "12 logs-system.syslog-* dockerd lines \u2014 the 12 count is from query 3, but only 1 syslog hit (total=1, the dockerd sandbox line) was ever returned; attributing all 12 to dockerd is not observed"
+ ]
+}

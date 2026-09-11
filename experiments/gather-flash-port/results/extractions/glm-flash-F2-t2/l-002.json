@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any registry entry authorizes SSH key-add / persistence-exercise activity on soc-playground or its containers (e.g. container 1df4bcd65ee4)": {
+   "status": "exact",
+   "note": "All 7 lookups (returns 14-16, 19-20, 24-25) returned matched: null; the summary's count and probed actor/host/pattern combinations match the query list, and user.name: null is in return 13"
+  },
+  "the id, scope and validity window of any matching entry": {
+   "status": "exact",
+   "note": "Honest 'none to report' \u2014 every payload is a miss, and execution.md confirms a miss names no entry"
+  }
+ },
+ "unsupported": []
+}

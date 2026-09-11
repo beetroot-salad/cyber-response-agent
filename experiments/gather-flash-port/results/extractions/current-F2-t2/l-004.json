@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "what process parentage or session context is observable for the bash that wrote /root/.ssh/authorized_keys in container 1df4bcd65ee4 around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "bash / pname <NA> / openat at 16:12:37.250Z and the full -lc cmdline match return 5"
+  },
+  "what other Falco alerts or execve events occurred in this container in the surrounding minutes, and what they reveal about how the shell was launched": {
+   "status": "exact",
+   "note": "4 dup2, 2 UDP, 1 curl/bash, 1 nc/runuser, 1 authorized_keys in 16:10\u201316:20 match return 5; execve 4+4 over 16:02\u201316:12 match return 8"
+  },
+  "whether the 'Adding ssh keys to authorized_keys' rule has fired before 2026-07-28 on any host or container, and if so for which actors": {
+   "status": "wrong",
+   "note": "83 total / 8 containers / 3 containerd-shim events in a36492b5172b are correct, but the 80 legitimate sshd-rotation events span 8 containers (a36492b5172b appears in both patterns), not 7"
+  },
+  "any earlier Falco events for container 1df4bcd65ee4 beyond the alert window establishing what this container normally does": {
+   "status": "wrong",
+   "note": "volumes (9916/5009/3566), 9 prior sshd-parent rotation events, and the 16:00:26.997Z <NA>-parent event are all supported; but '28 distinct alert types' is the rule\u00d7proc\u00d7parent\u00d7evt_type row count \u2014 return 7 shows 13 distinct rules"
+  }
+ },
+ "unsupported": []
+}

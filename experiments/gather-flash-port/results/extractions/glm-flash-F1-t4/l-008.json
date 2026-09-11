@@ -1,0 +1,9 @@
+{
+ "dims": {
+  "whether 147.235.199.7 and 79.177.137.245 are known malicious, suspicious, or clean in threat intel, with any recorded malware/campaign associations": {
+   "status": "exact",
+   "note": "Both lookups returned verdict unknown, score 0, empty sources/tags, null dates; list-indicators total 15 with neither IP present; the four named IPv4s and their verdicts/tags match the rows."
+  }
+ },
+ "unsupported": []
+}

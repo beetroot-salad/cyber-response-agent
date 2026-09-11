@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "how often SSH logins to soc-playground occurred over the prior 30 days, as which users and from which source IPs": {
+   "status": "exact",
+   "note": "10,782 + 3 = 10,785 accepted, 0 failed, both IPs, spans, and publickey all match returns 5/6"
+  },
+  "whether root SSH logins to this host are recurring or novel": {
+   "status": "exact",
+   "note": "both rows in return 5 are root; 10,785/10,785 verifiable from the payload"
+  },
+  "whether 147.235.199.7 has any prior login history anywhere in the estate in the last 30 days": {
+   "status": "exact",
+   "note": "return 9 (logs-* sweep) shows the single soc-playground/system.auth row with 3 events; return 7 confirms root/publickey/accepted"
+  },
+  "any failed SSH attempts or anomalies preceding the 09:54:41Z login": {
+   "status": "exact",
+   "note": "return 10 (09:40\u201309:55 window) shows exactly one accepted root login from 147.235.199.7 at 09:54:41.339Z, 0 failed"
+  }
+ },
+ "unsupported": []
+}

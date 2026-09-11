@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "the CMDB record for soc-playground: owner, role, environment, and any provisioning/enrollment note": {
+   "status": "exact",
+   "note": "404 on get-host verbatim from return 6; list-hosts total 11 and all 11 names match return 7; scanner-1/canary-1 role/criticality/owner values match; correctly reports no owner/role/env/note exists"
+  },
+  "whether 147.235.199.7 or its range is registered to any documented host, operator, or egress": {
+   "status": "exact",
+   "note": "no IP fields exist anywhere in the list-hosts payload; the union of trust_edges_out across all 11 records is exactly the 8 hostnames the summary lists; honest 'not registered' is supported"
+  },
+  "if neither is documented, that both are absent from the registry": {
+   "status": "exact",
+   "note": "both absences follow directly from the 404 and the IP-free 11-host inventory; caveat that CMDB cannot positively resolve an IP is interpretation, not a measurement"
+  }
+ },
+ "unsupported": []
+}

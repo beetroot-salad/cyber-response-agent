@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether any approved change ticket or scheduled exercise window covers an authorized_keys / ssh-key modification on soc-playground around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "active-changes at 16:12:00Z returned []; host-scoped list-changes returned total 0 \u2014 summary reports 0, matches"
+  },
+  "if such a record exists, its id, scope (hosts/containers named), author, and time span": {
+   "status": "exact",
+   "note": "no record exists in any payload; summary states none \u2014 honest empty result"
+  },
+  "whether any other change records are open for this host or container 1df4bcd65ee4 in the surrounding period": {
+   "status": "exact",
+   "note": "host and container queries returned total 0; unfiltered list returned 14 rows covering only web-1, web-2, db-1, jump-box-1 \u2014 summary's count and host list match"
+  }
+ },
+ "unsupported": []
+}

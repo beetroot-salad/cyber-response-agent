@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "Y measured the login baseline (91 prior accepted root logins from the same IP since 08-22) that X's own h-002 p2 hinged on but never tested, and Y priced that into a moderate-confidence verdict while X claimed high confidence on a sudo-only baseline. Y also tested whether its ticket-store negative was meaningful (l-007: store healthy but empty estate-wide, so downweighted) and flagged the clock discrepancy and the failed l-001, whereas X's summary leans on an incident-state check (l-004) and a no-persistence claim (l-006) that have no result rows in the record. X's rows are tidier and more of its facts are in structured form, and Y's post-REPORT loop 4 is structurally awkward, which keeps the margin slight."
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any approved change ticket or change window covers an SSH key addition or authorized_keys modification on soc-playground around 2026-07-28T16:12Z": {
+   "status": "exact",
+   "note": "active-changes returned [] and list-changes (approved and unfiltered) returned total 0; summary reports none found, matching payloads"
+  },
+  "if such a record exists, its id, requester, scope, and scheduled window": {
+   "status": "exact",
+   "note": "honest 'nothing to report' \u2014 all payloads empty, no record to describe"
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "any identity/account registered as the operator of soc-playground or entitled to root there": {
+   "status": "exact",
+   "note": "All 16 realm users from list-users were checked with can-access; every payload is authorized:false, via:null. Role host lists (8 roles) contain no soc-playground. The '13 calls' figure in the quirk bullet is off (16 false payloads) but the dimension's own value (16 identities, all false) is correct."
+  },
+  "whether root on soc-playground maps to a named person or service": {
+   "status": "exact",
+   "note": "can-access user=root returned exit 1 / HTTP 404 'user root not found', as reported."
+  },
+  "if nothing is registered, that the lookup came back empty": {
+   "status": "exact",
+   "note": "Summary states the identity store's answer is empty and explains the 404 and uniform authorized:false; dev.hira exit-2 retry to exit-0 matches returns 18 and 25."
+  }
+ },
+ "unsupported": [
+  "13 can-access calls returned authorized: false \u2014 payloads show 16 such returns (all non-root identities), not 13",
+  "the alert's own host web-1 \u2014 the alert payload gives host.name = soc-playground; web-1 appears only as an sre-ops role host and the adapter's default bastion, never as the alert host"
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "any identity or access records covering the soc-playground host, its root account, or source IPs 147.235.199.7 / 79.177.137.245": {
+   "status": "wrong",
+   "note": "root 404s and soc-playground absence from role host lists are supported, but the summary says the 8 roles collectively authorize 9 distinct hostnames; the list-roles payload has 8 distinct (web-1, web-2, db-1, jump-box-1, dev-ws-1, office-ws-1, office-ws-2, canary-1). IP claim rests on the verb signatures accepting no IP param, which is acceptable."
+  },
+  "if the identity system cannot answer (adapter failure or no data), say so explicitly": {
+   "status": "exact",
+   "note": "States system reachable (exit 0 on list-users/list-roles), 404s are genuine not-found, no adapter failure, no data on the entities \u2014 matches returns."
+  }
+ },
+ "unsupported": [
+  "9 distinct hostnames authorized across the roles (payload shows 8)"
+ ]
+}

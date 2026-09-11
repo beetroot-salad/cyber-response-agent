@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "what events (any sensor) involve container 1df4bcd65ee4 in the hours before and after 16:12:37Z, including the nc probes to db-1:22 and any session/exec/auth events that could have initiated the bash write": {
+   "status": "exact",
+   "note": "2 authorized_keys fires (16:00:26.997Z, 16:12:37.250Z, bash/root/openat), nc+curl 8 execs each 15:49:28.710\u219216:12:37.249Z with cmdlines/parents, connect counts 48/12, nc target 127.0.0.1:22, zeek 10 flows .24\u2192.9, root publickey 203 events from 79.177.137.245 \u2014 all match returns 3/5/7/10/11/12. Omits dup2 \u00d7144 and full-window nc/curl \u00d745 but nothing stated is wrong."
+  },
+  "whether such authorized_keys or network-tool activity on this container is recurring (baseline over prior weeks) or novel": {
+   "status": "exact",
+   "note": "5 prior authorized_keys fires 07-08\u219207-11 and 1,923 nc/curl fires each 07-07 00:12\u219207-28 07:23 match return 6."
+  },
+  "which identity/session, if any, the initiating execution traces to": {
+   "status": "exact",
+   "note": "Falco user root, parent <NA>; host auth shows only root publickey from 79.177.137.245 (203 events, 15:48:38.438\u219216:17:28.016Z) \u2014 matches returns 7 and 11; linkage is hedged as the only login lineage, not asserted as proven."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 147.235.199.7 is recorded as a managed/documented host, and if so its role and ownership": {
+   "status": "exact",
+   "note": "get-host returned HTTP 404 (seen in return 3); list-hosts total 11 with the listed names matches return 4; no record names the IP, so 'not documented / no role or owner' is supported"
+  },
+  "whether any documented host or approved-source list covers 147.235.199.7 as an SSH source toward soc-playground": {
+   "status": "exact",
+   "note": "union of trust_edges_out across the 11 records verified as {web-1, web-2, db-1, jump-box-1, dev-ws-1, office-ws-1, office-ws-2, canary-1}; no ip field in any record; nothing references the IP or soc-playground, so 'no coverage' is supported"
+  }
+ },
+ "unsupported": []
+}

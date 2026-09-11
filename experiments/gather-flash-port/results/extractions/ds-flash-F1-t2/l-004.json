@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "whether 147.235.199.7 is a documented/managed host or IP in the estate, and what it is if so": {
+   "status": "exact",
+   "note": "Reports HTTP 404 on get-host for the IP, matching return 5; 'not documented' is the honest empty result."
+  },
+  "what soc-playground is: its role, zone, environment tier, owner": {
+   "status": "exact",
+   "note": "Reports HTTP 404 (return 4) and no role/criticality/owner available; 11-host list and absence of any soc-*/playground name verified against return 6."
+  },
+  "if either is undocumented, that the lookup came back empty for that entity": {
+   "status": "exact",
+   "note": "Both 404 error strings quoted verbatim from returns 4 and 5; list-hosts total 11 matches return 6."
+  }
+ },
+ "unsupported": [
+  "\"the IP-resolving hostname lookup path returned nothing\" \u2014 no elastic.ip-to-host-search (or any IP-to-hostname query) was run; the summary itself later admits it was not run",
+  "\"no registered host in the inventory carries this IP\" \u2014 the list-hosts payload contains no IP fields, so this was not observable from any tool return"
+ ]
+}

@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's leads actually discriminate: it tested whether the appended key was ever used (no new-source login) and traced how the bash arrived (nc/curl localhost probes, container-local sshd entrypoint), recording each as quoted edges, whereas X ran only authorization lookups plus an event count and never tested key use or ancestry \u2014 the two observables most able to move the verdict. X's record also under-carries its prose: the ticket lead (l-002) has no result row yet the prose asserts 'no ticket of any kind', and the baseline finding of 12 identical commands is left unexplored. Y over-reaches slightly \u2014 'impact exceeds' with no observed login, and an empty registry graded 'unauthorized' rather than indeterminate \u2014 but its escalation is forced by contracts either way and its named gaps (container identity, current key contents) are the genuinely open ones, while X's inconclusive verdict is cheap to earn and omits key-use as an open question."
+}

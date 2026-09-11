@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "what session or parent process launched the bash process in container 1df4bcd65ee4 around 2026-07-28T16:12:36Z (interactive, docker exec, scheduled script, or none visible)": {
+   "status": "exact",
+   "note": "proc.pname=<NA> for bash (and sshd), cmdline, openat, 2 fires 16:00:26.997Z/16:12:37.250Z, co-fired nc(runuser)/curl(bash) at 16:12:37.249\u2013.250Z all match returns 10/17/20/23; honest 'not visible' reading"
+  },
+  "any SSH login or session records on soc-playground around that time, including source addresses": {
+   "status": "wrong",
+   "note": "255 accepted/0 failed, root/publickey/79.177.137.245, 15:48:38.438\u219216:27:10.557Z, the 16:12:36.493Z login on port 12905, and 331/320 PAM sessions all match; but '37 in ~80s' is the grouping row_count (37 distinct ports over a 90s window), not the login count \u2014 visible rows alone sum to \u226542 events, so the count is under-reported"
+  },
+  "any prior or subsequent activity by the same session in that container": {
+   "status": "exact",
+   "note": "per-process (sshd 63, nc 15, curl 15, bash 2 with timestamps) and per-rule (20/10/7/7/2) counts match returns 11 and 8"
+  }
+ },
+ "unsupported": [
+  "13 distinct container ids in that window \u2014 return 24 was LIMIT 10 and returned exactly 10 rows; no payload shows 13"
+ ]
+}

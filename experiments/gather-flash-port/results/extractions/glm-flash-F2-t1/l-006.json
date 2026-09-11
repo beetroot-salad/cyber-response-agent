@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any threat-intel reputation, sightings, or classification for 79.177.137.245": {
+   "status": "exact",
+   "note": "verdict unknown, score 0, empty sources/tags, null first/last seen all match return 2"
+  },
+  "whether it is listed as a scanner, botnet, or known-bad infrastructure, or is unlisted": {
+   "status": "exact",
+   "note": "reports unlisted with empty tags/sources; correctly frames unknown as absence of signal per the stub doc"
+  }
+ },
+ "unsupported": []
+}

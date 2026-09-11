@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "open incident tickets referencing soc-playground or its services around 2026-08-30": {
+   "status": "exact",
+   "note": "Every list-tickets call returned total 0 / empty list; health-check ticket_count 0 confirms store is empty. Summary's 'none observed' matches."
+  },
+  "who is assigned/oncall on those tickets and whether their activity would involve sudo on that host": {
+   "status": "exact",
+   "note": "Summary honestly reports no assignee/oncall observable because no ticket exists; payloads are empty for this."
+  }
+ },
+ "unsupported": []
+}

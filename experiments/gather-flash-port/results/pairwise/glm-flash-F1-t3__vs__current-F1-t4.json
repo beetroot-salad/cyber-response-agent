@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "X's record carries its verdict in rows \u2014 quoted IP history (only three root logins ever, all to this host), a threat-intel liveness check against seeded indicators, a session-window exec sweep showing no persistence, and an explicit admission that Falco parent fields are null so login\u2192sudo attribution rests on a 10s timing gap \u2014 while Y's loop-2/3 results live only in prose and Y never checked its threat-intel feed was live. Y surfaced a real problem (host-state places the sudo burst ~45s before the SSH login) and then waved it off as 'adjacent in any reading' without a lead to resolve it, yet its summary still asserts the session was 'driving' the escalation; its l-001 also failed outright, leaving the elastic sudo baseline unmeasured. X's one overreach is labelling the termination 'adversarial-confirmed' with impact 'exceeds' when its own text concedes intent is undiscriminable, but its summary correctly scopes the incident to the unauthorized external root access and names the genuinely open questions (origin of the IP/key, whether the host is an undocumented lab box)."
+}

@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "counts and times of Falco 'Drop and execute new binary in container', 'Launch Sensitive Mount Container', 'Unexpected UDP Traffic', 'Clear Log Activities', and 'Read ssh information' events on soc-playground per day over the 30 days before 2026-08-30, to show whether 08-30 is a recurrence or a first appearance": {
+   "status": "wrong",
+   "note": "18 of 19 day rows match the payloads, but the 08-22 row is shifted: ClearLog is given as 112 when the payload shows Clear Log Activities=1 (112 is the UDP count, which the row then leaves as '\u2014'). The notes also say 'Read ssh information' did not exist before 08-07, contradicting the payload (and the summary's own table) showing 1/day from 07-30 onward. Recurrence-vs-novel conclusion and 08-30 counts (714/412/4/5/229) are supported."
+  },
+  "whether the sh-parented curl/openssl pattern (drop-and-execute with parent sh) occurred on any prior day": {
+   "status": "exact",
+   "note": "curl/sh and openssl/sh each 12,640 events across 19 days, 07-30 \u2192 08-30, per-day 1:1 pairing (1437/1437 on 07-30, 357/357 on 08-30) and the five rare non-sh procs all match returns 16/17."
+  }
+ },
+ "unsupported": [
+  "falco.output_fields.proc.pname carries 7 distinct values \u2014 the payload shows 6 distinct parents (sh, ca-certificates, run-parts, containerd-shim, configure, 8); no separate cardinality probe was run"
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "dims": {
+  "what session or parent process initiated the bash at 2026-07-28T16:12:36Z inside container 1df4bcd65ee4 (interactive, scripted, remote)": {
+   "status": "exact",
+   "note": "bash -lc, root/uid 0, proc.tty=0, parent <NA>, loginuid=-1, inline script \u2014 all in the fetched Falco doc (return 8)"
+  },
+  "what other activity the same session/container performed around that time": {
+   "status": "wrong",
+   "note": "Rule counts and 05-26\u219208-17 span match return 15, but 'Read sensitive file untrusted' is dated 2026-07-28T17:28:46Z; payload has it only on 2026-07-27T17:28:46Z (min and max). No 07-28 activity other than the key write is in the payloads."
+  },
+  "the container's name, image, and entrypoint if resolvable": {
+   "status": "exact",
+   "note": "container.name <NA>, image.repository null, docker inspect 'no such object' \u2014 honest unresolvable, matches returns 3 and 8"
+  },
+  "whether authorized_keys writes have any prior occurrence on this host, and whether an attacker-labeled key of the fake_key_0_*_attacker pattern appears in prior exercise activity": {
+   "status": "exact",
+   "note": "363 estate-wide (return 9); 34 non-fake + 3 fake for 1df4bcd65ee4 with timestamps and containerd-shim parent (returns 15, 16); per-container fake breakdown summing to 9 matches return 12"
+  }
+ },
+ "unsupported": [
+  "\"Read sensitive file untrusted\" occurring on 2026-07-28 at 17:28:46Z \u2014 the only such events in the payloads are on 2026-07-27T17:28:46Z"
+ ]
+}

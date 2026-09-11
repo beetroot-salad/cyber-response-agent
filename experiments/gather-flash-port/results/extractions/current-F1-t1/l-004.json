@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether 147.235.199.7 is a documented host, and if so its role, owner, and zone": {
+   "status": "exact",
+   "note": "HTTP 404 on get-host is in return 4; 11-host inventory in return 7 has no such entry; summary correctly says no role/owner/zone assignable"
+  },
+  "whether 79.177.137.245 (the habitual root-login source for soc-playground) is a documented host and its role": {
+   "status": "exact",
+   "note": "HTTP 404 on get-host is in return 5; not in the 11-host inventory; summary reports absence and no role"
+  },
+  "whether either IP is absent from CMDB entirely": {
+   "status": "exact",
+   "note": "Both 404s plus full list-hosts (total 11, names match the payload exactly) support 'absent entirely'"
+  }
+ },
+ "unsupported": []
+}

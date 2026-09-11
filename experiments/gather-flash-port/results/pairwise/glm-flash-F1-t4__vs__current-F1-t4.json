@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "X's leads each tested something that could flip the verdict (30d SSH baseline, CMDB, tickets, tacit-knowledge, threat intel) and its rows show the sudo burst sits inside a boot/entrypoint sequence, so its 'inconclusive, escalate for attribution' is exactly what the record supports. Y reaches 'malicious' from convergent absence in registries it admits are sparse or empty, while its own rows undercut its causal story: the sudo events (09:53:56) precede the root SSH login (09:54:41) by 45s, its only 'attacker' prediction (recon/persistence commands) stays refuted, and its summary concedes the activity was benign-shaped and unconfirmed. Y also never tested the boot-sequence explanation X found, and its post-REPORT loop 4 and challenge-review claim do not repair the gap between its evidence and its disposition."
+}

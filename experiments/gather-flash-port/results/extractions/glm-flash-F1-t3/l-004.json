@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "the provisioning status of the identity observed in the burst once identified (defer to whatever identity elastic shows, e.g. sre.* or svc account)": {
+   "status": "exact",
+   "note": "Identity = root (3 Falco events, user.name=root, uid/loginuid null all match return 8). get-user root \u2192 HTTP 404 'user root not found'; list-users total 16 with no root entry \u2014 all supported."
+  },
+  "whether that identity is granted sudo/root rights on soc-playground or equivalent hosts": {
+   "status": "exact",
+   "note": "can-access root/soc-playground \u2192 HTTP 404 'user root not found'; summary reports no grant in the identity store, which is what the returns show."
+  }
+ },
+ "unsupported": []
+}

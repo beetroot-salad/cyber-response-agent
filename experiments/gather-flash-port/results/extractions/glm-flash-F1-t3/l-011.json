@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "any documented deploy-key, automation egress range, image-builder, or pipeline infrastructure whose address could be 147.235.199.7 or that provisions hosts like soc-playground": {
+   "status": "exact",
+   "note": "Greps over the handbook files returned only learning-loop 'pipeline' lines, a 'deployment' word match, and two unrelated 'egress' phrases; one grep (return 6) returned no hits. No address, deploy-key, image-builder, or provisioning infra appears in any payload \u2014 the 'none found' is supported."
+  },
+  "any documented convention for playground/lab hosts and how they are set up": {
+   "status": "exact",
+   "note": "Nothing in any return mentions playground/lab hosts; honest 'none' is supported."
+  },
+  "a miss if the handbook covers nothing matching": {
+   "status": "exact",
+   "note": "Summary declares a documented miss, consistent with empty/unrelated grep results and the SKILL.md index describing only defender-internal docs."
+  }
+ },
+ "unsupported": [
+  "Claim of having read the full content corpus (design.md, runtime-loop.md, learning-loop.md, run-artifacts.md, knowledge-and-skills.md, invlang.md) directly \u2014 the only file read in the payloads is the handbook SKILL.md (return 1); the six file names come from its index, and the content files were only touched via grep, not read."
+ ]
+}

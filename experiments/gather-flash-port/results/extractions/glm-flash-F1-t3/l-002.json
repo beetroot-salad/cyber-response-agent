@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any change record or incident ticket active on soc-playground covering the burst window": {
+   "status": "exact",
+   "note": "host-filtered query returned total 0; all-hosts list has 14 tickets (count verified), hosts limited to web-1/web-2/db-1/jump-box-1, windows span 2026-04-21 to 2026-09-12 with none overlapping 2026-08-30; no incident linkage touches this host"
+  },
+  "who the change was approved for and what actions it authorized": {
+   "status": "exact",
+   "note": "honest 'no such record' \u2014 no ticket lists soc-playground, so no approver/scope exists to report"
+  },
+  "absence of any covering window, if none exists": {
+   "status": "exact",
+   "note": "absence stated and supported by both payloads; burst window values (09:54:51Z start, count 3, alert 09:59:51Z) match the alert file; status values cited all appear in the listing"
+  }
+ },
+ "unsupported": []
+}

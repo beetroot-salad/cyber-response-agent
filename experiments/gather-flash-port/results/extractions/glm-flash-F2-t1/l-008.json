@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any ticket (exercise, simulation, investigation, or change) references soc-playground, container 1df4bcd65ee4, or authorized_keys / ssh-key persistence activity around 2026-07-28": {
+   "status": "exact",
+   "note": "Both list-tickets calls returned total=0, tickets=[]; summary reports 0 tickets and 'not observed' \u2014 supported"
+  },
+  "if found, the ticket id, author, scope, and status": {
+   "status": "exact",
+   "note": "Nothing found; summary honestly states no ticket records exist, which is the correct conditional answer given empty payloads"
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "whether any identity record, key inventory, or principal provisions root SSH key access to soc-playground, and whether any ties to source 79.177.137.245": {
+   "status": "exact",
+   "note": "404 'user root not found' / exit 1 matches return 4; 16 users with 3/5/1/6/1 role split verified from return 5; sre-ops host list and absence of soc-playground in any role matches return 6; 'no IP fields' is true of both payloads. Only slip: the summary calls the root lookup a `get-user` query, but the only root query run was `can-access` (it does also label it identity.access-check)."
+  },
+  "any record of a sanctioned actor or exercise operator for this host": {
+   "status": "exact",
+   "note": "Honest 'not observed' \u2014 no user, role, or field in the payloads resembles an exercise-operator or sanctioned-actor record."
+  }
+ },
+ "unsupported": [
+  "Summary states `get-user` for `root` was run and returned 404 \u2014 no get-user query appears in the returns; the 404 came from the can-access query"
+ ]
+}

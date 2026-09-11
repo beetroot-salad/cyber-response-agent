@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "X ran the more discriminating leads (new-source login, bash ancestry) but its closing claim outruns them: it records no new-source login, a 97-per-30d recurrence of the same pattern, and admits an exercise cannot be excluded, yet closes 'malicious' with impact 'exceeds' and treats an empty registry as a positive 'unauthorized' verdict. Y's empties are trustworthy (positive controls on change-mgmt and host-state, five registry variants), it correctly reads a registry miss as indeterminate rather than refutation, and its 'inconclusive' verdict with named ceiling tests matches what its rows actually show. Y is docked for never testing whether the key was used for login (the triage prompt's third question), for a missing result row for its ticket lead, and for a contradictory h-001 resolution line, which keeps the margin slight."
+}

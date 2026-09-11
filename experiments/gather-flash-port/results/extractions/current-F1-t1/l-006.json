@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 147.235.199.7 appears in threat-intel feeds, and any known attribution (scanner, botnet, TOR exit, benign ISP, etc.)": {
+   "status": "exact",
+   "note": "verdict unknown, score 0, empty sources/tags, null first/last_seen all match the lookup payload; 'no attribution' is an honest none-found"
+  },
+  "whether it is absent from all feeds (clean/no reputation)": {
+   "status": "exact",
+   "note": "reports absent from seeded feeds, correctly framed as lookup-miss/absence-of-signal per the reference doc, not as clean"
+  }
+ },
+ "unsupported": []
+}

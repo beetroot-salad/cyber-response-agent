@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "the identity (user) behind each sudo execution in the burst and whether it is a svc/sre.* style account or a human interactive account": {
+   "status": "exact",
+   "note": "All 3 rows have user=root; no svc/sre.* identity in payloads; user.tty column absence confirmed by the HTTP 400 error text, so the human-vs-service caveat is honest."
+  },
+  "the sudo commands executed in the burst window": {
+   "status": "exact",
+   "note": "The three cmdlines, timestamps (09:54:51.724Z/.725Z/.725Z) and container e5b0213bd690 match the rows in return 3 verbatim."
+  },
+  "the prior sudo activity baseline on soc-playground (does this host habitually see sudo bursts, by which identities, at what hours)": {
+   "status": "exact",
+   "note": "7-day query returned a single row: 3 events, root, 2026-08-30T09:00 bucket. Summary's 'sole sudo activity in the week, by root, 09:00 hour' matches."
+  },
+  "any correlated process or session context in the Falco events (parent process, shell, tty)": {
+   "status": "exact",
+   "note": "proc.name is null and proc.pname is <NA> on all rows; tty field does not exist per the error return. Summary reports exactly that."
+  }
+ },
+ "unsupported": []
+}

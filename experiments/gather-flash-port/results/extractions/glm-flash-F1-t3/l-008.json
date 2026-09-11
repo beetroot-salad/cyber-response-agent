@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "every process executed in the root session beyond the three sudo/psql probes, with command lines": {
+   "status": "exact",
+   "note": "Reports none observable; proc-tree payload shows only routine services, no session processes. Honest none-found matches payload."
+  },
+  "any writes, downloads, cron/persistence changes, or additional remote connections during the session window": {
+   "status": "exact",
+   "note": "authorized_keys keys=[] (0 keys) and stock '/usr/sbin/cron -P' with no children both match payloads; historical writes/downloads honestly marked not observable."
+  },
+  "when the session ended and whether the host shows routine post-boot automation only": {
+   "status": "exact",
+   "note": "Session end honestly not observable; routine-only process list (tini/sshd, rsyslogd, cron, postgres, elastic-agent) matches proc-tree payload."
+  }
+ },
+ "unsupported": []
+}

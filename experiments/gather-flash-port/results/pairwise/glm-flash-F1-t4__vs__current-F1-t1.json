@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "Both reach the same escalation, but Y actually tested the predictions that could have flipped the verdict \u2014 what the root session did for 18 minutes (fleet-config curl, CA check), where traffic went (internal Kibana only), and whether persistence landed \u2014 whereas X asserts 'no persistence commands, no adversary observable' having inspected only the three alerted sudo lines and never the session itself. Y also calibrated its anchors better (noting the habitual 10,782-login source is equally absent from CMDB, so absence is a weak signal) and its ceiling tests name the genuinely unmeasured items (audit-level session record, the UDP/cloud-metadata Falco payloads) rather than a registry-API limitation. Y loses ground on auditability \u2014 several results (the l-011 persistence check, the 7x/30d command baseline) live only in prose, one observation is attributed to the wrong lead, and four leads died on budget \u2014 so the win is slight rather than clear."
+}

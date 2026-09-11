@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "every Falco rule that fired on soc-playground from 09:54:51Z to ~10:15Z, with timestamps, container id, process name, and user": {
+   "status": "wrong",
+   "note": "All 17 per-rule counts, first/last timestamps, and the per-rule container/proc/user detail match returns 6/7/8/9, but the headline '644 rule-fires total' contradicts the rows: SUM(events) over the 17 rule rows in return 6 is 859."
+  },
+  "specifically the Read ssh information / auth-keys / network-tool rule events: what files or tools they name and whether they trace to the root ssh session or container e5b0213bd690": {
+   "status": "exact",
+   "note": "Read ssh information = 2 events on container host under systemd (09:54:52.324 proc <NA>; 10:08:48.368 systemd-tmpfile --clean, root) matches return 9; no 'Adding ssh keys' rule in return 6; curl/openssl Drop-and-execute cmdlines, container 90115da40383, parent sh, root, 19+19 all match return 8; correctly states none carry e5b0213bd690."
+  },
+  "any events suggesting credential access, persistence, or outbound connections after the burst": {
+   "status": "exact",
+   "note": "Counts/timestamps for Read environment variable (17), Read sensitive file (9), Setuid (2), Write below etc (6), Write below binary dir (1), UDP (91), cloud-metadata (214/50), containers and procs all match returns 4/6/8; 'apk' as a UDP proc and extra Read-env containers could sit in the 71 elided rows of return 4, so not counted against it."
+  }
+ },
+ "unsupported": [
+  "644 rule-fires total (no tool return reports this; the per-rule rows sum to 859)"
+ ]
+}

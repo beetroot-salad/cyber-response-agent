@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "slight",
+ "reasons": "X's rationale is carried by quoted rows at every step (password change, sshd start, external root publickey login, CMDB inbound-source list, metadata-service contact, 42MB external download), and each loop opened a hypothesis that could have flipped the verdict (scheduled routine, documented provisioning) before refuting it on a named anchor. Y's inconclusive verdict is honestly scoped and its habitual-peer control is a genuinely discriminating fact X never tested, but Y's behavioral 'routine, no external egress, no persistence' claims have no observation rows for l-011 and are undercut by Y's own ceiling notes admitting the cloud-metadata/UDP payloads were never read. X overreaches on confidence \u2014 its 'post-login' egress edges are timestamped before the login, the burst time conflicts with the alert, and it never tested whether this bring-up sequence is the host's normal mode \u2014 so the margin is slight."
+}

@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether 147.235.199.7 is a documented IP in CMDB (asset, egress, bastion, VPN range)": {
+   "status": "exact",
+   "note": "HTTP 404 on direct lookup matches return 5; list-hosts (11 hosts) has no entry for the IP"
+  },
+  "what CMDB records exist for soc-playground (role, owner, environment)": {
+   "status": "exact",
+   "note": "HTTP 404 matches return 4; host absent from the 11-host inventory; correctly reports no role/owner/env available"
+  },
+  "if the IP is undocumented, that fact": {
+   "status": "exact",
+   "note": "Stated plainly, grounded in the 404 and the full inventory listing"
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "the Falco sudo-execution events on soc-playground around 09:54-10:00Z: user identity, command lines, parent process/session for each": {
+   "status": "exact",
+   "note": "3 events, root, three psql cmdlines, proc null, parent <NA>, timestamps .724\u2013.725Z all match returns 3/4; tty column absence matches the 400 error"
+  },
+  "whether the activity traces to an interactive shell/tty session or a service/scheduled context": {
+   "status": "wrong",
+   "note": "Conclusion (boot/entrypoint context) is supported by co-timed runc/tini/seed-users/agent-enroll rows, but the stated bound 'every Falco event on this host in 09:50\u201310:05Z falls between 09:53:56 and 09:56:33' contradicts return 5, where 'Drop and execute new binary in container' has last_seen 10:04:58.346Z"
+  },
+  "any other process or network activity from the same host and session in the surrounding window suggesting recon, persistence, credential access, or lateral movement": {
+   "status": "wrong",
+   "note": "Most figures match (curl/openssl 11 each to 10:04:58, python 46, elastic-otel-co 257, 'Read sensitive file untrusted' proc 9 \u00d79), but 'one Clear Log Activities (agent-enroll.sh)' under-reports: payload shows 2 events (two rows in return 3, count 2 in return 5). The bullet's own window header 09:53:56\u201309:56:33 also contradicts the 10:04:58 it cites"
+  }
+ },
+ "unsupported": []
+}

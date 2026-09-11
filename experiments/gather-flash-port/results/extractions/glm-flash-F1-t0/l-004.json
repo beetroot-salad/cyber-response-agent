@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any threat-intel records, listings, or history for 147.235.199.7": {
+   "status": "exact",
+   "note": "lookup fields (unknown/0/no sources/no tags/null seen) match return 1; absence from the 15-entry listing verified against return 2"
+  },
+  "whether the IP is known-bad, known-benign, or unknown to the intel sources": {
+   "status": "exact",
+   "note": "verdict 'unknown' matches lookup payload"
+  },
+  "any related indicators attributed to the same actor/infrastructure": {
+   "status": "exact",
+   "note": "no attribution in payloads; the cited 5.188.87.12 (suspicious, 61, vt, ssh-scanner/brute-force) matches return 2"
+  }
+ },
+ "unsupported": []
+}

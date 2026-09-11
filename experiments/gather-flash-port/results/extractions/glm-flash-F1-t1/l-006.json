@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any sshd/auth events on soc-playground or container e5b0213bd690 in the hours around 09:54:51Z on 2026-08-30, with actor identity and source": {
+   "status": "exact",
+   "note": "Accepted publickey root from 147.235.199.7 port 45835 at 09:54:41.339, session .341, password change 09:53:47.594, sshd listen 09:54:40.675, cron sessions 09:55:01/10:05:01, 3 ssh_login successes 09:54:41\u219218:03:45 all match returns 3/4. Container.id query errored (Unknown column) and the summary doesn't misreport it. Minor: '18:05:01 last sshd session close' is the max of all logged-off rows (cron included), not shown to be sshd \u2014 value is seen, attribution is interpretation."
+  },
+  "any non-falco process/exec events (auditd, system logs, other falco rules) covering the burst moment that show the invoking user or parent process of the sudo psql commands": {
+   "status": "exact",
+   "note": "Syslog sudo/psql count 0 (return 6, row_count 0), dataset list in return 11 has no auditd, Falco Sudo execution rows show user.name=root and proc.pname=<NA> for all 3 cmdlines \u2014 all supported."
+  },
+  "whether any interactive session or unusual activity preceded or followed the burst on this host that day": {
+   "status": "exact",
+   "note": "Falco evt.time 09:53:56.98\u201309:53:57.31 vs SSH login 09:54:41 (~44 s later), Drop-and-execute openssl/curl 09:54:53\u219210:12:55 (19 per process), apk/pip 09:55:12\u201309:55:48, python Launch Sensitive Mount Container, cron sessions \u2014 all match returns 4/7/8. 'runc Launch Sensitive Mount' is a slight mislabel (runc rows are BPF Program Not Profiled) but no value is invented."
+  }
+ },
+ "unsupported": []
+}

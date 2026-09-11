@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "how often 147.235.199.7 has authenticated to soc-playground via SSH before 2026-08-30, as which users, and with what success/failure pattern": {
+   "status": "exact",
+   "note": "2 accepted / 0 failed, root, publickey, first 2026-08-22T08:53:21Z, last 2026-08-22T16:09:13Z \u2014 matches return 4 row exactly"
+  },
+  "whether 147.235.199.7 appears in auth logs on any other fleet host": {
+   "status": "exact",
+   "note": "Return 4 grouped by host.name with no host filter and returned only soc-playground; 'not observed elsewhere' is supported"
+  },
+  "whether other source IPs habitually SSH into soc-playground (is remote root SSH to this host routine)": {
+   "status": "exact",
+   "note": "79.177.137.245 root/publickey 11403 accepted, 0 failed, 2026-07-30 \u2192 2026-08-18 matches return 5; row_count=2 supports 'no other IPs/users/methods' and 'zero failures from any source'"
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether 79.177.137.245 is a documented host, operator workstation, or known external address in the CMDB": {
+   "status": "exact",
+   "note": "404 on IP lookup matches return 4; 11-host list and the two office-ws owners (dev.dana, dev.ethan) match return 8/11; no CMDB record carries an IP field, so 'no host matches this IP' is consistent"
+  },
+  "what CMDB records exist for soc-playground (role, owner, environment) and for container 1df4bcd65ee4 if tracked": {
+   "status": "exact",
+   "note": "404 on soc-playground matches return 5; hostname absent from the 11 listed; inventory has no container-level fields, so 'not tracked' is an honest absence"
+  }
+ },
+ "unsupported": []
+}

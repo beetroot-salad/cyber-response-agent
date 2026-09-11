@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "the authorized_keys entries present for root on the db-1 container: key types, comments, counts": {
+   "status": "exact",
+   "note": "db-1 payload is keys: [] at 2026-09-11T08:40:29Z; summary reports 0 entries, no types/comments, matching timestamp"
+  },
+  "whether any key comment or fingerprint names an operator identity": {
+   "status": "exact",
+   "note": "none on db-1 (empty list); the only comment reported anywhere, 'attacker@elsewhere' on canary-1, is verbatim from return 16"
+  },
+  "which other lab containers carry the same authorized_keys": {
+   "status": "exact",
+   "note": "all seven other hosts queried; six return keys: [], canary-1 returns exactly one ssh-rsa entry as quoted; captured_at range 08:40:36Z\u201308:40:38Z matches the payloads"
+  }
+ },
+ "unsupported": []
+}

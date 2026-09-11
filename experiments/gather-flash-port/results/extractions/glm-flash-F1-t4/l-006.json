@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any open or recent tickets/incidents naming soc-playground or covering its 2026-08-30 boot window": {
+   "status": "exact",
+   "note": "All three list-tickets calls returned total 0 / empty list; honest 'none observed'"
+  },
+  "any oncall activity context that would explain a root login and provisioning burst on 2026-08-30": {
+   "status": "exact",
+   "note": "Ticket system empty; 'none observed' is supported by empty payloads"
+  }
+ },
+ "unsupported": []
+}

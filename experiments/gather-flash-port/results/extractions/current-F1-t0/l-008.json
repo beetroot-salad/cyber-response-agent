@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any open or recent tickets (incidents, oncall, requests) referencing soc-playground, its DB container, or postgres problems around 2026-08-30": {
+   "status": "exact",
+   "note": "Summary reports none; all four list-tickets returns are {\"total\": 0, \"tickets\": []}, including the filtered q=soc-playground/postgres/DB calls."
+  },
+  "even non-matching ticket activity in that window, so absence can be graded": {
+   "status": "exact",
+   "note": "Summary reports the unfiltered list-tickets call returned zero tickets total; return 8 shows total 0 with an empty list, and the NO-OP markers on the filtered calls are reproduced faithfully."
+  }
+ },
+ "unsupported": []
+}

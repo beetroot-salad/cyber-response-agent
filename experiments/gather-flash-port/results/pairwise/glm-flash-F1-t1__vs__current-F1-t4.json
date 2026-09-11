@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "X's verdict rests on affirmative rows it gathered itself \u2014 the root password change, sshd start, external root login, CMDB's documented-inbound-source list, and post-login egress (metadata-service probing, log clearing, 42MB download) \u2014 with all three authz contracts settled by quoted reasoning, whereas Y's 'malicious' rests entirely on convergent absence (CMDB/change/ticket negatives) and never examined what the root session actually did after login, which is the one lead that could have moved its own moderate-confidence call either way. X's leads each tested a live alternative (scheduled routine via tacit-knowledge registry, documented provisioning via CMDB, provisioning-scale activity via egress) and refuted it, while Y's l-007 only re-weighed a negative it already had and l-001 failed outright with the gap covered by prose. Y is more candid about calibration (moderate, impact none) and surfaces the 91-prior-logins baseline X never explains, but its record carries the CMDB/ticket results only as prose, and it leaves the genuinely open question \u2014 post-shell behaviour \u2014 unnamed."
+}

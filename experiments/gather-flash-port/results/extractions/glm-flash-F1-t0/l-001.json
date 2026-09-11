@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "the acting user/identity for each of the three sudo events and whether it is a svc / sre.* account or something else": {
+   "status": "exact",
+   "note": "All three rows carry user.name=root; summary reports root, not svc/sre.*, target user postgres from cmdline."
+  },
+  "the commands run under sudo and their shape (remediation vs credential/account/file manipulation)": {
+   "status": "exact",
+   "note": "Three cmdlines quoted verbatim match query 0/1 rows; shape assessment is interpretation."
+  },
+  "the surrounding process/session context (interactive shell, parent processes) for these sudo events": {
+   "status": "exact",
+   "note": "proc.name null and parent <NA> on the sudo rows is supported; summary states no parent recorded."
+  },
+  "whether the same identity or host shows other security-relevant events near the burst": {
+   "status": "wrong",
+   "note": "Summary says everything else in the window is elastic-agent/beats noise plus one agent-enroll.sh event and 'no ssh\u2026activity', but query 1 also returned an 'Unexpected UDP Traffic' event from sshd -D (root, 09:54:51.725Z) that the summary omits. Wider-window 'only 3 sudo events 08:00\u201312:00Z' is supported by query 2."
+  }
+ },
+ "unsupported": []
+}

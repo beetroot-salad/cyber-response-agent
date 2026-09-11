@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "X closes 'malicious, high confidence' on provenance alone while its own rows show the sudo payload was routine postgres health checks, no persistence, no egress \u2014 and it never tested whether external root publickey logins are this host's normal mode, which Y did (habitual peer 79.177.137.245 with 10,782 logins, also undocumented) and which collapses X's 'undocumented external IP' inference. Y's leads were discriminating (30-day command baseline, IAM, tacit-knowledge, Zeek peers, persistence check) and its 'inconclusive, escalate' verdict is scoped to exactly what the rows support: routine behavior, unattributable operator, with the unmeasured surfaces (l-009, l-010) named honestly as ceilings. Y's record is messier (exhausted leads, an observation block filed under the wrong lead, no challenge review) but a reader can audit its verdict from the rows, whereas X's rows contradict the strength of its claim."
+}

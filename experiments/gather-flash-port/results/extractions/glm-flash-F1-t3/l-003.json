@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "soc-playground's documented role, environment, owner team, and provenance": {
+   "status": "exact",
+   "note": "404 on direct lookup and 11-host enumeration (count and names verified) contain no soc-playground; honest 'not observed' matches payloads"
+  },
+  "whether sudo activity by humans or service accounts is expected baseline on this host": {
+   "status": "exact",
+   "note": "No baseline for soc-playground is correct given absence; per-host sudo attributions (svc.config-mgmt on canary-1/db-1/jump-box-1/dev-ws-1, svc.deploy+svc.config-mgmt on web-1/web-2, svc.security on scanner-1, dev.dana/dev.ethan on office-ws-1/2) all match the list-hosts rows"
+  }
+ },
+ "unsupported": []
+}

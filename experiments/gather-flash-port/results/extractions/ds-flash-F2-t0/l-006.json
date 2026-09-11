@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "whether 79.177.137.245 appears in threat-intel feeds and with what reputation/classification": {
+   "status": "exact",
+   "note": "lookup payload (verdict unknown, score 0, sources [], tags [], null first/last_seen) quoted verbatim; health-check indicator_count 15 and list-indicators total 15 match; control example 185.220.101.45 malicious/92 vt,otx matches"
+  },
+  "whether any known actor, campaign, or pattern is associated with it": {
+   "status": "exact",
+   "note": "honest none \u2014 sources/tags empty in lookup; IP absent from the 15-row census; cited tags (emotet, cobalt-strike, tor-exit, ssh-scanner, brute-force) all present on other rows"
+  },
+  "whether it is classified as residential, corporate, hosting, or anonymizing infrastructure": {
+   "status": "exact",
+   "note": "honest 'not provided' \u2014 no payload carries ASN/infrastructure-type fields; correctly scoped as unresolvable on this system"
+  }
+ },
+ "unsupported": [
+  "Window note claims entries carry first_seen/last_seen 'up to 2026-04-22' \u2014 the list-indicators payload's latest last_seen is 2026-04-24 (8.8.8.8, 1.1.1.1, github.com, registry-1.docker.io, d41d8cd9...), so the stated upper bound contradicts the rows"
+ ]
+}

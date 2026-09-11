@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "falco process or syscall events in container 1df4bcd65ee4 between roughly 15:50Z and 16:15Z, including process names, parents, and command lines": {
+   "status": "exact",
+   "note": "All five groups, counts (11/22/7/7/2 = 49), timestamps, procs, parents, evt types and cmdlines match return 6 exactly."
+  },
+  "any network-tool, exec, or shell-spawning activity in that container preceding the bash write": {
+   "status": "wrong",
+   "note": "nc/curl execve at 15:59:10Z and sshd activity are correctly reported, but the stated gap of '~67 seconds' before the first authorized_keys openat at 16:00:26Z contradicts the payload timestamps (15:59:10.969 \u2192 16:00:26.997 is ~76 seconds)."
+  },
+  "the ancestry chain leading to the bash process at 16:12:37Z if visible": {
+   "status": "exact",
+   "note": "Correctly reports bash with parent <NA> at 16:12:37Z, runuser\u2192nc and bash\u2192curl branches; the sshd-as-spawner link is flagged as inference, not observed."
+  }
+ },
+ "unsupported": [
+  "~67 seconds between the nc/curl execs at 15:59:10Z and the first authorized_keys openat at 16:00:26Z (payload timestamps give ~76 seconds)"
+ ]
+}

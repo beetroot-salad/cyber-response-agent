@@ -1,0 +1,25 @@
+{
+ "dims": {
+  "container e5b0213bd690's name, image, entrypoint, and role on soc-playground": {
+   "status": "exact",
+   "note": "name db-1 and image soc-playground/host-db:22.04 match container-inspect; entrypoint chain tini \u2192 host-entrypoint.sh \u2192 sshd -D and postgres-14 role read straight from the proc-tree PID 1 / PID 75 rows; correctly notes the verb exposes no entrypoint field"
+  },
+  "the process and parentage behind the three sudo -u postgres psql commands (event-time 09:53:56-57Z): which process/session/script issued them": {
+   "status": "exact",
+   "note": "honest none-found: both proc-tree captures (08:35:30Z, 08:36:04Z) show no sudo/psql/shell; the ~12-day gap and ~07:43Z postgres start are arithmetic on captured_at/ELAPSED, not new measurements"
+  },
+  "any scheduled job, entrypoint script, or provisioning automation on soc-playground that explains a postgres app-db setup at this time": {
+   "status": "exact",
+   "note": "core answer (cron -P PID 52 running, no job contents visible, no script contents retrievable) is supported; but the stated fim-checksum /etc refusal was never observed \u2014 see unsupported"
+  },
+  "what soc-playground itself is, as far as host state shows": {
+   "status": "exact",
+   "note": "docker context name and eight-host inventory all present match the proc-tree error text and health-check payload; the health-check timestamp it attaches is not in the payload \u2014 see unsupported"
+  }
+ },
+ "unsupported": [
+  "health-check captured at '2026-09-11T08:35:2x Z' \u2014 the health-check return carries no captured_at field at all, and by return order it ran after the 08:35:30Z proc-tree",
+  "fim-checksum's safe-path regex denies /etc and an 'ls /etc/cron.d/' attempt was refused by the transport \u2014 no fim-checksum query was run; the only refusal seen was the generic bash-blocking correction, which mentions neither fim-checksum nor /etc",
+  "proc-tree with the 12-char container id 'also fails' the inventory check \u2014 never attempted; only host=soc-playground was tried and failed"
+ ]
+}

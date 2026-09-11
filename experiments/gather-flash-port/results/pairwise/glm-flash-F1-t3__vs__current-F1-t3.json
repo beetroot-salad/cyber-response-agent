@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "X's rows explicitly say the sudo-to-session link rests on timing alone (Falco parent null), the probes sit inside a cluster-wide seeding second on a freshly booted host, the IP had two prior clean root logins, and 'adversary vs undocumented operator cannot be further discriminated' \u2014 yet it closes 'malicious / adversarial-confirmed', so the prose outruns its own record and 'root absent from a 16-user identity store' is a non-discriminating finding dressed as a refutation. Y's quoted 30-day baselines (identical sudo psql commands; 22,700 recurring curl/openssl Fleet-enrollment events) genuinely test novelty and its 'inconclusive, escalate for governance' claim is exactly what those rows plus the empty authority anchors support, with the deferred contract and budget-exhausted leads named honestly. Y is not clean \u2014 it labels root 'known-corp' without evidence, reads parent=NA as 'not an interactive shell', and never saw the external SSH login X found \u2014 so it wins on earned scoping rather than on investigative reach."
+}

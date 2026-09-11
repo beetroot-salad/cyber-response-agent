@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "which user identity and process/command executed sudo in each of the three events, with timestamps": {
+   "status": "exact",
+   "note": "All three rows match returns 10/15: user root, container e5b0213bd690, @timestamp 09:54:51.724/.725/.725Z, Falco event times 09:53:56.98/57.18/57.31Z, the three psql cmdlines; proc.name null / pname <NA> as reported; count 3 verified."
+  },
+  "whether the sudo activity traces to an interactive session, a service account, or scheduled execution (parent process, terminal, source of the session)": {
+   "status": "exact",
+   "note": "Falco parent/tty absent as stated; db-1 auth rows (24x pam session open/close, 8x each 'root : PWD=/ ; USER=postgres ; COMMAND=/usr/bin/psql ...' at 09:53:57) match returns 24/33; ordering vs the 09:54:41 ssh login and 09:55:01 CRON is correct. The 'scheduled/db-init' verdict is interpretation. Minor: the closing '~54 s after' should be ~44 s (09:53:57\u219209:54:41), a derived figure not a payload value."
+  },
+  "any surrounding events on soc-playground in the same window (logins, ssh, remote exec, network tool use) that put the burst in context": {
+   "status": "exact",
+   "note": "auth (8 rows, publickey root from 147.235.199.7:45835, fingerprint, passwd change 09:53:47.594, CRON 09:55:01), Falco 121 groups / 340 BPF / curl+openssl 11 each in 90115da40383, zeek 3412 conns 20/15 IPs and zero rows for 147.235.199.7, postgres 8x startup + 2112x auth failures 09:54:01.409\u201310:04:51.431, syslog 3755/24/3354 all match returns 16,19,20,21,28\u201331,35. 'Launch Sensitive Mount Container python 09:55:48\u201309:56:26' and container names ci-1/elasticsearch fall in truncated returns; counted as supported."
+  }
+ },
+ "unsupported": []
+}

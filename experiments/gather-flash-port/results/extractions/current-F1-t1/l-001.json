@@ -1,0 +1,24 @@
+{
+ "dims": {
+  "the 3 Falco sudo-execution events on soc-playground in the 09:54-10:00Z window: user, command, parent process, session and terminal if recorded": {
+   "status": "exact",
+   "note": "3 events at 09:54:51Z, user root, parent <NA>, tty null, container e5b0213bd690, three psql cmdlines \u2014 all match returns 9/22/29; session field does not exist (return 8) and summary reports none recorded"
+  },
+  "what else the same identity did on soc-playground in the surrounding hour (logins, shells, process or file events)": {
+   "status": "wrong",
+   "note": "login/session details match (1 accepted root publickey from 147.235.199.7 at 09:54:41.339Z; 4 opened/2 closed; sshd/cron/systemd-user split), but the Falco total '846 events' is off \u2014 return 19's 18 rule rows sum to 867"
+  },
+  "the 30-day baseline of sudo-execution and ssh/login activity on soc-playground: which identities habitually appear, typical hours, and whether any prior burst resembles this one": {
+   "status": "wrong",
+   "note": "'2,555 Falco sudo events' contradicts the payloads \u2014 return 20's 14 rows and return 21's 18 daily buckets both sum to 2,236; per-command counts, daily peaks, 10,782/3 auth split, 12,959/12,861 sessions are correct; typical hours not addressed"
+  },
+  "any session or login event on soc-playground shortly before 09:54Z that plausibly preceded the burst": {
+   "status": "exact",
+   "note": "accepted publickey root login 09:54:41.339Z from 147.235.199.7 and sshd session open 09:54:41.341Z, only sshd session in window \u2014 matches returns 14/25/26/31"
+  }
+ },
+ "unsupported": [
+  "846 total Falco events in the 09:00\u201311:00Z window (payload rows sum to 867)",
+  "2,555 Falco 'Sudo execution' events over the 30-day baseline (payload rows sum to 2,236)"
+ ]
+}

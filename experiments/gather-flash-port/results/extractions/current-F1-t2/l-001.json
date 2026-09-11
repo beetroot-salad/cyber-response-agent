@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "which user identities executed sudo in the burst and what commands were run, with parent process/session context where recorded": {
+   "status": "exact",
+   "note": "3 events, root, container e5b0213bd690, three psql cmdlines, pname <NA>, proc.name null all match return 5"
+  },
+  "the surrounding auth context on soc-playground: logins, ssh sessions, or shell activity shortly before the burst": {
+   "status": "exact",
+   "note": "publickey login from 147.235.199.7 at 09:54:41.339Z, PAM/systemd session lines, password-change at 09:53:47.594Z, cron open/close at 09:55 all match returns 6/17/21/22; the 09:55:01.743Z cron-open timestamp sits plausibly in truncated return 12 (return 17 confirms 1 opened + 1 closed in that minute)"
+  },
+  "this host's baseline: how often sudo execution occurs on soc-playground over the prior 30 days, by which users, at which hours": {
+   "status": "exact",
+   "note": "0 sudo lines verified by return 16; ~79K total = 43117 null + 36603 root from return 14; zero sudo makes per-user/per-hour trivially empty"
+  },
+  "whether any of the burst's sudo commands look like privilege-pivot or defensive-tool tampering rather than routine administration": {
+   "status": "exact",
+   "note": "interpretive assessment grounded in the three observed cmdlines; no new measurements asserted"
+  }
+ },
+ "unsupported": []
+}

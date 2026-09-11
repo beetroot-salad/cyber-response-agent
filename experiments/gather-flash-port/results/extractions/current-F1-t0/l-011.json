@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any registry entry covering host soc-playground, root SSH access to it, sudo/postgres health-check activity, or its lab/playground status": {
+   "status": "exact",
+   "note": "All three lookups returned matched: null (returns 4-6) and health-check reports entries: 0 (return 7); summary reports none found for each facet"
+  },
+  "the entry's id and validity window if a hit, or an explicit miss if none": {
+   "status": "exact",
+   "note": "Explicit miss stated; no id or validity window claimed, consistent with matched: null and empty registry"
+  }
+ },
+ "unsupported": []
+}

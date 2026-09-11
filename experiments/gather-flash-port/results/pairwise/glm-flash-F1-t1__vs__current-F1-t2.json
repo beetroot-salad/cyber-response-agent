@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "Y's closing claim (unauthorized root access, adversary-vs-undocumented-operator unresolved) is fully carried by its rows \u2014 quoted registry counts, a 30d SSH baseline showing external root login is this host's normal composition, and a clean host-vs-container split \u2014 whereas X applies db-1's CMDB record to soc-playground and its decisive l-009 step calls 09:54:23/09:54:35 events 'post-login' when its own e-004 puts the login at 09:54:41, while its bring-up attr places the sudo burst at 09:53:57, before sshd even started, contradicting both e-002 and the matched 'post-shell' archetype. X's 'malicious/high' therefore rests on prose ('credential probing', 'far exceeds provisioning') that outruns rows showing an unknown-reputation TLS download during package installs. X's leads were markedly more discriminating (scheduled-routine, provisioning, egress forks) and Y's named ceiling is partly misstated since SIEM session/egress evidence was reachable and untried, which keeps the margin slight."
+}

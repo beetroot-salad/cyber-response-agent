@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any CMDB record (host, network device, IP allocation) covering 147.235.199.7 or its range": {
+   "status": "exact",
+   "note": "Direct get-host returned HTTP 404 'host 147.235.199.7 not found' (seen); list-hosts returned total=11 with the 11 names the summary lists, and no record carries any IP/range field. Network-device/IP-allocation record types don't exist in the adapter (only host verbs), so 'none covers it' is a fair reading of what was observed."
+  },
+  "a measured absence if no record covers it": {
+   "status": "exact",
+   "note": "Absence is grounded in both the 404 and the full 11-host enumeration showing no IP reference; the count 11 matches the payload."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether soc-playground exists in CMDB with a role, zone, owner, and lifecycle status": {
+   "status": "exact",
+   "note": "404 on direct lookup and absence from the 11-host inventory both match the payloads; the listed hostnames, canary-1 sandbox/team.sre, and preprod office-ws roles are all verifiable from return 4"
+  },
+  "any documentation about expected root/admin access patterns or deployment purpose for this host": {
+   "status": "exact",
+   "note": "honest 'none found' \u2014 no record exists in either payload, so nothing to report"
+  }
+ },
+ "unsupported": []
+}

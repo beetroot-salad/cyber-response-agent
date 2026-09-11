@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any open incident, oncall ticket, or alert-response activity referencing soc-playground active around 2026-08-30 09:54-10:00Z, and who was responding": {
+   "status": "exact",
+   "note": "All three list-tickets queries (unfiltered, status=open, q=soc-playground) returned total:0; summary reports none found and responder N/A, which matches the empty payloads."
+  },
+  "any recent tickets for soc-playground explaining sudo activity at this hour": {
+   "status": "exact",
+   "note": "q=soc-playground and unfiltered queries both returned total:0; honest zero, correctly noted as covering open and closed."
+  }
+ },
+ "unsupported": []
+}

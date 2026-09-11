@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "the distribution of source IPs behind soc-playground's ~14k prior successful ssh_logins: which IPs, which users, habitual cadence": {
+   "status": "wrong",
+   "note": "30,095 / 15 IPs / 1 user and the full per-IP counts and spans match returns 8 and 10; 9-vs-6 range split is correct. But 'No IP ever overlaps another on the same day' contradicts the daily table (return 12): 06-14 (79.177.141.177 + 79.177.131.209), 06-18 (147.235.197.12 + 147.235.199.93), 06-26 (79.177.155.109 + 147.235.197.12), 07-01 (79.177.131.160 + 79.177.135.156). Also labels an Apr-22\u2192Sep-11 (~142-day) window as '46 days'."
+  },
+  "whether 147.235.199.7 ever logged in to soc-playground (or any fleet host) before 2026-08-30": {
+   "status": "exact",
+   "note": "91 events / 91 accepted / 0 failed, root, ssh_login, soc-playground only, span 08-22T08:53:21.548Z \u2192 09-01T15:15:56.519Z, daily 2/3/1/85 \u2014 all match returns 9 and 12."
+  },
+  "whether prior root ssh logins to soc-playground from external/non-internal IPs are routine or absent": {
+   "status": "wrong",
+   "note": "15 external IPs and zero 172.18.* root rows match return 13, but the stated total '42,199 accepted' is not in any payload; the 15 rows sum to 30,095."
+  }
+ },
+ "unsupported": [
+  "42,199 accepted root ssh_logins from external IPs (return 13 rows sum to 30,095; no payload carries 42,199)",
+  "No IP ever overlaps another on the same day (return 12 shows two source IPs on 06-14, 06-18, 06-26 and 07-01)"
+ ]
+}

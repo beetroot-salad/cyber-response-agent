@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any registry entry covers exercise or training activity involving authorized_keys writes, SSH persistence, or attacker-simulation on soc-playground": {
+   "status": "exact",
+   "note": "All nine lookups returned {\"matched\": null}; summary reports a clean miss and lists exactly the actor/host/pattern bindings that were run."
+  },
+  "for any hit: its entry id, scope (hosts/containers), and validity span": {
+   "status": "exact",
+   "note": "No hit in any payload; summary honestly states there is no id/scope/validity span to report."
+  }
+ },
+ "unsupported": []
+}

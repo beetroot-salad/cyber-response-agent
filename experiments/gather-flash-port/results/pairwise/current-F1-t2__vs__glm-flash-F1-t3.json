@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "X's closing claim (inconclusive, escalate on refused authorization) matches its rows exactly: every registry lead returned a quoted refusal, the 30-day SSH baseline (l-006) showed external root login is this host's normal pattern, and the one lead that failed (l-008) is named as the ceiling with the genuinely open questions (process parentage, the 09:53:47Z event). Y gathered some sharper evidence (l-009's finding that the sudo probes sit inside a cluster-wide seeding second with null parent fields, l-010's three-login IP history) but then closed as 'malicious / adversarial-confirmed / impact exceeds' while its own prose concedes attribution rests on timing alone, p2 was refuted three times, no impact or persistence was found, and the actor is 'an unregistered operator at best' \u2014 a verdict the rows do not carry. Y also never measured the host-level login baseline X did, so its 'recurring external root access' framing misses that thousands of such logins preceded this IP."
+}

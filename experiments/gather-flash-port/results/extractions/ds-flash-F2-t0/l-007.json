@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "whether any documented identity or SSH key is provisioned for root access on soc-playground or from source 79.177.137.245": {
+   "status": "exact",
+   "note": "root 404 on get-user and can-access, 16 users, 8 roles, positive/negative control values all match payloads; only over-reach is the 'none of 16 users' claim (see unsupported)"
+  },
+  "any known association of that address or its reverse identity with the estate": {
+   "status": "exact",
+   "note": "honestly reported as not resolvable in identity (user\u00d7host only, no IP fields in any return); no value asserted"
+  },
+  "whether root SSH access on this host is a documented pattern": {
+   "status": "exact",
+   "note": "no root account, soc-playground in no role host list, sre.alice\u2192soc-playground authorized:false; role shell/sudo values match list-roles"
+  }
+ },
+ "unsupported": [
+  "\"none [of the 16 users] lists soc-playground in authorized_hosts\" \u2014 get-user was run for only 6 of 16 users (sre.alice, ctr.kai, svc.backups, dba.ivy, svc.security, dev.dana); the other 10 users' authorized_hosts were never returned, and per-host overrides exist (svc.security has scanner-1 despite the service-account role having an empty host list)"
+ ]
+}

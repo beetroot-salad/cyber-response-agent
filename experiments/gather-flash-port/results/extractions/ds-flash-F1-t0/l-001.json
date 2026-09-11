@@ -1,0 +1,21 @@
+{
+ "dims": {
+  "the full set of Falco Sudo execution events on soc-playground in the 10 minutes from 2026-08-30T09:54:51Z, with per-event user, sudo command, and parent process": {
+   "status": "exact",
+   "note": "3 events, root, three psql cmdlines, container e5b0213bd690, proc null, pname <NA>, timestamps .724\u2013.725Z all match return 4"
+  },
+  "any surrounding session/login events on soc-playground for the same user shortly before the burst (how they got on the host, from which source)": {
+   "status": "exact",
+   "note": "SSH publickey login root from 147.235.199.7 at 09:54:41.339Z, 11 null rows, 4 logged-on, 2 logged-off with timestamps all match return 7; empty event.action=sudo result matches return 8"
+  },
+  "whether the same identity has prior sudo-execution history on this host or elsewhere in the last 30 days (baseline presence/absence)": {
+   "status": "exact",
+   "note": "all 10 cmdline rows, counts, date spans, soc-playground-only, last prior fire 08-22T08:37:38Z match return 6"
+  },
+  "any other suspicious Falco events on this host in the same hour (shell spawns, network tools, file writes)": {
+   "status": "exact",
+   "note": "every quoted group count/proc/parent/timestamp matches return 5 (340/214/46/43/36/19/19/13/12/10/3/1s); row_count 52 correct; Setuid listed as a single group of 1 though two such groups exist (each 1) \u2014 lenient"
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "the count and cadence of prior 'Drop and execute new binary in container' falco events on soc-playground over the 30 days before 2026-08-30, and which containers/commands they involved": {
+   "status": "wrong",
+   "note": "Summary states 22,700 total events; per-container rows (return 6) sum to 21,701 (20374+1+1+1+57+128+1139). Container list, per-container counts, date spans, and curl/openssl command shapes are all supported."
+  },
+  "whether today's burst in container 90115da40383 differs from that historical pattern in destination, command shape, or timing": {
+   "status": "exact",
+   "note": "714 events, 09:54:53\u201318:04:40, sole container, identical curl/openssl cmdlines under sh, prior 1,139-event run 08-18\u219208-22 \u2014 all match returns 5/6/7."
+  }
+ },
+ "unsupported": [
+  "22,700 total historical events (no return yields this figure; the rows sum to 21,701)"
+ ]
+}

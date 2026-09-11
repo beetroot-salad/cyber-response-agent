@@ -1,0 +1,15 @@
+{
+ "dims": {
+  "whether the root account / direct root SSH logins are a documented, provisioned access pattern in this environment": {
+   "status": "exact",
+   "note": "Both root lookups returned HTTP 404 'user root not found' (exit 1) as stated; list-users count 16 all enabled, list-roles count 8, per-role host sets, role cardinalities (3/5/1/6/1), and sre.alice's 8 authorized + 8 sudo hosts all verify against the payloads; no 'soc-playground' appears anywhere in the identity returns."
+  },
+  "any identity or SSH-key records that would explain logins from an external IP like 147.235.199.7": {
+   "status": "exact",
+   "note": "Honest 'not observed' \u2014 no payload carries a source-IP or key field; ctr.kai details (kai@contractor.example, contractor role, office-ws-2 only, sudo false) match list-users and list-roles."
+  }
+ },
+ "unsupported": [
+  "control lookup 'returned 200' \u2014 the sre.alice query shows exit=0 with a JSON body, but no HTTP 200 status appears in any tool return (minor; inferred from exit 0)"
+ ]
+}

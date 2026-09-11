@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's 30-day SSH baseline and container-inspect leads were genuinely discriminating \u2014 they showed external root SSH is this host's normal composition (10,785 logins, mostly from a different IP) and that the burst ran inside the documented prod db-1 container \u2014 while X's IP-scoped telemetry query produced the misleading 'exclusive recurring access' framing and X's own record is internally inconsistent (root marked first-seen on a host that booted 60s prior, yet the same IP had root logins there over 8 days). X closes 'malicious' while its synthesis admits the adversary story is not tool-confirmed, so the disposition outruns the rows; Y's 'inconclusive, escalate on refused authorization' matches exactly what its authz rows show. Y also names the genuinely open questions (cause of the pre-login root password change, process parentage) and ties them to a specific failed lead, whereas X leaves the host-provenance question unnamed."
+}

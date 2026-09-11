@@ -1,0 +1,5 @@
+{
+ "winner": "X",
+ "margin": "clear",
+ "reasons": "Run X calibrates its verdict to what its leads actually found \u2014 undocumented external root access with no authorization anchor anywhere, but benign-shaped psql commands \u2014 landing at moderate confidence / impact none, and its rows (login edge, prior-login baseline, CMDB/change-mgmt/ticket negatives) carry that claim auditably. Run Y escalates to adversarial-confirmed / high / impact-exceeds while its own loop-2 grading concedes the dropped binary is an enrollment script and the activity 'reads as environment provisioning, not credential destruction,' so its dramatic closing claim (compromised container, rotate credentials) is contradicted by its own gathered evidence and attributes host-wide container-provisioning Falco counts to the SSH session without establishing that link. Run Y also asserts 'no prior auth history' where Run X's rows show 91 prior accepted root logins since 08-22, an unearned premise underpinning its high-confidence verdict."
+}

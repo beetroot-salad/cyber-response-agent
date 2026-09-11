@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any registry entry covering root SSH access, sudo/psql diagnostic routines, or operator practice on soc-playground or from source IP 147.235.199.7": {
+   "status": "exact",
+   "note": "Every lookup (root/147.235.199.7 \u00d7 soc-playground/db-1 \u00d7 ssh/sudo/psql/postgres) returned matched:null, and health-check reports entries:0; the summary's 'none found' matches the payloads."
+  },
+  "any entry naming who operates or maintains soc-playground and its db-1 postgres container": {
+   "status": "exact",
+   "note": "Summary reports no operator/owner named; supported by entries:0 and all-null lookups."
+  }
+ },
+ "unsupported": []
+}

@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether 147.235.199.7 maps to any documented host, network, or egress range in the CMDB": {
+   "status": "exact",
+   "note": "HTTP 404 on IP lookup matches return 4; list-hosts payload has no IP/CIDR/egress fields, so 'no mapping' is supported"
+  },
+  "the CMDB record for soc-playground: role, owner, environment, expected SSH sources": {
+   "status": "exact",
+   "note": "HTTP 404 matches return 3; name absent from the 11-host inventory; honest 'no record' is correct"
+  },
+  "confirmation either way with the inventory that was actually enumerated": {
+   "status": "exact",
+   "note": "Count of 11 matches total; every host's role/criticality/owner and jump-box-1's trust_edges_out match the payload verbatim"
+  }
+ },
+ "unsupported": []
+}

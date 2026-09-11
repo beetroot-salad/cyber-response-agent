@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "slight",
+ "reasons": "Y's 'inconclusive, escalate for governance' is exactly what its rows carry: 30-day baseline rows showing the same sudo-psql and curl/openssl commands recurring in the same containers, plus empty CMDB, change-mgmt, and tacit-knowledge lookups, with the two dead-ended leads declared as ceilings rather than hidden. X's 'malicious, high confidence' overreaches its own record: its loop-2 leads (threat-intel miss, no persistence, no egress) and its own weak refutation of h-002's command-shape prediction all cut against the adversary story, yet the weight and confidence never moved, and it relabels scripted psql init probes as 'database reconnaissance' while the IP's externality rests on an unattributed miss. X does earn credit for surfacing the root SSH login 10s before the burst, which Y never finds, and Y's 'parent is not an interactive shell' claim is unsupported by a row that says parent=NA \u2014 so the gap is real but not wide."
+}

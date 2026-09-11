@@ -1,0 +1,25 @@
+{
+ "dims": {
+  "which user identity executed sudo for each of the three events, and whether it is consistent across them": {
+   "status": "exact",
+   "note": "root on all three, uid null, container e5b0213bd690, host.name soc-playground, falco.hostname 23b737493496 \u2014 all match returns 7/10/14"
+  },
+  "the parent process/session context of each sudo execution (interactive shell, sshd session, service/automation)": {
+   "status": "wrong",
+   "note": "Falco null/<NA> fields and auth-stream events (publickey root from 147.235.199.7:45835 @09:54:41.339Z, sshd listening @09:54:40.675Z, cron @09:55:01.743\u2013.746Z, 0 sudo lines) all match. But derived intervals are off: login-to-burst is 10.4 s not 9.6 s; sshd-listening-to-login is 0.66 s not 2 s."
+  },
+  "the commands run under sudo and whether they look like remediation or recon/privilege activity": {
+   "status": "wrong",
+   "note": "Table row 3 misquotes the cmdline as `sudo -tAc SELECT 1 \u2026` \u2014 payload is `sudo -u postgres psql -tAc SELECT 1 FROM pg_database WHERE datname='app'`. Rows 1\u20132 and the prose characterization match; summary explicitly declines the remediation/recon call."
+  },
+  "how this host's sudo activity compares to its own baseline cadence over preceding days": {
+   "status": "exact",
+   "note": "Honest cannot-measure: 3 events on one day for soc-playground (return 18), 850 Falco events all 08-30 09:53:56\u201310:04:58 (return 19) \u2014 both supported"
+  }
+ },
+ "unsupported": [
+  "root SSH login lands 9.6 s before the burst (payload timestamps give ~10.4 s: 09:54:41.339Z \u2192 09:54:51.724Z)",
+  "sshd started listening 2 s prior to the login (payload gives 0.66 s: 09:54:40.675Z \u2192 09:54:41.339Z)",
+  "cmdline `sudo -tAc SELECT 1 FROM pg_database WHERE datname='app'` (no such value in any return; actual is `sudo -u postgres psql -tAc \u2026`)"
+ ]
+}

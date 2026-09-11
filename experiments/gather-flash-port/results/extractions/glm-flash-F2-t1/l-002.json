@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether any registry entry sanctions authorized_keys writes / attacker-style persistence activity on soc-playground or its containers, with entry id and validity span": {
+   "status": "exact",
+   "note": "All four lookups returned matched: null; summary reports no entry, no id/span citable, and correctly names the probed patterns and actors (root, control actor alice)."
+  },
+  "any entry describing soc-playground as a training/exercise environment": {
+   "status": "exact",
+   "note": "Honest 'none surfaced'; every payload was matched: null, nothing describing soc-playground appeared."
+  }
+ },
+ "unsupported": []
+}

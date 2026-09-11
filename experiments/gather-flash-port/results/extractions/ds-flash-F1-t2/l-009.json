@@ -1,0 +1,20 @@
+{
+ "dims": {
+  "any registry entry covering soc-playground, its environment bring-ups, root ssh operator access, or sudo psql app-db setup": {
+   "status": "exact",
+   "note": "health-check entries:0 and all three lookups matched:null; summary reports no covering entry"
+  },
+  "each hit's id, scope, and validity window": {
+   "status": "exact",
+   "note": "no hits in any payload; summary honestly reports nothing to enumerate"
+  },
+  "if no entry matches, that the lookup came back empty": {
+   "status": "exact",
+   "note": "all three lookups returned {\"matched\": null}, exit 0, as reported"
+  }
+ },
+ "unsupported": [
+  "Lookup payloads were byte-identical to the health-check's zero-entry state \u2014 the health-check payload is a different JSON ({system, connected, registry, entries}) from the lookup payload ({matched: null})",
+  "The adapter signalled NO-OP on each of the three lookups \u2014 only seq 2 and seq 3 carried the NO-OP marker; seq 1 (return 9) did not"
+ ]
+}

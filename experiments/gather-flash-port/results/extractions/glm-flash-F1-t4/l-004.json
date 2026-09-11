@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "SSH authentication history on soc-playground over the past 30 days: which users, which source IPs, how often, and whether root publickey logins are routine": {
+   "status": "exact",
+   "note": "Both rows (root/publickey/79.177.137.245 10782 accepted Aug1\u201318; root/publickey/147.235.199.7 5 accepted Aug22\u201330) and the 'no failures, no other users, no password' reading match query 0 verbatim."
+  },
+  "whether the 2026-08-30 09:54:41Z root login from 147.235.199.7 is a repeat of prior activity or a first occurrence": {
+   "status": "exact",
+   "note": "first_seen 2026-08-22 08:53:21Z, 5 accepted, last_seen 08-30 18:03:45Z all supported; 'not a first occurrence' follows. 'including the alert-time login' is inferred from the aggregate window (the 09:54:41Z timestamp comes from the goal, not a payload) but the window covers it."
+  },
+  "whether 147.235.199.7 appears elsewhere in the estate (other hosts, other protocols)": {
+   "status": "exact",
+   "note": "Query 1 returned one row: soc-playground / system.auth, 6 events, 08-22 08:53:21Z \u2192 08-31 19:27:12Z \u2014 matches the summary; the 5-vs-6 difference is explained by the 08-31 event falling outside the 30-day window."
+  }
+ },
+ "unsupported": []
+}

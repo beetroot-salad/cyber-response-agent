@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any provisioned or known identity (human or service) associated with root login to soc-playground": {
+   "status": "exact",
+   "note": "root 404 matches returns 7/8; the 16-user enumeration and role breakdown (3/5/1/6/1) match return 6; no authorized_hosts list contains soc-playground; svc.monitoring's 11 hosts and the sre-ops 8-host list match. 'svc.config-mgmt authorized on 8 hosts with sudo' reads as sudo_hosts=8 (correct); note its authorized_hosts is actually 9."
+  },
+  "any identity records tied to source IPs 147.235.199.7 or 79.177.137.245": {
+   "status": "exact",
+   "note": "No user record carries IP fields, so 'none' is supported. Runtime detail for 147.235.199.7 (1 auth event, 09:54:41.339Z, soc-playground, root, Accepted/success/publickey) matches returns 29/31/32/35; 79.177.137.245 zero rows in both the 1-hour and 2-hour windows (returns 30/34)."
+  },
+  "whether the lookup found nothing for either": {
+   "status": "exact",
+   "note": "Summary states root is unprovisioned (404) and no identity record references either IP; both supported."
+  }
+ },
+ "unsupported": []
+}

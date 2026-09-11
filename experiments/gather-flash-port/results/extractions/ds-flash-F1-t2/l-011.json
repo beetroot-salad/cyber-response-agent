@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "whether 147.235.199.7 is a known-malicious or flagged IP in threat intelligence": {
+   "status": "exact",
+   "note": "lookup returned verdict unknown / score 0 / empty sources+tags, exactly as summarized; correctly framed as lookup-miss, not benign"
+  },
+  "whether the adjacent ranges used by soc-playground's rotating root-access baseline carry any reputation flags": {
+   "status": "wrong",
+   "note": "Summary states the seed has '4 IPv4 entries'; list-indicators actually holds 6 (it omits the clean 8.8.8.8 and 1.1.1.1). The four flagged IPs and their verdicts/scores/tags are correct, the four boundary lookups are correctly reported unknown, and the 'none in range' conclusion still holds \u2014 but the catalog cardinality is under-reported."
+  },
+  "if nothing is flagged, that the lookups came back clean or empty": {
+   "status": "exact",
+   "note": "all five lookups returned unknown/score 0 with exit 0; health-check connected:true, indicator_count 15 and list-indicators total 15 both match payloads"
+  }
+ },
+ "unsupported": [
+  "the seed catalog contains 4 IPv4 entries (payload shows 6 IPv4 records)"
+ ]
+}

@@ -1,0 +1,11 @@
+{
+ "dims": {
+  "whether 147.235.199.7 appears in threat intelligence as malicious, anonymizing infrastructure, or known-good corporate infrastructure": {
+   "status": "exact",
+   "note": "lookup returned verdict unknown/score 0/empty sources+tags/null first_seen+last_seen (return 7); health-check connected/ok/15 and list-indicators total 15 with the cited example verdicts, scores and tags all match return 8/9; April-2026 last_seen clustering matches the rows"
+  }
+ },
+ "unsupported": [
+  "template_search for `reputation` returned nothing \u2014 only searches for `verdict` and `indicator` appear in the tool returns; no `reputation` search was seen"
+ ]
+}

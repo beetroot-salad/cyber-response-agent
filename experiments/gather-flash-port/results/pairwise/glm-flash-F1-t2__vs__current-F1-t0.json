@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's leads actually discriminated \u2014 the 30-day baseline showed 3+/10min sudo bursts are routine on this host and the SSH-history lead showed the source IP had prior accepted root logins alongside 11k from another IP \u2014 and its 'inconclusive, escalate on unauthorized contract' claim is scoped exactly to what the rows carry, with the open question (who holds the root key) named honestly and its ceiling documented. X reaches 'malicious / high confidence' almost entirely from absence in registries plus a provenance narrative it never tested (no lead on the IP's login history or the host's longer sudo baseline), its own h-002 payload prediction was refuted yet the weight stayed unchanged, and its prose overreaches the record ('spent ~3 hours probing the database' for three psql commands within 1ms; a withdrawn root-password-change signal that appears nowhere in the rows; the ticket lead l-004 has no result row). Both runs converge on 'no authorization exists', but only Y's record lets a reader audit why that yields escalation rather than a confident attack verdict."
+}

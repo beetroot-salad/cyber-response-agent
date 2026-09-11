@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "the account type and provenance of the sudo actor identity (human user, service account, sre/oncall role)": {
+   "status": "exact",
+   "note": "Correctly reports the alert carries user.name: null so no principal is bound by identity data; the candidate roster (sre-ops sudo:true with sre.alice/ben/chen; dba sudo_hosts db-1; six svc.* service-account nologin; ctr.kai contractor; developer list; empty config-mgmt/ci-host/scanner-host roles) matches list-users, list-roles and the three get-user returns."
+  },
+  "whether the account is provisioned and active in this environment, and any role/oncall associations": {
+   "status": "exact",
+   "note": "All 16 users enabled:true per list-users; health-check 16/8/11 matches; sre.alice\u2192soc-playground authorized:false via:null role:sre-ops and sre.alice\u2192web-1 authorized:true via:role sudo:true match; 'no oncall field exposed' is consistent with the payloads."
+  }
+ },
+ "unsupported": [
+  "svc.security is the sole service account with an explicit per-host sudo grant \u2014 get-user was run only for svc.security; the other five svc.* accounts were never looked up, and the role-level hosts:[] does not rule out per-user grants (svc.security itself has one despite the role's empty list)",
+  "'The store's 11 known hosts are web-1, web-2, db-1, jump-box-1, dev-ws-1, office-ws-1, office-ws-2, canary-1 (11 total counted)' \u2014 only 8 names are listed (9 if scanner-1 from svc.security's record is included); the remaining hosts were never enumerated, so presenting this list as the full 11 is not supported",
+  "soc-playground appears 'in no user's authorized_hosts/sudo_hosts' \u2014 only three users (svc.security, ctr.kai, sre.alice) had get-user run; the claim over all 16 users is not verified"
+ ]
+}

@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "whether an open incident or oncall ticket references soc-playground around 2026-08-30 09:54\u201310:00Z": {
+   "status": "exact",
+   "note": "Reported as none found; q=soc-playground, status=open, status=in_progress, label=escalated, q=incident and unfiltered all returned {total:0, tickets:[]}, and health-check reported ticket_count 0 \u2014 all match the payloads."
+  },
+  "if so, who is responding and what remediation is underway": {
+   "status": "exact",
+   "note": "Reported as not observed / unanswerable; payloads contain no tickets, comments, or assignees, so the honest absence is supported."
+  }
+ },
+ "unsupported": []
+}

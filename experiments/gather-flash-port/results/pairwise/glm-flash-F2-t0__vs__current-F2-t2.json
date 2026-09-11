@@ -1,0 +1,5 @@
+{
+ "winner": "Y",
+ "margin": "clear",
+ "reasons": "Y's baseline lead actually discriminated: it separated the container's legitimate rotation writes (parent=sshd, svc.config-mgmt cmdline) from the alerted write and showed the alert deviates on parent, key comment, and command, plus a same-day precursor and matching activity in another container \u2014 evidence recorded as edges and attribute rows that carry the verdict. X counted 94 authorized_keys writes and then asserted in prose that the 'identical scripted pattern recurs routinely', a claim its own consultation row does not carry (it records event counts, not command identity), so X's central 'seeded simulation' reading is an over-read of its telemetry and its l-002 and l-004 results never appear as rows. Both hit the same authority silence and container-identity gap, but Y explains why that gap does not flip the disposition while X's inconclusive rests on an unsupported inference that the recurring events are the same command; Y's remaining softness is a 'high' confidence on a playground host with an empty (not merely silent) registry."
+}

@@ -1,0 +1,19 @@
+{
+ "dims": {
+  "any approved change record whose window covers soc-playground on 2026-08-30 in the hours around 09:54-09:59Z": {
+   "status": "exact",
+   "note": "list-changes host=soc-playground returned total 0; active-changes at 09:54:51Z returned []; none of the 14 unfiltered records lists soc-playground or any 2026-08-30 window \u2014 all verified against the rows"
+  },
+  "who the change was requested by and what activity it authorizes": {
+   "status": "exact",
+   "note": "honestly reported as having no referent since no covering ticket exists; payloads are empty for the host"
+  },
+  "if none exists, that no covering change record was found": {
+   "status": "exact",
+   "note": "stated plainly, backed by both host-scoped queries and the health-check positive control (connected true, change_count 14, standing_count 2)"
+  }
+ },
+ "unsupported": [
+  "db-1 has '8 nightly svc.backups standing windows' \u2014 the unfiltered list-changes payload contains 9 CHG-DB-BACKUP records (2026-09-04 through 2026-09-12 inclusive); the count 8 appears in no tool return"
+ ]
+}

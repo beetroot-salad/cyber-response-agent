@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "all prior appearances of 147.235.199.7 in telemetry over the past 30 days: which hosts, what auth outcomes, what activity": {
+   "status": "exact",
+   "note": "3 hits all system.auth (return 3); 3 accepted/0 failed root publickey on soc-playground, first 2026-08-22T08:53:21Z last 2026-08-30T09:54:41Z (return 2); 0 null-outcome rows (return 4). All values match."
+  },
+  "whether this IP has a habitual pattern of root publickey logins onto estate hosts (provisioning pattern) or is first-seen here": {
+   "status": "exact",
+   "note": "Addressed: not first-seen (3 root/publickey logins over 8 days, 08-22 to 08-30), confined to one host, no other estate hosts. Consistent with returns 2 and 3."
+  }
+ },
+ "unsupported": []
+}

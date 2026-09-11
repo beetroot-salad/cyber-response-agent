@@ -1,0 +1,13 @@
+{
+ "dims": {
+  "any tacit-knowledge entry covering root publickey logins from an external source onto sandbox/playground/undocumented hosts": {
+   "status": "exact",
+   "note": "Reports none found; all lookups (publickey, provision publickey, ssh publickey login) returned matched: null, plus the build-runner-01.prod control probe also null."
+  },
+  "any entry covering the observed boot script pattern (agent-enroll.sh, seed-users.py, sudo psql health checks)": {
+   "status": "exact",
+   "note": "Reports none found; lookups for agent-enroll, seed-users, psql health check, sudo psql all returned matched: null."
+  }
+ },
+ "unsupported": []
+}

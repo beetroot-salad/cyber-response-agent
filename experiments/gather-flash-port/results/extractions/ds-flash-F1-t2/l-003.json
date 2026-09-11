@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any open or in-progress incident ticket referencing soc-playground around 2026-08-30 09:54-09:59Z": {
+   "status": "exact",
+   "note": "q=soc-playground, status=open, status=in_progress all returned total:0 (payloads 1, 2, 0); summary reports 0 for each"
+  },
+  "the incident's owner/severity and whether oncall sudo response would be expected": {
+   "status": "exact",
+   "note": "honest 'nothing to derive' \u2014 no ticket rows exist in any payload to carry owner/severity"
+  },
+  "if none exists, that no active incident was found": {
+   "status": "exact",
+   "note": "states no active incident; backed by unfiltered and closed queries also total:0 and health-check ticket_count:0, connected:true, status:ok"
+  }
+ },
+ "unsupported": []
+}

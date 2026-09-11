@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any open or recent ticket or incident naming soc-playground, especially around 2026-08-30": {
+   "status": "exact",
+   "note": "All 14 list-tickets calls returned {total:0, tickets:[]}; 'none observed' matches."
+  },
+  "any ticket describing postgres/database health checks or remediation on soc-playground": {
+   "status": "exact",
+   "note": "q=postgres, q=database, q=health, q=remediation all returned empty; 'none observed' matches."
+  },
+  "who was on-call or assigned around 2026-08-30 09:54Z for anything touching this host": {
+   "status": "exact",
+   "note": "Ticket store has no assignee/on-call field and every query was empty; honest 'no context available' is supported."
+  }
+ },
+ "unsupported": []
+}

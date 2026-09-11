@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "any registry entry covering root remote access, the source 147.235.199.7, or soc-playground provisioning/setup runs": {
+   "status": "exact",
+   "note": "All seven lookups returned matched: null; summary reports a miss and lists the exact actor/host/pattern bindings tried, matching the query log."
+  },
+  "the validity window and scope of any matching entry": {
+   "status": "exact",
+   "note": "No entry matched so none exists to quote; summary says so explicitly, consistent with the empty payloads and the 'a miss names nothing' contract."
+  },
+  "a miss if no entry matches": {
+   "status": "exact",
+   "note": "Summary leads with the miss, correctly notes exit 0 on every call."
+  }
+ },
+ "unsupported": []
+}

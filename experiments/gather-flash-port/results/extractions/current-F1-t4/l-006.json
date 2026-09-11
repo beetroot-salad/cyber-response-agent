@@ -1,0 +1,17 @@
+{
+ "dims": {
+  "whether 147.235.199.7 appears in any threat-intel feed, and with what tags (scanner, botnet, C2, brute-forcer)": {
+   "status": "exact",
+   "note": "Lookup returned verdict unknown, sources [], tags []; summary reports no match, no tags, no sources \u2014 matches payload"
+  },
+  "any known malware, campaign, or adversary infrastructure associated with this IP": {
+   "status": "exact",
+   "note": "Payload has no sources/tags/first_seen/last_seen; summary's 'none observed' is an honest empty result"
+  },
+  "the IP's ASN/geo or hosting context if available": {
+   "status": "exact",
+   "note": "Lookup response carries no ASN/geo field; summary correctly states the field is not present rather than inventing a value"
+  }
+ },
+ "unsupported": []
+}
