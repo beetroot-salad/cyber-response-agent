@@ -459,6 +459,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     bounds: challenge_gate.Bounds,
     correlation_task: Any = None,
     toolset: Any = None,
+    catalog: str | None,
 ) -> Agent[AgentDeps, str]:
     # The bounds arrive RESOLVED, non-`Optional`. Re-coalescing here would give the gate's ONE
     # bounds object a default at four depths, and the entry point could then resolve one value
@@ -543,9 +544,13 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # dispatch catalog/template index is a ROLE-LEVEL surface (the one verb_roster.py scores
     # against), not a per-run one; a test injecting a registry scoped narrower than
     # GATHER_DEF's real grant must not narrow what the catalog advertises.
+    #
+    # `catalog` arrives the same way the bounds do — read by `run_investigation` from the tree
+    # at run start, where a tree that cannot be read fails before any model call (#1031) —
+    # rather than being built per dispatch inside the tool.
     register_gather_tool(
         agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant,
-        _stamp_gather_terminator,
+        _stamp_gather_terminator, catalog=catalog,
     )
     # `build_agent` has no `run_dir` of its own, so it cannot BUILD a live bundle — one
     # carrying live stages is assembled by `run_investigation` and arrives here already bound.

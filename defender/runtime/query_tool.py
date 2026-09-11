@@ -95,26 +95,6 @@ DEFAULT_FAULT_EXIT = 2
 #: and not the digest, leaving an operator joining the two surfaces with two names for one class.
 UNDECLARED_SYSTEM = "an undeclared system"
 
-#: The circuit breaker's key for a registry that cannot LIST its systems (#1017 D4). A host
-#: constant, not the model's string: the fault is ONE fault affecting every call, and a breaker
-#: keyed per name would count it once per name — for an empty or unreadable `system` (which
-#: `record_outcome` and `_tripped_message` both skip) it would bound nothing at all (C17). The
-#: `:` is what keeps it OUT of the system-name shape (`is_system_name` admits only
-#: `[a-z0-9-]`, and an adapter file derives its name by that shape), so no adapter's counter
-#: can share it and no model-authored `gather(system=...)` — shape-checked, never
-#: membership-checked, before its own breaker read — can be answered with this key's message.
-#: `"system-registry"` alone was a name `system_registry_adapter.py` would derive.
-REGISTRY_BREAKER_KEY = "host:system-registry"
-
-
-class RegistryUnavailable(Exception):
-    """The verb registry could not LIST its systems, so the host cannot say whether a name is
-    declared (#1017 D4). Raised by `QueryCapture._system_of_record` and propagated through
-    `_coarsen`; caught at exactly the two above-guard placements that ask, which record the
-    call as an `infra` row (the row is the trace) and hand the model its ORIGINAL rejection.
-    Neither a coarsened `system=""` nor a fingerprint is ever minted from it — a `""` here
-    would put `sha256(real name)` on the row, which `system_fingerprint`'s contract forbids."""
-
 #: What the GRANT CHECK's unresolvable-verb rejection records when the host COARSENED the
 #: system away (#1016 M1) — that placement only; the schema placement renders
 #: `_coarse_schema_detail(e)`, and the adapter-load writer coarsens nothing. A literal, because
@@ -265,8 +245,12 @@ class QueryCapture(AbstractCapability[Any]):
 
     def _system_of_record(self, system: str) -> str:
         """The `system` an ABOVE-GUARD row is allowed to carry: the model's own string when the
-        registry declares that system, `""` when it does not — and `RegistryUnavailable` when
-        the registry cannot say (#1017 D4), which is neither answer.
+        registry declares that system, `""` when it does not. Two answers and no third: the
+        roster is fixed at the registry's construction and read from no I/O here
+        (`VerbRegistry.systems`, #1031), so "the registry could not say" is not a state this
+        function can be in. It was, once — `systems()` globbed the adapters directory per
+        call — and the fault path #1017 D4 built for it (an exception, a reserved breaker
+        key, an `infra` row at both placements) went with the glob.
 
         The two writers that spend this function record what the MODEL named, and nothing
         between them and the offline collectors re-checks it (`_grant_check`'s adapter-load
@@ -289,22 +273,7 @@ class QueryCapture(AbstractCapability[Any]):
         instead of it. The dead-end message still says "an undeclared system"
         (`_undeclared_target`): the guard can tell the ghosts apart, and main still must not
         be told their names."""
-        try:
-            declared = self._registry.systems()
-        except CONTROL_FLOW_EXCEPTIONS:
-            raise
-        except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
-            raise
-        except BaseException as e:  # noqa: BLE001 — a registry that cannot list cannot answer
-            # NOT `""` (#1017 D4). A registry that cannot answer is not "this name is
-            # undeclared": answering `""` coarsened a DECLARED system's rejection and minted
-            # `sha256(real name)` as its `system_key` — a fingerprint of a real name, keyed
-            # like a ghost's — with a stderr line as the only trace. The fault is the host's,
-            # so it is raised for the placement to record as the `infra` row it is.
-            raise RegistryUnavailable(
-                f"system registry could not list its systems ({type(e).__name__}: {e})"
-            ) from e
-        return system if system in declared else ""
+        return system if system in self._registry.systems() else ""
 
     def _coarsen(self, raw_system: str) -> tuple[str, str]:
         """THE above-guard pair, minted once: `(system of record, system_key)`.
@@ -316,10 +285,7 @@ class QueryCapture(AbstractCapability[Any]):
         are `str` and only one of them is hashed, so a transposition returns `""` for every
         ghost, fixes nothing, raises nothing, and is caught only by a test that drives that
         one placement to the threshold. Returned as a pair, the two halves cannot be computed
-        from different inputs, ordered wrongly, or handed on one without the other.
-
-        `RegistryUnavailable` PROPAGATES (#1017 D4): a registry that cannot list has no pair to
-        mint, and each placement records that call as the host fault it is."""
+        from different inputs, ordered wrongly, or handed on one without the other."""
         recorded = self._system_of_record(raw_system)
         return recorded, system_fingerprint(raw_system, recorded)
 
@@ -504,21 +470,9 @@ class QueryCapture(AbstractCapability[Any]):
             # the same way when the registry does not declare it, and for a stronger reason:
             # this row's `system` steers an offline corpus write (`_system_of_record`).
             raw_system = as_str(raw.get("system"))
-            # Extracted AHEAD of the coarsening (#1017 D4): the registry-cannot-list row below
-            # needs the call's verb and params, and it is written before the pair is minted.
             verb = as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
-            pair = await self._coarsen_or_record_fault(
-                ctx.deps, raw_system, verb=verb, params=params,
-            )
-            if pair is None:
-                # The registry could not answer and the row is written. A bare `raise` HERE
-                # re-raises `e` — the model's own schema error, which is real and its to fix:
-                # the helper's handler has exited in its own frame, so nothing else is being
-                # handled in this one, and the model receives its rejection rather than the
-                # host's fault.
-                raise
-            system, system_key = pair
+            system, system_key = self._coarsen(raw_system)
             trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
             # #1016 M2. `str(e)` names whatever the model sent — the failing value, and the
             # offending KEY when the model invented one — so on a row whose `system` this writer
@@ -548,7 +502,7 @@ class QueryCapture(AbstractCapability[Any]):
             detail = rejection if trip is None else rejection_detail(trip, rejection)
             await self._record(
                 ctx.deps,
-                system=system, verb=verb, system_key=system_key, breaker_key=system,
+                system=system, verb=verb, system_key=system_key,
                 query_id=ABOVE_GUARD_QUERY_ID,
                 params=params,
                 payload=None,
@@ -584,7 +538,7 @@ class QueryCapture(AbstractCapability[Any]):
             if tripped is not None:
                 return None, tripped
             row, text = await self._record(
-                deps, system=system, verb=verb, breaker_key=system,
+                deps, system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=DEFAULT_FAULT_EXIT, detail=load_error,
                 # `""`, and NOT because nothing was named: this is the THIRD above-guard
@@ -615,18 +569,8 @@ class QueryCapture(AbstractCapability[Any]):
             # entitled to become a `skills/<system>/` path; a REAL system with an unknown verb
             # still records itself.
             #
-            # `refusal` is bound ONCE because it is the answer on both exits of this branch —
-            # the registry-down one just below and the ordinary one at the bottom — and one
-            # spelling is what keeps the two exits from answering the same unresolvable verb
-            # with different text.
             refusal = decision.refusal or f"unresolvable: {system}.{verb}"
-            pair = await self._coarsen_or_record_fault(deps, system, verb=verb, params=params)
-            if pair is None:
-                # The grant refusal is the model's own answer — the verb IS unresolvable — and
-                # the host's fault is not the model's to fix. Raised here, outside the
-                # helper's handler, so the refusal carries no registry fault as its cause.
-                raise ModelRetry(refusal)
-            recorded_system, system_key = pair
+            recorded_system, system_key = self._coarsen(system)
             trip = self._rejection_guard(
                 deps, recorded_system, verb, params, system_key=system_key,
             )
@@ -645,7 +589,6 @@ class QueryCapture(AbstractCapability[Any]):
             detail = rejection if trip is None else rejection_detail(trip, rejection)
             await self._record(
                 deps, system=recorded_system, verb=verb, system_key=system_key,
-                breaker_key=recorded_system,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
                 detail=detail,
@@ -677,7 +620,7 @@ class QueryCapture(AbstractCapability[Any]):
                 deps, system=system, verb=verb,
                 query_id=resolve_query_id(system, verb, None),
                 params=params, payload=None,
-                exit_code=USAGE_EXIT_CODE, detail=reason, system_key="", breaker_key=system,
+                exit_code=USAGE_EXIT_CODE, detail=reason, system_key="",
             )
             raise ModelRetry(reason)
 
@@ -717,7 +660,7 @@ class QueryCapture(AbstractCapability[Any]):
             await self._record(
                 deps, system=system, verb=verb, query_id=REPEAT_TRIP_QUERY_ID, params=params,
                 payload=None, exit_code=USAGE_EXIT_CODE, detail=repeat_trip_detail(trip),
-                system_key="", breaker_key=system,
+                system_key="",
             )
             executed = sum(1 for r in rows if r.get("exit_code") == 0)
             raise GatherDeadEnd(
@@ -749,104 +692,27 @@ class QueryCapture(AbstractCapability[Any]):
         row, text = await self._record(
             deps, system=system, verb=verb, query_id=query_id, params=params,
             payload=payload, exit_code=exit_code, detail=detail, system_key="",
-            breaker_key=system,
         )
         return self._model_view(deps, row, text, exit_code, detail)
 
-    async def _coarsen_or_record_fault(
-        self, deps, raw_system: str, *, verb: str, params: dict,
-    ) -> tuple[str, str] | None:
-        """`_coarsen`'s pair, or `None` once the registry-cannot-list row is written (#1017 D4).
-
-        THE ONE HANDLER for `RegistryUnavailable`, in its own frame: both above-guard
-        placements call this and test for `None`, so neither carries a `try` of its own — and
-        that is what lets the schema placement re-raise the model's error with a bare `raise`
-        (nothing else is being handled in that frame by the time this returns) and the grant
-        placement raise its refusal with no registry fault chained as its cause. Spelled at each
-        placement, the same logic needed a flag set inside the handler and tested outside it,
-        twice, with a comment at each about where a bare `raise` is legal.
-
-        `RunAborted` out of `_record_registry_fault` propagates through here untouched (S3)."""
-        try:
-            return self._coarsen(raw_system)
-        except RegistryUnavailable as unavailable:
-            await self._record_registry_fault(
-                deps, system=raw_system, verb=verb, params=params, fault=unavailable,
-            )
-            return None
-
-    async def _record_registry_fault(
-        self, deps, *, system: str, verb: str, params: dict, fault: RegistryUnavailable,
-    ) -> None:
-        """The registry-cannot-list row (#1017 D4/O5), at either above-guard placement: the
-        path `_grant_check`'s adapter-load branch already takes for a host fault — breaker
-        check, then an `infra` row (`DEFAULT_FAULT_EXIT`) with the model's own string in
-        `system`, `system_key=""`, and the registry's message as the detail. The ROW is the
-        trace; nothing is printed.
-
-        `system` is the model's string un-coarsened, as the adapter-load branch records it —
-        WHEN IT HAS A SYSTEM NAME'S SHAPE. That branch's string is name-shaped by construction
-        (`decide` refuses a non-name as UNDECLARED before any adapter load can fail), whereas
-        the schema placement's is whatever the model sent: the argument the schema may just
-        have refused, at any length, holding newlines or path separators. Every reader treats
-        this column as a name (the operator HTML, the questioner's row dump, the audit
-        differential), so a string that is not one is recorded as `""` — the table's own
-        spelling for "not a system" — and the raw bytes stay where the rejection already put
-        them, in the error the model receives. `infra` rows are outside
-        `collect_general_failures` (it keeps only `agent-fixable`) and outside
-        `in_rejection_domain` (by `error_class`), so no corpus path and no guard count is
-        composed from the name either way (S1). The rejection guard is NOT consulted on this
-        path, so no fingerprint is minted — for a declared name or a ghost (O4).
-
-        THE BREAKER IS KEYED ON `REGISTRY_BREAKER_KEY`, never on `system` (C17): one fault,
-        one counter, and a per-name key would leave an empty or unreadable system unbounded.
-        After the trip the down-answer writes no row and counts no failure (N7) — the rule the
-        adapter-load branch keeps — so O5 is owed on the calls up to the trip. NOTE WHAT THAT
-        LEAVES UNBOUNDED: the adapter-load branch RETURNS its down message as the tool result,
-        while this path hands back the model's own rejection with nothing about the registry,
-        and the rejection guards never see these rows — so a lead that keeps sending rejected
-        calls against a registry that stays down is stopped only by the framework's per-tool
-        retry ceiling or the request limit, not by `rejection_trip` / `rejection_budget_trip`
-        (#871, #1015) as it was when this placement wrote exit-64 rows. The
-        `RunAborted` that `record_outcome` may raise propagates out of the placement's handler:
-        that is the run ending on an unreachable host, the same abort the adapter-load path
-        raises, not the rejection being replaced (S3)."""
-        # `is_tripped`, the predicate itself: `_tripped_message` would load the breaker state
-        # a second time to build a message this path never shows anyone.
-        if circuit_breaker.is_tripped(deps.run_dir, REGISTRY_BREAKER_KEY):
-            return
-        await self._record(
-            deps, system=system if is_system_name(system) else "", verb=verb,
-            query_id=ABOVE_GUARD_QUERY_ID, params=params,
-            payload=None, exit_code=DEFAULT_FAULT_EXIT, detail=str(fault),
-            # `""` for the adapter-load branch's reason: an `infra` row is outside
-            # `rejection_trip`'s domain, so there is no count for a fingerprint to separate —
-            # and on THIS path there is no registry to say whether the name is declared, so a
-            # fingerprint could be of a real one.
-            system_key="",
-            breaker_key=REGISTRY_BREAKER_KEY,
-        )
-
     async def _record(  # noqa: PLR0913 — one per row column the CALLER decides, plus `deps`
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
-        payload: Any, exit_code: int, detail: str, system_key: str, breaker_key: str,
+        payload: Any, exit_code: int, detail: str, system_key: str,
     ) -> tuple[dict, str]:
-        """`breaker_key` is the circuit breaker's counter this outcome is charged to: the row's
-        own `system` at every writer but one, and `REGISTRY_BREAKER_KEY` (#1017 D4) for a fault
-        that is the host's and not the named system's. REQUIRED, not defaulted to `system`,
-        for the reason the file gives for `system_key` just below and for the rule the
-        repository states once (defender/CLAUDE.md, "anchor a default in one place"): a
-        default re-coalesced in the body is a counter a writer can charge by omission — and
-        for an empty or unreadable `system` that omission bounds nothing at all (C17), silently.
+        """The circuit breaker is charged to the row's own `system` — every writer's, since
+        #1031 removed the one that charged a host constant instead. A coarsened above-guard row
+        charges `""`, which `record_outcome` skips; those rows are bounded by the rejection
+        guards (`rejection_trip`, `rejection_budget_trip`), which count them by the
+        `(system, system_key)` pair the row carries.
 
         `system_key` is REQUIRED here for the reason `append_query_row` requires it, and the
         reason binds HARDER at this frame: every real writer of the column reaches the row
         through `_record`, never through `append_query_row` directly, so a default here would
         satisfy the column's requirement on the writer's behalf and leave the discipline
-        protecting nothing. `""` is a real answer at five of the seven call sites and each says
+        protecting nothing. `""` is a real answer at four of the six call sites and each says
         so in its own argument list; the two that mint a fingerprint (`wrap_tool_validate` and
         `_grant_check`'s unresolvable branch) are the ones a reader has to check, and a
-        required keyword is what puts each of the five in front of that reader rather than
+        required keyword is what puts each of the four in front of that reader rather than
         letting a writer that OUGHT to fingerprint pass for one that has nothing to."""
         if deps.lead_id is None:
             raise RuntimeError("internal: query reached capture without a dispatched lead_id")
@@ -892,7 +758,7 @@ class QueryCapture(AbstractCapability[Any]):
                 system_key=system_key,
             )
 
-        circuit_breaker.record_outcome(run_dir, breaker_key, exit_code)
+        circuit_breaker.record_outcome(run_dir, system, exit_code)
         return row, text
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:
@@ -1087,15 +953,10 @@ _RERAISE: tuple[type[BaseException], ...] = (
 
 
 def _registry_declares(registry: Any, system: str) -> bool:
-    """Does the registry list `system` among the systems it knows? `False` when it cannot say —
-    a registry that cannot list its systems is not evidence that a system exists.
-    """
-    try:
-        return system in registry.systems()
-    except _RERAISE:
-        raise
-    except BaseException:  # noqa: BLE001 — a registry that cannot list declares nothing
-        return False
+    """Does the registry list `system` among the systems it knows? A membership test over a
+    roster fixed at the registry's construction (`VerbRegistry.systems`, #1031) — no arm for
+    "it cannot say", because there is no longer a way for it not to."""
+    return system in registry.systems()
 
 
 def _granted_systems(registry: Any) -> tuple[str, ...]:
@@ -1105,8 +966,7 @@ def _granted_systems(registry: Any) -> tuple[str, ...]:
     except _RERAISE:
         raise
     except BaseException as e:  # noqa: BLE001 — a registry that cannot name its grant reaches nothing
-        # LOUD on the operator channel — the one stderr line this module still writes, since
-        # #1017 made `_system_of_record` record its registry fault as a row instead (D4). This
+        # LOUD on the operator channel — the one stderr line this module writes. This
         # arm has no row of its own to write: it answers "your grant
         # reaches nothing" for EVERY system in the run, which reads to the lead as a
         # correctly-empty grant rather than a broken registry. The tool's own answer cannot
@@ -1308,8 +1168,6 @@ __all__ = [
     "CONTROL_FLOW_EXCEPTIONS",
     "DEFAULT_FAULT_EXIT",
     "QueryCapture",
-    "REGISTRY_BREAKER_KEY",
-    "RegistryUnavailable",
     "TOOL_NAME",
     "UNENFORCED_TYPE",
     "register_list_verbs_tool",

@@ -306,7 +306,17 @@ def test_the_resolver_answers_about_the_tree_it_was_handed(tmp_path):
 
 def test_an_unresolvable_system_raises_rather_than_reporting_a_clean_template(tmp_path):
     """`ScaffoldRuleError`, not an empty verb mapping. "Could not check" rendered as "nothing
-    wrong" is the #901 defect itself, and a caller that cannot tell the two apart re-opens it."""
+    wrong" is the #901 defect itself, and a caller that cannot tell the two apart re-opens it.
+
+    Two shapes of "could not check", each refused where it is first knowable. A tree with NO
+    adapters directory at all is refused at CONSTRUCTION (#1031 D2: the roster is read once,
+    there, and a directory that cannot be listed is a fault of the tree, not an empty roster —
+    a resolver that constructed over it would answer `frozenset()` to every membership
+    question). A tree WITH one that declares no such system is refused at `verbs()`."""
+    with pytest.raises(_scaffold_rules.ScaffoldRuleError):
+        _scaffold_rules.VerbResolver(tmp_path)
+
+    (tmp_path / "scripts" / "adapters").mkdir(parents=True)
     resolver = _scaffold_rules.VerbResolver(tmp_path)
     with pytest.raises(_scaffold_rules.ScaffoldRuleError):
         resolver.verbs("nosuchsystem")

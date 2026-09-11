@@ -45,6 +45,10 @@ def descriptor_catalog(
     # against `grant.systems`. Constructing with `grant` would run ModuleVerbRegistry's load
     # check against these REAL adapters, which a grant naming a system/verb this tree doesn't
     # declare would fail for a reason unrelated to which systems the catalog describes.
+    #
+    # Raises `RegistryError` for an adapters tree that cannot be read (#1031), and is NOT
+    # memoised for that raise — which is why `run_investigation` calls this once at run start
+    # and hands the result to the dispatch tool, rather than the tool calling it per dispatch.
     registry = ModuleVerbRegistry(adapters_dir, DENY_ALL)
     lines = []
     for system in registry.systems():

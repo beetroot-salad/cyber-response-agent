@@ -284,7 +284,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,
         tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
-        GATHER_DEF.verb_grant,
+        GATHER_DEF.verb_grant, catalog=None,
     ))
 
     assert seen == [("gather:l-005", "identity")]
@@ -392,7 +392,7 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
     with override_allow_model_requests(False):
         agent = driver.build_agent(
             _DEFENDER, logger, make_model=fake,
-            bounds=challenge_gate.default_bounds(),
+            bounds=challenge_gate.default_bounds(), catalog=None,
         )
     tools = set(agent._function_toolset.tools)
     # The authoring tool is `append_block` since #810 — MAIN's write grant is `append=True`,

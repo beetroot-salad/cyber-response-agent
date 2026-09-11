@@ -68,6 +68,7 @@ from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import observe  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.scripts.adapters.elastic_adapter import search_envelope  # noqa: E402
+from defender.tests._verb_authorization_632 import breaker_doc  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     FakeVerbs,
@@ -438,8 +439,7 @@ class Res:
 
     @property
     def breaker(self) -> dict:
-        path = self.run_dir / "circuit_breaker.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        return breaker_doc(self.run_dir)
 
     @property
     def denials(self) -> list[dict]:

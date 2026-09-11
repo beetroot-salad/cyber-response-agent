@@ -956,9 +956,9 @@ demands:
      binds: [_system_of_record, "interacts(_system_of_record->adapters_dir)"]}
      # N1, bound at the READER'S OWN EDGE because that is what R7 asks: `_system_of_record` still
      # coarsens an undeclared system to `''` (C40, executed: `mcpsys` and `gather` both -> `''`).
-     # A registry that cannot list (C16/G8) is no longer coarsened to `''` with a stderr line:
-     # since #1017 D4 it raises `RegistryUnavailable` for the placement to record as an `infra`
-     # row, and the discharging test pins that raise and the silence. This change is the
+     # A registry that cannot list (C16/G8) is no longer a runtime event at all: since #1031
+     # the roster is read once at construction (a directory that cannot be listed fails there),
+     # and `_system_of_record` is a membership test with no exception arm. This change is the
      # offline half plus the one writer. The other two unmoved readers of the same source
      # (`descriptor_catalog`, `verb_registry`) are NOT covered by this demand — and §7 settled why
      # they need no coverage rather than leaving it open: NF2 keeps the PITFALLS lane adapter-only,

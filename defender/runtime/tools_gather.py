@@ -27,7 +27,6 @@ from .tools import (
 from defender._corpus import QueryTemplate, iter_query_templates
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
-from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
 from defender._untrusted import wrap_fresh
 from defender.scripts.gather_tools.record_query import GatherDeadEnd
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
@@ -140,7 +139,7 @@ def _template_index(
         return TemplateIndex("", established_seen)
 
     # No positional word ("above"/"below") in this arm: the descriptor index is absent whenever
-    # `_descriptor_catalog` returns None and the other tier is absent on a one-system corpus, so
+    # the dispatch's `catalog` is None and the other tier is absent on a one-system corpus, so
     # a pointer at either is a dangling reference in exactly the degradation this block exists
     # to make legible. `_run_gather` holds `system` to `is_system_name` before the prompt is
     # built, so reaching here means a well-formed system the catalog has no template for.
@@ -432,13 +431,19 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
 async def _run_gather(  # noqa: C901 — the branch count IS the terminator census (see docstring)
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
-    *, pre_claimed: bool = False,
+    *, catalog: str | None, pre_claimed: bool = False,
 ) -> str:
     """`stamp_terminator(agent_id, reason)` records how a gather session ENDED, and is the
     composition root's (`driver.build_agent`) to supply: the gather session is opened inside
     the factory, so this frame knows the `agent_id` that keys it but never the store or the
     session id. `None` (every test double that builds a bare factory) leaves every arm below
     behaving as it does now, which is what makes the seam optional.
+
+    `catalog` is the descriptor index (`hooks.inject_system_skill_description.descriptor_catalog`)
+    the dispatch prompt opens with, and it ARRIVES here rather than being built here: building
+    it reads the adapters tree, which since #1031 fails loudly for a tree that cannot be read,
+    and that fault belongs at run start — `run_investigation` reads it once, before any model
+    call — not inside a tool the model is mid-run on. `None` is a run with no index to show.
 
     The `except` arms below ARE this frame's complexity, one per way a gather session can end:
     four that degrade the lead into a summary main can still reason from, and two that end the
@@ -499,11 +504,6 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
 
     from defender.runtime.agent_definition import bind
     from defender.runtime.driver import GATHER_DEF
-
-    catalog = _descriptor_catalog(
-        deps.defender_dir / "skills", deps.defender_dir / "scripts" / "adapters",
-        verb_grant,
-    )
 
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{lead_id}"
     # `system` as well as `agent_id`: `agent_id` keys this lead's session and its wire-log
@@ -600,7 +600,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
 
 def register_gather_tool(
     main_agent, gather_factory: GatherFactory, request_limit: int, verb_grant: VerbGrant,
-    stamp_terminator: Callable[[str, str], None] | None = None,
+    stamp_terminator: Callable[[str, str], None] | None = None, *, catalog: str | None,
 ) -> None:
 
     @main_agent.tool
@@ -620,5 +620,5 @@ def register_gather_tool(
         request = GatherRequest(lead_id, system, goal, tuple(what_to_summarize))
         return await tools._run_gather(
             ctx.deps, gather_factory, request_limit, request, verb_grant,
-            stamp_terminator,
+            stamp_terminator, catalog=catalog,
         )
