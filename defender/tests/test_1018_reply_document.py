@@ -203,6 +203,32 @@ def _accepts(text: str, *, expected_text: str = DOCUMENT, expected_doc: dict = V
     assert safe_load(text_out) == expected_doc
 
 
+# THE SHAPE VOCABULARY, ONE MARKER PER REFUSAL. O2/M1 say the message NAMES the shape, and a
+# message that names every shape at once ("fence inside / text after / second fence / …")
+# would satisfy any single-substring check — so a refusal is pinned as carrying its own
+# marker and NONE of the others. Each marker is a word the design's own answer table uses.
+SHAPE_MARKERS = {
+    "inside": "a fence inside the reply",
+    "after": "text after the closing fence",
+    "second": "a second fence",
+    "trailing": "a closer with trailing characters",
+    "no closing": "no closer",
+    "empty": "an empty reply or an empty fence",
+}
+
+
+def _refuses(text: str, shape: str) -> None:
+    """The REFUSE assertion: `MalformedReply`, and its message names exactly this shape — the
+    marker for `shape` present, every other marker absent."""
+    assert shape in SHAPE_MARKERS, shape
+    with pytest.raises(_malformed()) as err:
+        _parse(text)
+    message = str(err.value)
+    assert shape in message, f"the refusal does not name {SHAPE_MARKERS[shape]}: {message!r}"
+    others = [m for m in SHAPE_MARKERS if m != shape and m in message]
+    assert not others, f"the refusal for {shape!r} also names {others}: {message!r}"
+
+
 # ---------------------------------------------------------------------------------------
 # M1 / O1 — the thirteen shapes, each with the design's stated answer
 # ---------------------------------------------------------------------------------------
@@ -228,9 +254,7 @@ def test_1018_shape_3_prose_then_fence_is_refused_as_a_fence_inside_the_reply():
     """Shape 3 (prose, then fence): REFUSE, "a fence inside the reply". This was the C12 shape
     #921's lenient parser recovered; the design's explicit non-obligation ("no leniency for
     prose before or after the document") retires it. Failing: the fenced block is recovered."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_3_PROSE_THEN_FENCE)
-    assert "fence" in str(err.value)
+    _refuses(SHAPE_3_PROSE_THEN_FENCE, "inside")
 
 
 def test_1018_shape_4_fence_then_prose_is_refused_as_text_after_the_closer():
@@ -239,18 +263,14 @@ def test_1018_shape_4_fence_then_prose_is_refused_as_text_after_the_closer():
     parser that refuses every fence. Failing: the reply is accepted (attempt 1 returned the
     block) or the backticks reach the loader with an unnamed error."""
     _accepts(SHAPE_2_WHOLE_FENCE)
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_4_FENCE_THEN_PROSE)
-    assert "after" in str(err.value)
+    _refuses(SHAPE_4_FENCE_THEN_PROSE, "after")
 
 
 def test_1018_shape_5_prose_fence_prose_is_refused():
     """Shape 5 (prose, fence, prose): REFUSE, "a fence inside the reply" — the reply does not
     start with a fence, so the unfenced rule applies and finds a column-0 fence line.
     Failing: the block is recovered (the old unanchored search's arming case)."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_5_PROSE_FENCE_PROSE)
-    assert "fence" in str(err.value)
+    _refuses(SHAPE_5_PROSE_FENCE_PROSE, "inside")
 
 
 def test_1018_shape_6_draft_then_corrected_verdict_is_refused_as_a_second_fence():
@@ -258,36 +278,28 @@ def test_1018_shape_6_draft_then_corrected_verdict_is_refused_as_a_second_fence(
     fence". The ONLY silent shape in the corpus (C3): both blocks are complete, valid verdicts,
     so a parser taking the first records the abandoned `survived`, one taking the last records
     `caught` with no error either way. Neither is taken. Failing: any text comes back."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_6_DRAFT_THEN_FINAL)
-    assert "second" in str(err.value)
+    _refuses(SHAPE_6_DRAFT_THEN_FINAL, "second")
 
 
 def test_1018_shape_7_fence_then_schema_example_is_refused_as_a_second_fence():
     """Shape 7 (fence, then a fence holding a schema example): REFUSE, "a second fence". Attempt
     2 returned `{'episode_outcome': '<word>', 'findings': '<list>'}` for this one. Failing: the
     verdict OR the schema comes back."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_7_FENCE_THEN_SCHEMA)
-    assert "second" in str(err.value)
+    _refuses(SHAPE_7_FENCE_THEN_SCHEMA, "second")
 
 
 def test_1018_shape_8_fence_then_evidence_fence_is_refused_as_a_second_fence():
     """Shape 8 (fence, then a fence holding raw evidence): REFUSE, "a second fence". Attempt 2
     returned `{'srcip': '1.2.3.4'}` for this one; the current code returns the prose line
     between the blocks as a one-key mapping (C2). Failing: any text comes back."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_8_FENCE_THEN_EVIDENCE)
-    assert "second" in str(err.value)
+    _refuses(SHAPE_8_FENCE_THEN_EVIDENCE, "second")
 
 
 def test_1018_shape_9_json_tagged_fence_before_the_verdict_fence_is_refused():
     """Shape 9 (a `json`-tagged fence before the verdict fence): REFUSE, "a second fence". No
     tag preference — the design settles "prefer the `yaml`-tagged block" (attempt 3) as NOT
     the policy. Failing: the tagged verdict is picked out from beside the JSON block."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_9_JSON_THEN_VERDICT)
-    assert "second" in str(err.value)
+    _refuses(SHAPE_9_JSON_THEN_VERDICT, "second")
 
 
 def test_1018_shape_10_untagged_log_fence_then_plain_verdict_is_refused():
@@ -295,27 +307,21 @@ def test_1018_shape_10_untagged_log_fence_then_plain_verdict_is_refused():
     the closing fence" — the reply starts with a fence, so the whole-string rule applies and the
     plain verdict is text after its closer. Attempt 1 returned the log excerpt. Failing: the
     plain verdict is recovered from after the block."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_10_LOG_THEN_PLAIN)
-    assert "after" in str(err.value)
+    _refuses(SHAPE_10_LOG_THEN_PLAIN, "after")
 
 
 def test_1018_shape_11_outer_fence_wrapping_an_inner_tagged_fence_is_refused():
     """Shape 11 (an outer ``` wrapping an inner ```yaml fence): REFUSE, "a second fence".
     Attempt 3 returned `{'Here is the grading': None}` for this one, SILENTLY. Failing: any
     text comes back."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_11_OUTER_WRAPS_INNER)
-    assert "second" in str(err.value)
+    _refuses(SHAPE_11_OUTER_WRAPS_INNER, "second")
 
 
 def test_1018_shape_12_closer_with_trailing_text_is_refused():
     """Shape 12 (a closing marker with trailing text on its line, ```END): REFUSE — a closer
     with trailing characters is no closer, and "no repair of a mangled closer" is an explicit
     non-obligation. Failing: ```END is accepted as a closer."""
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_12_TRAILING_CLOSER)
-    assert "clos" in str(err.value)
+    _refuses(SHAPE_12_TRAILING_CLOSER, "trailing")
 
 
 def test_1018_shape_13_a_thinking_prelude_is_dropped_before_the_shape_rule():
@@ -325,9 +331,7 @@ def test_1018_shape_13_a_thinking_prelude_is_dropped_before_the_shape_rule():
     a prelude launders a fence-then-prose reply into an accept."""
     _accepts(SHAPE_13A_PRELUDE_THEN_PLAIN)
     _accepts(SHAPE_13B_PRELUDE_THEN_FENCE)
-    with pytest.raises(_malformed()) as err:
-        _parse(SHAPE_13C_PRELUDE_THEN_FENCE_PROSE)
-    assert "after" in str(err.value)
+    _refuses(SHAPE_13C_PRELUDE_THEN_FENCE_PROSE, "after")
 
 
 # ---------------------------------------------------------------------------------------
@@ -413,26 +417,43 @@ def test_1018_e6_an_empty_or_whitespace_only_reply_is_refused_and_named(text):
     """E6: an empty completion is refused with a NAMED reason, never returned as "" for the
     loader to turn into `None` and the consumer into "not a mapping". Failing: no
     `MalformedReply`."""
-    with pytest.raises(_malformed()) as err:
-        _parse(text)
-    assert "empty" in str(err.value)
+    _refuses(text, "empty")
 
 
 @pytest.mark.parametrize("text", ["```yaml\n```", "```yaml\n\n```\n", "```\n   \n```"])
 def test_1018_e7_an_empty_fence_is_refused_and_named(text):
     """E7: a fence with a blank body is refused and named. Failing: an empty string comes back
     and the loader's `None` is what the consumer sees."""
-    with pytest.raises(_malformed()) as err:
-        _parse(text)
-    assert "empty" in str(err.value)
+    _refuses(text, "empty")
 
 
 def test_1018_a_fence_with_no_closer_is_refused():
     """A reply that opens a fence and never closes it (a truncated completion) is refused,
     naming the missing closer. Failing: the opener line is dropped and the rest returned."""
-    with pytest.raises(_malformed()) as err:
-        _parse("```yaml\n" + DOCUMENT + "\n")
-    assert "clos" in str(err.value)
+    _refuses("```yaml\n" + DOCUMENT + "\n", "no closing")
+
+
+@pytest.mark.parametrize("lead", ["\n\n", "  ", " \t\n"])
+def test_1018_whitespace_before_the_opener_is_stripped_before_the_fence_rule(lead):
+    """M1 step 3 runs BEFORE step 4: surrounding whitespace is stripped, and only then is "does
+    it start with a fence" decided. A parser that reads the first character before stripping
+    sees a reply that "does not start with a fence" yet holds a column-0 fence line, and
+    refuses one legitimate document (O5). Failing: a blank line or spaces before the opener
+    turns shape 2 into a refusal."""
+    _accepts(lead + SHAPE_2_WHOLE_FENCE)
+
+
+def test_1018_the_prelude_ends_at_the_first_column_zero_close_tag_not_the_last():
+    """M1 step 2 drops everything through the FIRST column-0 closing think tag. A parser that
+    cuts at the LAST one turns "prelude, draft document, close tag, corrected document" into
+    an accept of the corrected document — a two-document reply yielding a verdict (O1). The
+    honest cut leaves the second tag inside the returned text, where the loader refuses it
+    (C12), so the consumer refuses the reply. Failing: `caught` loads from the tail."""
+    text = PRELUDE + DRAFT + "\n</think>\n" + DOCUMENT + "\n"
+    out = _parse(text)
+    assert out == (DRAFT + "\n</think>\n" + DOCUMENT), f"the parser returned:\n{out!r}"
+    with pytest.raises(yaml.YAMLError):
+        safe_load(out)
 
 
 @pytest.mark.parametrize("tag", ["</think>", "</thinking>", "</system_thinking>"])
@@ -484,9 +505,7 @@ def test_1018_the_xml_envelope_and_trailing_close_tag_shapes_are_no_longer_unwra
 def test_1018_a_dangling_closer_after_a_plain_document_is_refused():
     """M4 / "no dangling-closer trim": a plain document followed by a lone column-0 ``` is "a
     fence inside the reply". Failing: the closer is trimmed and the document recovered."""
-    with pytest.raises(_malformed()) as err:
-        _parse(DOCUMENT + "\n```\n")
-    assert "fence" in str(err.value)
+    _refuses(DOCUMENT + "\n```\n", "inside")
 
 
 def test_1018_malformed_reply_is_a_value_error():
@@ -494,8 +513,10 @@ def test_1018_malformed_reply_is_a_value_error():
     names, so one that leaked past a consumer's own wrap would still arrive as `JudgeRefused`
     rather than a bare traceback. Failing: a `MalformedReply` is not caught by `except
     ValueError`."""
-    with pytest.raises(ValueError, match="after"):
+    with pytest.raises(ValueError, match="after") as err:
         _parse(SHAPE_4_FENCE_THEN_PROSE)
+    assert "second" not in str(err.value)
+    assert "inside" not in str(err.value)
 
 
 def test_1018_the_three_old_parser_names_are_gone_from_validate_and_from_loop():
@@ -640,6 +661,42 @@ def test_1018_validate_reply_wraps_the_parser_refusal_in_judge_refused(tmp_path)
     assert run_mod.validate_reply(_bare_verdict()).episode_outcome == "gradable"
     with pytest.raises(JudgeRefused):
         run_mod.validate_reply(_fence_then_prose(_bare_verdict()))
+    # BOTH SCOPES. `scope="family"` is the same seam's second caller (#1007 M5), and a wrap
+    # discharged for the default scope alone lets a `MalformedReply` cross the family lane
+    # bare — where `grade_episode`'s family arm swallows it as `family_failed_reason` and
+    # makes no further family draw.
+    family_bare = _family_verdict()
+    assert run_mod.validate_reply(family_bare, scope="family").episode_outcome == "gradable"
+    with pytest.raises(JudgeRefused):
+        run_mod.validate_reply(_fence_then_prose(family_bare), scope="family")
+
+
+def _family_verdict() -> str:
+    """A verdict valid at FAMILY scope: no findings, so nothing names a world or the defender."""
+    return J.as_reply_text(J.reply_doc(findings=[]))
+
+
+def test_1018_judge_family_scope_fence_then_prose_costs_one_family_draw_not_the_family_call(
+        tmp_path):
+    """O2 at the family lane: a fence-then-prose reply on `judge:family:0` (draws=2) is ONE
+    malformed family draw — `family_malformed_replies` 1, `family_failed_reason` None — and the
+    second family draw is still made and completes, so `family_outcome` resolves. A refusal
+    that escapes `validate_reply` at this scope is caught by the family arm's `except
+    Exception` as a FAILED CALL: draw 1 never made, `family_malformed_replies` 0, and the
+    family outcome lost to one bad reply. Failing: `family_failed_reason` names
+    `MalformedReply`, or `judge:family:1` was never called."""
+    ep = _episode(tmp_path)
+    # Call order is world b's draws, world c's draws, then the family's: 2 + 2 + 2.
+    judge = J.FakeJudge(replies=[_bare_verdict()] * 4 + [_fence_then_prose(_family_verdict())],
+                        default=_family_verdict())
+    _grade(tmp_path, ep, judge, draws=2)
+
+    record = J.judge_record(ep)
+    assert record["family_failed_reason"] is None, record["family_failed_reason"]
+    assert record["family_malformed_replies"] == 1
+    assert judge.agent_ids[-2:] == ["judge:family:0", "judge:family:1"], judge.agent_ids
+    assert record["family_outcome"] == "gradable", "the bare second family draw did not count"
+    assert _wire_row(ep, "family", 0)["reply"] == _fence_then_prose(_family_verdict())
 
 
 # ---------------------------------------------------------------------------------------
@@ -731,7 +788,29 @@ def test_1018_questioner_one_bare_fenced_document_per_call_still_composes(tmp_pa
 
 #: The one phrase every shape-telling site carries, so the implementation has one string to
 #: write and this census one string to look for.
-SHAPE_PHRASE = "not inside a code fence"
+#: THE WHOLE SENTENCE, not a substring: the shape the parser accepts, in the words every site
+#: must use. A substring pin ("not inside a code fence") was greened by a sentence that PERMITS
+#: the opposite — "anything not inside a code fence is commentary, so wrap the mapping in one"
+#: — which is the #700 attack-deck shape (prose describing content, pinned by presence alone).
+SHAPE_PHRASE = "not inside a code fence, with nothing before or after it"
+#: Words that would turn the sentence into permission for a shape the parser refuses. None
+#: may appear in the sentence that carries the phrase.
+PERMISSIVE_WORDS = ("wrap", "you may", "commentary", "treated as", "before and after")
+#: M3's label on the two questioner examples, which still SHOW the document inside a fence.
+ILLUSTRATION_LABEL = "illustration, not part of the reply"
+
+
+def _says_bare(text: str) -> bool:
+    """The site states the accepted shape: the whole phrase, whitespace-normalised so a wrapped
+    markdown line counts, in a sentence that permits nothing the parser refuses."""
+    flat = " ".join(text.split())
+    at = flat.find(SHAPE_PHRASE)
+    if at < 0:
+        return False
+    start = max(flat.rfind(". ", 0, at), flat.rfind(": ", 0, at), 0)
+    end = flat.find(". ", at)
+    sentence = flat[start:end if end > 0 else None].lower()
+    return not any(word in sentence for word in PERMISSIVE_WORDS)
 
 
 def test_1018_every_shape_telling_prompt_site_says_the_document_is_bare(tmp_path):
@@ -754,14 +833,20 @@ def test_1018_every_shape_telling_prompt_site_says_the_document_is_bare(tmp_path
     # One site is ONE template, so the two rendered world prompts are one entry — and it
     # holds only if BOTH renderings carry the phrase.
     said: dict[str, bool] = {
-        "run.py world prompt": all(SHAPE_PHRASE in p for p in world_prompts),
-        "run.py family prompt": SHAPE_PHRASE in family_prompts[0],
-        "run.py deny reason":
-            SHAPE_PHRASE in J.sym("learning.judge.run", "JUDGE_DEF").deny_reason,
+        "run.py world prompt": all(_says_bare(p) for p in world_prompts),
+        "run.py family prompt": _says_bare(family_prompts[0]),
+        "run.py deny reason": _says_bare(J.sym("learning.judge.run", "JUDGE_DEF").deny_reason),
     }
     for rel in ("judge/role.md", "branch/questioner/role.md", "branch/questioner/world.md",
                 "branch/questioner/family.md"):
-        said[rel] = SHAPE_PHRASE in (prompt_files / rel).read_text(encoding="utf-8")
+        said[rel] = _says_bare((prompt_files / rel).read_text(encoding="utf-8"))
     assert len(said) == 7
     missing = sorted(name for name, present in said.items() if not present)
     assert missing == [], f"sites that do not say the reply is bare: {missing}"
+    # The two questioner examples stay, LABELLED: each file shows the document inside a fence,
+    # and the sentence that shows it must say the fence is illustration.
+    for rel in ("branch/questioner/world.md", "branch/questioner/family.md"):
+        text = " ".join((prompt_files / rel).read_text(encoding="utf-8").split())
+        assert ILLUSTRATION_LABEL in text, f"{rel} shows a fenced example without labelling it"
+        assert text.find(SHAPE_PHRASE) < text.find(ILLUSTRATION_LABEL) < text.find("```yaml"), (
+            f"{rel}: the label is not between the shape sentence and the example it labels")
