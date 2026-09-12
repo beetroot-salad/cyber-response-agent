@@ -396,25 +396,36 @@ def test_921_a_zero_finding_reply_is_schema_valid_and_stands_as_one_draws_answer
     assert J.world_rows(J.judge_record(ep))["b"]["completed_draws"] == 2
 
 
-def test_921_fenced_reply_with_prose_around_it_parses_and_then_validates(tmp_path):
-    """A reply arriving fenced in a code block with prose before it PARSES LENIENTLY and is then
-    VALIDATED STRICTLY. Both halves are the demand: lenient at the parse, strict at the schema.
+def test_921_fenced_reply_with_prose_around_it_is_refused_and_a_bare_one_validates_strictly(
+        tmp_path):
+    """A reply arriving fenced with prose before it is REFUSED (`JudgeRefused`, the class named
+    — never `J.refusals()`, whose tuple includes `ValueError` and would be satisfied by the
+    parser's own `MalformedReply` leaking through), and a BARE reply is validated STRICTLY.
 
-    The shape is measured, not imagined: 7 of 20 replies under the earlier prompt needed the
-    lenient parser, and 15/15 parsed strictly once the prompt required quoting scalars with
-    colons (C12). The questioner's own replies arrive the same way, which is the failure that
-    prompted the lenient half.
+    FLIPPED BY #1018. This test used to pin the lenient half — the C12 shape (7/20 real K3
+    replies under an earlier prompt) recovered from around its fence — and #1018's design
+    retires that leniency: a reply is one bare document or it is malformed, and the prompt
+    (O4/M3) is the compensation. The schema-bad half stays, on an UNFENCED fixture, so it still
+    discriminates at the schema and not at the fence: a document that parses cleanly and is
+    missing its three pass tables is refused by the validator, not the parser.
     """
     run_mod = _run()
-    fenced = J.as_reply_text(J.reply_doc(), malformed="fenced-with-prose")
-    parsed = run_mod.validate_reply(fenced)
-    assert parsed.episode_outcome == "gradable"
-    assert parsed.findings, "the lenient parse dropped the body it recovered"
+    JudgeRefused = J.sym("learning.judge", "JudgeRefused")
+    body = J.as_reply_text(J.reply_doc())
+    fenced = ("Here is my grading of the world, following the three passes you asked for.\n\n"
+              f"```yaml\n{body}```\n\nLet me know if you want the derivation table expanded.")
+    with pytest.raises(JudgeRefused):
+        run_mod.validate_reply(fenced)
 
-    # Strict at the schema: lenient parsing never softens what a valid reply IS.
-    fenced_bad = J.as_reply_text(J.reply_doc(passes=False), malformed="fenced-with-prose")
-    with pytest.raises(J.refusals()):
-        run_mod.validate_reply(fenced_bad)
+    # Positive control: the same document bare validates, so the refusal above is about the
+    # shape and not about the verdict.
+    parsed = run_mod.validate_reply(body)
+    assert parsed.episode_outcome == "gradable"
+    assert parsed.findings
+
+    # Strict at the schema, on an unfenced reply: the parser accepts it, the validator does not.
+    with pytest.raises(JudgeRefused):
+        run_mod.validate_reply(J.as_reply_text(J.reply_doc(passes=False)))
 
 
 # ---------------------------------------------------------------------------------------
