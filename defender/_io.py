@@ -127,9 +127,17 @@ def parse_jsonl_row(line: str) -> dict | None:
         return None
     try:
         obj = json.loads(s)
-    except ValueError:
+    except (ValueError, RecursionError):
         # `JSONDecodeError` IS a `ValueError`; the broader guard costs nothing and spares the
-        # two callers from agreeing on which to name.
+        # two callers from agreeing on which to name. `RecursionError` beside it because a line
+        # nested past the parser's limit is not a row EITHER, and it is the one malformed shape
+        # `json.loads` reports as a `RuntimeError` rather than a decode error: left uncaught,
+        # one such line in a run's queries table raised out of every reader of the table — the
+        # judge's leads view, the narration crosscheck, the capture primer — where the lead-file
+        # reader (`lead_repository.load_leads`) had tolerated the same shape since #1017 D3.
+        # One predicate, one tolerance: the writer side (`challenge_gate._is_row_shaped`)
+        # asks the same function, so a reply line that deep goes out raw on the strength of
+        # every reader skipping it — which, now, every reader does.
         return None
     return obj if isinstance(obj, dict) else None
 

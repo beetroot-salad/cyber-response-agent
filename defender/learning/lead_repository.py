@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -71,13 +71,13 @@ class QueryRow:
     #: treats any falsy value as "no identity", so the two agree on every value a writer
     #: stores (`append_query_row` always writes the hex digest).
     #:
-    #: NOT model-facing content, and nothing here has to say so: every render that reaches a
-    #: model (`actor_view`, `render_joined_yaml`, `questioner_leads`, the judge's `lead_chain`)
-    #: enumerates its fields by NAME, so a column is model-facing only where a render names
-    #: it, and none names this one. Until #1032 the questioner's section stringified whole
-    #: rows through this dataclass's `repr`, which made every column model-facing unless
-    #: someone remembered `repr=False` — the flag this field carried. The rule is now the
-    #: renders' own, pinned by `tests/test_1017_row_schema.py`'s key-set census.
+    #: NOT model-facing content, and nothing here has to say so: this module's renders that
+    #: reach a model (`actor_view`, and `questioner_leads` / `render_joined_yaml` through
+    #: `project_leads`) name their columns, so a column is model-facing only where a render
+    #: names it, and none names this one — `tests/test_1017_row_schema.py` pins each of the
+    #: three renders' key sets. Until #1032 the questioner's section stringified whole rows
+    #: through this dataclass's `repr`, which made every column model-facing unless someone
+    #: remembered `repr=False` — the flag this field carried.
     payload_sha256: str = ""
     #: #871's hash half of an above-guard rejection's identity: `sha256` of a model-authored
     #: system string the writer coarsened to `system=""`, `""` everywhere else. Coerced the way
@@ -192,6 +192,8 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
             # file's reader before #1017) tolerates it: a lead file nested past the parser's
             # limit is a `RuntimeError`, which no reader of this surface catches, and one
             # planted file would otherwise end the judge pass for every world in the episode.
+            # The table's reader (`_io.parse_jsonl_row`) applies the same tolerance to a row,
+            # so `joined()` raises on neither file for its content.
             continue
         if not isinstance(data, dict):
             continue
@@ -410,9 +412,14 @@ def _capped_document(value: object, depth: int = 0) -> object:
 
 
 def corpus_samples(
-    run_dir: Path, *, pattern_of: Callable[[QueryRow], str | None]
+    leads: Iterable[JoinedLead], *, pattern_of: Callable[[QueryRow], str | None]
 ) -> dict[str, dict | None]:
     """One real document per base pattern this run's queries addressed.
+
+    OVER THE JOIN, NOT THE RUN DIR: `leads` is `joined(run_dir)`, read once by the caller and
+    projected here — the launcher composes this with `questioner_leads` over the same list, and
+    a second read of both tables for a value that cannot differ from the first is what the
+    two path-taking signatures used to cost it.
 
     THE ANSWER TO "what does a document in this corpus look like". Its caller is the questioner,
     which authors documents to INJECT into these corpora and, without this, had only
@@ -437,7 +444,7 @@ def corpus_samples(
     next candidate rather than blinding the pattern.
     """
     samples: dict[str, dict | None] = {}
-    for lead in joined(Path(run_dir)):
+    for lead in leads:
         for query in lead.queries:
             try:
                 pattern = pattern_of(query)
@@ -587,15 +594,14 @@ def render_actor_view_yaml(run_dir: Path) -> str:
     return yaml.safe_dump(actor_view(run_dir), sort_keys=False)
 
 
-def questioner_leads(run_dir: Path) -> list[dict]:
-    """The questioner's "joined leads" section (#1032): every lead `joined()` returns, in its
-    order, as dicts of NAMED fields — never a row object, never its `repr`.
-
-    @owns the questioner leads section shape. Per lead: `lead_id`, `goal`, `what_to_summarize`,
-    `provenance`, `queries`. Per query: `seq`, `system`, `verb`, `query_id`, `params`,
-    `exit_code`, `error_class`, `payload_status`, `payload_digest`. That is the whole census of
-    what the questioner is shown of a row; a column added to `QueryRow` reaches it only by
-    being added HERE, and `tests/test_1017_row_schema.py`'s key-set check says so.
+def project_leads(
+    leads: Iterable[JoinedLead], *, lead_fields: Sequence[str], query_fields: Sequence[str],
+) -> list[dict]:
+    """THE ONE WALK from the join to a model-facing list of dicts: every lead in `leads`, in
+    its order, as a dict of exactly `lead_fields` plus `queries`, each query a dict of exactly
+    `query_fields`. The two renders over it (`questioner_leads`, `render_joined_yaml`) differ
+    only in the columns they name, so a coercion or a shape decision made here is made once —
+    the two used to be hand-spelled walks whose key sets drifted apart in silence.
 
     `.queries`, never `.rows`: the sentinel rows are the defender's refusals and shims, not
     queries it ran, and shown as queries they say the run asked something it never asked —
@@ -604,59 +610,49 @@ def questioner_leads(run_dir: Path) -> list[dict]:
     so it is kept with `queries: []`. Orphans (rows with no lead file) arrive as `joined()`
     hands them: `goal` and `provenance` `None`, `what_to_summarize` empty.
 
-    What is NOT here, on purpose: `raw_command` and `raw_ref` (a shell string and the host's
-    absolute payload path — no other model-facing render shows either), `payload_sha256` and
-    `system_key` (identities for the guards, not for a model), `orphan` (a lead with no file
-    already reads as `goal: None`), `sentinels`.
-
-    Reads through `joined()` and tolerates exactly what it tolerates — a missing run dir, an
-    unreadable table — and no more: a fault the surface raises is the launcher's to report
-    (`branch/cli._joined_leads`), not this render's to swallow."""
+    Columns are named, never dumped: a column added to `QueryRow` reaches a model only by
+    being named in a render's `query_fields`, and never by existing."""
     return [
         {
-            "lead_id": jl.lead_id,
-            "goal": jl.goal,
-            "what_to_summarize": jl.what_to_summarize,
-            "provenance": jl.provenance,
-            "queries": [
-                {
-                    "seq": q.seq,
-                    "system": q.system,
-                    "verb": q.verb,
-                    "query_id": q.query_id,
-                    "params": q.params,
-                    "exit_code": q.exit_code,
-                    "error_class": q.error_class,
-                    "payload_status": q.payload_status,
-                    "payload_digest": q.payload_digest,
-                }
-                for q in jl.queries
-            ],
+            **{name: getattr(jl, name) for name in lead_fields},
+            "queries": [{name: getattr(q, name) for name in query_fields} for q in jl.queries],
         }
-        for jl in joined(Path(run_dir))
+        for jl in leads
     ]
+
+
+#: The questioner's "joined leads" section, per lead and per query — the whole census of what
+#: the questioner is shown of a row. Pinned as literals by `tests/test_1017_row_schema.py`.
+#: NOT here, on purpose: `raw_command` and `raw_ref` (a shell string and the host's absolute
+#: payload path — no other model-facing render shows either), `payload_sha256` and
+#: `system_key` (identities for the guards, not for a model), `orphan` (a lead with no file
+#: already reads as `goal: None`), `sentinels`.
+QUESTIONER_LEAD_FIELDS: tuple[str, ...] = ("lead_id", "goal", "what_to_summarize", "provenance")
+QUESTIONER_QUERY_FIELDS: tuple[str, ...] = (
+    "seq", "system", "verb", "query_id", "params", "exit_code", "error_class",
+    "payload_status", "payload_digest",
+)
+
+
+def questioner_leads(leads: Iterable[JoinedLead]) -> list[dict]:
+    """The questioner's "joined leads" section (#1032): `project_leads` over `joined()`'s
+    answer with the questioner's columns — never a row object, never its `repr`.
+
+    @owns questioner_leads — the section's shape is decided by the two field tuples above and
+    nowhere else. Takes the JOIN rather than the run dir, like `corpus_samples` and unlike the
+    document renders (`actor_view`, `render_joined_yaml`, which carry `case_id`): the launcher
+    reads the run once and projects it twice."""
+    return project_leads(
+        leads, lead_fields=QUESTIONER_LEAD_FIELDS, query_fields=QUESTIONER_QUERY_FIELDS)
 
 
 def render_joined_yaml(run_dir: Path) -> str:
     run_dir = Path(run_dir)
-    leads = []
-    for jl in joined(run_dir):
-        lead = {
-            "lead_id": jl.lead_id,
-            "goal": jl.goal,
-            "what_to_summarize": jl.what_to_summarize,
-            "queries": [
-                {
-                    "query_id": q.query_id,
-                    "verb": q.verb,
-                    "params": q.params,
-                    "payload_status": q.payload_status,
-                    "payload_digest": q.payload_digest,
-                }
-                for q in jl.queries
-            ],
-        }
-        leads.append(lead)
+    leads = project_leads(
+        joined(run_dir),
+        lead_fields=("lead_id", "goal", "what_to_summarize"),
+        query_fields=("query_id", "verb", "params", "payload_status", "payload_digest"),
+    )
     doc = {"case_id": run_dir.name, "alert_ref": "alert.json", "leads": leads}
     return yaml.safe_dump(doc, sort_keys=False)
 

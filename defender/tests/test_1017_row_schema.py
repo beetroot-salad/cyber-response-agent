@@ -21,9 +21,10 @@ What is pinned here, at the unit level (the driven-run half lives in
   run never took.
 * **S2** — the model-facing renders that reach the rows (`actor_view`, `render_joined_yaml`,
   and since #1032 the questioner's NAMED projection `questioner_leads`) carry neither new
-  column; the questioner's carries exactly the key sets `QUESTIONER_LEAD_KEYS` /
-  `QUESTIONER_QUERY_KEYS` spell below (#1032 O1). The rest of #1032's obligations live in
-  `tests/test_1032_questioner_leads.py`, which imports this module's fixtures.
+  column, and each carries exactly its key sets — the questioner's the ones
+  `QUESTIONER_LEAD_KEYS` / `QUESTIONER_QUERY_KEYS` spell below (#1032 O1). The rest of #1032's
+  obligations live in `tests/test_1032_questioner_leads.py`, which imports this module's
+  fixtures.
 * **D3** — the surface refuses a link at a lead file's name and at the table's name, and
   tolerates a lead file nested past the parser's limit, the way the judge's own readers did
   before the reads moved here.
@@ -36,6 +37,7 @@ import os
 from pathlib import Path
 
 import pytest
+import yaml
 
 from defender._io import append_jsonl
 from defender._run_paths import RunPaths
@@ -346,7 +348,8 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
     """S2, and #1032 O1 — every model-facing render of the rows ENUMERATES its fields:
     `actor_view` / `render_actor_view_yaml`, `render_joined_yaml`, and (since #1032 M1) the
     questioner's `lead_repository.questioner_leads`, driven through the shipped path
-    `branch/cli._joined_leads` → `_prompt.titled_section`. Each is checked for the two #1017
+    `branch/cli._joined_leads` → `questioner_leads` → `_prompt.titled_section`. Each is
+    checked for the two #1017
     MARKER VALUES and KEY NAMES beside the positive control on the same string (the row's
     `query_id` and its `params` marker DO appear, so an empty render cannot satisfy the
     negatives). The questioner's render, the one that used to stringify each
@@ -356,7 +359,9 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
     * KEY-SET EQUALITY on every lead dict and every query dict it returns, against
       `QUESTIONER_LEAD_KEYS` / `QUESTIONER_QUERY_KEYS`: a census of the output, which no marker
       check is. A column added to `QueryRow` tomorrow, or `orphan` / `sentinels` carried along,
-      fails here without anyone planting a marker for it.
+      fails here without anyone planting a marker for it. The same census is taken of the
+      other two renders, so the `QueryRow` comment's claim — a column is model-facing only
+      where a render names it — is pinned for every render it names.
     * MARKER ABSENCE on the rendered section text, with markers in `raw_command` and
       `payload_path` planted by `_searchable_row` (the fixture's defaults are not distinctive —
       M4's own note), plus the key names the old dump carried (`raw_ref`, `raw_command`,
@@ -393,7 +398,7 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
         "actor_view": json.dumps(lead_repository.actor_view(tmp_path), default=str),
         "questioner_joined_leads": titled_section(
             "The joined leads at the branch point",
-            _joined_leads(tmp_path, lead_repository.questioner_leads),
+            lead_repository.questioner_leads(_joined_leads(tmp_path, lead_repository.joined)),
         ),
     }
     for name, text in renders.items():
@@ -411,16 +416,31 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
     ):
         assert needle not in section, f"the questioner's section carries {needle!r} to a model"
 
-    # The census: exactly the enumerated keys, on every lead and every query the render returns.
-    leads = lead_repository.questioner_leads(tmp_path)
-    assert [lead["lead_id"] for lead in leads] == [LEAD], f"the render returned {leads!r}"
-    assert leads[0]["queries"], "the lead's real query is missing — the query census is vacuous"
-    for lead in leads:
-        assert set(lead) == QUESTIONER_LEAD_KEYS, \
-            f"lead {lead['lead_id']!r} carries {sorted(set(lead) ^ QUESTIONER_LEAD_KEYS)}"
-        for query in lead["queries"]:
-            assert set(query) == QUESTIONER_QUERY_KEYS, \
-                f"a query dict carries {sorted(set(query) ^ QUESTIONER_QUERY_KEYS)}"
+    # The census: exactly the enumerated keys, on every lead and every query each render
+    # returns — the questioner's, and the two other renders the `QueryRow` comment names, so a
+    # column added to the row tomorrow reaches none of the three without being named there.
+    censuses = {
+        "questioner_leads": (
+            lead_repository.questioner_leads(lead_repository.joined(tmp_path)),
+            QUESTIONER_LEAD_KEYS, QUESTIONER_QUERY_KEYS),
+        "render_joined_yaml": (
+            yaml.safe_load(renders["render_joined_yaml"])["leads"],
+            frozenset({"lead_id", "goal", "what_to_summarize", "queries"}),
+            frozenset({"query_id", "verb", "params", "payload_status", "payload_digest"})),
+        "actor_view": (
+            lead_repository.actor_view(tmp_path)["leads"],
+            frozenset({"lead_id", "queries"}), frozenset({"query_id", "params"})),
+    }
+    for name, (leads, lead_keys, query_keys) in censuses.items():
+        assert [lead["lead_id"] for lead in leads] == [LEAD], f"{name} returned {leads!r}"
+        assert leads[0]["queries"], \
+            f"{name}: the lead's real query is missing — the query census is vacuous"
+        for lead in leads:
+            assert set(lead) == lead_keys, \
+                f"{name}: lead {lead['lead_id']!r} carries {sorted(set(lead) ^ lead_keys)}"
+            for query in lead["queries"]:
+                assert set(query) == query_keys, \
+                    f"{name}: a query dict carries {sorted(set(query) ^ query_keys)}"
 
 
 # ---------------------------------------------------------------------------------------

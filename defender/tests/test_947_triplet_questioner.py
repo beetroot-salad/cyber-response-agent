@@ -493,7 +493,8 @@ def test_947_a_real_document_outranks_an_esql_projection(tmp_path):
         ("logs-alpha-*", {"index": "logs-alpha-*", "total": 1, "returned": 1,
                           "hits": [{"source": {"address": "::1"}}]}),
     ])
-    got = repo.corpus_samples(run, pattern_of=lambda q: (q.params or {}).get("index"))
+    got = repo.corpus_samples(repo.joined(run),
+                              pattern_of=lambda q: (q.params or {}).get("index"))
     assert got["logs-alpha-*"] == {"source": {"address": "::1"}}, (
         "the aggregate projection was kept over a real document")
 

@@ -1430,16 +1430,20 @@ def _author(
     from defender._corpus import iter_lesson_paths
     from defender.learning.branch import questioner as questioner_mod
     from defender.learning.branch.estate.stagers.elastic import source_pattern  # noqa: E501 # lint-shippable: ok — the per-vendor stager owns which key of a call names its corpus; the join surface holds no vendor knowledge and takes this as its `pattern_of`
-    from defender.learning.lead_repository import corpus_samples, questioner_leads
+    from defender.learning.lead_repository import corpus_samples, joined, questioner_leads
 
     as_of = branch_point_clock(source, ns.branch_message_id)
     fences = _fence_count(source, ns.branch_message_id,
                           continuation_prompt=ns.continuation_prompt, as_of=as_of)
+    # ONE READ, TWO PROJECTIONS. The source's two tables are joined once here and the list is
+    # handed to both the sampler and the questioner's leads render — the same leads, by
+    # construction, rather than by two reads of a run dir a prior box was root on.
+    leads = _joined_leads(source, joined)
     # ONE WALK, TWO ANSWERS. `corpus_samples` keys every base pattern the capture addressed,
     # so its keys ARE the capture's own FROM sources — which is exactly what `parse_family`
     # judges an overlay's keys against, and what the prompt must name as stageable. Derived
     # apart, the sampler and the pattern set would answer for two different captures.
-    samples = _corpus_samples(source, corpus_samples, source_pattern)
+    samples = _corpus_samples(leads, corpus_samples, source_pattern)
     # #1007 O5/M4: the SAME documents the questioner is about to be shown, moved into the
     # episode archive now — before the model call — so the judge can be shown byte-identical
     # bytes at grading time regardless of what later happens to the source run.
@@ -1456,7 +1460,7 @@ def _author(
     document = questioner_mod.author_family(
         source_run_dir=source, episode_dir=episode_dir,
         invoke=questioner,
-        leads=_joined_leads(source, questioner_leads),
+        leads=questioner_leads(leads),
         alert=_alert_document(source),
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
         # The SAME set `parse_family` below judges the authored overlays against, so the prompt
@@ -1493,8 +1497,8 @@ def _author(
     return family
 
 
-def _corpus_samples(source: Path, sampler: Any, pattern_of: Any) -> dict[str, Any]:
-    """One document per corpus the capture queried, or nothing if the tables cannot be read.
+def _corpus_samples(leads: Any, sampler: Any, pattern_of: Any) -> dict[str, Any]:
+    """One document per corpus the capture queried, or nothing if the payloads cannot be read.
 
     Best-effort like `_joined_leads` beside it, and for the same reason: the samples are an
     ORIENTATION aid, so a run whose payloads are unreadable should author a family with a
@@ -1503,8 +1507,8 @@ def _corpus_samples(source: Path, sampler: Any, pattern_of: Any) -> dict[str, An
     call for different operator responses.
     """
     try:
-        samples = sampler(source, pattern_of=lambda q: pattern_of(q.verb, q.params or {}))
-    except Exception as unreadable:  # noqa: BLE001 — an unreadable table is a thinner prompt
+        samples = sampler(leads, pattern_of=lambda q: pattern_of(q.verb, q.params or {}))
+    except Exception as unreadable:  # noqa: BLE001 — an unreadable payload is a thinner prompt
         print(f"[branch] could not sample the source's corpora ({unreadable!r}); the questioner "
               "is shown none", file=sys.stderr)
         return {}
@@ -1551,13 +1555,19 @@ def _fence_count(source: Path, branch_message_id: int, *,
         store.close()
 
 
-def _joined_leads(source: Path, render: Any) -> list[dict]:
-    """The joined leads at the branch point, as the questioner is shown them: `render` is
-    `lead_repository.questioner_leads`, the named projection that owns the section's shape
-    (#1032) — this function adds nothing to it and dumps no object whole."""
+def _joined_leads(source: Path, joined: Callable[[Path], list[Any]]) -> list[Any]:
+    """The joined leads at the branch point: `lead_repository.joined` over the source, and the
+    ONE place the launcher reads the two tables — what it returns is projected, never re-read
+    (`questioner_leads` for the prompt's section, `corpus_samples` for the corpora). A
+    passthrough: the list is the surface's own, untouched.
+
+    The surface absorbs everything a run dir's CONTENT can do — a missing table, a line that
+    is not a row, a row nested past the parser's limit — as `[]` or a skipped row, silently.
+    What can still raise is the host: a directory it refuses to walk. That is an episode with
+    a thinner prompt, not no episode, so the arm is broad and says so on stderr."""
     try:
-        return render(source)
-    except Exception as unreadable:  # noqa: BLE001 — a missing table is an empty frontier
+        return joined(source)
+    except Exception as unreadable:  # noqa: BLE001 — a fault at the read is a thinner prompt, not no episode
         print(f"[branch] could not join the source's leads ({unreadable!r}); the questioner is "
               "shown none", file=sys.stderr)
         return []

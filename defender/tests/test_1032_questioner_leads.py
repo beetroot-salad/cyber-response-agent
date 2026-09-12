@@ -6,8 +6,11 @@ the host's absolute payload path (`raw_ref`), and the lead's SENTINEL rows (repe
 above-guard rejections, `∅.bash-shim` rows carrying model-authored shell text) under a
 `sentinels` key — while the `repr=False` markers from fc3a4ac9 hid exactly two columns and
 nothing else. The design (issue #1032's last comment) replaces it with a fourth named render,
-`lead_repository.questioner_leads(run_dir) -> list[dict]`, beside `actor_view` /
-`render_joined_yaml`, and the launcher passes it through the `_joined_leads` seam it already has.
+`lead_repository.questioner_leads`, beside `actor_view` / `render_joined_yaml`. The render is
+`project_leads` — the ONE walk from the join to model-facing dicts, shared with
+`render_joined_yaml` — with the questioner's column tuples; it takes `joined()`'s answer, not
+the run dir, so the launcher reads the two tables ONCE (`_joined_leads(source, joined)`, its
+best-effort read seam) and projects the list twice, for the sampler and for this section.
 
 What is pinned here, one test per obligation (the key-set census, O1, lives with the other
 renders' S2 check in `tests/test_1017_row_schema.py`, whose fixtures this file imports):
@@ -17,12 +20,14 @@ renders' S2 check in `tests/test_1017_row_schema.py`, whose fixtures this file i
 * **O2** — every lead `joined()` returns arrives, in `joined()`'s order, orphans (rows with no
   lead file) included with `goal: None`; queries in `seq` order; `goal`, `provenance`,
   `what_to_summarize` and the four outcome columns present with their values.
-* **O4a** — the read surface's silent tolerances (missing run dir, non-JSON table, directory at
-  the table's path) are untouched: `questioner_leads` answers `[]` and prints nothing.
-* **O4b** — the launcher's `except` arm still returns `[]` and prints its stderr line when the
-  render raises — pinned on a fake that records what it was handed, and again on a REAL fault
-  through the real primitive (a table whose `params` is nested past the parser's limit, which
-  `joined()` does not absorb today).
+* **O4a** — the read surface absorbs everything a run dir's CONTENT can do — a missing run
+  dir, a non-JSON table, a directory at the table's path, and a row nested past the parser's
+  limit (the one shape it used to raise on) — silently, and the shipped path over it shows the
+  questioner what survived.
+* **O4b** — the launcher's read seam returns `[]` and prints its stderr line when the surface
+  raises (a host fault, now that content cannot make it), pinned on fakes that record what
+  they were handed and raise two different classes; and it is a PASSTHROUGH of the surface's
+  own list.
 * **M2** — the launcher itself hands the questioner the named projection: driven through
   `cli.main` with the #947 seams, the sentinel's marker and the old dump's columns are absent
   from call 1's prompt and the real row's marker is present.
@@ -46,6 +51,7 @@ from defender._run_paths import RunPaths
 from defender.learning import lead_repository
 from defender.learning._prompt import titled_section
 from defender.learning.branch.cli import _joined_leads
+from defender.learning.branch.questioner import UNTRUSTED_TAG
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
@@ -67,8 +73,8 @@ from defender.tests.test_1017_row_schema import (
 )
 
 #: The section title `questioner._capture_sections` renders the leads under — spelled here
-#: because the shipped path is `titled_section(<this>, _joined_leads(...))`, and the marker
-#: checks below are made on that text, not on the render's return value.
+#: because the shipped path is `titled_section(<this>, questioner_leads(_joined_leads(...)))`,
+#: and the marker checks below are made on that text, not on the render's return value.
 SECTION_TITLE = "The joined leads at the branch point"
 
 #: The stderr line `_joined_leads`'s `except` arm prints, as two fixed halves around the
@@ -79,10 +85,18 @@ LINE_TAIL = "); the questioner is shown none"
 
 
 def _section(run_dir: Path) -> str:
-    """The questioner's leads section as the launcher assembles it — the render through the
-    launcher's best-effort seam, through the section renderer. Every marker check in this file
-    is made here, on the bytes a model would be shown."""
-    return titled_section(SECTION_TITLE, _joined_leads(run_dir, lead_repository.questioner_leads))
+    """The questioner's leads section as the launcher assembles it — the launcher's
+    best-effort read seam, the render over its answer, the section renderer. Every marker check
+    in this file is made here, on the bytes a model would be shown."""
+    return titled_section(
+        SECTION_TITLE,
+        lead_repository.questioner_leads(_joined_leads(run_dir, lead_repository.joined)))
+
+
+def _questioner_leads(run_dir: Path) -> list[dict]:
+    """The render over the surface's own read of `run_dir` — the two calls the launcher makes,
+    minus its stderr arm."""
+    return lead_repository.questioner_leads(lead_repository.joined(run_dir))
 
 
 def _above_guard_row(seq: int, marker: str, **overrides) -> dict:
@@ -178,7 +192,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     ):
         assert dropped not in text, f"a sentinel row or an unlisted column reached the questioner: {dropped!r}"
 
-    leads = {lead["lead_id"]: lead for lead in lead_repository.questioner_leads(tmp_path)}
+    leads = {lead["lead_id"]: lead for lead in _questioner_leads(tmp_path)}
     assert set(leads) == {LEAD, "l-002"}, f"the render returned {sorted(leads)}"
     for lead in leads.values():
         assert set(lead) == QUESTIONER_LEAD_KEYS, f"lead {lead['lead_id']!r} carries other keys"
@@ -284,7 +298,7 @@ def test_o2_every_joined_lead_reaches_the_questioner_in_joineds_order(tmp_path):
         {"lead_id": "l-004", "goal": None, "what_to_summarize": [], "provenance": None,
          "queries": []},
     ]
-    leads = lead_repository.questioner_leads(tmp_path)
+    leads = _questioner_leads(tmp_path)
     assert [lead["lead_id"] for lead in leads] == joined_order, \
         "the questioner's leads are not in joined()'s order, or a lead is missing"
     assert leads == expected
@@ -303,24 +317,50 @@ def test_o2_every_joined_lead_reaches_the_questioner_in_joineds_order(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# O4a — the read surface's silent tolerances are the render's too
+# O4a — the read surface absorbs a run dir's content; the shipped path shows what survived
 # ---------------------------------------------------------------------------------------
 
 
-def test_o4a_the_render_keeps_the_read_surfaces_silent_tolerances(tmp_path, capsys):
-    """O4a — `joined()` absorbs a missing run dir, a non-JSON table and a directory at the
-    table's path as `[]` with nothing on stderr (executed against today's surface in the
-    design's C-probes, and re-asserted here on `joined` itself as the premise), and the render
-    over it does the same: `[]`, no raise, no stderr. The positive control is a healthy run
-    dir beside them, from which the same render returns its one lead.
+def _nested_bomb(run_dir: Path) -> Path:
+    """A queries table whose one row's `params` is a JSON array nested 200,000 deep — the one
+    content shape on which `joined()` used to RAISE (`RecursionError` out of `json.loads`,
+    which the lead-file reader tolerated and the table's did not), so one planted row ended
+    the judge pass, the crosscheck and the capture's priming for the whole run. A lead file
+    sits beside it so the tolerance has something to show: the row is skipped, the lead
+    survives with no queries."""
+    run_dir.mkdir()
+    _lead_file(run_dir, "SURVIVES_THE_BOMB")
+    table = RunPaths(run_dir).executed_queries
+    depth = 200_000
+    nested = "[" * depth + "]" * depth
+    table.write_text(f'{{"lead_id": "{LEAD}", "seq": 0, "params": {nested}}}\n', encoding="utf-8")
+    return table
 
-    Observed failing by: `questioner_leads` missing, raising on any of the three, or printing
-    where the surface is silent."""
+
+def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_what_survived(
+    tmp_path, capsys,
+):
+    """O4a — `joined()` absorbs a missing run dir, a non-JSON table and a directory at the
+    table's path as `[]`, and a row nested past the parser's limit as one skipped row — each
+    silently, nothing on stderr — and the shipped path over it (`_joined_leads` through
+    `questioner_leads`) shows the questioner exactly what survived: nothing for the first
+    three, the bomb's lead with `queries: []` for the fourth. The skipped row is not lost
+    to the capture's accounting either: `load_queries_report` counts it as the one record
+    that could not become a row. The positive control is a healthy run dir beside them, from
+    which the same path returns its one lead with its one query.
+
+    The bomb used to be O4b's premise ("the real primitive raises on this table"); it is the
+    tolerance's witness now, so a table reader that stops catching the parser's
+    `RecursionError` fails here, and fails as the judge would — one row, no leads shown.
+
+    Observed failing by: `joined` raising or printing on any of the four; the bomb's lead
+    missing from the shipped path's answer, or its skipped row not counted."""
     healthy = tmp_path / "healthy"
     _lead_file(healthy, "kept")
     _table(healthy, [_searchable_row(0)])
-    assert [lead["lead_id"] for lead in lead_repository.questioner_leads(healthy)] == [LEAD], \
-        "the healthy run dir renders no lead — the three empties below prove nothing"
+    shown = lead_repository.questioner_leads(_joined_leads(healthy, lead_repository.joined))
+    assert [(lead["lead_id"], len(lead["queries"])) for lead in shown] == [(LEAD, 1)], \
+        "the healthy run dir renders no lead — the empties below prove nothing"
 
     garbage = tmp_path / "garbage"
     garbage.mkdir()
@@ -334,86 +374,73 @@ def test_o4a_the_render_keeps_the_read_surfaces_silent_tolerances(tmp_path, caps
     }
     for label, run_dir in shapes.items():
         assert lead_repository.joined(run_dir) == [], f"the surface stopped absorbing a {label}"
-        assert lead_repository.questioner_leads(run_dir) == [], \
-            f"the render does not absorb a {label} the way the surface does"
+        assert lead_repository.questioner_leads(_joined_leads(run_dir, lead_repository.joined)) \
+            == [], f"the shipped path shows the questioner something for a {label}"
+
+    bomb = tmp_path / "bomb"
+    _nested_bomb(bomb)
+    assert lead_repository.load_queries_report(bomb) == ([], 1), \
+        "the nested row was not skipped as the one unreadable record"
+    shown = lead_repository.questioner_leads(_joined_leads(bomb, lead_repository.joined))
+    assert shown == [{"lead_id": LEAD, "goal": "SURVIVES_THE_BOMB",
+                      "what_to_summarize": ["auth events"], "provenance": None,
+                      "queries": []}], \
+        f"the bomb's lead did not survive its row being skipped: {shown!r}"
     assert capsys.readouterr().err == "", "the read surface's tolerances are no longer silent"
 
 
 # ---------------------------------------------------------------------------------------
-# O4b — the launcher's except arm, with the render as the thing that raises
+# O4b — the launcher's read seam: the arm, and the passthrough
 # ---------------------------------------------------------------------------------------
 
 
-def _nested_bomb(run_dir: Path) -> Path:
-    """A queries table whose one row's `params` is a JSON array nested 200,000 deep — the
-    shape `load_leads` tolerates on a LEAD file (`RecursionError` beside the decode errors) and
-    `load_queries_report` does not on the table: `joined()` raises out of `json.loads`. The
-    one input found (probing the surface for this file) on which the real primitive raises."""
-    run_dir.mkdir()
-    table = RunPaths(run_dir).executed_queries
-    depth = 200_000
-    nested = "[" * depth + "]" * depth
-    table.write_text(f'{{"lead_id": "{LEAD}", "seq": 0, "params": {nested}}}\n', encoding="utf-8")
-    return table
-
-
-def test_o4b_the_launcher_shows_the_questioner_no_leads_and_says_so_when_the_render_raises(
-    tmp_path, capsys,
-):
-    """O4b — `_joined_leads(source, render)` on a render that raises returns `[]` and prints
-    the existing stderr line with the exception's repr inside it; on a render that answers it
-    returns that answer and prints nothing (the positive control). The render is a fake that
+def test_o4b_the_launchers_read_seam_absorbs_a_fault_at_the_read_and_says_so(tmp_path, capsys):
+    """O4b — `_joined_leads(source, joined)` on a surface that raises returns `[]` and prints
+    the existing stderr line with the exception's repr inside it; on a surface that answers it
+    returns that answer and prints nothing (the positive control). The surface is a fake that
     RECORDS what it was handed, so the seam's inbound payload is pinned too: the source run dir
-    it was given, unchanged. Its fault is the one `joined()` was observed to raise (the nested
-    table below), not an invented one.
+    it was given, unchanged.
 
-    Then the same fault through the REAL primitive on the shipped path: a table whose
-    `params` is nested past the parser's limit makes `joined()` — and so `questioner_leads`
-    over it — raise `RecursionError`; the arm turns that into `[]` and the line. The premise
-    (`joined` raises on it) is asserted so that a surface that later absorbs the shape fails
-    here as "the premise is gone" rather than passing this test for the wrong reason.
-
-    The arm is `except Exception`, not the one class above: a second fake raises `OSError`
-    (the class the read surface's own `except` arm names) through the same seam, so an arm
-    narrowed to the observed fault — which greened the adversary's replay — is refuted. And
-    the seam is a PASSTHROUGH: handed the raw join surface `joined` it returns that surface's
-    own `JoinedLead` list unchanged, so a launcher that kept `joined` and had the seam
-    re-render behind it (the other replay that greened) has nowhere to hide.
+    The arm is `except Exception`, not one class: nothing a run dir's CONTENT holds reaches it
+    any more (O4a), so what it exists for is the host — an `OSError` off a directory the
+    walk is refused on — and a second fake raises a `RuntimeError` through the same seam, so
+    an arm narrowed to the one class named here is refuted. And the seam is a PASSTHROUGH:
+    handed the real surface it returns that surface's own `JoinedLead` list unchanged, so a
+    launcher that had the seam re-render behind it has nowhere to hide.
 
     Observed failing by: `_joined_leads` propagating, or returning `[]` without the line, or
-    calling the render with something other than the source; the arm narrowed to one class;
-    the seam transforming a render's answer; `questioner_leads` missing."""
+    calling the surface with something other than the source; the arm narrowed to one class;
+    the seam transforming the surface's answer."""
     handed: list[Path] = []
 
-    def render_that_raises(source):
+    def surface_that_raises(source):
         handed.append(source)
-        raise RecursionError(
-            "maximum recursion depth exceeded while decoding a JSON array from a unicode string")
+        raise OSError(13, "Permission denied", str(source))
 
-    assert _joined_leads(tmp_path, render_that_raises) == []
+    assert _joined_leads(tmp_path, surface_that_raises) == []
     err = capsys.readouterr().err
-    for part in (LINE_HEAD, "RecursionError(", LINE_TAIL):
+    for part in (LINE_HEAD, "PermissionError(", LINE_TAIL):
         assert part in err, f"the arm's line is missing, reworded, or silent on what raised: {err!r}"
-    assert handed == [tmp_path], f"the render was handed {handed!r}, not the source run dir"
+    assert handed == [tmp_path], f"the surface was handed {handed!r}, not the source run dir"
 
-    answer = [{"lead_id": "L0", "goal": None, "what_to_summarize": [], "provenance": None,
-               "queries": []}]
+    answer = [lead_repository.JoinedLead(lead_id="L0", goal=None, what_to_summarize=[],
+                                         queries=[], orphan=True)]
 
-    def render_that_answers(source):
+    def surface_that_answers(source):
         handed.append(source)
         return answer
 
-    assert _joined_leads(tmp_path, render_that_answers) == answer, \
-        "the arm changed a render's answer on the way through"
+    assert _joined_leads(tmp_path, surface_that_answers) is answer, \
+        "the arm changed the surface's answer on the way through"
     assert handed == [tmp_path, tmp_path]
-    assert capsys.readouterr().err == "", "the arm printed on a render that did not raise"
+    assert capsys.readouterr().err == "", "the arm printed on a surface that did not raise"
 
-    def render_that_raises_differently(source):
-        raise OSError(13, "Permission denied", str(source))
+    def surface_that_raises_differently(source):
+        raise RuntimeError("a fault no reader names")
 
-    assert _joined_leads(tmp_path, render_that_raises_differently) == []
+    assert _joined_leads(tmp_path, surface_that_raises_differently) == []
     err = capsys.readouterr().err
-    for part in (LINE_HEAD, "PermissionError(", LINE_TAIL):
+    for part in (LINE_HEAD, "RuntimeError(", LINE_TAIL):
         assert part in err, f"the arm does not cover a second fault class: {err!r}"
 
     healthy = tmp_path / "healthy"
@@ -424,16 +451,6 @@ def test_o4b_the_launcher_shows_the_questioner_no_leads_and_says_so_when_the_ren
     assert through == lead_repository.joined(healthy), \
         "the seam is not a passthrough — it re-rendered or dropped the join surface's answer"
     assert capsys.readouterr().err == ""
-
-    bomb = tmp_path / "bomb"
-    _nested_bomb(bomb)
-    with pytest.raises(RecursionError):
-        lead_repository.joined(bomb)  # the premise: the real primitive raises on this table
-    assert _joined_leads(bomb, lead_repository.questioner_leads) == [], \
-        "the shipped path does not absorb a render that raises"
-    err = capsys.readouterr().err
-    for part in (LINE_HEAD, "RecursionError(", LINE_TAIL):
-        assert part in err, f"the shipped path absorbed the raise silently: {err!r}"
 
 
 # ---------------------------------------------------------------------------------------
@@ -455,14 +472,16 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     the #947 harness, a recording `FakeAgent` as the questioner) over a source run whose table
     holds the harness's primed capture, a real row with markers in `params`, `raw_command` and
     `payload_path`, and an above-guard sentinel with its own `params` marker. Call 1's prompt is
-    what the questioner was HANDED; its leads section (from the section title to the frame's
-    close tag) carries the real row's params marker, the goal and the query id, and carries
+    what the questioner was HANDED; its leads section — the one frame whose body OPENS on the
+    section title, cut at that frame's close — carries the real row's params marker, the goal
+    and the query id, and carries
     NONE of: the sentinel's marker, either row's `raw_command` / `payload_path` marker, the two
     #1017 markers, the source run's absolute host path (today's `raw_ref` shows it three times
     — once per row — and nothing else in the prompt does), or the old dump's key names.
 
-    The unit tests above call `_joined_leads(run_dir, questioner_leads)` themselves; this is
-    the one test that fails if the render exists and `_author` still passes `joined`.
+    The unit tests above call `questioner_leads` over `_joined_leads(run_dir, joined)`
+    themselves; this is the one test that fails if the render exists and `_author` does not
+    hand the questioner its answer.
 
     Observed failing by: the sentinel's marker, a `raw_command` / path marker, the host path,
     or `raw_ref` / `sentinels` / `orphan` in the section the questioner was handed — today's
@@ -484,8 +503,14 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     assert rc == 0, "the episode did not complete cleanly"
     assert questioner.prompts, "the questioner was never called"
     prompt = questioner.prompts[0]
-    start = prompt.index(f"## {SECTION_TITLE}")
-    section = prompt[start:prompt.index("</run-", start)]
+    # Anchored on the FRAME, not the title: the frame open tag whose body's first line is the
+    # section title is the one frame this section is (titles go inside frames — the reader
+    # contract's own claim), so host text that happened to mention the title, or a reordered
+    # frame, cannot move the slice onto another section and turn every negative vacuous.
+    opened = f"-{UNTRUSTED_TAG}>\n## {SECTION_TITLE}\n"
+    assert prompt.count(opened) == 1, "the leads section does not open exactly one frame"
+    start = prompt.index(opened) + len(opened)
+    section = f"## {SECTION_TITLE}\n" + prompt[start:prompt.index("</run-", start)]
 
     for kept in ("REAL_PARAMS_MARKER", "GOAL_MARKER", "elastic.ad-hoc", "elastic.query",
                  T.EVENTS_PATTERN):
@@ -504,6 +529,6 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     # And the section IS the named projection, not a re-rendering of it: the dicts the render
     # returns for this source, rendered the way `_capture_sections` renders them, are the
     # section byte for byte.
-    rendered = titled_section(SECTION_TITLE, lead_repository.questioner_leads(src))
+    rendered = titled_section(SECTION_TITLE, _questioner_leads(src))
     assert section.rstrip("\n") == rendered.rstrip("\n"), \
         "the launcher's section is not the render's own output"
