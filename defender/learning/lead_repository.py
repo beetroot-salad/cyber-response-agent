@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import shutil
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,6 +11,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from defender._io import (
+    load_json_artifact,
     read_guarded,
     read_jsonl_rows_report,
     read_text_utf8,
@@ -35,9 +35,13 @@ _LEAD_SUFFIX = ".lead.json"
 
 
 def _as_int(value, default: int = 0) -> int:
+    """A stored integer column as the reader's `int`, `default` for anything that is not one.
+    `OverflowError` beside the two: a JSON number past a float's range decodes to `inf`, and
+    `int(inf)` is neither a `TypeError` nor a `ValueError` — one such `seq` raised out of
+    `joined()` for every reader of the table."""
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -185,17 +189,11 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
         text, _refused = read_guarded(path)
         if text is None:
             continue
-        try:
-            data = json.loads(text)
-        except (ValueError, RecursionError):
-            # `RecursionError` beside the decode error, as `judge.render.json_mapping` (this
-            # file's reader before #1017) tolerates it: a lead file nested past the parser's
-            # limit is a `RuntimeError`, which no reader of this surface catches, and one
-            # planted file would otherwise end the judge pass for every world in the episode.
-            # The table's reader (`_io.parse_jsonl_row`) applies the same tolerance to a row,
-            # so `joined()` raises on neither file for its content.
-            continue
-        if not isinstance(data, dict):
+        # `load_json_artifact`, the one decoder with the one tolerance: a lead file that is not
+        # JSON, or is nested past the bound, is not a lead — the same answer the table's row
+        # reader gives a row, so `joined()` raises on neither file for its content.
+        data, unreadable = load_json_artifact(text)
+        if unreadable is not None or not isinstance(data, dict):
             continue
         wts = data.get("what_to_summarize")
         provenance = data.get("provenance")
@@ -412,14 +410,16 @@ def _capped_document(value: object, depth: int = 0) -> object:
 
 
 def corpus_samples(
-    leads: Iterable[JoinedLead], *, pattern_of: Callable[[QueryRow], str | None]
+    leads: Sequence[JoinedLead], *, pattern_of: Callable[[QueryRow], str | None]
 ) -> dict[str, dict | None]:
     """One real document per base pattern this run's queries addressed.
 
     OVER THE JOIN, NOT THE RUN DIR: `leads` is `joined(run_dir)`, read once by the caller and
     projected here — the launcher composes this with `questioner_leads` over the same list, and
     a second read of both tables for a value that cannot differ from the first is what the
-    two path-taking signatures used to cost it.
+    two path-taking signatures used to cost it. A `Sequence`, not an `Iterable`, for that
+    reason: the same object is walked twice, and a one-shot iterator would hand the second
+    projection nothing, silently.
 
     THE ANSWER TO "what does a document in this corpus look like". Its caller is the questioner,
     which authors documents to INJECT into these corpora and, without this, had only
@@ -468,10 +468,12 @@ def corpus_samples(
             text, _refused = read_guarded(query.raw_ref)
             if text is None:
                 continue
-            try:
-                document = _one_document(json.loads(text))
-            except (ValueError, TypeError):
+            # One unreadable payload — not JSON, nested past the bound — is one skipped
+            # candidate, decided by the same decoder every other reader of a run dir uses.
+            payload, unreadable = load_json_artifact(text)
+            if unreadable is not None:
                 continue
+            document = _one_document(payload)
             if document and (samples.get(pattern) is None
                              or not document.get("esql_projection")):
                 capped = _capped_document(document)
@@ -595,7 +597,7 @@ def render_actor_view_yaml(run_dir: Path) -> str:
 
 
 def project_leads(
-    leads: Iterable[JoinedLead], *, lead_fields: Sequence[str], query_fields: Sequence[str],
+    leads: Sequence[JoinedLead], *, lead_fields: Sequence[str], query_fields: Sequence[str],
 ) -> list[dict]:
     """THE ONE WALK from the join to a model-facing list of dicts: every lead in `leads`, in
     its order, as a dict of exactly `lead_fields` plus `queries`, each query a dict of exactly
@@ -634,7 +636,7 @@ QUESTIONER_QUERY_FIELDS: tuple[str, ...] = (
 )
 
 
-def questioner_leads(leads: Iterable[JoinedLead]) -> list[dict]:
+def questioner_leads(leads: Sequence[JoinedLead]) -> list[dict]:
     """The questioner's "joined leads" section (#1032): `project_leads` over `joined()`'s
     answer with the questioner's columns — never a row object, never its `repr`.
 

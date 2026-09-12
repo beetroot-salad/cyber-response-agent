@@ -69,7 +69,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _provenance
-from defender._io import guarded_mkdir, write_guarded
+from defender._io import guarded_mkdir, load_json_artifact, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.learning.branch import seams
@@ -1498,17 +1498,19 @@ def _author(
 
 
 def _corpus_samples(leads: Any, sampler: Any, pattern_of: Any) -> dict[str, Any]:
-    """One document per corpus the capture queried, or nothing if the payloads cannot be read.
+    """One document per corpus the capture queried.
 
-    Best-effort like `_joined_leads` beside it, and for the same reason: the samples are an
-    ORIENTATION aid, so a run whose payloads are unreadable should author a family with a
+    The sampler absorbs an unreadable payload itself, per candidate — one bad payload is one
+    skipped candidate, not a blank sample set — so like `_joined_leads` beside it, the arm here
+    is for a fault at the READ the host raises, and for the same reason: the samples are an
+    ORIENTATION aid, so a run whose payloads cannot be reached should author a family with a
     thinner prompt rather than refuse an episode over an aside. The count is printed because a
     silently empty sample set looks identical to a capture that queried nothing, and the two
     call for different operator responses.
     """
     try:
         samples = sampler(leads, pattern_of=lambda q: pattern_of(q.verb, q.params or {}))
-    except Exception as unreadable:  # noqa: BLE001 — an unreadable payload is a thinner prompt
+    except Exception as unreadable:  # noqa: BLE001 — a fault at the read is a thinner prompt, not no episode
         print(f"[branch] could not sample the source's corpora ({unreadable!r}); the questioner "
               "is shown none", file=sys.stderr)
         return {}
@@ -1562,9 +1564,10 @@ def _joined_leads(source: Path, joined: Callable[[Path], list[Any]]) -> list[Any
     passthrough: the list is the surface's own, untouched.
 
     The surface absorbs everything a run dir's CONTENT can do — a missing table, a line that
-    is not a row, a row nested past the parser's limit — as `[]` or a skipped row, silently.
-    What can still raise is the host: a directory it refuses to walk. That is an episode with
-    a thinner prompt, not no episode, so the arm is broad and says so on stderr."""
+    is not a row, a row nested past `_io.JSON_NESTING_LIMIT`, a numeric column past an `int`
+    — as `[]`, a skipped row or a defaulted column, silently. What can still raise is the
+    host: a directory it refuses to walk. That is an episode with a thinner prompt, not no
+    episode, so the arm is broad and says so on stderr."""
     try:
         return joined(source)
     except Exception as unreadable:  # noqa: BLE001 — a fault at the read is a thinner prompt, not no episode
@@ -1577,10 +1580,11 @@ def _alert_document(source: Path) -> dict:
     """The source run's alert, already screened by the preflight."""
     path = RunPaths(source).alert
     try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = path.read_text(encoding="utf-8")
+    except OSError:
         return {}
-    return loaded if isinstance(loaded, dict) else {}
+    loaded, unreadable = load_json_artifact(text)
+    return loaded if unreadable is None and isinstance(loaded, dict) else {}
 
 
 __all__ = [

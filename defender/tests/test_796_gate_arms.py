@@ -382,6 +382,36 @@ def test_no_stage_reply_stands_as_a_trace_row_whatever_shape_it_arrives_in(tmp_p
     )
 
 
+@pytest.mark.parametrize("depth", [20, 500])
+def test_the_writer_and_the_reader_agree_about_a_nested_reply_from_any_stack_depth(
+    tmp_path, depth,
+):
+    """The writer asks the row predicate from deep inside the gate; the readers ask it from the
+    top. `json.loads` spends the caller's stack budget once per nested container, so before
+    `_io` judged nesting from the bytes, a reply nested past what the DEEP stack had left was
+    "not a row" to the writer (a caught `RecursionError`) and a row to every reader — the
+    writer put it out raw, on the strength of a skip that never happened. Written here from a
+    stack with almost no budget left: the file holds exactly one row, the gate's own, at
+    both depths — a 20-deep object is a row (framed inside the gate's value), a 500-deep one
+    is past the bound for writer and reader alike (raw line, skipped by both).
+
+    Observed failing by: a predicate that catches `RecursionError` — at depth 500 the writer
+    emits the raw line and `read_jsonl_rows` counts two rows."""
+    from defender.tests.test_1032_json_artifact import from_a_deep_stack
+
+    reply = '{"finding": "holds", "review": ' + "[" * depth + "]" * depth + "}"
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    from_a_deep_stack(
+        lambda: challenge_gate._write_trace_row(run_dir, "composer", 0, {"ok": True},
+                                                raw_reply=reply))
+    rows = read_jsonl_rows(review_trace_path(run_dir, "composer"))
+    assert len(rows) == 1, f"a stage's reply was counted as a trace row of its own: {len(rows)}"
+    assert rows[0]["round"] == 0, "the surviving row is not the gate's metadata"
+    trace = review_trace_path(run_dir, "composer").read_text(encoding="utf-8")
+    assert rows[0].get("raw_reply") == reply or reply in trace, "the reply reached no trace at all"
+
+
 def test_the_composers_json_reply_does_not_stand_as_a_trace_row_of_its_own(tmp_path):
     """The composer answers with a JSON OBJECT by contract. Framed on its own literal line
     that object is a round-less row every trace consumer reads as gate metadata — the review's

@@ -21,11 +21,10 @@ world's own file, and counting them across a family is its size.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender._io import append_jsonl, read_text_soft
+from defender._io import append_jsonl, load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
 
 from .ledger import CAPTURED, LedgerError, ServedCall, payload_text
@@ -211,15 +210,15 @@ def _canonical_payload(text: str) -> str | None:
     full. `payload_text` is imported from the ledger rather than respelled for exactly that
     reason: the two spellings must be one.
 
-    `RecursionError` BESIDE `ValueError`, because "unreadable" is a COUNT here and not a fault:
-    the caller's whole contract is that a sidecar this episode cannot read back advances
-    `PrimeReport.unreadable` and the run states the size of its non-deterministic surface.
-    `json.loads` raises `RecursionError` — not a `ValueError` — on a deeply nested payload, and
-    adapter output is arbitrary vendor JSON, so one such row escaped every frame up to
-    `cli.main` and killed the episode before a world forked, with a traceback naming neither
-    the row nor the file.
+    Decoded by `_io.load_json_artifact`, the one decoder with the one tolerance, because
+    "unreadable" is a COUNT here and not a fault: the caller's whole contract is that a
+    sidecar this episode cannot read back advances `PrimeReport.unreadable` and the run states
+    the size of its non-deterministic surface. Adapter output is arbitrary vendor JSON, and a
+    deeply nested payload once escaped every frame up to `cli.main` (a `RecursionError` out of
+    `json.loads`, which no arm named) and killed the episode before a world forked, with a
+    traceback naming neither the row nor the file. The decoder now judges nesting ahead of the
+    parser, so that shape is an unreadable sidecar here and the same unreadable row to every
+    other reader of the run.
     """
-    try:
-        return payload_text(json.loads(text))
-    except (ValueError, RecursionError):
-        return None
+    payload, unreadable = load_json_artifact(text)
+    return None if unreadable is not None else payload_text(payload)

@@ -21,9 +21,9 @@ renders' S2 check in `tests/test_1017_row_schema.py`, whose fixtures this file i
   lead file) included with `goal: None`; queries in `seq` order; `goal`, `provenance`,
   `what_to_summarize` and the four outcome columns present with their values.
 * **O4a** — the read surface absorbs everything a run dir's CONTENT can do — a missing run
-  dir, a non-JSON table, a directory at the table's path, and a row nested past the parser's
-  limit (the one shape it used to raise on) — silently, and the shipped path over it shows the
-  questioner what survived.
+  dir, a non-JSON table, a directory at the table's path, a row nested past
+  `_io.JSON_NESTING_LIMIT` and a numeric column past an `int` (the two shapes it used to raise
+  on) — silently, and the shipped path over it shows the questioner what survived.
 * **O4b** — the launcher's read seam returns `[]` and prints its stderr line when the surface
   raises (a host fault, now that content cannot make it), pinned on fakes that record what
   they were handed and raise two different classes; and it is a PASSTHROUGH of the surface's
@@ -325,9 +325,9 @@ def _nested_bomb(run_dir: Path) -> Path:
     """A queries table whose one row's `params` is a JSON array nested 200,000 deep — the one
     content shape on which `joined()` used to RAISE (`RecursionError` out of `json.loads`,
     which the lead-file reader tolerated and the table's did not), so one planted row ended
-    the judge pass, the crosscheck and the capture's priming for the whole run. A lead file
-    sits beside it so the tolerance has something to show: the row is skipped, the lead
-    survives with no queries."""
+    the judge pass, the crosscheck and the capture's priming for the whole run. Now past
+    `_io.JSON_NESTING_LIMIT`, judged from the bytes. A lead file sits beside it so the
+    tolerance has something to show: the row is skipped, the lead survives with no queries."""
     run_dir.mkdir()
     _lead_file(run_dir, "SURVIVES_THE_BOMB")
     table = RunPaths(run_dir).executed_queries
@@ -341,19 +341,21 @@ def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_w
     tmp_path, capsys,
 ):
     """O4a — `joined()` absorbs a missing run dir, a non-JSON table and a directory at the
-    table's path as `[]`, and a row nested past the parser's limit as one skipped row — each
-    silently, nothing on stderr — and the shipped path over it (`_joined_leads` through
-    `questioner_leads`) shows the questioner exactly what survived: nothing for the first
-    three, the bomb's lead with `queries: []` for the fourth. The skipped row is not lost
-    to the capture's accounting either: `load_queries_report` counts it as the one record
-    that could not become a row. The positive control is a healthy run dir beside them, from
-    which the same path returns its one lead with its one query.
+    table's path as `[]`, a row nested past `_io.JSON_NESTING_LIMIT` as one skipped row, and
+    a numeric column past an `int` (`1e400` decodes to `inf`; `int(inf)` is an
+    `OverflowError`, which no arm named) as the column's default — each silently, nothing on
+    stderr — and the shipped path over it (`_joined_leads` through `questioner_leads`) shows
+    the questioner exactly what survived: nothing for the first three, the bomb's lead with
+    `queries: []`, the overflow's row at `seq: 0`. The skipped row is not lost to the
+    capture's accounting either: `load_queries_report` counts it as the one record that could
+    not become a row. The positive control is a healthy run dir beside them, from which the
+    same path returns its one lead with its one query.
 
     The bomb used to be O4b's premise ("the real primitive raises on this table"); it is the
     tolerance's witness now, so a table reader that stops catching the parser's
     `RecursionError` fails here, and fails as the judge would — one row, no leads shown.
 
-    Observed failing by: `joined` raising or printing on any of the four; the bomb's lead
+    Observed failing by: `joined` raising or printing on any of the five; the bomb's lead
     missing from the shipped path's answer, or its skipped row not counted."""
     healthy = tmp_path / "healthy"
     _lead_file(healthy, "kept")
@@ -386,6 +388,15 @@ def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_w
                       "what_to_summarize": ["auth events"], "provenance": None,
                       "queries": []}], \
         f"the bomb's lead did not survive its row being skipped: {shown!r}"
+
+    overflow = tmp_path / "overflow"
+    _lead_file(overflow, "kept")
+    RunPaths(overflow).executed_queries.write_text(
+        f'{{"lead_id": "{LEAD}", "seq": 1e400, "exit_code": -1e400, "query_id": "q"}}\n',
+        encoding="utf-8")
+    shown = lead_repository.questioner_leads(_joined_leads(overflow, lead_repository.joined))
+    assert [(q["seq"], q["exit_code"], q["query_id"]) for q in shown[0]["queries"]] == \
+        [(0, 0, "q")], f"a numeric column past an int was not defaulted: {shown!r}"
     assert capsys.readouterr().err == "", "the read surface's tolerances are no longer silent"
 
 
