@@ -35,7 +35,7 @@ FIXED_SEED = 0x5EED0276              # constant across arms
 
 # helpers that may live in S or a sibling module
 def _strip(x):
-    return V.strip_yaml_fence(x)
+    return V.reply_document_text(x)
 
 def _is_skip(story):
     fn = getattr(S, "is_skip_story", None)

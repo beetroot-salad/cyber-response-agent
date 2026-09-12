@@ -44,7 +44,7 @@ RETIRED_LESSON = Path("/workspace/defender/lessons-actor/ssh-brute-force-timing-
 
 
 def _strip(x):
-    return V.strip_yaml_fence(x)
+    return V.reply_document_text(x)
 
 
 def _is_skip(story):

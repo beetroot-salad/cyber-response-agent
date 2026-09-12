@@ -3,9 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import yaml
-
-from defender._yaml import safe_load
 from defender._report import ReportRead, read_report
 from defender.learning.core.config import RunUnprocessable
 
@@ -33,46 +30,66 @@ def _unprocessable_reason(read: ReportRead, report_path: Path) -> str:
     return f"{read.reason}\n--- {report_path} (head) ---\n{head}"
 
 
+class MalformedReply(ValueError):
+    """A model reply that is not exactly one bare document. The message names the shape."""
 
 
-def strip_yaml_fence(text: str) -> str:
-    s = text.strip()
-    m = re.search(r"</[a-zA-Z_][\w-]*?think[a-zA-Z_]*>\s*\n", s) or re.search(
-        r"</think(?:ing)?>\s*\n", s
-    )
-    if m:
-        s = s[m.end():].strip()
-    m = re.match(r"\A```(?:yaml|yml)?\s*\n(.*?)\n```\s*\Z", s, re.DOTALL)
-    if m:
-        s = m.group(1).strip()
-    m = re.search(r"^```(?:yaml|yml)?\s*\n(.*?)\n```", s, re.DOTALL | re.MULTILINE)
-    if m and not s.startswith("```"):
-        s = m.group(1).strip()
-    m = re.match(r"\A<([a-zA-Z_][\w-]*)\s*>\s*\n(.*?)\n\s*</\1>\s*\Z", s, re.DOTALL)
-    if m:
-        s = m.group(2).strip()
-    s = re.sub(r"\n\s*</[a-zA-Z_][\w-]*>\s*\Z", "", s)
-    s = re.sub(r"\n\s*```\s*\Z", "", s)
-    return s
+# A closing think tag on a line of its own at column 0, trailing spaces allowed. Anchored to a
+# whole line rather than searched, because a column-0 `</…>` line cannot sit inside loadable
+# YAML (`safe_load` refuses it) while one quoted inside a block scalar is indented and untouched
+# — so untrusted text quoted in the reply cannot move the parse boundary. No opening tag is
+# required: the recorded prelude shape has none.
+_THINK_CLOSE_LINE = re.compile(
+    r"^</(?:think(?:ing)?|[a-zA-Z_][\w-]*?think[a-zA-Z_]*)>[ \t]*$", re.MULTILINE)
+_FENCE_LINE = re.compile(r"^```", re.MULTILINE)
+_ONE_FENCED_DOCUMENT = re.compile(r"\A```([A-Za-z0-9_+-]*)[ \t]*\n(.*)\n```[ \t]*\Z", re.DOTALL)
 
 
-def strip_yaml_preamble(text: str) -> str:
-    lines = text.split("\n")
-    for i in range(len(lines)):
-        candidate = text if i == 0 else "\n".join(lines[i:])
-        try:
-            doc = safe_load(candidate)
-        except yaml.YAMLError:
-            continue
-        if isinstance(doc, dict):
-            if not i:
-                return text
-            suffix = lines[i:]
-            while suffix and not suffix[0].strip():
-                del suffix[0]
-            return "\n".join(suffix)
-    return text
+def reply_document_text(text: str) -> str:
+    """The bare document text of one model reply, or `MalformedReply` naming the shape.
+
+    A reply is one document, or it is malformed — the parser does not guess which of several
+    blocks the model meant (#1018: every attempt at guessing recorded a wrong verdict silently
+    on some other shape). In order: CRLF and a leading BOM are normalised; a reasoning prelude
+    ending in a column-0 closing think tag is dropped; the remainder is either exactly one
+    fenced block (any tag — a `json` tag on one document is still one document) or unfenced
+    text holding no column-0 fence line. An indented ``` or `</think>` inside a block scalar is
+    part of the document and stays. Loading and schema validation are the consumer's job.
+    """
+    s = text.replace("\r\n", "\n").lstrip("\ufeff")
+    prelude = _THINK_CLOSE_LINE.search(s)
+    if prelude:
+        s = s[prelude.end():]
+    s = s.strip()
+    if not s:
+        raise MalformedReply("empty reply")
+    if not s.startswith("```"):
+        if _FENCE_LINE.search(s):
+            raise MalformedReply("a fence inside the reply — the document must be bare")
+        return s
+    fenced = _ONE_FENCED_DOCUMENT.match(s)
+    if not fenced:
+        raise MalformedReply(_fenced_shape(s))
+    body = fenced.group(2)
+    if _FENCE_LINE.search(body):
+        raise MalformedReply("a second fence — the reply must hold exactly one document")
+    body = body.strip()
+    if not body:
+        raise MalformedReply("empty fence")
+    return body
 
 
-def normalize_judge_yaml(text: str) -> str:
-    return strip_yaml_preamble(strip_yaml_fence(text))
+def _fenced_shape(s: str) -> str:
+    """Why a reply that opens with a fence is not one fenced document, for the refusal."""
+    lines = s.split("\n")
+    closers = [i for i, line in enumerate(lines) if i and line.startswith("```")]
+    if not closers:
+        return "no closing fence"
+    if len(closers) > 1:
+        return "a second fence — the reply must hold exactly one document"
+    first = closers[0]
+    if lines[first].rstrip(" \t") != "```":
+        return f"closing fence with trailing characters ({lines[first].strip()!r})"
+    if any(line.strip() for line in lines[first + 1:]):
+        return "text after the closing fence"
+    return "empty fence"

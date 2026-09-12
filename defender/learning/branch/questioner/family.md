@@ -27,7 +27,8 @@ story and carry on.
 
 ## What you must return
 
-One YAML document, no prose around it, with these keys:
+One YAML document, no prose around it — bare, not inside a code fence, with nothing before
+or after it — with these keys (the fence below is illustration, not part of the reply):
 
 ```yaml
 base_story: |

@@ -1076,10 +1076,12 @@ demands:
     form: test
     source: "flow 1"
     binds: ['judge_reply.domain.distinguished[fenced-with-prose]']
-    discharged_by: test_921_fenced_reply_with_prose_around_it_parses_and_then_validates
+    discharged_by: test_921_fenced_reply_with_prose_around_it_is_refused_and_a_bare_one_validates_strictly
     seed_docstring: >-
-      A reply arriving fenced in a code block with prose before it parses leniently and is then
-      validated strictly. Both halves are the demand: lenient at the parse, strict at the schema.
+      SUPERSEDED BY #1018: a reply arriving fenced in a code block with prose around it is now
+      REFUSED as one draw's own failure (the reply is one bare document or it is malformed), and
+      a bare reply is validated strictly. Strict at the schema is still the demand; lenient at
+      the parse is not.
 
   # =========================================================================================
   # D1 / D2 / D3 / M4 — vocabulary and the role. D2 rests on a registry fact: one definition

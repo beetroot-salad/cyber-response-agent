@@ -71,7 +71,7 @@ from defender._report import REPORT_NAME, read_report
 from defender._run_paths import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
-from defender.learning.core.validate import strip_yaml_fence
+from defender.learning.core.validate import MalformedReply, reply_document_text
 from defender.runtime.agent_definition import AgentDefinition, ToolSet
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.branch import BranchError
@@ -316,13 +316,19 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
     """
     doc: Any = reply
     if isinstance(reply, str):
+        # ONE BARE DOCUMENT, OR A REFUSAL NAMING THE CALL (#1018). The same shape rule the
+        # judge's `validate_reply` applies: exactly one document, bare or inside exactly one
+        # code fence, nothing before or after it. A reply holding two candidate documents (a
+        # draft and its correction, a document and a schema example) is refused rather than
+        # guessed at — the cost is this episode, and a family composed from the wrong document
+        # is worse. `BranchError` is what the launcher already turns into `LauncherRefused`.
         try:
-            # NORMALISED BEFORE PARSING, like every other reader of a model reply in this repo
-            # (the judge's `validate_reply`, the oracle sampler, `learning/loop`). Both prompts
-            # SHOW the required document inside a ```yaml fence, so a fenced reply is the model
-            # doing what it was asked; parsing the raw text made `safe_load` refuse on the
-            # backtick and abort the whole episode on call 1.
-            doc = _yaml.safe_load(strip_yaml_fence(reply))
+            text = reply_document_text(reply)
+        except MalformedReply as shape:
+            raise BranchError(
+                f"{what}: the questioner's reply is not one bare document: {shape}") from shape
+        try:
+            doc = _yaml.safe_load(text)
         except yaml.YAMLError as e:
             raise BranchError(f"{what}: the questioner's reply is not a YAML document: {e}") from e
     if not isinstance(doc, dict):
