@@ -821,11 +821,12 @@ def test_d24_status_agrees_with_the_draft_directory():
 
 
 def test_the_harness_named_correlation_template_is_runnable_on_the_grant_that_names_it():
-    """`lead_zero.CORRELATION_TEMPLATE` is named OUTRIGHT in item 3's harness-authored goal
+    """The template `lead-zero.yaml` names is named OUTRIGHT in item 3's harness-authored goal
     ("read it first ... it already carries the entity-disjunct body"), so the id is prompt text
-    a lead with no model in the loop acts on. Nothing else pins the join: the constant lives in
-    `runtime/`, the file lives in the catalog, and the grant that decides whether the file is
-    even RENDERED lives in a third place.
+    a lead with no model in the loop acts on. The join is pinned at run start for every
+    deployment (`lead_zero.resolve_correlation_dispatch`, #1003); this is repo CI's pin on
+    the repo's own copies — the config lives in `knowledge/`, the file in the catalog, and
+    the grant that decides whether the file is even RENDERED in a third place.
 
     Three ways it silently breaks, all of them the failure #859 exists to remove — a rename or
     a demotion to `_draft/` (the id resolves to nothing), and a `verb:` change (the id resolves
@@ -836,14 +837,11 @@ def test_the_harness_named_correlation_template_is_runnable_on_the_grant_that_na
     The last assertion is the goal's own remaining claim: this is what the grant-filtered index
     offers. Not "the one template" as a literal — a second `alerts` template is a legitimate
     authoring move — but the named one must be IN that set."""
-    from defender.runtime.lead_zero import (
-        CORRELATION_GRANT,
-        CORRELATION_SYSTEM,
-        CORRELATION_TEMPLATE,
-    )
+    from defender.runtime.lead_zero import CORRELATION_GRANT, CORRELATION_SYSTEM
+    from defender.runtime.lead_zero_config import lead_zero_config_path, load_correlation_template
 
-    established = [t for t in _corpus.iter_query_templates(_REAL_CATALOG)
-                   if t.status == "established" and "_draft" not in t.path.parts]
+    CORRELATION_TEMPLATE = load_correlation_template(lead_zero_config_path(_DEFENDER))
+    established = [t for t in _corpus.iter_query_templates(_REAL_CATALOG) if _corpus.is_established(t)]
     named = [t for t in established if t.id == CORRELATION_TEMPLATE]
     assert named, (
         f"item 3's contract names {CORRELATION_TEMPLATE!r}, which is not an established "

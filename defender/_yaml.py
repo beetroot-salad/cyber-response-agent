@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import yaml
+
+from defender._io import TEXT_READ_ERRORS
 
 
 def duplicate_key_paths(text: str) -> tuple[str, ...]:
@@ -154,3 +158,66 @@ def safe_load(text: str) -> Any:
         # implicit timestamp). `yaml.YAMLError` is not a `ValueError`, so this
         # cannot swallow PyYAML's own typed errors.
         raise yaml.YAMLError(f"YAML value could not be constructed: {e}") from e
+
+
+def reject_unread_keys(
+    where: str, mapping: Mapping[object, object], known: tuple[str, ...],
+    *, error: type[Exception],
+) -> None:
+    """Refuse a mapping carrying a key nothing reads, as `error` naming `where` and the key.
+
+    A key the loader ignores is a statement a reviewer WILL read and the runtime will not
+    honour — the same two-statements-one-honoured defect as a duplicate key, one level up. An
+    adversarial implementer of #995 hid a `residue: settled` top-level key in the shipped table
+    to mute the census; a `class: rw` on a row, or a misspelled `resaon:` leaving a withholding
+    unexplained while looking explained, are the same shape inside a row; a misspelled
+    `correlation_tempalte:` in `lead-zero.yaml` is the same shape in a one-key file.
+    """
+    unknown = sorted(str(k) for k in mapping if k not in known)
+    if unknown:
+        raise error(
+            f"{where} carries key(s) {unknown} that nothing reads — the key(s) read here are "
+            f"{list(known)}"
+        )
+
+
+def load_reviewed_mapping(
+    path: Path, *, what: str, known: tuple[str, ...], error: type[Exception],
+) -> Mapping[object, object]:
+    """Read a hand-authored, reviewed per-deployment file (`verb-grants.yaml`,
+    `lead-zero.yaml`) as ONE top-level mapping carrying only `known` keys, or raise `error`.
+
+    Everything about the FILE being trustworthy at all, in one place — absent, unreadable or
+    undecodable, a repeated key (refused BEFORE the load, because the load is where the
+    duplicate disappears and YAML silently honours the last), unparseable, not a mapping, a
+    key nothing reads. Every refusal names `what` and `path`: the failure is read at startup by
+    someone who has just edited the file. What the KEYS mean is the caller's — this returns the
+    mapping and decides nothing about its values.
+    """
+    where = f"{what} at {path}"
+    if not path.is_file():
+        raise error(f"{what} not found at {path}")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except TEXT_READ_ERRORS as e:
+        raise error(f"{where} is unreadable ({e})") from e
+
+    duplicates = duplicate_key_paths(text)
+    if duplicates:
+        raise error(
+            f"{where} repeats key(s) {list(duplicates)} — YAML would silently honour the last "
+            "of each; write each key once"
+        )
+    try:
+        data = safe_load(text)
+    except yaml.YAMLError as e:
+        raise error(f"{where} does not parse ({e})") from e
+
+    if not isinstance(data, Mapping):
+        raise error(f"{where} must be a mapping carrying the key(s) {list(known)}")
+    # BEFORE any shape check the caller makes: an unread top-level key is the more actionable
+    # diagnosis. A table carrying both (`residue: settled` beside an empty `dispositions:`)
+    # reported only "declares no dispositions", which sends the author looking for missing
+    # rows rather than at the key that does nothing.
+    reject_unread_keys(where, data, known, error=error)
+    return data

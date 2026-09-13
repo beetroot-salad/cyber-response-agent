@@ -58,10 +58,10 @@ dispositions:
   elastic:
     # The two pairs the turn-zero correlation lead holds (#999). This table's authority over
     # that lead is GRANT OR WITHHOLD, never relocate: the pair it grants must be the one the
-    # template named in `lead-zero.yaml` binds (`elastic.correlate-alerts-by-entity` binds
-    # `alerts`), and the run refuses at start if the two disagree (#1003). Moving the lead to
-    # another backend is that config line plus this holder's rows — not one without the
-    # other. The loader's one-query-verb rule is what keeps a one-word edit here from
+    # template named in `lead-zero.yaml` binds (its front matter's `verb:`, under the system
+    # it is filed under), and the run refuses at start if the two disagree (#1003). Moving
+    # the lead to another backend is that config line plus this holder's rows — not one
+    # without the other. The loader's one-query-verb rule is what keeps a one-word edit here from
     # widening it; withholding the pair (`roles: [gather]`) skips the lead instead. It used
     # to be a `VerbGrant` literal in `runtime/lead_zero/_spec.py` that no row here could
     # withdraw.

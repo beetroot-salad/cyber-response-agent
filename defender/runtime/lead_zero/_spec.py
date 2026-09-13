@@ -18,7 +18,6 @@ from __future__ import annotations
 import re
 
 from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER
-from defender.runtime.lead_zero_config import shipped_correlation_template
 from defender.runtime.verb_dispositions import (
     HEALTH_CHECK,
     Disposition,
@@ -43,7 +42,7 @@ def correlation_grant(rows: tuple[Disposition, ...]) -> VerbGrant:
     which invents nothing (#995's standing property), and the holder's pairs are AUTHORED in
     the table under `CORRELATION_GRANT_HOLDER` and nowhere else. The table's authority over
     the lead is grant-or-withhold: WHICH query pair it grants is not free — it must be the
-    pair the configured template binds (`CORRELATION_TEMPLATE`), and the run-start check in
+    pair the template configured in `lead-zero.yaml` binds, and the run-start check in
     `_agreement` refuses a table that grants any other (#1003).
 
     A function over rows, not only the constant below, because `shipped_dispositions` is
@@ -85,24 +84,15 @@ def correlation_system(grant: VerbGrant) -> str | None:
 #: it is what `decide` consults — and `system` is only ever a rendering/routing key derived
 #: from it, so the two cannot drift. `None` means the table withheld the lead.
 #:
-#: What the table CAN drift from is the template the contract tells the lead to bind
-#: (`CORRELATION_TEMPLATE` below): a table moving the holder to another pair loads clean here
-#: and derives that pair's system. That join is closed at run start, not at import —
-#: `_agreement.resolve_correlation_dispatch` walks the deployment's catalog and refuses a
-#: table whose one query pair is not the template's (#1003) — so whenever a dispatch happens,
-#: `CORRELATION_SYSTEM` equals the template's system by that check, with no second derivation.
+#: What the table CAN drift from is the template the contract tells the lead to bind — the id
+#: in `lead-zero.yaml`, which is NOT read here: it is a per-tree fact with one consumer, the
+#: run-start check (`_agreement.resolve_correlation_dispatch`, run by the driver over the
+#: tree the run reads), which resolves it against that tree's catalog and refuses a table
+#: whose one query pair is not the template's (#1003). Whenever a dispatch happens, its
+#: system is the template's by that check, and the dispatch carries the resolved identity
+#: down (`CorrelationDispatch`) rather than re-deriving it from these constants.
 CORRELATION_GRANT = correlation_grant(shipped_dispositions())
 CORRELATION_SYSTEM: str | None = correlation_system(CORRELATION_GRANT)
-
-#: The catalog template item 3's contract names outright — read from the per-deployment
-#: config (`knowledge/environment/lead-zero.yaml`, #1003), never spelled here: the template's
-#: own front matter names the system and the verb, so this id is the unit that moves the lead
-#: to another backend. Read at import like the table above, and for the same reason; NOT
-#: resolved against the catalog here — this module stays a vocabulary leaf, and a malformed
-#: template elsewhere in the corpus must not become an import failure for the dozen modules
-#: that import two strings from it. Resolution and the agreement check with the grant run at
-#: run start (`_agreement`), before any prompt is built.
-CORRELATION_TEMPLATE: str = shipped_correlation_template()
 
 #: Item 1's OWN system, and deliberately not `CORRELATION_SYSTEM`. Every backend call item 1
 #: issues names this string directly — `_capture_issue`'s `args`, `_record_manual_row`'s row +

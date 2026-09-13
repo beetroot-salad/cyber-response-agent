@@ -8,29 +8,24 @@ AGREEMENT with the template at run start (`lead_zero._agreement`). Before #1003 
 literal in `lead_zero/_spec.py` naming one vendor, so a table that moved the holder loaded
 clean and the lead burned its whole budget on a template its index could not list.
 
-This module is deliberately NOT inside the `lead_zero` package: `_spec` reads the value at
-import and "imports none of its siblings", so the reader lives one level up, beside
-`verb_dispositions` — the other per-deployment file `_spec` already reads the same way.
+READ AT RUN START, FROM THE RUN'S OWN TREE — not at import, not from the checkout. The id has
+exactly one consumer, the run-start check, and that check resolves it against the catalog of
+the tree the run was pointed at (`run_investigation`'s `defender_dir`); a config read from
+anywhere else would pair one tree's id with another tree's catalog. That is also why this
+module is NOT inside the `lead_zero` package and `_spec` does not read it: `_spec` is the
+vocabulary leaf a dozen test modules import for two strings, and it stays free of tree reads.
 
 WHAT THE LOADER DOES NOT DO: validate the id against the catalog or its grammar. That is the
-run-start check's job, where the catalog is visible. A loader that walked the catalog would
-put a tree read into `_spec`'s import — the vocabulary leaf a dozen test modules import for
-two strings — and a malformed template elsewhere in the corpus (warn-and-skip on the walk)
-would become an import failure for all of them.
+run-start check's job, where the catalog is visible.
 
 Every refusal is `LeadZeroConfigError` naming the path, for the reason `DispositionError`
 names the table: the failure is read at startup by someone who just edited the file.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
-from functools import lru_cache
 from pathlib import Path
 
-import yaml
-
 from defender import _yaml
-from defender._io import TEXT_READ_ERRORS
 
 #: The file's home BELOW a defender tree, and the one place its name is spelled —
 #: `LEAD_ZERO_CONFIG_REL` and `lead_zero_config_path` both derive from it.
@@ -62,65 +57,23 @@ def lead_zero_config_path(defender_dir: Path) -> Path:
 def load_correlation_template(path: Path) -> str:
     """Read `path` and return its `correlation_template` id, or raise `LeadZeroConfigError`.
 
-    @owns correlation_template — the one reader of the key; `shipped_correlation_template`
-    and every consumer of `lead_zero.CORRELATION_TEMPLATE` take this function's value rather
-    than parsing the file again.
+    @owns correlation_template — the one reader of the key.
 
     Returns the STRING as authored. Whether it names an established template whose pair the
     table grants is decided at run start, against the deployment's own catalog
-    (`lead_zero.resolve_correlation_dispatch`), not here.
+    (`lead_zero.resolve_correlation_dispatch`), not here. The file-trust preamble (absent,
+    undecodable, a repeated key, unparseable, an unread key) is the table loader's, shared.
     """
     path = Path(path)
-    where = f"lead-zero config at {path}"
-    if not path.is_file():
-        raise LeadZeroConfigError(f"lead-zero config not found at {path}")
-    try:
-        text = path.read_text(encoding="utf-8")
-    except TEXT_READ_ERRORS as e:
-        # Undecodable bytes are as much "no usable id" as an absent file — a raw
-        # `UnicodeDecodeError` out of an import-time read is not a refusal naming the file.
-        raise LeadZeroConfigError(f"{where} is unreadable ({e})") from e
-
-    duplicates = _yaml.duplicate_key_paths(text)
-    if duplicates:
-        raise LeadZeroConfigError(
-            f"{where} repeats key(s) {list(duplicates)} — YAML would silently honour the "
-            "last of each"
-        )
-    try:
-        data = _yaml.safe_load(text)
-    except yaml.YAMLError as e:
-        raise LeadZeroConfigError(f"{where} does not parse ({e})") from e
-
-    if not isinstance(data, Mapping):
-        raise LeadZeroConfigError(
-            f"{where} must be a mapping with a `{CORRELATION_TEMPLATE_KEY}:` key"
-        )
-    unknown = sorted(str(k) for k in data if k != CORRELATION_TEMPLATE_KEY)
-    if unknown:
-        raise LeadZeroConfigError(
-            f"{where} carries key(s) {unknown} that nothing reads — the only key read here "
-            f"is `{CORRELATION_TEMPLATE_KEY}`"
-        )
+    data = _yaml.load_reviewed_mapping(
+        path, what="lead-zero config", known=(CORRELATION_TEMPLATE_KEY,),
+        error=LeadZeroConfigError,
+    )
     template_id = data.get(CORRELATION_TEMPLATE_KEY)
     if not isinstance(template_id, str) or not template_id.strip():
         raise LeadZeroConfigError(
-            f"{where} declares no usable `{CORRELATION_TEMPLATE_KEY}:` — it must be the id "
-            "of the query template the correlation lead binds (got "
+            f"lead-zero config at {path} declares no usable `{CORRELATION_TEMPLATE_KEY}:` — "
+            "it must be the id of the query template the correlation lead binds (got "
             f"{template_id!r})"
         )
     return template_id.strip()
-
-
-@lru_cache(maxsize=1)
-def shipped_correlation_template() -> str:
-    """The id configured in the tree THIS process runs from, read once — the twin of
-    `verb_dispositions.shipped_dispositions`, and read at import by `lead_zero._spec` for the
-    same reason: a missing or malformed config stops startup rather than yielding a lead told
-    to bind nothing.
-
-    `PATHS` is imported lazily to keep the import edge one-way, as `shipped_dispositions`
-    does."""
-    from defender._paths import PATHS
-
-    return load_correlation_template(lead_zero_config_path(PATHS.defender_dir))

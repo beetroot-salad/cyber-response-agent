@@ -24,7 +24,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
@@ -131,6 +131,9 @@ from defender.hooks.budget_enforcer import (
     tier,
     update_budget_locked,
 )
+
+if TYPE_CHECKING:
+    from ..lead_zero import CorrelationDispatch
 
 
 def _log_node(node: Any) -> None:
@@ -350,30 +353,57 @@ def _dispatch_catalogs(defender_dir: Path, roster: RosterRead) -> tuple[str | No
 
     The ROLE's committed grant, never the injected `verbs=` registry's: a registry scoped
     narrower than GATHER_DEF's real grant must not narrow what the catalog advertises (the
-    same decoupling `build_agent` states at the dispatch tool's registration).
-
-    ALSO the frame that checks item 3's configured template AGREES with the table (#1003),
-    and deliberately this one: it is the one place that already holds the run's tree (hence
-    its catalog) and `CORRELATION_GRANT` together, it runs once at run start before the
-    budget opens, the logger opens or any model exists, and it precedes
-    `prepare_correlation_lead`. The check walks the catalog of the tree the RUN reads —
-    loaded, not linted — because the operator who can author the mismatch never runs repo
-    CI, which pins the same join on the repo's own copies. A withheld lead
-    (`CORRELATION_SYSTEM is None`) consults no template and degrades as before; an
-    unresolvable, malformed or disagreeing template raises `CorrelationDispatchError` out of
-    `run_investigation`'s own frame, naming both sides, and nothing downstream is spent."""
+    same decoupling `build_agent` states at the dispatch tool's registration)."""
     from .. import lead_zero as lead_zero_mod
-    from ..tools_gather import _catalog_dir
 
-    lead_zero_mod.resolve_correlation_dispatch(
-        lead_zero_mod.CORRELATION_TEMPLATE,
-        iter_query_templates(_catalog_dir(defender_dir)),
-        lead_zero_mod.CORRELATION_GRANT,
-    )
     skills = defender_dir / "skills"
     return (
         descriptor_catalog(skills, roster, GATHER_DEF.verb_grant),
         descriptor_catalog(skills, roster, lead_zero_mod.CORRELATION_GRANT),
+    )
+
+
+def _correlation_dispatch_at_run_start(
+    defender_dir: Path, *, resume: Any, lead_zero_verbs: Any,
+) -> CorrelationDispatch | None:
+    """Item 3's dispatch identity, resolved FIRST — before the budget opens, the logger opens
+    or any model exists — for a run that WILL dispatch the lead (#1003), and `None` for one
+    that will not.
+
+    WHETHER this run dispatches item 3 at all is decided here, once, on the two facts the
+    dispatch frame itself keys on: a resume skips turn-0 work, and a scenario with no
+    injected registry dispatches nothing. The dispatch frame then keys on the VALUE (`None`
+    means "not this run"), so the check cannot refuse a run for a lead that run would never
+    have consulted — a branch episode resuming every sibling world after an operator demoted
+    the template — and the dispatch cannot run unchecked.
+
+    Three inputs, each from where it is authored: the id from the run's own `lead-zero.yaml`
+    (`load_correlation_template`, read here and nowhere earlier — there is no process-cached
+    copy to fall behind the tree), the catalog of the run's own tree (walked, not linted,
+    because the operator who can author the mismatch never runs repo CI), and the table's
+    projection for the holder (`CORRELATION_GRANT`, process-level like every role's grant).
+    An unresolvable, misfiled, malformed or disagreeing template raises
+    `CorrelationDispatchError` out of `run_investigation`'s own frame, naming both sides, and
+    nothing downstream is spent; an unusable config raises `LeadZeroConfigError` naming the
+    file. A withheld lead (`system is None`) consults no template and degrades as before.
+
+    The value is CARRIED to `prepare_correlation_lead` and `dispatch_correlation` rather than
+    re-derived there: the system the lead is labelled with, dispatched on and cache-keyed by
+    is the one this frame checked the template against, by construction.
+
+    A sibling of `_adapters_at_run_start`, and the same shape: the one place a refusing read
+    of the tree happens is a frame named for it at the entry point, not a builder's side
+    effect."""
+    if resume is not None or lead_zero_verbs is None:
+        return None
+    from .. import lead_zero as lead_zero_mod
+    from ..lead_zero_config import lead_zero_config_path, load_correlation_template
+    from ..tools_gather import _catalog_dir
+
+    return lead_zero_mod.resolve_correlation_dispatch(
+        load_correlation_template(lead_zero_config_path(defender_dir)),
+        iter_query_templates(_catalog_dir(defender_dir)),
+        lead_zero_mod.CORRELATION_GRANT,
     )
 
 
@@ -409,6 +439,17 @@ def _adapters_at_run_start(
     return roster, verbs
 
 
+def _alert_doc_soft(alert_path: Path) -> dict:
+    """The alert as item 3's contract reads it — `{}` when the file is unreadable or not
+    JSON, because the contract's own gate (`_correlation_contract`: no usable timestamp, no
+    dispatch) is the refusal, and item 1 has already said what it could about the file."""
+    try:
+        doc = json.loads(alert_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
     *,
     alert_path: Path,
@@ -437,6 +478,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
     roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs)
+    correlation = _correlation_dispatch_at_run_start(
+        defender_dir, resume=resume, lead_zero_verbs=lead_zero_verbs,
+    )
     catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
@@ -547,18 +591,15 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # awaited later, inside the store's render processor, right before MAIN's SECOND request.
     # A scenario with no injected registry dispatches nothing.
     correlation_task: Any = None
-    # `resume is None` is stated here rather than carried by a nulled `lead_zero_verbs`: a
-    # resume skipping turn-0 work is a fact about the run, and a reader at this line must be
-    # able to see it without tracing where the registry was set to `None` and why.
-    if resume is None and lead_zero_verbs is not None:
+    # `correlation` is `None` exactly for a run that dispatches no item 3 (a resume, or no
+    # injected registry — `_correlation_dispatch_at_run_start` decides that, once, and this
+    # frame keys on its value); otherwise it is the identity the run-start check stood behind.
+    if correlation is not None:
         from .. import lead_zero as lead_zero_mod
 
-        try:
-            alert_doc = json.loads(alert_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            alert_doc = {}
         contract = lead_zero_mod.prepare_correlation_lead(
-            run_dir, alert_doc, lead_zero_block, lead_zero_status,
+            run_dir, _alert_doc_soft(alert_path), lead_zero_block, lead_zero_status,
+            dispatch=correlation,
         )
         if contract is not None:
             goal, what_to_summarize = contract
@@ -574,7 +615,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 # Share the RUN's own budget-clock origin rather than letting it default to a
                 # fresh `time.monotonic()` stamp taken whenever this task happens to start.
                 budget_started_monotonic=budget_started_monotonic,
-                catalog=correlation_catalog,
+                catalog=correlation_catalog, dispatch=correlation,
             ))
 
     agent = build_agent(

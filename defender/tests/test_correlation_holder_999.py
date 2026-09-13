@@ -244,16 +244,22 @@ def test_a_grant_with_no_query_verb_has_no_dispatch_target():
 
 def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
     """`prepare_correlation_lead` returns before `claim_lead`: no `l-00c` row lands in the
-    leads table for a lead that will never run. The positive control claims."""
-    from defender.runtime.lead_zero import STATUS_RESOLVED, prepare_correlation_lead
+    leads table for a lead that will never run. The positive control claims. The dispatch
+    identity is handed in as the run-start check resolves it (#1003): `system=None` is the
+    withheld arm."""
+    from defender.runtime.lead_zero import STATUS_RESOLVED, CorrelationDispatch, prepare_correlation_lead
 
     alert = {"alert_timestamp": "2026-01-01T00:00:00Z"}
     lead_file = tmp_path / "gather_raw" / "l-00c.lead.json"
+    withheld = CorrelationDispatch("alpha.correlate", None, VerbGrant(role=HOLDER, entries=()))
+    granted = CorrelationDispatch(
+        "alpha.correlate", "alpha", VerbGrant(role=HOLDER, entries=(("alpha", "lookup", "r"),)),
+    )
 
-    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, system=None) is None
+    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, dispatch=withheld) is None
     assert not lead_file.exists(), "a withheld lead must not claim its row"
 
-    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, system="alpha") is not None
+    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, dispatch=granted) is not None
     assert lead_file.exists(), "positive control: with a dispatch target the row is claimed"
 
 
