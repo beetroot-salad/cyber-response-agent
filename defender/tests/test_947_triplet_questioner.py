@@ -479,6 +479,32 @@ def test_947_a_long_value_is_truncated_and_says_so(tmp_path):
     assert "truncated" in out["cmdline"], "the elision is silent"
 
 
+def test_947_one_unreadable_payload_is_one_skipped_candidate_not_a_blank_sample_set(tmp_path):
+    """A payload nested past `_io.JSON_NESTING_LIMIT` (a file in the box's rw bind, so a
+    model can plant it) used to raise `RecursionError` out of the sampler's walk; the
+    launcher's arm then answered `{}` for EVERY corpus, the captured pattern set went empty,
+    and `parse_family` refused overlays keyed on patterns the capture had addressed. The
+    sampler's own contract — one unreadable payload skips to the next candidate rather than
+    blinding the pattern — now holds for that shape: the pattern's sample is the next
+    payload, and a second pattern whose only payload is unreadable is keyed with `None`, the
+    "asked and held nothing" answer, not dropped.
+
+    Observed failing by: the sampler raising (the launcher's arm blanks every pattern)."""
+    repo = T.mod("learning.lead_repository")
+    run = T.sampled_run(tmp_path, rows=[
+        ("logs-alpha-*", {"placeholder": "overwritten below"}),
+        ("logs-alpha-*", {"hits": [{"source": {"address": "::1"}}]}),
+        ("logs-beta-*", {"placeholder": "overwritten below"}),
+    ])
+    depth = 200_000
+    for seq in (0, 2):
+        (run / "gather_raw" / "l-001" / f"{seq}.json").write_text(
+            '{"hits": [' + "[" * depth + "]" * depth + "]}", encoding="utf-8")
+    got = repo.corpus_samples(repo.joined(run),
+                              pattern_of=lambda q: (q.params or {}).get("index"))
+    assert got == {"logs-alpha-*": {"source": {"address": "::1"}}, "logs-beta-*": None}, got
+
+
 def test_947_a_real_document_outranks_an_esql_projection(tmp_path):
     """A pattern whose first usable payload was an aggregate row keeps looking for a document.
 
@@ -493,7 +519,8 @@ def test_947_a_real_document_outranks_an_esql_projection(tmp_path):
         ("logs-alpha-*", {"index": "logs-alpha-*", "total": 1, "returned": 1,
                           "hits": [{"source": {"address": "::1"}}]}),
     ])
-    got = repo.corpus_samples(run, pattern_of=lambda q: (q.params or {}).get("index"))
+    got = repo.corpus_samples(repo.joined(run),
+                              pattern_of=lambda q: (q.params or {}).get("index"))
     assert got["logs-alpha-*"] == {"source": {"address": "::1"}}, (
         "the aggregate projection was kept over a real document")
 

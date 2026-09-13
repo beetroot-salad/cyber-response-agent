@@ -5,6 +5,7 @@ import errno
 import fcntl
 import json
 import os
+import re
 import secrets
 import stat
 import sys
@@ -108,6 +109,64 @@ def use_utf8_stdio() -> None:
             reconfigure(encoding="utf-8", errors=getattr(stream, "errors", None) or "strict")
 
 
+#: The deepest nesting a JSON artifact a box wrote may carry and still be READABLE. A property
+#: of the bytes, judged by :func:`json_nesting_depth` before the decoder sees them — never of
+#: the caller. `json.loads` recurses once per nested container on the interpreter's shared
+#: stack budget (3.11: the `sys.getrecursionlimit()` one), so without a bound the same line
+#: decoded from a deep call and a shallow one gives two different answers, and the two sides of
+#: a "this line is / is not a row" agreement (`challenge_gate._is_row_shaped` deep in the gate,
+#: `read_jsonl_rows` from the top) could disagree about one line. 100 is an order of magnitude
+#: past the deepest artifact any adapter or model writes here, and an order of magnitude short
+#: of the budget a caller could plausibly have left.
+JSON_NESTING_LIMIT = 100
+
+_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+_JSON_BRACKET = re.compile(r"[\[\]{}]")
+
+
+def json_nesting_depth(text: str) -> int:
+    """The deepest container nesting in ``text``, judged WITHOUT decoding it.
+
+    Exact for valid JSON: string literals are dropped first (escapes honoured), so a bracket
+    inside a value does not count, and each remaining ``[``/``{`` opens a level. For text that
+    is not JSON the answer is whatever the brackets say — the decoder refuses it either way,
+    so only valid text needs the number to be right. Iterative and regex-driven so a payload
+    of megabytes costs a pass over its brackets, not a Python loop over its characters."""
+    depth = deepest = 0
+    for bracket in _JSON_BRACKET.finditer(_JSON_STRING.sub("", text)):
+        if bracket.group() in "[{":
+            depth += 1
+            deepest = max(deepest, depth)
+        elif depth:
+            depth -= 1
+    return deepest
+
+
+# lint-parse: ok — the decoder is the seam every reader narrows AT, not one that narrows for
+# them: it returns `object`, never `Any`, so a caller cannot read a key or index a list without
+# its own `isinstance` — the shape check stays beside the code that knows the shape.
+def load_json_artifact(text: str) -> tuple[object, str | None]:
+    """Decode one JSON artifact a box could have written: ``(value, None)``, or ``(None,
+    reason)`` when it is not one. Success is ``reason is None`` — ``null`` decodes to ``None``.
+
+    THE ONE PLACE the tolerance for a malformed artifact is decided. Every reader of a run
+    dir's content (a lead file, a table row, a payload, an alert) used to spell its own
+    ``except`` around ``json.loads``, each with a different list, and each new malformed shape
+    had to be discovered once per reader — the deeply nested one was, four times over
+    (``lead_repository.load_leads``, ``branch/capture``, ``_provenance``, ``query_tool``),
+    with the table's row reader the one that had not yet paid. Decode errors are a
+    ``ValueError``; nesting is judged ahead of the decoder by :func:`json_nesting_depth`, for
+    the reason :data:`JSON_NESTING_LIMIT` gives — a ``RecursionError`` out of ``json.loads``
+    is a fact about the caller's stack, and catching it would make the answer depend on who
+    asked."""
+    if json_nesting_depth(text) > JSON_NESTING_LIMIT:
+        return None, f"nested deeper than {JSON_NESTING_LIMIT}"
+    try:
+        return json.loads(text), None
+    except ValueError as e:
+        return None, str(e)
+
+
 def parse_jsonl_row(line: str) -> dict | None:
     """One physical line as a JSONL ROW, or ``None`` if it is not one.
 
@@ -115,7 +174,9 @@ def parse_jsonl_row(line: str) -> dict | None:
     :func:`read_jsonl_rows`, because a second reader must agree with it exactly:
     ``challenge_gate._write_trace_row`` decides whether a stage's framed reply may stand as its
     own physical line, which is only safe while "a line every reader skips" is the SAME
-    predicate the reader applies.
+    predicate the reader applies — and the same from ANY stack depth, which is what
+    :func:`load_json_artifact`'s nesting bound buys: the writer asks from deep inside the
+    gate, the readers from the top, and one line must not be a row to one and not the other.
 
     A row is a line that parses AND parses to a dict: ``"x"``, ``3`` and ``[...]`` are all
     valid JSON and none of them is one. Without that half the declared ``list[dict]`` is a lie
@@ -125,13 +186,8 @@ def parse_jsonl_row(line: str) -> dict | None:
     s = line.strip()
     if not s:
         return None
-    try:
-        obj = json.loads(s)
-    except ValueError:
-        # `JSONDecodeError` IS a `ValueError`; the broader guard costs nothing and spares the
-        # two callers from agreeing on which to name.
-        return None
-    return obj if isinstance(obj, dict) else None
+    obj, reason = load_json_artifact(s)
+    return obj if reason is None and isinstance(obj, dict) else None
 
 
 def read_jsonl_rows(path: Path) -> list[dict]:

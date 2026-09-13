@@ -89,7 +89,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _git
-from defender._io import read_guarded, write_guarded
+from defender._io import load_json_artifact, read_guarded, write_guarded
 
 #: The dirty-path sample's ceiling. The paths are a debugging affordance — `dirty` is the bit
 #: that carries meaning — and `--untracked-files=all` over a tree with a vendored directory in
@@ -403,13 +403,11 @@ def read(path: Path) -> RunProvenance | None:
     raw, _err = read_guarded(path)
     if raw is None:
         return None
-    try:
-        parsed: object = json.loads(raw)
-    except (ValueError, RecursionError):
-        # `JSONDecodeError` IS a `ValueError`, so the parent alone is the guard (`_io.parse_
-        # jsonl_row`'s convention). `RecursionError` is NOT one and `json.loads` raises it on a
-        # deeply nested payload — `learning/branch/capture.py` already paid for that omission
-        # once, where one such row escaped every frame and killed the episode.
+    # `load_json_artifact`: the one decoder every reader of box-written JSON goes through, so
+    # its tolerance (not JSON, nested past the bound) is decided once and not re-listed here —
+    # `learning/branch/capture.py` once paid for a list that missed the nested case.
+    parsed, unreadable = load_json_artifact(raw)
+    if unreadable is not None:
         return None
     # The shape check belongs to the seam that performed the parse, not to `from_obj` alone:
     # `json.loads` is typed `Any`, and an `Any` flowing straight into a call whose return is

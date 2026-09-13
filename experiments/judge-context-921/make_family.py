@@ -14,7 +14,7 @@ sys.path.insert(0, "/workspace")
 from defender.learning.branch import cli as launcher
 from defender.learning.branch import questioner as qmod
 from defender.learning.branch.seams import model_seam
-from defender.learning.lead_repository import joined
+from defender.learning.lead_repository import joined, questioner_leads
 from defender.runtime import session_store as ss
 from defender.runtime.branch import _frontier
 from defender.runtime.branch._family import check_identities, parse_family, write_family
@@ -40,7 +40,9 @@ def main() -> int:
     held = _frontier.leads_at(store, sid, N, SOURCE)
     store.close()
     all_leads = launcher._joined_leads(SOURCE, joined)
-    leads = [lead for lead in all_leads if lead.get("lead_id") in held]
+    # The seam hands back `JoinedLead`s since #1032; the questioner is shown the named
+    # projection over them, as the launcher shows it.
+    leads = questioner_leads([lead for lead in all_leads if lead.lead_id in held])
     print(f"as_of={as_of} fences_at={fences} leads_held={sorted(held)} of {len(all_leads)}")
     (EP / "inputs.json").write_text(json.dumps({
         "as_of": str(as_of), "fences_at": fences, "leads_held": sorted(held)}, indent=2))
