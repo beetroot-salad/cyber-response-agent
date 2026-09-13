@@ -24,7 +24,7 @@ from .tools import (
     AgentDeps,
 )
 
-from defender._corpus import QueryTemplate, iter_query_templates
+from defender._corpus import QueryTemplate, is_established, iter_query_templates
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh
@@ -121,7 +121,7 @@ def _template_index(
     elsewhere: list[str] = []
     established_seen = 0
     for t in iter_query_templates(_catalog_dir(defender_dir)):
-        if t.status != "established" or "_draft" in t.path.parts:
+        if not is_established(t):
             continue
         established_seen += 1
         if verb_grant is not None and not verb_grant.allows(t.system, t.verb):

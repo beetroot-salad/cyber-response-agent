@@ -54,7 +54,6 @@ from ._spec import (
     CORRELATION_GRANT,
     CORRELATION_REQUEST_LIMIT,
     CORRELATION_SYSTEM,
-    CORRELATION_TEMPLATE,
     ELIDED,
     GROUP_ID_FIELD,
     HARNESS_PROVENANCE,
@@ -77,6 +76,11 @@ from ._spec import (
     _FENCE_RUN,
     correlation_grant,
     correlation_system,
+)
+from ._agreement import (
+    CorrelationDispatch,
+    CorrelationDispatchError,
+    resolve_correlation_dispatch,
 )
 from ._capture import (
     LeadZeroResult,
@@ -114,7 +118,7 @@ from ._items import (
 
 def prepare_correlation_lead(
     run_dir: Path, alert: dict, ancestor_block: str, status: str,
-    *, system: str | None = CORRELATION_SYSTEM,
+    *, dispatch: CorrelationDispatch,
 ) -> tuple[str, list[str]] | None:
     """The SYNCHRONOUS half of item 3: gate on the resolution status (dispatches on RESOLVED
     and TRUNCATED, never on FAILED/EMPTY), build the harness-authored contract, and claim
@@ -125,19 +129,22 @@ def prepare_correlation_lead(
     dispatch away for yielding no host/user/source-ip, which would exclude every alert source
     carrying its entities outside those three fields.
 
-    `system` is the dispatch target the table's projection determines (`CORRELATION_SYSTEM`),
-    and `None` means the verb-disposition table projects the lead NO query verb (#999). That
-    gate sits FIRST, before the contract and before `claim_lead`: a lead that will never run
-    must not own a row in the leads table. The parameter exists so a test can state the
-    withholding without planting a table into the process-wide cache.
+    `dispatch` is the identity the run-start check resolved (`resolve_correlation_dispatch`,
+    run by the driver over the run's own tree before this frame, #1003). `dispatch.system is
+    None` means the verb-disposition table projects the lead NO query verb (#999); that gate
+    sits FIRST, before the contract and before `claim_lead`: a lead that will never run must
+    not own a row in the leads table. Otherwise the system is the one the configured template
+    is filed under and the table grants, by the check — so the `:L findings` row this claims
+    is labelled with the system the lead actually binds its template on, and the contract
+    names the id the check resolved (`dispatch.template_id`), not a module constant.
 
     `ancestor_block` is item 1's rendered block as `LeadZeroResult.text` carries it — already
     sanitized, elided and wrapped — so the lead reads the same bytes MAIN reads at ORIENT."""
-    if system is None:
+    if dispatch.system is None:
         return None
     if status not in (STATUS_RESOLVED, STATUS_TRUNCATED):
         return None
-    contract = _correlation_contract(alert, ancestor_block)
+    contract = _correlation_contract(alert, ancestor_block, dispatch.template_id)
     if contract is None:
         return None
     goal, what = contract
@@ -150,7 +157,7 @@ def prepare_correlation_lead(
         # written at all — either way this frame owns nothing, so it dispatches nothing and
         # touches the id no further.
         return None
-    _declare_l_finding(run_dir, L3, "correlation lead", system)
+    _declare_l_finding(run_dir, L3, "correlation lead", dispatch.system)
     return goal, what
 
 
@@ -325,7 +332,8 @@ __all__ = [
     "CORRELATION_GRANT",
     "CORRELATION_REQUEST_LIMIT",
     "CORRELATION_SYSTEM",
-    "CORRELATION_TEMPLATE",
+    "CorrelationDispatch",
+    "CorrelationDispatchError",
     "DEFAULT_LIMITS",
     "DISPOSITIONS_REL",
     "ELIDED",
@@ -395,6 +403,7 @@ __all__ = [
     "read_jsonl_rows",
     "read_text_soft",
     "render_orient_section",
+    "resolve_correlation_dispatch",
     "replace",
     "resolve_lead_zero",
     "sys",

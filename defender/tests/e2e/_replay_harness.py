@@ -434,7 +434,7 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
-        toolset=None, resume=None):
+        toolset=None, resume=None, defender_dir: Path | None = None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -510,8 +510,16 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     because a resumed run is still a driven replay in every other respect, and the alternative
     is a second copy of this function's model wrapping, hermetic guard and seam assembly in the
     #920 scripts. Passed through only when supplied, so every existing call is byte-identical.
-    It is MUTUALLY EXCLUSIVE with `store_factory=` — see `_refuse_conflicting_store_seams`."""
+    It is MUTUALLY EXCLUSIVE with `store_factory=` — see `_refuse_conflicting_store_seams`.
+
+    `defender_dir` is the TREE the run reads (#1003): the catalog it walks at run start, the
+    adapters it rosters, the skills it prompts from. It defaults to this checkout, which is
+    what every scenario before #1003 drove; a scenario about the run-start check over a
+    DEPLOYMENT's own catalog (a planted template whose `verb:` disagrees with the shipped
+    table) hands in a planted mirror of the tree instead. The same tree feeds the box's env,
+    so a bash turn in such a scenario runs against the tree the run was told it is in."""
     _refuse_conflicting_store_seams(resume, store_factory)
+    tree = defender_dir if defender_dir is not None else DEFENDER
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
@@ -544,10 +552,10 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     if resume is not None:
         seams["resume"] = resume
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
-        env=run_common.run_env(DEFENDER, run_dir),
+        env=run_common.run_env(tree, run_dir),
     )
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-            defender_dir=DEFENDER, make_model=make_model, **seams,
+            defender_dir=tree, make_model=make_model, **seams,
         ))

@@ -56,10 +56,15 @@ dispositions:
       reason: "in the registry, exercised by no template and no run (c18/#632)"
 
   elastic:
-    # The two pairs the turn-zero correlation lead holds (#999), and the ONLY two: that is the
-    # whole safety case for a lead the harness dispatches on its own, and the loader's
-    # one-query-verb rule is what keeps a one-word edit here from widening it. It used to be a
-    # `VerbGrant` literal in `runtime/lead_zero/_spec.py` that no row here could withdraw.
+    # The two pairs the turn-zero correlation lead holds (#999). This table's authority over
+    # that lead is GRANT OR WITHHOLD, never relocate: the pair it grants must be the one the
+    # template named in `lead-zero.yaml` binds (its front matter's `verb:`, under the system
+    # it is filed under), and the run refuses at start if the two disagree (#1003). Moving
+    # the lead to another backend is that config line plus this holder's rows — not one
+    # without the other. The loader's one-query-verb rule is what keeps a one-word edit here from
+    # widening it; withholding the pair (`roles: [gather]`) skips the lead instead. It used
+    # to be a `VerbGrant` literal in `runtime/lead_zero/_spec.py` that no row here could
+    # withdraw.
     alerts: {roles: [gather, lead-zero-correlation]}
     esql: {roles: [gather]}
     health-check: {roles: [gather, lead-zero-correlation]}
