@@ -487,6 +487,7 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     store_factory: Any = None,
     stores: list | None = None,
     before: Callable[[Path], None] | None = None,
+    defender_dir: Path | None = None,
 ) -> Res:
     """Drive a REAL `run_investigation` over a synthesized alert.
 
@@ -502,6 +503,11 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     `before(run_dir)` runs on the materialized run dir just before the driver starts — the
     seam a scenario needs to plant a REAL fault in the tree the run is about to write into
     (a directory squatting an artifact's own name, a pre-claimed lead sidecar).
+
+    `defender_dir` is the tree the run READS (#1003) — `drive`'s own seam of that name,
+    passed through only when supplied, so a scenario over a planted catalog (a template
+    whose `verb:` disagrees with the shipped table) can drive the run-start check while every
+    scenario before it keeps driving this checkout.
 
     MAIN's default script makes TWO requests (a read, then a text turn) because `d23`'s
     observable lives at the second one; the gather model answers item 3's dispatch with the
@@ -530,6 +536,8 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         kw["limits"] = limits
     if store_factory is not None:
         kw["store_factory"] = store_factory
+    if defender_dir is not None:
+        kw["defender_dir"] = defender_dir
     out = drive(run_dir, run_id=run_id, main=main, gather=gather, **kw)
     return Res(run_dir, main, gather, rec, out or {}, sink, doc.get("alert_id"))
 
