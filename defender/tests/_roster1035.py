@@ -16,7 +16,10 @@ over a pipe, because `capsys` cannot see across `os._exit` and an assertion abou
 WHY `nobody` AT ALL. The local gate runs as uid 0, for whom `chmod` is a no-op on the fault
 (P2 of #869 measured it: root lists a mode-000 directory), and a `skipif(geteuid() == 0)`
 leaves the pin unexecuted exactly where it is run most. So the child forks, drops to `nobody`,
-and meets the real fault through the real primitive.
+and meets the real fault through the real primitive. As a NON-root uid (CI's `runner`) the
+mode bits ARE the fault for the process itself, and neither the chown nor the setuid is
+permitted — so both are skipped, the same split `_declared869.unreadable_dir_verdict` makes;
+the fork stays, so the verdict travels the same channel on both uids.
 
 Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
@@ -92,8 +95,9 @@ class ChildVerdict:
 
 
 def run_as_nobody(probe: Callable[[], object], *, expected: type[BaseException]) -> ChildVerdict:
-    """Fork, drop the child to `nobody`, run `probe` there with both streams captured, and
-    return its verdict.
+    """Fork, drop the child to `nobody` (when running as root; a non-root uid already meets
+    the mode bits itself), run `probe` there with both streams captured, and return its
+    verdict.
 
     The exit code classifies the outcome (see the `EXIT_*` constants) and the pipe carries the
     detail. The pipe is drained BEFORE `waitpid`, so a child with a long log cannot block on a
@@ -106,9 +110,10 @@ def run_as_nobody(probe: Callable[[], object], *, expected: type[BaseException])
         payload: dict[str, object] = {"raised": None, "message": "", "returned": None}
         buf = io.StringIO()
         try:
-            os.setgroups([])
-            os.setgid(_NOBODY)
-            os.setuid(_NOBODY)
+            if os.geteuid() == 0:
+                os.setgroups([])
+                os.setgid(_NOBODY)
+                os.setuid(_NOBODY)
             with redirect_stdout(buf), redirect_stderr(buf):
                 try:
                     value = probe()
@@ -162,10 +167,13 @@ def handed_to_nobody(root: Path, target: Path, mode: int) -> Iterator[None]:
     tree, and a setup failure is not a refusal. `mode` is the whole point of the parameter —
     `0o400` is the listable-but-unsearchable arm (#1035's own), `0o000` the cannot-list arm,
     `0o755` the readable positive control."""
-    _hand_tree_to_nobody(root)
+    as_root = os.geteuid() == 0
+    if as_root:
+        _hand_tree_to_nobody(root)
     target.chmod(mode)
     try:
         yield
     finally:
         target.chmod(0o755)
-        _reclaim_tree(root)
+        if as_root:
+            _reclaim_tree(root)
