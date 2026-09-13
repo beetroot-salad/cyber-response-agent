@@ -78,6 +78,11 @@ from ._spec import (
     correlation_grant,
     correlation_system,
 )
+from ._agreement import (
+    CorrelationDispatch,
+    CorrelationDispatchError,
+    resolve_correlation_dispatch,
+)
 from ._capture import (
     LeadZeroResult,
     _CallLedger,
@@ -129,7 +134,11 @@ def prepare_correlation_lead(
     and `None` means the verb-disposition table projects the lead NO query verb (#999). That
     gate sits FIRST, before the contract and before `claim_lead`: a lead that will never run
     must not own a row in the leads table. The parameter exists so a test can state the
-    withholding without planting a table into the process-wide cache.
+    withholding without planting a table into the process-wide cache. When it is not `None`
+    it is also the configured template's system: the run-start agreement check
+    (`resolve_correlation_dispatch`, run from `driver._dispatch_catalogs` before this frame)
+    refused any table whose pair is not the template's, so the `:L findings` row this claims
+    is labelled with the system the lead actually binds its template on (#1003).
 
     `ancestor_block` is item 1's rendered block as `LeadZeroResult.text` carries it — already
     sanitized, elided and wrapped — so the lead reads the same bytes MAIN reads at ORIENT."""
@@ -326,6 +335,8 @@ __all__ = [
     "CORRELATION_REQUEST_LIMIT",
     "CORRELATION_SYSTEM",
     "CORRELATION_TEMPLATE",
+    "CorrelationDispatch",
+    "CorrelationDispatchError",
     "DEFAULT_LIMITS",
     "DISPOSITIONS_REL",
     "ELIDED",
@@ -395,6 +406,7 @@ __all__ = [
     "read_jsonl_rows",
     "read_text_soft",
     "render_orient_section",
+    "resolve_correlation_dispatch",
     "replace",
     "resolve_lead_zero",
     "sys",

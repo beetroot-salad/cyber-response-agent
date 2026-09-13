@@ -341,20 +341,26 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
         "the environment carries: a host name that names the shared VPS every containerized "
         "alert reports from selects the whole environment and measures nothing.\n\n"
         f"{ancestor_block}\n\n"
-        "Search the alerts index ONLY (this is a correlation over prior alerts, not raw "
-        "telemetry). Do not narrow to this alert's own rule. The documents above may NAME that "
-        "rule — on a sequence alert they are themselves alert documents, carrying "
-        "`kibana.alert.rule.*` — and it is still not an axis to bind: a different rule firing "
-        "on the same entity is exactly the related behaviour this lead exists to surface, and "
-        "narrowing to the signature that already fired is the one result guaranteed to teach "
-        "nothing. Bind "
+        "This is a correlation over PRIOR ALERTS, not raw telemetry. Do not narrow to this "
+        "alert's own rule. The documents above may themselves name that rule, and it is still "
+        "not an axis to bind: a different rule firing on the same entity is exactly the "
+        "related behaviour this lead exists to surface, and narrowing to the signature that "
+        "already fired is the one result guaranteed to teach nothing. Bind "
         f"`{CORRELATION_TEMPLATE}` — read it first: it is named by your grant-filtered template "
         "index, and it carries the window params and the substitutable entity filter this "
-        "contract needs. Each count is the result envelope's `total`, which the `hits` cap does "
-        "not bound — a `truncated` result still carries a complete count."
+        "contract needs. The template says where its count is read; each count below is that "
+        "number, not the size of the returned sample."
     )
-    # Two COUNT dimensions, each answerable by ONE `alerts` call, plus a third line that is not
-    # a count. A fourth — "whether any correlated alert is already benign-explained" — is
+    # Vendor-neutral by construction (#1003): the goal above names no field, no index and no
+    # envelope shape. The three vendor facts it used to state — search the ALERTS INDEX only,
+    # that a sequence alert's ancestors carry `kibana.alert.rule.*`, and that the count is the
+    # envelope's `total` which the `hits` cap does not bound — are the TEMPLATE's to say (its
+    # Goal and Pitfalls), where every gather lead binding it reads them, and the lead is told
+    # to read the template first. What stays here is the frame that is true of any backend:
+    # prior alerts not telemetry, breadth over this alert's own rule, bind the configured id.
+    #
+    # Two COUNT dimensions, each answerable by ONE call of the granted verb, plus a third line
+    # that is not a count. A fourth — "whether any correlated alert is already benign-explained" — is
     # deliberately absent: `kibana.alert.workflow_status` is `"open"` on every alert this
     # environment produces, and the systems that could carry a benign explanation (`ticket`,
     # `change-mgmt`) are outside this lead's grant, so it has exactly one possible answer.
@@ -377,9 +383,9 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
     # summary is the only thing that reaches it.
     what = [
         "the count of alerts in the window scoped to the entities you judged central — one "
-        "call, across any rule (the envelope's `total`)",
+        "call, across any rule (the count the template says to read, not the sample size)",
         "the count for those same entities UNSCOPED — the same window with the narrowing "
-        "predicate dropped, across any rule (the envelope's `total`)",
+        "predicate dropped, across any rule (the same count, read the same way)",
         "which entities you correlated on, the field each came from, and why you judged them "
         "the discriminating ones for this alert",
     ]

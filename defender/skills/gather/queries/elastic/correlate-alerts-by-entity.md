@@ -59,6 +59,14 @@ in front of you.
   bounds the sample, never the count. Do not reach for `esql` to re-derive a
   number `total` already gave you, and do not report a count as unavailable
   because `truncated` is set.
+- **The documents you were bound from may carry `kibana.alert.rule.*`, and the
+  rule is NOT an axis.** On a sequence alert the ancestor documents are
+  themselves alert documents, each naming the rule that fired
+  (`kibana.alert.rule.rule_id`, `kibana.alert.rule.name`). Do not AND any
+  `kibana.alert.rule.*` term into `${entity_filter}`: this is a count ACROSS
+  rules, and a different rule firing on the same entity is exactly the related
+  behaviour the count exists to surface — narrowing to the signature that
+  already fired is the one result guaranteed to teach nothing.
 - **`host.name` is a bad axis in both directions here.** It is often null on
   correlation and sequence alerts — a cross-tier or EQL-sequence rule fires on a
   correlation, not a single host — so a host predicate silently excludes exactly

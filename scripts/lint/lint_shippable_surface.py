@@ -37,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
+from defender.runtime.lead_zero_config import LEAD_ZERO_CONFIG_REL  # noqa: E402
 from defender.runtime.verb_dispositions import DISPOSITIONS_REL  # noqa: E402
 
 DEFENDER = REPO_ROOT / "defender"
@@ -95,6 +96,9 @@ EXCLUDED_FILES = {
     # reason `excluded_prefixes` derives the skill dirs: this gate keeping its own idea of
     # where that file lives is the drift the table exists to close.
     DISPOSITIONS_REL,
+    # The correlation lead's template id (#1003) — the same kind of file, one row: naming
+    # a vendor's template is its job. Spelled from the runtime's constant for the same reason.
+    LEAD_ZERO_CONFIG_REL,
     "defender/CLAUDE.md",              # internal structure doc
     "defender/learning/actor-settings.json",  # settings file
     "defender/uv.lock",

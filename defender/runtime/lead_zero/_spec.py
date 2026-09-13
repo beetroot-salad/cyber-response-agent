@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 
 from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER
+from defender.runtime.lead_zero_config import shipped_correlation_template
 from defender.runtime.verb_dispositions import (
     HEALTH_CHECK,
     Disposition,
@@ -39,8 +40,11 @@ def correlation_grant(rows: tuple[Disposition, ...]) -> VerbGrant:
     Until #999 this was a `VerbGrant` literal here — the one grant the table could neither
     widen nor withdraw, so a withholding written in the table was honoured by item 1 and every
     model-dispatched lead and ignored by item 3. Now it is `grant_for`'s filter over the rows,
-    which invents nothing (#995's standing property), and the two pairs are AUTHORED in the
-    table under `CORRELATION_GRANT_HOLDER` and nowhere else.
+    which invents nothing (#995's standing property), and the holder's pairs are AUTHORED in
+    the table under `CORRELATION_GRANT_HOLDER` and nowhere else. The table's authority over
+    the lead is grant-or-withhold: WHICH query pair it grants is not free — it must be the
+    pair the configured template binds (`CORRELATION_TEMPLATE`), and the run-start check in
+    `_agreement` refuses a table that grants any other (#1003).
 
     A function over rows, not only the constant below, because `shipped_dispositions` is
     cached per process: a test that plants a table hands its rows here.
@@ -80,14 +84,25 @@ def correlation_system(grant: VerbGrant) -> str | None:
 #: ever imported, so a bad table stops the run there, not here). The grant is the authority —
 #: it is what `decide` consults — and `system` is only ever a rendering/routing key derived
 #: from it, so the two cannot drift. `None` means the table withheld the lead.
+#:
+#: What the table CAN drift from is the template the contract tells the lead to bind
+#: (`CORRELATION_TEMPLATE` below): a table moving the holder to another pair loads clean here
+#: and derives that pair's system. That join is closed at run start, not at import —
+#: `_agreement.resolve_correlation_dispatch` walks the deployment's catalog and refuses a
+#: table whose one query pair is not the template's (#1003) — so whenever a dispatch happens,
+#: `CORRELATION_SYSTEM` equals the template's system by that check, with no second derivation.
 CORRELATION_GRANT = correlation_grant(shipped_dispositions())
 CORRELATION_SYSTEM: str | None = correlation_system(CORRELATION_GRANT)
 
-#: The catalog template item 3's contract names outright. The grant admits exactly one query
-#: verb (`alerts`), and every other elastic template binds `esql` or `query` — so without this
-#: template grant ∩ catalog is empty and the dispatch renders `_INDEX_NONE_GRANTED`, leaving a
-#: lead to spend its whole budget discovering why nothing is runnable.
-CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
+#: The catalog template item 3's contract names outright — read from the per-deployment
+#: config (`knowledge/environment/lead-zero.yaml`, #1003), never spelled here: the template's
+#: own front matter names the system and the verb, so this id is the unit that moves the lead
+#: to another backend. Read at import like the table above, and for the same reason; NOT
+#: resolved against the catalog here — this module stays a vocabulary leaf, and a malformed
+#: template elsewhere in the corpus must not become an import failure for the dozen modules
+#: that import two strings from it. Resolution and the agreement check with the grant run at
+#: run start (`_agreement`), before any prompt is built.
+CORRELATION_TEMPLATE: str = shipped_correlation_template()
 
 #: Item 1's OWN system, and deliberately not `CORRELATION_SYSTEM`. Every backend call item 1
 #: issues names this string directly — `_capture_issue`'s `args`, `_record_manual_row`'s row +

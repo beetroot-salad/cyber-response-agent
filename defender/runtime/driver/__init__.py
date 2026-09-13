@@ -33,6 +33,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
+from defender._corpus import iter_query_templates
 from defender._io import write_guarded
 from defender import _git
 from defender._paths import DefenderPaths, adapters_under
@@ -349,9 +350,26 @@ def _dispatch_catalogs(defender_dir: Path, roster: RosterRead) -> tuple[str | No
 
     The ROLE's committed grant, never the injected `verbs=` registry's: a registry scoped
     narrower than GATHER_DEF's real grant must not narrow what the catalog advertises (the
-    same decoupling `build_agent` states at the dispatch tool's registration)."""
-    from .. import lead_zero as lead_zero_mod
+    same decoupling `build_agent` states at the dispatch tool's registration).
 
+    ALSO the frame that checks item 3's configured template AGREES with the table (#1003),
+    and deliberately this one: it is the one place that already holds the run's tree (hence
+    its catalog) and `CORRELATION_GRANT` together, it runs once at run start before the
+    budget opens, the logger opens or any model exists, and it precedes
+    `prepare_correlation_lead`. The check walks the catalog of the tree the RUN reads —
+    loaded, not linted — because the operator who can author the mismatch never runs repo
+    CI, which pins the same join on the repo's own copies. A withheld lead
+    (`CORRELATION_SYSTEM is None`) consults no template and degrades as before; an
+    unresolvable, malformed or disagreeing template raises `CorrelationDispatchError` out of
+    `run_investigation`'s own frame, naming both sides, and nothing downstream is spent."""
+    from .. import lead_zero as lead_zero_mod
+    from ..tools_gather import _catalog_dir
+
+    lead_zero_mod.resolve_correlation_dispatch(
+        lead_zero_mod.CORRELATION_TEMPLATE,
+        iter_query_templates(_catalog_dir(defender_dir)),
+        lead_zero_mod.CORRELATION_GRANT,
+    )
     skills = defender_dir / "skills"
     return (
         descriptor_catalog(skills, roster, GATHER_DEF.verb_grant),

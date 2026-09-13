@@ -40,7 +40,10 @@ no row here could widen or withdraw — the two-statements-one-honoured defect t
 to end, surviving in the one grant the census could not see. Naming the lead here is what
 makes the table total over GRANTS and not only over adapters. `_refuse_incoherent_narrowing`
 holds the three rules that keep "narrowing" true: the lead never holds a pair gather does not,
-reaches one system, and holds one query verb.
+reaches one system, and holds one query verb. Which query verb is the TEMPLATE's to say
+(`knowledge/environment/lead-zero.yaml` names it; its front matter declares the pair), and
+the run refuses at start if this table grants the lead any other (#1003,
+`lead_zero._agreement`) — the table grants or withholds the lead; it does not relocate it.
 
 WHY NO `verb_class` FIELD. Every shipped verb is read-class and the projection hardcodes `r`.
 That is deliberate under-expression: a write grant should cost a schema change and its own
@@ -327,7 +330,12 @@ def _refuse_incoherent_narrowing(path: Path, rows: tuple[Disposition, ...]) -> N
       and hands a harness-dispatched lead an unconfined read, for a one-word edit. Before
       #999 that widening cost a Python change; this is what keeps the cost. The lead's own
       contract binds ONE template and makes one kind of call
-      (`lead_zero._spec.CORRELATION_TEMPLATE`), so one query verb is also all it can spend.
+      (`lead_zero._spec.CORRELATION_TEMPLATE`, read from `lead-zero.yaml`), so one query verb
+      is also all it can spend — and WHICH one is not this loader's to check: the template
+      the config names declares its own pair, and `lead_zero._agreement` refuses at run
+      start a table whose one query pair is not that one (#1003). This module cannot name
+      the template (`lead_zero._spec` imports it; the reverse edge is a cycle) and has no
+      catalog to resolve it against, so that fourth rule lives one level up.
 
     `health-check` is excluded from the last two rules on purpose. It is never a dispatch
     target and never selects one — `lead_zero._spec.correlation_system` filters it out before
