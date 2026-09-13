@@ -391,6 +391,80 @@ UNDECLARED = "UNDECLARED"
 
 
 @dataclass(frozen=True)
+class RosterRead:
+    """One read of an adapters directory: `accepted`, every system it declares mapped to the
+    adapter file that dispatches it (the registry stores exactly this); `refused`, every name
+    the listing derived that the dispatch seam would NOT resolve — per derived NAME, sorted,
+    so a reader that renders it (the lead-author resolver logs one line per refusal) says
+    each name once, in a deterministic order, where two filenames deriving one name
+    (`.hid_den_adapter.py`, `.hid-den_adapter.py`) would otherwise say it twice."""
+
+    accepted: dict[str, Path]
+    refused: tuple[str, ...]
+
+
+def read_roster(adapters_dir: Path) -> RosterRead:
+    """THE one read of an adapters directory (#1035): every system it declares, mapped to the
+    adapter file `ModuleVerbRegistry.verbs()` dispatches it from, and every derived name it
+    refused. Raises `RegistryError` naming the directory when it cannot be read. Every reader
+    of the roster consumes this — the registry's constructor, the lead-author resolver, the
+    invlang `nothing-to-try` gate, the read-surface audit — so "the same set" is one function's
+    answer and not four readers agreeing.
+
+    @owns the adapters roster — `accepted` and `refused` are derived here and nowhere else.
+
+    One primitive, consumed: `os.scandir` raises `OSError` for a path that is absent, a
+    regular file, or unreadable — where `Path.glob` yields `[]` for all three and raises
+    for none (#1031 O2). Listing and reading are deliberately NOT two calls: a directory
+    validated by one and read by another can go between them, and the second answers an
+    empty roster with nothing said.
+
+    `lstat` on every listed entry, explicitly: listing needs the directory's READ bit and
+    resolving an entry inside it needs its SEARCH bit, and a directory with the first but
+    not the second lists fine and then refuses every `_adapter_path` below — as a raise on
+    3.11-3.13 and, from 3.14 (where `Path.is_file` swallows `EACCES`), as a silent empty
+    roster with every real adapter reported as refused. The `lstat` needs exactly the second
+    bit and raises on every version. `follow_symlinks=False` so a dangling symlink is not
+    that fault: `_adapter_path` drops it as it always has.
+
+    `_adapter_path`, not `is_system_name` alone, as the filter: shape is only half of what
+    makes a name dispatchable. `_system_of` maps `_`->`-` and the inverse is NOT onto — a
+    `change-mgmt_adapter.py` (hyphen in the FILENAME) derives the well-formed name
+    `change-mgmt`, which `_adapter_path` looks for at `change_mgmt_adapter.py` and does not
+    find; so does a DIRECTORY named `foo_adapter.py`, which the listing yields and
+    `is_file()` refuses. Keyed by name for the same reason: two filenames can derive one
+    system, and a roster naming it twice is not a set.
+
+    The filter sits INSIDE the one wrap, because it touches the disk too (`resolve`,
+    `is_file`) and what it can raise there is the same "cannot read" fault under another
+    name: an adapter symlinked into a subdirectory this process cannot search is
+    `PermissionError` out of `is_file` on 3.11-3.13, and a symlink loop named like an
+    adapter is what `Path.resolve` spells as `RuntimeError` on 3.11/3.12 (`resolve` stops
+    raising for a loop at 3.13, and `is_file` then drops the entry; `is_file` stops raising
+    `EACCES` at 3.14). Outside the wrap each escaped untyped — past `VerbResolver`'s one-type
+    wrap and the lead author's dead-letter class alike."""
+    adapters_dir = Path(adapters_dir)
+    try:
+        with os.scandir(adapters_dir) as it:
+            entries = [e for e in it if e.name.endswith(ADAPTER_SUFFIX)]
+        for entry in entries:
+            entry.stat(follow_symlinks=False)
+        accepted: dict[str, Path] = {}
+        refused: list[str] = []
+        for name in sorted({_system_of(Path(entry.name)) for entry in entries}):
+            path = _adapter_path(adapters_dir, name)
+            if path is None:
+                refused.append(name)
+            else:
+                accepted[name] = path
+    except (OSError, RuntimeError) as e:
+        raise RegistryError(
+            f"adapters directory {adapters_dir} cannot be read "
+            f"({getattr(e, 'strerror', None) or e})"
+        ) from e
+    return RosterRead(accepted, tuple(refused))
+
+@dataclass(frozen=True)
 class VerbDecision:
 
     outcome: str
@@ -540,7 +614,7 @@ class ModuleVerbRegistry(VerbRegistry):
         super().__init__(grant)
         self.adapters_dir = Path(adapters_dir)
         # THE ROSTER, read ONCE, here, and FIRST — before the grant check, so a directory that
-        # cannot be read fails as what it is (`RegistryError`, from `_read_roster`) rather than
+        # cannot be read fails as what it is (`RegistryError`, from `read_roster`) rather than
         # as the grant's fault ("names verb(s) the adapters do not declare" for a tree that was
         # never read), and fails under `DENY_ALL` too, which has no entries for the grant check
         # to fail on (#1031 O2). Name -> the adapter file that dispatches it: every later
@@ -552,7 +626,7 @@ class ModuleVerbRegistry(VerbRegistry):
         # the only CORRECT answer for the directory this constructor validated: a per-call
         # read over a removed tree answers "nothing there" without raising, and a declared
         # system's rejection gets coarsened to a ghost's.
-        self._adapters: dict[str, Path] = self._read_roster()
+        self._adapters: dict[str, Path] = read_roster(self.adapters_dir).accepted
         self._systems: tuple[str, ...] = tuple(sorted(self._adapters))
         # The cold cache `_cold_verb_names` fills — one read+parse per SYSTEM, not per grant
         # entry (the shipped gather grant names 30 entries across 8 systems), which the load
@@ -589,60 +663,9 @@ class ModuleVerbRegistry(VerbRegistry):
             )
 
     def systems(self) -> tuple[str, ...]:
-        """The roster read at construction (`_read_roster`), and nothing else: no I/O, no raise.
+        """The roster read at construction (`read_roster`), and nothing else: no I/O, no raise.
         See `VerbRegistry.systems` for the contract this keeps."""
         return self._systems
-
-    def _read_roster(self) -> dict[str, Path]:
-        """The roster: every system this adapters directory declares, mapped to the adapter
-        file `verbs()` dispatches it from. THE one read of the directory, called ONCE, by the
-        constructor; raises `RegistryError` naming the directory when it cannot be read.
-
-        One primitive, consumed: `os.scandir` raises `OSError` for a path that is absent, a
-        regular file, or unreadable — where `Path.glob` yields `[]` for all three and raises
-        for none (#1031 O2). Listing and reading are deliberately NOT two calls: a directory
-        validated by one and read by another can go between them, and the second answers an
-        empty roster with nothing said.
-
-        `lstat` on every listed entry, explicitly: listing needs the directory's READ bit and
-        resolving an entry inside it needs its SEARCH bit, and a directory with the first but
-        not the second lists fine and then refuses every `_adapter_path` below — as a raise on
-        3.11/3.12 and, on 3.13+ (where `Path.is_file` swallows `EACCES`), as a silent empty
-        roster. The `lstat` needs exactly the second bit and raises on every version.
-        `follow_symlinks=False` so a dangling symlink is not that fault: `_adapter_path`
-        drops it as it always has.
-
-        `_adapter_path`, not `is_system_name` alone, as the filter: shape is only half of what
-        makes a name dispatchable. `_system_of` maps `_`->`-` and the inverse is NOT onto — a
-        `change-mgmt_adapter.py` (hyphen in the FILENAME) derives the well-formed name
-        `change-mgmt`, which `_adapter_path` looks for at `change_mgmt_adapter.py` and does not
-        find; so does a DIRECTORY named `foo_adapter.py`, which the listing yields and
-        `is_file()` refuses. Keyed by name for the same reason: two filenames can derive one
-        system, and a roster naming it twice is not a set.
-
-        The filter sits INSIDE the one wrap, because it touches the disk too (`resolve`,
-        `is_file`) and what it can raise there is the same "cannot read" fault under another
-        name: an adapter symlinked into a subdirectory this process cannot search is
-        `PermissionError` out of `is_file` on 3.11/3.12, and a symlink loop named like an
-        adapter is what `Path.resolve` spells as `RuntimeError` on those versions (3.13+
-        drops both silently). Outside the wrap each escaped the constructor untyped — past
-        `VerbResolver`'s one-type wrap and the lead author's dead-letter class alike."""
-        try:
-            with os.scandir(self.adapters_dir) as it:
-                entries = [e for e in it if e.name.endswith(ADAPTER_SUFFIX)]
-            for entry in entries:
-                entry.stat(follow_symlinks=False)
-            roster: dict[str, Path] = {}
-            for name in {_system_of(Path(entry.name)) for entry in entries}:
-                path = _adapter_path(self.adapters_dir, name)
-                if path is not None:
-                    roster[name] = path
-        except (OSError, RuntimeError) as e:
-            raise RegistryError(
-                f"adapters directory {self.adapters_dir} cannot be read "
-                f"({getattr(e, 'strerror', None) or e})"
-            ) from e
-        return roster
 
     def _cold_verb_names(self, system: str) -> frozenset[str]:
         # Never `None`: this subclass always HAS a cold source (the roster), so the base
@@ -690,6 +713,7 @@ __all__ = [
     "UNDECLARED",
     "ModuleVerbRegistry",
     "RegistryError",
+    "RosterRead",
     "Verb",
     "VerbContext",
     "VerbDecision",
@@ -702,6 +726,7 @@ __all__ = [
     "engine_of",
     "is_system_name",
     "model_facing_params",
+    "read_roster",
     "validate_params",
     "verb",
     "verb_class_of",
