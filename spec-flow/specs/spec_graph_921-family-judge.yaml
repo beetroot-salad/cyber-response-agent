@@ -27,8 +27,9 @@ base: d1b8b06a          # main. write-code-from-spec's gate diffs against it. MO
 #       model-authored body framed untrusted, every sibling world marked counterfactual and
 #       its overlay withheld.                                              (O4, O5, O8, O9, N10)
 #   M2  learning/judge/run.py — one `run_stage` call per (world, draw) under the QUESTIONER
-#       key with `agent_id="judge:<X>:<n>"`; lenient parse, then strict validation into
-#       `JudgeReply`; `write_guarded` into `worlds/<X>/judge/<n>.yaml`.     (O1, O4, O8, O9, D2, D4)
+#       key with `agent_id="judge:<X>:<n>"`; one bare document or a refused draw (#1018
+#       superseded the lenient parse), then strict validation into `JudgeReply`;
+#       `write_guarded` into `worlds/<X>/judge/<n>.yaml`.                  (O1, O4, O8, O9, D2, D4)
 #   M3  learning/judge/family.py — the mechanical half and `episodes/<id>/judge.yaml`. (O3, O7)
 #   M4  defender/_vocab.py::JUDGE_OUTCOME_ENUM + its normalizer.                    (O2, D1)
 #   M5  learning/judge/enqueue.py — twelve-key rows appended under `queue_lock`; refuses
@@ -2188,12 +2189,14 @@ structure:
             - {role: user,   source: template:JUDGE_REPLY, slots: {findings: world_label, episode_outcome: draw_index}}
           invariants: [all-slots-bound]
           nl: >-
-            Parsed leniently, then validated strictly into `JudgeReply` before anything reads it.
+            Read as exactly one bare document — or refused as that draw's own failure (#1018
+            superseded the lenient parse) — then validated strictly into `JudgeReply` before
+            anything reads it.
             Each finding carries bucket, claim, root_cause, anchor, topic, evidence[] and
             `discriminator_related`.
         domain:
           type: str
-          refinement: {nl: "Reply shapes a draw can produce. `unparseable-past-the-lenient-fallback` and the missing-pass-table case are J6's; the other three are decided (dispositions §1)."}
+          refinement: {nl: "Reply shapes a draw can produce. `unparseable` (named `unparseable-past-the-lenient-fallback` until #1018 retired the fallback; the draw record it demands is unchanged) and the missing-pass-table case are J6's; the other three are decided (dispositions §1), `fenced-with-prose` now as a REFUSAL (#1018)."}
           default: non-mapping
           distinguished: ['non-mapping', 'fenced-with-prose', 'no-findings', 'missing-pass-table', 'unparseable-past-the-lenient-fallback']
           falsy_valid: false
@@ -3174,6 +3177,7 @@ gate:
     - {rule: R4, element: 'episode_judge_yaml.domain.distinguished[absent]', by: judge_is_skipped_when_judge_yaml_exists, cites: [run1/E5]}
     - {rule: R4, element: 'episode_judge_yaml.domain.distinguished[present]', by: judge_is_skipped_when_judge_yaml_exists, cites: [run1/E5]}
     - {rule: R4, element: 'judge_reply.domain.distinguished[non-mapping]', by: a_non_mapping_reply_fails_validation}
+    # `fenced-with-prose` was discharged by a lenient parse until #1018; the demand keeps its id and now pins the refusal.
     - {rule: R4, element: 'judge_reply.domain.distinguished[fenced-with-prose]', by: lenient_parse_then_strict_validation}
     - {rule: R4, element: 'judge_reply.domain.distinguished[no-findings]', by: an_empty_findings_reply_is_one_draws_answer}
     - {rule: R4, element: 'judge_reply.domain.distinguished[missing-pass-table]', by: prompt_demands_three_passes, cites: [C10]}

@@ -385,8 +385,8 @@ def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
 
     # A NON-STRING REPLY IS THIS DESIGN'S REFUSAL, not an `AttributeError`. The seam is
     # `judge: Any` — the design's own injection point — so a seam that returns `None` on a
-    # refusal (or a result object, or a dict) is a live shape, and `normalize_judge_yaml`'s
-    # first act is `text.strip()`. The draw loop contains `JudgeRefused` and nothing else, and
+    # refusal (or a result object, or a dict) is a live shape, and `reply_document_text`'s
+    # first act is `text.replace(...)`. The draw loop contains `JudgeRefused` and nothing else, and
     # `grade_episode`'s conversion set names neither `AttributeError` nor `TypeError` — so one
     # such reply took the WHOLE pass down: every already-completed world's draws thrown away
     # and no `judge.yaml` written, which is the blast radius the malformed-reply arm exists to

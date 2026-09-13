@@ -101,7 +101,8 @@ _PROMPTS = Path(__file__).resolve().parent
 _QUESTIONER_DENY_REASON = (
     "Blocked: the questioner is a pure authoring projection — its entire input is inlined in "
     "the user prompt by the host and its entire output is one YAML document. It runs no tools: "
-    "no data-source adapters, no run-dir reads, no writes, no shell. Emit the document directly."
+    "no data-source adapters, no run-dir reads, no writes, no shell. Emit the document directly "
+    "— bare, not inside a code fence, with nothing before or after it."
 )
 
 

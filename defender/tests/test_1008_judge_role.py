@@ -521,11 +521,19 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
     # anchor on and `find_longest_match` UNDER-REPORTS it. Measured: the questioner's verbatim
     # 47-character clause inside a judge-length reason reads as 12 with autojunk on and 48 with
     # it off, so the guard below passed on the exact case it names.
-    overlap = difflib.SequenceMatcher(None, questioner_reason, policy.deny_reason,
-                                      autojunk=False)
-    longest = overlap.find_longest_match(
-        0, len(questioner_reason), 0, len(policy.deny_reason))
-    shared = questioner_reason[longest.a:longest.a + longest.size]
+    # ONE clause is shared by contract and excluded before measuring: the reply-shape sentence
+    # (#1018 — every site that tells a model its reply shape says the document is bare, in the
+    # same words, and `test_1018_reply_document.py`'s census pins each deny reason to that
+    # phrase). It is the parser's rule stated once, not one role's voice borrowed by the other.
+    shape_clause = "bare, not inside a code fence, with nothing before or after it"
+    for reason in (questioner_reason, policy.deny_reason):
+        assert shape_clause in reason, (
+            "the shared shape clause this guard excludes is not what both reasons carry — "
+            "re-derive the exclusion from the 1018 census before loosening anything here")
+    own_words = [r.replace(shape_clause, "") for r in (questioner_reason, policy.deny_reason)]
+    overlap = difflib.SequenceMatcher(None, own_words[0], own_words[1], autojunk=False)
+    longest = overlap.find_longest_match(0, len(own_words[0]), 0, len(own_words[1]))
+    shared = own_words[0][longest.a:longest.a + longest.size]
     assert longest.size < 24, (
         f"the judge's refusal shares {longest.size} characters of unbroken text with the "
         f"questioner's ({shared!r}) — one is a substitution of the other, which is the same "
