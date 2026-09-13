@@ -798,20 +798,20 @@ def _parse_ceiling_row(row: str) -> CeilingReceipt | None:
 @lru_cache(maxsize=1)
 def _known_capabilities() -> Mapping[str, frozenset[str]]:
     from defender._git import REPO_ROOT
-    from defender.runtime.verbs import (
-        ADAPTER_SUFFIX,
-        _system_of,
-        declared_verb_names,
-        is_system_name,
-    )
+    from defender.runtime.verbs import declared_verb_names, read_roster
 
     adapters_dir = REPO_ROOT / "defender" / "scripts" / "adapters"
-    if not adapters_dir.is_dir():
-        return {}
-    systems = {
-        _system_of(p) for p in adapters_dir.glob("*" + ADAPTER_SUFFIX)
-        if is_system_name(_system_of(p))
-    }
+    # `read_roster`, the dispatch seam's own read (#1035): a directory this process cannot
+    # read — absent, unlistable, listable but not searchable — RAISES `RegistryError` out of
+    # here and out of the close tool, and fails the run. It used to answer `{}`, under which
+    # every `cap` "does not exist" and every `nothing-to-try` receipt pays: a fault turned
+    # into the most permissive answer, and cached for the process lifetime. The directory is
+    # this checkout's own, so "absent" is a fault too, not an empty roster. Not a validation
+    # diagnostic against the document: an unreadable repo tree is not the document's fault,
+    # and a diagnostic would let the run continue on a roster it does not have. And the
+    # primitive's filter is `_adapter_path`, not shape alone, so a filename the seam cannot
+    # dispatch (`change-mgmt_adapter.py`) no longer makes `cap=change-mgmt` "exist".
+    systems = read_roster(adapters_dir).accepted
     return {s: declared_verb_names(adapters_dir, s) for s in systems}
 
 

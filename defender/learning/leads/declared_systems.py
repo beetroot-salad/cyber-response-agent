@@ -3,8 +3,9 @@
 
 Two sources, unioned:
 
-* the ADAPTER glob (`defender/scripts/adapters/*_adapter.py`), read from the WORKING tree —
-  the same set `runtime.verbs.ModuleVerbRegistry.systems()` reads;
+* the ADAPTER roster (`defender/scripts/adapters/*_adapter.py`), read from the WORKING tree
+  through `runtime.verbs.read_roster` — the one read `ModuleVerbRegistry.systems()` is built
+  from, so the two are one set by construction;
 * the `execution.md` MARKER, read from the COMMITTED tree, at exactly depth 1 under
   `defender/skills/`.
 
@@ -18,7 +19,6 @@ adapter half alone, never consulting the marker source.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -29,7 +29,7 @@ from defender import _git
 from defender._paths import DefenderPaths
 from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime.verbs import ADAPTER_SUFFIX, _adapter_path, _system_of, is_system_name
+from defender.runtime.verbs import RegistryError, is_system_name, read_roster
 
 #: Both re-exported from `DefenderPaths` rather than re-spelled: a resolver whose idea of
 #: where adapters live can drift from the gate that reads its answer is the whole class of
@@ -41,37 +41,33 @@ _log = _loop_config.make_logger("lead-author", flush=True)
 
 
 def _adapter_names(adapters_dir: Path) -> frozenset[str]:
-    """The adapter half: a COLD glob over filenames, never a load — an adapter whose import
-    raises is still named. Explicitly tests the source rather than trusting `Path.glob`'s
-    silent `[]` for an absent path, a regular file, or an unreadable directory."""
-    if not adapters_dir.is_dir():
-        raise LeadAuthorError(
-            f"declared_systems: {adapters_dir} is not a directory this process can read"
-        )
+    """The adapter half: a COLD read of filenames, never a load — an adapter whose import
+    raises is still named.
+
+    `runtime.verbs.read_roster` is THE read (#1035): the same call `ModuleVerbRegistry` builds
+    its roster from, so this half and the runtime roster are one set by construction rather
+    than by two readers agreeing. What the primitive refuses — absent, a regular file,
+    unlistable, listable but not searchable, a symlink loop named like an adapter — arrives
+    as `RegistryError` and leaves as this resolver's own class: `LeadAuthorError` is not an
+    `OSError`, which is what keeps the drain seam's `(SubprocessError, OSError)` swallow from
+    rendering a tree this process cannot read as a green tick (#869 O4, #1035 O2). The
+    message keeps `not a directory this process can read` on every arm: `test_hardening_772`
+    binds on it.
+
+    The refused names are the primitive's — per derived name, sorted — so each is logged
+    once, with the directory it came from, in a deterministic order."""
     try:
-        with os.scandir(adapters_dir) as it:
-            list(it)
-    except OSError as e:
+        roster = read_roster(adapters_dir)
+    except RegistryError as e:
         raise LeadAuthorError(
-            f"declared_systems: {adapters_dir} is not readable ({e})"
+            f"declared_systems: {adapters_dir} is not a directory this process can read ({e})"
         ) from e
-    names: set[str] = set()
-    for p in adapters_dir.glob("*" + ADAPTER_SUFFIX):
-        name = _system_of(p)
-        # `_adapter_path`, which is `is_system_name` PLUS the resolution `verbs()` performs —
-        # the same call `ModuleVerbRegistry.systems()` filters on, so this half and the runtime
-        # roster this docstring calls "the same set" really are one set. Shape alone is not
-        # enough: `_system_of` maps `_`->`-` and its inverse is not onto, so a
-        # `change-mgmt_adapter.py` derives the well-formed `change-mgmt` that `_adapter_path`
-        # then fails to find at `change_mgmt_adapter.py` — declared here, unresolvable there.
-        if _adapter_path(adapters_dir, name) is not None:
-            names.add(name)
-        else:
-            _log(
-                f"declared_systems: refused anomalous adapter name {name!r} "
-                f"from {adapters_dir} — it is not a name the dispatch seam resolves"
-            )
-    return frozenset(names)
+    for name in roster.refused:
+        _log(
+            f"declared_systems: refused anomalous adapter name {name!r} "
+            f"from {adapters_dir} — it is not a name the dispatch seam resolves"
+        )
+    return frozenset(roster.accepted)
 
 
 def _skills_tree_exists_at_head(repo_root: Path) -> bool:

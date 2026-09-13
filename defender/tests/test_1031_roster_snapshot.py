@@ -241,14 +241,14 @@ def test_an_unreadable_directory_fails_at_construction(tmp_path):
 def test_a_listable_but_unsearchable_directory_fails_at_construction(tmp_path):
     """O2/D2, the arm between "cannot list" and "fine" — a directory with its READ bit and not
     its SEARCH bit (mode 0o400). `os.scandir` lists it, so a check that stops at the listing
-    passes; resolving any entry inside it then fails, which `Path.is_file` raises on 3.11/3.12
-    and SWALLOWS on 3.13+ — where the roster comes out empty with nothing said, the silent
+    passes; resolving any entry inside it then fails, which `Path.is_file` raises on 3.11-3.13
+    and SWALLOWS from 3.14 — where the roster comes out empty with nothing said, the silent
     shape this issue exists to close. `RegistryError` at construction, naming the directory,
     under `DENY_ALL` and under a real grant alike (the grant's cold read walks the same
     entries); the positive control restores the mode and constructs.
 
     Observed failing by (today, as a non-root user): `PermissionError` out of the constructor
-    on 3.11/3.12 — not the registry's own error — and a clean empty roster on 3.13+."""
+    on 3.11-3.13 — not the registry's own error — and a clean empty roster from 3.14."""
     adapters = tmp_path / "adapters"
     write(adapters / "elastic_adapter.py", QUERY_ADAPTER)
     adapters.chmod(0o400)
