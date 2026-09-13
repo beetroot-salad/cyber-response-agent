@@ -245,7 +245,12 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
             f"{INVESTIGATION_FILE_MAX}-byte limit. {UNCHANGED_NOTICE} {remedy}"
         )
     # Fail closed on an internal validator error — same as invlang_validate's
-    # hook, which exits 2 (block) rather than letting the write through.
+    # hook, which exits 2 (block) rather than letting the write through. An adapters
+    # directory this process cannot read is NOT a case this guard can meet: the
+    # `nothing-to-try` price is answered from the checkout's roster the run HOLDS
+    # (`hold_capabilities`, handed the value at `run_investigation`'s own frame before any
+    # model call, #1035), so by the time a write reaches here the roster is that value or the
+    # run never started — the gate has no read of its own to fail here.
     try:
         found = diagnose(proposed_text, current)
     except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed

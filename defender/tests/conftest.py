@@ -20,6 +20,34 @@ REAL_REPO = Path(__file__).resolve().parents[2]
 LEARNING_SRC = REAL_REPO / "defender" / "learning"
 
 
+@pytest.fixture(scope="session")
+def checkout_roster():
+    """The real checkout's adapters roster, read ONCE per session — the value a production
+    process reads at its composition root and hands down."""
+    from defender._paths import PATHS
+    from defender.runtime.verbs import read_roster
+
+    return read_roster(PATHS.adapters_dir)
+
+
+@pytest.fixture(autouse=True)
+def _held_capabilities(checkout_roster):
+    """Every test starts with the `nothing-to-try` gate HOLDING the real checkout's roster,
+    the way a production process does at its start (`_adapters_at_run_start` →
+    `hold_capabilities`), and ends with it released, so a test that drove the gate to another
+    tree cannot leak that tree to the next test in the worker. A test that must observe the
+    unheld state calls `release_capabilities()` itself; the gate never reads for itself, so
+    without this a document with a `nothing-to-try` receipt would raise `CapabilitiesNotRead`
+    out of every validator call in the suite."""
+    from defender.skills.invlang.validate import hold_capabilities, release_capabilities
+
+    hold_capabilities(checkout_roster)
+    try:
+        yield
+    finally:
+        release_capabilities()
+
+
 
 @pytest.fixture
 def tmp_repo(tmp_path: Path):

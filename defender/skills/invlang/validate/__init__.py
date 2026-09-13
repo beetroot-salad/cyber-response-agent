@@ -215,6 +215,10 @@ from ._gating import (
     disposition_entry_price,
     entry_price,
     exhausted_contract_ids,
+    CapabilitiesNotRead,
+    hold_capabilities,
+    known_capabilities,
+    release_capabilities,
     runtime_evidence_block,
 )
 from ._closure import (
@@ -548,6 +552,10 @@ __all__ = [
     "runtime_evidence_block",
     "effective_vertex_state",
     "exhausted_contract_ids",
+    "CapabilitiesNotRead",
+    "hold_capabilities",
+    "known_capabilities",
+    "release_capabilities",
     "field",
     "has_open_slot",
     "is_catchall_slot",

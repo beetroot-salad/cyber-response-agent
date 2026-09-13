@@ -293,9 +293,9 @@ def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: 
 class WorldRegistry(ModuleVerbRegistry):
     """A `ModuleVerbRegistry` whose verbs run for real and then answer to the world."""
 
-    def __init__(self, adapters_dir, grant, *, world: Any, ledger: Ledger, as_of: datetime,
+    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,
                  applier: Any = None):
-        super().__init__(adapters_dir, grant)
+        super().__init__(roster, grant)
         # THE CLOCK FIRST, and read ONCE here rather than per call. A `TypeError` or an
         # `AttributeError` raised deep inside `served` is not an `AdapterFault`, so the query
         # tool files it as `DEFAULT_FAULT_EXIT` — which is 2, which is in

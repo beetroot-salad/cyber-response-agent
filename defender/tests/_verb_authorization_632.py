@@ -20,7 +20,7 @@ The surface this suite pins
     and an entry point rejects a registry-shaped stand-in that never went through it.
     `ModuleVerbRegistry(adapters_dir, grant)` — the grant is now REQUIRED, and the
     constructor runs the load check: every grant entry must resolve against the adapters'
-    DECLARED verb names, read cold (§7 R10 — `declared_verb_names`, no adapter import).
+    DECLARED verb names, read cold (§7 R10 — the roster's `declared_verbs`, no adapter import).
     `registry.decide(system, verb) -> VerbDecision` is the one grant decision point;
     `registry.verbs(system)` still returns the UNNARROWED declared map, because narrowing
     it is exactly the shape that collapses a denial into the unknown-verb path (§7 R2).
@@ -174,7 +174,7 @@ from defender.runtime.verbs import (  # noqa: E402
     VerbContext,
     VerbDecision,
     VerbRegistry,
-    declared_verb_names,
+    read_roster,
     verb_class_of,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -305,9 +305,8 @@ SYSTEMS: tuple[str, ...] = tuple(sorted(
 
 def declared_verbs_everywhere() -> frozenset[str]:
     """Every verb NAME the shipped adapters declare, read cold off the real tree."""
-    return frozenset(
-        v for system in SYSTEMS for v in declared_verb_names(ADAPTERS_DIR, system)
-    )
+    roster = read_roster(ADAPTERS_DIR)
+    return frozenset(v for system in SYSTEMS for v in roster.declared_verbs(system))
 
 
 def bare_only_surfaces(files, verb_names: frozenset[str]) -> tuple[Path, ...]:
@@ -590,7 +589,6 @@ __all__ = [
     "VerbRegistry",
     "bare_only_surfaces",
     "breaker_doc",
-    "declared_verb_names",
     "declared_verbs_everywhere",
     "grant_of",
     "q",

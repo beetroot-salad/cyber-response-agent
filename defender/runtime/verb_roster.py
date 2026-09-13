@@ -18,13 +18,9 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .verb_grant import DENY_ALL, VerbGrant
-from .verbs import (
-    ADAPTER_SUFFIX,
-    SYSTEM_PATTERN,
-    _system_of,
-    declared_verb_names,
-    is_system_name,
-)
+from defender._paths import adapters_under
+
+from .verbs import SYSTEM_PATTERN, RegistryError, read_roster
 
 _AUDIT_DEFAULT_ROLE = "gather"
 _ROSTER_FILENAME = "verb-roster.md"
@@ -204,15 +200,18 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
     (several committed surfaces share the bare name `SKILL.md`)."""
     root = Path(defender_dir)
     skills_dir = root / "skills"
-    adapters_dir = root / "scripts" / "adapters"
-    # `_system_of` + `is_system_name` rather than a second spelling of either: the audit's
-    # notion of "a system this tree declares" must be the dispatch seam's, or a name only one of
-    # them recognises is a pair the other cannot score.
-    systems = sorted({
-        _system_of(p) for p in adapters_dir.glob("*" + ADAPTER_SUFFIX)
-        if is_system_name(_system_of(p))
-    }) if adapters_dir.is_dir() else []
-    declared_by_system = {s: declared_verb_names(adapters_dir, s) for s in systems}
+    # `read_roster`, the dispatch seam's own read, once, at the audit's own top — and its
+    # `verbs` map consumed as the value, rather than a second spelling of either: the audit's
+    # notion of "a system this tree declares" and "what it declares" must be the seam's, or a
+    # name only one of them recognises is a pair the other cannot score (#1035). A tree this
+    # process cannot read — absent, unlistable, listable but not searchable, an adapter file
+    # it cannot open — is `RosterError`, never "clean": `()` from a directory that was never
+    # listed reports nothing to check as nothing wrong, and the absent arm matches
+    # `generate_roster`'s own "does not exist — refusing" posture.
+    try:
+        declared_by_system = read_roster(adapters_under(root)).verbs
+    except RegistryError as e:
+        raise RosterError(f"cannot audit {root}: {e}") from e
 
     hits: list[str] = []
     for path in model_read_surfaces(root):

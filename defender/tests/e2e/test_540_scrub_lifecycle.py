@@ -1431,13 +1431,13 @@ def test_a_box_authored_filename_cannot_forge_a_workspace_map_section(tmp_path):
     The oracle is differential against the benign render: the set of section headings must be
     unchanged, and the forged bullet must not appear as a line of its own."""
     run = _clean_run_dir(tmp_path)
-    benign = workspace_map_mod.workspace_map(run)
+    benign = workspace_map_mod.workspace_map(run, systems=())
 
     hostile_name = f"notes.md\n{_FORGED_HEADING}\n{_FORGED_BULLET}"
     (run / hostile_name).write_text("x\n", encoding="utf-8")
     assert hostile_name in {p.name for p in run.iterdir()}
 
-    rendered = workspace_map_mod.workspace_map(run)
+    rendered = workspace_map_mod.workspace_map(run, systems=())
     lines = rendered.splitlines()
     headings = [ln for ln in lines if ln.startswith("## ")]
     assert headings == [ln for ln in benign.splitlines() if ln.startswith("## ")], \
@@ -1454,7 +1454,7 @@ def test_workspace_map_renders_an_ordinary_filename_intact(tmp_path):
     Without this control a renderer that escaped or dropped EVERY name into mush would satisfy
     the forgery test while destroying the orientation the map exists to give the model."""
     run = _clean_run_dir(tmp_path)
-    lines = workspace_map_mod.workspace_map(run).splitlines()
+    lines = workspace_map_mod.workspace_map(run, systems=()).splitlines()
 
     for name in ("report.md", "investigation.md", "alert.json", "executed_queries.jsonl"):
         assert f"- {name}" in lines, f"{name} did not render as its own intact bullet"

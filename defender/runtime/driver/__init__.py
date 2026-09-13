@@ -34,7 +34,8 @@ from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
 from defender._io import write_guarded
-from defender._paths import adapters_under
+from defender import _git
+from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
 
 from .. import branch
@@ -61,7 +62,8 @@ from ..tools import (
     register_tools,
 )
 from ..verb_grant import VerbGrant
-from ..verbs import ModuleVerbRegistry
+from ..verbs import ModuleVerbRegistry, RosterRead, read_roster
+from defender.skills.invlang.validate import hold_capabilities
 from defender.hooks.inject_system_skill_description import descriptor_catalog
 
 from defender import _clock
@@ -335,26 +337,58 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     return run, truncated_by, exit_reason
 
 
-def _dispatch_catalogs(defender_dir: Path) -> tuple[str | None, str | None]:
+def _dispatch_catalogs(defender_dir: Path, roster: RosterRead) -> tuple[str | None, str | None]:
     """The descriptor index each dispatch prompt opens with — MAIN's, narrowed to the gather
-    role's committed grant, and lead-0's, narrowed to the correlation grant — read from the
-    tree HERE, once, at run start, and handed down to the two dispatch sites rather than built
-    inside them per dispatch. Reading one builds a registry over the adapters directory,
-    which since #1031 fails for a tree that cannot be read; a run over such a tree must fail
-    at `run_investigation`'s own frame, before any model call, as the fault it is — not on the
-    first dispatch inside a tool the model is mid-run on, and not inside item 3's task, which
-    swallows its own failures into "injection skipped".
+    role's committed grant, and lead-0's, narrowed to the correlation grant — built HERE,
+    once, at run start, over the roster the run read, and handed down to the two dispatch
+    sites rather than built inside them per dispatch. The one read that can fail for the
+    tree is `read_roster`, and it ran at `run_investigation`'s own frame before any model
+    call, so neither catalog can fail for it — not on the first dispatch inside a tool the
+    model is mid-run on, and not inside item 3's task, which swallows its own failures into
+    "injection skipped".
 
     The ROLE's committed grant, never the injected `verbs=` registry's: a registry scoped
     narrower than GATHER_DEF's real grant must not narrow what the catalog advertises (the
     same decoupling `build_agent` states at the dispatch tool's registration)."""
     from .. import lead_zero as lead_zero_mod
 
-    skills, adapters = defender_dir / "skills", adapters_under(defender_dir)
+    skills = defender_dir / "skills"
     return (
-        descriptor_catalog(skills, adapters, GATHER_DEF.verb_grant),
-        descriptor_catalog(skills, adapters, lead_zero_mod.CORRELATION_GRANT),
+        descriptor_catalog(skills, roster, GATHER_DEF.verb_grant),
+        descriptor_catalog(skills, roster, lead_zero_mod.CORRELATION_GRANT),
     )
+
+
+def _adapters_at_run_start(
+    defender_dir: Path, roster: RosterRead | None, verbs: Any,
+) -> tuple[RosterRead, Any]:
+    """Everything a run resolves from an adapters tree, resolved FIRST — before the budget
+    opens, the logger opens, or any model exists — so an adapters tree this process cannot
+    read fails at `run_investigation`'s own frame as `RegistryError` naming it (#1031,
+    #1035), never inside a tool the model is mid-run on.
+
+    THE ROSTER is `run.py`'s one read, handed in beside the registry it built over it; it is
+    read here, once, only for a caller that injected neither. Every consumer in this process
+    takes the VALUE — the gather registry, both dispatch catalogs, the workspace map's
+    Adapters section — and none holds a directory to go back to.
+
+    The invlang `nothing-to-try` gate is priced against the CHECKOUT's roster (a closed
+    universe this repo owns, not the run's tree), and it is HANDED that roster here
+    (`hold_capabilities`) rather than reading for itself: in production the run's tree IS the
+    checkout (`run.py` passes `DEFENDER_DIR`), so the one read above is the value the gate
+    holds and the tree is read once; a caller whose `defender_dir` is another tree (the
+    hermetic suite's fixtures) costs one more read, of the checkout, still here, still before
+    any model call. Either way the read that can fail fails at this frame as `RegistryError`,
+    never inside a guard on the document's path — the write gate's fail-closed wrap, the
+    close's price wrap and the prepare-time readers each re-filed the host's fault as the
+    document's when the gate read lazily on first use."""
+    roster = roster if roster is not None else read_roster(adapters_under(defender_dir))  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    verbs = verbs if verbs is not None else ModuleVerbRegistry(roster, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
+    hold_capabilities(
+        roster if Path(roster.root).resolve() == checkout.resolve() else read_roster(checkout)
+    )
+    return roster, verbs
 
 
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
@@ -366,6 +400,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_name: str | None = None,
     make_model: MakeModel | None = None,
     verbs: Any = None,
+    roster: RosterRead | None = None,
     limits: dict | None = None,
     box: Any = None,
     store_factory: StoreFactory | None = None,
@@ -383,8 +418,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # ceiling's BASE), resolved once at the entry point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters_under(defender_dir), GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
-    catalog, correlation_catalog = _dispatch_catalogs(defender_dir)
+    roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs)
+    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
@@ -487,7 +522,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     prompt, lead_zero_block, lead_zero_status = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
-        verbs=lead_zero_verbs, limits=limits, run_id=run_id,
+        systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits, run_id=run_id,
     )
 
     # Item 3's async frame: scheduled here (after item 1 has resolved synchronously) and

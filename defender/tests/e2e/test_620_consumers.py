@@ -854,16 +854,16 @@ def test_visualize_runtime_positive_control(tmp_path):
 def test_workspace_map_stops_advertising_help(tmp_path):
     """workspace_map_stops_advertising_help — the workspace map injected into MAIN's message 0
     does not tell main to run `--help` on an adapter module (the modules have no argparse/main)."""
-    text = workspace_map_mod.workspace_map(tmp_path)
+    text = workspace_map_mod.workspace_map(tmp_path, systems=("elastic",))
     assert "--help" not in text, "the workspace map still advertises a dead --help affordance"
 
 
 def test_workspace_map_positive_control(tmp_path):
     """workspace_map_positive_control — the map still lists the adapter surface, so the negative is
     not passing because the map went empty."""
-    text = workspace_map_mod.workspace_map(tmp_path)
+    text = workspace_map_mod.workspace_map(tmp_path, systems=("elastic",))
     assert "Adapters" in text
-    assert "elastic_adapter.py" in text, "the adapter surface vanished from the map"
+    assert "- elastic " in text, "the adapter surface vanished from the map"
 
 
 

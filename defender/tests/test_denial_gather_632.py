@@ -63,6 +63,7 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     ticket_envelope,
 )
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
+from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -495,7 +496,7 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
     from defender.runtime.verbs import ModuleVerbRegistry
 
     grant = grant_of("gather", (("elastic", "query"), ("cmdb", "get-host")))
-    reg = ModuleVerbRegistry(adapters, grant)
+    reg = ModuleVerbRegistry(read_roster(adapters), grant)
     assert reg.decide("mystery", "get-host").outcome == UNDECLARED, \
         "a system the grant reaches nowhere resolved to something other than unresolvable"
     assert reg.decide("elastic", "esql").outcome == DENIED

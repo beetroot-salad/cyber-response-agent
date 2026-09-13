@@ -26,7 +26,7 @@ design fork", fork F1), so these are the write-tests half of that call:
     the system name from the filename with `_`→`-`, so this file and only this file spells
     `tacit-knowledge`.
   * `VERBS = {"health-check": ..., "lookup": ...}` as a DICT LITERAL with string-literal keys:
-    `verbs.declared_verb_names` reads it cold off the AST, and a table assembled any other way
+    `verbs.read_roster` reads it cold off the AST, and a table assembled any other way
     declares nothing, which makes `ModuleVerbRegistry.__init__` raise on the grant.
   * `find_entry(entries, *, actor, host, pattern, now)` is the pure half the semantics tests
     drive, and `lookup(ctx, *, actor, host, pattern) -> {"matched": <entry>|None}` the verb
@@ -72,8 +72,8 @@ from defender.runtime.verbs import (
     GRANTED,
     ModuleVerbRegistry,
     VerbContext,
-    declared_verb_names,
     is_system_name,
+    read_roster,
 )
 from defender.tests import _tacit983 as scene
 
@@ -411,7 +411,7 @@ def test_registry_lookup_is_a_rostered_gather_verb():
     assert "health-check" in registry().VERBS, (
         "every rostered system answers `health-check` (skills/connect's merge bar)"
     )
-    assert LOOKUP in declared_verb_names(ADAPTERS, SYSTEM), (
+    assert LOOKUP in read_roster(ADAPTERS).declared_verbs(SYSTEM), (
         "`VERBS` is read COLD off the AST — it has to be a dict literal with literal keys"
     )
 
@@ -423,7 +423,7 @@ def test_registry_lookup_is_a_rostered_gather_verb():
         entry[2] == "r" for entry in grant.entries if entry[0] == SYSTEM
     ), "the registry is a READ — no run-path verb may write it"
 
-    assert ModuleVerbRegistry(ADAPTERS, grant).decide(SYSTEM, LOOKUP).outcome == GRANTED
+    assert ModuleVerbRegistry(read_roster(ADAPTERS), grant).decide(SYSTEM, LOOKUP).outcome == GRANTED
 
     committed = roster_path(DEFENDER, "gather")
     assert generate_roster(grant, defender_dir=DEFENDER) == \

@@ -44,7 +44,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender._paths import adapters_under  # noqa: E402
-from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
+from defender.learning.leads.declared_systems import (  # noqa: E402
+    declared_systems_over,
+    read_adapters,
+)
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
 from defender.runtime.verb_dispositions import (  # noqa: E402
     DispositionError,
@@ -52,39 +55,34 @@ from defender.runtime.verb_dispositions import (  # noqa: E402
     dispositions_path,
     load_dispositions,
 )
-from defender.runtime.verbs import _adapter_path, declared_verb_names  # noqa: E402
+from defender.runtime.verbs import RosterRead  # noqa: E402
 
 
-def _walk(defender_dir: Path, systems: frozenset[str]) -> dict[str, frozenset[str]]:
-    adapters = adapters_under(defender_dir)
-    return {s: declared_verb_names(adapters, s) for s in sorted(systems)}
+def _walk(roster: RosterRead, systems: frozenset[str]) -> dict[str, frozenset[str]]:
+    return {s: roster.declared_verbs(s) for s in sorted(systems)}
 
 
 def _unreadable_adapters(
-    defender_dir: Path, walked: dict[str, frozenset[str]]
+    roster: RosterRead, walked: dict[str, frozenset[str]]
 ) -> tuple[str, ...]:
     """Systems that HAVE an adapter the walk read no verb out of — the gate's fail-open hole.
 
-    `declared_verb_names` answers `frozenset()` both for "no adapter" and for "an adapter this
-    reader cannot see into": a source that does not read or parse, or a `VERBS` that is not a
-    top-level dict LITERAL (`VERBS: dict[str, Verb] = {...}` is an `AnnAssign` and declares
-    nothing to it, and neither does a table assembled in a loop). That polarity is right for
-    `ModuleVerbRegistry`, where an unreadable table refuses every grant; it is exactly
-    backwards here, where an empty walk yields no `undecided` and the gate prints "clean ...
-    with no residue" over a system nobody has decided anything about — #995's own defect
-    wearing this gate's clothes. So an adapter that exists and declares nothing is exit 2: the
-    census over it was never taken.
+    The roster's cold read answers `frozenset()` for an adapter it cannot see into: a source
+    that does not parse, or a `VERBS` that is not a top-level dict LITERAL (`VERBS: dict[str,
+    Verb] = {...}` is an `AnnAssign` and declares nothing to it, and neither does a table
+    assembled in a loop). That polarity is right for `ModuleVerbRegistry`, where an
+    unreadable table refuses every grant; it is exactly backwards here, where an empty walk
+    yields no `undecided` and the gate prints "clean ... with no residue" over a system
+    nobody has decided anything about — #995's own defect wearing this gate's clothes. So an
+    adapter that exists and declares nothing is exit 2: the census over it was never taken.
 
-    Adapter PRESENCE is what separates the two, which is why this is not simply "walked to an
-    empty set". An MCP-path system is declared by its committed `execution.md` marker and has
-    no adapter module by design (`skills/connect/mcp.md`); it is out of this census's reach
-    either way, and failing on it would block a legitimate integration.
+    Adapter PRESENCE (`roster.accepted`) is what separates the two, which is why this is not
+    simply "walked to an empty set". An MCP-path system is declared by its committed
+    `execution.md` marker and has no adapter module by design (`skills/connect/mcp.md`); it
+    is out of this census's reach either way, and failing on it would block a legitimate
+    integration.
     """
-    adapters = adapters_under(defender_dir)
-    return tuple(
-        s for s in sorted(walked)
-        if not walked[s] and _adapter_path(adapters, s) is not None
-    )
+    return tuple(s for s in sorted(walked) if not walked[s] and s in roster.accepted)
 
 
 def main(argv: list[str]) -> int:
@@ -96,9 +94,14 @@ def main(argv: list[str]) -> int:
 
     # Exit 2, not 1, when the gate could not RUN. An unreadable source or an unloadable table
     # means the census was never taken, and a gate that prints "0 findings" because it scanned
-    # nothing is categorically not clean (#618/#621/#652).
+    # nothing is categorically not clean (#618/#621/#652). ONE roster read for this gate — the
+    # resolver's own (`read_adapters`, which raises this lane's `LeadAuthorError` for a tree
+    # it cannot read) — and both the system set and the verb walk below are that one value:
+    # two reads would let a tree that changed between them score one read's systems against
+    # the other's verbs.
     try:
-        systems = declared_systems(root)
+        roster = read_adapters(adapters_under(defender_dir))
+        systems = declared_systems_over(roster, root)
     except LeadAuthorError as e:
         print(f"lint_verb_disposition_census: cannot resolve systems: {e}", file=sys.stderr)
         return 2
@@ -108,8 +111,8 @@ def main(argv: list[str]) -> int:
         print(f"lint_verb_disposition_census: {e}", file=sys.stderr)
         return 2
 
-    walked = _walk(defender_dir, systems)
-    blind = _unreadable_adapters(defender_dir, walked)
+    walked = _walk(roster, systems)
+    blind = _unreadable_adapters(roster, walked)
     if blind:
         print(
             f"lint_verb_disposition_census: {list(blind)} have an adapter the cold verb "
@@ -120,6 +123,12 @@ def main(argv: list[str]) -> int:
             "to the reader. Fix the adapter.",
             file=sys.stderr,
         )
+        for system in blind:
+            if system in roster.unparsed:
+                print(
+                    f"lint_verb_disposition_census: {system}: {roster.unparsed[system]}",
+                    file=sys.stderr,
+                )
         return 2
 
     gaps = census_gaps(walked, rows)

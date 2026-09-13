@@ -36,12 +36,12 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     GrantError,
     ScopedFakeVerbs,
     VerbGrant,
-    declared_verb_names,
     grant_of,
     q,
     recording_table,
     run_gather,
 )
+from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -77,13 +77,13 @@ def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):
     it (g17), so that guard is unreachable from the build path and a test on it would pin
     dead code green."""
     with pytest.raises(TypeError):
-        ModuleVerbRegistry(ADAPTERS_DIR)  # type: ignore[call-arg]
+        ModuleVerbRegistry(read_roster(ADAPTERS_DIR))  # type: ignore[call-arg]
 
     for bad in (None, {"elastic": ("query",)}, "gather"):
         with pytest.raises((GrantError, TypeError)):
-            ModuleVerbRegistry(ADAPTERS_DIR, bad)  # type: ignore[arg-type]
+            ModuleVerbRegistry(read_roster(ADAPTERS_DIR), bad)  # type: ignore[arg-type]
 
-    reg = ModuleVerbRegistry(ADAPTERS_DIR, grant_of("gather", GATHER_PAIRS))
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), grant_of("gather", GATHER_PAIRS))
     assert reg.grant.role == "gather", "a built registry does not carry the grant it was scoped by"
 
 
@@ -161,7 +161,7 @@ def test_a_role_definition_without_a_grant_gets_an_empty_deny_all(tmp_path: Path
     run_dir.mkdir()
     assert compile_policy_for(MAIN_DEF, run_dir).verb_allow.entries == ()
 
-    reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL)
     decision = reg.decide("elastic", "query")
     assert decision.outcome != GRANTED, \
         "a deny-all grant admitted a call — an empty grant read as 'no filter'"
@@ -184,12 +184,12 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
     (c19)."""
     phantom = grant_of("gather", (*GATHER_PAIRS, ("cmdb", "host-trust-edges")))
     with pytest.raises(GrantError) as caught:
-        ModuleVerbRegistry(ADAPTERS_DIR, phantom)
+        ModuleVerbRegistry(read_roster(ADAPTERS_DIR), phantom)
     assert "host-trust-edges" in str(caught.value)
 
     wrong_system = grant_of("gather", (("elastic", "list-tickets"),))
     with pytest.raises(GrantError):
-        ModuleVerbRegistry(ADAPTERS_DIR, wrong_system)
+        ModuleVerbRegistry(read_roster(ADAPTERS_DIR), wrong_system)
 
     # THE COLD READER IS CROSS-CHECKED AGAINST THE IMPORTED NAMES, on every shipped adapter.
     # Without this the reader is unfalsifiable in the direction that matters: a syntactic scan
@@ -197,11 +197,12 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
     # other way declares NOTHING to the check while declaring everything to the runtime — and
     # a grant naming a phantom verb on that system then passes at load. Importing is legal
     # HERE, in the test, precisely because it is what the production reader must not do.
+    roster = read_roster(ADAPTERS_DIR)
     for system in SYSTEMS:
         module = importlib.import_module(f"defender.scripts.adapters.{system.replace('-', '_')}_adapter")
-        assert set(declared_verb_names(ADAPTERS_DIR, system)) == set(module.VERBS), (
+        assert set(roster.declared_verbs(system)) == set(module.VERBS), (
             f"the cold reader and the real {system} adapter disagree on which verbs exist — "
-            f"cold={sorted(declared_verb_names(ADAPTERS_DIR, system))} "
+            f"cold={sorted(roster.declared_verbs(system))} "
             f"imported={sorted(module.VERBS)}"
         )
 
@@ -215,7 +216,7 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
         "VERBS = {}\n"
         "for _n, _f in (('look', look),):\n    VERBS[_n] = _f\n", encoding="utf-8")
     with pytest.raises(GrantError):
-        ModuleVerbRegistry(adapters, grant_of("gather", (("alpha", "no-such-verb"),)))
+        ModuleVerbRegistry(read_roster(adapters), grant_of("gather", (("alpha", "no-such-verb"),)))
 
 
 def test_grant_authoring_integrity_rejects_a_bad_class_token_and_a_conflicting_duplicate():
@@ -277,7 +278,7 @@ def test_compiling_a_policy_imports_no_adapter_and_a_broken_one_costs_only_its_o
     )
 
     grant = grant_of("gather", (("elastic", "query"), ("cmdb", "get-host")))
-    registry = ModuleVerbRegistry(adapters, grant)  # cold names only — must not import
+    registry = ModuleVerbRegistry(read_roster(adapters), grant)  # cold names only — must not import
 
     assert registry.decide("elastic", "query").outcome == GRANTED, \
         "a broken sibling adapter cost the whole registry"

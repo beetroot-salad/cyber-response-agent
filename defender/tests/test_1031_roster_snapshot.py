@@ -19,6 +19,12 @@ made unreadable. No fake whose `systems()` raises appears here — the design's 
 is a broken fake, not a contract. The query tool's reading of the roster is driven through the
 real `QueryCapture` over the real registry; the e2e half (the recorded row under a live run) is
 `tests/e2e/test_1031_removed_directory.py`.
+
+SINCE #1035 the registry takes the roster as a VALUE — `ModuleVerbRegistry(read_roster(d),
+grant)` — and the read that can fail is `read_roster`'s, performed where the process starts.
+Every "fails at construction" below is driven as that pair inside one `pytest.raises`, so the
+pin is unchanged in what it claims (the fault is raised before any registry exists, typed,
+naming the directory) and only the frame that raises it moved one call outward.
 """
 from __future__ import annotations
 
@@ -44,6 +50,7 @@ from defender.tests._verb_authorization_632 import grant_of  # noqa: E402
 # primed ledger its constructor demands — imported rather than re-spelled, so the registry
 # here is built the way `run.py:288` builds it.
 from defender.tests.test_920_estate_seam import AS_OF, World, fresh_ledger  # noqa: E402
+from defender.runtime.verbs import read_roster  # noqa: E402
 
 #: A grant that reaches the one system the fixtures declare, with the one verb they declare —
 #: so a registry over the fixture tree constructs under it (the grant's own load check names
@@ -99,7 +106,7 @@ def test_the_roster_is_the_construction_time_one_after_the_directory_is_removed(
     (adapters / "foo_adapter.py").mkdir()                      # the glob yields it; is_file refuses it
     expected = ("cmdb", "elastic", "host-state")
 
-    registry = ModuleVerbRegistry(adapters, DENY_ALL)
+    registry = ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
     assert registry.systems() == expected, "the roster before the removal is not the filtered one"
 
     (adapters / "cmdb_adapter.py").unlink()
@@ -123,7 +130,7 @@ def test_the_query_tool_consults_the_snapshot_not_the_disk(tmp_path):
     Observed failing by (today): `("", sha256("elastic"))` for the declared name after the
     removal — a fingerprint of a real name, keyed like a ghost's, which is O3's failure."""
     adapters = _adapters(tmp_path, "elastic")
-    capture = QueryCapture(ModuleVerbRegistry(adapters, DENY_ALL))
+    capture = QueryCapture(ModuleVerbRegistry(read_roster(adapters), DENY_ALL))
     ghost_pair = ("", system_fingerprint("ghostone", ""))
     assert ghost_pair[1], "the ghost mints no fingerprint, so the control below is vacuous"
 
@@ -149,13 +156,13 @@ def test_an_adapter_added_after_construction_is_not_on_the_roster(tmp_path):
 
     Observed failing by (today): the first registry answering `("cmdb", "elastic")`."""
     adapters = _adapters(tmp_path, "elastic")
-    before = ModuleVerbRegistry(adapters, DENY_ALL)
+    before = ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
     assert before.systems() == ("elastic",)
 
     write(adapters / "cmdb_adapter.py", ADAPTER_BODY)
     assert before.systems() == ("elastic",), \
         "the roster grew after construction: it is read from the disk per call"
-    assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == ("cmdb", "elastic"), \
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("cmdb", "elastic"), \
         "a fresh registry does not see the new adapter, so the control above is vacuous"
 
 
@@ -165,7 +172,7 @@ def test_an_adapter_added_after_construction_is_not_on_the_roster(tmp_path):
 
 
 def test_a_missing_directory_fails_at_construction_under_deny_all(tmp_path):
-    """O2/D2 — `ModuleVerbRegistry(<missing dir>, DENY_ALL)` raises `RegistryError` at
+    """O2/D2 — `ModuleVerbRegistry(read_roster(<missing dir>), DENY_ALL)` raises `RegistryError` before
     construction, and the message names the directory. `DENY_ALL` is the grant the two
     prompt-side registries (`_scaffold_rules`, the skill-description hook) construct over, and
     the one the grant's own load check cannot fail: a grant naming nothing has no offender, so
@@ -176,11 +183,11 @@ def test_a_missing_directory_fails_at_construction_under_deny_all(tmp_path):
     missing = tmp_path / "nope"
     assert not missing.exists()
     with pytest.raises(verbs.RegistryError) as exc:
-        ModuleVerbRegistry(missing, DENY_ALL)
+        ModuleVerbRegistry(read_roster(missing), DENY_ALL)
     assert str(missing) in str(exc.value), \
         f"the registry error does not name the directory: {exc.value}"
 
-    assert ModuleVerbRegistry(_adapters(tmp_path, "elastic"), DENY_ALL).systems() == ("elastic",)
+    assert ModuleVerbRegistry(read_roster(_adapters(tmp_path, "elastic")), DENY_ALL).systems() == ("elastic",)
 
 
 def test_a_missing_directory_fails_at_construction_under_a_real_grant(tmp_path):
@@ -195,14 +202,14 @@ def test_a_missing_directory_fails_at_construction_under_a_real_grant(tmp_path):
     Observed failing by (today): `GrantError` raised instead."""
     missing = tmp_path / "nope"
     with pytest.raises(verbs.RegistryError) as exc:
-        ModuleVerbRegistry(missing, GRANT)
+        ModuleVerbRegistry(read_roster(missing), GRANT)
     assert not isinstance(exc.value, GrantError), \
         "a missing directory is reported as a grant/declaration disagreement"
     assert str(missing) in str(exc.value)
 
     adapters = tmp_path / "adapters"
     write(adapters / "elastic_adapter.py", QUERY_ADAPTER)
-    assert ModuleVerbRegistry(adapters, GRANT).systems() == ("elastic",)
+    assert ModuleVerbRegistry(read_roster(adapters), GRANT).systems() == ("elastic",)
 
 
 def test_a_regular_file_at_the_adapters_path_fails_at_construction(tmp_path):
@@ -215,7 +222,7 @@ def test_a_regular_file_at_the_adapters_path_fails_at_construction(tmp_path):
     not_a_dir.write_text("VERBS = {}\n", encoding="utf-8")
     assert not_a_dir.is_file()
     with pytest.raises(verbs.RegistryError) as exc:
-        ModuleVerbRegistry(not_a_dir, DENY_ALL)
+        ModuleVerbRegistry(read_roster(not_a_dir), DENY_ALL)
     assert str(not_a_dir) in str(exc.value)
 
 
@@ -230,37 +237,37 @@ def test_an_unreadable_directory_fails_at_construction(tmp_path):
     adapters.chmod(0)
     try:
         with pytest.raises(verbs.RegistryError) as exc:
-            ModuleVerbRegistry(adapters, DENY_ALL)
+            ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
         assert str(adapters) in str(exc.value)
     finally:
         adapters.chmod(0o700)
-    assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == ("elastic",)
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic",)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores mode bits; the directory stays searchable")
 def test_a_listable_but_unsearchable_directory_fails_at_construction(tmp_path):
     """O2/D2, the arm between "cannot list" and "fine" — a directory with its READ bit and not
     its SEARCH bit (mode 0o400). `os.scandir` lists it, so a check that stops at the listing
-    passes; resolving any entry inside it then fails, which `Path.is_file` raises on 3.11/3.12
-    and SWALLOWS on 3.13+ — where the roster comes out empty with nothing said, the silent
+    passes; resolving any entry inside it then fails, which `Path.is_file` raises on 3.11-3.13
+    and SWALLOWS from 3.14 — where the roster comes out empty with nothing said, the silent
     shape this issue exists to close. `RegistryError` at construction, naming the directory,
     under `DENY_ALL` and under a real grant alike (the grant's cold read walks the same
     entries); the positive control restores the mode and constructs.
 
     Observed failing by (today, as a non-root user): `PermissionError` out of the constructor
-    on 3.11/3.12 — not the registry's own error — and a clean empty roster on 3.13+."""
+    on 3.11-3.13 — not the registry's own error — and a clean empty roster from 3.14."""
     adapters = tmp_path / "adapters"
     write(adapters / "elastic_adapter.py", QUERY_ADAPTER)
     adapters.chmod(0o400)
     try:
         for grant in (DENY_ALL, GRANT):
             with pytest.raises(verbs.RegistryError) as exc:
-                ModuleVerbRegistry(adapters, grant)
+                ModuleVerbRegistry(read_roster(adapters), grant)
             assert str(adapters) in str(exc.value)
             assert not isinstance(exc.value, GrantError)
     finally:
         adapters.chmod(0o700)
-    assert ModuleVerbRegistry(adapters, GRANT).systems() == ("elastic",)
+    assert ModuleVerbRegistry(read_roster(adapters), GRANT).systems() == ("elastic",)
 
 
 def test_a_symlink_loop_named_like_an_adapter_is_the_registrys_own_error(tmp_path):
@@ -276,24 +283,24 @@ def test_a_symlink_loop_named_like_an_adapter_is_the_registrys_own_error(tmp_pat
     dropped and the roster is the control's — never an untyped raise on any version.
 
     Observed failing by (before the fix): `RuntimeError("Symlink loop from ...")` out of
-    `ModuleVerbRegistry(...)` and out of `VerbResolver(...)`."""
+    `ModuleVerbRegistry(read_roster(...))` and out of `VerbResolver(...)`."""
     adapters = _adapters(tmp_path / "defender" / "scripts", "elastic")
     os.symlink("loop_adapter.py", adapters / "loop_adapter.py")
     loops_raise = sys.version_info < (3, 13)
 
     if loops_raise:
         with pytest.raises(verbs.RegistryError) as exc:
-            ModuleVerbRegistry(adapters, DENY_ALL)
+            ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
         assert str(adapters) in str(exc.value), \
             f"the registry error does not name the directory: {exc.value}"
         with pytest.raises(_scaffold_rules.ScaffoldRuleError):
             _scaffold_rules.VerbResolver(tmp_path / "defender")
     else:
-        assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == ("elastic",)
+        assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic",)
         assert _scaffold_rules.VerbResolver(tmp_path / "defender").is_system("elastic")
 
     (adapters / "loop_adapter.py").unlink()
-    assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == ("elastic",)
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic",)
 
 
 def test_the_registry_error_names_the_directory_once(tmp_path):
@@ -302,7 +309,7 @@ def test_the_registry_error_names_the_directory_once(tmp_path):
     `str()` already carries the path."""
     missing = tmp_path / "nope"
     with pytest.raises(verbs.RegistryError) as exc:
-        ModuleVerbRegistry(missing, DENY_ALL)
+        ModuleVerbRegistry(read_roster(missing), DENY_ALL)
     assert str(exc.value).count(str(missing)) == 1, str(exc.value)
 
 
@@ -326,7 +333,7 @@ def test_decide_and_verbs_read_the_roster_not_the_disk(tmp_path):
     while `systems()` still declared the name."""
     adapters = tmp_path / "loaded" / "adapters"
     write(adapters / "elastic_adapter.py", QUERY_ADAPTER)
-    registry = ModuleVerbRegistry(adapters, GRANT)
+    registry = ModuleVerbRegistry(read_roster(adapters), GRANT)
     before = registry.decide("elastic", "query")
     assert before.outcome == verbs.GRANTED
     assert before.fn is not None
@@ -351,7 +358,7 @@ def test_decide_and_verbs_read_the_roster_not_the_disk(tmp_path):
 
     fresh_dir = tmp_path / "fresh" / "adapters"
     write(fresh_dir / "elastic_adapter.py", QUERY_ADAPTER)
-    fresh = ModuleVerbRegistry(fresh_dir, GRANT)
+    fresh = ModuleVerbRegistry(read_roster(fresh_dir), GRANT)
     shutil.rmtree(fresh_dir)
     assert fresh.systems() == ("elastic",)
     with pytest.raises(FileNotFoundError):
@@ -369,12 +376,12 @@ def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_chec
     answering `()` after the removal."""
     missing = tmp_path / "nope"
     with pytest.raises(verbs.RegistryError) as exc:
-        WorldRegistry(missing, DENY_ALL, world=World("w1"),
+        WorldRegistry(read_roster(missing), DENY_ALL, world=World("w1"),
                       ledger=fresh_ledger(tmp_path / "missing" / "served.jsonl"), as_of=AS_OF)
     assert str(missing) in str(exc.value)
 
     adapters = _adapters(tmp_path, "elastic")
-    world = WorldRegistry(adapters, DENY_ALL, world=World("w1"),
+    world = WorldRegistry(read_roster(adapters), DENY_ALL, world=World("w1"),
                           ledger=fresh_ledger(tmp_path / "real" / "served.jsonl"), as_of=AS_OF)
     assert world.systems() == ("elastic",)
     shutil.rmtree(adapters)
@@ -460,7 +467,7 @@ def test_the_registry_cannot_list_apparatus_is_gone_and_declares_is_membership(t
     assert "RegistryError" in verbs.__all__, "the construction-time error is not exported"
 
     adapters = _adapters(tmp_path, "elastic")
-    registry = ModuleVerbRegistry(adapters, DENY_ALL)
+    registry = ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
     assert registry.systems() == ("elastic",)
     assert _registry_declares(registry, "elastic") is True
     assert _registry_declares(registry, "cmdb") is False
