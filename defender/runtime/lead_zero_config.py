@@ -30,6 +30,7 @@ from pathlib import Path
 import yaml
 
 from defender import _yaml
+from defender._io import TEXT_READ_ERRORS
 
 #: The file's home BELOW a defender tree, and the one place its name is spelled —
 #: `LEAD_ZERO_CONFIG_REL` and `lead_zero_config_path` both derive from it.
@@ -75,7 +76,9 @@ def load_correlation_template(path: Path) -> str:
         raise LeadZeroConfigError(f"lead-zero config not found at {path}")
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as e:
+    except TEXT_READ_ERRORS as e:
+        # Undecodable bytes are as much "no usable id" as an absent file — a raw
+        # `UnicodeDecodeError` out of an import-time read is not a refusal naming the file.
         raise LeadZeroConfigError(f"{where} is unreadable ({e})") from e
 
     duplicates = _yaml.duplicate_key_paths(text)
