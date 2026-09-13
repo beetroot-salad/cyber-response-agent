@@ -85,12 +85,16 @@ def _shipped_shaped_grant(tmp_path: Path) -> VerbGrant:
 def _template_text(tid: str, *, verb: str | None, status: str = "established") -> str:
     """A minimal template document in the catalog's own shape (`SCHEMA.md`). `verb=None`
     OMITS the `verb:` line — the malformed shape #1003's O6 is about."""
+    # The `verb:` line is spliced in AFTER the dedent: interpolated before it, its newline
+    # leaves the following line unindented and `dedent` then strips nothing, so every planted
+    # file reaches the corpus reader with an indented `---` and is skipped as malformed —
+    # which would turn every "resolves" positive control below into a silent "not found".
     verb_line = f"verb: {verb}\n" if verb is not None else ""
     return textwrap.dedent(f"""\
         ---
         id: {tid}
         status: {status}
-        {verb_line}params: [end, start]
+        @VERB@params: [end, start]
         body_substitutions: [entity_filter]
         ---
 
@@ -103,7 +107,7 @@ def _template_text(tid: str, *, verb: str | None, status: str = "established") -
         ```
         ${{entity_filter}}
         ```
-        """)
+        """).replace("@VERB@", verb_line)
 
 
 def _plant(
