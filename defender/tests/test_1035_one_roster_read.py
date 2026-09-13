@@ -34,6 +34,7 @@ raises on call so a missing target fails each test loudly rather than aborting c
 """
 from __future__ import annotations
 
+import ast
 import os
 import sys
 from pathlib import Path
@@ -45,7 +46,7 @@ from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime import verbs
+from defender.runtime import verb_roster, verbs
 from defender.runtime.verb_grant import DENY_ALL
 from defender.runtime.verb_roster import RosterError, audit_read_surfaces
 from defender.runtime.verbs import ModuleVerbRegistry, RegistryError
@@ -229,6 +230,26 @@ def test_read_roster_refuses_an_unsearchable_directory_as_nobody(tmp_path):
             f"mode {mode:o}: the error does not name the directory; {verdict.describe()}"
         )
 
+    # The `lstat` guard's OWN arm, which the tree above cannot see: with a well-formed
+    # `cmdb_adapter.py` inside, `_adapter_path`'s `is_file` raises `PermissionError` on 3.11
+    # and the wrap converts it, so a body with the guard deleted greens the arm above. A
+    # directory holding ONLY a shape-refused name never reaches the disk through
+    # `_adapter_path` (`is_system_name` short-circuits first), so without the guard the
+    # 0o400 answer is a clean empty roster with `.hidden` refused — the silent shape O1
+    # names, on CI's own version. Only the `lstat` can see the missing search bit here.
+    shape_only = root / "shape-only"
+    write(shape_only / ".hidden_adapter.py", ADAPTER_BODY)
+
+    def probe_shape_only():
+        return set(read_roster(shape_only).accepted)
+
+    with handed_to_nobody(root, shape_only, 0o755):
+        _expect_returned(run_as_nobody(probe_shape_only, expected=RegistryError), set())
+    with handed_to_nobody(root, shape_only, 0o400):
+        verdict = run_as_nobody(probe_shape_only, expected=RegistryError)
+    _expect_raised(verdict, RegistryError)
+    assert str(shape_only) in verdict.message, verdict.describe()
+
 
 # ---------------------------------------------------------------------------------------
 # P1 / P2 — the resolver (O1, O5)
@@ -269,6 +290,21 @@ def test_the_resolver_reports_an_unreadable_directory_as_its_own_fault_as_nobody
     with pytest.raises(LeadAuthorError) as exc:
         declared_systems.adapter_systems_under(missing)
     assert f"{missing} is {CANNOT_READ}" in str(exc.value), str(exc.value)
+
+    # The `lstat` arm through the resolver (see the primitive's own test for why a tree
+    # holding only a shape-refused name is the one that discriminates): never `frozenset()`
+    # with `.hidden` logged as anomalous — that is a permission fault rendered as a
+    # name-shape fault, the silent shape O1 forbids on every version.
+    shape_only = root / "shape-only"
+    write(shape_only / ".hidden_adapter.py", ADAPTER_BODY)
+
+    def probe_shape_only():
+        return declared_systems.adapter_systems_under(shape_only)
+
+    with handed_to_nobody(root, shape_only, 0o400):
+        verdict = run_as_nobody(probe_shape_only, expected=LeadAuthorError)
+    _expect_raised(verdict, LeadAuthorError)
+    assert f"{shape_only} is {CANNOT_READ}" in verdict.message, verdict.describe()
 
 
 def test_the_resolver_logs_each_refused_name_once_in_sorted_order(tmp_path, capsys):
@@ -311,6 +347,78 @@ def test_the_resolver_logs_each_refused_name_once_in_sorted_order(tmp_path, caps
         assert not hasattr(declared_systems, name), (
             f"declared_systems still imports {name}: a second roster reader survives there"
         )
+
+
+#: What a directory read looks like in source, by ORIGIN rather than by the spelling a
+#: module chose: a call whose callee attribute is one of these (`os.scandir(...)`,
+#: `_verbs.scandir`, `adapters_dir.glob(...)`, `Path(...).iterdir()`, `os.listdir(...)`).
+_DIRECTORY_READS = frozenset({"scandir", "glob", "rglob", "iterdir", "listdir"})
+#: The names only the primitive may reach: its two private filter helpers and the suffix a
+#: re-spelled adapters glob would have to name.
+_PRIMITIVE_ONLY = frozenset({"_adapter_path", "_system_of", "ADAPTER_SUFFIX"})
+
+
+def _names_in(node: ast.AST) -> set[str]:
+    return {
+        n.id if isinstance(n, ast.Name) else n.attr
+        for n in ast.walk(node) if isinstance(n, (ast.Name, ast.Attribute))
+    }
+
+
+def _mentions_adapters(call: ast.Call) -> bool:
+    """Does this directory read touch the ADAPTERS tree — a receiver or argument named for
+    it, a string constant carrying the adapter suffix, or the suffix constant itself?"""
+    for n in ast.walk(call):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and "_adapter" in n.value:
+            return True
+    return any("adapter" in name.lower() for name in _names_in(call))
+
+
+def _roster_reads_in(module, *, any_directory: bool) -> list[str]:
+    """Every roster read in `module`'s source, as `line: text` — resolved off the AST, so an
+    alias (`from ... import verbs as _v` then `_v._adapter_path`) is seen the same as a direct
+    import, where a `hasattr` on the module's namespace is not. With `any_directory`, EVERY
+    directory read counts; without it, only one that mentions the adapters tree (the audit
+    legitimately globs the skills tree for its read surfaces)."""
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    lines = source.splitlines()
+    hits: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        hit = False
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            hit = node.func.attr in _DIRECTORY_READS and (
+                any_directory or _mentions_adapters(node)
+            )
+        elif isinstance(node, (ast.Name, ast.Attribute)):
+            hit = bool(_names_in(node) & _PRIMITIVE_ONLY)
+        elif isinstance(node, ast.ImportFrom):
+            hit = any(alias.name in _PRIMITIVE_ONLY for alias in node.names)
+        if hit:
+            hits.append(f"{node.lineno}: {lines[node.lineno - 1].strip()}")
+    return sorted(set(hits))
+
+
+def test_no_consumer_reads_the_directory_itself():
+    """O4, by construction and MEASURED rather than trusted to the anomaly fixture — which
+    cannot tell one reader from five that agree on it. Each consumer module of the roster
+    (`declared_systems`, the invlang gate, the read-surface audit) contains NO directory read
+    (`scandir`/`glob`/`iterdir`/`listdir` call) and NO reference to the primitive's private
+    filter helpers, however it spells the import; and the registry has no `_read_roster` of
+    its own left to consume instead of the primitive. The positive control is the primitive's
+    own module, which DOES read the directory — so the detector would fire on a reader that
+    moved rather than went.
+
+    Observed failing by (today): `declared_systems` globs and calls `_adapter_path`; the
+    gate and the audit each glob and call `_system_of`; the registry has `_read_roster`."""
+    for module, any_directory in ((declared_systems, True), (_gating, True), (verb_roster, False)):
+        hits = _roster_reads_in(module, any_directory=any_directory)
+        assert not hits, f"{module.__name__} still reads the adapters directory itself: {hits}"
+    assert not hasattr(ModuleVerbRegistry, "_read_roster"), (
+        "the registry kept its own roster read beside the primitive"
+    )
+    assert any("scandir" in hit for hit in _roster_reads_in(verbs, any_directory=False)), (
+        "the detector sees no adapters-directory read even in the primitive's own module"
+    )
 
 
 def test_a_symlink_loop_named_like_an_adapter_never_escapes_the_resolver_untyped(tmp_path):
@@ -592,10 +700,20 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
     `_capability_exists("change-mgmt")` is True."""
     root = tmp_path / "tree"
     adapters = _anomaly_adapters(_repo_adapters(root))
+    capsys.readouterr()
     expected = ModuleVerbRegistry(adapters, DENY_ALL).systems()
     assert expected == ("cmdb",), "the anchor is not the filtered roster, so the equalities are vacuous"
+    assert read_roster(adapters).refused == tuple(sorted(ANOMALY_NAMES))
+    # `refused` is DATA, rendered by the resolver alone (the design's stated non-obligation:
+    # the registry does not start logging). A primitive that printed the resolver's line
+    # itself would green the per-line pins below while every registry construction — the
+    # scaffold rules, the skill-description hook, every `VerbResolver` — logged refusals its
+    # callers never asked for.
+    silent = capsys.readouterr()
+    assert silent.err + silent.out == "", (
+        f"the registry / the primitive logged on their own: {silent.err!r} {silent.out!r}"
+    )
 
-    capsys.readouterr()
     assert declared_systems.adapter_systems_under(adapters) == frozenset(expected)
     log = capsys.readouterr().err
     for name in ANOMALY_NAMES:
