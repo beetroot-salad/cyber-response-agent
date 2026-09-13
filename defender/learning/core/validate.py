@@ -3,7 +3,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import yaml
+
 from defender._report import ReportRead, read_report
+from defender._yaml import safe_load
 from defender.learning.core.config import RunUnprocessable
 
 
@@ -34,9 +37,11 @@ class MalformedReply(ValueError):
     """A model reply that is not exactly one bare document. The message names the shape."""
 
 
-# A line ENDING in a closing think tag, trailing spaces allowed — on its own line (the recorded
-# prelude shape) or closing a line of reasoning (`…so caught.</think>`). No opening tag is
-# required: the recorded prelude shape has none. Only a BARE reply that does not already load
+# An UNINDENTED line ending in a closing think tag, trailing spaces allowed — on its own line
+# (the recorded prelude shape) or closing a line of reasoning (`…so caught.</think>`). No
+# opening tag is required: the recorded prelude shape has none. The column-0 anchor is what
+# keeps a tag quoted inside an indented block scalar from ending a prelude, so a reply that
+# does not load is not cut at a line its own document indented. Only a BARE reply that does not already load
 # as one mapping is searched for it: a reply opening with a fence has nothing in front of the
 # document by construction, and a loadable reply is the document — so a tag quoted inside a
 # valid document, or inside a fenced one, never moves the parse boundary. What remains is a
@@ -44,7 +49,7 @@ class MalformedReply(ValueError):
 # quote, and the consumer's loader is what decides the remainder. A YAML-aware scan would
 # close that too; it is not worth its weight against a reply that was already unloadable.
 _THINK_CLOSE_LINE = re.compile(
-    r"</(?:think(?:ing)?|[a-zA-Z_][\w-]*?think[a-zA-Z_]*)>[ \t]*$", re.MULTILINE)
+    r"^(?:\S[^\n]*?)?</(?:think(?:ing)?|[a-zA-Z_][\w-]*?think[a-zA-Z_]*)>[ \t]*$", re.MULTILINE)
 _FENCE_LINE = re.compile(r"^```", re.MULTILINE)
 _FENCE_OPENER = re.compile(r"```[A-Za-z0-9_+-]*[ \t]*")
 _ONE_FENCED_DOCUMENT = re.compile(r"\A```([A-Za-z0-9_+-]*)[ \t]*\n(.*)\n```[ \t]*\Z", re.DOTALL)
@@ -66,14 +71,17 @@ def reply_document_text(text: str) -> str:
     s = text.replace("\r\n", "\n").lstrip("\ufeff").strip()
     if not s:
         raise MalformedReply("empty reply")
-    if not s.startswith("```") and not _loads_as_mapping(s):
+    loads = not s.startswith("```") and _loads_as_mapping(s)
+    if not s.startswith("```") and not loads:
         prelude = _THINK_CLOSE_LINE.search(s)
         if prelude:
-            s = s[prelude.end():].strip()
-            if not s:
-                raise MalformedReply("empty reply")
+            rest = s[prelude.end():].strip()
+            if not rest:
+                raise MalformedReply("a closing think tag with no document following it")
+            s = rest
+            loads = not s.startswith("```") and _loads_as_mapping(s)
     if not s.startswith("```"):
-        if _FENCE_LINE.search(s) and not _loads_as_mapping(s):
+        if _FENCE_LINE.search(s) and not loads:
             raise MalformedReply("a fence inside the reply — the document must be bare")
         return s
     fenced = _ONE_FENCED_DOCUMENT.match(s)
@@ -90,10 +98,6 @@ def reply_document_text(text: str) -> str:
 def _loads_as_mapping(s: str) -> bool:
     """Does the text load as one YAML mapping? A mapping, not merely "loads": a prose line and a
     fenced block together load as one multi-line plain scalar, and that is not a document."""
-    import yaml
-
-    from defender._yaml import safe_load
-
     try:
         return isinstance(safe_load(s), dict)
     except yaml.YAMLError:

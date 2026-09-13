@@ -248,6 +248,7 @@ SHAPE_MARKERS = {
     "trailing": "a closer with trailing characters",
     "no closing": "no closer",
     "opening": "an opening fence line carrying more than a tag",
+    "no document following": "a closing think tag with no document following it",
     "empty": "an empty reply or an empty fence",
 }
 
@@ -444,6 +445,27 @@ def test_1018_a_column_zero_fence_quoted_in_a_double_quoted_scalar_is_still_one_
              expected_doc=expected)
     _accepts(fenced(QUOTED_COLUMN_ZERO_FENCE.strip()),
              expected_text=QUOTED_COLUMN_ZERO_FENCE.strip(), expected_doc=expected)
+
+
+def test_1018_an_indented_quoted_close_tag_cannot_end_a_prelude_on_an_unloadable_reply():
+    """The prelude rule only runs on a bare reply that does NOT load — and there, the column-0
+    anchor is the whole defence: a `</think>` quoted inside an INDENTED block scalar must not
+    become the boundary. The reply is E1's document made unloadable by an unquoted colon (C12's
+    live shape); the honest answer is to return it whole for the loader to refuse. Failing:
+    the text before the quoted tag is discarded and the tail is accepted as a verdict off a
+    reply that was never one document."""
+    unloadable = E1_QUOTED_THINK.replace(
+        "episode_outcome: caught\n", "episode_outcome: caught\nnote: one trial: no replicate\n")
+    with pytest.raises(yaml.YAMLError):
+        safe_load(unloadable)
+    assert _parse(unloadable) == unloadable.strip()
+
+
+def test_1018_a_close_tag_with_nothing_after_it_is_named_not_called_empty():
+    """A complete document followed by a stray closing think tag on the last line: the cut
+    would leave nothing, and the refusal says so rather than calling a multi-KB reply "empty".
+    Failing: `empty reply` for a reply the wire log shows in full."""
+    _refuses(DOCUMENT + "\n</think>\n", "no document following")
 
 
 def test_1018_a_close_tag_ending_a_reasoning_line_is_still_a_prelude_boundary():
