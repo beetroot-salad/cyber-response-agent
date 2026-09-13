@@ -43,6 +43,7 @@ from defender.runtime.verbs import (
     Verb,
     engine_of,
     model_facing_params,
+    read_roster,
     wrapper_only_params,
 )
 
@@ -257,11 +258,12 @@ class VerbResolver:
         self._adapters_dir = adapters_under(Path(defender_dir))
         # A tree whose adapters directory cannot be listed fails HERE, as "could not check"
         # (`ScaffoldRuleError`, the error both production callers already catch) — not later
-        # as a clean empty roster, which is #901's own defect one step earlier. Since #1031 the
-        # registry reads the roster once at construction and raises for a missing or
-        # unreadable directory; wrapped so the resolver's callers keep catching one type.
+        # as a clean empty roster, which is #901's own defect one step earlier. This resolver
+        # is its lane's composition root, so the one roster read (`read_roster`, which raises
+        # for a missing or unreadable directory) sits here; wrapped so the resolver's callers
+        # keep catching one type.
         try:
-            self._registry = ModuleVerbRegistry(self._adapters_dir, DENY_ALL)
+            self._registry = ModuleVerbRegistry(read_roster(self._adapters_dir), DENY_ALL)
         except RegistryError as e:
             raise ScaffoldRuleError(str(e)) from e
         self._cache: dict[str, Mapping[str, Verb]] = {}

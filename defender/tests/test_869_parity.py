@@ -32,6 +32,7 @@ from defender.tests._declared869 import (
     seed_tree,
     write,
 )
+from defender.runtime.verbs import read_roster
 
 #: The name driven at every composition site. It must be undeclared under BOTH membership
 #: readings (NF2): a MARKER-ONLY name is declared at the three union sites and undeclared at
@@ -71,7 +72,7 @@ def test_runtime_system_of_record_is_unchanged(tmp_path):
     adapters.mkdir()
     write(adapters / "elastic_adapter.py", "VERBS = {}\n")
     write(adapters / "cmdb_adapter.py", "VERBS = {}\n")
-    registry = ModuleVerbRegistry(adapters, DENY_ALL)
+    registry = ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
     capture = QueryCapture(registry)
 
     assert registry.systems() == ("cmdb", "elastic")

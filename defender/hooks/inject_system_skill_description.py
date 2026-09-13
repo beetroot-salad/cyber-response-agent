@@ -1,17 +1,17 @@
 
 from __future__ import annotations
 
-from functools import cache
 from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
+from defender._paths import adapters_under
 from defender.runtime.verb_grant import DENY_ALL, VerbGrant
-from defender.runtime.verbs import ModuleVerbRegistry
+from defender.runtime.verbs import ModuleVerbRegistry, RosterRead
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 SKILLS_DIR = DEFENDER_DIR / "skills"
-ADAPTERS_DIR = DEFENDER_DIR / "scripts" / "adapters"
+ADAPTERS_DIR = adapters_under(DEFENDER_DIR)
 
 
 def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
@@ -36,9 +36,8 @@ def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
     return desc or None
 
 
-@cache
 def descriptor_catalog(
-    skills_dir: Path, adapters_dir: Path, grant: VerbGrant,
+    skills_dir: Path, roster: RosterRead, grant: VerbGrant,
 ) -> str | None:
     # DENY_ALL, not `grant`: this registry only enumerates real systems and probes whether each
     # adapter IMPORTS (the `except` below); narrowing to the caller's grant happens after,
@@ -46,10 +45,12 @@ def descriptor_catalog(
     # check against these REAL adapters, which a grant naming a system/verb this tree doesn't
     # declare would fail for a reason unrelated to which systems the catalog describes.
     #
-    # Raises `RegistryError` for an adapters tree that cannot be read (#1031), and is NOT
-    # memoised for that raise — which is why `run_investigation` calls this once at run start
-    # and hands the result to the dispatch tool, rather than the tool calling it per dispatch.
-    registry = ModuleVerbRegistry(adapters_dir, DENY_ALL)
+    # Over the ROSTER `run_investigation` read once at run start, not a directory: the read
+    # that can fail (`RegistryError`, #1031) happened there, at the entry point's own frame,
+    # so this cannot raise for the tree. Not memoised: its one production caller
+    # (`driver._dispatch_catalogs`) builds each catalog once per run and hands the string
+    # down, so a cache here would only ever hold a run's roster past the run.
+    registry = ModuleVerbRegistry(roster, DENY_ALL)
     lines = []
     for system in registry.systems():
         if system not in grant.systems:

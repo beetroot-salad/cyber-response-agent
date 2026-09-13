@@ -28,7 +28,6 @@ from defender._yaml import duplicate_top_level_key
 # directly. The normalizer is deliberately NOT imported — this module holds the WRITE gate,
 # and on write the value is tested exactly (see `validate_report`).
 from defender._vocab import DISPOSITION_ENUM
-from defender.runtime.verbs import RegistryError
 from defender.skills.invlang.validate import Diagnostic, diagnose, warn_diagnostics
 
 # Output-structure bounds for the run's two model-authored artifacts, all in UTF-8 BYTES.
@@ -246,17 +245,14 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
             f"{INVESTIGATION_FILE_MAX}-byte limit. {UNCHANGED_NOTICE} {remedy}"
         )
     # Fail closed on an internal validator error — same as invlang_validate's
-    # hook, which exits 2 (block) rather than letting the write through.
-    #
-    # `RegistryError` is NOT that: the `nothing-to-try` price read an adapters directory this
-    # process cannot read (#1035), which is the host's fault, and a refusal is a message to the
-    # model about its own text — "simplify the invlang" over a document with nothing wrong in
-    # it. It propagates, and the run ends the way the same fault out of the registry at setup
-    # already does, with the directory named as the cause.
+    # hook, which exits 2 (block) rather than letting the write through. An adapters
+    # directory this process cannot read is NOT a case this guard can meet: the
+    # `nothing-to-try` price is answered from the checkout's roster the run HOLDS
+    # (`hold_capabilities`, handed the value at `run_investigation`'s own frame before any
+    # model call, #1035), so by the time a write reaches here the roster is that value or the
+    # run never started — the gate has no read of its own to fail here.
     try:
         found = diagnose(proposed_text, current)
-    except RegistryError:
-        raise
     except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
         return (
             f"investigation.md validation errored — failing closed: {e!r}. "
@@ -329,10 +325,6 @@ def committed_investigation_reason(text: str) -> str | None:
     review gate. The one verb that publishes was the one verb that did not check (#961)."""
     try:
         found = diagnose(text, text)
-    except RegistryError:
-        # The host's own fault (see `validate_investigation`): not a validator defect to log
-        # past, and "publishable" is not an answer to a roster this process could not read.
-        raise
     except Exception as e:  # noqa: BLE001 — fail open (H7); an unclosable run is worse
         print(
             f"[artifact_schema] investigation.md could not be validated for the close, "

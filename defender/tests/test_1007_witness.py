@@ -20,6 +20,7 @@ from pathlib import Path
 
 from defender.tests import _world_1007 as W
 from defender.tests import test_1007_ladder as L
+from defender.runtime.verbs import read_roster
 
 
 BASE_PAYLOAD = {"rows": [{"host": "canary-1", "owner": "base-team", "status": "up"}]}
@@ -57,7 +58,7 @@ def serve_one_call(ep: Path, family, world_id: str, *, answers=None, tmp_path: P
     served.mkdir(parents=True, exist_ok=True)
     path = served / f"{W.world_token(world_id)}.jsonl"
     ledger = ledger_mod.Ledger(path, base_path=served / "base.jsonl")
-    reg = registry.WorldRegistry(adapters_dir, grant, world=world, ledger=ledger,
+    reg = registry.WorldRegistry(read_roster(adapters_dir), grant, world=world, ledger=ledger,
                                  as_of=family.as_of)
     reg.verbs("elastic")["query"](ctx, native_query="event.action:ssh_login", index=index)
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]

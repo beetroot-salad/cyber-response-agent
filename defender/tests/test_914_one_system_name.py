@@ -83,29 +83,30 @@ def test_every_real_system_in_the_tree_passes_the_predicate():
 def test_the_resolver_and_the_dispatch_seam_cannot_disagree(tmp_path):
     """THE defect this issue closes, driven end to end rather than asserted about.
 
-    For every refused shape, `_adapter_path` returns None — so if the resolver admitted one,
-    it would declare a system that cannot dispatch. Driven over a real adapters directory
+    For every refused shape, `_adapter_path_under` returns None — so if the resolver admitted
+    one, it would declare a system that cannot dispatch. Driven over a real adapters directory
     holding a real file for each name, so a None here is the PREDICATE's answer and not a
     missing file's.
     """
     adapters = tmp_path / "adapters"
     adapters.mkdir()
+    root = adapters.resolve()
     for name in ADMITTED:
         (adapters / (name.replace("-", "_") + verbs.ADAPTER_SUFFIX)).write_text("VERBS = {}\n")
-        assert verbs._adapter_path(adapters, name) is not None, name
+        assert verbs._adapter_path_under(root, name) is not None, name
 
     for name in REFUSED:
         # A name the resolver must not declare is a name dispatch must not resolve. The file
         # is planted for every shape that can BE one — INCLUDING the separator-bearing `a/b`,
         # whose parent directory is created first. Without the mkdir that one assertion is
-        # vacuous: `_adapter_path` returns None for the missing file, so it passes just as
+        # vacuous: `_adapter_path_under` returns None for the missing file, so it passes just as
         # well against a predicate that admits everything, and the traversal shape is the one
         # FK-5 is most about. `a\x00b` is the single shape no filesystem can hold.
         planted = adapters / (name.replace("-", "_") + verbs.ADAPTER_SUFFIX)
         with contextlib.suppress(OSError, ValueError):
             planted.parent.mkdir(parents=True, exist_ok=True)
             planted.write_text("VERBS = {}\n")
-        assert verbs._adapter_path(adapters, name) is None, name
+        assert verbs._adapter_path_under(root, name) is None, name
 
 
 def test_no_module_restates_the_shape_or_the_bound():

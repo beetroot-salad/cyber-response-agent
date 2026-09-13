@@ -13,14 +13,19 @@ like an adapter escapes the resolver as `RuntimeError`. And the pitfalls drain r
 curator inside `except (SubprocessError, OSError)`, so the resolver's `PermissionError` is a
 green tick with "(continuing)" logged over a queue that will never drain.
 
-WHAT IS PINNED. One module-level primitive, `read_roster(adapters_dir)`, returning a record
-with `.accepted: dict[name, resolved path]` and `.refused: tuple[name, ...]` (sorted,
-deduplicated), raising `RegistryError` naming the directory for every cannot-read arm — and
-each consumer's OWN fault class over the same faults: `LeadAuthorError` from the resolver
-(message naming the directory and carrying `not a directory this process can read`, the
-phrase `test_hardening_772` matches on), `RegistryError` propagating out of the gate,
-`RosterError` from the audit. The "one set" claim is measured, not read off a docstring:
-over the anomaly fixture every consumer's system set equals the registry's.
+WHAT IS PINNED. One module-level primitive, `read_roster(adapters_dir)`, returning a
+COMPLETE record — `.accepted: name -> resolved path`, `.verbs: name -> the verb names the
+adapter declares (read cold)`, `.refused: tuple[name, ...]` (sorted, deduplicated) — raising
+`RegistryError` naming the directory for every cannot-read arm, an adapter FILE this process
+cannot open included; and each consumer's OWN fault class over the same faults:
+`LeadAuthorError` from the resolver (message naming the directory once and carrying `not a
+directory this process can read`, the phrase `test_hardening_772` matches on),
+`RegistryError` out of the gate, `RosterError` from the audit. The record is a VALUE handed
+down, not a handle: the registry takes it (`ModuleVerbRegistry(roster, grant)`), and
+`run_investigation` reads it and primes the gate at its own frame before any model call, so
+no guard on the document's path can ever meet the fault mid-run. The "one set" claim is
+measured, not read off a docstring: over the anomaly fixture every consumer's system set
+equals the registry's.
 
 THE INSTRUMENT. Every permission arm is driven as `nobody` in a forked child
 (`_roster1035.run_as_nobody`): the local gate runs as root, for whom `chmod` produces no
@@ -29,8 +34,6 @@ reports the raised class through its exit code and ships the message, the return
 its captured log back over a pipe. Every negative arm has a readable positive control driven
 through the SAME child over the SAME tree, so a refusal cannot be blamed on the instrument.
 
-THE CODE DOES NOT EXIST YET. `read_roster` is imported through `_roster1035`, whose stand-in
-raises on call so a missing target fails each test loudly rather than aborting collection.
 """
 from __future__ import annotations
 
@@ -48,11 +51,13 @@ from defender.learning.core.config import LoopPaths
 from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime import permission, verb_roster, verbs
+from defender.runtime import verb_roster, verbs
 from defender.runtime.verb_grant import DENY_ALL
 from defender.runtime.verb_roster import RosterError, audit_read_surfaces
 from defender.runtime.verbs import ModuleVerbRegistry, RegistryError
 from defender.skills.invlang.validate import _gating
+from defender.scripts import workspace_map
+from defender.tests._by_path import import_lint_lib
 from defender.tests._declared869 import (
     ADAPTER_BODY,
     ADAPTERS_REL,
@@ -77,8 +82,8 @@ CANNOT_READ = "not a directory this process can read"
 #: The swallow's own log line — the shape `_run_curator_module` renders an `OSError` as.
 CONTINUING = "(continuing)"
 
-#: An adapter whose `VERBS` literal the cold read (`declared_verb_names`) can parse, so a
-#: consumer that also reads verbs (the gate, the audit) sees `query` declared on it.
+#: An adapter whose `VERBS` literal the roster's cold read can parse, so a consumer that
+#: also reads verbs (the gate, the audit) sees `query` declared on it.
 QUERY_ADAPTER = (
     "def query(ctx, *, native_query: str) -> list[dict]:\n"
     "    return [{'hit': native_query}]\n"
@@ -88,7 +93,7 @@ QUERY_ADAPTER = (
 #: The names the anomaly fixture derives and the dispatch seam refuses — `verbs._system_of`
 #: of a DIRECTORY named `dir_adapter.py`, of `.hidden_adapter.py`, of the suffix-only
 #: `_adapter.py`, of `.._adapter.py`, and of `change-mgmt_adapter.py` (a hyphen in the
-#: FILENAME: well-formed, but `_adapter_path` looks for `change_mgmt_adapter.py`). The first
+#: FILENAME: well-formed, but the seam looks for `change_mgmt_adapter.py`). The first
 #: four are #869 J4's; the fifth is the one that makes the two `is_system_name`-only globs
 #: (the gate's, the audit's) disagree with the registry TODAY, so the four-consumer equality
 #: below is red rather than vacuous.
@@ -110,7 +115,7 @@ def _anomaly_adapters(adapters: Path) -> Path:
 
 def _repo_adapters(root: Path) -> Path:
     """`<root>/defender/scripts/adapters` — the address every consumer that starts from a
-    repo root (`adapter_declared_systems`, `_known_capabilities`) derives, and the one the
+    repo root (`adapter_declared_systems`, `known_capabilities`) derives, and the one the
     audit derives from `<root>/defender`."""
     return root / ADAPTERS_REL
 
@@ -138,21 +143,26 @@ def _expect_returned(verdict: ChildVerdict, value: object) -> None:
 def test_read_roster_accepts_what_dispatches_and_reports_what_it_refused(tmp_path):
     """M1 — `read_roster(d)` over the anomaly fixture answers `.accepted == {"cmdb": <the real
     file, resolved>}` and `.refused` equal to the five anomaly names as a SORTED tuple; it is
-    exported in `__all__`; and `ModuleVerbRegistry(d, DENY_ALL).systems()` is exactly
+    exported in `__all__`; and `ModuleVerbRegistry(read_roster(d), DENY_ALL).systems()` is exactly
     `tuple(sorted(read_roster(d).accepted))` — the registry consumes the record rather than
     keeping a reader of its own.
 
-    Observed failing by (today): `ImportError` — the primitive does not exist."""
+    The record is a value: its two maps are read-only views, so a consumer holding one
+    cannot edit the roster the registry was built over through it."""
     adapters = _anomaly_adapters(tmp_path / "adapters")
 
     roster = read_roster(adapters)
+    for view in (roster.accepted, roster.verbs):
+        with pytest.raises(TypeError):
+            view["ghost"] = None  # type: ignore[index]
 
     assert roster.accepted == {"cmdb": (adapters / "cmdb_adapter.py").resolve()}, roster.accepted
     assert roster.accepted["cmdb"].is_file()
+    assert roster.verbs == {"cmdb": frozenset({"query"})}, roster.verbs
     assert roster.refused == tuple(sorted(ANOMALY_NAMES)), roster.refused
     assert "read_roster" in verbs.__all__, "the primitive is not exported"
-    assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == tuple(sorted(roster.accepted))
-    assert ModuleVerbRegistry(adapters, DENY_ALL).systems() == ("cmdb",)
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == tuple(sorted(roster.accepted))
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("cmdb",)
 
 
 def test_read_roster_refused_names_are_deduplicated_per_derived_name(tmp_path):
@@ -234,10 +244,10 @@ def test_read_roster_refuses_an_unsearchable_directory_as_nobody(tmp_path):
         )
 
     # The `lstat` guard's OWN arm, which the tree above cannot see: with a well-formed
-    # `cmdb_adapter.py` inside, `_adapter_path`'s `is_file` raises `PermissionError` on 3.11
+    # `cmdb_adapter.py` inside, the filter's `is_file` raises `PermissionError` on 3.11
     # and the wrap converts it, so a body with the guard deleted greens the arm above. A
     # directory holding ONLY a shape-refused name never reaches the disk through
-    # `_adapter_path` (`is_system_name` short-circuits first), so without the guard the
+    # the filter (`is_system_name` short-circuits first), so without the guard the
     # 0o400 answer is a clean empty roster with `.hidden` refused — the silent shape O1
     # names, on CI's own version. Only the `lstat` can see the missing search bit here.
     shape_only = root / "shape-only"
@@ -269,7 +279,7 @@ def test_the_resolver_reports_an_unreadable_directory_as_its_own_fault_as_nobody
     is the O5 positive control: it already names the directory with that phrase today.
 
     Observed failing by (today, 3.11): `PermissionError(13, ...)` out of the `0o400` arm —
-    the listing check passes and `_adapter_path`'s `is_file` raises; and the `0o000` arm's
+    the listing check passes and the filter's `is_file` raises; and the `0o000` arm's
     message reads "is not readable (...)", not the unified phrase."""
     root = tmp_path / "tree"
     adapters = _repo_adapters(root)
@@ -322,7 +332,7 @@ def test_the_resolver_logs_each_refused_name_once_in_sorted_order(tmp_path, caps
 
     Also the one structural line in this suite, on the 1031 D4 precedent that absence is the
     claim: the three names M2 says stop being imported into `declared_systems`
-    (`ADAPTER_SUFFIX`, `_system_of`, `_adapter_path`) are gone from it. `is_system_name`
+    (`ADAPTER_SUFFIX`, `_system_of`, `_adapter_path_under`) are gone from it. `is_system_name`
     stays — the marker half screens on it.
 
     Observed failing by (today): `.hid-den` refused on TWO lines (one per path)."""
@@ -346,19 +356,23 @@ def test_the_resolver_logs_each_refused_name_once_in_sorted_order(tmp_path, caps
         f"the refusals are not logged in sorted-name order: {lines}"
     )
 
-    for name in ("ADAPTER_SUFFIX", "_system_of", "_adapter_path"):
+    for name in ("ADAPTER_SUFFIX", "_system_of", "_adapter_path_under"):
         assert not hasattr(declared_systems, name), (
             f"declared_systems still imports {name}: a second roster reader survives there"
         )
 
 
-#: What a directory read looks like in source, by ORIGIN rather than by the spelling a
-#: module chose: a call whose callee attribute is one of these (`os.scandir(...)`,
-#: `_verbs.scandir`, `adapters_dir.glob(...)`, `Path(...).iterdir()`, `os.listdir(...)`).
-_DIRECTORY_READS = frozenset({"scandir", "glob", "rglob", "iterdir", "listdir"})
-#: The names only the primitive may reach: its two private filter helpers and the suffix a
+#: What a directory read looks like in source, by ORIGIN: a call whose callee resolves
+#: (through `_astlib`, the gates' own scope-aware resolver) to one of these module-level
+#: functions — however the module spelled it (`os.scandir(...)`, `from os import scandir`,
+#: `import os as _o; _o.listdir(...)`) — or a duck-typed method call by one of these names
+#: on a value (`adapters_dir.glob(...)`, `Path(...).iterdir()`), which `_astlib` deliberately
+#: leaves unresolved and which is therefore matched on the attribute.
+_DIRECTORY_READ_ORIGINS = frozenset({"os.scandir", "os.listdir", "glob.glob", "glob.iglob"})
+_DIRECTORY_READ_METHODS = frozenset({"scandir", "glob", "rglob", "iterdir", "listdir"})
+#: The names only the primitive may reach: its private filter helpers and the suffix a
 #: re-spelled adapters glob would have to name.
-_PRIMITIVE_ONLY = frozenset({"_adapter_path", "_system_of", "ADAPTER_SUFFIX"})
+_PRIMITIVE_ONLY = frozenset({"_adapter_path_under", "_system_of", "ADAPTER_SUFFIX"})
 
 
 def _names_in(node: ast.AST) -> set[str]:
@@ -377,21 +391,30 @@ def _mentions_adapters(call: ast.Call) -> bool:
     return any("adapter" in name.lower() for name in _names_in(call))
 
 
+def _is_directory_read(call: ast.Call, env) -> bool:
+    astlib = import_lint_lib("_astlib")
+    resolved = astlib.callee(call, env)
+    if resolved is not None:
+        return resolved in _DIRECTORY_READ_ORIGINS
+    return isinstance(call.func, ast.Attribute) and call.func.attr in _DIRECTORY_READ_METHODS
+
+
 def _roster_reads_in(module, *, any_directory: bool) -> list[str]:
-    """Every roster read in `module`'s source, as `line: text` — resolved off the AST, so an
-    alias (`from ... import verbs as _v` then `_v._adapter_path`) is seen the same as a direct
-    import, where a `hasattr` on the module's namespace is not. With `any_directory`, EVERY
-    directory read counts; without it, only one that mentions the adapters tree (the audit
-    legitimately globs the skills tree for its read surfaces)."""
+    """Every roster read in `module`'s source, as `line: text` — callees resolved through
+    `_astlib.callee` against the scope each call sits in, so an aliased or `from`-imported
+    `scandir` is seen the same as `os.scandir`, where a spelling match is not. With
+    `any_directory`, EVERY directory read counts; without it, only one that mentions the
+    adapters tree (the audit legitimately globs the skills tree for its read surfaces)."""
+    astlib = import_lint_lib("_astlib")
     source = Path(module.__file__).read_text(encoding="utf-8")
     lines = source.splitlines()
+    tree = ast.parse(source)
+    env = astlib.module_env(tree)
     hits: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         hit = False
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            hit = node.func.attr in _DIRECTORY_READS and (
-                any_directory or _mentions_adapters(node)
-            )
+        if isinstance(node, ast.Call):
+            hit = _is_directory_read(node, env) and (any_directory or _mentions_adapters(node))
         elif isinstance(node, (ast.Name, ast.Attribute)):
             hit = bool(_names_in(node) & _PRIMITIVE_ONLY)
         elif isinstance(node, ast.ImportFrom):
@@ -411,9 +434,14 @@ def test_no_consumer_reads_the_directory_itself():
     own module, which DOES read the directory — so the detector would fire on a reader that
     moved rather than went.
 
+    The workspace map joins the consumer list: it used to list `*_adapter.py` filenames off
+    its own `iterdir`, and now renders the roster's systems handed to it.
+
     Observed failing by (today): `declared_systems` globs and calls `_adapter_path`; the
     gate and the audit each glob and call `_system_of`; the registry has `_read_roster`."""
-    for module, any_directory in ((declared_systems, True), (_gating, True), (verb_roster, False)):
+    for module, any_directory in (
+        (declared_systems, True), (_gating, True), (verb_roster, False), (workspace_map, False),
+    ):
         hits = _roster_reads_in(module, any_directory=any_directory)
         assert not hits, f"{module.__name__} still reads the adapters directory itself: {hits}"
     assert not hasattr(ModuleVerbRegistry, "_read_roster"), (
@@ -530,81 +558,129 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
 # ---------------------------------------------------------------------------------------
 # P6 — the `nothing-to-try` gate (O6)
 # ---------------------------------------------------------------------------------------
+#
+# The gate does not READ. It HOLDS the roster the process's composition root read
+# (`hold_capabilities`), and answers from that value or refuses to answer at all. So "never
+# answers from a roster it could not read" holds by construction — there is no read in the
+# gate to fail — and what is pinned instead is the two halves of that construction: an unheld
+# gate raises rather than answering (P6a), and the composition root reads the checkout's
+# roster at the run's own frame, once, reusing the run's read when the run's tree IS the
+# checkout (P6b) and raising `RegistryError` naming the checkout's directory when it cannot
+# be read (P6c, and the whole-run drive in P9).
 
 
 def _redirect_repo_root(monkeypatch, root: Path) -> None:
-    """Point `_known_capabilities` at `root`. It reads `_git.REPO_ROOT` inside its body at
-    call time and takes no tree argument — there is no injection seam, and the design chose
-    not to add one for a gate over the process's own checkout — so the module constant is
-    the only address to redirect. The `lru_cache(maxsize=1)` is process-global: it is cleared
-    here and again by the caller's `finally`, or a leaked entry would answer every later
-    `nothing-to-try` test in this worker from this fixture."""
-    monkeypatch.setattr(_git, "REPO_ROOT", root)  # lint-monkeypatch: ok — a module constant read at call time; no seam exists and the design declines to add one
-    _gating._known_capabilities.cache_clear()
+    """Point the checkout at `root`. `_adapters_at_run_start` reads `_git.REPO_ROOT` at call
+    time to find the checkout's adapters directory, so the module constant is the address
+    to redirect."""
+    monkeypatch.setattr(_git, "REPO_ROOT", root)  # lint-monkeypatch: ok — a module constant read at call time; the checkout root has no other seam
 
 
-def test_the_nothing_to_try_gate_never_answers_from_a_roster_it_could_not_read(
+def test_the_nothing_to_try_gate_never_answers_without_a_held_roster(tmp_path):
+    """P6a (O6) — `_capability_exists("cmdb")` with no roster held raises
+    `CapabilitiesNotRead` rather than answering `False` (under which EVERY `cap` "does not
+    exist" and every `nothing-to-try` receipt pays) and rather than reading the tree for
+    itself (which was the lazy `lru_cache` this replaces: whichever guard on the document's
+    path asked first caught the host's fault and re-filed it as the document's). Positive
+    control: the same question, with a roster read over a readable tree held, answers —
+    `cmdb` and `cmdb.query` exist, `nosuch` and `cmdb.nosuch` do not. And the holder is
+    nominally typed: a `verbs` map or a path handed to it is a `TypeError`, so a caller that
+    still spells the read for itself cannot slip its result in.
+
+    Observed failing by (today): `False` returned over an unreadable checkout."""
+    root = tmp_path / "tree"
+    adapters = _repo_adapters(root)
+    write(adapters / "cmdb_adapter.py", QUERY_ADAPTER)
+
+    _gating.release_capabilities()
+    with pytest.raises(_gating.CapabilitiesNotRead) as exc:
+        _gating._capability_exists("cmdb")
+    assert "hold_capabilities" in str(exc.value), exc.value
+
+    roster = read_roster(adapters)
+    with pytest.raises(TypeError):
+        _gating.hold_capabilities(roster.verbs)  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        _gating.hold_capabilities(adapters)  # type: ignore[arg-type]
+    with pytest.raises(_gating.CapabilitiesNotRead):
+        _gating._capability_exists("cmdb")
+
+    _gating.hold_capabilities(roster)
+    assert _gating.known_capabilities() is roster.verbs
+    assert _gating._capability_exists("cmdb") is True
+    assert _gating._capability_exists("cmdb.query") is True
+    assert _gating._capability_exists("nosuch") is False
+    assert _gating._capability_exists("cmdb.nosuch") is False
+
+
+def _run_start():
+    pytest.importorskip("pydantic_ai")
+    from defender.runtime.driver import _adapters_at_run_start
+
+    return _adapters_at_run_start
+
+
+def test_the_run_hands_the_gate_its_own_roster_when_the_run_tree_is_the_checkout(
     tmp_path, monkeypatch,
 ):
-    """P6 (O6) — `_capability_exists("cmdb")` over a repo adapters directory this process
-    cannot read RAISES `RegistryError` naming the directory, rather than answering `False`:
-    mode `0o000` today makes `_known_capabilities` answer `{}` — so EVERY `cap` "does not
-    exist" and every `nothing-to-try` receipt pays, a fault turned into the most permissive
-    answer and kept for the process lifetime by the cache; mode `0o400` leaks a raw
-    `PermissionError` on 3.11. Positive control, root and `nobody` alike over the readable
-    tree: `cmdb` and `cmdb.query` exist, `nosuch` and `cmdb.nosuch` do not.
-
-    The child clears the cache itself: it inherits the parent's control-filled entry through
-    `fork`, and an answer from that entry would be the cache's, not the directory's.
-
-    Observed failing by (today): `False` returned over `0o000`; `PermissionError` over `0o400`."""
+    """P6b (O6) — with `REPO_ROOT` and the run's `defender_dir` naming ONE tree (production's
+    shape: `run.py` passes `DEFENDER_DIR`), `_adapters_at_run_start` reads the tree once and
+    the roster the gate holds IS the roster the run's registry was built over — identity,
+    not agreement — so the tree is read once per process and the two cannot disagree. With
+    the two naming DIFFERENT trees (the hermetic suite's shape), the gate holds a roster
+    read over the CHECKOUT's, and the run's registry one over the run's."""
+    at_run_start = _run_start()
     root = tmp_path / "tree"
     adapters = _repo_adapters(root)
     write(adapters / "cmdb_adapter.py", QUERY_ADAPTER)
     _redirect_repo_root(monkeypatch, root)
-    try:
-        assert _gating._capability_exists("cmdb") is True
-        assert _gating._capability_exists("cmdb.query") is True
-        assert _gating._capability_exists("nosuch") is False
-        assert _gating._capability_exists("cmdb.nosuch") is False
 
-        def probe():
-            _gating._known_capabilities.cache_clear()
-            return _gating._capability_exists("cmdb")
+    # A registry is injected (any value; it is never called here) so the gather grant's
+    # load check is not run against a fixture that declares one verb of one system.
+    injected = object()
+    _gating.release_capabilities()
+    roster, registry = at_run_start(root / "defender", None, injected)
+    assert registry is injected
+    assert _gating.known_capabilities() is roster.verbs, (
+        "the run's tree is the checkout, and the gate holds a second read of it"
+    )
+    assert set(_gating.known_capabilities()) == {"cmdb"}
 
-        with handed_to_nobody(root, adapters, 0o755):
-            _expect_returned(run_as_nobody(probe, expected=RegistryError), True)
-        for mode in (0o400, 0o000):
-            with handed_to_nobody(root, adapters, mode):
-                verdict = run_as_nobody(probe, expected=RegistryError)
-            _expect_raised(verdict, RegistryError)
-            assert str(adapters) in verdict.message, (
-                f"mode {mode:o}: the error does not name the directory; {verdict.describe()}"
-            )
-    finally:
-        _gating._known_capabilities.cache_clear()
+    other = tmp_path / "other"
+    write(_repo_adapters(other) / "elastic_adapter.py", QUERY_ADAPTER)
+    _gating.release_capabilities()
+    roster, _ = at_run_start(other / "defender", None, injected)
+    assert set(roster.accepted) == {"elastic"}, "the run's registry is not over the run's tree"
+    assert set(_gating.known_capabilities()) == {"cmdb"}, (
+        "the gate is not priced against the CHECKOUT's roster"
+    )
 
 
-def test_the_nothing_to_try_gate_refuses_an_absent_repo_adapters_directory(
+def test_the_run_refuses_an_absent_checkout_adapters_directory_at_its_own_frame(
     tmp_path, monkeypatch,
 ):
-    """P6 (O6), the absent arm — the `is_dir -> {}` branch goes: the directory is the
-    process's OWN checkout's, and "absent" is a fault there, not an empty roster. Over a
-    repo root with no `defender/scripts/adapters`, `_capability_exists("cmdb")` raises
-    `RegistryError` naming the directory. Needs no privilege.
+    """P6c (O6), the absent arm — the directory is the process's OWN checkout's, and
+    "absent" is a fault there, not an empty roster. Over a repo root with no
+    `defender/scripts/adapters`, `_adapters_at_run_start` (the run's tree readable) raises
+    `RegistryError` naming the checkout's directory, and the gate is left holding NOTHING —
+    not the previous roster, not `{}`. Needs no privilege.
 
-    Observed failing by (today): `False` returned."""
+    Observed failing by (today): `False` returned from `_capability_exists`."""
+    at_run_start = _run_start()
+    run_tree = tmp_path / "run-tree"
+    write(_repo_adapters(run_tree) / "cmdb_adapter.py", QUERY_ADAPTER)
     root = tmp_path / "tree"
     root.mkdir()
     adapters = _repo_adapters(root)
     assert not adapters.exists()
     _redirect_repo_root(monkeypatch, root)
-    try:
-        with pytest.raises(RegistryError) as exc:
-            _gating._capability_exists("cmdb")
-        assert str(adapters) in str(exc.value), f"does not name the directory: {exc.value}"
-    finally:
-        _gating._known_capabilities.cache_clear()
+
+    _gating.release_capabilities()
+    with pytest.raises(RegistryError) as exc:
+        at_run_start(run_tree / "defender", None, object())
+    assert str(adapters) in str(exc.value), f"does not name the directory: {exc.value}"
+    with pytest.raises(_gating.CapabilitiesNotRead):
+        _gating._capability_exists("cmdb")
 
 
 # ---------------------------------------------------------------------------------------
@@ -682,12 +758,12 @@ def test_the_read_surface_audit_refuses_an_absent_adapters_directory(tmp_path):
 
 
 def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
-    tmp_path, monkeypatch, capsys,
+    tmp_path, capsys,
 ):
     """P3 / P8 (O4) — over the anomaly fixture the registry declares exactly `("cmdb",)`,
     and each consumer's system set is that set: the resolver's `adapter_systems_under(d)`
-    (P3) and the `nothing-to-try` gate's `_known_capabilities()` keys under a redirected
-    `REPO_ROOT` (P8), with the gate's per-name answers as the observable — `cmdb` exists,
+    (P3) and the `nothing-to-try` gate's `known_capabilities()` keys once it holds the
+    roster read over the fixture (P8), with the gate's per-name answers as the observable — `cmdb` exists,
     `change-mgmt` and `dir` do NOT, though today both "exist" because the gate's
     `is_system_name`-only glob admits a name the dispatch seam cannot resolve. The audit's
     system set is NOT measured here, and the docstring says why: its only observable is the
@@ -704,7 +780,7 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
     root = tmp_path / "tree"
     adapters = _anomaly_adapters(_repo_adapters(root))
     capsys.readouterr()
-    expected = ModuleVerbRegistry(adapters, DENY_ALL).systems()
+    expected = ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems()
     assert expected == ("cmdb",), "the anchor is not the filtered roster, so the equalities are vacuous"
     assert read_roster(adapters).refused == tuple(sorted(ANOMALY_NAMES))
     # `refused` is DATA, rendered by the resolver alone (the design's stated non-obligation:
@@ -724,19 +800,16 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
             f"{name!r} is not refused on exactly one line naming the directory: {log}"
         )
 
-    _redirect_repo_root(monkeypatch, root)
-    try:
-        assert set(_gating._known_capabilities()) == set(expected)
-        assert _gating._capability_exists("cmdb") is True
-        assert _gating._capability_exists("cmdb.query") is True
-        assert _gating._capability_exists("change-mgmt") is False, (
-            "a hyphen-in-filename adapter the dispatch seam cannot resolve counts as a capability"
-        )
-        assert _gating._capability_exists("dir") is False, (
-            "a DIRECTORY named like an adapter counts as a capability"
-        )
-    finally:
-        _gating._known_capabilities.cache_clear()
+    _gating.hold_capabilities(read_roster(adapters))
+    assert set(_gating.known_capabilities()) == set(expected)
+    assert _gating._capability_exists("cmdb") is True
+    assert _gating._capability_exists("cmdb.query") is True
+    assert _gating._capability_exists("change-mgmt") is False, (
+        "a hyphen-in-filename adapter the dispatch seam cannot resolve counts as a capability"
+    )
+    assert _gating._capability_exists("dir") is False, (
+        "a DIRECTORY named like an adapter counts as a capability"
+    )
 
     assert set(read_roster(adapters).accepted) == set(expected)
 
@@ -752,6 +825,14 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
 # row's lifetime `attempts`; the close's price wrap tells the model to "repair the document";
 # the write gate's fail-closed wrap refuses the write with "simplify the invlang". Under each,
 # the operator never sees the directory named as the cause, and the run or the queue pays.
+#
+# The runtime's guards are not taught the fault one by one. The roster is read ONCE, at
+# `run_investigation`'s own frame, before the budget opens or any model exists — the run's
+# tree for the registry and the catalogs, the checkout's for the `nothing-to-try` gate — so
+# the read that can fail fails there, and a guard on the document's path only ever meets the
+# cached value. `test_the_run_reads_the_roster_before_any_model_call` pins the frame;
+# `test_no_guard_on_the_documents_path_names_the_fault` pins that the per-guard arms are gone
+# rather than merely redundant.
 
 
 def _seed_pitfalls_queue(tmp_path: Path, monkeypatch) -> tuple[Path, LoopPaths]:
@@ -816,127 +897,149 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
     )
 
 
-def _inconclusive_over_nothing_to_try(tmp_path: Path, monkeypatch) -> tuple[str, object, Path]:
-    """A companion whose `:T conclude` pays `inconclusive` with a `nothing-to-try` receipt,
-    MAIN deps bound over it, and `_known_capabilities` pointed at a repo root with NO
-    adapters directory — the one arm of the price that reads the roster at all."""
-    from defender.tests._spec923 import CAPABILITY_ROW, main_deps, paid
+def _never_called(messages, info):  # pragma: no cover — reached only by a regressed run
+    raise AssertionError("the model was called before the roster was read")
 
-    document = paid(CAPABILITY_ROW)
-    deps, run_dir = main_deps(tmp_path, document)
+
+def test_the_run_reads_the_roster_before_any_model_call(tmp_path, monkeypatch):
+    """P9, the run — `run_investigation` over a checkout whose adapters directory this process
+    cannot read raises `RegistryError` naming the directory OUT of its own frame: before the
+    budget file opens (`budget.json` is absent from the run dir afterwards), before the wire
+    log opens, and before any model is asked anything (the injected main model raises if it
+    is ever called). The run's OWN tree is the readable real checkout here; it is the
+    CHECKOUT roster the `nothing-to-try` gate reads that is pointed at a repo root with no
+    adapters directory — the one arm of the price that reads a roster at all — so what is
+    pinned is that the gate is primed at run start and not on the first close.
+
+    Never a `ModelRetry` out of the close, never a `Decision(False)` out of the write gate,
+    never `()` out of the repair window: none of those frames is reached. Before this, the
+    first of them to run read the roster lazily under its own guard and re-filed the host's
+    fault as the document's."""
+    pytest.importorskip("pydantic_ai")
+    from defender.tests.e2e._replay_harness import GOLDEN_AB3, drive, materialize
+
     root = tmp_path / "tree"
     root.mkdir()
     assert not _repo_adapters(root).exists()
     _redirect_repo_root(monkeypatch, root)
-    return document, deps, run_dir
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    with pytest.raises(RegistryError) as exc:
+        drive(run_dir, run_id="r-1035", main=_never_called)
+    assert str(_repo_adapters(root)) in str(exc.value), exc.value
+    assert not (run_dir / "budget.json").exists(), "the budget opened before the roster was read"
+    assert not (run_dir / "wire_logs").exists(), "the wire log opened before the roster was read"
 
 
-def test_the_close_does_not_ask_the_model_to_repair_a_document_for_an_unreadable_tree(
-    tmp_path, monkeypatch,
+def test_an_unreadable_adapter_file_is_the_hosts_fault_not_an_empty_declaration(tmp_path):
+    """M1, one level down — an adapter FILE this process cannot open is the same fault as a
+    directory it cannot list, and `read_roster` raises `RegistryError` naming the directory
+    for it, as `nobody` over a mode-`0o000` `cmdb_adapter.py`. It used to be swallowed one
+    reader down: the directory listed fine (`stat` needs no read bit), the roster accepted
+    `cmdb`, and the cold verb read answered `frozenset()` — "declares no verbs" — under which
+    a `nothing-to-try cap=cmdb.query` receipt PAID, the audit scored no `cmdb` verb, and the
+    registry refused the shipped grant as a `GrantError` naming verbs "the adapters do not
+    declare": a host fault re-filed as a grant fault. Positive control through the same
+    child over the readable file: `{"cmdb": {"query"}}`."""
+    root = tmp_path / "tree"
+    adapters = _repo_adapters(root)
+    write(adapters / "cmdb_adapter.py", QUERY_ADAPTER)
+    adapter = adapters / "cmdb_adapter.py"
+
+    def probe():
+        return {s: set(v) for s, v in read_roster(adapters).verbs.items()}
+
+    with handed_to_nobody(root, adapter, 0o644):
+        _expect_returned(run_as_nobody(probe, expected=RegistryError), {"cmdb": {"query"}})
+    with handed_to_nobody(root, adapter, 0o000):
+        verdict = run_as_nobody(probe, expected=RegistryError)
+    _expect_raised(verdict, RegistryError)
+    assert str(adapters) in verdict.message, (
+        f"the error does not name the directory; {verdict.describe()}"
+    )
+    assert str(adapter) in verdict.message, (
+        f"the error blames the directory and does not name the one FILE at fault — the "
+        f"operator's `ls -la` on the directory shows nothing wrong; {verdict.describe()}"
+    )
+
+
+def test_an_adapter_that_does_not_parse_is_recorded_on_the_roster_not_raised_or_swallowed(
+    tmp_path,
 ):
-    """P9, the close — `close_investigation(inconclusive)` over a paid `nothing-to-try`
-    receipt and an adapters directory this process cannot read raises `RegistryError` naming
-    the directory OUT of the close, and commits nothing. Never a `ModelRetry`: that is the
-    price wrap's answer for a document the gate could not parse, and it tells the model to
-    "repair the document" — so a host fault would be spent as retries against a document
-    that has nothing wrong with it, ending in a forced `unresolved` close with the cause
-    named nowhere.
+    """M1, the CONTENT arm — an adapter file this process CAN read but whose bytes do not
+    parse is neither the host's fault nor "declares no verbs" with nothing said: the roster
+    accepts the system, its `verbs` are empty, and `unparsed` carries the parser's reason
+    against its name. Three shapes, none of which may escape `read_roster` as anything: a
+    Latin-1 byte inside a string literal (the earlier shape decoded the file as UTF-8 first,
+    and `UnicodeDecodeError` — a `ValueError`, neither `OSError` nor `SyntaxError` nor
+    `RuntimeError` — left every consumer untyped), a null byte, and an unbalanced literal.
 
-    Observed failing by (today): `ModelRetry("close blocked: `investigation.md` could not be
-    priced ... (RegistryError: ...). Repair the document ...")`."""
-    from pydantic_ai.exceptions import ModelRetry
+    Two more adapters PARSE, and the pin is that the cold reader agrees with the IMPORTER
+    about them, since `ModuleVerbRegistry.verbs()` is an import: a `# coding: latin-1` line
+    over the same byte, and — the surprise — the same byte in a COMMENT with no declaration,
+    which `python file.py` refuses but `compile(bytes)` and the import system accept. A
+    reader that decoded strictly declared nothing for a table the runtime would dispatch.
+    Positive control beside them: `cmdb` declares `query`.
 
-    from defender.tests._spec923 import close
+    The consequence the registry draws is the one it always drew — an adapter that declares
+    nothing fails a grant naming its verbs as `GrantError` — but the census lint can now
+    tell that arm from an annotated-assignment table, because the reason is on the record."""
+    adapters = tmp_path / "adapters"
+    write(adapters / "cmdb_adapter.py", QUERY_ADAPTER)
+    (adapters / "latin_adapter.py").write_bytes(b"VERBS = {'query': 'caf\xe9'}\n")
+    (adapters / "nul_adapter.py").write_bytes(b"VERBS = {'query': 1}\x00\n")
+    (adapters / "broken_adapter.py").write_bytes(b"VERBS = {'query': \n")
+    (adapters / "declared_adapter.py").write_bytes(
+        b"# coding: latin-1\n# caf\xe9\nVERBS = {'query': 1}\n"
+    )
+    (adapters / "comment_adapter.py").write_bytes(b"# caf\xe9\nVERBS = {'query': 1}\n")
 
-    _document, deps, run_dir = _inconclusive_over_nothing_to_try(tmp_path, monkeypatch)
-    try:
-        with pytest.raises(RegistryError) as exc:
-            close(deps, "inconclusive")
-    except ModelRetry as retry:  # pragma: no cover — the mutant's own shape, named
-        pytest.fail(f"the close re-filed the host fault as the document's: {retry}")
-    finally:
-        _gating._known_capabilities.cache_clear()
-    assert str(_repo_adapters(tmp_path / "tree")) in str(exc.value), exc.value
-    assert not (run_dir / "report.md").exists(), "a close that could not price still committed"
+    roster = read_roster(adapters)
+    assert set(roster.accepted) == {"cmdb", "latin", "nul", "broken", "declared", "comment"}
+    assert roster.refused == ()
+    assert set(roster.verbs["cmdb"]) == {"query"}
+    for parses in ("declared", "comment"):
+        assert set(roster.verbs[parses]) == {"query"}, (
+            f"{parses}: the importer accepts this file and the cold reader declares nothing for it"
+        )
+        assert set(ModuleVerbRegistry(roster, DENY_ALL).verbs(parses)) == {"query"}
+    assert set(roster.unparsed) == {"latin", "nul", "broken"}, dict(roster.unparsed)
+    for name in ("latin", "nul", "broken"):
+        assert roster.verbs[name] == frozenset()
+        assert roster.declared_verbs(name) == frozenset()
+        assert "SyntaxError" in roster.unparsed[name], roster.unparsed[name]
+
+    from defender.runtime.verb_grant import GrantError, VerbGrant
+
+    with pytest.raises(GrantError) as exc:
+        ModuleVerbRegistry(roster, VerbGrant(role="gather", entries=(("latin", "query", "r"),)))
+    assert "latin.query" in str(exc.value)
 
 
-def test_the_write_gate_does_not_refuse_the_document_for_an_unreadable_tree(
-    tmp_path, monkeypatch,
-):
-    """P9, the write gate — `decide_write` of the same document over the same tree raises
-    `RegistryError` naming the directory, rather than returning `Decision(False, "...
-    validation errored — failing closed ... Simplify the invlang and re-send.")`. The gate's
-    "return a Decision, never propagate" contract is about the DOCUMENT's faults: a refusal
-    is a message to the model about its own text, and there is nothing in the text for the
-    model to simplify here. A tree this process cannot read is the host's, and the same
-    fault out of the registry at run setup already ends the run — the write gate is not a
-    place for it to become a retry.
-
-    `validate_investigation` is driven beside `decide_write` because the wrap that re-files
-    the fault lives there, and a gate that propagated only from a different branch would
-    green the `decide_write` pin alone.
-
-    Observed failing by (today): `Decision(allow=False, reason="investigation.md validation
-    errored — failing closed: RegistryError(...) ... Simplify the invlang and re-send.")`."""
+def test_no_guard_on_the_documents_path_names_the_fault():
+    """P9, structural, on the 1031 D4 precedent that absence is the claim — the five
+    `except RegistryError: raise` arms that once sat on the document path's guards (the
+    write gate's fail-closed wrap, the close's structure check, the close's price wrap, the
+    two prepare-time readers) are GONE, not kept as belt and braces: an arm that stays is an
+    arm every future guard on that path must remember to copy, and two sibling guards were
+    missed the first time for exactly that reason. The fault is closed one frame up instead,
+    by the read happening before any of these frames exists. Resolved through `_astlib`, so
+    an aliased import of the class is seen the same as a direct one."""
     from defender import _artifact_schema
-
-    document, deps, run_dir = _inconclusive_over_nothing_to_try(tmp_path, monkeypatch)
-    try:
-        with pytest.raises(RegistryError):
-            _artifact_schema.validate_investigation(document, None)
-        with pytest.raises(RegistryError) as exc:
-            permission.decide_write(
-                run_dir / "investigation.md", document, run_dir=run_dir,
-                defender_dir=tmp_path / "defender", policy=deps.policy,
-            )
-    finally:
-        _gating._known_capabilities.cache_clear()
-    assert str(_repo_adapters(tmp_path / "tree")) in str(exc.value), exc.value
-
-
-def test_every_guard_on_the_documents_path_lets_the_unreadable_tree_through(
-    tmp_path, monkeypatch,
-):
-    """P9, per guard — the close above raises `RegistryError` from the FIRST frame on its
-    path that reads the document, and a frame further along whose own guard still re-filed
-    the fault would be green behind it. So each frame is driven on its own over the same
-    fixture: the close's price wrap (`_refuse_if_entry_price_is_owed`), the close's
-    structure check (`committed_document_refusal`, which is `committed_investigation_reason`'s
-    fail-open wrap), and the two `prepare=`-time readers (`flagged_diagnostics`,
-    `repairable_diagnostics`) — each raises `RegistryError` naming the directory rather than
-    a `ModelRetry`, `None`, or `()`.
-
-    The prepare-time readers fail open by design ("a wedged run is the worse failure"), and
-    that stays true for a document this process cannot read or decode. A roster this process
-    cannot read is a different fault: "no window open" is not an answer to it, and the run
-    ends at the next write or close anyway — with the cause named by whichever frame saw it
-    first, which is what a reader of the log needs.
-
-    Observed failing by (today): `ModelRetry` out of the price wrap; `None` and `()` out of
-    the three readers, each with a "treating it as ..." line logged."""
-    from pydantic_ai.exceptions import ModelRetry
-
     from defender.runtime import close_tool
     from defender.runtime.tools import _document
 
-    _document_text, deps, _run_dir = _inconclusive_over_nothing_to_try(tmp_path, monkeypatch)
-    adapters = str(_repo_adapters(tmp_path / "tree"))
-    frames = {
-        "the close's price wrap": lambda: close_tool._refuse_if_entry_price_is_owed(
-            deps, "inconclusive",
-        ),
-        "the close's structure check": lambda: _document.committed_document_refusal(deps),
-        "the repair window": lambda: _document.flagged_diagnostics(deps),
-        "the repair set": lambda: _document.repairable_diagnostics(deps),
-    }
-    try:
-        for label, frame in frames.items():
-            _gating._known_capabilities.cache_clear()
-            try:
-                with pytest.raises(RegistryError) as exc:
-                    frame()
-            except ModelRetry as retry:
-                pytest.fail(f"{label} re-filed the host fault as the document's: {retry}")
-            assert adapters in str(exc.value), f"{label}: does not name the directory: {exc.value}"
-    finally:
-        _gating._known_capabilities.cache_clear()
+    astlib = import_lint_lib("_astlib")
+    for module in (_artifact_schema, close_tool, _document):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        env = astlib.module_env(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler) or node.type is None:
+                continue
+            named = node.type.elts if isinstance(node.type, ast.Tuple) else [node.type]
+            for expr in named:
+                origin = astlib.origin(expr, env)
+                assert origin != "defender.runtime.verbs.RegistryError", (
+                    f"{module.__name__}:{node.lineno} still carries a per-guard "
+                    f"`RegistryError` arm"
+                )

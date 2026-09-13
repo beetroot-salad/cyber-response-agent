@@ -826,7 +826,7 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
     "to; confirm it there and call this again with that name."
 )
 
-#: Reached only for a name that already passed `_adapter_path`'s `is_system_name` and
+#: Reached only for a name that already passed `_adapter_path_under`'s `is_system_name` and
 #: containment checks — an unmatched name raises `KeyError` into the branch above — so
 #: interpolating it into a path here cannot mint an arbitrary model-named one.
 #:
@@ -1106,9 +1106,9 @@ def register_list_verbs_tool(agent, registry) -> None:
         another system if this lead crosses one. It runs nothing against the system of record
         and is not recorded as a query."""
         # OFF THE EVENT LOOP, as the `query` tool's own dispatch is: this reads no system of
-        # record, but it imports the adapter MODULE on first use and re-parses its source per
-        # withheld verb (`declared_verb_names`) — synchronous filesystem work that would
-        # otherwise stall every sibling lead's turn in the process.
+        # record, but it imports the adapter MODULE on first use (the cold verb names come
+        # off the roster the registry holds, already parsed) — synchronous filesystem work
+        # that would otherwise stall every sibling lead's turn in the process.
         return await asyncio.to_thread(_tool_list_verbs, registry, system)
 
 

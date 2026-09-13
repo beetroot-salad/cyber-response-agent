@@ -19,13 +19,14 @@ from .verb_grant import GrantError, VerbGrant
 
 
 class RegistryError(Exception):
-    """The adapters directory a registry is being built over cannot be READ — absent, a
-    regular file, unreadable, or listable but not searchable. Raised at construction, for
-    every grant including `DENY_ALL` and by every subclass, so a tree that cannot be read
-    fails before any model call rather than surfacing as an empty roster (#1031): `Path.glob`
-    answers `[]` for a directory that is not there, and a registry built on that answer
-    declares nothing and refuses every name as a ghost. Not a `GrantError` — that one points
-    its reader at the disposition table, and the table is not what is wrong here."""
+    """The adapters directory cannot be READ — absent, a regular file, unreadable, listable
+    but not searchable, or holding an adapter file this process cannot open. Raised by
+    `read_roster`, the one read, which every process performs where it starts and before
+    any registry exists — so a tree that cannot be read fails before any model call rather
+    than surfacing as an empty roster (#1031): `Path.glob` answers `[]` for a directory that
+    is not there, and a registry built on that answer declares nothing and refuses every
+    name as a ghost. Not a `GrantError` — that one points its reader at the disposition
+    table, and the table is not what is wrong here."""
 
 #: The alphabet of a system name, UNANCHORED, so a scanner that must recognise a name INSIDE
 #: surrounding text embeds this rather than respelling it (`verb_roster`'s `query(system="…"`
@@ -341,38 +342,41 @@ def _load_adapter_module(path: Path) -> Any:
         return _MODULES[key]
 
 
-def _adapter_path(adapters_dir: Path, system: str) -> Path | None:
+def _adapter_path_under(root: Path, system: str) -> Path | None:
+    """The adapter file `system` dispatches from under `root`, or `None` when the name is not
+    one the dispatch seam resolves there. `root` is the adapters directory already resolved —
+    `read_roster` resolves it once and asks about every name under it, rather than walking
+    the same directory's `realpath` once per name. Touches the disk (`resolve`, `is_file`):
+    it runs inside `read_roster`'s one wrap and nowhere else."""
     if not is_system_name(system):
         return None
-    root = Path(adapters_dir).resolve()
-    path = (Path(adapters_dir) / (system.replace("-", "_") + ADAPTER_SUFFIX)).resolve()
+    path = (root / (system.replace("-", "_") + ADAPTER_SUFFIX)).resolve()
     if root not in path.parents or not path.is_file():
         return None
     return path
 
 
-def declared_verb_names(adapters_dir: Path, system: str) -> frozenset[str]:
-    """Every verb name a system's adapter declares, read COLD off its `VERBS = {...}` literal
-    — no import, so a system whose module cannot even be imported still declares what it
-    declares. Only string-literal keys of a top-level dict LITERAL assignment are seen; a
-    table assembled any other way (a loop, a comprehension) declares nothing to this reader,
-    which is deliberate — the load check that consumes this must fail rather than treat an
-    unreadable table as a blank cheque."""
-    path = _adapter_path(adapters_dir, system)
-    if path is None:
-        return frozenset()
-    return _declared_verb_names_at(path)
-
-
-def _declared_verb_names_at(path: Path) -> frozenset[str]:
-    """`declared_verb_names` from a path already resolved — the registry's own arm, which
-    reads its adapters off the roster it fixed at construction rather than resolving the
-    name against the disk again."""
+def _verb_names_in(source: bytes, path: Path) -> tuple[frozenset[str], str | None]:
+    """The cold read of one adapter's `VERBS = {...}` literal, off bytes ALREADY IN HAND —
+    pure: no disk, so nothing here can be the host's fault, and what it returns is a fact
+    about the file's content. `(names, None)` when the source parses; `(frozenset(), why)`
+    when it does not — an undecodable byte where the tokenizer must decode it (a string
+    literal), a null byte, a nesting the parser refuses. BYTES, not decoded text, so the
+    reader accepts exactly what `ModuleVerbRegistry.verbs()`'s import accepts: `ast.parse`
+    on bytes honours a `# coding:` line and, like `compile` and the import system (unlike
+    `python file.py`), lets an undeclared non-UTF-8 byte in a COMMENT through — a reader
+    that decoded strictly first declared nothing for a table the runtime would dispatch, and
+    escaped as `UnicodeDecodeError`. Only string-literal keys of a top-level dict LITERAL
+    assignment are seen; a table assembled any other way (a loop, a comprehension) declares
+    nothing to this reader, deliberately: the grant's load check must fail rather than treat
+    an unreadable table as a blank cheque. A file that does not parse declares nothing for
+    the same reason, and `read_roster` records WHY on the roster (`unparsed`), so a consumer
+    that must tell "declares nothing" from "could not be read into" (the disposition census)
+    has the file's own reason rather than an empty set to guess from."""
     try:
-        source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
-    except (OSError, SyntaxError):
-        return frozenset()
+    except (SyntaxError, ValueError, RecursionError) as e:
+        return frozenset(), f"{type(e).__name__}: {e}"
     names: set[str] = set()
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)):
@@ -382,7 +386,7 @@ def _declared_verb_names_at(path: Path) -> frozenset[str]:
         for key in node.value.keys:
             if isinstance(key, ast.Constant) and isinstance(key.value, str):
                 names.add(key.value)
-    return frozenset(names)
+    return frozenset(names), None
 
 
 GRANTED = "GRANTED"
@@ -390,79 +394,137 @@ DENIED = "DENIED"
 UNDECLARED = "UNDECLARED"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class RosterRead:
-    """One read of an adapters directory: `accepted`, every system it declares mapped to the
-    adapter file that dispatches it (the registry stores exactly this); `refused`, every name
-    the listing derived that the dispatch seam would NOT resolve — per derived NAME, sorted,
-    so a reader that renders it (the lead-author resolver logs one line per refusal) says
-    each name once, in a deterministic order, where two filenames deriving one name
-    (`.hid_den_adapter.py`, `.hid-den_adapter.py`) would otherwise say it twice."""
+    """One read of an adapters directory, complete: `root`, the directory it was read from;
+    `accepted`, every system it declares mapped to the adapter file that dispatches it (the
+    registry stores exactly this); `verbs`, every accepted system mapped to the verb names
+    its adapter declares, read cold; `unparsed`, the accepted systems whose adapter source
+    could not be parsed, each mapped to the parser's reason (its `verbs` entry is empty —
+    "declares nothing", with the why beside it); `refused`, every name the listing derived
+    that the dispatch seam would NOT resolve — per derived NAME, sorted, so a reader that
+    renders it (the lead-author resolver logs one line per refusal) says each name once, in
+    a deterministic order, where two filenames deriving one name (`.hid_den_adapter.py`,
+    `.hid-den_adapter.py`) would otherwise say it twice.
 
-    accepted: dict[str, Path]
+    A VALUE, not a handle: every consumer that takes it holds the same read — there is no
+    directory left in it to go back to, and every question about the tree is answered from
+    a field here, never by a function that takes a path (there is none: `read_roster` is the
+    one thing that accepts a directory). The maps are read-only views (`MappingProxyType`),
+    so a consumer cannot mutate the registry's roster through its own reference; `eq=False`
+    because two reads are two reads even when they agree."""
+
+    root: Path
+    accepted: Mapping[str, Path]
+    verbs: Mapping[str, frozenset[str]]
+    unparsed: Mapping[str, str]
     refused: tuple[str, ...]
+
+    def declared_verbs(self, system: str) -> frozenset[str]:
+        """The verb names `system`'s adapter declares, cold — empty for a name this read did
+        not accept, and for an adapter whose source did not parse (see `unparsed`)."""
+        return self.verbs.get(system, frozenset())
+
+
+def _cannot_read(adapters_dir: Path, e: BaseException) -> str:
+    """`RegistryError`'s text: the DIRECTORY always (every pin and every operator's first `ls`
+    starts there), and the FILE when the fault was one entry's — an adapter with no read bit
+    in an otherwise readable tree is the file's fault, and a message that blamed the
+    directory would send the operator to `ls -la` a directory that looks fine."""
+    fault = getattr(e, "strerror", None) or str(e)
+    text = f"adapters directory {adapters_dir} cannot be read ({fault})"
+    filename = getattr(e, "filename", None)
+    if filename and Path(filename) != Path(adapters_dir):
+        text += f" at {filename}"
+    return text
 
 
 def read_roster(adapters_dir: Path) -> RosterRead:
-    """THE one read of an adapters directory (#1035): every system it declares, mapped to the
-    adapter file `ModuleVerbRegistry.verbs()` dispatches it from, and every derived name it
-    refused. Raises `RegistryError` naming the directory when it cannot be read. Every reader
-    of the roster consumes this — the registry's constructor, the lead-author resolver, the
-    invlang `nothing-to-try` gate, the read-surface audit — so "the same set" is one function's
-    answer and not four readers agreeing.
+    """THE one read of an adapters directory (#1035): every system it declares, the adapter
+    file `ModuleVerbRegistry.verbs()` dispatches each from, the verb names each declares, and
+    every derived name it refused. Raises `RegistryError` when any of that cannot be read.
+    Read ONCE, where a process starts — `run.py` / `run_investigation`, the lead-author lane's
+    resolver, the audit's own top, the workspace-map CLI — and handed down as the VALUE: the
+    registry's constructor and the dispatch catalogs take the record, the workspace map takes
+    its systems, the gate and the audit consume its `verbs`. So "the same set" is one read's
+    answer and not five readers agreeing, and no consumer holds a path to go back to.
 
-    @owns the adapters roster — `accepted` and `refused` are derived here and nowhere else.
+    @owns accepted — derived here and nowhere else.
+    @owns refused — derived here and nowhere else.
+    @owns verbs — the cold verb read, per accepted system, here and nowhere else.
+    @owns unparsed — the parser's reason per adapter whose source it refused.
+
+    ALL the disk I/O happens in the one `try` below, in one pass — list, `lstat`, resolve,
+    `is_file`, read the bytes — and NOTHING else in this module touches the tree. What that
+    buys: the wrap's one `except` is the complete statement of "the host could not read the
+    tree", because the only other thing that can go wrong — the bytes not parsing — happens
+    AFTER it, off bytes in memory, and is a fact about the file recorded per file
+    (`unparsed`) rather than an exception to type-classify. The earlier shape read text and
+    parsed inside the same wrap, where `UnicodeDecodeError` (a `ValueError`, neither
+    `OSError` nor `SyntaxError`) escaped every consumer untyped and a parser's
+    `RecursionError` (a `RuntimeError`) was reported as "the directory cannot be read".
 
     One primitive, consumed: `os.scandir` raises `OSError` for a path that is absent, a
     regular file, or unreadable — where `Path.glob` yields `[]` for all three and raises
-    for none (#1031 O2). Listing and reading are deliberately NOT two calls: a directory
-    validated by one and read by another can go between them, and the second answers an
-    empty roster with nothing said.
+    for none (#1031 O2). Listing, resolving and reading are deliberately NOT separate calls
+    with separate guards: a directory validated by one and read by another can go between
+    them, and the second answers an empty roster with nothing said.
 
     `lstat` on every listed entry, explicitly: listing needs the directory's READ bit and
     resolving an entry inside it needs its SEARCH bit, and a directory with the first but
-    not the second lists fine and then refuses every `_adapter_path` below — as a raise on
-    3.11-3.13 and, from 3.14 (where `Path.is_file` swallows `EACCES`), as a silent empty
-    roster with every real adapter reported as refused. The `lstat` needs exactly the second
-    bit and raises on every version. `follow_symlinks=False` so a dangling symlink is not
-    that fault: `_adapter_path` drops it as it always has.
+    not the second lists fine and then refuses every `_adapter_path_under` below — as a
+    raise on 3.11-3.13 and, from 3.14 (where `Path.is_file` swallows `EACCES`), as a silent
+    empty roster with every real adapter reported as refused. The `lstat` needs exactly the
+    second bit and raises on every version. `follow_symlinks=False` so a dangling symlink is
+    not that fault: `_adapter_path_under` drops it as it always has.
 
-    `_adapter_path`, not `is_system_name` alone, as the filter: shape is only half of what
-    makes a name dispatchable. `_system_of` maps `_`->`-` and the inverse is NOT onto — a
-    `change-mgmt_adapter.py` (hyphen in the FILENAME) derives the well-formed name
-    `change-mgmt`, which `_adapter_path` looks for at `change_mgmt_adapter.py` and does not
-    find; so does a DIRECTORY named `foo_adapter.py`, which the listing yields and
-    `is_file()` refuses. Keyed by name for the same reason: two filenames can derive one
-    system, and a roster naming it twice is not a set.
+    `_adapter_path_under`, not `is_system_name` alone, as the filter: shape is only half of
+    what makes a name dispatchable. `_system_of` maps `_`->`-` and the inverse is NOT onto —
+    a `change-mgmt_adapter.py` (hyphen in the FILENAME) derives the well-formed name
+    `change-mgmt`, which the seam looks for at `change_mgmt_adapter.py` and does not find;
+    so does a DIRECTORY named `foo_adapter.py`, which the listing yields and `is_file()`
+    refuses. Keyed by name for the same reason: two filenames can derive one system, and a
+    roster naming it twice is not a set.
 
-    The filter sits INSIDE the one wrap, because it touches the disk too (`resolve`,
-    `is_file`) and what it can raise there is the same "cannot read" fault under another
-    name: an adapter symlinked into a subdirectory this process cannot search is
-    `PermissionError` out of `is_file` on 3.11-3.13, and a symlink loop named like an
-    adapter is what `Path.resolve` spells as `RuntimeError` on 3.11/3.12 (`resolve` stops
-    raising for a loop at 3.13, and `is_file` then drops the entry; `is_file` stops raising
-    `EACCES` at 3.14). Outside the wrap each escaped untyped — past `VerbResolver`'s one-type
-    wrap and the lead author's dead-letter class alike."""
+    `RuntimeError` in the wrap is `Path.resolve`'s spelling of a symlink loop on 3.11/3.12
+    (`resolve` stops raising for a loop at 3.13, and `is_file` then drops the entry;
+    `is_file` stops raising `EACCES` at 3.14); an adapter symlinked into a subdirectory this
+    process cannot search is `PermissionError` out of `is_file` on 3.11-3.13, and an adapter
+    file with no read bit is `PermissionError` out of `read_bytes` on every version. Each is
+    the same "cannot read" fault under another name, and the message names the file when
+    the fault was one file's."""
     adapters_dir = Path(adapters_dir)
     try:
         with os.scandir(adapters_dir) as it:
             entries = [e for e in it if e.name.endswith(ADAPTER_SUFFIX)]
         for entry in entries:
             entry.stat(follow_symlinks=False)
+        root = adapters_dir.resolve()
         accepted: dict[str, Path] = {}
+        sources: dict[str, bytes] = {}
         refused: list[str] = []
         for name in sorted({_system_of(Path(entry.name)) for entry in entries}):
-            path = _adapter_path(adapters_dir, name)
+            path = _adapter_path_under(root, name)
             if path is None:
                 refused.append(name)
             else:
                 accepted[name] = path
+                sources[name] = path.read_bytes()
     except (OSError, RuntimeError) as e:
-        raise RegistryError(
-            f"adapters directory {adapters_dir} cannot be read "
-            f"({getattr(e, 'strerror', None) or e})"
-        ) from e
-    return RosterRead(accepted, tuple(refused))
+        raise RegistryError(_cannot_read(adapters_dir, e)) from e
+    declared: dict[str, frozenset[str]] = {}
+    unparsed: dict[str, str] = {}
+    for name, source in sources.items():
+        declared[name], why = _verb_names_in(source, accepted[name])
+        if why is not None:
+            unparsed[name] = why
+    return RosterRead(
+        root=adapters_dir,
+        accepted=types.MappingProxyType(accepted),
+        verbs=types.MappingProxyType(declared),
+        unparsed=types.MappingProxyType(unparsed),
+        refused=tuple(refused),
+    )
 
 @dataclass(frozen=True)
 class VerbDecision:
@@ -610,31 +672,34 @@ class VerbRegistry:
 
 class ModuleVerbRegistry(VerbRegistry):
 
-    def __init__(self, adapters_dir: Path, grant: VerbGrant):
+    def __init__(self, roster: RosterRead, grant: VerbGrant):
         super().__init__(grant)
-        self.adapters_dir = Path(adapters_dir)
-        # THE ROSTER, read ONCE, here, and FIRST — before the grant check, so a directory that
-        # cannot be read fails as what it is (`RegistryError`, from `read_roster`) rather than
-        # as the grant's fault ("names verb(s) the adapters do not declare" for a tree that was
-        # never read), and fails under `DENY_ALL` too, which has no entries for the grant check
-        # to fail on (#1031 O2). Name -> the adapter file that dispatches it: every later
+        # THE ROSTER, taken as a VALUE — the one `read_roster` produced where this process
+        # started — never a directory to read here. A tree that cannot be read fails at that
+        # read, as what it is (`RegistryError`), before any registry exists and before the
+        # grant check below could re-file it as the grant's fault ("names verb(s) the adapters
+        # do not declare" for a tree that was never read), and it fails under `DENY_ALL` too,
+        # which has no entries for the grant check to fail on (#1031 O2). Every later
         # question — `systems()`, `verbs()`, the cold verb read `decide` refuses through — is
-        # answered from this map and touches the directory no further. An adapters tree does
-        # not change under a live registry; `verbs()` memoizes the loaded module on the same
-        # assumption, and a tree removed under one is unsupported, not a runtime event to
-        # record (#1017 D4's apparatus for exactly that is gone with #1031). A snapshot is also
-        # the only CORRECT answer for the directory this constructor validated: a per-call
-        # read over a removed tree answers "nothing there" without raising, and a declared
+        # answered from the record and touches the directory no further. An adapters tree
+        # does not change under a live registry; `verbs()` memoizes the loaded module on the
+        # same assumption, and a tree removed under one is unsupported, not a runtime event
+        # to record (#1017 D4's apparatus for exactly that is gone with #1031). A snapshot is
+        # also the only CORRECT answer for the directory the read validated: a per-call read
+        # over a removed tree answers "nothing there" without raising, and a declared
         # system's rejection gets coarsened to a ghost's.
-        self._adapters: dict[str, Path] = read_roster(self.adapters_dir).accepted
+        #
+        # Nominally typed, like the grant: a `Path` here is a caller that still spells the
+        # read for itself, and `AttributeError` on `.accepted` would name the symptom.
+        if not isinstance(roster, RosterRead):
+            raise TypeError(
+                f"a ModuleVerbRegistry takes the RosterRead `read_roster` produced, got "
+                f"{type(roster).__name__} — read the adapters directory once where the "
+                "process starts and hand the value down"
+            )
+        self.roster = roster
+        self._adapters: Mapping[str, Path] = roster.accepted
         self._systems: tuple[str, ...] = tuple(sorted(self._adapters))
-        # The cold cache `_cold_verb_names` fills — one read+parse per SYSTEM, not per grant
-        # entry (the shipped gather grant names 30 entries across 8 systems), which the load
-        # check below is what first fills. Kept rather than thrown away after it: since #995
-        # `decide` also cold-reads on the refusal path for a system the grant does not reach
-        # at all, which a model looping on one ungranted name would otherwise pay a fresh
-        # read+parse for on every call.
-        self._cold: dict[str, frozenset[str]] = {}
         # THE registry that resolves a real adapters tree, which is the deployment shape the
         # disposition table governs — every grant reaching this constructor that a model ever
         # calls through is one the table projects — so a refusal from here may name the table
@@ -659,34 +724,23 @@ class ModuleVerbRegistry(VerbRegistry):
             named = ", ".join(f"{s}.{v}" for s, v in offenders)
             raise GrantError(
                 f"verb_grant for role {grant.role!r} names verb(s) the adapters under "
-                f"{self.adapters_dir} do not declare: {named}"
+                f"{roster.root} do not declare: {named}"
             )
 
     def systems(self) -> tuple[str, ...]:
-        """The roster read at construction (`read_roster`), and nothing else: no I/O, no raise.
-        See `VerbRegistry.systems` for the contract this keeps."""
+        """The roster this registry was built over (`read_roster`'s value), and nothing else:
+        no I/O, no raise. See `VerbRegistry.systems` for the contract this keeps."""
         return self._systems
 
     def _cold_verb_names(self, system: str) -> frozenset[str]:
         # Never `None`: this subclass always HAS a cold source (the roster), so the base
-        # class's "no cold source, fall back to `verbs()`" answer is not one it gives.
-        if system in self._cold:
-            return self._cold[system]
-        # Only a name ON THE ROSTER is remembered, which is what bounds this dict by the tree.
-        # Since #995 `decide` cold-reads on the refusal path for a system the grant reaches
-        # nowhere, and `system` there is unbounded model text straight off the `query` tool's
-        # arguments — so remembering every name asked about lets a model grow the dict
-        # without limit, keyed on strings it chose. Well-formedness is NOT that bound:
-        # `is_system_name` admits every lowercase-alphanumeric string up to `SYSTEM_MAX_LEN`,
-        # so a model looping on `sys0`, `sys1`, … grows it just as freely. Roster membership
-        # is the bound, and it costs nothing: a name off the roster reads no file, so there
-        # is no parse to save by caching its empty answer.
-        path = self._adapters.get(system)
-        if path is None:
-            return frozenset()
-        names = _declared_verb_names_at(path)
-        self._cold[system] = names
-        return names
+        # class's "no cold source, fall back to `verbs()`" answer is not one it gives. The
+        # roster carries the cold read for every accepted system already — one parse per
+        # system, done where the roster was read — so a name off it declares nothing and
+        # nothing is remembered per question. That bound matters: since #995 `decide`
+        # cold-reads on the refusal path for a system the grant reaches nowhere, and `system`
+        # there is unbounded model text straight off the `query` tool's arguments.
+        return self.roster.declared_verbs(system)
 
     def verbs(self, system: str) -> Mapping[str, Verb]:
         # From the roster, never the disk: a name `systems()` declares is a name that
@@ -721,7 +775,6 @@ __all__ = [
     "body_param_for",
     "body_param_of",
     "declared_params",
-    "declared_verb_names",
     "engine_for",
     "engine_of",
     "is_system_name",

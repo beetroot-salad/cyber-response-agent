@@ -31,7 +31,7 @@ did not name them would leave the seam unpinned:
     naming the source, which is the only thing closing R6's log sink on this path.
   - the shape half is `runtime.verbs.is_system_name(name: str) -> bool` — #868's check, which
     #914 folded into the ONE system-name predicate the dispatch seam already had, so a name
-    this resolver declares is a name `_adapter_path` will also resolve. Lowercase letters,
+    this resolver declares is a name `_adapter_path_under` will also resolve. Lowercase letters,
     digits and hyphens, bounded by `verbs.SYSTEM_MAX_LEN`; membership stays a separate
     question, so `gather` and `fakesys` are well-formed and simply undeclared.
 * `defender/_paths.py::DefenderPaths` gains `adapters_dir` (and its `adapters_rel` spelling),

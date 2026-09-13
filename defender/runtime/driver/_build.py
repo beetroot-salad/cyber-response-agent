@@ -136,10 +136,10 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     if defn.tools.query or defn.tools.list_verbs:
         from defender._paths import PATHS
 
-        from ..verbs import VerbRegistry
+        from ..verbs import VerbRegistry, read_roster
 
         if verbs is None:
-            verbs = ModuleVerbRegistry(PATHS.defender_dir / "scripts" / "adapters", defn.verb_grant)
+            verbs = ModuleVerbRegistry(read_roster(PATHS.adapters_dir), defn.verb_grant)
         if not isinstance(verbs, VerbRegistry):
             raise TypeError(
                 f"a verb-bearing tool needs a real VerbRegistry, got {type(verbs).__name__} — a "

@@ -1,5 +1,5 @@
 """Substrate for the #1035 pins (`test_1035_one_roster_read.py`): the generalised
-drop-to-`nobody` instrument, and the surface under test that does not exist yet.
+drop-to-`nobody` instrument, and the surface under test.
 
 WHY A SECOND INSTRUMENT. `_declared869.unreadable_dir_verdict` is the right idea and the wrong
 shape for this issue: it hardcodes the probe (`declared_systems(root)`, the union), the mode
@@ -35,25 +35,9 @@ from pathlib import Path
 
 from defender.tests._declared869 import _hand_tree_to_nobody, _NOBODY, _reclaim_tree
 
-# THE SURFACE UNDER TEST — the roster primitive #1035 M1 lifts out of
-# `ModuleVerbRegistry._read_roster`. It does not exist on this base (RED by construction).
-try:  # pragma: no cover — the post-implementation branch
-    from defender.runtime.verbs import read_roster  # type: ignore[attr-defined]
-except ImportError as _err:  # pragma: no cover — the pre-implementation state
-    _missing_target = _err
-
-    def read_roster(adapters_dir: Path):
-        """Stand in for the not-yet-written primitive.
-
-        NOT a skip and NOT a soften: calling it raises, so each test fails loudly on its own.
-        The indirection exists only so the missing target does not abort pytest's whole
-        collection and take the rest of the tree's suite down with it."""
-        raise ImportError(
-            "defender.runtime.verbs.read_roster does not exist yet — "
-            "test_1035_one_roster_read.py is the executable spec for it. "
-            f"Original: {_missing_target}"
-        )
-
+# THE SURFACE UNDER TEST — the roster primitive (#1035), re-exported so the suite and its
+# substrate name one symbol.
+from defender.runtime.verbs import read_roster  # noqa: F401 — re-exported to the suite
 
 #: The child's exit codes. Distinct on purpose: a red run must say WHAT happened in the child,
 #: and "raised something other than the expected class" is this issue's own defect, not a
@@ -167,13 +151,23 @@ def handed_to_nobody(root: Path, target: Path, mode: int) -> Iterator[None]:
     tree, and a setup failure is not a refusal. `mode` is the whole point of the parameter —
     `0o400` is the listable-but-unsearchable arm (#1035's own), `0o000` the cannot-list arm,
     `0o755` the readable positive control."""
+    # The handover sits INSIDE the `try`, and the reclaim is what the `finally` guarantees:
+    # a `chmod` that fails on the way out (a `target` the probe removed — the drain's
+    # `reset --hard` + `clean` over a handed-over repo does exactly that) must not skip it,
+    # or the subtree stays owned by `nobody` and every later test in this worker that reuses
+    # the parent directory meets foreign-owned files. So the restore is best-effort and the
+    # reclaim runs regardless.
     as_root = os.geteuid() == 0
-    if as_root:
-        _hand_tree_to_nobody(root)
-    target.chmod(mode)
     try:
+        if as_root:
+            _hand_tree_to_nobody(root)
+        target.chmod(mode)
         yield
     finally:
-        target.chmod(0o755)
-        if as_root:
-            _reclaim_tree(root)
+        try:
+            target.chmod(0o755)
+        except FileNotFoundError:
+            pass
+        finally:
+            if as_root:
+                _reclaim_tree(root)

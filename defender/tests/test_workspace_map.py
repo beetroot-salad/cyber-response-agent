@@ -19,7 +19,7 @@ wm = load_module(DEFENDER / "scripts" / "workspace_map.py")
 
 
 def test_canonical_sections_present(tmp_path: Path):
-    out = wm.workspace_map(tmp_path)
+    out = wm.workspace_map(tmp_path, systems=())
     for header in (
         "# Workspace map",
         "## Absolute roots",
@@ -36,7 +36,7 @@ def test_no_credential_signal(tmp_path: Path):
     or env-var signal — no `.env` path, no MISSING/SET status, no secret
     var names. The run-dir path is masked first so a tmp dir named after
     this test can't inject a token."""
-    out = wm.workspace_map(tmp_path).replace(str(tmp_path), "RUNDIR").lower()
+    out = wm.workspace_map(tmp_path, systems=()).replace(str(tmp_path), "RUNDIR").lower()
     for token in (".env", "missing", "elastic_password", "elasticsearch_url",
                   "password", "credential", "watched_env", "source it"):
         assert token not in out, f"credential signal leaked into map: {token!r}"
@@ -44,7 +44,7 @@ def test_no_credential_signal(tmp_path: Path):
 
 def test_run_dir_contents_listed(tmp_path: Path):
     (tmp_path / "alert.json").write_text("{}")
-    out = wm.workspace_map(tmp_path)
+    out = wm.workspace_map(tmp_path, systems=())
     assert "alert.json" in out
 
 
@@ -57,10 +57,10 @@ def test_gather_raw_suppressed(tmp_path: Path):
     gr = tmp_path / "gather_raw"
     gr.mkdir()
     (gr / "l-001.lead.json").write_text("{}")
-    out = wm.workspace_map(tmp_path).replace(str(tmp_path), "RUNDIR")
+    out = wm.workspace_map(tmp_path, systems=()).replace(str(tmp_path), "RUNDIR")
     assert "alert.json" in out
     assert "gather_raw" not in out
 
 
 def test_output_ends_with_newline(tmp_path: Path):
-    assert wm.workspace_map(tmp_path).endswith("\n")
+    assert wm.workspace_map(tmp_path, systems=()).endswith("\n")

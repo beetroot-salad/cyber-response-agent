@@ -35,7 +35,6 @@ from defender._untrusted import wrap_fresh
 # test in `_close_investigation_async`, the ordered tuple for the argument schema below.
 from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
-from defender.runtime.verbs import RegistryError
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.schema import CompanionBody
 from defender.skills.invlang.validate import (
@@ -684,13 +683,7 @@ def _refuse_if_entry_price_is_owed(
         companion = CompanionBody()
     try:
         price = entry_price(disposition, companion)
-    except (ModelRetry, RegistryError):
-        # `RegistryError`: the `nothing-to-try` arm read an adapters directory this process
-        # cannot read (#1035). That is the host's fault, not the document's, and a `ModelRetry`
-        # here would tell the model to repair a document with nothing wrong in it until the
-        # retry budget forced an `unresolved` close with the cause named nowhere. It leaves
-        # the close as itself and ends the run, the way the same fault out of the registry at
-        # run setup already does.
+    except ModelRetry:
         raise
     except Exception as exc:
         raise ModelRetry(

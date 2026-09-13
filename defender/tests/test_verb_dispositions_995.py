@@ -27,7 +27,7 @@ import pytest
 
 from defender._paths import PATHS, adapters_under
 from defender.runtime.verb_grant import VerbGrant
-from defender.runtime.verbs import ModuleVerbRegistry, declared_verb_names
+from defender.runtime.verbs import ModuleVerbRegistry, read_roster
 from defender.tests._dispositions995 import (
     GATHER_CENSUS,
     WITHHELD_CENSUS,
@@ -57,7 +57,8 @@ def _walk(defender_dir: Path, systems: tuple[str, ...]) -> dict[str, frozenset[s
     Handed the system names explicitly rather than resolved, so a test states which systems
     it planted and the assertion is against that statement.
     """
-    return {s: declared_verb_names(adapters_under(defender_dir), s) for s in systems}
+    roster = read_roster(adapters_under(defender_dir))
+    return {s: roster.declared_verbs(s) for s in systems}
 
 
 # =========================================================================================
@@ -507,7 +508,7 @@ def test_every_projected_pair_survives_registry_construction():
     rows = load_dispositions(dispositions_path(DEFENDER))
     grant = grant_for("gather", rows)
     assert grant.entries, "an empty grant would pass every phantom check vacuously"
-    ModuleVerbRegistry(ADAPTERS, grant)  # raises GrantError if any pair is phantom
+    ModuleVerbRegistry(read_roster(ADAPTERS), grant)  # raises GrantError if any pair is phantom
 
 
 # =========================================================================================
@@ -726,7 +727,7 @@ def test_an_ungranted_systems_real_verb_keeps_the_unresolvable_label():
         role="gather",
         entries=tuple((s, v, "r") for s, v in GATHER_CENSUS if s != "cmdb"),
     )
-    reg = ModuleVerbRegistry(ADAPTERS, grant)
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant)
     assert reg.decide("cmdb", "list-hosts").outcome == "UNDECLARED"
 
 
@@ -741,7 +742,7 @@ def test_the_ungranted_system_refusal_differs_from_a_typo_refusal():
         role="gather",
         entries=tuple((s, v, "r") for s, v in GATHER_CENSUS if s != "cmdb"),
     )
-    reg = ModuleVerbRegistry(ADAPTERS, grant)
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant)
     real = reg.decide("cmdb", "list-hosts")   # declared by the adapter, granted to nobody
     typo = reg.decide("cmdb", "list-hostz")   # declared by nothing
 
@@ -771,7 +772,7 @@ def test_a_typo_on_a_granted_system_is_told_apart_from_a_typo_on_an_ungranted_on
     """The third case, which the two above do not cover between them: an unreal verb on a
     system the grant DOES reach. It must not borrow the ungranted-system wording either."""
     rows = load_dispositions(dispositions_path(DEFENDER))
-    reg = ModuleVerbRegistry(ADAPTERS, grant_for("gather", rows))
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
     near_miss = reg.decide("cmdb", "list-hostz")
     assert near_miss.outcome == "UNDECLARED"
     assert "verb-grants.yaml" not in (near_miss.refusal or "")
@@ -780,7 +781,7 @@ def test_a_typo_on_a_granted_system_is_told_apart_from_a_typo_on_an_ungranted_on
 def test_a_withheld_verb_on_a_granted_system_is_still_denied():
     """Unchanged behaviour, pinned so the O2 fix does not reshuffle the existing taxonomy."""
     rows = load_dispositions(dispositions_path(DEFENDER))
-    reg = ModuleVerbRegistry(ADAPTERS, grant_for("gather", rows))
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
     assert reg.decide("cmdb", "list-roles").outcome == "DENIED"
 
 
@@ -788,7 +789,7 @@ def test_an_unknown_system_entirely_is_still_undeclared():
     """The boundary of the O2 change: a system with no adapter at all must not be reported as
     'denied', which would tell a caller it exists."""
     rows = load_dispositions(dispositions_path(DEFENDER))
-    reg = ModuleVerbRegistry(ADAPTERS, grant_for("gather", rows))
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
     assert reg.decide("nosuchsystem", "anything").outcome == "UNDECLARED"
 
 

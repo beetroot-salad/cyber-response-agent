@@ -39,7 +39,7 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
     PER_SYSTEM_FAIL_LIMIT,
 )
 from defender.runtime.query_tool import DEFAULT_FAULT_EXIT, QueryCapture  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
+from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests._declared869 import write  # noqa: E402
@@ -90,7 +90,7 @@ def _real_registry(tmp_path: Path) -> tuple[Path, ModuleVerbRegistry]:
     """A real `ModuleVerbRegistry` over a real adapters directory declaring `elastic`."""
     adapters = tmp_path / "adapters"
     write(adapters / "elastic_adapter.py", ELASTIC_ADAPTER)
-    return adapters, ModuleVerbRegistry(adapters, GRANT)
+    return adapters, ModuleVerbRegistry(read_roster(adapters), GRANT)
 
 
 def _reached(r: _Res) -> bool:

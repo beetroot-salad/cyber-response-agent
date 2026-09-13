@@ -698,7 +698,7 @@ def test_d14_map_names_no_template_and_no_draft_filename():
     model-coined verb minted from attacker-influenced alert data (draft_synthesis.py:187), so it
     is an untagged channel into the main prompt. Main dispatches leads by SYSTEM, never by
     template: the filenames were never actionable there."""
-    out = wsm.workspace_map(Path("/tmp/does-not-matter"))
+    out = wsm.workspace_map(Path("/tmp/does-not-matter"), systems=())
 
     section = out.split("## Gather query templates", 1)[1]
     assert "## Gather query templates" in out
@@ -710,7 +710,7 @@ def test_d14_map_names_no_template_and_no_draft_filename():
 def test_d14_positive_control_the_map_carries_per_system_counts():
     """Positive control for d14: the section is not simply empty — it still names every system,
     with counts that match the corpus on disk."""
-    out = wsm.workspace_map(Path("/tmp/does-not-matter"))
+    out = wsm.workspace_map(Path("/tmp/does-not-matter"), systems=())
     section = out.split("## Gather query templates", 1)[1].split("\n##", 1)[0]
 
     rows = list(_corpus.iter_query_templates(_REAL_CATALOG))

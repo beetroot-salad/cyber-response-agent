@@ -14,7 +14,6 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import read_text_utf8, write_guarded
-from defender.runtime.verbs import RegistryError
 from .. import permission
 
 # The SAME byte ruler the artifact bounds are measured with — a write tool that reports
@@ -45,8 +44,6 @@ def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
     An unreadable or undecodable `investigation.md` is an unrelated fault; converting it into
     "every write and the close are refused" would manufacture the unclosable run this mechanism
     exists to avoid. `append_block` still refuses an undecodable document for its own reason.
-    The one exception is `RegistryError` — an adapters directory this process cannot read
-    (#1035) — which is the host's fault and propagates from every reader here.
 
     A warn diagnostic carrying NO `locus` is not in the window: the window is the set of rows
     `fix_row` can address, so counting a locus-less finding would refuse the append AND the
@@ -61,11 +58,6 @@ def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
         return ()
     try:
         return _addressable(warn_diagnostics(read_text_utf8(p)))
-    except RegistryError:
-        # An adapters directory this process cannot read (#1035) is the host's fault, not the
-        # document's: "no window open" is not an answer to it, and the write gate and the
-        # close raise it out of the run anyway. Every fail-open arm below is the same.
-        raise
     except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
         print(
             f"[tools] repair-window derivation failed, treating it as empty: {e!r}",
@@ -177,8 +169,6 @@ def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
             if d.locus is not None and d.locus.row_text
             and d.locus.block == REPAIRABLE_BLOCK
         )
-    except RegistryError:
-        raise
     except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
         print(
             f"[tools] repair-set derivation failed, treating it as empty: {e!r}",

@@ -10,7 +10,6 @@ import datetime as dt
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any
 
 import yaml
@@ -18,6 +17,7 @@ import yaml
 from defender import _clock
 from defender._text import strip_zero_width
 from defender._vocab import DISPOSITION_ENUM
+from defender.runtime.verbs import RosterRead
 from .. import _walkers, vocab
 from ..parser import (
     is_conclude_empty_marker,
@@ -790,35 +790,78 @@ def _parse_ceiling_row(row: str) -> CeilingReceipt | None:
 
 
 #: `defender/scripts/adapters/*_adapter.py` — the closed universe of `(system, verb)` pairs
-#: this codebase can dispatch through AT ALL, read COLD (no adapter imported) the same way
-#: `runtime.verb_roster`'s own audit reads it. This is the roster `nothing-to-try` is checked
+#: this codebase can dispatch through AT ALL, read COLD (no adapter imported) by the one
+#: roster read (`runtime.verbs.read_roster`). This is the roster `nothing-to-try` is checked
 #: against, and it is closed BY CONSTRUCTION: it is code this repo owns, never a catalogue of
 #: data sources that exist in the world — enumerating those (internal applications included) is
 #: exactly what the #923 design discussion rejected as unmaintainable.
-@lru_cache(maxsize=1)
-def _known_capabilities() -> Mapping[str, frozenset[str]]:
-    from defender._git import REPO_ROOT
-    from defender.runtime.verbs import declared_verb_names, read_roster
+#:
+#: HELD, never fetched. This module does not read the tree: the process that starts reads the
+#: checkout's roster ONCE, at its own frame, and hands the value here (`hold_capabilities`)
+#: before any document is validated. A process that never did is a defect, and
+#: `known_capabilities` says so rather than reading the tree for itself — the earlier shape
+#: was an `lru_cache` that read lazily on first use, so whichever guard on the document's path
+#: asked first caught the host's fault and re-filed it as the document's, and a process that
+#: forgot to prime it reverted to that silently. `RosterRead`, not its `verbs` map, so the
+#: holder is the same object the run's registry and catalogs hold and the equality is by
+#: identity, not agreement.
+_CHECKOUT_ROSTER: RosterRead | None = None
 
-    adapters_dir = REPO_ROOT / "defender" / "scripts" / "adapters"
-    # `read_roster`, the dispatch seam's own read (#1035): a directory this process cannot
-    # read — absent, unlistable, listable but not searchable — RAISES `RegistryError` out of
-    # here and out of the close tool, and fails the run. It used to answer `{}`, under which
-    # every `cap` "does not exist" and every `nothing-to-try` receipt pays: a fault turned
-    # into the most permissive answer, and cached for the process lifetime. The directory is
-    # this checkout's own, so "absent" is a fault too, not an empty roster. Not a validation
-    # diagnostic against the document: an unreadable repo tree is not the document's fault,
-    # and a diagnostic would let the run continue on a roster it does not have. And the
-    # primitive's filter is `_adapter_path`, not shape alone, so a filename the seam cannot
-    # dispatch (`change-mgmt_adapter.py`) no longer makes `cap=change-mgmt` "exist".
-    systems = read_roster(adapters_dir).accepted
-    return {s: declared_verb_names(adapters_dir, s) for s in systems}
+
+class CapabilitiesNotRead(RuntimeError):
+    """`known_capabilities` was asked before this process read the checkout's roster — the
+    composition root did not call `hold_capabilities`. Not a document diagnostic and not a
+    `RegistryError`: nothing was read and refused; nothing was read at all."""
+
+
+def hold_capabilities(roster: RosterRead) -> None:
+    """Hand the gate the checkout's roster — `read_roster(DefenderPaths(REPO_ROOT).adapters_dir)`,
+    or the run's own roster when the run's tree IS the checkout's (`run_investigation` passes
+    whichever applies, having read once). Called once, at the process's start; a later call
+    replaces the value, which is what a test harness driving several checkouts through one
+    process needs and what no production entry point does."""
+    if not isinstance(roster, RosterRead):
+        raise TypeError(
+            f"hold_capabilities takes the RosterRead `read_roster` produced, got "
+            f"{type(roster).__name__}"
+        )
+    global _CHECKOUT_ROSTER
+    _CHECKOUT_ROSTER = roster
+
+
+def release_capabilities() -> None:
+    """Forget the held roster — for a test that must observe the unheld state, or that pointed
+    the gate at a fixture and must not leak it to the next test in the worker."""
+    global _CHECKOUT_ROSTER
+    _CHECKOUT_ROSTER = None
+
+
+def known_capabilities() -> Mapping[str, frozenset[str]]:
+    """System -> the verb names its adapter declares, for the CHECKOUT this process runs from
+    — the `verbs` map of the roster `hold_capabilities` was handed. Raises
+    `CapabilitiesNotRead` when it was not.
+
+    The CHECKOUT's tree (`REPO_ROOT`), deliberately not the run's `defender_dir`: this is the
+    universe the price is closed over, and it is closed because this repository owns it. The
+    read that can fail — a directory this process cannot read: absent, unlistable, listable
+    but not searchable, or holding an adapter file it cannot open — fails at the composition
+    root as `RegistryError`, the way the run's own roster read does, never inside a guard on
+    the document's path (the write gate's fail-closed wrap, the close's price wrap, the
+    prepare-time repair window), which would re-file the host's fault as the model's. The
+    directory is this checkout's own, so "absent" is a fault too, not an empty roster."""
+    if _CHECKOUT_ROSTER is None:
+        raise CapabilitiesNotRead(
+            "the checkout's adapters roster was never read: the process's composition root "
+            "must `read_roster` it once and `hold_capabilities` the value before any "
+            "document is validated"
+        )
+    return _CHECKOUT_ROSTER.verbs
 
 
 def _capability_exists(cap: str) -> bool:
     """Does `cap` name a REAL `system` or `system.verb` this deployment's adapters declare?
     `nothing-to-try` pays only when this is False."""
-    known = _known_capabilities()
+    known = known_capabilities()
     system, sep, verb = cap.partition(".")
     if sep:
         return verb in known.get(system, frozenset())

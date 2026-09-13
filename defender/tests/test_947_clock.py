@@ -51,6 +51,7 @@ from defender import _clock  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.branch.estate.registry import EstateError, WorldRegistry  # noqa: E402
+from defender.runtime.verbs import read_roster  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     BASE_FILENAME,
     PASSTHROUGH,
@@ -413,7 +414,7 @@ def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock
     the second is what separates "the clock was threaded" from "the adapter stamped something
     that happened to be a timestamp"."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(REAL_ADAPTERS, GATHER_GRANT, world=World("w1"),
+    reg = WorldRegistry(read_roster(REAL_ADAPTERS), GATHER_GRANT, world=World("w1"),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     payload = reg.verbs("host-state")["proc-tree"](ctx, host="web-1")
@@ -440,7 +441,7 @@ def test_the_clock_rides_every_served_call_staged_or_not(tmp_path):
     The context arrives NAMING NO MOMENT, as `query_tool.py` builds it — so both `as_of` values
     below are the registry's own work and not the fixture's."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT,
+    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT,
                         world=World("w1", ("elastic",)), ledger=primed_ledger(tmp_path),
                         as_of=T0)
 
@@ -468,7 +469,7 @@ def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
     carrying a second identity identical to its first, the pairing column that exists to survive
     staging reduced to noise, and `restore` running over payloads nothing staged."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("A", ("cmdb",)),
+    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -491,7 +492,7 @@ def test_a_staged_call_still_records_the_two_identities_it_always_did(tmp_path):
     "an unstaged call records one identity" and lose the cross-world pairing entirely."""
     ctx = docker_ctx(tmp_path)
     body = "FROM logs-system.auth-*\n| LIMIT 5"
-    reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("a", ("elastic",)),
+    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("a", ("elastic",)),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     reg.verbs("elastic")["esql"](ctx, query=body)
@@ -529,7 +530,7 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
 
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("w1"),
+    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     payload = reg.verbs("cmdb")["get-host"](
@@ -561,7 +562,7 @@ def test_a_registry_refuses_a_clock_that_cannot_honestly_spell_z(tmp_path, as_of
     a property of the clock, not of a call, and per-call it reads as a sibling that asked
     nothing."""
     with pytest.raises(EstateError):
-        WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("w1"),
+        WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                       ledger=primed_ledger(tmp_path), as_of=as_of)
 
 
@@ -582,7 +583,7 @@ def test_a_zero_offset_zone_that_is_not_utc_itself_is_accepted(tmp_path):
         def tzname(self, moment):
             return "UTC"
 
-    reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("w1"),
+    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                         ledger=primed_ledger(tmp_path),
                         as_of=dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=ZeroOffset()))
 
@@ -600,7 +601,7 @@ def test_a_registry_will_not_serve_without_being_told_which_moment_it_serves(tmp
     forgot the clock would keep working and keep minting wall-clock stamps, which is precisely
     the state the batch is removing, with nothing red to show for it."""
     with pytest.raises(TypeError):
-        WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("w1"),
+        WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                       ledger=primed_ledger(tmp_path))
 
 
