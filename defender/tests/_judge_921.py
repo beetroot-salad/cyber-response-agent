@@ -42,10 +42,13 @@ FOUR THINGS LIVE HERE AND NOTHING ELSE.
      `learning.core.config.RunUnprocessable`, never a sentinel and never a hang, separable only
      by the `did not complete:` / `failed:` prefix and by `__cause__`. A draw handler cannot
      branch on exception type, so this fake raises the one class both ways.
-   * `malformed="fenced-with-prose"` — C12, EXECUTED over 45 real K3 replies: a reply arrives
-     fenced in a ```yaml block with prose before it; 7/20 needed the lenient parser under the
-     earlier prompt and 15/15 parsed strictly once the prompt required quoting scalars with
-     colons.
+   * (RETIRED BY #1018) `malformed="fenced-with-prose"` — C12, EXECUTED over 45 real K3
+     replies: a reply arrived fenced in a ```yaml block with prose before it; 7/20 needed a
+     lenient parser under the earlier prompt and 15/15 parsed strictly once the prompt required
+     quoting scalars with colons. The lenient parse is gone: a reply is ONE BARE DOCUMENT or it
+     is malformed (`learning/core/validate.py::reply_document_text`), and prose around a fence
+     is a refusal at the consumer. The shape and its answer are pinned in
+     `tests/test_1018_reply_document.py`; this fixture no longer spells it.
    * `malformed="not-a-mapping"` / `"lookalike-bucket"` — dispositions §1, the two reply shapes
      the consensus set records as decided.
    * `source="fault"` on a ledger row — A5, EXECUTED (`47-probe-a5.py`): a missing `config.env`
@@ -481,11 +484,14 @@ def reply_doc(*, episode_outcome: str = "gradable", findings: list[dict] | None 
 
 
 def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
-    """A `JudgeReply` document as the TEXT a model seam returns.
+    """A `JudgeReply` document as the TEXT a model seam returns — BARE, the one shape the
+    parser accepts (#1018).
 
     `malformed=` names a reply SHAPE, each spelling citing the claim that observed it:
-    `"fenced-with-prose"` (C12, 45 real K3 replies), `"not-a-mapping"` and
-    `"lookalike-bucket"` (dispositions §1's consensus rows).
+    `"not-a-mapping"` and `"lookalike-bucket"` (dispositions §1's consensus rows). The
+    `"fenced-with-prose"` spelling (C12) is retired: under #1018 that shape is a refusal, not a
+    reply to be recovered, and the tests that pin it build the text themselves
+    (`tests/test_1018_reply_document.py`).
     """
     import yaml
 
@@ -494,11 +500,7 @@ def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
     if malformed == "lookalike-bucket":
         doc = dict(doc)
         doc["findings"] = [dict(finding_doc(), bucket="Lead-Set")]
-    body = yaml.safe_dump(doc, sort_keys=True)
-    if malformed == "fenced-with-prose":
-        return ("Here is my grading of the world, following the three passes you asked for.\n\n"
-                f"```yaml\n{body}```\n\nLet me know if you want the derivation table expanded.")
-    return body
+    return yaml.safe_dump(doc, sort_keys=True)
 
 
 # --------------------------------------------------------------------------------------

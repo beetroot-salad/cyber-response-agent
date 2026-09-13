@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
+from defender._yaml import safe_load
 from defender.learning import loop
 
 RunUnprocessable = loop.RunUnprocessable
@@ -145,51 +147,77 @@ def _full_judge_doc(**overrides):
 
 
 
-def test_strip_yaml_fence_passes_through_plain_yaml():
-    assert loop.strip_yaml_fence("outcome: caught\nconfidence: high\n") == (
+# ---------------------------------------------------------------------------------------
+# `loop.reply_document_text` (#1018 M1/M5): the facade re-exports the one-bare-document
+# parser; the three lenient rules the old `strip_yaml_fence` carried (XML envelope, trailing
+# close tag, dangling closer) are gone. The full corpus is `tests/test_1018_reply_document.py`.
+# ---------------------------------------------------------------------------------------
+
+
+def test_reply_document_text_passes_through_plain_yaml():
+    """Shape 1: a bare document comes back stripped and unchanged (#1018 M1 step 5)."""
+    assert loop.reply_document_text("outcome: caught\nconfidence: high\n") == (
         "outcome: caught\nconfidence: high"
     )
 
 
-def test_strip_yaml_fence_strips_yaml_code_fence():
+def test_reply_document_text_unwraps_a_whole_string_yaml_fence():
+    """Shape 2: exactly one fenced block, nothing around it, is the document it holds (#1018
+    M1 step 4 — the one deliberate leniency)."""
     fenced = "```yaml\noutcome: caught\n```\n"
-    assert loop.strip_yaml_fence(fenced) == "outcome: caught"
+    assert loop.reply_document_text(fenced) == "outcome: caught"
 
 
-def test_strip_yaml_fence_strips_trailing_close_tag():
+def test_reply_document_text_leaves_a_trailing_close_tag_for_the_loader_to_refuse():
+    """#1018 M4: a bare `</content>` after the document is NOT unwrapped any more. It is not a
+    fence line and not a think tag, so the parser returns the text unchanged (M1 step 5) and
+    the consumer's own `safe_load` is what refuses it. Would fail: the tag is trimmed."""
     text = "outcome: caught\nconfidence: high\n</content>\n"
-    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+    assert loop.reply_document_text(text) == text.strip()
+    with pytest.raises(yaml.YAMLError):
+        safe_load(loop.reply_document_text(text))
 
 
-def test_strip_yaml_fence_strips_full_xml_envelope():
+def test_reply_document_text_leaves_a_full_xml_envelope_for_the_loader_to_refuse():
+    """#1018 M4 ("no XML envelope unwrapping"): `<content>…</content>` around the document is
+    returned unchanged and refused at the loader. Would fail: the envelope is stripped."""
     text = "<content>\noutcome: caught\nconfidence: high\n</content>\n"
-    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+    assert loop.reply_document_text(text) == text.strip()
+    with pytest.raises(yaml.YAMLError):
+        safe_load(loop.reply_document_text(text))
 
 
-def test_strip_yaml_fence_strips_dangling_close_fence():
+def test_reply_document_text_refuses_a_dangling_close_fence():
+    """#1018 M4 ("no dangling-closer trim"): a lone column-0 ``` after a plain document is "a
+    fence inside the reply" — `MalformedReply`, not a trim. Would fail: the closer is trimmed."""
     text = "outcome: caught\nconfidence: high\n```\n"
-    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+    with pytest.raises(loop.MalformedReply):
+        loop.reply_document_text(text)
 
 
-def test_strip_yaml_fence_strips_thinking_prelude():
+def test_reply_document_text_strips_thinking_prelude():
+    """Shape 13 / E8: a column-0 `</thinking>` line ends a prelude that has no opening tag —
+    the recorded live shape (#1018 M1 step 2)."""
     text = (
         "outcome: caught\n(reasoning trace…)\n</thinking>\n"
         "outcome: survived\nconfidence: high\n"
     )
-    assert loop.strip_yaml_fence(text) == "outcome: survived\nconfidence: high"
+    assert loop.reply_document_text(text) == "outcome: survived\nconfidence: high"
 
 
-def test_strip_yaml_fence_strips_system_thinking_variant():
+def test_reply_document_text_strips_system_thinking_variant():
+    """E8: the `</system_thinking>` spelling is a prelude boundary too."""
     text = (
         "outcome: caught\n(reasoning trace…)\n</system_thinking>\n"
         "outcome: survived\nconfidence: high\n"
     )
-    assert loop.strip_yaml_fence(text) == "outcome: survived\nconfidence: high"
+    assert loop.reply_document_text(text) == "outcome: survived\nconfidence: high"
 
 
-def test_strip_yaml_fence_passes_through_when_no_thinking_tag():
+def test_reply_document_text_passes_through_when_no_thinking_tag():
+    """No prelude, no fence: the document is returned as it was written."""
     text = "outcome: caught\nconfidence: high\n"
-    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+    assert loop.reply_document_text(text) == "outcome: caught\nconfidence: high"
 
 
 

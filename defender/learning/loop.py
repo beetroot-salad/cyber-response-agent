@@ -31,9 +31,9 @@ from defender.learning.core.persist import (  # noqa: E402
     derive_alert_rule_key,
 )
 from defender.learning.core.validate import (  # noqa: E402
+    MalformedReply,
     normalize_disposition,
-    normalize_judge_yaml,
-    strip_yaml_fence,
+    reply_document_text,
 )
 
 #: THE TWO AUTHORING STAGES AND THE NAMES THEIR CALLERS ALREADY IMPORT FROM HERE.
@@ -48,7 +48,7 @@ __all__ = [
     "DEFAULT_PATHS", "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
     "author_drain", "lead_author_drain",
     "main",
-    "normalize_disposition", "strip_yaml_fence", "normalize_judge_yaml",
+    "normalize_disposition", "reply_document_text", "MalformedReply",
     "derive_alert_rule_key",
     "lead_repository",
 ]

@@ -35,7 +35,7 @@ RETIRE_LESSON = Path("/workspace/defender/lessons-actor/ssh-brute-force-timing-m
 RETIRE_STASH = Path("/tmp/retired-ssh-brute-force-timing-mimicry.md")
 
 def _strip(x):
-    return V.strip_yaml_fence(x)
+    return V.reply_document_text(x)
 
 def _is_skip(story):
     fn = getattr(S, "is_skip_story", None)
