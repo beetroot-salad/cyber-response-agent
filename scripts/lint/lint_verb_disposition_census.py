@@ -59,7 +59,7 @@ from defender.runtime.verbs import RosterRead  # noqa: E402
 
 
 def _walk(roster: RosterRead, systems: frozenset[str]) -> dict[str, frozenset[str]]:
-    return {s: roster.verbs.get(s, frozenset()) for s in sorted(systems)}
+    return {s: roster.declared_verbs(s) for s in sorted(systems)}
 
 
 def _unreadable_adapters(

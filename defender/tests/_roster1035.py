@@ -28,6 +28,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import stat
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
@@ -158,6 +159,9 @@ def handed_to_nobody(root: Path, target: Path, mode: int) -> Iterator[None]:
     # the parent directory meets foreign-owned files. So the restore is best-effort and the
     # reclaim runs regardless.
     as_root = os.geteuid() == 0
+    # The mode `target` HAD, restored on the way out — not a fixed `0o755`, which would leave
+    # an adapter FILE handed over as `target` executable afterwards.
+    original = stat.S_IMODE(target.stat().st_mode)
     try:
         if as_root:
             _hand_tree_to_nobody(root)
@@ -165,7 +169,7 @@ def handed_to_nobody(root: Path, target: Path, mode: int) -> Iterator[None]:
         yield
     finally:
         try:
-            target.chmod(0o755)
+            target.chmod(original)
         except FileNotFoundError:
             pass
         finally:

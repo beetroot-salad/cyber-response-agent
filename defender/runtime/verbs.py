@@ -426,14 +426,16 @@ class RosterRead:
         return self.verbs.get(system, frozenset())
 
 
-def _cannot_read(adapters_dir: Path, e: BaseException) -> str:
+def _cannot_read(adapters_dir: Path, e: BaseException, *, blame_entry: bool = True) -> str:
     """`RegistryError`'s text: the DIRECTORY always (every pin and every operator's first `ls`
     starts there), and the FILE when the fault was one entry's — an adapter with no read bit
     in an otherwise readable tree is the file's fault, and a message that blamed the
-    directory would send the operator to `ls -la` a directory that looks fine."""
+    directory would send the operator to `ls -la` a directory that looks fine. `blame_entry`
+    is False for a fault the OS reports against an entry but which is the DIRECTORY's (the
+    `lstat` pass's `EACCES`, see `read_roster`): the entry's name is then left out."""
     fault = getattr(e, "strerror", None) or str(e)
     text = f"adapters directory {adapters_dir} cannot be read ({fault})"
-    filename = getattr(e, "filename", None)
+    filename = getattr(e, "filename", None) if blame_entry else None
     if filename and Path(filename) != Path(adapters_dir):
         text += f" at {filename}"
     return text
@@ -498,13 +500,20 @@ def read_roster(adapters_dir: Path) -> RosterRead:
         with os.scandir(adapters_dir) as it:
             entries = [e for e in it if e.name.endswith(ADAPTER_SUFFIX)]
         for entry in entries:
-            entry.stat(follow_symlinks=False)
-        root = adapters_dir.resolve()
+            try:
+                entry.stat(follow_symlinks=False)
+            except PermissionError as e:
+                # `EACCES` on the `lstat` of an entry the listing just yielded is the
+                # DIRECTORY's missing search bit, not that entry's fault — and the OS names
+                # the entry in the error. Blaming it would send the operator to `ls -la` a
+                # file that is fine, chosen by whichever the listing happened to yield first.
+                raise RegistryError(_cannot_read(adapters_dir, e, blame_entry=False)) from e
+        resolved = adapters_dir.resolve()
         accepted: dict[str, Path] = {}
         sources: dict[str, bytes] = {}
         refused: list[str] = []
         for name in sorted({_system_of(Path(entry.name)) for entry in entries}):
-            path = _adapter_path_under(root, name)
+            path = _adapter_path_under(resolved, name)
             if path is None:
                 refused.append(name)
             else:
@@ -698,8 +707,7 @@ class ModuleVerbRegistry(VerbRegistry):
                 "process starts and hand the value down"
             )
         self.roster = roster
-        self._adapters: Mapping[str, Path] = roster.accepted
-        self._systems: tuple[str, ...] = tuple(sorted(self._adapters))
+        self._systems: tuple[str, ...] = tuple(sorted(roster.accepted))
         # THE registry that resolves a real adapters tree, which is the deployment shape the
         # disposition table governs — every grant reaching this constructor that a model ever
         # calls through is one the table projects — so a refusal from here may name the table
@@ -749,7 +757,7 @@ class ModuleVerbRegistry(VerbRegistry):
         # the first load of a module not yet memoized, as the `OSError` the import raises: a
         # host fault, propagated as one, never "unknown system" back to a model whose name
         # was right.
-        path = self._adapters.get(system)
+        path = self.roster.accepted.get(system)
         if path is None:
             raise KeyError(system)
         verbs = getattr(_load_adapter_module(path), "VERBS", None)
