@@ -40,6 +40,16 @@ SKILLS_REL = DefenderPaths.skills_rel
 _log = _loop_config.make_logger("lead-author", flush=True)
 
 
+class AdaptersUnreadable(LeadAuthorError, RegistryError):
+    """The adapters directory this resolver reads cannot be read — the registry's own
+    `RegistryError`, re-raised as this lane's `LeadAuthorError` with the message
+    `test_hardening_772` binds on. BOTH bases are load-bearing: `LeadAuthorError` is what the
+    lane's callers and pins name; `RegistryError` is what puts it in `faults.SYSTEMIC_FAULTS`,
+    so `run_or_dead_letter` re-raises it to `_run_stage`'s `[loop] FATAL:` + exit 2 instead
+    of filing a checkout nobody can read as the batch's own failure and spending every queued
+    row's `attempts` on it, tick after tick, until the whole queue is in the graveyard."""
+
+
 def _adapter_names(adapters_dir: Path) -> frozenset[str]:
     """The adapter half: a COLD read of filenames, never a load — an adapter whose import
     raises is still named.
@@ -52,14 +62,15 @@ def _adapter_names(adapters_dir: Path) -> frozenset[str]:
     `OSError`, which is what keeps the drain seam's `(SubprocessError, OSError)` swallow from
     rendering a tree this process cannot read as a green tick (#869 O4, #1035 O2). The
     message keeps `not a directory this process can read` on every arm: `test_hardening_772`
-    binds on it.
+    binds on it. The class is `AdaptersUnreadable` — a `LeadAuthorError` the drain's
+    systemic set also recognises, so the fault ends the tick rather than the queue.
 
     The refused names are the primitive's — per derived name, sorted — so each is logged
     once, with the directory it came from, in a deterministic order."""
     try:
         roster = read_roster(adapters_dir)
     except RegistryError as e:
-        raise LeadAuthorError(
+        raise AdaptersUnreadable(
             f"declared_systems: {adapters_dir} is not a directory this process can read ({e})"
         ) from e
     for name in roster.refused:

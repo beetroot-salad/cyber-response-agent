@@ -464,6 +464,11 @@ def decide_write(
     `..`/symlinks before the match so a pattern is a true path set, not a string prefix an operand
     can escape; a `resolve()` error FAILS CLOSED rather than propagating out of the gate.
 
+    ONE fault propagates on purpose: `RegistryError`, the investigation.md schema's
+    `nothing-to-try` price reading an adapters directory this process cannot read (#1035). A
+    `Decision(False)` is a message to the model about its own text, and there is nothing in the
+    text to fix; the run ends with the directory named, as the same fault at run setup does.
+
     `run_dir`/`defender_dir` are REQUIRED run roots. A write target must ALSO resolve within the
     agent's read CONTAINMENT — its read roots minus the secret/ground-truth denylist
     (`read_allowed_path`), the `write_allow ⊆ read roots` invariant `edit_file` relies on. NOTE

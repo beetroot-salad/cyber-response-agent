@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ast
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -44,9 +45,10 @@ import pytest
 from defender import _git
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
+from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime import verb_roster, verbs
+from defender.runtime import permission, verb_roster, verbs
 from defender.runtime.verb_grant import DENY_ALL
 from defender.runtime.verb_roster import RosterError, audit_read_surfaces
 from defender.runtime.verbs import ModuleVerbRegistry, RegistryError
@@ -58,6 +60,7 @@ from defender.tests._declared869 import (
     seed_tree,
     write,
 )
+from defender.tests._declared870 import graveyard_by_id, queue_ids
 from defender.tests._roster1035 import (
     EXIT_RAISED_EXPECTED,
     EXIT_RETURNED,
@@ -736,3 +739,204 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
         _gating._known_capabilities.cache_clear()
 
     assert set(read_roster(adapters).accepted) == set(expected)
+
+
+# ---------------------------------------------------------------------------------------
+# P9 — loud one frame up: the guard above each consumer does not re-file the fault
+# ---------------------------------------------------------------------------------------
+#
+# P4, P6 and the close's own tests pin what each consumer RAISES. These pin what the frame
+# ABOVE each consumer does with that raise, because every one of them sits under a guard that
+# was written for the document's or the batch's own faults and would otherwise re-file a tree
+# this process cannot read as one of those: the drain's dead-letter guard bumps every queued
+# row's lifetime `attempts`; the close's price wrap tells the model to "repair the document";
+# the write gate's fail-closed wrap refuses the write with "simplify the invlang". Under each,
+# the operator never sees the directory named as the cause, and the run or the queue pays.
+
+
+def _seed_pitfalls_queue(tmp_path: Path, monkeypatch) -> tuple[Path, LoopPaths]:
+    """Two `mcpsys` rows queued over a tree whose adapters directory declares `cmdb` — the
+    P4 fixture, minus the privilege drop. The rows name a system no adapter declares so that
+    the readable control rotates them out without ever reaching a curator spawn."""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
+    repo = seed_tree(tmp_path, adapters=("cmdb",), markers=("elastic",), skills=("elastic",),
+                     catalog=())
+    paths = LoopPaths(repo_root=repo, state_dir=repo / "state")
+    persist.append_pitfalls(
+        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")], paths=paths,
+    )
+    assert queue_ids(paths) == ["r:l-000:0", "r:l-001:0"]
+    return repo, paths
+
+
+def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_tree(
+    tmp_path, monkeypatch,
+):
+    """P9, the drain — `_drain_pitfalls(paths, _invoke_pitfalls)` over a repo whose adapters
+    directory is ABSENT raises the resolver's fault out of the tick, and the queue is exactly
+    as it was: both rows still queued, neither row's `attempts` bumped, nothing in the
+    graveyard. The ceiling is set to ONE attempt so that a guard which still treats the fault
+    as a batch failure retires both rows on this single tick and the loss is visible here,
+    not after `author_max_attempts()` ticks nobody drives.
+
+    The fault is systemic (`SYSTEMIC_FAULTS`), so `run_or_dead_letter` re-raises it and
+    `_run_stage` renders it as `[loop] FATAL:` + exit 2 — "fix the deployment", which is what
+    a checkout with no readable adapters directory is. The positive control is the same drive
+    over the readable tree: the tick gets past the resolver, finds the rows name no declared
+    system, and rotates them out.
+
+    Observed failing by (today): `LeadAuthorError` swallowed by the dead-letter guard; both
+    rows retired to the graveyard as `batch-error:LeadAuthorError` on the first tick."""
+    repo, paths = _seed_pitfalls_queue(tmp_path, monkeypatch)
+    adapters = _repo_adapters(repo)
+    shutil.rmtree(adapters)
+
+    with pytest.raises(LeadAuthorError) as exc:
+        drains._drain_pitfalls(paths, drains._invoke_pitfalls)
+    assert f"{adapters} is {CANNOT_READ}" in str(exc.value), (
+        f"the raise is not the resolver's own refusal: {exc.value}"
+    )
+    assert isinstance(exc.value, SYSTEMIC_FAULTS), (
+        "the resolver's fault is not systemic, so `run_or_dead_letter` files it as the "
+        "batch's own failure"
+    )
+    assert queue_ids(paths) == ["r:l-000:0", "r:l-001:0"], "the queue was spent on a host fault"
+    assert all(int(r.get("attempts") or 0) == 0 for r in persist.read_pitfalls(paths)), (
+        "a queued row's lifetime `attempts` was bumped for a tree this process cannot read"
+    )
+    assert graveyard_by_id(paths) == {}, "rows were retired for a host fault"
+
+    # The tick's own `finally` (`_discard_worktree_changes`: `reset --hard` + `clean`) has
+    # already put the committed adapters directory back, so the control needs no rebuild.
+    assert (adapters / "cmdb_adapter.py").is_file()
+    drains._drain_pitfalls(paths, drains._invoke_pitfalls)
+    assert queue_ids(paths) == [], (
+        "the readable control did not get past the resolver to rotate the unattributable rows"
+    )
+
+
+def _inconclusive_over_nothing_to_try(tmp_path: Path, monkeypatch) -> tuple[str, object, Path]:
+    """A companion whose `:T conclude` pays `inconclusive` with a `nothing-to-try` receipt,
+    MAIN deps bound over it, and `_known_capabilities` pointed at a repo root with NO
+    adapters directory — the one arm of the price that reads the roster at all."""
+    from defender.tests._spec923 import CAPABILITY_ROW, main_deps, paid
+
+    document = paid(CAPABILITY_ROW)
+    deps, run_dir = main_deps(tmp_path, document)
+    root = tmp_path / "tree"
+    root.mkdir()
+    assert not _repo_adapters(root).exists()
+    _redirect_repo_root(monkeypatch, root)
+    return document, deps, run_dir
+
+
+def test_the_close_does_not_ask_the_model_to_repair_a_document_for_an_unreadable_tree(
+    tmp_path, monkeypatch,
+):
+    """P9, the close — `close_investigation(inconclusive)` over a paid `nothing-to-try`
+    receipt and an adapters directory this process cannot read raises `RegistryError` naming
+    the directory OUT of the close, and commits nothing. Never a `ModelRetry`: that is the
+    price wrap's answer for a document the gate could not parse, and it tells the model to
+    "repair the document" — so a host fault would be spent as retries against a document
+    that has nothing wrong with it, ending in a forced `unresolved` close with the cause
+    named nowhere.
+
+    Observed failing by (today): `ModelRetry("close blocked: `investigation.md` could not be
+    priced ... (RegistryError: ...). Repair the document ...")`."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.tests._spec923 import close
+
+    _document, deps, run_dir = _inconclusive_over_nothing_to_try(tmp_path, monkeypatch)
+    try:
+        with pytest.raises(RegistryError) as exc:
+            close(deps, "inconclusive")
+    except ModelRetry as retry:  # pragma: no cover — the mutant's own shape, named
+        pytest.fail(f"the close re-filed the host fault as the document's: {retry}")
+    finally:
+        _gating._known_capabilities.cache_clear()
+    assert str(_repo_adapters(tmp_path / "tree")) in str(exc.value), exc.value
+    assert not (run_dir / "report.md").exists(), "a close that could not price still committed"
+
+
+def test_the_write_gate_does_not_refuse_the_document_for_an_unreadable_tree(
+    tmp_path, monkeypatch,
+):
+    """P9, the write gate — `decide_write` of the same document over the same tree raises
+    `RegistryError` naming the directory, rather than returning `Decision(False, "...
+    validation errored — failing closed ... Simplify the invlang and re-send.")`. The gate's
+    "return a Decision, never propagate" contract is about the DOCUMENT's faults: a refusal
+    is a message to the model about its own text, and there is nothing in the text for the
+    model to simplify here. A tree this process cannot read is the host's, and the same
+    fault out of the registry at run setup already ends the run — the write gate is not a
+    place for it to become a retry.
+
+    `validate_investigation` is driven beside `decide_write` because the wrap that re-files
+    the fault lives there, and a gate that propagated only from a different branch would
+    green the `decide_write` pin alone.
+
+    Observed failing by (today): `Decision(allow=False, reason="investigation.md validation
+    errored — failing closed: RegistryError(...) ... Simplify the invlang and re-send.")`."""
+    from defender import _artifact_schema
+
+    document, deps, run_dir = _inconclusive_over_nothing_to_try(tmp_path, monkeypatch)
+    try:
+        with pytest.raises(RegistryError):
+            _artifact_schema.validate_investigation(document, None)
+        with pytest.raises(RegistryError) as exc:
+            permission.decide_write(
+                run_dir / "investigation.md", document, run_dir=run_dir,
+                defender_dir=tmp_path / "defender", policy=deps.policy,
+            )
+    finally:
+        _gating._known_capabilities.cache_clear()
+    assert str(_repo_adapters(tmp_path / "tree")) in str(exc.value), exc.value
+
+
+def test_every_guard_on_the_documents_path_lets_the_unreadable_tree_through(
+    tmp_path, monkeypatch,
+):
+    """P9, per guard — the close above raises `RegistryError` from the FIRST frame on its
+    path that reads the document, and a frame further along whose own guard still re-filed
+    the fault would be green behind it. So each frame is driven on its own over the same
+    fixture: the close's price wrap (`_refuse_if_entry_price_is_owed`), the close's
+    structure check (`committed_document_refusal`, which is `committed_investigation_reason`'s
+    fail-open wrap), and the two `prepare=`-time readers (`flagged_diagnostics`,
+    `repairable_diagnostics`) — each raises `RegistryError` naming the directory rather than
+    a `ModelRetry`, `None`, or `()`.
+
+    The prepare-time readers fail open by design ("a wedged run is the worse failure"), and
+    that stays true for a document this process cannot read or decode. A roster this process
+    cannot read is a different fault: "no window open" is not an answer to it, and the run
+    ends at the next write or close anyway — with the cause named by whichever frame saw it
+    first, which is what a reader of the log needs.
+
+    Observed failing by (today): `ModelRetry` out of the price wrap; `None` and `()` out of
+    the three readers, each with a "treating it as ..." line logged."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.runtime import close_tool
+    from defender.runtime.tools import _document
+
+    _document_text, deps, _run_dir = _inconclusive_over_nothing_to_try(tmp_path, monkeypatch)
+    adapters = str(_repo_adapters(tmp_path / "tree"))
+    frames = {
+        "the close's price wrap": lambda: close_tool._refuse_if_entry_price_is_owed(
+            deps, "inconclusive",
+        ),
+        "the close's structure check": lambda: _document.committed_document_refusal(deps),
+        "the repair window": lambda: _document.flagged_diagnostics(deps),
+        "the repair set": lambda: _document.repairable_diagnostics(deps),
+    }
+    try:
+        for label, frame in frames.items():
+            _gating._known_capabilities.cache_clear()
+            try:
+                with pytest.raises(RegistryError) as exc:
+                    frame()
+            except ModelRetry as retry:
+                pytest.fail(f"{label} re-filed the host fault as the document's: {retry}")
+            assert adapters in str(exc.value), f"{label}: does not name the directory: {exc.value}"
+    finally:
+        _gating._known_capabilities.cache_clear()
