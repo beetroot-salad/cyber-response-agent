@@ -183,12 +183,21 @@ def test_the_authored_contract_carries_no_vendor_field_names_or_envelope_shape(t
     assert authored_goal != goal, "the frame strip removed nothing — the split is not doing work"
     assert authored_goal.strip(), "the frame strip ate the harness's own text"
 
-    vendor = re.compile(r"\bkibana\.", re.IGNORECASE)
-    envelope = re.compile(r"\b(?:hits|total|truncated)\b", re.IGNORECASE)
+    # The field family by any spelling (`kibana.`, `alert.rule`), the vendor's index, and the
+    # vendor's envelope by name or by its fields: a paraphrase that keeps "the alerts index"
+    # and "the envelope's count field" is the same vendor shape with the tokens filed off
+    # (adversary H4). `\balerts\b` alone is NOT scanned — "prior alerts" is the neutral
+    # concept the design keeps.
+    vendor = re.compile(r"\bkibana\.|\balert\.rule\b|\balerts index\b", re.IGNORECASE)
+    envelope = re.compile(r"\b(?:hits|total|truncated|envelope)\b", re.IGNORECASE)
     for label, text in (("goal", authored_goal), *((f"what_to_summarize[{i}]", w) for i, w in enumerate(what))):
         assert vendor.search(text) is None, f"a vendor field name in the authored {label}:\n{text}"
         assert envelope.search(text) is None, f"an envelope word in the authored {label}:\n{text}"
 
     assert "not narrow to this alert's own rule" in authored_goal, authored_goal
+    # The design's replacement sentences, pinned POSITIVELY: the concept survives the token
+    # scan only if it is actually said in the neutral form (prose split pieces 1 and 3).
+    assert "correlation over PRIOR ALERTS" in authored_goal, authored_goal
+    assert "the template says where its count is read" in authored_goal.lower(), authored_goal
     assert CORRELATION_TEMPLATE in authored_goal, authored_goal
     assert CORRELATION_TEMPLATE == SHIPPED_TEMPLATE_ID

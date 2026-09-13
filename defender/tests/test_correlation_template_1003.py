@@ -262,6 +262,38 @@ def test_a_config_with_no_usable_id_is_refused_naming_the_path(tmp_path, text):
     assert str(path) in str(caught.value), str(caught.value)
 
 
+def test_an_undecodable_config_is_refused_naming_the_path_not_raised_raw(tmp_path):
+    """The #677 shape: bytes that are not UTF-8. A raw `UnicodeDecodeError` out of an
+    import-time read is a stack trace, not a refusal naming the file — the typed error is
+    what an operator who just saved the file in the wrong encoding needs. Positive control:
+    the same path, valid bytes, loads."""
+    from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
+
+    path = _config(tmp_path, f"correlation_template: {SHIPPED_TEMPLATE_ID}\n")
+    assert load_correlation_template(path) == SHIPPED_TEMPLATE_ID
+    path.write_bytes(b"correlation_template: \xff\xfe\n")
+    with pytest.raises(LeadZeroConfigError) as caught:
+        load_correlation_template(path)
+    assert str(path) in str(caught.value), str(caught.value)
+
+
+def test_a_repeated_key_is_refused_rather_than_last_wins(tmp_path):
+    """Two `correlation_template:` lines are two statements, one of which YAML would silently
+    honour — the duplicate-key defect the table loader refuses (#995), refused here the same
+    way, naming the path. Positive control: one line loads."""
+    from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
+
+    assert load_correlation_template(
+        _config(tmp_path / "ok", f"correlation_template: {SHIPPED_TEMPLATE_ID}\n")
+    ) == SHIPPED_TEMPLATE_ID
+    path = _config(tmp_path / "dup",
+                   f"correlation_template: {SHIPPED_TEMPLATE_ID}\n"
+                   "correlation_template: splunk.correlate-things\n")
+    with pytest.raises(LeadZeroConfigError) as caught:
+        load_correlation_template(path)
+    assert str(path) in str(caught.value), str(caught.value)
+
+
 # =========================================================================================
 # O1 — nothing in Python names the vendor the lead dispatches to.
 # =========================================================================================
@@ -279,6 +311,15 @@ def test_spec_no_longer_spells_the_template_id():
         "_spec.py still spells the template id as a literal — the id is per-deployment "
         "config now, read through lead_zero_config"
     )
+    # The WHOLE runtime package, not only `_spec.py`: a `shipped_correlation_template()`
+    # that returned the literal (file left on disk so the loader tests still pass) would
+    # move the vendor name one module over and satisfy the scan above (adversary H2).
+    runtime = Path(_spec.__file__).resolve().parents[1]
+    spelled = sorted(
+        str(f.relative_to(runtime)) for f in runtime.rglob("*.py")
+        if SHIPPED_TEMPLATE_ID in f.read_text(encoding="utf-8")
+    )
+    assert spelled == [], f"the template id is spelled as a literal under runtime/: {spelled}"
     assert shipped_correlation_template() == _spec.CORRELATION_TEMPLATE
     assert _spec.ITEM1_SYSTEM == "elastic"
     assert _spec.CORRELATION_REQUEST_LIMIT == 8
@@ -438,6 +479,30 @@ def test_the_reports_table_moving_the_holder_to_another_vendor_is_refused(tmp_pa
     assert _pair("splunk", "search") in message, message
 
 
+def test_a_template_binding_the_health_check_verb_is_not_a_dispatch_target(tmp_path):
+    """Agreement is EQUALITY with the holder's one QUERY pair, not `grant.allows`: the holder
+    also holds `elastic.health-check`, so a check written as "does the grant allow the
+    template's pair" would accept an established template binding `verb: health-check` and
+    dispatch a lead with an eight-request budget against a ping (adversary H3;
+    `correlation_system`'s own docstring: "Health-check alone is not a target either").
+    Refused naming `elastic.health-check` and `elastic.alerts`. Positive control: the
+    `alerts` template on the same catalog resolves."""
+    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+
+    catalog = tmp_path / "catalog"
+    _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
+    _plant(catalog, "elastic", "ping", verb="health-check")
+    templates = _templates(catalog)
+    grant = _shipped_shaped_grant(tmp_path)
+    assert grant.allows("elastic", "health-check"), "the fixture's grant must hold the pair"
+    assert resolve_correlation_dispatch(SHIPPED_TEMPLATE_ID, templates, grant).template.verb == "alerts"
+    with pytest.raises(CorrelationDispatchError) as caught:
+        resolve_correlation_dispatch("elastic.ping", templates, grant)
+    message = str(caught.value)
+    assert _pair("elastic", "health-check") in message, message
+    assert _pair("elastic", "alerts") in message, message
+
+
 def test_the_grant_reaching_the_dispatch_is_the_tables_projection_whatever_the_id_says(tmp_path):
     """O5, the negative universal at the unit seam: no id value changes the GRANT a dispatch
     carries. Two ids resolving to two templates on the same pair yield dispatches whose
@@ -463,7 +528,12 @@ def test_the_grant_reaching_the_dispatch_is_the_tables_projection_whatever_the_i
 # O6 (a) — an id that is not a template id, or resolves to no established template.
 # =========================================================================================
 
-@pytest.mark.parametrize("bad_id", ["not-an-id", "Elastic.x", "elastic."])
+@pytest.mark.parametrize("bad_id", [
+    "not-an-id", "Elastic.x", "elastic.",
+    # The SUFFIX half is a grammar too (`{kebab}`): uppercase, an underscore, a second dot —
+    # each a file the corpus reader accepts and the design's id shape does not (adversary H6).
+    "elastic.Correlate_Alerts", "elastic.correlate.alerts",
+])
 def test_an_id_that_is_not_a_template_id_is_refused_even_when_a_file_carries_it(tmp_path, bad_id):
     """The grammar arm is a GRAMMAR check, not a "not found": the catalog is planted with a
     file whose `id:` is exactly the malformed string (the corpus reader accepts any string),
@@ -611,4 +681,15 @@ def test_the_template_carries_the_rule_field_pitfall_and_its_declarations_are_in
         "the template's Pitfalls do not tell the lead that its input documents may carry "
         "`kibana.alert.rule.*` and that the rule is not an axis to bind"
     )
-    assert "entity_filter" in pitfalls, "the pitfall must say where the rule must NOT be ANDed"
+    # ONE bullet carries the field, the filter and the NEGATION together: presence of the
+    # two tokens alone is satisfied by the inverted instruction ("AND the rule into the
+    # filter so the count stays on this rule"), rendered to every gather lead on the system
+    # (adversary H5). Bullets are the `- ` items of the section.
+    bullets = [b for b in re.split(r"\n(?=- )", pitfalls) if "kibana.alert.rule" in b]
+    assert bullets, pitfalls
+    rule_bullet = bullets[0]
+    assert "entity_filter" in rule_bullet, "the pitfall must say where the rule must NOT be ANDed"
+    assert re.search(r"\b(?:do not|not an axis|is not an axis)\b", rule_bullet, re.IGNORECASE), (
+        f"the rule-field pitfall does not NEGATE binding the rule:\n{rule_bullet}"
+    )
+    assert not re.search(r"\bso the count stays on this rule\b", rule_bullet, re.IGNORECASE)
