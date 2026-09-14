@@ -2,14 +2,14 @@
   "project": "defender — an LLM SOC-analyst agent (python, pytest, uv)",
   "gate": {
     "ciConfig": ".github/workflows/ci.yml",
-    "test": "cd defender && uv run pytest tests/ -m \"not live and not gate\" -n auto --dist loadfile --ignore tests/e2e/test_540_box_boundary.py",
+    "test": "cd defender && flock /tmp/defender-pytest.lock uv run pytest tests/ -m \"not live and not gate\" -n auto --dist loadfile --ignore tests/e2e/test_540_box_boundary.py",
     "checks": [
       "defender/.venv/bin/ruff check . --select E,F --ignore E402,E501",
       "defender/.venv/bin/ruff check defender",
       "defender/.venv/bin/mypy --config-file defender/pyproject.toml",
       "the baseline-ratcheted custom lints under scripts/lint/lint_*.py (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, …) — each blocks only on a NEW finding, and each documents an inline-suppression escape hatch in its own module"
     ],
-    "notes": "`.github/workflows/ci.yml` is the source of truth — run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout — prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree."
+    "notes": "`.github/workflows/ci.yml` is the source of truth — run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout — prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree. EVERY pytest invocation on this box goes through one lock — prefix it `flock /tmp/defender-pytest.lock`, ad-hoc subsets and adversary runs included, not just the command above. Two sessions launching fleets independently put 20 xdist workers on 12 cores and OOM-killed the container; the lock makes them take the box in turn instead of thrashing it. It costs nothing when nothing else is running."
   },
   "tests": {
     "language": "python",
@@ -177,14 +177,21 @@
           "defender/runtime/lead_zero/_items.py::dispatch_correlation",
           "defender/runtime/lead_zero/__init__.py::prepare_correlation_lead",
           "defender/runtime/lead_zero/_capture.py::_declare_l_finding",
-          "defender/runtime/lead_zero/_capture.py::_record_manual_row"
+          "defender/runtime/lead_zero/_capture.py::_record_manual_row",
+          "defender/runtime/close_tool.py::_commit",
+          "defender/runtime/challenge_gate.py::write_review_record",
+          "defender/runtime/challenge_gate.py::_write_trace_row"
         ],
         "readers": [
           "defender/runtime/scrub.py::scrub",
           "defender/run_common.py::cross_check_tables",
           "defender/learning/lead_repository.py::joined",
           "defender/_run_paths.py::contained_payload",
-          "defender/runtime/lead_zero/_capture.py::_rows_for"
+          "defender/runtime/lead_zero/_capture.py::_rows_for",
+          "defender/scripts/visualize/visualize_runtime.py::_review_records",
+          "defender/scripts/visualize/visualize_runtime.py::_read_role_traces",
+          "defender/scripts/visualize/visualize_run.py::_gate_badge_html",
+          "defender/_report.py::read_report"
         ],
         "grep": [
           "tool_trace.jsonl",
@@ -197,9 +204,13 @@
           "circuit_breaker.json",
           "box-sentinel",
           "tool_trace.jsonl",
-          "DEFENDER_RUN_DIR"
+          "DEFENDER_RUN_DIR",
+          "report.md",
+          "review_record.",
+          "review_trace_path",
+          "wire_logs/review_"
         ],
-        "note": "Four writers were added after #771's phase-F reconciliation found the same hole in three instruments at once. The driver's fault-exit trace write (`write_text(\"\")` onto the fixed tool_trace.jsonl name observe.write_trace also owns) is one of the two sites that issue reported and was missing from the test census, the write lint's gate list AND this list. The queries-table append is the query tool's SECOND artifact — the payload write was censused, the table was not. The lead-claim hook and the atomic helper are the two the original grep could not see. EVERY ENTRY MUST NAME A SYMBOL THAT RESOLVES: three of the four added here did not (a leading underscore the driver's entry point does not have, an actor id where the code symbol was `_revert_strays`, and a render-lane function renamed at some point), and a resolver following a name that resolves to nothing gets the same answer as one following a row that was never written. This list seeds the next run's census, so a gap here becomes a gap in every downstream instrument. `scrub` stays under readers deliberately: #771's scan verdict is written OUTSIDE the tree it judges (§7 D8), so the walk remains a pure reader of the run dir and the marker belongs to no run-dir writer census."
+        "note": "Four writers were added after #771's phase-F reconciliation found the same hole in three instruments at once. The driver's fault-exit trace write (`write_text(\"\")` onto the fixed tool_trace.jsonl name observe.write_trace also owns) is one of the two sites that issue reported and was missing from the test census, the write lint's gate list AND this list. The queries-table append is the query tool's SECOND artifact — the payload write was censused, the table was not. The lead-claim hook and the atomic helper are the two the original grep could not see. EVERY ENTRY MUST NAME A SYMBOL THAT RESOLVES: three of the four added here did not (a leading underscore the driver's entry point does not have, an actor id where the code symbol was `_revert_strays`, and a render-lane function renamed at some point), and a resolver following a name that resolves to nothing gets the same answer as one following a row that was never written. This list seeds the next run's census, so a gap here becomes a gap in every downstream instrument. `scrub` stays under readers deliberately: #771's scan verdict is written OUTSIDE the tree it judges (§7 D8), so the walk remains a pure reader of the run dir and the marker belongs to no run-dir writer census. ADDED BY #992's GROUNDING: three writers the list never carried although #796/#923 built them — `close_tool._commit` (report.md, write_guarded mode=replace, the ONLY writer of that file), `challenge_gate.write_review_record` (review_record.{turn}.json, keyed on ReviewState.turns+1 at the committing arms and on turns at the challenged arm) and `challenge_gate._write_trace_row` (wire_logs/review_{role}_trace.jsonl, guarded append, one file per REVIEW_ROLES member). #992 puts `inconclusive` through the gate, so all three now fire on the disposition that used to write only the first two; the readers added are the run-page consumers that split reviewed from unreviewed attempts — note `visualize_runtime._was_reviewed` keys that split on the `close_tool.NO_REVIEW_DISPOSITIONS` CONSTANT and not on anything in the record, so a run dir written before the set shrank re-renders as reviewed."
       },
       "drain_worktree": {
         "writers": [
