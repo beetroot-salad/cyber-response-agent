@@ -46,8 +46,32 @@ def read_text_soft(path: Path) -> tuple[str | None, str | None]:
 ALIAS_READ_REFUSAL = "refusing to read through a non-plain or aliased entry"
 
 
-def read_guarded(path: Path) -> tuple[str | None, str | None]:
+def entry_present(path: Path) -> bool:
+    """Does ANYTHING stand at the name — a file, a link, a directory, a FIFO?
+
+    The one question a reader may ask AHEAD of a guarded read without opening a check-then-act
+    window: it decides only what a caller SAYS about the name ("absent" versus "refused"), never
+    what it reads. ``Path.exists()`` is not this: it follows a link, and on 3.11 it re-raises a
+    permission fault from the directory above (only ``ENOENT``/``ENOTDIR``/``EBADF``/``ELOOP``
+    are swallowed), so a mode-000 parent crashed a reader that had screened the parent itself
+    with ``lstat``. An entry the caller cannot judge is PRESENT: the guarded read that follows
+    is what names why it could not be read.
+    """
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def read_guarded(path: Path, *, errors: str = "strict") -> tuple[str | None, str | None]:
     """:func:`write_guarded`'s READ-side twin: the text at ``path``, or a refusal reason.
+
+    ``errors`` is ``open``'s own decoding policy. The default refuses an undecodable byte
+    like any other read fault; the tolerant line readers pass ``"replace"`` so one bad byte
+    costs one row rather than the whole file (:func:`read_jsonl_rows_guarded`).
 
     Same return shape as :func:`read_text_soft` — ``(text, None)`` or ``(None, reason)`` — so it
     drops in wherever a reader already tolerates "could not read this". What it adds is that a
@@ -82,6 +106,13 @@ def read_guarded(path: Path) -> tuple[str | None, str | None]:
     try:
         fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
     except TEXT_READ_ERRORS as e:
+        # A symlink is refused BY THE OPEN (`ELOOP`, marked by `open_nofollow_fd`), and it is
+        # the same refusal the hard-link and directory arms below spell — said in the same
+        # words here, so a caller's log names an alias as an alias rather than as "too many
+        # levels of symbolic links", and never has to prefix the sentence itself (which one
+        # caller did, in front of a permission fault as well).
+        if getattr(e, "write_guarded_alias", False):
+            return None, f"{ALIAS_READ_REFUSAL}: {path}"
         return None, str(e)
     try:
         st = os.fstat(fd)
@@ -92,7 +123,7 @@ def read_guarded(path: Path) -> tuple[str | None, str | None]:
         # planted symlink to know it has no artifact.
         if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
             return None, f"{ALIAS_READ_REFUSAL}: {path}"
-        with os.fdopen(fd, "r", encoding="utf-8") as fh:
+        with os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
             fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
             return fh.read(), None
     except TEXT_READ_ERRORS as e:
@@ -205,6 +236,33 @@ def read_jsonl_rows_report(path: Path) -> tuple[list[dict], int]:
     if not path.is_file():
         return [], 0
     text = path.read_text(encoding="utf-8", errors="replace")  # lint-jsonl-io: ok — the canonical tolerant reader  # noqa: E501
+    return _jsonl_rows_of(text)
+
+
+def read_jsonl_rows_guarded(path: Path) -> tuple[list[dict], int, str | None]:
+    """:func:`read_jsonl_rows_report` through :func:`read_guarded`'s screen: the rows, the
+    count of non-blank lines that were not rows, and the refusal reason — ``None`` on a read.
+
+    ONE reader for a JSONL table that sits in a tree a box can write to (a served ledger, a
+    wire log, a run's tool trace). Before it, each such site took an ``lstat`` screen and then
+    called the tolerant reader's bare ``read_text`` — the check-then-act pair
+    :func:`read_guarded`'s docstring condemns, and a pair whose second half raised
+    ``PermissionError`` out of whichever caller forgot its own ``except``. The screen is asked
+    of the open descriptor here, once, and a fault is a reason string, never an exception.
+
+    Decoding is ``errors="replace"``, the tolerant reader's own policy: an undecodable byte is
+    one counted malformed row, not a refusal of the file. ABSENT is a refusal, as it is for
+    :func:`read_guarded`; a caller that wants to say "absent" rather than "refused" asks
+    :func:`entry_present` for the label and this for the bytes.
+    """
+    text, refusal = read_guarded(path, errors="replace")
+    if text is None:
+        return [], 0, refusal
+    rows, unreadable = _jsonl_rows_of(text)
+    return rows, unreadable, None
+
+
+def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
     rows: list[dict] = []
     unreadable = 0
     for line in text.splitlines():

@@ -1,6 +1,6 @@
 """#1025 — the episode page: `render_episode(episode_dir) -> Path` renders `learning.html`
 beside `judge.yaml` from an episode directory alone, and `main(argv)` is the standalone CLI.
-The launcher (`branch/cli.py::_render_document`) calls `render_episode` after the JUDGE clock frame
+The launcher (`branch/cli.py::_render_page`) calls `render_episode` after the JUDGE clock frame
 closes, under its own non-fatal boundary.
 
 TWO PHASES, ONE BOUNDARY. `load_episode` reads every record the page shows — the manifest, the
@@ -25,18 +25,39 @@ from pathlib import Path
 from typing import Any
 
 from defender._artifact_schema import INVESTIGATION_NAME, REPORT_NAME
-from defender._io import read_jsonl_rows_report, write_guarded
+from defender._clock import parse_iso_utc
+from defender._io import entry_present, read_jsonl_rows_guarded, write_guarded
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._run_paths import PROVENANCE, WIRE_LOG_DIR, artifact_dir, artifact_file
-from defender._vocab import normalized_judge_outcome
+from defender._vocab import normalized_disposition, normalized_judge_outcome
 from defender.learning.branch import archive, staging
 from defender.learning.branch import timing as timing_mod
-from defender.learning.branch.cli import RUNS_SUBDIR
+# `archive`, where the launcher moved it so the writer of the tree and this reader spell the
+# segment once — NOT `branch.cli`, which is the launcher itself (argparse, the estate
+# registry, the review runtime): imported for one constant it dragged the whole graph into a
+# static renderer and, with the launcher running as a script, executed `cli.py` twice.
+from defender.learning.branch.archive import RUNS_SUBDIR
 from defender.learning.branch.steps import STEPS, Step
 from defender.learning.judge import JudgeRefused, read_grade
 from defender.learning.judge import family
-from defender.learning.judge.enqueue import DrawsSkipReport, draws_on_disk_report
+from defender.learning.judge.enqueue import (
+    KIND_DRAW,
+    KIND_FAMILY,
+    KIND_MECHANICAL,
+    ROUTE_DEFENDER,
+    ROUTE_NEVER_ELIGIBLE,
+    ROUTE_NO_CHANNEL,
+    ROUTE_NO_ROW,
+    ROUTE_UNGRADABLE,
+    ROUTE_WITHHELD,
+    ROUTE_WORLD,
+    DrawsSkipReport,
+    defender_lane_blocked,
+    draws_on_disk_report,
+    route_finding,
+    withheld_reasons_of,
+)
 from defender.learning.judge.render import episode_alert
 from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
 from defender.runtime.branch._family import episode_token_for
@@ -186,7 +207,7 @@ class _Record:
 
 def _read_review(episode_dir: Path) -> _Record:
     path = Path(episode_dir) / archive.REVIEW_NAME
-    present = path.exists() or path.is_symlink()
+    present = entry_present(path)
     try:
         doc = family.read_review_record(episode_dir)
     except JudgeRefused as bad:
@@ -206,7 +227,7 @@ def _strict_samples_reader(path: Path) -> dict[str, Any]:
 
 def _read_samples(episode_dir: Path) -> _Record:
     path = Path(episode_dir) / archive.SAMPLES_NAME
-    present = path.exists() or path.is_symlink()
+    present = entry_present(path)
     try:
         doc = family.read_samples_record(episode_dir, reader=_strict_samples_reader)
     except JudgeRefused as bad:
@@ -218,17 +239,10 @@ def _read_samples(episode_dir: Path) -> _Record:
 
 def _read_staged(episode_dir: Path) -> _Record:
     path = staging.staged_path(episode_dir)
-    present = path.exists() or path.is_symlink()
+    present = entry_present(path)
     try:
         rows = staging.read_staged(episode_dir)
     except staging.StagingRefused as bad:
-        return _Record(present=True, error=f"staging record unreadable: {bad}")
-    # `read_staged` now screens through `read_guarded`, which folds a permission-denied regular
-    # file (root ignores this; a real non-root run does not, #1025) into `StagingRefused` above
-    # rather than letting it escape as a bare `OSError`/`PermissionError` — this arm is kept as
-    # a defensive backstop should that change, so this record's own slot still answers rather
-    # than the whole page's render.
-    except OSError as bad:
         return _Record(present=True, error=f"staging record unreadable: {bad}")
     if not rows and not present:
         return _Record([], present=False)
@@ -420,7 +434,11 @@ def _priced(model: Any, usage: Any) -> float | None:
     `model` string, a model the table does not know, or token counts that are not numbers — a
     wire log sits in a tree a sibling box can write, so a count spelled as text is that row's
     own unpriced state, never the page's crash."""
-    if not (isinstance(usage, dict) and isinstance(model, str)):
+    # `model` EMPTY is unpriced here, not `pricing.model_key`'s absorbed pre-provider case: a
+    # wire-log row that recorded no model at all is a call the page cannot bill, and billing
+    # it at the absorbed row's rate would put a figure on the stage table for a model that
+    # was never named.
+    if not (isinstance(usage, dict) and isinstance(model, str) and model):
         return None
     try:
         cost = pricing.usage_cost(model, usage)
@@ -653,9 +671,14 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — o
     # of these: a manifest but no world to show anything about yet (#1025 J7/J8).
     reached_runs = bool(run_dirs) or artifact_dir(runs_dir) or grade_present or bool(
         ep.archived_world_dirs)
+    # `family` IS NOT A WORLD. It is the reserved label the family-level call's draws live under
+    # (`worlds/family/judge/`), and the judge refuses a manifest that spells a world with it —
+    # but the page reads whatever tree it is given, and a manifest row, a grade row or a
+    # `runs/<ep>-family` directory carrying the name would otherwise make the family lane a
+    # world entry as well, walking its draws twice under duplicate `f-family-*` ids.
     for w in ep.manifest_worlds:
         label = w.get("world_id")
-        if not isinstance(label, str):
+        if not isinstance(label, str) or label == _FAMILY_LABEL:
             continue
         if label not in entries and not reached_runs:
             continue
@@ -667,12 +690,13 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — o
             entries[label].manifest_doc = w
 
     for label in grade_row_labels:
-        entry(label)
+        if label != _FAMILY_LABEL:
+            entry(label)
 
     stray_run_dirs: list[str] = []
     for child in run_dirs:
         label = _decompose_run_dir(child, episode_id=ep.episode_id)
-        if label is None:
+        if label is None or label == _FAMILY_LABEL:
             stray_run_dirs.append(child)
             continue
         entry(label).run_dir_name = child
@@ -683,11 +707,15 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — o
 
 def _result_event(run_dir: Path) -> _ResultEvent:
     trace = run_dir / _TOOL_TRACE_NAME
-    if not (trace.exists() or trace.is_symlink()):
+    if not entry_present(trace):
         return _ResultEvent(None, None, "absent")
-    if not artifact_file(trace):
+    # ONE guarded read decides "refused" — a link or a FIFO at the name, a permission-denied
+    # file — rather than an lstat and then the tolerant reader's bare `read_text`, whose
+    # `PermissionError` took the whole page down (root ignores mode 000; a real non-root run
+    # does not, #1025).
+    rows, _bad, refusal = read_jsonl_rows_guarded(trace)
+    if refusal is not None:
         return _ResultEvent(None, None, "refused")
-    rows, _bad = read_jsonl_rows_report(trace)
     if not rows or rows[-1].get("type") != "result":
         return _ResultEvent(None, None, "none")
     last = rows[-1]
@@ -703,7 +731,7 @@ def _load_world_archive(world_dir: Path) -> _WorldArchive | None:
         return None
     report_path = world_dir / REPORT_NAME
     report = None
-    if report_path.exists() or report_path.is_symlink():
+    if entry_present(report_path):
         # The world-archive screen (`read_guarded`: open `O_NOFOLLOW` + `fstat`), not an lstat
         # taken ahead of a bare read — the same one reader the judge's own pass uses for these
         # bytes, so a link planted at the name is refused at the open itself.
@@ -711,7 +739,7 @@ def _load_world_archive(world_dir: Path) -> _WorldArchive | None:
     inv_path = world_dir / INVESTIGATION_NAME
     return _WorldArchive(
         report=report,
-        investigation_present=inv_path.exists() or inv_path.is_symlink(),
+        investigation_present=entry_present(inv_path),
         provenance=family.json_mapping(world_dir / PROVENANCE),
         scrub=family.json_mapping(world_dir / archive.SCRUB_VERDICT_NAME))
 
@@ -720,23 +748,13 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
     leads = _WorldLeads()
     world_dir = ep.dir / archive.WORLDS_DIRNAME / label
 
+    # The served ledger is read ONCE, by `read_world_facts` below — its `malformed_rows` is
+    # the judge's own count (a torn line AND a row whose `source` is outside the ledger's
+    # vocabulary), the number that lands on the `judge.yaml` row. A second read here through
+    # the bare tolerant reader counted only the torn lines and disagreed with the record.
     ledger_path = family.world_ledger_path(ep.dir, label, episode_token=ep.episode_token)
-    if not (ledger_path.exists() or ledger_path.is_symlink()):
+    if not entry_present(ledger_path):
         leads.ledger_note = "served ledger: absent"
-    elif not artifact_file(ledger_path):
-        leads.ledger_note = "served ledger unreadable"
-    else:
-        try:
-            # `read_jsonl_rows_report` is the shared tolerant reader's own bare `read_text` —
-            # it survives a torn line or an undecodable byte but not a permission-denied
-            # regular file (root ignores this; a real non-root run does not, #1025), which
-            # reaches this call as an un-typed `OSError`. This world's leads block is its own
-            # slot, never the whole page.
-            _rows, malformed = read_jsonl_rows_report(ledger_path)
-            if malformed:
-                leads.ledger_note = f"{malformed} malformed row"
-        except OSError:
-            leads.ledger_note = "served ledger unreadable"
 
     leads.archived = artifact_dir(world_dir)
     if not leads.archived:
@@ -744,13 +762,15 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
 
     inv_path = world_dir / INVESTIGATION_NAME
     facts = None
-    if inv_path.exists() or inv_path.is_symlink():
+    if entry_present(inv_path):
         try:
             facts = family.read_world_facts(ep.dir, label, episode_token=ep.episode_token)
         except JudgeRefused as bad:
             leads.facts_error = str(bad)
         except Exception as bad:  # noqa: BLE001
             leads.facts_error = str(bad)
+    if facts is not None and facts.malformed_rows:
+        leads.ledger_note = f"{facts.malformed_rows} malformed row"
 
     try:
         all_leads = family.leads_by_id(world_dir)
@@ -801,24 +821,24 @@ def _load_wire_logs(wire: Path) -> _WireLogs:
             stem = name[: -len("_framed_trace.jsonl")] + "_trace"
             trace = logs.traces.setdefault(stem, _Trace(stem))
             trace.framed_present = True
-            if artifact_file(path):
-                frows, _ = read_jsonl_rows_report(path)
-                if frows:
-                    trace.framed = frows[0]
+            frows, _bad, _refusal = read_jsonl_rows_guarded(path)
+            if frows:
+                trace.framed = frows[0]
             continue
         if not name.endswith("_trace.jsonl"):
             continue
         stem = name[: -len(".jsonl")]
         trace = logs.traces.setdefault(stem, _Trace(stem))
-        # `artifact_file` (lstat) ahead of the read: `wire_logs/` sits under the episode dir, a
-        # tree a sibling box has an rw bind on (`judge.__init__._write_wire_log`'s own docstring
-        # names it), and `read_jsonl_rows_report` is the shared tolerant reader's own bare
-        # `is_file()` + `read_text` — unguarded on its own.
-        if not artifact_file(path):
+        # `wire_logs/` sits under the episode dir, a tree a sibling box has an rw bind on
+        # (`judge.__init__._write_wire_log`'s own docstring names it): the guarded reader
+        # refuses a link or a FIFO at the name at the open itself and answers a permission
+        # fault as a refusal rather than an exception.
+        rows, unreadable, refusal = read_jsonl_rows_guarded(path)
+        if refusal is not None:
             trace.plain = "refused"
             continue
         trace.plain = "ok"
-        trace.rows, trace.unreadable = read_jsonl_rows_report(path)
+        trace.rows, trace.unreadable = rows, unreadable
     return logs
 
 
@@ -886,10 +906,8 @@ def _withheld_by_label(grade: Any) -> dict[str, list[dict[str, Any]]]:
 
 
 def _bump(counts: dict[str, int], disposition: str) -> None:
-    key = {"defender": "defender", "world_author": "world_author", "withheld": "withheld",
-          "unqueueable": "unqueueable", "never_eligible": "never_eligible"}.get(disposition)
-    if key:
-        counts[key] += 1
+    if disposition in counts:
+        counts[disposition] += 1
 
 
 def _finding_fields(finding: dict[str, Any]) -> dict[str, Any]:
@@ -901,10 +919,12 @@ def _finding_fields(finding: dict[str, Any]) -> dict[str, Any]:
 
 
 def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
-    """Every finding row the page shows, keyed `(label, draw, index)` — the page's own
-    disposition rule mirrors `enqueue_report`'s (#1025 amendment 3): the record's own signals
-    (`unqueueable_findings`, a world's `withheld_reason`, the family/verdict word) decide each
-    row's fate, never a re-run of the enqueue pass itself."""
+    """Every finding row the page shows, keyed `(label, draw, index)`. Each row's fate is
+    `enqueue.route_finding`'s answer — THE lane rule the enqueue pass itself walks, asked of
+    the record's own signals (a world's row, its `withheld_reason`, the family's verdict word)
+    — with the record's own `unqueueable_findings` and `world_findings` laid over it (#1025
+    amendment 3: never a re-run of the enqueue pass, and since the mirror drifted, never a
+    copy of its rule either)."""
     out = _Findings()
     rows = out.rows
     counts = out.counts
@@ -941,47 +961,40 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
         out.group_index = _group_numbering(rows)
         return out
 
-    withheld_reasons = {}
-    for w in entries.values():
-        if w.row is not None and w.row.get("withheld_reason") is not None:
-            withheld_reasons[w.label] = w.row["withheld_reason"]
-    measuring = {w.label for w in entries.values()
-                if w.row is not None and not w.row.get("ungradable")
-                and w.row.get("withheld_reason") is None}
+    # The enqueue's own inputs, off the record's rows exactly as `enqueue_report` builds them.
+    world_rows = [w.row for w in entries.values() if w.row is not None]
+    withheld_reasons = withheld_reasons_of(world_rows)
     verdict_word = getattr(grade, "verdict_word", None)
-    # THROUGH THE OWNER'S NORMALIZER, not a bare `in` (mirroring `enqueue.py`'s own O7 gate,
-    # enqueue.py:622): a `verdict_word` that reaches this record any other way than the
-    # enqueue pass's own write — case-folded, whitespace differently, a value from an older
-    # writer — would otherwise be missed here while the real enqueue pass still blocks it,
-    # rendering a finding "enqueued" that the record's own pass never queued (#1025).
-    defender_blocked = normalized_judge_outcome(verdict_word) in ("discard", "corpus-contradiction")
+    defender_blocked = defender_lane_blocked(verdict_word)
 
     unqueueable = _unqueueable_lookup(grade)
     world_findings_by_coord = _world_findings_lookup(grade)
     seen_coords: set[str] = set()
 
-    def _row_state_of(label: str) -> str | None:
+    def _walked(label: str) -> bool:
+        """Does the page walk this label's draws at all? The family lane always; a world once
+        a grade row or a manifest entry names it (a bare `runs/` directory is a section with
+        no findings)."""
         entry = entries.get(label)
-        if label == _FAMILY_LABEL:
-            return "family"
-        if entry is not None and entry.row is not None:
-            return "ungradable" if entry.row.get("ungradable") else "graded"
-        if entry is not None and entry.in_manifest:
-            return "no_grade_row"
-        return None
+        return label == _FAMILY_LABEL or (
+            entry is not None and (entry.row is not None or entry.in_manifest))
 
-    def _dispose(label: str, row_state: str, subject: Any, coord: str) -> tuple[str, str | None]:
+    def _dispose(label: str, finding: dict[str, Any], kind: str, coord: str,
+                 ) -> tuple[str, str | None]:
+        entry = entries.get(label)
         return _finding_disposition(
-            row_state=row_state, entry=entries.get(label), subject=subject, coord=coord,
-            unqueueable=unqueueable, withheld_reasons=withheld_reasons, measuring=measuring,
-            defender_blocked=defender_blocked, verdict_word=verdict_word,
+            route_finding(
+                label=label, finding=finding, kind=kind,
+                world_row=entry.row if entry is not None else None,
+                withheld_reasons=withheld_reasons, defender_blocked=defender_blocked),
+            coord=coord, unqueueable=unqueueable, verdict_word=verdict_word,
             world_findings_by_coord=world_findings_by_coord)
 
     for label in roster_labels:
         entry = entries.get(label)
-        row_state = _row_state_of(label)
-        if row_state is None:
+        if not _walked(label):
             continue
+        kind = KIND_FAMILY if label == _FAMILY_LABEL else KIND_DRAW
 
         docs, _report = ep.draws[label]
         for draw, doc in docs.items():
@@ -991,13 +1004,10 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
                 counts["mappings"] += 1
                 coord = f"{label}/{draw}/{index}"
                 seen_coords.add(coord)
-                # ABSENT reads as the defender's, exactly as `enqueue_report` reads it
-                # (`finding.get("subject", SUBJECT_DEFENDER)`, enqueue.py): the pre-#1007 draw
-                # shape carries no `subject` at all, and the real pass queued those as defender
-                # findings — a page that read the absence as "names neither channel" contradicted
-                # the record's own `enqueued_rows` on the very archive it was built to explain.
+                # `route_finding` reads an ABSENT `subject` as the defender's, exactly as the
+                # enqueue pass does; the row shows the same reading.
                 subject = finding.get("subject", SUBJECT_DEFENDER)
-                disposition, reason = _dispose(label, row_state, subject, coord)
+                disposition, reason = _dispose(label, finding, kind, coord)
                 _bump(counts, disposition)
                 recorded = world_findings_by_coord.get(coord)
                 recorded_id = recorded.get("finding_id") if isinstance(recorded, dict) else None
@@ -1015,12 +1025,15 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
             coord = f"{label}/mechanical/{mech_index}"
             seen_coords.add(coord)
             counts["mappings"] += 1
-            disposition, reason = _dispose(label, row_state, SUBJECT_WORLD, coord)
+            disposition, reason = _dispose(label, finding, KIND_MECHANICAL, coord)
             _bump(counts, disposition)
+            recorded = world_findings_by_coord.get(coord)
             rows.append(_Finding(
                 row_id=f"f-{label}-mechanical-{mech_index}", label=label, draw="mechanical",
                 index=mech_index, subject=SUBJECT_WORLD, disposition=disposition,
-                reason=reason, stub=False, recorded_id=None, **_finding_fields(finding)))
+                reason=reason, stub=False,
+                recorded_id=recorded.get("finding_id") if isinstance(recorded, dict) else None,
+                **_finding_fields(finding)))
 
     # Record-only stubs: a recorded coordinate whose draw DOCUMENT is absent (J9b).
     present_docs = {label: set(ep.draws[label][0]) for label in roster_labels}
@@ -1035,11 +1048,11 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
             continue  # a present document, no stub (the document is the grain, F-5)
         if coord in seen_coords:
             continue
-        entry = entries.get(label)
-        row_state = ("family" if label == _FAMILY_LABEL else
-                    ("ungradable" if entry and entry.row and entry.row.get("ungradable") else
-                     ("graded" if entry and entry.row else "no_grade_row")))
-        disposition, reason = _dispose(label, row_state, SUBJECT_WORLD, coord)
+        # A recorded world row IS a world finding: the stub carries the subject the record
+        # gave it, and the coordinate's middle segment says which of the three shapes it took.
+        kind = (KIND_FAMILY if label == _FAMILY_LABEL else
+                KIND_MECHANICAL if draw_s == KIND_MECHANICAL else KIND_DRAW)
+        disposition, reason = _dispose(label, {"subject": SUBJECT_WORLD}, kind, coord)
         counts["mappings"] += 1
         _bump(counts, disposition)
         rows.append(_Finding(
@@ -1084,34 +1097,33 @@ def _group_numbering(rows: list[_Finding]) -> dict[str, int]:
                                        start=1)}
 
 
-def _finding_disposition(  # noqa: PLR0913, C901 — the enqueue's own subject/withheld/blocked precedence (#1025 amendment 3), mirrored as one decision
-    *, row_state: str, entry: WorldEntry | None, subject: Any, coord: str,
-    unqueueable: dict[str, str], withheld_reasons: dict[str, str], measuring: set[str],
-    defender_blocked: bool, verdict_word: Any, world_findings_by_coord: dict[str, dict],
+def _finding_disposition(
+    route: tuple[str, str | None], *, coord: str, unqueueable: dict[str, str],
+    verdict_word: Any, world_findings_by_coord: dict[str, dict],
 ) -> tuple[str, str | None]:
-    label = coord.split("/", 1)[0]
-    if row_state == "ungradable":
-        reason = entry.row.get("ungradable_reason") if entry and entry.row else None
-        return "world_ungradable", reason
-    if row_state == "no_grade_row":
-        return "no_grade_row", None
-    if subject == SUBJECT_WORLD or row_state == "family":
-        if coord in unqueueable:
-            return "unqueueable", unqueueable[coord]
-        if coord in world_findings_by_coord:
-            return "world_author", None
-        return "never_on_record", None
-    if subject != SUBJECT_DEFENDER:
-        if coord in unqueueable:
-            return "unqueueable", unqueueable[coord]
-        return "unqueueable", f"subject {subject!r} names neither channel"
-    if coord in unqueueable:
+    """The page's disposition word for one finding: `route_finding`'s lane, with the record's
+    own `unqueueable_findings` (a validation drop, named by coordinate) and `world_findings`
+    (a world row the pass built) laid over the two lanes that validate. Every other lane is
+    the route's own answer, spelled in the page's vocabulary (`_disposition_heading_raw`)."""
+    lane, reason = route
+    if lane in (ROUTE_WORLD, ROUTE_DEFENDER, ROUTE_NO_CHANNEL) and coord in unqueueable:
         return "unqueueable", unqueueable[coord]
-    if label in withheld_reasons:
-        return "withheld", withheld_reasons[label]
-    if defender_blocked and label in measuring:
+    if lane == ROUTE_WORLD:
+        return ("world_author", None) if coord in world_findings_by_coord else (
+            "never_on_record", None)
+    if lane == ROUTE_DEFENDER:
+        return "defender", None
+    if lane == ROUTE_NO_CHANNEL:
+        return "unqueueable", reason
+    if lane == ROUTE_WITHHELD:
+        return "withheld", reason
+    if lane == ROUTE_NEVER_ELIGIBLE:
         return "never_eligible", str(verdict_word)
-    return "defender", None
+    if lane == ROUTE_UNGRADABLE:
+        return "world_ungradable", reason
+    if lane == ROUTE_NO_ROW:
+        return "no_grade_row", None
+    return "no_grade", None
 
 
 def _disposition_heading_raw(f: _Finding) -> str:
@@ -1280,7 +1292,11 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         if f.label == _FAMILY_LABEL and f.disposition != "never_on_record":
             family_groups.setdefault(f.draw, []).append(f)
     family_docs = ep.draws[_FAMILY_LABEL][0]
-    for draw in sorted(family_groups, key=lambda d: (isinstance(d, str), d)):
+    # Draw keys come in three shapes — a document's `int`, a record-only stub's `str`, a
+    # withheld entry's `None` — and a key that compares across them is what keeps one
+    # `withheld_findings` entry tagged `world: family` from raising `TypeError` out of the
+    # whole page (d01: only `family.yaml` is fatal).
+    for draw in sorted(family_groups, key=_draw_sort_key):
         doc = family_docs.get(draw) if isinstance(draw, int) else None
         outcome = str(doc.get("episode_outcome", "")) if isinstance(doc, dict) else ""
         items = "".join(f'<div class="vd-family-item">{_uv(f.topic)}: {_uv(f.claim)}'
@@ -1305,18 +1321,18 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     badge = f'<span class="vd-badge">{_uv(badge_word)}</span>'
     meta = f'<span class="vd-meta">{_uv(grade.episode_outcome)} · {_uv(grade.verdict_word)}</span>'
 
-    measuring = {w.label for w in entries.values()
-                if w.row is not None and not w.row.get("ungradable")
-                and w.row.get("withheld_reason") is None}
-    graded = {w.label for w in entries.values()
-             if w.row is not None and not w.row.get("ungradable")}
+    # The record's OWN partition (`_grade_from_document` derives both off the rows with
+    # `is_gradable_row`, the one predicate), never a third spelling of it here.
+    measuring = grade.measuring_worlds
+    graded = grade.graded_worlds
     control_world = ep.manifest_world(ep.control_label) if ep.control_label else None
     control_declared = _normalized_disposition(
         control_world.get("disposition_declared") if control_world else None)
     contrasting = 0
     agree = 0
-    for label in measuring:
-        row = entries[label].row
+    for label in sorted(measuring):
+        entry = entries.get(label)
+        row = entry.row if entry is not None else None
         if row is None:
             continue
         if _normalized_disposition(row.get("declared")) != control_declared:
@@ -1423,16 +1439,20 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     return _page_section("sec-verdict", "Verdict", body)
 
 
+def _draw_sort_key(draw: Any) -> tuple[int, Any]:
+    if isinstance(draw, int):
+        return (0, draw)
+    if isinstance(draw, str):
+        return (1, draw)
+    return (2, "")
+
+
 def _normalized_disposition(value: Any) -> Any:
     """A declared/verdict disposition through the vocabulary's own normalizer, for the tile's
     control-contrast count — the raw value where it is not a string the normalizer knows."""
     if not isinstance(value, str):
         return value
-    try:
-        from defender._vocab import normalized_disposition
-        return normalized_disposition(value) or value
-    except Exception:  # noqa: BLE001
-        return value
+    return normalized_disposition(value) or value
 
 
 def _render_queue_accounting(grade: Any, counts: dict[str, int], rows: list[_Finding]) -> str:
@@ -1933,7 +1953,6 @@ def _role_cost_text(cost: float, wall_ms: float, priced: int, calls: int) -> str
 def _wall_between(start: str, end: str) -> float | None:
     """The pair's wall in ms: `None` where either stamp does not parse, `-1` where the pair is
     INVERTED (the end precedes the start), the plain delta — zero included — otherwise."""
-    from defender._clock import parse_iso_utc
     a, b = parse_iso_utc(start), parse_iso_utc(end)
     if a is None or b is None:
         return None
@@ -1942,7 +1961,6 @@ def _wall_between(start: str, end: str) -> float | None:
 
 
 def _wall_span(starts: list[str], ends: list[str]) -> float:
-    from defender._clock import parse_iso_utc
     parsed_starts = [d for s in starts if (d := parse_iso_utc(s)) is not None]
     parsed_ends = [d for e in ends if (d := parse_iso_utc(e)) is not None]
     if not parsed_starts or not parsed_ends:
