@@ -85,6 +85,7 @@ from ._handoff import (
     build_system_draft_handoffs,
     discover_system_drafts,
     invoke_agent,
+    queue_lock_file,
     release_queue_lock,
 )
 from ._rules import (
@@ -129,6 +130,35 @@ def _write_state(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def done_sentinel_text(sha: str | None) -> str:
+    """The body of the per-run `done` sentinel — the one producer of it.
+
+    @owns done_sentinel — `commit: <sha|none>`, the time, and whether a commit was made.
+    Both write sites in this module and the drain's deferred write (#952 M1) render through
+    here, so "done" means one thing however the run was served."""
+    return (
+        f"commit: {sha or 'none'}\nat: {_loop_config.now_iso()}\n"
+        f"commit_made: {sha is not None}\n"
+    )
+
+
+def write_done_sentinel(run_dir: Path, text: str) -> None:
+    """The one writer of `<run_dir>/lead_author/done` — the file `_run_locked` short-circuits
+    on. `run` writes it itself by default; under `on_done` the drain writes it here after the
+    batch's push landed (#952 M4), so a run the drain committed but never pushed is served
+    again next tick instead of being recorded as done."""
+    _write_state(_done_sentinel(run_dir), text)
+
+
+def _sentinel_sink(run_dir: Path, on_done: Callable[[str], None] | None) -> Callable[[str], None]:
+    """Where a clean exit's sentinel goes: the file under the run dir (default, the CLI's
+    contract — consumption is immediate) or the caller's callable (the drain's — consumption
+    waits for durability)."""
+    if on_done is not None:
+        return on_done
+    return functools.partial(write_done_sentinel, run_dir)
+
+
 
 
 @dataclass(frozen=True)
@@ -165,7 +195,7 @@ def build_lead_author_deps(
         discover_system_drafts=functools.partial(
             discover_system_drafts, skills_dir=paths.skills_dir, systems=systems
         ),
-        acquire_queue_lock=acquire_queue_lock,
+        acquire_queue_lock=functools.partial(acquire_queue_lock, paths),
         release_queue_lock=release_queue_lock,
     )
 
@@ -176,7 +206,14 @@ def run(
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
+    on_done: Callable[[str], None] | None = None,
 ) -> int:
+    """Serve one run. `on_done` is the consumption switch (#952 M4): left `None`, a clean
+    exit writes the `done` sentinel under the run dir at once — the CLI's contract; given,
+    the sentinel's text is handed to the callable instead and nothing is written under the
+    run dir, so the drain can record the run as done only once its batch has landed. The
+    `pitfalls_collected` marker and the pitfalls rows are written either way — they are facts
+    about the run, not about a commit."""
     if not run_dir.is_dir():
         _log(f"FATAL: run_dir not found: {run_dir}")
         return 2
@@ -190,21 +227,24 @@ def run(
         if queue_lock is None:
             return QUEUE_LOCK_SKIP_RC
         try:
-            return _run_locked(run_dir, deps, box=box)
+            return _run_locked(run_dir, deps, box=box, on_done=on_done)
         finally:
             deps.release_queue_lock(queue_lock)
 
-    queue_lock = acquire_queue_lock()
+    queue_lock = acquire_queue_lock(paths)
     if queue_lock is None:
         return QUEUE_LOCK_SKIP_RC
     try:
         deps = build_lead_author_deps(paths)
-        return _run_locked(run_dir, deps, box=box)
+        return _run_locked(run_dir, deps, box=box, on_done=on_done)
     finally:
         release_queue_lock(queue_lock)
 
 
-def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
+def _run_locked(
+    run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None,
+    on_done: Callable[[str], None] | None = None,
+) -> int:
     if _done_sentinel(run_dir).is_file():
         _log("already processed (done sentinel exists) — nothing to do")
         return 0
@@ -263,7 +303,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
     if synth:
         catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
     handoffs, pending_drafts, rc = _prepare_handoffs(
-        run_dir, deps, executed, joined_leads, catalog=catalog
+        run_dir, deps, executed, joined_leads, catalog=catalog, on_done=on_done,
     )
     if rc is not None:
         return rc
@@ -284,10 +324,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
         repo_root, repo_root / "defender" / "skills",
         _loop_commit_message(run_dir, changed),
     )
-    _write_state(
-        _done_sentinel(run_dir),
-        f"commit: {sha or 'none'}\nat: {_loop_config.now_iso()}\ncommit_made: {sha is not None}\n",
-    )
+    _sentinel_sink(run_dir, on_done)(done_sentinel_text(sha))
     _log(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
     return 0
 
@@ -295,7 +332,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
 def _prepare_handoffs(
     run_dir: Path, deps: LeadAuthorDeps,
     executed: list | None = None, joined_leads: list | None = None,
-    *, catalog: list | None = None,
+    *, catalog: list | None = None, on_done: Callable[[str], None] | None = None,
 ) -> tuple[list, list, int | None]:
     pending_drafts_raw = deps.discover_system_drafts()
     threshold = _lift_threshold()
@@ -348,10 +385,7 @@ def _prepare_handoffs(
             "template (unresolved query_id, or a `∅.` sentinel routed to the pitfalls "
             "residue) and there are no pending drafts — nothing to do"
         )
-        _write_state(
-            _done_sentinel(run_dir),
-            f"commit: none\nat: {_loop_config.now_iso()}\ncommit_made: False\n",
-        )
+        _sentinel_sink(run_dir, on_done)(done_sentinel_text(None))
         return [], [], 0
 
     return handoffs, pending_drafts, None
@@ -367,15 +401,19 @@ worktree and opens the PR.
 
 Preconditions
   * No other lead-author tick may be running (per-author queue lock at
-    defender/learning/_pending_leads/.lock). Violating it is not silent: this returns
-    rc=3 without serving, and the drain puts the request back on the queue untouched
-    for the next tick rather than counting the skip as a serve.
+    defender/learning/_pending_leads/.lock, held by the drain for its whole tick —
+    serve, pitfalls curation, push, PR). Violating it is not silent: this returns
+    rc=3 without serving, and a drain tick that finds the lock held skips before
+    claiming any request rather than counting the skip as a serve.
   * ``<run_dir>/executed_queries.jsonl`` and ``<run_dir>/gather_raw/``
     (the two tables) must exist — written live during the run by
     record_query.py + record_lead.py.
 
 State files written under ``<run_dir>/lead_author/``
-  done           sentinel on successful completion; makes the run a no-op.
+  done           sentinel on successful completion; makes the run a no-op. Written
+                 here at once when invoked by hand; under the drain, only after the
+                 batch's push and PR landed, so a run whose push failed is served
+                 again next tick instead of being recorded as done.
 
 On a per-run fault this returns rc=2 and the lead-author drain quarantines the run's
 marker to the author-queue's ``failed/`` dir (surfaced for a human, not dropped); the
@@ -487,6 +525,8 @@ __all__ = [
     "_verify_skills_state",
     "_write_state",
     "acquire_queue_lock",
+    "done_sentinel_text",
+    "queue_lock_file",
     "answered_identities",
     "argparse",
     "build_handoff",
@@ -504,6 +544,7 @@ __all__ = [
     "lead_render",
     "main",
     "release_queue_lock",
+    "write_done_sentinel",
     "run",
     "stage_user_message",
     "structured_json_body",

@@ -310,8 +310,11 @@ def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
 
 def rotate_pitfalls(
     batch_ids: list[str], commit_sha: str | None, *, paths: LoopPaths = DEFAULT_PATHS,
-    category: str = "consumed_committed",
+    category: str = "consumed_committed", timeout_seconds: int | None = None,
 ) -> None:
+    """`timeout_seconds` is `queue_lock`'s own deadline, threaded through untouched: the
+    drain must pass one (#952 M1 — the deferred `consumed_committed` rotation runs from the
+    drain tick, after the push), and an appender-side caller may still pass none."""
     ids = set(batch_ids)
     consumed = [
         {**r, "consumed_category": category}
@@ -326,6 +329,7 @@ def rotate_pitfalls(
         held=[],
         consumed=consumed,
         commit_sha=commit_sha,
+        timeout_seconds=timeout_seconds,
     )
 
 

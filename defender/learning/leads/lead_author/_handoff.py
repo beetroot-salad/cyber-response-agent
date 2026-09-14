@@ -16,6 +16,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 
 from defender.learning.author import shared as _author_shared
 from defender._frontmatter import parse_frontmatter_or_none
+from defender._io import guarded_mkdir
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning._prompt import stage_user_message, structured_json_body
@@ -65,6 +66,9 @@ from defender.learning.leads._lead_spine import (
 )
 
 
+#: The per-author queue lock under DEFAULT_PATHS — what the CLI locks. `queue_lock_file(paths)`
+#: is the same spelling for any `LoopPaths`; the drain and a by-hand run over the same state
+#: contend on the same file (#952 M5).
 QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
 
 #: What `run` returns when it did NOT serve because another lead-author tick holds the queue
@@ -82,9 +86,16 @@ def _lift_threshold() -> int:
 
 
 
-def acquire_queue_lock() -> Any:
-    _log(f"acquire queue-lock={QUEUE_LOCK_FILE}")
-    fh = _author_shared.acquire_flock(QUEUE_LOCK_FILE)
+def queue_lock_file(paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS) -> Path:
+    return paths.lead_pending_dir / ".lock"
+
+
+def acquire_queue_lock(paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS) -> Any:
+    lock = queue_lock_file(paths)
+    _log(f"acquire queue-lock={lock}")
+    # The state root is the trust root: the queues hang off it and no box mounts it.
+    guarded_mkdir(lock.parent, base=paths.state_root)
+    fh = _author_shared.acquire_flock(lock)
     if fh is None:
         _log("queue-lock held by another tick — skipping")
         return None
