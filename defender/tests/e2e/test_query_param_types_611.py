@@ -40,6 +40,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
     q,
     run_gather,
 )
+from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -174,7 +175,7 @@ def test_the_real_registry_rejects_a_mistyped_param(system, verb, params, why):
 
     Model-bindable is load-bearing in that sentence — a param the boundary reserves before it
     ever type-checks cannot exercise this."""
-    fn = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL).verbs(system)[verb]
+    fn = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL).verbs(system)[verb]
     assert why in model_facing_params(fn), (
         f"{why} is not a param a model may bind on {system}.{verb} — this row cannot reach the "
         "type check it exists to measure"
@@ -186,7 +187,7 @@ def test_the_real_registry_rejects_a_mistyped_param(system, verb, params, why):
 
 def test_the_real_registry_admits_its_own_declared_types():
     """Positive control on the real signatures."""
-    reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL)
     assert validate_params(
         reg.verbs("elastic")["query"], {"native_query": "FROM logs", "limit": 20},
     ) is None

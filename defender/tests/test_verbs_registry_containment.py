@@ -17,12 +17,13 @@ import pytest
 from defender.runtime.verb_grant import DENY_ALL, VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry
 from defender.tests.e2e._replay_harness import DEFENDER
+from defender.runtime.verbs import read_roster
 
 ADAPTERS = DEFENDER / "scripts" / "adapters"
 
 
 def test_a_real_system_is_admitted():
-    reg = ModuleVerbRegistry(ADAPTERS, DENY_ALL)
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS), DENY_ALL)
     assert "health-check" in reg.verbs("elastic")
 
 
@@ -36,7 +37,7 @@ def test_a_real_system_is_admitted():
 ])
 def test_a_malformed_system_is_rejected_not_imported(bad):
     with pytest.raises(KeyError):
-        ModuleVerbRegistry(ADAPTERS, DENY_ALL).verbs(bad)
+        ModuleVerbRegistry(read_roster(ADAPTERS), DENY_ALL).verbs(bad)
 
 
 def test_a_traversal_system_cannot_execute_an_out_of_tree_module(tmp_path):
@@ -47,7 +48,7 @@ def test_a_traversal_system_cannot_execute_an_out_of_tree_module(tmp_path):
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\nVERBS = {{}}\n",
         encoding="utf-8",
     )
-    reg = ModuleVerbRegistry(ADAPTERS, DENY_ALL)
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS), DENY_ALL)
     rel = os.path.relpath(outside / "pwned_adapter.py", ADAPTERS)[: -len("_adapter.py")]
     assert ".." in rel
 
@@ -84,7 +85,7 @@ def test_a_broken_adapter_module_does_not_kill_the_catalog(tmp_path):
         role="gather",
         entries=(("good", "health-check", "r"), ("broken", "health-check", "r")),
     )
-    catalog = descriptor_catalog(skills, adapters, grant)
+    catalog = descriptor_catalog(skills, read_roster(adapters), grant)
     assert catalog is not None, "one broken adapter emptied the whole catalog"
     assert "`good`" in catalog
     assert "`broken`" not in catalog, "a system that cannot be imported was still advertised"
@@ -99,4 +100,4 @@ def test_a_broken_adapter_module_raises_from_the_registry(tmp_path):
     (adapters / "broken_adapter.py").write_text("this is not python(\n", encoding="utf-8")
 
     with pytest.raises(SyntaxError):
-        ModuleVerbRegistry(adapters, DENY_ALL).verbs("broken")
+        ModuleVerbRegistry(read_roster(adapters), DENY_ALL).verbs("broken")

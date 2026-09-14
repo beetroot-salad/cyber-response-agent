@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from defender._frontmatter import strip_frontmatter
@@ -132,7 +133,7 @@ def _build_corpus_vocab_section(env: dict[str, str], sig: str | None) -> str | N
 
 def orientation(
     run_dir: Path, defender_dir: Path, alert_path: Path,
-    *, lead_zero_section: str | None = None,
+    *, systems: Sequence[str], lead_zero_section: str | None = None,
 ) -> str:
     try:
         from defender import run_common
@@ -159,7 +160,7 @@ def orientation(
 
     try:
         from defender.scripts.workspace_map import workspace_map
-        sections.append("## Workspace\n" + workspace_map(run_dir).strip())
+        sections.append("## Workspace\n" + workspace_map(run_dir, systems=systems).strip())
     except Exception as e:  # noqa: BLE001 — orientation must never break the run
         sections.append(f"## Workspace\n_(unavailable: {e!r} — discover via ls/Read)_")
 

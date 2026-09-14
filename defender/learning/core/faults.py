@@ -5,6 +5,7 @@ from collections.abc import Callable
 from defender._git import GitError
 from defender.learning.core.config import FatalConfigError, StageAbort
 from defender.runtime import box as box_mod
+from defender.runtime.verbs import RegistryError
 
 
 # `RunTainted` is here for TWO readers. `_run_stage` gives it `[loop] FATAL:` + exit 2
@@ -13,8 +14,15 @@ from defender.runtime import box as box_mod
 # taint is raised from `stop_and_scrub`, outside `do_work`, so it never meets that guard
 # today — but a tainted tree filed as one item's ordinary failure is exactly the silence this
 # tuple prevents.
+#
+# `RegistryError` is the adapters directory this checkout cannot read — absent, unlistable,
+# listable but not searchable (#1035). The lead-author resolver raises it as its own class
+# (`declared_systems.AdaptersUnreadable`, a `LeadAuthorError` that IS a `RegistryError`), and
+# without it here the dead-letter guard filed that as the batch's ordinary failure: every
+# queued pitfall row's lifetime `attempts` bumped per tick, the whole queue retired to the
+# graveyard at the ceiling, for a fault no row caused and no retry can clear.
 SYSTEMIC_FAULTS: tuple[type[BaseException], ...] = (
-    StageAbort, FatalConfigError, GitError, box_mod.BoxFault, box_mod.RunTainted,
+    StageAbort, FatalConfigError, GitError, box_mod.BoxFault, box_mod.RunTainted, RegistryError,
 )
 
 

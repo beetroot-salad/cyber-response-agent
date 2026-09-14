@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
+from defender._paths import adapters_under  # noqa: E402
 from defender._run_paths import PROVENANCE, WIRE_LOG_DIR  # noqa: E402
-from defender.runtime.verbs import ADAPTER_SUFFIX  # noqa: E402
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
@@ -43,20 +44,22 @@ def _rel(p: Path) -> str:
         return str(p)
 
 
-def _list_dir(d: Path, suffix: str | None = None) -> list[str]:
+def _list_dir(d: Path) -> list[str]:
     if not d.is_dir():
         return []
-    out = []
-    for child in sorted(d.iterdir()):
-        if child.name.startswith(".") or child.name == "__pycache__":
-            continue
-        if suffix and child.is_file() and not child.name.endswith(suffix):
-            continue
-        out.append(child.name)
-    return out
+    return [
+        child.name for child in sorted(d.iterdir())
+        if not child.name.startswith(".") and child.name != "__pycache__"
+    ]
 
 
-def workspace_map(run_dir: Path) -> str:
+def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
+    """The model's directory view of the run. `systems` is what the Adapters section lists:
+    the run's roster (`read_roster(...).accepted`, threaded down from `run_investigation`),
+    never a listing of the directory — a map that listed `*_adapter.py` filenames itself
+    named a `change-mgmt_adapter.py` (a hyphen in the filename) as dispatchable while every
+    `query(system="change-mgmt")` came back "unknown system": two readers of one directory
+    disagreeing on the surface the model reads first (#1035)."""
     lines: list[str] = []
     lines.append("# Workspace map")
     lines.append("")
@@ -90,14 +93,12 @@ def workspace_map(run_dir: Path) -> str:
         lines.append(f"- {name}{marker}")
     lines.append("")
 
-    adapters_dir = DEFENDER_DIR / "scripts" / "adapters"
-    lines.append(f"## Adapters — `{_rel(adapters_dir)}/`")
-    adapters = _list_dir(adapters_dir, suffix=ADAPTER_SUFFIX)
-    if adapters:
-        for name in adapters:
-            lines.append(f"- {name}  (a VERBS registry dispatched via the query tool; do not Read the source)")
+    lines.append(f"## Adapters — `{_rel(adapters_under(DEFENDER_DIR))}/`")
+    if systems:
+        for name in sorted(systems):
+            lines.append(f"- {name}  (a system dispatched via the query tool; do not Read the adapter source)")
     else:
-        lines.append("- (none yet — v2 adapters TBD)")
+        lines.append("- (none declared)")
     lines.append("")
 
     queries_dir = DEFENDER_DIR / "skills" / "gather" / "queries"
@@ -131,7 +132,18 @@ def main(argv: list[str]) -> int:
     if len(argv) != 2:
         sys.stderr.write("usage: workspace_map.py <run_dir>\n")
         return 2
-    print(workspace_map(Path(argv[1])), end="")
+    # The CLI is the operator's view of the checkout, so it reads the checkout's roster at
+    # its own top — the one read this entry point performs. A checkout whose adapters tree
+    # cannot be read is a one-line refusal and exit 2, like the other CLIs over the same
+    # read, not a traceback.
+    from defender.runtime.verbs import RegistryError, read_roster
+
+    try:
+        roster = read_roster(adapters_under(DEFENDER_DIR))
+    except RegistryError as e:
+        sys.stderr.write(f"workspace_map: {e}\n")
+        return 2
+    print(workspace_map(Path(argv[1]), systems=tuple(roster.accepted)), end="")
     return 0
 
 

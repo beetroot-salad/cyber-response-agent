@@ -153,6 +153,7 @@ from defender.scripts.gather_tools.record_query import (  # noqa: E402
     rejection_trip,
     repeat_trip,
 )
+from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -587,7 +588,7 @@ def unloadable_adapter(root: Path) -> ModuleVerbRegistry:
     adapters = root / "adapters"
     adapters.mkdir(parents=True)
     (adapters / "elastic_adapter.py").write_text(_BROKEN_ADAPTER, encoding="utf-8")
-    return ModuleVerbRegistry(adapters, VerbGrant(role="gather", entries=(("elastic", "probe", "r"),)))
+    return ModuleVerbRegistry(read_roster(adapters), VerbGrant(role="gather", entries=(("elastic", "probe", "r"),)))
 
 
 def _bad_args(params: dict) -> Turn:

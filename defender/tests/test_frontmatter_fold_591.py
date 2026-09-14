@@ -29,6 +29,7 @@ from defender.evals.held_out import predicted_disposition
 from defender._vocab import DISPOSITION_ENUM
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
+from defender.runtime.verbs import read_roster
 
 WORKTREE = Path(__file__).resolve().parents[2]
 
@@ -36,9 +37,8 @@ WORKTREE = Path(__file__).resolve().parents[2]
 
 
 def _hook():
-    """A FRESH hook module — a fresh ``descriptor_catalog`` lru_cache per test.
-
-    `load_module` executes on every call, which is what makes that true."""
+    """A FRESH hook module per test. `load_module` executes on every call, which is what
+    makes that true."""
     return load_module(DEFENDER / "hooks" / "inject_system_skill_description.py",
                        name="inject591")
 
@@ -146,19 +146,16 @@ def test_d0_descriptor_catalog_seam(tmp_path):
 
     grant = VerbGrant(role="gather", entries=(("alpha", "ping", "r"), ("beta", "ping", "r")))
 
-    hook.descriptor_catalog.cache_clear()
-    out = hook.descriptor_catalog(skills, adapters, grant)
+    out = hook.descriptor_catalog(skills, read_roster(adapters), grant)
     assert out == "- `alpha`: alpha desc"
 
     empty_adapters = tmp_path / "adapters2"
     empty_adapters.mkdir()
     (empty_adapters / "beta_adapter.py").write_text("# adapter\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
-    hook.descriptor_catalog.cache_clear()
-    assert hook.descriptor_catalog(skills, empty_adapters, grant) is None
+    assert hook.descriptor_catalog(skills, read_roster(empty_adapters), grant) is None
 
-    hook.descriptor_catalog.cache_clear()
-    a = hook.descriptor_catalog(skills, adapters, grant)
-    b = hook.descriptor_catalog(skills, empty_adapters, grant)
+    a = hook.descriptor_catalog(skills, read_roster(adapters), grant)
+    b = hook.descriptor_catalog(skills, read_roster(empty_adapters), grant)
     assert a == "- `alpha`: alpha desc"
     assert b is None
 
@@ -289,8 +286,7 @@ def test_d_unfenced_skill_none(tmp_path):
 
     grant = VerbGrant(role="gather", entries=(("evil", "ping", "r"), ("good", "ping", "r")))
     assert hook.read_description("evil", skills_dir=skills) is None
-    hook.descriptor_catalog.cache_clear()
-    catalog = hook.descriptor_catalog(skills, adapters, grant) or ""
+    catalog = hook.descriptor_catalog(skills, read_roster(adapters), grant) or ""
     assert "BOGUS" not in catalog
     assert "`evil`" not in catalog
     assert hook.read_description("good", skills_dir=skills) == "real desc"
@@ -305,9 +301,8 @@ def test_d_fenced_skill_desc(tmp_path):
     _skill(skills, "good", b"---\nname: defender-good\ndescription: real desc\n---\nbody\n")
     (adapters / "good_adapter.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     assert hook.read_description("good", skills_dir=skills) == "real desc"
-    hook.descriptor_catalog.cache_clear()
     grant = VerbGrant(role="gather", entries=(("good", "ping", "r"),))
-    assert hook.descriptor_catalog(skills, adapters, grant) == "- `good`: real desc"
+    assert hook.descriptor_catalog(skills, read_roster(adapters), grant) == "- `good`: real desc"
 
 
 def test_d_trailing_space_opener_none(tmp_path):
@@ -369,8 +364,7 @@ def test_d_catalog_survival():
     from defender.runtime.driver import GATHER_DEF
 
     hook = _hook()
-    hook.descriptor_catalog.cache_clear()
-    out = hook.descriptor_catalog(hook.SKILLS_DIR, hook.ADAPTERS_DIR, GATHER_DEF.verb_grant)
+    out = hook.descriptor_catalog(hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), GATHER_DEF.verb_grant)
     assert out is not None
     adapters_dir = DEFENDER / "scripts" / "adapters"
     systems = sorted(

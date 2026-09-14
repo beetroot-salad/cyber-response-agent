@@ -41,11 +41,12 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 
 from defender import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
+from defender._paths import adapters_under  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
+from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
@@ -278,6 +279,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     two registries are therefore built in the two arms of one `if`, so there is no path on
     which both exist.
     """
+    # THE ROSTER, read once for this process and handed down as a value — to whichever
+    # registry the arm below builds, and to `run_investigation`, which builds the dispatch
+    # catalogs over the same read rather than reading the tree again for them.
+    roster = read_roster(adapters_under(defender_dir))
     if world is not None:
         from defender.learning.branch.estate.applier import WorldApplier
         from defender.learning.branch.estate.registry import WorldRegistry
@@ -286,7 +291,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
 
         family = world.family
         verbs: Any = WorldRegistry(
-            defender_dir / "scripts" / "adapters", driver.GATHER_DEF.verb_grant,
+            roster, driver.GATHER_DEF.verb_grant,
             # DECLARED, not merely constructed: a world that serves nothing must still leave a
             # ledger, or its silence is indistinguishable from an archive that lost the file.
             world=world, ledger=Ledger.for_world(
@@ -302,12 +307,13 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
         return investigate(
             alert_path=alert_path, run_dir=run_dir, run_id=run_id,
             defender_dir=defender_dir, model_name=model_name,
-            model_override=model_override, box=box, verbs=verbs, resume=resume,
+            model_override=model_override, box=box, verbs=verbs, roster=roster, resume=resume,
         )
-    verbs = registry_cls(defender_dir / "scripts" / "adapters", driver.GATHER_DEF.verb_grant)
+    verbs = registry_cls(roster, driver.GATHER_DEF.verb_grant)
     return investigate(
         alert_path=alert_path, run_dir=run_dir, run_id=run_id, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
+        roster=roster,
     )
 
 

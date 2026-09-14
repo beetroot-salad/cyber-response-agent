@@ -152,12 +152,13 @@ def adapter_seam(episode_dir: Path) -> EpisodeAdapters:
     keeps out of the episode.
     """
     from defender.learning.branch.review import verb_context
+    from defender._paths import adapters_under
     from defender.run_common import DEFENDER_DIR
     from defender.runtime.driver import GATHER_DEF
-    from defender.runtime.verbs import ModuleVerbRegistry
+    from defender.runtime.verbs import ModuleVerbRegistry, read_roster
 
     return EpisodeAdapters(
         registry=ModuleVerbRegistry(
-            DEFENDER_DIR / "scripts" / "adapters", GATHER_DEF.verb_grant),
+            read_roster(adapters_under(DEFENDER_DIR)), GATHER_DEF.verb_grant),
         ctx=verb_context(Path(episode_dir)),
     )

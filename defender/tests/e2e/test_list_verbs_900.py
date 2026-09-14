@@ -100,7 +100,6 @@ from defender.runtime.verbs import (  # noqa: E402
     VerbRegistry,
     _resolved_hints,
     declared_params,
-    declared_verb_names,
     is_system_name,
     model_facing_params,
     validate_params,
@@ -115,6 +114,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
+from defender.runtime.verbs import read_roster  # noqa: E402
 
 if TYPE_CHECKING:
     # Imported ONLY for the type checker, which is exactly how an unresolvable annotation
@@ -257,7 +257,7 @@ def _binding(fn: Any, names: Any) -> dict[str, Any]:
 
 def _registry() -> ModuleVerbRegistry:
     """The PRODUCTION registry under gather's own grant — the shipped surface O1/O5 are about."""
-    return ModuleVerbRegistry(_ADAPTERS, GATHER_DEF.verb_grant)
+    return ModuleVerbRegistry(read_roster(_ADAPTERS), GATHER_DEF.verb_grant)
 
 
 def _granted(registry: VerbRegistry, system: str) -> dict[str, Any]:
@@ -636,8 +636,9 @@ def test_o5_a_withheld_but_declared_verb_is_never_published(tmp_path):
     registry = _registry()
     answers = {s: _ask(registry, s, tmp_path) for s in {s for s, _ in _WITHHELD}}
 
+    declared = read_roster(_ADAPTERS)
     for system, verb in _WITHHELD:
-        assert verb in declared_verb_names(_ADAPTERS, system), (
+        assert verb in declared.declared_verbs(system), (
             f"{system}.{verb} is no longer declared by its adapter — this assertion is vacuous"
         )
         assert registry.decide(system, verb).outcome != GRANTED, (

@@ -340,9 +340,11 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
 
     `system` is the CALLER's, not a module constant: this frame serves both reserved ids and
     they do not share an authority for it — item 1's is the literal its own backend calls name
-    (`ITEM1_SYSTEM`), item 3's is derived from the grant that confines it
-    (`CORRELATION_SYSTEM`). They are the same string today; a shared constant would silently
-    mislabel one of the two rows the moment they stop being.
+    (`ITEM1_SYSTEM`), item 3's is the one its `CorrelationDispatch` carries — derived from
+    the grant that confines it, and made equal to the system of the template the lead binds
+    by the run-start agreement check (#1003). They are the same string today; a shared constant
+    would silently mislabel one of the two rows the moment they stop being — and #1003 made
+    item 3's movable by config while item 1's stays one vendor's by construction (N2).
 
     THE SEED IS VALIDATED LIKE ANY OTHER APPEND (#964). This writer runs before MAIN's first
     turn and reaches `write_guarded` directly — it is not a tool call, so there is no

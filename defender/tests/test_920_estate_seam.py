@@ -60,6 +60,7 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.branch.estate.applier import WorldApplier  # noqa: E402
+from defender.runtime.verbs import read_roster  # noqa: E402
 from defender.learning.branch.estate.lookups import apply_patches  # noqa: E402
 from defender.learning.branch.estate.registry import (  # noqa: E402
     EstateError,
@@ -116,7 +117,7 @@ GRANTED_SYSTEMS = 8
 # the fake estate: a real adapters directory, with verb bodies that count
 
 #: A recording adapter. Written to disk rather than patched in, because `ModuleVerbRegistry`
-#: COLD-READS this text (`declared_verb_names` parses the `VERBS = {...}` literal without
+#: COLD-READS this text (`read_roster` parses the `VERBS = {...}` literal without
 #: importing) and checks the grant against it at construction — a module-object stand-in would
 #: never reach that check, so the fixture would not be the shape the seam actually admits.
 #:
@@ -310,7 +311,7 @@ def world_registry(
 ) -> WorldRegistry:
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
     return WorldRegistry(
-        adapters, grant, world=world, ledger=fresh_ledger(ledger_path), applier=applier,
+        read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path), applier=applier,
         as_of=AS_OF,
     )
 
@@ -355,7 +356,7 @@ def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
     with no row. Pinned as `__wrapped__ is real`, so the wrapper is proven to be over THIS
     body rather than merely to be some other callable."""
     reg = world_registry(REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl")
-    plain = ModuleVerbRegistry(REAL_ADAPTERS, GATHER_GRANT)
+    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), GATHER_GRANT)
 
     bare = []
     for system, verb, _ in GATHER_GRANT.entries:
@@ -376,7 +377,7 @@ def test_the_wrapper_carries_the_decoration_the_seam_reads(tmp_path):
     `esql`/`query`/`alerts` verbs are the ones carrying non-default values, so they are the
     ones a `functools.wraps` regression would silently blank."""
     reg = world_registry(REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl")
-    plain = ModuleVerbRegistry(REAL_ADAPTERS, GATHER_GRANT)
+    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), GATHER_GRANT)
 
     drifted = []
     for system, verb, verb_class in GATHER_GRANT.entries:
@@ -403,7 +404,7 @@ def test_the_wrapper_keeps_the_keyword_only_signature_the_boundary_introspects(t
     `model_facing_params`, so a wrapper whose signature read differently would publish a
     surface the seam then refuses."""
     reg = world_registry(REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl")
-    plain = ModuleVerbRegistry(REAL_ADAPTERS, GATHER_GRANT)
+    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), GATHER_GRANT)
 
     drifted = []
     for system, verb, _ in GATHER_GRANT.entries:
@@ -857,8 +858,8 @@ def test_two_siblings_read_one_base_recording(tmp_path):
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     ledger = fresh_ledger(ledger_path)
-    a = WorldRegistry(adapters, FAKE_GRANT, world=World("a"), ledger=ledger, as_of=AS_OF)
-    b = WorldRegistry(adapters, FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
+    a = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=ledger, as_of=AS_OF)
+    b = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
 
     from_a = a.verbs("cmdb")["get-host"](ctx, host="canary-1")
     from_b = b.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -902,11 +903,11 @@ def test_a_ledger_reopened_from_disk_replays_the_family_recording(tmp_path):
     process, which is not where siblings live."""
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    first = WorldRegistry(adapters, FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+    first = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
     from_a = first.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     reopened = WorldRegistry(
-        adapters, FAKE_GRANT, world=World("b"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+        read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
     from_b = reopened.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     assert from_a == from_b
@@ -948,8 +949,8 @@ def test_a_staged_call_records_its_base_under_the_view_it_asked_for(tmp_path):
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     ledger = fresh_ledger(ledger_path)
     body = "FROM logs-system.auth-*\n| STATS COUNT(*)"
-    a = WorldRegistry(adapters, FAKE_GRANT, world=World("a", ("elastic",)), ledger=ledger, as_of=AS_OF)
-    b = WorldRegistry(adapters, FAKE_GRANT, world=World("b", ("elastic",)), ledger=ledger, as_of=AS_OF)
+    a = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("a", ("elastic",)), ledger=ledger, as_of=AS_OF)
+    b = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("b", ("elastic",)), ledger=ledger, as_of=AS_OF)
 
     from_a = a.verbs("elastic")["esql"](ctx, query=body)
     from_b = b.verbs("elastic")["esql"](ctx, query=body)
@@ -1253,7 +1254,7 @@ def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):
 
     with pytest.raises(EstateError):
         WorldRegistry(
-            fake_estate(tmp_path), FAKE_GRANT, world=BaseWorld(),
+            read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=BaseWorld(),
             ledger=fresh_ledger(ledger_path), as_of=AS_OF,
             applier=WorldApplier({"cmdb": {"canary-1": {"owner": "world"}}}))
 
@@ -1272,9 +1273,9 @@ def test_a_sibling_never_replays_another_worlds_patch_as_the_estate(tmp_path):
     ledger = fresh_ledger(ledger_path)
 
     patcher = WorldRegistry(
-        adapters, FAKE_GRANT, world=World("base", ("cmdb",)), ledger=ledger, as_of=AS_OF,
+        read_roster(adapters), FAKE_GRANT, world=World("base", ("cmdb",)), ledger=ledger, as_of=AS_OF,
         applier=WorldApplier({"cmdb": {"canary-1": {"owner": "world"}}}))
-    sibling = WorldRegistry(adapters, FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
+    sibling = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
 
     assert patcher.verbs("cmdb")["get-host"](ctx, host="canary-1")["owner"] == "world"
     assert sibling.verbs("cmdb")["get-host"](ctx, host="canary-1")["owner"] == "estate"
@@ -1347,7 +1348,7 @@ def test_two_siblings_rows_pair_on_the_question_asked_not_the_one_run(tmp_path):
 
     for wid in ("a", "b"):
         reg = WorldRegistry(
-            adapters, FAKE_GRANT, world=World(wid, ("elastic",)), ledger=ledger, as_of=AS_OF)
+            read_roster(adapters), FAKE_GRANT, world=World(wid, ("elastic",)), ledger=ledger, as_of=AS_OF)
         reg.verbs("elastic")["esql"](ctx, query=body)
 
     rows = [r for r in served_rows(ledger_path) if r["world_id"] in ("a", "b")]
@@ -1371,7 +1372,7 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     reg = WorldRegistry(
-        adapters, FAKE_GRANT, world=World("A", ("cmdb",)), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+        read_roster(adapters), FAKE_GRANT, world=World("A", ("cmdb",)), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 

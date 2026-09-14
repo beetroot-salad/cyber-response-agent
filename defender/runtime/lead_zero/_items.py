@@ -31,7 +31,8 @@ from defender.runtime import circuit_breaker
 from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import VerbContext, VerbRegistry
-from ._spec import ALERT_ID_FIELD, BUILDING_BLOCK_FIELD, CORRELATION_GRANT, CORRELATION_REQUEST_LIMIT, CORRELATION_SYSTEM, CORRELATION_TEMPLATE, GROUP_ID_FIELD, HARNESS_PROVENANCE, ITEM1_GOAL, ITEM1_SYSTEM, ITEM1_WHAT_TO_SUMMARIZE, L0, L3, SHORTFALL, STATUS_EMPTY, STATUS_FAILED, STATUS_RESOLVED, STATUS_TRUNCATED
+from ._agreement import CorrelationDispatch
+from ._spec import ALERT_ID_FIELD, BUILDING_BLOCK_FIELD, CORRELATION_REQUEST_LIMIT, GROUP_ID_FIELD, HARNESS_PROVENANCE, ITEM1_GOAL, ITEM1_SYSTEM, ITEM1_WHAT_TO_SUMMARIZE, L0, L3, SHORTFALL, STATUS_EMPTY, STATUS_FAILED, STATUS_RESOLVED, STATUS_TRUNCATED
 from ._capture import _CallLedger, _budget_account, _budget_gate, _build_deps, _last_row_seq, _sanitize
 from ._render import _render_doc, _sort_chrono, _unavailable
 from ._capture import _declare_l_finding
@@ -47,7 +48,8 @@ class _NarrowedRegistry(VerbRegistry):
 
     A thin re-grant wrapper, at module scope so a test can build one over a planted table
     (#999): the grant it is handed is `correlation_grant(rows)`, and the production dispatch
-    hands it `CORRELATION_GRANT`, the same projection over the shipped rows.
+    hands it the grant its `CorrelationDispatch` carries — the same projection over the
+    shipped rows, checked at run start against the template it binds (#1003).
 
     `grant_home` names the table for the same reason `ModuleVerbRegistry` does: since #999
     the grant here is the table's projection too, so a refusal that points at the file points
@@ -312,9 +314,12 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
 # item 3: the correlation lead's harness-authored contract
 
-def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[str]] | None:
+def _correlation_contract(
+    alert: dict, ancestor_block: str, template_id: str,
+) -> tuple[str, list[str]] | None:
     """The contract carries item 1's RESOLVED DOCUMENTS and the lead chooses the correlation
-    axes off them.
+    axes off them, and names `template_id` — the id the run-start check resolved in the
+    lead's own index — as the template to bind.
 
     What gates the dispatch is item 1 resolving documents, which `prepare_correlation_lead`'s
     status check already decides — there is no entity-emptiness arm here. `GatherRequest`
@@ -341,20 +346,26 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
         "the environment carries: a host name that names the shared VPS every containerized "
         "alert reports from selects the whole environment and measures nothing.\n\n"
         f"{ancestor_block}\n\n"
-        "Search the alerts index ONLY (this is a correlation over prior alerts, not raw "
-        "telemetry). Do not narrow to this alert's own rule. The documents above may NAME that "
-        "rule — on a sequence alert they are themselves alert documents, carrying "
-        "`kibana.alert.rule.*` — and it is still not an axis to bind: a different rule firing "
-        "on the same entity is exactly the related behaviour this lead exists to surface, and "
-        "narrowing to the signature that already fired is the one result guaranteed to teach "
-        "nothing. Bind "
-        f"`{CORRELATION_TEMPLATE}` — read it first: it is named by your grant-filtered template "
+        "This is a correlation over PRIOR ALERTS, not raw telemetry. Do not narrow to this "
+        "alert's own rule. The documents above may themselves name that rule, and it is still "
+        "not an axis to bind: a different rule firing on the same entity is exactly the "
+        "related behaviour this lead exists to surface, and narrowing to the signature that "
+        "already fired is the one result guaranteed to teach nothing. Bind "
+        f"`{template_id}` — read it first: it is named by your grant-filtered template "
         "index, and it carries the window params and the substitutable entity filter this "
-        "contract needs. Each count is the result envelope's `total`, which the `hits` cap does "
-        "not bound — a `truncated` result still carries a complete count."
+        "contract needs. The template says where its count is read; each count below is that "
+        "number, not the size of the returned sample."
     )
-    # Two COUNT dimensions, each answerable by ONE `alerts` call, plus a third line that is not
-    # a count. A fourth — "whether any correlated alert is already benign-explained" — is
+    # Vendor-neutral by construction (#1003): the goal above names no field, no index and no
+    # envelope shape. The three vendor facts it used to state — search the ALERTS INDEX only,
+    # that a sequence alert's ancestors carry `kibana.alert.rule.*`, and that the count is the
+    # envelope's `total` which the `hits` cap does not bound — are the TEMPLATE's to say (its
+    # Goal and Pitfalls), where every gather lead binding it reads them, and the lead is told
+    # to read the template first. What stays here is the frame that is true of any backend:
+    # prior alerts not telemetry, breadth over this alert's own rule, bind the configured id.
+    #
+    # Two COUNT dimensions, each answerable by ONE call of the granted verb, plus a third line
+    # that is not a count. A fourth — "whether any correlated alert is already benign-explained" — is
     # deliberately absent: `kibana.alert.workflow_status` is `"open"` on every alert this
     # environment produces, and the systems that could carry a benign explanation (`ticket`,
     # `change-mgmt`) are outside this lead's grant, so it has exactly one possible answer.
@@ -377,9 +388,9 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
     # summary is the only thing that reaches it.
     what = [
         "the count of alerts in the window scoped to the entities you judged central — one "
-        "call, across any rule (the envelope's `total`)",
+        "call, across any rule (the count the template says to read, not the sample size)",
         "the count for those same entities UNSCOPED — the same window with the narrowing "
-        "predicate dropped, across any rule (the envelope's `total`)",
+        "predicate dropped, across any rule (the same count, read the same way)",
         "which entities you correlated on, the field each came from, and why you judged them "
         "the discriminating ones for this alert",
     ]
@@ -391,11 +402,17 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
     budget_started_monotonic: float = 0.0, catalog: str | None,
+    dispatch: CorrelationDispatch,
 ) -> str | None:
     """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
     shared terminator/bookkeeping seam (`tools_gather._run_gather`) with `pre_claimed=True` —
     `prepare_correlation_lead` already claimed the leads row synchronously, before MAIN's first
-    turn."""
+    turn.
+
+    `dispatch` is the identity the run-start check resolved (#1003): the system this lead is
+    dispatched on and cache-keyed by, and the grant that narrows its registry. Both are read
+    from it and not from `_spec`'s constants, so the frame that checked the template against
+    the table and the frame that dispatches on the result are one derivation."""
     from ..agent_definition import bind
     from ..agent_role import GATHER_AGENT_ID_PREFIX
     from ..driver import GATHER_DEF, build_gather_agent
@@ -410,11 +427,11 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     # `_run_gather` hands it, which is what the prompt-cache key is derived from). The two
     # carry the same string today, and a local that shadowed the parameter would let a later
     # edit swap the cache lane with nothing to notice it.
-    dispatch_system = CORRELATION_SYSTEM
+    dispatch_system = dispatch.system
     if dispatch_system is None:
         return None
 
-    registry = _NarrowedRegistry(verbs, CORRELATION_GRANT)
+    registry = _NarrowedRegistry(verbs, dispatch.grant)
 
     # The SAME spelling `_run_gather` derives for the agent id it hands `gather_factory` and
     # `stamp_terminator`. Spelled as a literal here, the session this frame opens and the one
@@ -473,7 +490,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     request = GatherRequest(L3, dispatch_system, goal, tuple(what_to_summarize))
     try:
         return await _run_gather(
-            gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, CORRELATION_GRANT,
+            gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, dispatch.grant,
             stamp_terminator, catalog=catalog, pre_claimed=True,
         )
     except (BudgetKill, circuit_breaker.RunAborted):

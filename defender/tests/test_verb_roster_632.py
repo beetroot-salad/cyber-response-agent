@@ -103,6 +103,7 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     ScopedFakeVerbs,
 )
 from defender.tests.e2e._replay_harness import DEFENDER, Turn, VerbRecorder  # noqa: E402
+from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -333,7 +334,7 @@ def test_a_newly_authored_verb_is_denied_and_unadvertised_until_a_grant_names_it
         "---\nname: gamma\ndescription: the new system\n---\n\nbody\n", encoding="utf-8")
 
     before = grant_of("gather", (("alpha", "look"),))
-    registry = ModuleVerbRegistry(adapters, before)
+    registry = ModuleVerbRegistry(read_roster(adapters), before)
 
     # A newly authored verb on a system the role already holds: the DENIAL that keeps
     # deny-by-default non-vacuous. `alpha.peek` ships in the same adapter as the granted
@@ -349,7 +350,7 @@ def test_a_newly_authored_verb_is_denied_and_unadvertised_until_a_grant_names_it
     assert "gamma" not in generate_roster(before, defender_dir=tree)
 
     after = grant_of("gather", (("alpha", "look"), ("gamma", "look")))
-    granted = ModuleVerbRegistry(adapters, after)
+    granted = ModuleVerbRegistry(read_roster(adapters), after)
     assert granted.decide("gamma", "look").outcome == GRANTED
     assert ("gamma", "look") in roster_pairs(generate_roster(after, defender_dir=tree))
 

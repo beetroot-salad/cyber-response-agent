@@ -209,7 +209,7 @@ def test_the_stamp_is_not_named_in_the_model_facing_map(tmp_path):
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)
     _provenance.write(paths.provenance, RunProvenance(commit="a" * 40, dirty=False))
-    assert paths.provenance.name not in workspace_map.workspace_map(run_dir)
+    assert paths.provenance.name not in workspace_map.workspace_map(run_dir, systems=())
 
 
 @pytest.mark.parametrize("dirty", [True, False, None])

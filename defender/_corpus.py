@@ -107,6 +107,20 @@ class QueryTemplate:
     recording: str = ""
 
 
+def is_established(t: QueryTemplate) -> bool:
+    """Is `t` in the catalog's ESTABLISHED tier — `status: established` AND not under `_draft/`?
+
+    Both halves, always: the location and the status are two channels for the same fact, and
+    a file on which they disagree (an established-status copy parked under `_draft/`, a
+    demoted file still at the system root) is in neither tier. THE one predicate for "a
+    template a gather lead's index lists": `tools_gather._template_index` filters on it, and
+    the run-start check that promises the correlation lead its configured template is IN that
+    index (`lead_zero._agreement`) resolves through the same predicate, so the two cannot
+    drift into an id the check accepts and the index omits.
+    """
+    return t.status == "established" and "_draft" not in t.path.parts
+
+
 def section_bodies(body: str) -> dict[str, str]:
     heads: list[tuple[str, int, int]] = []
     pos = 0

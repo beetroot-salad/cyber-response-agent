@@ -38,6 +38,7 @@ import pytest
 
 from defender._io import append_jsonl, read_jsonl_rows
 from defender._run_paths import RunPaths
+from defender.runtime.verbs import read_roster
 from defender.learning.branch.ledger import (
     BASE_FILENAME,
     CAPTURED,
@@ -253,7 +254,7 @@ def test_a_primed_key_is_served_without_the_estate_being_asked(tmp_path):
         world_id = "w1"
         touches = ()
 
-    reg = WorldRegistry(fake_estate(tmp_path), LIVE_GRANT, world=World(),
+    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), LIVE_GRANT, world=World(),
                         ledger=Ledger.for_world(root, "w1"), as_of=T0)
     ctx = run_ctx(tmp_path)
 

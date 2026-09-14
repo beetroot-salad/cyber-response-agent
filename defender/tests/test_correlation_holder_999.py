@@ -41,6 +41,7 @@ from defender.tests._dispositions995 import (
     planted_tree,
     write_table,
 )
+from defender.runtime.verbs import read_roster
 
 DEFENDER = PATHS.defender_dir
 ADAPTERS = PATHS.adapters_dir
@@ -117,7 +118,7 @@ def test_a_withholding_from_every_holder_is_honoured_by_the_correlation_registry
     granted = load_dispositions(_table(tmp_path / "ok", {
         ("alpha", "lookup"): BOTH, ("alpha", "health-check"): BOTH,
     }))
-    inner = ModuleVerbRegistry(adapters, grant_for("gather", granted))
+    inner = ModuleVerbRegistry(read_roster(adapters), grant_for("gather", granted))
     assert _NarrowedRegistry(inner, correlation_grant(granted)).decide("alpha", "lookup").outcome == "GRANTED"
     assert correlation_system(correlation_grant(granted)) == "alpha"
 
@@ -125,7 +126,7 @@ def test_a_withholding_from_every_holder_is_honoured_by_the_correlation_registry
     withheld = load_dispositions(_table(tmp_path / "withheld", {
         ("alpha", "lookup"): WITHHELD, ("alpha", "health-check"): BOTH,
     }))
-    inner = ModuleVerbRegistry(adapters, grant_for("gather", withheld))
+    inner = ModuleVerbRegistry(read_roster(adapters), grant_for("gather", withheld))
     decision = _NarrowedRegistry(inner, correlation_grant(withheld)).decide("alpha", "lookup")
     assert decision.outcome == "DENIED", decision
     assert DISPOSITIONS_REL in (decision.refusal or ""), (
@@ -147,7 +148,7 @@ def test_a_denied_verb_names_the_table_for_gather_too():
     from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 
     rows = load_dispositions(dispositions_path(DEFENDER))
-    decision = ModuleVerbRegistry(ADAPTERS, grant_for("gather", rows)).decide("cmdb", "list-roles")
+    decision = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows)).decide("cmdb", "list-roles")
     assert decision.outcome == "DENIED"
     assert DISPOSITIONS_REL in (decision.refusal or ""), decision.refusal
 
@@ -243,16 +244,22 @@ def test_a_grant_with_no_query_verb_has_no_dispatch_target():
 
 def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
     """`prepare_correlation_lead` returns before `claim_lead`: no `l-00c` row lands in the
-    leads table for a lead that will never run. The positive control claims."""
-    from defender.runtime.lead_zero import STATUS_RESOLVED, prepare_correlation_lead
+    leads table for a lead that will never run. The positive control claims. The dispatch
+    identity is handed in as the run-start check resolves it (#1003): `system=None` is the
+    withheld arm."""
+    from defender.runtime.lead_zero import STATUS_RESOLVED, CorrelationDispatch, prepare_correlation_lead
 
     alert = {"alert_timestamp": "2026-01-01T00:00:00Z"}
     lead_file = tmp_path / "gather_raw" / "l-00c.lead.json"
+    withheld = CorrelationDispatch("alpha.correlate", None, VerbGrant(role=HOLDER, entries=()))
+    granted = CorrelationDispatch(
+        "alpha.correlate", "alpha", VerbGrant(role=HOLDER, entries=(("alpha", "lookup", "r"),)),
+    )
 
-    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, system=None) is None
+    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, dispatch=withheld) is None
     assert not lead_file.exists(), "a withheld lead must not claim its row"
 
-    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, system="alpha") is not None
+    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, dispatch=granted) is not None
     assert lead_file.exists(), "positive control: with a dispatch target the row is claimed"
 
 

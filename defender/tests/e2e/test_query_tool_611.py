@@ -13,7 +13,7 @@ The surface this suite pins
     (never an import-time constant) and the RUN's scrubbed env (never `os.environ`).
     `declared_params(fn)` — a verb's param surface = the keyword-only params of its annotated
     signature. This is the ONE reader of a verb's signature; the tool's validator uses it.
-    `ModuleVerbRegistry(adapters_dir)` — the production registry: `systems()` + `verbs(system)`,
+    `ModuleVerbRegistry(read_roster(adapters_dir))` — the production registry: `systems()` + `verbs(system)`,
     resolved per TREE, reading each adapter module's `VERBS` mapping.
 
 `defender/runtime/query_tool.py`
@@ -94,6 +94,7 @@ from defender.scripts.adapters.faults import (  # noqa: E402
     TransportFault,
     UpstreamFault,
 )
+from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -348,7 +349,7 @@ def test_verbs_registry_declares_surface():
     is a fact about the tool, not a restatement of the reader. Spelled out inline rather
     than delegated to `validate_scaffold.check_signatures`: that script is the OTHER gate on
     the same property, and a test that calls its checker is back to grading the grader."""
-    reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL)
     on_disk = sorted(
         p.name[: -len("_adapter.py")].replace("_", "-") for p in ADAPTERS_DIR.glob("*_adapter.py")
     )
@@ -567,7 +568,7 @@ def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
         described=("hollow", "solid"),
     )
     grant = VerbGrant(role="gather", entries=(("solid", "look", "r"),))
-    catalog = descriptor_catalog(tree / "skills", tree / "scripts" / "adapters", grant)
+    catalog = descriptor_catalog(tree / "skills", read_roster(tree / "scripts" / "adapters"), grant)
     assert catalog is not None
     assert "`solid`" in catalog
     assert "hollow" not in catalog, "a system with no declared verbs was advertised to gather"
@@ -581,13 +582,13 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
     b = _make_tree(tmp_path / "b", {"probe": _TREE_PROBE}, described=("probe",))
 
     grant = VerbGrant(role="gather", entries=(("probe", "whoami", "r"),))
-    assert descriptor_catalog(a / "skills", a / "scripts" / "adapters", grant) is not None
-    assert descriptor_catalog(b / "skills", b / "scripts" / "adapters", grant) is not None
+    assert descriptor_catalog(a / "skills", read_roster(a / "scripts" / "adapters"), grant) is not None
+    assert descriptor_catalog(b / "skills", read_roster(b / "scripts" / "adapters"), grant) is not None
 
     ctx_a = VerbContext(defender_dir=a, run_dir=tmp_path / "run", env={})
     ctx_b = VerbContext(defender_dir=b, run_dir=tmp_path / "run", env={})
-    fn_a = ModuleVerbRegistry(a / "scripts" / "adapters", DENY_ALL).verbs("probe")["whoami"]
-    fn_b = ModuleVerbRegistry(b / "scripts" / "adapters", DENY_ALL).verbs("probe")["whoami"]
+    fn_a = ModuleVerbRegistry(read_roster(a / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
+    fn_b = ModuleVerbRegistry(read_roster(b / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
 
     assert fn_a(ctx_a) == {"tree": str(a)}
     assert fn_b(ctx_b) == {"tree": str(b)}, \
@@ -602,7 +603,7 @@ def test_no_verb_names_a_program_or_command():
     """no_verb_names_a_program_or_command — no verb signature declares a param that is a
     program, a command, or a path in the DRIVER's namespace. host-state's fim-checksum path
     (a path on a target host, via docker exec) is the declared exception."""
-    reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL)
     offenders = [
         (system, verb, name)
         for system in reg.systems()
@@ -1393,7 +1394,7 @@ def test_ticket_cli_dual_surface_survives():
     (#672 moved the benign judge's closed-ticket read off this CLI onto two typed in-process
     tools, so the judge is no longer a subprocess consumer — but the CLI + its flag survive for
     the two that remain, d14.)"""
-    verbs = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL).verbs("ticket")
+    verbs = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL).verbs("ticket")
     assert {"list-tickets", "get-ticket"} <= set(verbs)
 
     parser = ticket_adapter.build_parser()

@@ -227,10 +227,11 @@ def test_a_tree_that_declares_no_system_is_refused_rather_than_bound_lane_less(t
     disjunctive reading #869 gives its resolver, applied at this seam:
 
     * the adapters directory is not there at all, so the SOURCE is unresolvable and
-      `adapter_declared_systems` raises `LeadAuthorError` — this lane's own fault class, which
-      `_drain_lead_author_markers` runs under `run_or_dead_letter`, so a broken worktree
-      quarantines one batch instead of halting the drain (it is NOT in the author drain's
-      `RETIRE_SET`, which is `(AuthorError, GitError, ModelRetry)` and gates a different queue);
+      `adapter_declared_systems` raises `LeadAuthorError` — this lane's own fault class. Since
+      #1035 it is `AdaptersUnreadable`, a `LeadAuthorError` that is also a `RegistryError` and
+      so in `SYSTEMIC_FAULTS`: `run_or_dead_letter` re-raises it and the drain HALTS with
+      `[loop] FATAL:`, rather than quarantining one batch per tick over a checkout nobody can
+      read (`test_1035_one_roster_read` P9 pins the queue staying untouched);
     * the directory resolves and declares nothing, which is a statement about the tree rather
       than about reading it, and is this module's own `ValueError`.
     """

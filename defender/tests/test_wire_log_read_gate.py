@@ -162,7 +162,7 @@ def test_the_workspace_map_does_not_name_the_observe_dir(env):
     """The map is inlined into MAIN's message 0 as "the canonical surfaces", and MAIN has no
     `ls` — so the map is its whole directory view. Naming a dir the gate then refuses only
     teaches the model to ask for it; `gather_raw/` is suppressed on the same ground (#264)."""
-    listing = _run_dir_section(wsm.workspace_map(env.run).replace(str(env.run), "RUNDIR"))
+    listing = _run_dir_section(wsm.workspace_map(env.run, systems=()).replace(str(env.run), "RUNDIR"))
 
     assert WIRE_LOG_DIR not in listing
     assert WIRE_LOG not in listing

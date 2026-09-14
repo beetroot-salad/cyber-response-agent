@@ -40,7 +40,10 @@ no row here could widen or withdraw — the two-statements-one-honoured defect t
 to end, surviving in the one grant the census could not see. Naming the lead here is what
 makes the table total over GRANTS and not only over adapters. `_refuse_incoherent_narrowing`
 holds the three rules that keep "narrowing" true: the lead never holds a pair gather does not,
-reaches one system, and holds one query verb.
+reaches one system, and holds one query verb. Which query verb is the TEMPLATE's to say
+(`knowledge/environment/lead-zero.yaml` names it; its front matter declares the pair), and
+the run refuses at start if this table grants the lead any other (#1003,
+`lead_zero._agreement`) — the table grants or withholds the lead; it does not relocate it.
 
 WHY NO `verb_class` FIELD. Every shipped verb is read-class and the projection hardcodes `r`.
 That is deliberate under-expression: a write grant should cost a schema change and its own
@@ -54,8 +57,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-
-import yaml
 
 from defender import _yaml
 from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER, AgentRole
@@ -196,40 +197,13 @@ def _systems_block(path: Path) -> Mapping[object, object]:
     """Read the file and return its `dispositions:` mapping, or raise.
 
     Split out from `load_dispositions` so that function stays one job — turning rows into
-    `Disposition`s — rather than two. Everything here is about the FILE being trustworthy at
-    all; everything there is about a row being well formed.
+    `Disposition`s — rather than two. Everything about the FILE being trustworthy at all is
+    `_yaml.load_reviewed_mapping`'s (shared with `lead-zero.yaml`'s loader, #1003); everything
+    here is about the one key's shape, and everything there about a row being well formed.
     """
-    if not path.is_file():
-        raise DispositionError(f"verb-disposition table not found at {path}")
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
-        raise DispositionError(f"verb-disposition table at {path} is unreadable ({e})") from e
-
-    # Duplicate keys BEFORE the load, because the load is where they disappear. Two rows for
-    # one pair is the same defect this issue is about — two statements, one silently honoured.
-    duplicates = _yaml.duplicate_key_paths(text)
-    if duplicates:
-        raise DispositionError(
-            f"verb-disposition table at {path} repeats key(s) {list(duplicates)} — YAML "
-            "would silently honour the last of each; write one row per pair"
-        )
-
-    try:
-        data = _yaml.safe_load(text)
-    except yaml.YAMLError as e:
-        raise DispositionError(f"verb-disposition table at {path} does not parse ({e})") from e
-
-    if not isinstance(data, Mapping):
-        raise DispositionError(
-            f"verb-disposition table at {path} must be a mapping with a `dispositions:` key"
-        )
-    # BEFORE the shape and emptiness checks below: an unread top-level key is a statement a
-    # reviewer will read and the loader will not honour, and it is the more actionable
-    # diagnosis of the two. A table carrying both (`residue: settled` beside an empty
-    # `dispositions:`) reported only "declares no dispositions", which sends the author
-    # looking for missing rows rather than at the key that does nothing.
-    _reject_unread_keys(f"verb-disposition table at {path}", data, ("dispositions",))
+    data = _yaml.load_reviewed_mapping(
+        path, what="verb-disposition table", known=("dispositions",), error=DispositionError,
+    )
     systems = data.get("dispositions")
     if systems is not None and not isinstance(systems, Mapping):
         # Said apart from the empty case below: a `dispositions:` that is a LIST is a shape
@@ -251,20 +225,11 @@ def _systems_block(path: Path) -> Mapping[object, object]:
 def _reject_unread_keys(
     where: str, mapping: Mapping[object, object], known: tuple[str, ...]
 ) -> None:
-    """Refuse a mapping carrying a key nothing here reads.
-
-    A key the loader ignores is a statement a reviewer WILL read and the runtime will not
-    honour — the same two-statements-one-honoured defect as a duplicate key, one level up. An
-    adversarial implementer of #995 hid a `residue: settled` top-level key in the shipped table
-    to mute the census; a `class: rw` on a row, or a misspelled `resaon:` leaving a withholding
-    unexplained while looking explained, are the same shape inside a row.
-    """
-    unknown = sorted(str(k) for k in mapping if k not in known)
-    if unknown:
-        raise DispositionError(
-            f"{where} carries key(s) {unknown} that nothing reads — the key(s) read here are "
-            f"{list(known)}"
-        )
+    """A row carrying a key nothing here reads is refused as `DispositionError` — the same
+    two-statements-one-honoured defect `_yaml.reject_unread_keys` names at the top level,
+    one level down (`class: rw` on a row; a misspelled `resaon:` leaving a withholding
+    unexplained while looking explained)."""
+    _yaml.reject_unread_keys(where, mapping, known, error=DispositionError)
 
 
 def load_dispositions(path: Path) -> tuple[Disposition, ...]:
@@ -327,7 +292,12 @@ def _refuse_incoherent_narrowing(path: Path, rows: tuple[Disposition, ...]) -> N
       and hands a harness-dispatched lead an unconfined read, for a one-word edit. Before
       #999 that widening cost a Python change; this is what keeps the cost. The lead's own
       contract binds ONE template and makes one kind of call
-      (`lead_zero._spec.CORRELATION_TEMPLATE`), so one query verb is also all it can spend.
+      (the template `lead-zero.yaml` names), so one query verb is also all it can spend —
+      and WHICH one is not this loader's to check: the template the config names declares
+      its own pair, and `lead_zero._agreement` refuses at run start a table whose one query
+      pair is not that one (#1003). This module has no catalog to resolve the template
+      against and is read at import by `lead_zero._spec`, so that fourth rule lives one
+      level up, where the run's tree is in hand.
 
     `health-check` is excluded from the last two rules on purpose. It is never a dispatch
     target and never selects one — `lead_zero._spec.correlation_system` filters it out before

@@ -6,6 +6,7 @@ it only assembles text, which is what makes the resume's substitution testable o
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,8 @@ def _main_instructions(defender_dir: Path) -> str:
 
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
     run_dir: Path, alert_path: Path, defender_dir: Path,
-    *, verbs: Any = None, limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
+    *, systems: Sequence[str], verbs: Any = None, limits: dict = DEFAULT_LIMITS,
+    run_id: str | None = None,
 ) -> tuple[str, str, str]:
     """Lead-0's call site, with its OWN exception handler: a `BudgetKill` or
     `circuit_breaker.RunAborted` raised inside `resolve_lead_zero` is caught HERE so it cannot
@@ -84,7 +86,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
         lead_zero_text = lead_zero_mod.render_orient_section(degraded, run_dir)
 
     orientation = orient.orientation(
-        run_dir, defender_dir, alert_path, lead_zero_section=lead_zero_text,
+        run_dir, defender_dir, alert_path, systems=systems, lead_zero_section=lead_zero_text,
     )
     prompt = f"Begin the investigation.\n\n{_coordinates(run_dir, alert_path)}\n{orientation}"
     return prompt, ancestor_block, status
@@ -105,7 +107,7 @@ def _coordinates(run_dir: Path, alert_path: Path) -> str:
 
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
     resume: Any, run_dir: Path, alert_path: Path, defender_dir: Path,
-    *, verbs: Any, limits: dict, run_id: str | None,
+    *, systems: Sequence[str], verbs: Any, limits: dict, run_id: str | None,
 ) -> tuple[str, str, str]:
     """MAIN's first message — for a fresh run or a resumed one.
 
@@ -127,7 +129,8 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
     """
     if resume is None:
         return _user_prompt(
-            run_dir, alert_path, defender_dir, verbs=verbs, limits=limits, run_id=run_id,
+            run_dir, alert_path, defender_dir, systems=systems, verbs=verbs, limits=limits,
+            run_id=run_id,
         )
     prompt = (
         f"{resume.continuation_prompt}\n\n"

@@ -595,7 +595,7 @@ def elastic_ctx(tmp_path: Path, *, response: dict | None = None):
 # ---------------------------------------------------------------------------------------
 # The serving estate: a REAL adapters directory whose verb bodies answer from a table.
 #
-# `WorldRegistry` COLD-READS the adapter text (`declared_verb_names` parses the `VERBS = {...}`
+# `WorldRegistry` COLD-READS the adapter text (`read_roster` parses the `VERBS = {...}`
 # literal without importing) and checks the grant against it at construction, so a module-object
 # stand-in never reaches that check and would not be the shape the seam admits. The answers are
 # DATA on disk, keyed by a substring of the index/query the body was asked for — which is how one
