@@ -175,7 +175,9 @@ def _unnameable(raw: str, *, what: str) -> str:
 
 
 def _money(cost: float) -> str:
-    return f"${cost:.4f}"
+    """A total is gated where it is printed, not only where its addends were read: every row
+    passes `_finite`, and the sum of enough finite rows is still `inf` (review of PR #1042)."""
+    return f"${cost:.4f}" if math.isfinite(cost) else "—"
 
 
 def _items(x: Any) -> list[Any]:
@@ -517,7 +519,9 @@ def _priced(model: Any, usage: Any) -> float | None:
     try:
         cost = pricing.usage_cost(model, usage)
         pricing.model_key(model)
-    except (pricing.UnknownModel, TypeError, ValueError):
+    except (pricing.UnknownModel, TypeError, ValueError, OverflowError):
+        # `OverflowError`: a token count spelled as a 400-digit literal is an int, and
+        # int-times-rate overflows before `_finite` ever sees the product.
         return None
     # The same gate `_result_event` puts on `total_cost_usd`: a usage block is box-writable,
     # and a negative, NaN or overflowing token count priced straight into the verdict tile
@@ -716,10 +720,16 @@ def _entries_of(directory: Path) -> list[Path]:
 
 def _finite(value: Any) -> float | None:
     """`value` as a float when it is a real, finite number — `json.loads` admits `NaN` and
-    `Infinity`, and `fmt_duration`'s `int(...)` rejects both — else `None`."""
+    `Infinity`, and `fmt_duration`'s `int(...)` rejects both — else `None`. The coercion goes
+    through `float(...)` first: a 400-digit literal is an int, not `inf`, and `math.isfinite`
+    on it raises `OverflowError` rather than answering (review of PR #1042)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value) if math.isfinite(value) else None
+    try:
+        as_float = float(value)
+    except OverflowError:
+        return None
+    return as_float if math.isfinite(as_float) else None
 
 
 def _decompose_run_dir(name: str, *, episode_id: str) -> str | None:

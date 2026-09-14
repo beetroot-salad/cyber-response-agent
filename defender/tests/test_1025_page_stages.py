@@ -701,6 +701,50 @@ def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp
     assert E.SAMPLE.total_cost in page.text_of("sec-verdict"), "positive control: the sample total"
 
 
+def test_1025_a_big_integer_literal_is_that_fields_own_absence(tmp_path):
+    """`json.loads` reads a 400-digit numeric literal as a Python int, not `inf` — and
+    `math.isfinite(<that int>)` and `<that int> * <rate>` both raise `OverflowError`, which no
+    gate caught: one box-writable digit string in a result event's `total_cost_usd`, a response
+    row's `duration_ms` or a `usage` count took the whole page down (d01: only `family.yaml` is
+    fatal). Each is now that field's own absence — "unusable result event", no wall on the
+    call, "unpriced" — through the one coercer every numeric read shares (review of PR #1042)."""
+    ep = E.sample_episode(tmp_path)
+    huge = 10 ** 400
+    E.write_tool_trace(ep.run(E.GRADED_WORLD), [E.result_event(cost=huge)])
+    rows = E.trace_rows("questioner:huge")
+    rows[1]["usage"]["input_tokens"] = huge
+    E.write_trace(ep.dir, "questioner:huge", rows)
+    E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:1", duration_ms=huge)
+    page = render(ep)
+    runs = page.text_of("stage-runs")
+    assert "unusable result event" in runs, runs
+    assert "unpriced" in page.text_of("tx-questioner_huge_trace")
+    assert f"tx-judge_{E.GRADED_WORLD}_1_trace" in page.ids
+    assert str(huge)[:20] not in page.text
+    assert f"${S.run_cost[E.CONTROL]:.4f}" in runs, "positive control: a sibling still priced"
+
+
+def test_1025_a_sum_of_finite_values_that_overflows_reads_the_dash(tmp_path):
+    """Each row is gated finite, but the SUM is not: two result events at `1e308` add to `inf`
+    and tile 4 read `$inf` — the exact string the per-row test forbids — while two response
+    rows at `1e308 ms` summed to a wall `fmt_duration` could not `int()`, and the page was not
+    written at all. The formatters answer a non-finite total with the same dash a missing value
+    gets, so a total is gated where it is printed, not only where its addends are read (review
+    of PR #1042)."""
+    ep = E.sample_episode(tmp_path)
+    E.write_tool_trace(ep.run(E.GRADED_WORLD), [E.result_event(cost=1e308)])
+    E.write_tool_trace(ep.run(E.CONTROL), [E.result_event(cost=1e308)])
+    for draw in (1, 2):
+        E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:{draw}", duration_ms=1e308)
+    page = render(ep)
+    verdict = page.text_of("sec-verdict")
+    assert "$inf" not in verdict, verdict
+    assert "$nan" not in verdict, verdict
+    stages = page.text_of("sec-stages")
+    assert "inf" not in stages.lower(), stages
+    assert "$1000000" in page.text_of("stage-runs"), "positive control: each finite row prints"
+
+
 def test_1025_a_judge_stem_with_a_non_ascii_digit_is_unattributed_not_a_draw(tmp_path):
     """`draws_on_disk_report` holds a draw stem to ASCII digits (the F-7 decision: `'١'` is
     UNDECODABLE); the transcript router must read the same alphabet. Before, `str.isdigit`

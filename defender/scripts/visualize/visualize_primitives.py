@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 from pathlib import Path
 
@@ -109,7 +110,9 @@ def slugify(s: str) -> str:
 
 
 def fmt_duration(ms: float | int) -> str:
-    if not ms or ms <= 0:
+    # A non-finite span — the sum of finite per-row walls can overflow — is the dash, not
+    # `int(inf)`'s raise.
+    if not ms or ms <= 0 or not math.isfinite(ms):
         return "—"
     s = int(ms // 1000)
     if s < 60:
