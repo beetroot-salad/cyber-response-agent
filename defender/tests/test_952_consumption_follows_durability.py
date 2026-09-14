@@ -49,6 +49,7 @@ from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.learning.leads.pitfalls_curator import PitfallsDisposition
 from defender.runtime import box as box_mod
+from defender.tests._declared869 import seed_executed_query
 from defender.tests._declared870 import (
     Spawn,
     commit_all,
@@ -1028,3 +1029,266 @@ def test_952_m5_the_drain_invokes_the_curator_with_lock_callables_that_do_not_co
 
         assert lead_author.run(by_hand, paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
+
+
+# --- the adversary round: seven ways the suite above was greened while betraying intent ----
+
+
+def test_952_a_the_production_adapter_forwards_on_done_to_the_curator(tmp_path: Path):
+    """Kills A. `_invoke_lead_author` accepting `on_done` and never forwarding it to `run`
+    greened every test above: the drain-level tests fake the serve, and the wiring test
+    drives a run dir that reaches the clean path, which writes no sentinel in either mode.
+    So this drives the PRODUCTION adapter over a run dir that reaches a sentinel write
+    without a model — one executed lead whose `query_id` names an undeclared system, so no
+    draft is minted and `build_handoff` resolves it to no template (`_prepare_handoffs`'
+    "none resolved" exit, `commit: none`). The sentinel text must reach `on_done` and
+    NOTHING may land under the run dir.
+
+    Positive control: the by-hand entry point over the same run dir writes that sentinel."""
+    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
+                     skills=("elastic",), catalog=("elastic",))
+    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    run_dir = tmp_path / "runs" / "run-1"
+    seed_executed_query(run_dir, query_id="nosuch.verb", system="nosuch", verb="verb")
+    captured: list[str] = []
+
+    drains._invoke_lead_author(paths, run_dir, on_done=captured.append)
+
+    assert len(captured) == 1, "the production adapter did not hand the sentinel to on_done"
+    m = _SENTINEL_RE.match(captured[0])
+    assert m, f"not a sentinel: {captured[0]!r}"
+    assert m["sha"] == "none"
+    assert m["made"] == "False"
+    assert not _done(run_dir).exists(), \
+        "the production adapter let the curator write the sentinel inside do_work"
+    assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
+
+    assert lead_author.run(run_dir, paths=paths) == 0
+    text = _done(run_dir).read_text(encoding="utf-8")
+    assert _without_at(text) == _without_at(captured[0])
+
+
+class _ProbingBranch(_Branch):
+    """`_Branch` whose `finish_batch` first records what a by-hand run answers at that
+    moment — the gap between the serve and the push that M5's lock exists to close."""
+
+    def __init__(self, base: Path, *, probe, **kw) -> None:
+        super().__init__(base, **kw)
+        self._probe = probe
+        self.probed: list[int] = []
+
+    def finish_batch(self, batch_id: str, wt: Path):
+        self.probed.append(self._probe())
+        return super().finish_batch(batch_id, wt)
+
+
+def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path: Path):
+    """Kills C. A lock released right after `do_work` greened the M5 test, which only probes
+    from inside the serve. The gap M5 names is the whole of it — pitfalls curation, box
+    teardown, push, PR — so the by-hand entry point is probed from inside the pitfalls
+    curation AND from inside `finish_batch`: both must answer `QUEUE_LOCK_SKIP_RC`, and the
+    tick must still land and consume. Outside a tick the same call serves (rc 0)."""
+    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
+                     skills=("elastic",), catalog=("elastic",))
+    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    by_hand = tmp_path / "runs" / "by-hand"
+    (by_hand / "gather_raw").mkdir(parents=True)
+    served: list[Path] = []
+    in_curation: list[int] = []
+
+    def probe() -> int:
+        return lead_author.run(by_hand, paths=paths)
+
+    def curate(_paths, *, box=None, on_curated):
+        in_curation.append(probe())
+        return 0
+
+    branch = _ProbingBranch(tmp_path / "worktrees", probe=probe)
+    assert _tick(paths, branch=branch, run_lead_author=_serving(served), run_pitfalls=curate) == 0
+
+    assert served == [run_dir.resolve()]
+    assert in_curation == [lead_author.QUEUE_LOCK_SKIP_RC], \
+        "a by-hand run during the pitfalls curation did not skip on the queue lock"
+    assert branch.probed == [lead_author.QUEUE_LOCK_SKIP_RC], \
+        "a by-hand run during finish_batch did not skip on the queue lock"
+    assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
+    assert author_markers(paths) == []
+    assert _inflight(paths) == []
+    assert _done(run_dir).read_text(encoding="utf-8") == SENTINEL
+
+    assert lead_author.run(by_hand, paths=paths) == 0
+    assert (by_hand / "lead_author" / "pitfalls_collected").is_file()
+
+
+def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Path):
+    """Kills D. Unlinking the claims BEFORE writing the sentinels greened the ordering test,
+    which faults at the rotation and so only ever sees steps 1–2 both done. Here the sentinel
+    write itself fails for real — a regular FILE sits where `<run_dir>/lead_author/` must be,
+    so the writer's mkdir raises — on a tick that LANDED. The fault propagates, and the
+    served marker is still claimed in `inflight/`: a partial apply on the lead-author half
+    must be a no-op re-serve, never a run consumed without its sentinel. Nothing behind the
+    sentinel step ran either. The green tick is the positive control on every address."""
+    paths = loop_paths(tmp_path)
+    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    queue_before = _seed_pitfalls(paths)
+    (run_dir / "lead_author").write_text("not a directory\n", encoding="utf-8")
+    served: list[Path] = []
+    curated: list[PitfallsDisposition] = []
+    branch = _Branch(tmp_path / "worktrees")
+
+    with pytest.raises(OSError, match="lead_author"):
+        _tick(
+            paths, branch=branch,
+            run_lead_author=_serving(served), run_pitfalls=_curating(curated, _disposition()),
+        )
+
+    assert served == [run_dir.resolve()]
+    assert branch.events == ["lease-check", "start", "finish", "cleanup"]
+    assert (run_dir / "lead_author").is_file(), "the blocking file was clobbered"
+    assert _inflight(paths) == ["case-1.json"], \
+        "the claim was unlinked ahead of a sentinel write that then failed"
+    assert author_markers(paths) == []
+    assert paths.pitfalls.file.read_bytes() == queue_before
+    assert not paths.pitfalls.consumed.exists()
+    assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
+
+
+@pytest.mark.parametrize("fault", ["git_error_from_finish_batch", "run_tainted_from_scrub"])
+def test_952_e_the_lessons_lane_logs_no_retained_summary_on_a_systemic_fault(
+    tmp_path: Path, capsys, fault: str,
+):
+    """Kills E. Rendering a `None` disposition as zeros put "batch not landed — …; 0 served
+    marker(s) left in inflight/, 0 committed pitfall row(s) …" on the LESSONS lane's systemic
+    exits, which the O2 test — `BranchError` only — never drives. O2 is about every exit: a
+    lane that collected no disposition says nothing about markers or pitfall rows on any of
+    them. The fault propagates as on the lead-author lane."""
+    paths = loop_paths(tmp_path)
+    append_jsonl(paths.pending_file, [{"finding_id": f"f{i}"} for i in range(5)])
+    triggered: list[str] = []
+    if fault == "git_error_from_finish_batch":
+        expected_type: type[BaseException] = GitError
+        branch = _Branch(
+            tmp_path / "worktrees", prefix="lessons/",
+            fail=GitError(["push"], 128, "the remote hung up"),
+        )
+        scrub = noop_scrub
+    else:
+        expected_type = box_mod.RunTainted
+        branch = _Branch(tmp_path / "worktrees", prefix="lessons/")
+
+        def scrub(_tree, **_kw):
+            raise box_mod.RunTainted("planted link")
+
+    with pytest.raises(expected_type):
+        drains.author_drain(
+            paths,
+            trigger_author=lambda _p, _f, _env, module, *_a, **_kw: triggered.append(module),
+            branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=scrub,
+        )
+
+    assert "author" in triggered, "the tick never ran a curator, so the negatives are vacuous"
+    assert "cleanup" in branch.events
+    err = capsys.readouterr().err
+    assert "batch not landed" not in err, "the lessons lane logged a summary it never collected"
+    assert "inflight" not in err
+    assert "pitfall" not in err
+    assert "work stays queued" not in err
+
+
+def test_952_f_the_retained_summary_counts_each_kind_at_asymmetric_counts(
+    tmp_path: Path, capsys,
+):
+    """Kills F. Every failing tick above seeds one served marker, one committed id and one
+    held id (or zeros), so a summary that counted non-None sentinels as served markers, or
+    swapped the committed and held counts, agreed with the literal. Two served markers of
+    which one hands over no sentinel, three committed ids, one held id — each count is its
+    own number, and the state assertions are honest against a queue seeded to match."""
+    paths = loop_paths(tmp_path)
+    run_1 = _queued_run(tmp_path, "case-1", "run-1", paths)
+    run_2 = _queued_run(tmp_path, "case-2", "run-2", paths)
+    committed = ("p:committed:0", "p:committed:1", "p:committed:2")
+    persist.append_pitfalls(
+        [*(pitfall_row(pid, "elastic") for pid in committed),
+         shim_row(HELD_ID, **{pitfalls_curator.OFFERS_DECLINED_KEY: 1})],
+        paths=paths,
+    )
+    queue_before = paths.pitfalls.file.read_bytes()
+    served: list[Path] = []
+
+    def serve(_paths, run_dir, *, box=None, on_done):
+        served.append(run_dir)
+        if run_dir.name == "run-1":
+            on_done(SENTINEL)  # run-2 is the clean path that hands over no sentinel
+
+    disposition = PitfallsDisposition(committed_ids=committed, sha="abc123", held_ids=(HELD_ID,))
+    curated: list[PitfallsDisposition] = []
+    branch = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
+
+    assert _tick(
+        paths, branch=branch, run_lead_author=serve, run_pitfalls=_curating(curated, disposition),
+    ) == 0
+
+    assert served == [run_1.resolve(), run_2.resolve()]
+    assert curated == [disposition]
+    assert _inflight(paths) == ["case-1.json", "case-2.json"]
+    assert paths.pitfalls.file.read_bytes() == queue_before
+    assert not _done(run_1).exists()
+    assert not _done(run_2).exists()
+    err = capsys.readouterr().err
+    expected = (
+        f"commit retained on local branch lead-author/{branch.batch_id}; "
+        "2 served marker(s) left in inflight/, 3 committed pitfall row(s) left queued, "
+        "1 held row(s) not bumped"
+    )
+    assert any(line.endswith(expected) for line in err.splitlines()), \
+        f"the retained counts are not the served/committed/held counts:\n{err}"
+
+
+def test_952_g_a_held_only_deferred_tick_defers_the_decline_bump(pitfalls_repo: Path, tmp_path: Path):
+    """Kills G. Honouring `on_curated` only when there was something committed greened the
+    M4 curator test, whose three-way seed always has a committed row. A tick that offered
+    the reducer surface and was declined has NOTHING committed and one held row — and its
+    decline bump is the push-dependent write C13 named: bumped inside `do_work`, N failed
+    pushes retire the row with its lesson never taught. So the held-only disposition is
+    handed over with the bump unapplied; applying it is what counts the decline."""
+    paths = LoopPaths(repo_root=pitfalls_repo, state_dir=tmp_path / "state")
+    persist.append_pitfalls([shim_row("h:l-003:0")], paths=paths)
+    head_before = _git.git_head_sha(pitfalls_repo)
+    spawn = Spawn(None)
+    captured: list[PitfallsDisposition] = []
+
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append) == 0
+
+    assert [h.get("surface") for h in spawn.handoffs] == ["reducer"], "the offer was never made"
+    assert _git.git_head_sha(pitfalls_repo) == head_before
+    assert captured == [PitfallsDisposition(committed_ids=(), sha=None, held_ids=("h:l-003:0",))]
+    assert queue_ids(paths) == ["h:l-003:0"]
+    assert pitfalls_curator.OFFERS_DECLINED_KEY not in _rows_by_id(paths)["h:l-003:0"], \
+        "the decline was counted on a tick whose consumption was handed back"
+    assert consumed_by_id(paths) == {}
+    assert graveyard_by_id(paths) == {}
+
+    assert captured[0].apply(paths, timeout_seconds=5) == 0
+    assert _rows_by_id(paths)["h:l-003:0"][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
+    assert queue_ids(paths) == ["h:l-003:0"]
+
+
+def test_952_m1_the_deferred_decline_bump_is_bounded_too(tmp_path: Path):
+    """The deadline covers BOTH steps of `apply`: the decline bump's own locked rotation
+    (`drain.retire`) waits on the same append lock as the committed rotation, and a
+    held-only disposition never reaches the first step — so a deadline threaded into the
+    rotation alone would let a held-only apply wait forever. Held lock: `TimeoutError`, row
+    untouched; released: bumped."""
+    paths = loop_paths(tmp_path)
+    queue_before = _seed_pitfalls(paths)
+    held_only = PitfallsDisposition(committed_ids=(), sha=None, held_ids=(HELD_ID,))
+
+    with _held(paths.pitfalls.append_lock) as holder, pytest.raises(TimeoutError):
+        _bounded(lambda: held_only.apply(paths, timeout_seconds=0), holder=holder)
+    assert paths.pitfalls.file.read_bytes() == queue_before
+    assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
+
+    assert held_only.apply(paths, timeout_seconds=0) == 0
+    assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 2
+    assert COMMITTED_ID in _rows_by_id(paths), "a held-only apply rotated the committed row"
