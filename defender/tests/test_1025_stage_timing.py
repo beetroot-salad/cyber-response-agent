@@ -124,14 +124,15 @@ class Launch:
     after: str
 
 
-def _launch(tmp_path, *, judge=None, spawn=None, capture=(), **seams) -> Launch:
+def _launch(tmp_path, *, judge=None, spawn=None, rows=(), **seams) -> Launch:
     """Drive ONE whole episode through the real launcher, every fake entering by its seam.
 
-    `capture` lands rows in the SOURCE run's queries table before the launch — the only way to
+    `rows` lands rows in the SOURCE run's queries table before the launch — the only way to
     give the review something to replay, since the launcher primes the episode from the source.
+    `capture` (defaulted below) is #976's live-tree seam, injected to match the fixture source.
     """
     base, src = T.runs_base(tmp_path)
-    for row in capture:
+    for row in rows:
         T.capture_call(src, **row)
     episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
     if spawn is None:
@@ -144,6 +145,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, capture=(), **seams) -> Launch:
     seams.setdefault("adapters", T.FakeAdapters())
     seams.setdefault("invoke", T.FakeAgent(*["same"] * 24))
     seams.setdefault("preflight", T.no_preflight)
+    seams.setdefault("capture", T.source_capture())
     before = now_iso()
     rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
                      spawn=spawn, judge=judge, **seams)
@@ -169,8 +171,8 @@ def _rejecting_seams() -> dict:
     patched = T.world_doc("b", ov=T.overlay(
         patches={"identity": {"web-1": {"owner": "platform"}}}))
     return {
-        "capture": [{"system": "identity", "verb": "get-user",
-                     "payload": {"hits": [{"host": "web-1", "owner": "soc"}]}}],
+        "rows": [{"system": "identity", "verb": "get-user",
+                  "payload": {"hits": [{"host": "web-1", "owner": "soc"}]}}],
         "questioner": T.FakeAgent(T.family_doc(worlds=[T.base_world(), patched]), patched),
         "invoke": T.FakeAgent(*["contradiction"] * 24),
     }

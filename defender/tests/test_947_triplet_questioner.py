@@ -146,7 +146,7 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     cli.main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
              preflight=lambda model: seen.append("family") or 0,
              spawn=spawn, door=T.FakeDoor(), adapters=T.FakeAdapters(),
-             invoke=T.FakeAgent(*["same"] * 24),
+             invoke=T.FakeAgent(*["same"] * 24), capture=T.source_capture(),
              questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")))
     assert seen == ["family"]
     run_src = (T.DEFENDER / "run.py").read_text(encoding="utf-8")

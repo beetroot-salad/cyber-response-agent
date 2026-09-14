@@ -62,6 +62,9 @@ def _launch(tmp_path, *, judge=None, spawn=None, argv_extra=(), **seams):
     seams.setdefault("adapters", T.FakeAdapters())
     seams.setdefault("invoke", T.FakeAgent(*["same"] * 24))
     seams.setdefault("preflight", T.no_preflight)
+    # #976 M2: the live-tree capture is injected to match the fixture source's stamp, or the
+    # preflight compares the suite's own HEAD against `deadbee` and refuses every launch.
+    seams.setdefault("capture", T.source_capture())
     rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
                       *argv_extra],
                      spawn=spawn, judge=judge, **seams)
