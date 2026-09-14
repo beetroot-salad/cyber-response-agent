@@ -518,14 +518,28 @@ def test_1025_a_served_ledger_present_but_truncated(tmp_path):
 def test_1025_one_malformed_sidecar_record_sits_beside_otherwise_intact_ones(tmp_path):
     """Only the section fed by the bad record carries a refusal sentence; every other section
     renders exactly as on the intact episode — each record is read inside its own boundary.
+
+    Spec resolution (human-authorized, see the PR body's "Spec resolution" note): this test
+    and `test_1025_timing_json_is_present_but_not_the_stageclock_record_shape` asserted
+    mutually exclusive behavior for `sec-verdict`'s own "lower bound on wall" fallback under a
+    malformed `timing.json` — one wanted it to match the never-had-timing render, the other the
+    had-valid-timing render, and no single implementation can satisfy both from the same
+    on-disk bytes. The kept behavior: a `timing.json` that is present but does not parse gives
+    the verdict tile nothing more to show than one that was never written at all, so its own
+    "lower bound" fallback is owed in both cases — the sibling test now pins this directly.
+    `sec-verdict` is therefore checked against a NEVER-had-timing baseline here, not against
+    this test's own valid-timing `intact` snapshot; every other section is untouched by
+    `timing.json`'s health either way and still checks against `intact`.
     """
     ep = E.sample_episode(tmp_path, timing=True)
     intact = _sections(render(ep))
+    never_timing = _sections(render(E.sample_episode(tmp_path / "never-timing")))
     E.write_timing(ep.dir, raw="not json at all")
     page = render(ep)
     broken = _sections(page)
     assert "timing record unreadable" in broken["sec-stages"]
-    for section in ("sec-verdict", "sec-worlds", "sec-findings", "sec-leads", "sec-records"):
+    assert broken["sec-verdict"] == never_timing["sec-verdict"]
+    for section in ("sec-worlds", "sec-findings", "sec-leads", "sec-records"):
         assert broken[section] == intact[section], section
 
 

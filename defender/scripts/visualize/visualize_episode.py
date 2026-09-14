@@ -1026,10 +1026,14 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
         f'{findings_total} <div class="vd-caption">{" / ".join(split_parts)}</div></div>')
 
     total_cost, worlds_wall, lower_bound = _cost_totals(episode_dir, manifest, entries)
-    # The lower-bound label is the STAGES header's own fallback caption — owed only while there
-    # is no `timing.json` to compute a real wall from; with one present the header carries the
-    # real figure instead, and this tile must not repeat the fallback beside it.
-    bound_html = f'<br>{lower_bound}' if not timing_rec.present else ""
+    # The lower-bound label is the STAGES header's own fallback caption — owed whenever there is
+    # no REAL wall to compute from: absent (`present=False`) and present-but-unreadable
+    # (`ok=False`, the STAGES table's own distinct "timing record unreadable" refusal) both
+    # leave this tile with nothing better than the estimate, so both read the same here even
+    # though the stage table itself tells the two apart (spec resolution, PR body). With a
+    # genuinely readable, non-empty record the header carries the real figure instead, and this
+    # tile must not repeat the fallback beside it.
+    bound_html = f'<br>{lower_bound}' if not (timing_rec.ok and timing_rec.value) else ""
     tile4 = (
         f'<div class="vd-tile" id="vd-tile-4">{_money(total_cost)}'
         f'<div class="vd-caption">{worlds_wall}{bound_html}</div></div>')
