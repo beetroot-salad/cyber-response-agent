@@ -13,6 +13,9 @@ the section-reads-its-own-records shape this model replaced.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+from pathlib import Path
 
 import pytest
 import yaml
@@ -296,3 +299,122 @@ def test_1025_the_cli_diagnostic_is_the_records_refusal_not_a_phrase_on_the_page
     rc, _out, err = cli([str(ep.dir)], capsys)
     assert rc == 0
     assert "grade record unreadable" in err, err
+
+
+# -----------------------------------------------------------------------------------------
+# Second pass of the #1042 review: what the load boundary must refuse or degrade on its own
+# -----------------------------------------------------------------------------------------
+
+
+def _outside_world(tmp_path, ep) -> tuple[Path, str]:
+    """A world-shaped directory OUTSIDE the episode tree carrying a planted draw finding and a
+    planted alert, and the label that would reach it from `worlds/` by relative path."""
+    outside = tmp_path / "outside_world"
+    (outside / "judge").mkdir(parents=True)
+    (outside / "judge" / "0.yaml").write_text(yaml.safe_dump(
+        E.draw_doc(findings=[E.finding(claim="PLANTED-OUTSIDE-CLAIM")]), sort_keys=False),
+        encoding="utf-8")
+    (outside / "alert.json").write_text(json.dumps(
+        {"alert_id": "planted", "rule": {"id": "planted-rule", "name": "PLANTED-OUTSIDE-RULE"}}),
+        encoding="utf-8")
+    label = os.path.relpath(outside, ep.dir / "worlds")
+    assert label.startswith(".."), label
+    return outside, label
+
+
+def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk(tmp_path):
+    """A manifest world whose label carries `..` names a directory OUTSIDE the episode; the
+    page renders it as an unnameable entry and joins it into no path — the planted draw
+    finding and the planted alert never appear, and the roster's three real worlds do. The
+    gate is the judge's own (`family.world_label_names_directory`), not a second grammar."""
+    ep = E.sample_episode(tmp_path)
+    _outside, label = _outside_world(tmp_path, ep)
+    manifest = E.sample_manifest()
+    manifest["worlds"].append(T.world_doc(label, role="B", axis="planted"))
+    T.write_family(ep.dir, manifest)
+    page = render(ep)
+    assert "PLANTED-OUTSIDE-CLAIM" not in page.text
+    assert "PLANTED-OUTSIDE-RULE" not in page.text
+    assert E.ALERT_RULE in page.text_of("sec-case")
+    assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS)
+    assert "unnameable" in page.text_of("sec-worlds"), page.text_of("sec-worlds")
+
+
+def test_1025_a_grade_row_label_off_the_directory_grammar_reads_nothing_from_disk(tmp_path):
+    """The same for a `judge.yaml` row — the record is a tree a box can write — with the
+    manifest clean: the planted finding is not walked."""
+    ep = E.sample_episode(tmp_path)
+    _outside, label = _outside_world(tmp_path, ep)
+    grade = E.sample_grade()
+    grade["worlds"].append(E.world_row(label, declared="malicious"))
+    E.write_judge(ep.dir, grade, check=False)
+    page = render(ep)
+    assert "PLANTED-OUTSIDE-CLAIM" not in page.text
+    assert "PLANTED-OUTSIDE-RULE" not in page.text
+    assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
+
+
+def test_1025_a_nan_or_infinite_duration_is_that_slots_own_absence(tmp_path):
+    """`duration_ms: NaN` in a run's result event and `Infinity` on a judge response row —
+    `json.loads` admits both — cost the world's wall and that call's wall, never the render:
+    the page is written, the world's cost still reads, and the lower bound is still a number."""
+    ep = E.sample_episode(tmp_path)
+    rd = ep.dir / "runs" / f"{E.EPISODE_ID}-{E.GRADED_WORLD}"
+    E.plant_raw(rd / "tool_trace.jsonl", json.dumps(E.result_event()).replace(
+        "180000", "NaN") + "\n")
+    agent_id = f"judge:{E.GRADED_WORLD}:1"
+    text = "".join(json.dumps(r) + "\n" for r in E.trace_rows(agent_id))
+    E.plant_raw(ep.dir / "wire_logs" / f"{E.trace_stem(agent_id)}.jsonl",
+                text.replace("1000.0", "Infinity"))
+    page = render(ep)
+    world = page.text_of(f"world-{E.GRADED_WORLD}")
+    assert "$0.25" in world, world
+    assert "nan" not in page.text.lower()
+    assert "inf" not in page.text_of("sec-stages").lower()
+
+
+def test_1025_runs_pruned_and_the_grade_unreadable_keeps_every_archived_world(tmp_path):
+    """`runs/` pruned (J8: disposable) AND `judge.yaml` unparseable: the manifest's worlds
+    are still archived under `worlds/<label>/`, so each keeps its section and none is counted
+    as an entry off the record — the archive is evidence the episode reached RUNS."""
+    ep = E.sample_episode(tmp_path)
+    shutil.rmtree(ep.dir / "runs")
+    E.plant_raw(ep.dir / "judge.yaml", "worlds: [\n")
+    page = render(ep)
+    assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS)
+    assert page.elements(cls="fr-off-roster") == [], page.text_of("sec-findings")
+    assert "grade record unreadable" in page.text
+
+
+def test_1025_the_ladder_note_asks_the_outcome_normalizer_not_a_local_list(tmp_path):
+    """`verdict_word: " Survived"` is the ladder word `survived` as `normalized_judge_outcome`
+    reads it (case-insensitive, trimmed), so tile 1 carries no "not the ladder" note; a word
+    the normalizer refuses carries it."""
+    ep = E.sample_episode(tmp_path)
+    grade = E.sample_grade()
+    grade["verdict_word"] = " Survived"
+    E.write_judge(ep.dir, grade, check=False)
+    assert "not the ladder" not in _tile(render(ep), 0)
+    grade["verdict_word"] = "survived-ish"
+    E.write_judge(ep.dir, grade, check=False)
+    assert "not the ladder" in _tile(render(ep), 0)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permission bits")
+@pytest.mark.parametrize("rel", [
+    "runs", "worlds", "wire_logs", f"worlds/{E.GRADED_WORLD}/gather_summaries",
+    f"worlds/{E.GRADED_WORLD}/judge",
+])
+def test_1025_an_unlistable_directory_is_its_own_slots_absence(tmp_path, rel):
+    """A directory the page cannot LIST (mode 000, non-root) — at any of the names the loader
+    walks — costs what that directory would have shown, never the page: the page is written and
+    the header still reads."""
+    ep = E.sample_episode(tmp_path)
+    target = ep.dir / rel
+    target.mkdir(parents=True, exist_ok=True)
+    target.chmod(0)
+    try:
+        page = render(ep)
+    finally:
+        target.chmod(0o755)
+    assert E.BASE_STORY in page.text_of("sec-records")

@@ -100,6 +100,13 @@ def read_report(path: Path) -> ReportRead:
     text, error = read_text_soft(path)
     if text is None:
         return _no_headline(f"{REPORT_NAME} is unreadable: {error}")
+    return parse_report_text(text)
+
+
+def parse_report_text(text: str) -> ReportRead:
+    """The interpretation half of `read_report`, over bytes a caller has already read — so a
+    reader that screens the open differently (the world-archive reader goes through
+    `read_guarded`) still decides what a headline IS exactly as every other consumer does."""
     try:
         frontmatter, body = parse_frontmatter(text)
     except FrontmatterError as e:

@@ -63,12 +63,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._io import read_guarded, read_jsonl_rows_report
 from defender._run_paths import artifact_dir, artifact_file
-from defender._report import ReportRead, read_report
+from defender._report import ReportRead, parse_report_text, read_report
 from defender._run_id import is_valid_run_id
-from defender._vocab import DISPOSITION_ENUM, normalized_disposition
+from defender._vocab import normalized_disposition
 from defender.learning.branch.ledger import (
     APPLIER_DECISIONS,
     FAULT,
@@ -610,6 +609,22 @@ def _non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
     return [w for w in entries if w.get("role") != BASE_ROLE]
 
 
+def world_label_names_directory(episode_id: str, label: str) -> bool:
+    """Whether `label` may be joined into a per-world path (`worlds/<label>/…`,
+    `runs/<episode_id>-<label>/`) — the ONE grammar every reader of a world label asks before
+    building a path from it, so the grading pass and the episode page cannot drift on which
+    labels reach the disk.
+
+    BOTH SPELLINGS. The concatenation is the launcher's own check (`_family.check_identities`
+    applies exactly it), and it is not enough on its own: the grammar tests the FIRST
+    character for `isalnum`, and in `f"{episode_id}-{label}"` that character is the episode
+    id's — so `..`, `.` and `-` all pass it, and `..` is the one value that turns
+    `worlds/<label>` back into the episode dir itself. Asking the same grammar of the bare
+    label closes that, and asking it of the concatenation too keeps this gate agreeing with
+    the launcher's."""
+    return is_valid_run_id(label) and is_valid_run_id(f"{episode_id}-{label}")
+
+
 def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
     """Two rules about the label as a NAME, both applied before any path is built from it.
 
@@ -647,15 +662,7 @@ def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
                 "family-level judge call, or one of that call's own `family_<n>` draws — a "
                 "graded world claiming it would collide with the family call's own agent id "
                 "and archive path (M5)")
-        # BOTH SPELLINGS. The concatenation is the launcher's own check (`_family.
-        # check_identities` applies exactly it), and it is not enough on its own: the grammar
-        # tests the FIRST character for `isalnum`, and in `f"{episode_id}-{label}"` that
-        # character is the episode id's — so `..`, `.` and `-` all pass it, and `..` is the one
-        # value that turns `worlds/<label>` back into the episode dir itself. Asking the same
-        # grammar of the bare label closes that, and asking it of the concatenation too keeps
-        # this gate agreeing with the launcher's.
-        if isinstance(label, str) and not (
-                is_valid_run_id(label) and is_valid_run_id(f"{episode_id}-{label}")):
+        if isinstance(label, str) and not world_label_names_directory(episode_id, label):
             raise JudgeRefused(
                 f"world label {label!r} cannot name a directory of its own, or this episode's "
                 f"sibling run ({episode_id}-{label}) — the label is joined straight into every "
@@ -869,17 +876,16 @@ def _resolution_facts(
 
 
 def _read_archived_text(path: Path, *, world: str, role: str) -> str:
-    """One archived document's text, with a PRESENT-BUT-BAD one answered as this design's
-    refusal — an ABSENT one, by contrast, is the ordinary case (a sibling that died before
-    writing one, an archive still mid-copy) and answers as an empty document rather than a
-    refusal, so a caller reading a partial archive gets what the world DOES have.
+    """One archived document's text, with a missing or unreadable one answered as this
+    design's refusal — the judge is never asked to grade a world it cannot see. A reader that
+    wants a partial archive (the episode page, rendering a world whose investigation was never
+    archived) checks the name is there before asking for the facts; a grading path reaches
+    this only past `_missing_required_input`'s own gate.
 
     Screened through `read_guarded` (#1025 O8): the archive sits in a tree a sibling box's rw
     bind reaches, so a symlink or a FIFO at the name is something the model planted, refused
     without being opened — never a bare `read_text`, which follows the link and would hand an
     outside file's bytes back as this world's own archived text."""
-    if not (path.exists() or path.is_symlink()):
-        return ""
     text, refusal = read_guarded(path)
     if text is None:
         raise JudgeRefused(f"world {world!r}: {role} could not be read: {refusal}")
@@ -973,10 +979,9 @@ def read_archived_report(path: Path) -> ReportRead:
     Screened with `read_guarded` (open `O_NOFOLLOW` + `fstat`) rather than an `artifact_file`
     `lstat` taken ahead of `read_report`'s own bare `is_file()` + read: the lstat-then-open
     form leaves the exact TOCTOU window `read_guarded` exists to close between the screen and
-    the open — a plant landing in that window would still be followed. `_report.read_report`
-    stays the repo-wide accessor, untouched, for every one of its eight other callers; this
-    mirrors its frontmatter/disposition parse over text `read_guarded` has already screened,
-    rather than handing it the path to reopen unguarded."""
+    the open — a plant landing in that window would still be followed. What a headline IS is
+    still `_report`'s one decision: the screened bytes go through `parse_report_text`, the
+    same interpretation `read_report` applies for its eight other callers."""
     if not (path.exists() or path.is_symlink()):
         return read_report(path)  # absent: `read_report`'s own "not found" branch, verbatim
     text, refusal = read_guarded(path)
@@ -986,22 +991,7 @@ def read_archived_report(path: Path) -> ReportRead:
             reason=f"report.md could not be read: refusing to read through a non-plain or "
                    f"aliased entry: {refusal}",
             frontmatter={}, body="", text="")
-    try:
-        frontmatter, body = parse_frontmatter(text)
-    except FrontmatterError as e:
-        # No frontmatter means no headline, but the bytes are still the report a view renders
-        # — the same partial-result posture `read_report` takes for the same case.
-        return ReportRead(disposition=None, reason=f"report.md {e}", frontmatter={}, body=text,
-                          text=text)
-    raw = frontmatter.get("disposition")
-    disposition = normalized_disposition(raw)
-    if disposition is None:
-        return ReportRead(
-            disposition=None,
-            reason=f"report.md disposition={raw!r} not in {sorted(DISPOSITION_ENUM)}",
-            frontmatter=frontmatter, body=body, text=text)
-    return ReportRead(disposition=disposition, reason=None, frontmatter=frontmatter, body=body,
-                      text=text)
+    return parse_report_text(text)
 
 
 def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
@@ -1476,5 +1466,6 @@ __all__ = [
     "is_gradable_row", "json_mapping", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "own_h_rows", "raw_manifest", "read_review_record",
     "read_samples_record", "read_world_facts", "sample_patterns", "scope_params",
-    "screened_yaml_mapping", "staged_patterns", "world_pattern", "world_review_block",
+    "screened_yaml_mapping", "staged_patterns", "world_label_names_directory", "world_pattern",
+    "world_review_block",
 ]

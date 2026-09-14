@@ -55,15 +55,6 @@ _TOOL_TRACE_NAME = "tool_trace.jsonl"
 #: The family's own draw documents live under this pseudo-label beside the worlds.
 _FAMILY_LABEL = "family"
 
-_LADDER_WORDS = ("undecidable", "caught", "survived", "discard", "corpus-contradiction")
-
-_WITHHELD_CLASS = {
-    "measured_nothing": "wh-measured-nothing",
-    "capture_unaddressed": "wh-capture-unaddressed",
-    "reachability_unmeasured": "wh-reachability-unmeasured",
-    "episode_incomplete": "wh-episode-incomplete",
-}
-
 _BUCKET_CLASS = {
     "lead-set": "bucket-lead-set",
     "observability": "bucket-observability",
@@ -323,7 +314,11 @@ class WorldEntry:
         self.in_manifest = False
         self.manifest_doc: dict[str, Any] | None = None
         self.row: dict[str, Any] | None = None  # judge.yaml row, if any
-        self.role: str | None = None
+        #: Whether the label may be joined into a path at all (`family.world_label_names_
+        #: directory`): a label carrying `..` or a separator names a directory OUTSIDE the
+        #: episode, so the loader reads nothing for it and the sections render it as an
+        #: unnameable entry — the same grammar the grading pass refuses such a manifest on.
+        self.nameable = False
         self.run_dir_name: str | None = None  # the runs/ dir that decomposed to this label
         self.result: _ResultEvent | None = None  # `None` when there is no run dir at all
         self.archive: _WorldArchive | None = None  # `None` when worlds/<label> is not a dir
@@ -393,8 +388,8 @@ class _WireLogs:
                 if cost is not None:
                     total += cost
                     call_priced = True
-                duration = row.get("duration_ms")
-                if isinstance(duration, (int, float)):
+                duration = _finite(row.get("duration_ms"))
+                if duration is not None:
                     wall += duration
             if call_priced:
                 priced_calls += 1
@@ -563,33 +558,64 @@ def load_episode(episode_dir: Path) -> _Episode:
     grade_rows = [r for r in (_items(grade.worlds) if grade is not None else [])
                   if isinstance(r, dict) and isinstance(r.get("world"), str)]
     worlds_dir = episode_dir / archive.WORLDS_DIRNAME
-    if artifact_dir(worlds_dir):
-        ep.archived_world_dirs = sorted(
-            p.name for p in worlds_dir.iterdir() if artifact_dir(p) and p.name != _FAMILY_LABEL)
+    ep.archived_world_dirs = [
+        p.name for p in _entries_of(worlds_dir) if artifact_dir(p) and p.name != _FAMILY_LABEL]
     ep.entries, ep.roster_order, ep.off_roster = _build_roster(
-        ep, [r["world"] for r in grade_rows], grade_exists=grade is not None)
+        ep, [r["world"] for r in grade_rows], grade_present=ep.grade_rec.present)
     for row in grade_rows:
         w = ep.entries.get(row["world"])
         if w is not None:
             w.row = row
 
-    labels = [w["world_id"] for w in ep.manifest_worlds if isinstance(w.get("world_id"), str)]
-    ep.alert = episode_alert(episode_dir, labels or ep.archived_world_dirs)
+    # EVERY path below is joined from a label; only a label that names a directory of its
+    # own reaches the disk. `archived_world_dirs` are real directory names, but a name is not
+    # a label (`..` is a name) — the same gate applies.
+    nameable = [w.label for w in ep.entries.values() if w.nameable]
+    labels = [w["world_id"] for w in ep.manifest_worlds
+              if isinstance(w.get("world_id"), str) and w["world_id"] in nameable]
+    ep.alert = episode_alert(episode_dir, labels or [
+        n for n in ep.archived_world_dirs if family.world_label_names_directory(ep.episode_id, n)])
 
     for label in [*ep.entries, _FAMILY_LABEL]:
-        ep.draws[label] = draws_on_disk_report(
-            worlds_dir / label / archive.DRAWS_DIRNAME)
+        ep.draws[label] = (draws_on_disk_report(worlds_dir / label / archive.DRAWS_DIRNAME)
+                           if label == _FAMILY_LABEL or ep.entries[label].nameable
+                           else ({}, DrawsSkipReport()))
     for w in ep.entries.values():
+        if not w.nameable:
+            continue
         if w.run_dir_name is not None:
             w.result = _result_event(episode_dir / RUNS_SUBDIR / w.run_dir_name)
         w.archive = _load_world_archive(worlds_dir / w.label)
     for label in ep.roster_order:
-        ep.leads[label] = _load_world_leads(ep, label)
+        entry = ep.entries.get(label)
+        ep.leads[label] = (_load_world_leads(ep, label)
+                           if entry is None or entry.nameable else _WorldLeads())
 
     ep.wire = _load_wire_logs(episode_dir / WIRE_LOG_DIR)
     ep.findings = _walk_findings(ep)
     ep.total_cost, ep.worlds_wall, ep.lower_bound = _cost_totals(ep)
     return ep
+
+
+def _entries_of(directory: Path) -> list[Path]:
+    """The directory's children, or nothing when it is not a listable directory — a
+    permission-denied listing (mode 000; root ignores this, a non-root operator does not) is
+    that directory's own absence, never the page's crash. `artifact_dir` screens a link or a
+    non-directory at the name first."""
+    if not artifact_dir(directory):
+        return []
+    try:
+        return sorted(directory.iterdir())
+    except OSError:
+        return []
+
+
+def _finite(value: Any) -> float | None:
+    """`value` as a float when it is a real, finite number — `json.loads` admits `NaN` and
+    `Infinity`, and `fmt_duration`'s `int(...)` rejects both — else `None`."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
 
 
 def _decompose_run_dir(name: str, *, episode_id: str) -> str | None:
@@ -600,7 +626,7 @@ def _decompose_run_dir(name: str, *, episode_id: str) -> str | None:
 
 
 def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — one union-membership decision (manifest ∪ judge.yaml rows ∪ runs/ dirs), the roster every other section keys on
-                  *, grade_exists: bool) -> tuple[dict[str, WorldEntry], list[str], int]:
+                  *, grade_present: bool) -> tuple[dict[str, WorldEntry], list[str], int]:
     """Every world label the page must give a section to: manifest worlds ∪ `judge.yaml`
     rows ∪ `runs/` directories that decompose to `<episode_id>-<label>` (#1025 J7/J8).
 
@@ -611,44 +637,45 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — o
     entries: dict[str, WorldEntry] = {}
     order: list[str] = []
     runs_dir = ep.dir / RUNS_SUBDIR
-    # A manifest world with NEITHER a `judge.yaml` row NOR any archive evidence contributes a
-    # section only once the episode has reached RUNS at all — either `runs/` still exists, or a
-    # grade landed at some point (and `runs/` was pruned afterward, J8). An episode that never
-    # got past REVIEW/STAGING (a rejection, an abort) has neither and has a manifest but no
-    # world to show anything about yet (#1025 J7/J8).
-    reached_runs = artifact_dir(runs_dir) or grade_exists
+    run_dirs = [p.name for p in _entries_of(runs_dir) if artifact_dir(p)]
+
+    def entry(label: str) -> WorldEntry:
+        if label not in entries:
+            entries[label] = WorldEntry(label)
+            entries[label].nameable = family.world_label_names_directory(ep.episode_id, label)
+            order.append(label)
+        return entries[label]
+
+    # A manifest world with no `judge.yaml` row contributes a section only once the episode
+    # has reached RUNS at all — `runs/` still exists, a grade record landed at some point
+    # (readable or not; `runs/` is disposable after it, J8), or a world was archived under
+    # `worlds/`. An episode that never got past REVIEW/STAGING (a rejection, an abort) has none
+    # of these: a manifest but no world to show anything about yet (#1025 J7/J8).
+    reached_runs = bool(run_dirs) or artifact_dir(runs_dir) or grade_present or bool(
+        ep.archived_world_dirs)
     for w in ep.manifest_worlds:
         label = w.get("world_id")
         if not isinstance(label, str):
             continue
-        if label not in entries:
-            if not reached_runs:
-                continue
-            entries[label] = WorldEntry(label)
-            order.append(label)
+        if label not in entries and not reached_runs:
+            continue
+        entry(label)
         entries[label].in_manifest = True
         # keep the FIRST manifest entry's fields as the section's own; the guide renders every
         # entry verbatim regardless (J7 iii).
         if entries[label].manifest_doc is None:
             entries[label].manifest_doc = w
-            entries[label].role = w.get("role") if isinstance(w.get("role"), str) else None
 
     for label in grade_row_labels:
-        if label not in entries:
-            entries[label] = WorldEntry(label)
-            order.append(label)
+        entry(label)
 
     stray_run_dirs: list[str] = []
-    if artifact_dir(runs_dir):
-        for child in sorted(p.name for p in runs_dir.iterdir() if artifact_dir(p)):
-            label = _decompose_run_dir(child, episode_id=ep.episode_id)
-            if label is None:
-                stray_run_dirs.append(child)
-                continue
-            if label not in entries:
-                entries[label] = WorldEntry(label)
-                order.append(label)
-            entries[label].run_dir_name = child
+    for child in run_dirs:
+        label = _decompose_run_dir(child, episode_id=ep.episode_id)
+        if label is None:
+            stray_run_dirs.append(child)
+            continue
+        entry(label).run_dir_name = child
 
     off_roster = sum(1 for name in ep.archived_world_dirs if name not in entries)
     return entries, [*order, *stray_run_dirs], off_roster
@@ -664,13 +691,11 @@ def _result_event(run_dir: Path) -> _ResultEvent:
     if not rows or rows[-1].get("type") != "result":
         return _ResultEvent(None, None, "none")
     last = rows[-1]
-    cost = last.get("total_cost_usd")
-    duration = last.get("duration_ms")
-    wall = float(duration) if isinstance(duration, (int, float)) else None
-    if not isinstance(cost, (int, float)) or isinstance(cost, bool) or not math.isfinite(cost) \
-            or cost < 0:
+    cost = _finite(last.get("total_cost_usd"))
+    wall = _finite(last.get("duration_ms"))
+    if cost is None or cost < 0:
         return _ResultEvent(None, wall, "unusable")
-    return _ResultEvent(float(cost), wall, "ok")
+    return _ResultEvent(cost, wall, "ok")
 
 
 def _load_world_archive(world_dir: Path) -> _WorldArchive | None:
@@ -734,12 +759,11 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
 
     summaries_dir = world_dir / archive.GATHER_SUMMARIES_DIRNAME
     summary_stems = set()
-    if artifact_dir(summaries_dir) and not summaries_dir.is_symlink():
-        for p in summaries_dir.iterdir():
-            if p.suffix == ".md" and artifact_file(p):
-                summary_stems.add(p.stem)
-            elif not p.name.endswith(".md") and _safe_id(p.stem) is None:
-                leads.unnameable_summaries.append(p.stem)
+    for p in _entries_of(summaries_dir):
+        if p.suffix == ".md" and artifact_file(p):
+            summary_stems.add(p.stem)
+        elif not p.name.endswith(".md") and _safe_id(p.stem) is None:
+            leads.unnameable_summaries.append(p.stem)
 
     if facts is not None:
         roster = set(facts.referenced_leads) | summary_stems
@@ -767,8 +791,10 @@ def _load_wire_logs(wire: Path) -> _WireLogs:
     if not artifact_dir(wire):
         return logs
     logs.present = True
-    for path in sorted(wire.glob("*.jsonl")):
+    for path in _entries_of(wire):
         name = path.name
+        if not name.endswith(".jsonl"):
+            continue
         if "_framed_trace" in name:
             if not name.endswith("_framed_trace.jsonl"):
                 continue
@@ -1297,7 +1323,10 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
             contrasting += 1
         if row.get("verdict") == row.get("declared"):
             agree += 1
-    verdict_note = ("" if grade.verdict_word in _LADDER_WORDS
+    # The ladder's vocabulary is `_vocab.JUDGE_OUTCOME_ENUM`'s, asked of its own normalizer
+    # (case-insensitive, trimmed — a bare `in` over a local copy would call ` Survived` off
+    # the ladder, and would go stale the day the enum grows).
+    verdict_note = ("" if normalized_judge_outcome(grade.verdict_word) is not None
                     else ' <span class="vd-nonladder">(family outcome, not the ladder)</span>')
     tile1 = (
         f'<div class="vd-tile" id="vd-tile-1">{len(measuring)} of {len(graded)} graded '
@@ -2050,7 +2079,7 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
             continue
         model = row.get("model")
         usage = row.get("usage")
-        duration = row.get("duration_ms")
+        duration = _finite(row.get("duration_ms"))
         _msg, parts = _message_parts(row)
         text = next((p.get("content") for p in parts if isinstance(p, dict)
                     and p.get("part_kind") == "text"), "")
@@ -2067,7 +2096,7 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
             line_bits.append(f'<span class="tx-cost">{_money(priced)}</span>')
         elif isinstance(usage, dict):
             line_bits.append('<span class="tx-cost">unpriced</span>')
-        if isinstance(duration, (int, float)):
+        if duration is not None:
             line_bits.append(f'<span class="tx-wall">{fmt_duration(duration)}</span>')
         line_bits.append('</div>')
         entries_html.append("".join(line_bits))
