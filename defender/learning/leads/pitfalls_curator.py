@@ -662,7 +662,9 @@ HELD_CEILING_REASON = "reducer-offered-never-taught"
 OFFERS_DECLINED_KEY = "offers_declined"
 
 
-def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
+def _retire_exhausted_holds(
+    paths, held_ids: list[str], *, timeout_seconds: int | None = None,
+) -> int:
     """Bump every held row once, and retire the ones that have now been offered too often.
 
     FK-7 makes a no-edit reducer tick a first-class outcome — `lead_pitfalls.md`'s "skip that
@@ -701,6 +703,7 @@ def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
         reason=HELD_CEILING_REASON,
         max_attempts=_loop_config.author_max_attempts(),
         counter_key=OFFERS_DECLINED_KEY,
+        timeout_seconds=timeout_seconds,
     )
     if outcome.retired:
         _log(
@@ -740,16 +743,19 @@ class PitfallsDisposition:
         """Rotate the committed rows out, then bump the held ones. Returns how many held rows
         were retired at the offer ceiling.
 
-        The rotation FIRST: it is the step that can expire (`queue_lock`'s deadline — the
-        drain runs this holding a batch's worth of locks, so it must not wait forever on a
-        wedged appender), and a partial apply that rotated nothing but bumped the declines
+        The rotation FIRST, and the same `timeout_seconds` on BOTH steps — the bump's own
+        locked rotation inside `drain.retire` waits on the same append lock. The drain runs
+        this after the push, holding the tick's locks, so neither step may wait forever on a
+        wedged appender; and a partial apply that rotated nothing but bumped the declines
         would spend a held row's offer budget on a tick that taught nothing."""
         if self.committed_ids:
             _loop_persist.rotate_pitfalls(
                 list(self.committed_ids), self.sha, paths=paths,
                 category="consumed_committed", timeout_seconds=timeout_seconds,
             )
-        return _retire_exhausted_holds(paths, list(self.held_ids))
+        return _retire_exhausted_holds(
+            paths, list(self.held_ids), timeout_seconds=timeout_seconds,
+        )
 
 
 def run_pitfalls(

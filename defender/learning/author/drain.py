@@ -191,8 +191,10 @@ def retire(
     that holds the repo lock — i.e. the corpus drain, which passes its configured wait.
     That lock serialises every channel, so an unbounded wait here would let one channel's
     wedged appender stall all four indefinitely. Expiry raises `TimeoutError`: the batch
-    is not bumped, and the tick surfaces as stuck. Left unset by the pitfalls leg, which
-    retires outside the repo lock and so has nothing to starve."""
+    is not bumped, and the tick surfaces as stuck. The pitfalls leg passes the same
+    configured wait through `PitfallsDisposition.apply` (#952): it retires from the
+    lead-author drain tick, after the push, and a wedged appender must not hold that tick
+    open indefinitely either."""
     ids = {str(i) for i in batch_ids}
     key = channel.id_key
     bumped: dict[str, int] = {}
