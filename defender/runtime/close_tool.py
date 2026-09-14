@@ -42,6 +42,7 @@ from defender.skills.invlang.schema import CompanionBody
 from defender.skills.invlang.validate import (
     CeilingReceipt,
     RuntimeEvidenceReceipt,
+    ceiling_note_block,
     ceiling_test_block,
     conclude_ceiling_test_rows,
     conclude_runtime_evidence_rows,
@@ -273,13 +274,10 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     if evidence:
         body += f" {evidence}"
     # The note is FOR THE HUMAN ANALYST and decides nothing about the verdict (see this
-    # function's docstring; its SIZE is charged at the price gate) — it lives here, in the
-    # body, never in the frontmatter block above. `receipt.ref or
-    # receipt.cap`: exactly one is set (`_check_ceiling_receipt` refuses any other shape), so
-    # this names whichever the receipt actually carries.
-    for receipt in ceiling_test:
-        if receipt.note:
-            body += f"\nceiling_test ({receipt.state}, {receipt.ref or receipt.cap}): {receipt.note}"
+    # function's docstring) — it lives here, in the body, never in the frontmatter block above.
+    # Through the OWNER's renderer, so the byte bound the price gate charges on the notes is a
+    # bound on the bytes written here.
+    body += ceiling_note_block(ceiling_test)
     # #983 mechanism A, O3. ONE line per baseline, from the SAME receipts the projection
     # accepted (`conclude_runtime_evidence_rows`) — never a second reading of the companion, so
     # a row the guard refused cannot reach a reader here. Body-only for the same reason the
