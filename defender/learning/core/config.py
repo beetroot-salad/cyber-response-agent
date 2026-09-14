@@ -108,6 +108,13 @@ class LoopPaths(DefenderPaths):
         return self.state_root / ".lead-author-drain.lock"
 
     @property
+    def pending_delivery_dir(self) -> Path:
+        """One record per drain batch that committed but whose push or PR failed: the
+        commit is on a local branch, and the next tick of that lane delivers it before
+        serving anything new (#952)."""
+        return self.state_root / "_pending_delivery"
+
+    @property
     def pending_file(self) -> Path:
         return self.pending_dir / "findings.jsonl"
 

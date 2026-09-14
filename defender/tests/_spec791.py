@@ -158,6 +158,11 @@ class SpecBranch:
         self._base = base
         self.events: list[str] = []
 
+    def branch_name(self, batch_id: str) -> str:
+        # The real `AuthorBranch.branch_name`, verbatim: #952's failure log names the local
+        # branch the commit was retained on, so the fake has to answer for it.
+        return f"{self.branch_prefix}{batch_id}"
+
     def open_pr_exists(self) -> bool:
         self.events.append("lease-check")
         return False

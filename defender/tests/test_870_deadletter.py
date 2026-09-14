@@ -212,7 +212,7 @@ def test_a_ceiling_retirement_names_its_exception_class(tmp_path, monkeypatch):
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     persist.append_pitfalls([shim_row("r:l-003:0")], paths=paths)
 
-    def _explodes(p, box=None):
+    def _explodes(p, box=None, **_kw):
         raise ImportError("the curator module vanished mid-tick")
 
     drains._drain_pitfalls(paths, _explodes)

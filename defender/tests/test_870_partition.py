@@ -315,7 +315,7 @@ def test_a_faulting_tick_does_not_spend_the_offer_budget(scene, monkeypatch):
     _repo, paths = scene
     ids = _shim_batch(paths, n=1)
 
-    def _faulting(_paths, box=None):
+    def _faulting(_paths, box=None, **_kw):
         raise ImportError("the curator module vanished mid-tick")
 
     for tick in (1, 2):
@@ -508,7 +508,7 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
 
 def _leg(paths, spawn):
     """`_invoke_pitfalls`' shape, so the drain drives the REAL curation leg."""
-    return lambda p, box=None: pitfalls_curator.run_pitfalls(paths=p, invoke=spawn, box=box)
+    return lambda p, box=None, **_kw: pitfalls_curator.run_pitfalls(paths=p, invoke=spawn, box=box)
 
 
 def test_two_curation_ticks_land_distinctly_in_every_shared_sink(scene):
@@ -576,7 +576,7 @@ def test_a_committed_batch_is_not_re_bumped(scene, monkeypatch):
         [shim_row("r:l-003:0"), pitfall_row("r:l-000:0", "elastic")], paths=paths,
     )
 
-    def _half_done(p, box=None):
+    def _half_done(p, box=None, **_kw):
         persist.rotate_pitfalls(
             ["r:l-003:0"], "deadbeef", paths=p, category="consumed_committed",
         )

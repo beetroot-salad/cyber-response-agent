@@ -148,7 +148,7 @@ def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
     branch = SpecBranch(tmp_path / "worktrees")
     rc = drains.lead_author_drain(
         state,
-        run_lead_author=lambda _paths, rd, *, box=None: served.append(rd),
+        run_lead_author=lambda _paths, rd, *, box=None, **_kw: served.append(rd),
         run_pitfalls=lambda *_a, **_kw: 0,
         branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
     )
@@ -228,7 +228,7 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(tmp_path, state
 
     served: list[Path] = []
 
-    def serve_and_re_ask(_paths, run_dir, *, box=None):
+    def serve_and_re_ask(_paths, run_dir, *, box=None, **_kw):
         served.append(run_dir)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it.

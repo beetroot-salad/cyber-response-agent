@@ -278,7 +278,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
 
     calls: list[Path] = []
 
-    def refusing_lane(_paths, rd, *, box=None):
+    def refusing_lane(_paths, rd, *, box=None, **_kw):
         calls.append(rd)
         raise LeadAuthorError(
             "lead author refused: mcpsys is not a declared system in this tree")

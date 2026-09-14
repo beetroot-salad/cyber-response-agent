@@ -95,11 +95,13 @@ class ClaimedMarker:
     """One request this pass owns: already moved out of the queue, read, and servable."""
 
     path: Path
-    """Where the marker sits now — under ``inflight/``. Unlink this when the serve succeeds."""
+    """Where the marker sits now — under ``inflight/``. Unlinked once the request is
+    CONSUMED: for the lead-author drain that is `BatchDisposition.apply`, after the batch's
+    tree has passed the scrub, never at the serve itself (#952)."""
 
     queued_path: Path
     """The top-level slot the claim freed. A transient retry is re-queued HERE, never at
-    ``path`` — which the claim is about to unlink."""
+    ``path`` — the slot the claim still occupies."""
 
     spec: dict
     run_dir: Path

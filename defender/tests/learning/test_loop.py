@@ -326,11 +326,24 @@ def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
 
 class _FakeBranch:
 
-    def __init__(self, *, prefix: str = "lessons/", pr_exists: bool = False, commits: int = 1):
+    def __init__(
+        self, *, prefix: str = "lessons/", pr_exists: bool = False, commits: int = 1,
+        worktree: Path | None = None,
+    ):
         self.branch_prefix = prefix
         self._pr_exists = pr_exists
         self._commits = commits
+        # A REAL tree to mint, for the tests that drive the production `_invoke_lead_author`:
+        # since #952 M5 the drain builds the curator's deps from the worktree it minted
+        # (`build_lead_author_deps(wt_paths)` resolves the declared systems there), so a
+        # path that does not exist is a systemic refusal before the patched `run` is reached.
+        self._worktree = worktree
         self.events: list[str] = []
+
+    def branch_name(self, batch_id: str) -> str:
+        # The real `AuthorBranch.branch_name`, verbatim: #952's failure log names the local
+        # branch the commit was retained on, so the fake has to answer for it.
+        return f"{self.branch_prefix}{batch_id}"
 
     def open_pr_exists(self) -> bool:
         self.events.append("lease-check")
@@ -338,7 +351,7 @@ class _FakeBranch:
 
     def start_batch(self, batch_id: str) -> Path:
         self.events.append("start")
-        return Path(f"/tmp/wt-{batch_id}")
+        return self._worktree if self._worktree is not None else Path(f"/tmp/wt-{batch_id}")
 
     def finish_batch(self, batch_id: str, wt: Path):
         self.events.append("finish")
@@ -346,6 +359,14 @@ class _FakeBranch:
 
     def cleanup(self, wt: Path) -> None:
         self.events.append("cleanup")
+
+
+def _declarable_worktree(tmp_path: Path) -> Path:
+    """A committed tree declaring one system, for `_FakeBranch(worktree=...)`."""
+    from defender.tests._declared869 import seed_tree
+
+    return seed_tree(tmp_path, name="wt", adapters=("elastic",), markers=("elastic",),
+                     skills=("elastic",), catalog=("elastic",))
 
 
 def _seed_curator_findings(paths, n: int = 5) -> None:
@@ -617,7 +638,7 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
     markers.enqueue_for_authoring(good, paths)
     seen: list[Path] = []
 
-    def maybe_boom(wt_paths, rd: Path, *, box=None) -> None:
+    def maybe_boom(wt_paths, rd: Path, *, box=None, **_kw) -> None:
         if rd.name == "case-poison":
             raise RuntimeError("lead-author blew up")
         seen.append(rd)
@@ -640,8 +661,9 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     run_dir.mkdir(parents=True)
     markers.enqueue_for_authoring(run_dir, paths)
     # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
-    monkeypatch.setattr(la, "run", lambda rd, paths=None, box=None: 2)  # lint-monkeypatch: ok
-    drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+    monkeypatch.setattr(la, "run_under_held_queue_lock", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok
+    branch = _FakeBranch(prefix="lead-author/", worktree=_declarable_worktree(tmp_path))
+    drains.lead_author_drain(paths, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert not (paths.author_queue_dir / "case-rc.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-rc.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
@@ -656,21 +678,22 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
     markers.enqueue_for_authoring(run_dir, paths)
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
 
-    def boom(rd, paths=None, box=None):
+    def boom(rd, paths=None, box=None, **_kw):
         raise OSError("disk hiccup")
 
     # lint-monkeypatch: ok — same intentional seam as the rc=2 test above: drives the
-    monkeypatch.setattr(la, "run", boom)  # lint-monkeypatch: ok
+    monkeypatch.setattr(la, "run_under_held_queue_lock", boom)  # lint-monkeypatch: ok
     marker = paths.author_queue_dir / "case-transient.json"
     failed = paths.author_queue_dir / "failed" / "case-transient.json"
+    wt = _declarable_worktree(tmp_path)
 
     for expected in (1, 2):
-        drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/", worktree=wt), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
         assert marker.exists()
         assert json.loads(marker.read_text())["attempts"] == expected
         assert not failed.exists()
 
-    drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+    drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/", worktree=wt), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert not marker.exists()
     assert json.loads(failed.read_text())["failed"].startswith("transient-exhausted")
 
@@ -688,7 +711,7 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
         worktree_base=tmp_path / "wt",
     )
 
-    def _author(wt_paths, rd, *, box=None):
+    def _author(wt_paths, rd, *, box=None, **_kw):
         f = wt_paths.repo_root / "defender" / "skills" / "note.md"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text("edit\n")
@@ -700,6 +723,61 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
     assert forge.open_calls[0]["head"].startswith("lead-author/")
     assert not forge.open_calls[0]["head"].startswith("lessons/")
     assert forge.list_calls == ["lead-author/"]
+
+
+def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path: Path, capsys):
+    """#952 O7 through the REAL `AuthorBranch` over a real origin: the first tick's push
+    lands but the forge refuses the PR, so the tick records the batch for delivery; the next
+    tick — nothing queued — delivers it from the branch alone: the push is a no-op, the forge
+    sees ONE `open_pr` for that head, and the record is gone. No second batch is minted for
+    it and the lead-author agent is not run again."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-pr"
+    run_dir.mkdir(parents=True)
+    markers.enqueue_for_authoring(run_dir, paths)
+    origin, work = _origin_work(tmp_path)
+    forge = _FakeForge(create_ref="https://github.com/o/r/pull/78", raises=True)
+    branch = ab.AuthorBranch(
+        forge=forge, repo_root=work, branch_prefix="lead-author/",
+        pr_title=drains._lead_author_pr_title, pr_body=drains._lead_author_pr_body,
+        worktree_base=tmp_path / "wt",
+    )
+    served: list[Path] = []
+
+    def _author(wt_paths, rd, *, box=None, **_kw):
+        served.append(rd)
+        f = wt_paths.repo_root / "defender" / "skills" / "note.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("edit\n")
+        _real(wt_paths.repo_root, "add", "-A")
+        _real(wt_paths.repo_root, "commit", "-q", "-m", "lead edit")
+
+    assert drains.lead_author_drain(
+        paths, run_lead_author=_author, branch=branch,
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    ) == 0
+    assert len(forge.open_calls) == 1
+    head = forge.open_calls[0]["head"]
+    records = sorted(paths.pending_delivery_dir.glob("*.json"))
+    assert [json.loads(r.read_text())["branch"] for r in records] == [head]
+    assert not (paths.author_queue_dir / "case-pr.json").exists(), "the served run was re-queued"
+    assert _real(work, "rev-parse", "--verify", f"refs/heads/{head}").returncode == 0
+    capsys.readouterr()
+
+    forge.raises = False
+    assert drains.lead_author_drain(
+        paths, run_lead_author=_author, branch=branch,
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    ) == 0
+
+    assert len(served) == 1, "the retained batch's run was served again"
+    assert [c["head"] for c in forge.open_calls] == [head, head]
+    assert forge.head_calls == [head], "delivery must look for an open PR before opening one"
+    assert list(paths.pending_delivery_dir.glob("*.json")) == []
+    remote = _real(work, "ls-remote", "--heads", str(origin), head).stdout
+    assert head in remote, "the retained branch never reached origin"
+    err = capsys.readouterr().err
+    assert f"delivered retained branch {head}: opened PR https://github.com/o/r/pull/78" in err
 
 
 def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
@@ -723,7 +801,7 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
 
     clean_at_entry: dict[str, bool] = {}
 
-    def run_lead_author(p, rd: Path, *, box=None) -> None:
+    def run_lead_author(p, rd: Path, *, box=None, **_kw) -> None:
         st = _subprocess.run(
             ["git", "-C", str(p.repo_root), "status", "--porcelain"],
             capture_output=True, text=True,
