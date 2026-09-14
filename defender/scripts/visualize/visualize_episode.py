@@ -212,6 +212,13 @@ def _read_staged(episode_dir: Path) -> _Record:
         rows = staging.read_staged(episode_dir)
     except staging.StagingRefused as bad:
         return _Record(present=True, error=f"staging record unreadable: {bad}")
+    # `read_staged` is `artifact_file`-screened against a PLANTED alias but still opens the
+    # plain file it confirms is there with a bare `read_text` — a permission-denied regular
+    # file (root ignores this; a real non-root run does not, #1025) reaches this call as an
+    # un-typed `OSError`/`PermissionError`, which is this record's own slot's business, never
+    # the whole page's.
+    except OSError as bad:
+        return _Record(present=True, error=f"staging record unreadable: {bad}")
     if not rows and not present:
         return _Record([], present=False)
     return _Record(rows, present=present)
@@ -1893,9 +1900,17 @@ def _render_world_leads(episode_dir: Path, label: str, episode_token: str) -> st
     elif not artifact_file(ledger_path):
         bits.append('<div class="ld-served">served ledger unreadable</div>')
     else:
-        _rows, malformed = read_jsonl_rows_report(ledger_path)
-        if malformed:
-            bits.append(f'<div class="ld-served">{malformed} malformed row</div>')
+        try:
+            # `read_jsonl_rows_report` is the shared tolerant reader's own bare `read_text` —
+            # it survives a torn line or an undecodable byte but not a permission-denied
+            # regular file (root ignores this; a real non-root run does not, #1025), which
+            # reaches this call as an un-typed `OSError`. This world's leads block is its own
+            # slot, never the whole page.
+            _rows, malformed = read_jsonl_rows_report(ledger_path)
+            if malformed:
+                bits.append(f'<div class="ld-served">{malformed} malformed row</div>')
+        except OSError:
+            bits.append('<div class="ld-served">served ledger unreadable</div>')
 
     if not artifact_dir(world_dir):
         return f'<div id="leads-{esc(label)}" class="leads-section">not archived' \
@@ -1956,7 +1971,18 @@ def _render_world_leads(episode_dir: Path, label: str, episode_token: str) -> st
         if file_safe and safe is None:
             bits.append(_unnameable(lead_id, what="lead id"))
             continue
-        chain = family.lead_chain(world_dir, lead_id, resolutions_by_lead, leads=all_leads)
+        try:
+            # `lead_chain`'s own gather-summary read is `errors="replace"` for a BAD byte but
+            # a bare `read_text` for a permission-denied file (root ignores this; a real
+            # non-root run does not, #1025) — this one lead's row is its own slot, never the
+            # whole page.
+            chain = family.lead_chain(world_dir, lead_id, resolutions_by_lead, leads=all_leads)
+        except OSError:
+            id_attr = f' id="ld-{esc(label)}-{esc(safe)}"' if safe is not None else ""
+            bits.append(f'<div{id_attr} class="ld-lead">'
+                       f'<span class="ld-id">{_uv(lead_id)}</span>'
+                       f'<span class="ld-summary">lead unreadable</span></div>')
+            continue
         goal = chain.get("goal")
         params = chain.get("params")
         summary = chain.get("summary")
