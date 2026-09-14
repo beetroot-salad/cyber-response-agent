@@ -193,8 +193,8 @@ def retire(
     wedged appender stall all four indefinitely. Expiry raises `TimeoutError`: the batch
     is not bumped, and the tick surfaces as stuck. The pitfalls leg passes the same
     configured wait through `PitfallsDisposition.apply` (#952): it retires from the
-    lead-author drain tick, after the push, and a wedged appender must not hold that tick
-    open indefinitely either."""
+    lead-author drain tick, which holds that tick's locks while it waits, and a wedged
+    appender must not hold it open indefinitely either; by hand it passes none."""
     ids = {str(i) for i in batch_ids}
     key = channel.id_key
     bumped: dict[str, int] = {}

@@ -313,8 +313,8 @@ def rotate_pitfalls(
     category: str = "consumed_committed", timeout_seconds: int | None = None,
 ) -> None:
     """`timeout_seconds` is `queue_lock`'s own deadline, threaded through untouched: the
-    drain must pass one (#952 M1 — the deferred `consumed_committed` rotation runs from the
-    drain tick, after the push), and an appender-side caller may still pass none."""
+    drain passes its configured wait on every rotation it makes (#952 — it holds the tick's
+    locks while it waits), and a by-hand caller passes none and waits as it always has."""
     ids = set(batch_ids)
     consumed = [
         {**r, "consumed_category": category}

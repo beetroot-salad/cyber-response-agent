@@ -121,7 +121,7 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
     assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 0
 
     empty = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "empty-state")
-    assert drains._invoke_pitfalls(empty, on_curated=lambda _d: None) == 0
+    assert drains._invoke_pitfalls(empty, on_curated=lambda _d: None, lock_wait_seconds=0) == 0
 
 
 

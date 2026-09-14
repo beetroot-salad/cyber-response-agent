@@ -661,7 +661,7 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     run_dir.mkdir(parents=True)
     markers.enqueue_for_authoring(run_dir, paths)
     # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
-    monkeypatch.setattr(la, "run", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok
+    monkeypatch.setattr(la, "run_under_held_queue_lock", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok
     branch = _FakeBranch(prefix="lead-author/", worktree=_declarable_worktree(tmp_path))
     drains.lead_author_drain(paths, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert not (paths.author_queue_dir / "case-rc.json").exists()
@@ -682,7 +682,7 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
         raise OSError("disk hiccup")
 
     # lint-monkeypatch: ok — same intentional seam as the rc=2 test above: drives the
-    monkeypatch.setattr(la, "run", boom)  # lint-monkeypatch: ok
+    monkeypatch.setattr(la, "run_under_held_queue_lock", boom)  # lint-monkeypatch: ok
     marker = paths.author_queue_dir / "case-transient.json"
     failed = paths.author_queue_dir / "failed" / "case-transient.json"
     wt = _declarable_worktree(tmp_path)
@@ -723,6 +723,61 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
     assert forge.open_calls[0]["head"].startswith("lead-author/")
     assert not forge.open_calls[0]["head"].startswith("lessons/")
     assert forge.list_calls == ["lead-author/"]
+
+
+def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path: Path, capsys):
+    """#952 O7 through the REAL `AuthorBranch` over a real origin: the first tick's push
+    lands but the forge refuses the PR, so the tick records the batch for delivery; the next
+    tick — nothing queued — delivers it from the branch alone: the push is a no-op, the forge
+    sees ONE `open_pr` for that head, and the record is gone. No second batch is minted for
+    it and the lead-author agent is not run again."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-pr"
+    run_dir.mkdir(parents=True)
+    markers.enqueue_for_authoring(run_dir, paths)
+    origin, work = _origin_work(tmp_path)
+    forge = _FakeForge(create_ref="https://github.com/o/r/pull/78", raises=True)
+    branch = ab.AuthorBranch(
+        forge=forge, repo_root=work, branch_prefix="lead-author/",
+        pr_title=drains._lead_author_pr_title, pr_body=drains._lead_author_pr_body,
+        worktree_base=tmp_path / "wt",
+    )
+    served: list[Path] = []
+
+    def _author(wt_paths, rd, *, box=None, **_kw):
+        served.append(rd)
+        f = wt_paths.repo_root / "defender" / "skills" / "note.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("edit\n")
+        _real(wt_paths.repo_root, "add", "-A")
+        _real(wt_paths.repo_root, "commit", "-q", "-m", "lead edit")
+
+    assert drains.lead_author_drain(
+        paths, run_lead_author=_author, branch=branch,
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    ) == 0
+    assert len(forge.open_calls) == 1
+    head = forge.open_calls[0]["head"]
+    records = sorted(paths.pending_delivery_dir.glob("*.json"))
+    assert [json.loads(r.read_text())["branch"] for r in records] == [head]
+    assert not (paths.author_queue_dir / "case-pr.json").exists(), "the served run was re-queued"
+    assert _real(work, "rev-parse", "--verify", f"refs/heads/{head}").returncode == 0
+    capsys.readouterr()
+
+    forge.raises = False
+    assert drains.lead_author_drain(
+        paths, run_lead_author=_author, branch=branch,
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    ) == 0
+
+    assert len(served) == 1, "the retained batch's run was served again"
+    assert [c["head"] for c in forge.open_calls] == [head, head]
+    assert forge.head_calls == [head], "delivery must look for an open PR before opening one"
+    assert list(paths.pending_delivery_dir.glob("*.json")) == []
+    remote = _real(work, "ls-remote", "--heads", str(origin), head).stdout
+    assert head in remote, "the retained branch never reached origin"
+    err = capsys.readouterr().err
+    assert f"delivered retained branch {head}: opened PR https://github.com/o/r/pull/78" in err
 
 
 def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
