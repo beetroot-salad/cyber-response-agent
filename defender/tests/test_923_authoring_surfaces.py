@@ -56,7 +56,6 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
     worktree_package_guard,
 )
 
-pytestmark = pytest.mark.gate
 
 #: Every module in the shipping tree that reaches the disposition vocabulary's OWNER, with what
 #: each one is. The census is how the subjects below are PICKED; what is asserted about them is

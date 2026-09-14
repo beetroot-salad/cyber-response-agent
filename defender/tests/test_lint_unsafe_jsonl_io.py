@@ -143,7 +143,7 @@ def test_clean_tree_still_scans(tmp_path):
     assert all("prod.py" in f.fingerprint for f in _GATE._scan(tree))
 
 
-@pytest.mark.gate  # covered by code-smells' "Unsafe JSONL-io gate"
+@pytest.mark.gate("Unsafe JSONL-io gate")  # the code-smells step this duplicates
 def test_real_tree_clean():
     """The regression check: the shipped baseline is EMPTY, so the real tree must
     scan clean. Any new finding here is a live site the refactor introduced.

@@ -154,10 +154,14 @@ jobs:
         # module-scoped fixtures and the per-file tmp git repos behave as they did serially.
         #
         # Two deselections, neither of which drops a check from CI:
-        #   -m "not gate"  — five tests that re-run a repo-wide lint gate over the real tree
+        #   -m "not gate"  — nine tests that re-run a repo-wide lint gate over the real tree
         #                    via the same `main([])` entry point the code-smells job already
         #                    runs as a BLOCKING step. See the `gate` marker in
-        #                    defender/pyproject.toml; each marked test names its step.
+        #                    defender/pyproject.toml: each marked test names its step as the
+        #                    marker's argument, and tests/conftest.py refuses collection when
+        #                    it doesn't or the step isn't in code-smells — because six spec
+        #                    modules (92 tests) once carried a bare module-level marker and
+        #                    ran nowhere.
         #   --ignore …540… — the boundary suite drives real containers (61s, the largest
         #                    file here). It now runs in `box-native` below, natively, and in
         #                    `box-dood` under the split-namespace topology — twice, as

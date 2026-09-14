@@ -75,8 +75,12 @@ markers = [
     # step in CI's `code-smells` job already asserts (`lint_<name>.main([]) == 0` over the
     # real tree, the same entry point the step runs). The marker exists so the `test` job
     # can stop paying for the second copy; the check itself stays hard-gated, in the job
-    # that owns it. A test carrying this marker MUST name the step that covers it.
-    "gate: re-runs a repo-wide lint gate that CI's code-smells job already runs as a blocking step",
+    # that owns it. The step's name is the marker's ARGUMENT — `@pytest.mark.gate("<step>")`
+    # on the one test the step duplicates — and tests/conftest.py refuses collection when
+    # the argument is missing or names no step in that job. Enforced rather than asked for
+    # because six spec modules once carried a bare `pytestmark = pytest.mark.gate`, which
+    # deselected 92 ordinary tests from every CI job and the local gate command at once.
+    "gate(step): re-runs a repo-wide lint gate that CI's code-smells job already runs as a blocking step, named by `step`",
 ]
 
 [tool.uv]

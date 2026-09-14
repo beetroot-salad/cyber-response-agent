@@ -202,7 +202,7 @@ def test_an_unparseable_file_fails_the_gate_rather_than_passing_it(gate, tmp_pat
     assert gate.main([], scope=broken_root, baseline_path=tmp_path / "none.json") == 2
 
 
-@pytest.mark.gate  # covered by code-smells' "Borrowed-vocabulary gate"
+@pytest.mark.gate("Borrowed-vocabulary gate")  # the code-smells step this duplicates
 def test_the_real_tree_passes_the_ratchet(gate):
     """The gate is green on the tree it ships with, through its own baseline.
 

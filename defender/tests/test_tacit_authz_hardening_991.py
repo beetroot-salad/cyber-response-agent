@@ -53,10 +53,10 @@ from defender.skills.invlang.validate import validate_companion
 from defender.tests import _tacit983 as scene
 from defender.tests._spec923 import close, committed, main_deps
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
+    REPO_ROOT,
     worktree_package_guard,
 )
 
-pytestmark = pytest.mark.gate
 
 
 def _errors(document: str) -> list[str]:
@@ -835,8 +835,10 @@ def test_the_skill_and_the_format_doc_agree_with_the_code() -> None:
 
     Asserted as CONTENT, not as a file hash: what has to survive an edit is that both rules are
     findable where a writer looks, not any particular sentence."""
-    skill = Path("defender/skills/invlang/SKILL.md").read_text(encoding="utf-8")
-    fmt = Path("docs/dense-investigation-format.md").read_text(encoding="utf-8")
+    # Anchored on the tree, not the cwd: CI runs pytest from `defender/`, and a cwd-relative
+    # path there opens nothing.
+    skill = (REPO_ROOT / "defender/skills/invlang/SKILL.md").read_text(encoding="utf-8")
+    fmt = (REPO_ROOT / "docs/dense-investigation-format.md").read_text(encoding="utf-8")
 
     for taught, why in (
         ("hit:", "the `hit:` outcome the write gate now demands"),
