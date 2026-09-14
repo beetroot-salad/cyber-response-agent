@@ -10,7 +10,7 @@ On-demand reference for the **defender** track (`defender/`). This skill
 explains how the defender works — it does not investigate alerts. Use
 `defender/SKILL.md` (via `python3 defender/run.py <alert.json>`) for an
 actual run. The defender is an experimental PoC; `content/design.md` says
-what it is, what it deliberately does not carry, and which gates it does.
+what it is and which gates it carries.
 
 ## Who asks this skill questions
 
@@ -68,7 +68,7 @@ Each file under `content/` is a standalone reference document.
 
 | File | Topic | Read when |
 |---|---|---|
-| `content/design.md` | What the defender is, the learning-loop-first philosophy, what it deliberately does not carry, and the roster of runtime gates it does | Overview question, or you need to ground a general answer about scope |
+| `content/design.md` | What the defender is, the learning-loop-first philosophy, and the roster of runtime gates it carries | Overview question, or you need to ground a general answer about scope |
 | `content/runtime-loop.md` | The ORIENT → PLAN → GATHER → ANALYZE → REPORT loop: what each phase writes, the gather-dispatch discipline (the `gather` tool as the only route to a system of record, a cheap model by default, gather-raw isolation), the in-process reliability gates, and the write-time review gate on a confident close | Questions about phases, how gather is dispatched, why the main loop can't read raw payloads, what the gates do, or why a confident close came back challenged or landed as `inconclusive` |
 | `content/learning-loop.md` | The offline loop: fork a finished run → questioner → staged estate → review by replay → run the family → judge → two queues → two curators (the defender's lessons behind a forward-check, the questioner's behind an idempotency gate). The branched episode, the forward-check gate, the `_pending` threshold, and how lessons land | Questions about how the defender learns, what the questioner and the judge do, why lessons are forward-checked before they land, which queue a finding lands on, or when the curators fire |
 | `content/run-artifacts.md` | Run-dir layout under `$DEFENDER_RUNS_BASE`, the contract each artifact carries, the two-table schema (leads + queries), and the `gather_raw/` by-ref payloads | Questions about what's in a run dir, where a file comes from, the two-table schema, or how to debug a run |

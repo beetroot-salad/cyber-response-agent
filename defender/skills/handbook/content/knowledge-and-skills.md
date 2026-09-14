@@ -56,8 +56,7 @@ verb-disposition table (`knowledge/environment/verb-grants.yaml`). An
 MCP-reached system declares no verbs to the registry and takes no rows, so
 for it the claim still holds outright. Nothing else either way — no loop
 change, no gather-subagent change, no signature catalog,
-permissions-per-signature, or archetype directory to fill in (the defender
-has none of those; see `content/design.md`).
+permissions-per-signature, or archetype directory to fill in.
 
 That one edit is deliberate and is not bookkeeping. The table is the
 authored answer to which verbs a role may call, and it is authored

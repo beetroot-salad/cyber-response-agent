@@ -16,10 +16,7 @@ runtime.
 The defender is **not a Claude Code plugin**. It is driven by
 `defender/run.py`, which runs the in-process PydanticAI driver
 (`runtime/driver/`) against `defender/SKILL.md`, with a gather subagent
-dispatched per lead on a cheaper model. It began as the experimental
-counterpart to a production plugin (`soc-agent`, not part of this repository)
-and shares the invlang on-disk shape and the `++/+/-/--` assessment vocabulary
-with it; the runtime loop and everything under `learning/` are its own.
+dispatched per lead on a cheaper model.
 
 ## The two loops
 
@@ -85,13 +82,6 @@ gate?" is now an ordinary design question. What runs today, and why:
 
 There is still **no phase state machine**: the loop's phases are prompt
 discipline, not enforced transitions.
-
-## What the defender deliberately does not carry
-
-No archetype catalog, no precedent snapshots, no `permissions.yaml`, no
-act-mode and no `/investigate` command. Those belong to the production plugin
-the defender was designed alongside (`soc-agent`), which does not live in this
-repository, so a question about them has no answer in this tree.
 
 ## What ships in the tree
 
