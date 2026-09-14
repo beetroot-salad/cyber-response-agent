@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from defender import _git
 from defender._report import ReportRead
+from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
 from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
@@ -350,11 +351,13 @@ def _bypass_note(record: dict) -> str:
 
 
 #: What the gate skipped BEFORE the record said so. A record with no `reviewed` field was
-#: written when `inconclusive` and `unresolved` were the bypass set, so for that record the
-#: disposition alone still tells the two populations apart. Frozen history, not the live
-#: bypass set — the live set is `close_tool.NO_REVIEW_DISPOSITIONS`, and a record written
-#: under it carries the field.
-_UNREVIEWED_BEFORE_THE_RECORD_SAID = ("inconclusive", "unresolved")
+#: written when the ceiling disposition and the host's own were the bypass set, so for that
+#: record the disposition alone still tells the two populations apart. Frozen history, not
+#: the live bypass set — the live set is `close_tool.NO_REVIEW_DISPOSITIONS`, and a record
+#: written under it carries the field. Spelled from the vocabulary's own names rather than as
+#: literals, so a member renamed at its home cannot leave this reader answering for a string
+#: nothing writes any more.
+_UNREVIEWED_BEFORE_THE_RECORD_SAID = frozenset({CEILING_DISPOSITION, HOST_ONLY_DISPOSITION})
 
 
 def _was_reviewed(record: dict) -> bool:
@@ -374,7 +377,11 @@ def _was_reviewed(record: dict) -> bool:
     reviewed = record.get("reviewed")
     if isinstance(reviewed, bool):
         return reviewed
-    return record.get("reviewed_disposition") not in _UNREVIEWED_BEFORE_THE_RECORD_SAID
+    # Membership through the vocabulary's own normalizer, not a bare `in` on the raw value: a
+    # value outside the vocabulary is no evidence a review ran, and rendering it as one is the
+    # failure this function exists to prevent — so it answers False, the same as a bypass.
+    disposition = normalized_disposition(record.get("reviewed_disposition"))
+    return disposition is not None and disposition not in _UNREVIEWED_BEFORE_THE_RECORD_SAID
 
 
 def _review_records(run_dir: Path) -> list[tuple[int, dict]]:

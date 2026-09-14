@@ -108,16 +108,21 @@ base: 67d29090          # main — the base every line anchor below was re-pinne
 #       and `challenge_gate` takes the close's parsed `CompanionBody` as an argument and reads
 #       no file. The `investigation_md` cells `unreadable-at-second-read`,
 #       `non-utf8-at-second-read` and `rewritten-between-reads` name a read that no longer
-#       happens and are retired. A companion the one read CANNOT READ (not UTF-8, an I/O
-#       fault, a non-plain entry) is decided ONCE by the close ahead of every gate rather than
-#       by each gate answering "cannot look" its own way: the model's close is a review that
-#       cannot run (`challenge_gate.review_cannot_run` — `unresolved`, `failure_kind: error`,
-#       the projector arm's own reporting; `non_utf8_companion` is a row of d14), and the
-#       host's forced close proceeds off the empty document. No gate reads a lenient decode —
-#       a confident disposition must not commit against a document the validator never
-#       checked. Pinned in test_ungated_artifact_write_961_964
-#       `test_one_read_answers_every_gate` and `test_an_unreadable_document_closes_unresolved_
-#       not_the_models_verdict`.
+#       happens and are retired. A companion the one read CANNOT READ is decided ONCE by the
+#       close ahead of every gate rather than by each gate answering "cannot look" its own
+#       way, keyed on `CompanionRead.retryable` (post-review amendment): a fault no retry
+#       changes (not UTF-8, a non-plain entry) makes the model's close a review that cannot
+#       run (`challenge_gate.review_cannot_run` — `unresolved`, `failure_kind: error`, the
+#       projector arm's own reporting; `non_utf8_companion` is a row of d14); an I/O fault
+#       (EACCES, EIO) is a refusal the model retries, because a terminal overrule on a fault
+#       the next read may not see would lose a settled verdict to a hiccup, and a persisting
+#       fault reaches the same `unresolved` through the retry budget and the host's forced
+#       close. The host's forced close proceeds off the empty document either way. No gate
+#       reads a lenient decode — a confident disposition must not commit against a document
+#       the validator never checked. Pinned in test_ungated_artifact_write_961_964
+#       `test_one_read_answers_every_gate`, `test_an_unreadable_document_closes_unresolved_
+#       not_the_models_verdict` and `test_an_io_fault_reading_the_companion_is_refused_not_
+#       overruled`.
 # ===========================================================================================
 
 demands:

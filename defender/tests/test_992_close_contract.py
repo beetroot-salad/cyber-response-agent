@@ -386,19 +386,25 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
     assert record(run_dir, 1) == challenged_record, "the challenged record was overwritten"
 
 
-def test_budget_kill_and_circuit_breaker_after_a_challenged_inconclusive(tmp_path):
-    """The other two exits that stop the model before it can close — the tool-call budget's
-    tail kill and the circuit breaker's abort — take the SAME post-loop forced close the
-    request ceiling and the retry budget take: `unresolved`, `CAUSE_NOT_REVIEWED`, no stage
-    dispatched, the challenged attempt's record intact, and the exit reason still naming
-    what cut the run short. One close keyed on the exit class, not one written into each
-    arm — the arm that forgot it reopened the dead-letter once already.
+def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
+    """The other two exits that stop the model — the tool budget's kill and the circuit
+    breaker's abort — do NOT take the post-loop forced close: no report.md, the challenged
+    attempt's record intact, the review state still open, and the exit reason naming what
+    cut the run short. Neither is a finding about the case (the breaker says the environment
+    is unreachable and asks for escalation; the budget kill fires on the run dir's own
+    accounting writes failing as often as on the tool tail), and everything downstream reads
+    a report.md as one — the ticket lane closes the ticket on any readable report where a
+    missing one leaves it open, the episode reader grades a world with a report where it
+    skips one without, the held-out scorer counts `unresolved` as a wrong disposition rather
+    than a missing run. Until the host's report carries the exit class, these two end as
+    they did before #992. Positive control in the two tests above: the request ceiling and
+    the retry budget — exits the model owns — still get the close.
 
     Each kill is raised from the model call, the seam the real kills reach the loop through
     (a tool hook and a gather agent both propagate them past `agent.iter`); what is under
-    test is the driver's classification and its close, not where the kill originated."""
+    test is the driver's classification, not where the kill originated."""
     from defender.hooks.budget_enforcer import BudgetKill
-    from defender.runtime import driver
+    from defender.runtime import driver, session_store
     from defender.runtime.circuit_breaker import RunAborted
     from defender.tests._invlang_warn_836 import build_main_agent
 
@@ -412,10 +418,12 @@ def test_budget_kill_and_circuit_breaker_after_a_challenged_inconclusive(tmp_pat
             raise self.exc
 
     kills = {
-        BudgetKill("budget tail exhausted at read_file"): "BudgetKill",
-        RunAborted(5, ["elastic"]): "RunAborted",
+        BudgetKill("budget tail exhausted at read_file"): (
+            "BudgetKill", session_store.TRUNCATED_BY_BUDGET,
+        ),
+        RunAborted(5, ["elastic"]): ("RunAborted", session_store.TRUNCATED_BY_ABORTED),
     }
-    for exc, expected_reason in kills.items():
+    for exc, (expected_reason, expected_truncation) in kills.items():
         deps, run_dir = _challenged_inconclusive(tmp_path / expected_reason)
         challenged_record = record(run_dir, 1)
         stages = recording(holds())
@@ -424,12 +432,11 @@ def test_budget_kill_and_circuit_breaker_after_a_challenged_inconclusive(tmp_pat
             agent, "go", deps, _spec923.NullStore(), "sid", bounds(),
         ))
         assert exit_reason == expected_reason, exit_reason
-        assert truncated_by is not None
-        assert stages.calls == [], f"the forced close dispatched {stages.calls}"
-        assert review_state(deps).closed is True
-        fm = frontmatter(run_dir)
-        assert fm["disposition"] == HOST_ONLY_DISPOSITION, expected_reason
-        assert fm["cause"] == CAUSE_NOT_REVIEWED, expected_reason
+        assert truncated_by == expected_truncation
+        assert truncated_by not in driver._CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE
+        assert stages.calls == [], f"a forced close dispatched {stages.calls}"
+        assert review_state(deps).closed is False, f"{expected_reason} was closed as a verdict"
+        assert not (run_dir / "report.md").exists(), f"{expected_reason} wrote a report.md"
         assert record(run_dir, 1) == challenged_record, "the challenged record was overwritten"
 
 

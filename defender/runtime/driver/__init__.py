@@ -305,26 +305,36 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     return run, truncated_by, exit_reason
 
 
-#: The exits on which the MODEL was stopped before it could close — by the request ceiling,
-#: the tool-retry budget, the tool-call budget or the circuit breaker. Each ends with no
+#: The exits on which the MODEL was stopped before it could close and the run still says
+#: something about the CASE — the request ceiling and the tool-retry budget: the model spent
+#: what it had and settled nothing, which is what `unresolved` records. Each ends with no
 #: report.md unless the host writes one, and a run with no report.md dead-letters at persist
-#: for a missing artifact. The store arm is deliberately absent: a run whose history store
-#: failed stops without writing another word against it, by that arm's own fail-closed rule.
+#: for a missing artifact.
+#:
+#: The circuit breaker and the budget kill are deliberately ABSENT, as is the store arm. The
+#: breaker trips when the ENVIRONMENT is unreachable and its own message asks for escalation;
+#: the budget kill fires on the run dir failing its accounting writes as often as on the
+#: tail of the tool budget. Neither is a finding about the case, and a report.md is read as
+#: one by everything downstream: the ticket lane closes the ticket on any readable report
+#: (where a missing one leaves it open, which IS the escalation), the episode reader grades a
+#: world with a report where it skips one without, and the held-out scorer counts
+#: `unresolved` as a wrong disposition rather than a missing run. Until the host's report
+#: carries the exit class those consumers can key on, an infra exit keeps ending as it did
+#: before #992 — no report, dead-lettered at persist — rather than as a verdict.
 _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE = frozenset({
     session_store.TRUNCATED_BY_REQUEST_LIMIT,
     session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
-    session_store.TRUNCATED_BY_BUDGET,
-    session_store.TRUNCATED_BY_ABORTED,
 })
 
 
 async def _close_a_run_cut_short(
     deps: AgentDeps, bounds: challenge_gate.Bounds, exit_reason: str | None,
 ) -> str | None:
-    """The host's own `unresolved` close for a run the framework cut short, so every such run
-    ends with a report.md. ONE place, after the loop, keyed on the exit class rather than
-    written into each arm — an arm that forgot it (the request-limit arm did, until #992 let
-    a challenged `inconclusive` reach that ceiling) reopened the dead-letter.
+    """The host's own `unresolved` close for a run the framework cut short on an exit the
+    model owns (`_CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE`), so every such run ends with a
+    report.md. ONE place, after the loop, keyed on the exit class rather than written into
+    each arm — an arm that forgot it (the request-limit arm did, until #992 let a challenged
+    `inconclusive` reach that ceiling) reopened the dead-letter.
 
     Returns the exit reason to record: the caller's, or `ForcedCloseFailed` when this close
     itself failed — logging alone left a forced close that failed indistinguishable

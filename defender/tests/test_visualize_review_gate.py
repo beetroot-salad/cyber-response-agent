@@ -212,6 +212,25 @@ def test_pre_change_inconclusive_close_says_it_was_never_reviewed(tmp_path):
     assert "unresolved" not in html
 
 
+def test_a_pre_record_row_outside_the_vocabulary_is_not_reported_as_reviewed(tmp_path):
+    """A record with no `reviewed` field falls back to the bypass set of its day, spelled from
+    the vocabulary's own names and answered through its normalizer — so a value the vocabulary
+    does not recognise (a laced or re-spelled disposition) is no evidence a review ran, and
+    renders as one that did not. A bare `not in` on the raw string read every such value as
+    REVIEWED, which is the one direction this page must never err in."""
+    from defender.scripts.visualize.visualize_runtime import _was_reviewed
+
+    assert _was_reviewed({"reviewed_disposition": "malicious"}) is True
+    assert _was_reviewed({"reviewed_disposition": "inconclusive"}) is False
+    assert _was_reviewed({"reviewed_disposition": "unresolved"}) is False
+    assert _was_reviewed({"reviewed_disposition": "incon\u200bclusive"}) is False
+    assert _was_reviewed({"reviewed_disposition": "Malicious"}) is False
+    assert _was_reviewed({}) is False
+    # The field, when present, is the answer — whatever the disposition string says.
+    assert _was_reviewed({"reviewed_disposition": "inconclusive", "reviewed": True}) is True
+    assert _was_reviewed({"reviewed_disposition": "malicious", "reviewed": False}) is False
+
+
 def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_path):
     """A run challenged once and then closed `inconclusive` has one attempt of each kind.
     The bypassed one carries `verdict: stands` — the close tool's word for "committed

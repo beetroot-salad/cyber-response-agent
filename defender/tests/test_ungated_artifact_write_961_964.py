@@ -175,8 +175,11 @@ def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_pat
     nor may the model's verdict commit against it: no gate ever looked at what the
     disposition claims to conclude. So the close decides it ONCE, ahead of every gate, as
     the review that cannot run it is — the host's `unresolved` with the typed failure kind —
-    for every way the read can fail: bytes that are not UTF-8, a planted entry at the name
-    (a directory, a fifo that would block a plain read forever), an I/O fault.
+    for every way the read can fail THAT NO RETRY CHANGES: bytes that are not UTF-8, a
+    planted entry at the name (a directory, a fifo that would block a plain read forever).
+    The I/O fault is the one shape deliberately NOT here — it is refused to retry instead
+    (`test_an_io_fault_reading_the_companion_is_refused_not_overruled`), because a terminal
+    overrule on a fault the next read may not see would lose a settled verdict to a hiccup.
 
     Three shapes through the real reader, each asserting the same commit."""
     import os
@@ -211,6 +214,45 @@ def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_pat
         assert rec["reviewed"] is True, "a review that could not run was still attempted"
         assert rec["failure_kind"] == STAGE_ERROR, (name, rec)
         assert "\ncompanion: " in rec["detail"], (name, rec)  # framed, like every stage detail
+
+
+def test_an_io_fault_reading_the_companion_is_refused_not_overruled(tmp_path):
+    """The I/O fault is the ONE unreadable shape the model's close is refused on rather than
+    overruled: `investigation.md` is there, is a plain file, and cannot be opened (EACCES here;
+    EIO on a degraded mount is the live case). A terminal `unresolved` on it would let a
+    one-off fault replace a settled `malicious` — the commit is terminal, so the retry that
+    would have read the file fine is refused as "already closed". The refusal costs a retry,
+    and if the fault persists the retry budget ends at the host's forced close and the same
+    `unresolved`, with the model told why at every step.
+
+    Nothing lands: no report, no record, no trace row — the fault arm's own writes beside an
+    unreadable file were the second way this used to end a run with no report at all.
+
+    The fault is met as `nobody` because root ignores mode bits (the repo's own root-uid
+    caveat); a non-root uid meets it directly and the fork stays so the verdict travels one
+    channel on both."""
+    from defender.runtime.tools import read_companion
+    from defender.tests._roster1035 import EXIT_RAISED_EXPECTED, handed_to_nobody, run_as_nobody
+    from defender.tests._spec992 import record_files, trace_files
+    from pydantic_ai.exceptions import ModelRetry
+
+    deps, run = main_deps(tmp_path)
+    doc = seed_investigation(run, _CLEAN_DOC)
+
+    def probe():
+        read = read_companion(deps)
+        assert read.text is None, "the fault was not met — the document read fine"
+        assert read.retryable is True, read
+        return _close(deps, "malicious")
+
+    with handed_to_nobody(tmp_path, doc, 0o000):
+        verdict = run_as_nobody(probe, expected=ModelRetry)
+    assert verdict.code == EXIT_RAISED_EXPECTED, verdict.describe()
+    assert "could not be read" in verdict.message, verdict.describe()
+    assert "retry" in verdict.message.lower(), verdict.describe()
+    assert not (run / "report.md").exists(), "the refusal committed a report"
+    assert record_files(run) == [], "the refusal wrote a review record"
+    assert trace_files(run) == [], "the refusal wrote trace rows"
 
 
 def test_the_price_gate_still_answers_first_for_what_it_prices(tmp_path):
@@ -274,6 +316,7 @@ def test_one_read_answers_every_gate(tmp_path):
     undecodable = read_companion(deps)
     assert undecodable.text is None
     assert "utf-8" in undecodable.refusal
+    assert undecodable.retryable is False, "bytes that do not decode are not a passing fault"
     assert flagged_in(undecodable) == (), "an unreadable document is no window (fail open)"
     assert committed_document_refusal(undecodable) is None, "not this gate's question"
 
@@ -282,6 +325,7 @@ def test_one_read_answers_every_gate(tmp_path):
     squatted = read_companion(deps)
     assert squatted.text is None
     assert ALIAS_READ_REFUSAL in squatted.refusal
+    assert squatted.retryable is False, "a planted entry is not a passing fault"
     assert (flagged_in(squatted), committed_document_refusal(squatted)) == ((), None)
 
     (run / "investigation.md").rmdir()
@@ -299,6 +343,48 @@ def test_one_read_answers_every_gate(tmp_path):
         signal.signal(signal.SIGALRM, previous)
     assert planted.text is None
     assert ALIAS_READ_REFUSAL in planted.refusal
+    assert planted.retryable is False
+
+
+def test_the_write_verbs_build_on_the_reading_they_judged(tmp_path):
+    """`append_block` and `fix_row` derive their window from ONE guarded reading and build the
+    bytes they write from that same reading — never from a second, unguarded `Path.read_text`
+    of the name. The second read used to follow a symlink the guarded read had refused, so the
+    gate judged one document (nothing — an empty window) while the write extended another
+    (whatever the link pointed at): one document, two answers, at the write verbs after the
+    close had stopped doing it.
+
+    Planted symlink: the verb is refused naming the refusal, and the link's target is
+    untouched. Undecodable bytes: refused, with the same reading's reason, and nothing
+    written. Both refusals are the reading's own, so a reworded refusal in `_io` cannot make
+    a planted entry read as a passing fault (`retryable` keys on the errno, not the text)."""
+    from defender.runtime.tools import _tool_append_block, _tool_fix_row
+    from pydantic_ai.exceptions import ModelRetry
+
+    deps, run = main_deps(tmp_path)
+    elsewhere = run / "elsewhere.md"
+    elsewhere.write_text(_CLEAN_DOC, encoding="utf-8")
+    (run / "investigation.md").symlink_to(elsewhere)
+
+    with pytest.raises(ModelRetry) as refused:
+        _tool_append_block(deps, "+ a row the link's target must never receive\n")
+    # The symlink is refused at the `O_NOFOLLOW` open itself (the OS's ELOOP), ahead of the
+    # primitive's own alias screen — so the reason is the OS's, and the classification keys
+    # on the errno rather than on either message.
+    assert "cannot be read" in str(refused.value), str(refused.value)
+    assert "symbolic link" in str(refused.value), str(refused.value)
+    assert "retry" not in str(refused.value).lower(), "a planted entry is not a passing fault"
+    assert elsewhere.read_text(encoding="utf-8") == _CLEAN_DOC, "the append followed the link"
+    with pytest.raises(ModelRetry) as refused:
+        _tool_fix_row(deps, "l-001|v-001|class|bastion", "")
+    assert elsewhere.read_text(encoding="utf-8") == _CLEAN_DOC, "the repair followed the link"
+
+    (run / "investigation.md").unlink()
+    (run / "investigation.md").write_bytes(b"```invlang\n:R attr\xff\xfe updates\n```\n")
+    with pytest.raises(ModelRetry) as refused:
+        _tool_append_block(deps, "+ a row\n")
+    assert "utf-8" in str(refused.value).lower()
+    assert (run / "investigation.md").read_bytes() == b"```invlang\n:R attr\xff\xfe updates\n```\n"
 
 
 def test_a_committed_unfenced_header_does_not_make_the_run_unclosable(tmp_path):

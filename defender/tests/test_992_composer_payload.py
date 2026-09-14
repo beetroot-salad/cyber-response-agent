@@ -177,6 +177,34 @@ def test_composer_user_message_carries_the_ceiling_question(tmp_path):
     ), "the document's own confident conclude block did not ride as companion content"
 
 
+def test_the_ceiling_question_closes_the_null_ask_arm(tmp_path):
+    """composer.md's shared doctrine says "return no ask when nothing measurable would settle
+    it; an unmeasurable gap is still a gap" — right for the confident question, and for the
+    ceiling question the exact description of the ceiling claim HOLDING. `_route` commits a
+    null-ask `gap` as the host's `unresolved` on every disposition (A1), so a composer that
+    followed the doctrine on a real ceiling would have its honest `inconclusive` overridden.
+    The ceiling sentence therefore says, in the user message, what a `gap` with no ask means
+    for THIS question — it is `holds` — and the doctrine defers to the question on it; the
+    confident sentence says nothing of the kind, so its null-ask arm keeps its meaning."""
+    stages = recording(holds())
+    deps, _run_dir = deps_over(tmp_path / "ceiling", ceiling_companion())
+    close_with(deps, GAP, stages)
+    host = _composer_host(stages).lower()
+    assert "never a `gap` with no ask" in host, host
+    assert "return `holds`" in host, host
+    system = role_prompt("composer").lower()
+    assert "your user message says what a `gap` with no ask" in system, (
+        "the shared doctrine's null-ask rule no longer defers to the question"
+    )
+
+    confident = recording(holds())
+    deps, _run_dir = deps_over(tmp_path / "confident", ceiling_companion())
+    close_with(deps, CONFIDENT, confident)
+    assert "no ask" not in _composer_host(confident).lower(), (
+        "the confident question acquired the ceiling question's null-ask rule"
+    )
+
+
 def test_composer_md_is_disposition_neutral(tmp_path):
     """composer.md — the system prompt the live composer stage is built with — no longer poses
     the confident question anywhere (no 'conclusion follows', no 'confident disposition', no

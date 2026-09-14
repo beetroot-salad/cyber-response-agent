@@ -255,6 +255,17 @@ _CONFIDENT_HOST_QUESTION = (
 #: FK-6: the missed measurement must be named by an id ALREADY RECORDED (`v-`/`e-`/`l-`/`h-`),
 #: agreeing with the `citable_refs` guard the ask's `target` is read through — following this
 #: sentence literally cannot produce the uncitable name that guard refuses.
+#:
+#: THE NULL-ASK GAP IS SPELLED OUT, because composer.md's shared doctrine and this question
+#: would otherwise disagree about it. The doctrine says "return no ask when nothing measurable
+#: would settle it; an unmeasurable gap is still a gap" — right for the confident question,
+#: where the record can fail to carry its conclusion with nothing left to measure. For THIS
+#: question "nothing measurable would settle it" is the ceiling claim holding, so a `gap` with
+#: no ask is the composer conceding the claim while answering `gap`, and `_route` commits that
+#: answer as the host's `unresolved` over an `inconclusive` whose ceiling was real. The
+#: sentence therefore closes the arm: a `gap` here always names the measurement, and a composer
+#: that cannot name one returns `holds`. `_route` stays disposition-blind (A1); the question
+#: itself is where the two answers are made to agree.
 _CEILING_HOST_QUESTION = (
     "This investigation closed `inconclusive`, claiming a ceiling — that nothing further "
     "could be measured. Its `ceiling_test` receipts (and any `ceiling_rationale`) are its own "
@@ -262,7 +273,11 @@ _CEILING_HOST_QUESTION = (
     "WITHOUT that claim. Judge whether the ceiling claim holds: does the record cite or test "
     "everything measurable the lenses name — every entity, edge, lead or hypothesis already "
     "recorded under a `v-`, `e-`, `l-` or `h-` id? If it does, return `holds`; if a lens named "
-    "something measurable the record neither cited nor tested, return `gap` with that one ask."
+    "something measurable the record neither cited nor tested, return `gap` with that one ask. "
+    "For this question a `gap` always names its ask: if you cannot name something measurable "
+    "already recorded under one of those ids, the ceiling claim holds — return `holds`, never "
+    "a `gap` with no ask. Over-crediting and weight are not this question; only whether "
+    "something measurable was left uncited and untested."
 )
 
 

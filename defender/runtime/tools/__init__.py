@@ -125,6 +125,8 @@ from ._document import (
     flagged_write_refusal,
     read_companion,
     repairable_diagnostics,
+    repairable_in,
+    unreadable_write_refusal,
 )
 
 
@@ -378,9 +380,11 @@ __all__ = [
     "register_tools",
     "read_companion",
     "repairable_diagnostics",
+    "repairable_in",
     "subprocess",
     "sys",
     "time",
+    "unreadable_write_refusal",
     "wrap_fresh",
     "write_guarded",
 ]

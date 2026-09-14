@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import errno
 import re
 import sys
 from collections.abc import Iterable
@@ -14,7 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import TEXT_READ_ERRORS, read_plain, read_text_utf8, write_guarded
+from defender._io import TEXT_READ_ERRORS, read_plain, write_guarded
 from .. import permission
 
 # The SAME byte ruler the artifact bounds are measured with — a write tool that reports
@@ -57,20 +58,35 @@ class CompanionRead:
         non-plain entry at the name (a symlink, a hard link, a directory, a fifo — the read
         goes through `_io.read_plain`, the guarded read every artifact in the box-writable tree
         takes, so a planted entry is refused at the open rather than followed or blocked on),
-        or bytes that are not UTF-8. ONE answer for all of them, because every gate answers it
-        the same way: the per-request window derivation is empty (fail open — a wedged run is
-        the worse failure), and the close cannot judge a document it cannot read, so the MODEL's
-        close is overruled to the host's `unresolved` as a review that cannot run and the HOST's
-        forced close proceeds off an empty body (`unresolved` owes nothing and is not
-        reviewed). No gate reads a lenient decode: replacing a bad byte and judging the rest
-        would let a confident disposition commit against a document the validator never
-        checked. `append_block` refuses undecodable bytes on the way in, so an undecodable
-        companion only ever arrived some other way (an import, a hand edit)."""
+        or bytes that are not UTF-8. ONE answer for all of them as far as the GATES go: the
+        per-request window derivation is empty (fail open — a wedged run is the worse failure),
+        no gate judges a lenient decode — replacing a bad byte and judging the rest would let a
+        confident disposition commit against a document the validator never checked — and the
+        HOST's forced close proceeds off an empty body (`unresolved` owes nothing and is not
+        reviewed). What the MODEL's close does with it turns on `retryable`: a fault the next
+        read may not see (an I/O error) is a refusal the model retries, and a fault no retry
+        changes (bytes that are not UTF-8, a planted entry) is decided once as a review that
+        cannot run — the host's `unresolved`. Overruling on the I/O fault too would let one
+        hiccup of the run dir's mount terminally replace a settled verdict, where the refusal
+        costs a retry and, if the fault persists, ends at the same `unresolved` through the
+        host's forced close. `append_block` refuses undecodable bytes on the way in, so an
+        undecodable companion only ever arrived some other way (an import, a hand edit)."""
 
     #: The document, `""` when never written, `None` when it could not be read.
     text: str | None
     #: Why it could not be read — set exactly when `text is None`.
     refusal: str | None = None
+    #: Whether a later read might succeed — set exactly when `text is None`. True for an I/O
+    #: fault; False for undecodable bytes and for a planted entry at the name, which are the
+    #: document's own state and not the mount's.
+    retryable: bool = False
+
+
+#: The errnos `_io.read_plain` refuses a non-plain entry with — a symlink or the
+#: `O_NOFOLLOW` race (`ELOOP`), a hard link (`EMLINK`), and the directory/fifo/socket/device
+#: shapes it folds into `ELOOP`. Read off the primitive's own contract rather than its message
+#: text, so a reworded refusal cannot silently turn a planted entry into a retryable fault.
+_PLANTED_ENTRY_ERRNOS = frozenset({errno.ELOOP, errno.EMLINK})
 
 
 def read_companion(deps: AgentDeps) -> CompanionRead:
@@ -81,8 +97,25 @@ def read_companion(deps: AgentDeps) -> CompanionRead:
         return CompanionRead(text=read_plain(_investigation_path(deps)))
     except FileNotFoundError:
         return CompanionRead(text="")
+    except UnicodeDecodeError as exc:
+        return CompanionRead(text=None, refusal=str(exc), retryable=False)
     except TEXT_READ_ERRORS as exc:
-        return CompanionRead(text=None, refusal=str(exc))
+        planted = isinstance(exc, OSError) and exc.errno in _PLANTED_ENTRY_ERRNOS
+        return CompanionRead(text=None, refusal=str(exc), retryable=not planted)
+
+
+def unreadable_write_refusal(verb: str, read: CompanionRead) -> str:
+    """The write verbs' refusal over a companion that could not be read — the SAME reading the
+    verb just derived its window from, so the gate's verdict and the bytes the verb would
+    rewrite or extend are one document. A second, unguarded `Path.read_text` here used to
+    follow a symlink the guarded read had refused and could see different bytes: the gate
+    judged one reading and the write was built from another."""
+    if read.retryable:
+        return f"{verb} blocked: investigation.md could not be read ({read.refusal}); retry."
+    return (
+        f"{verb} blocked: investigation.md cannot be read ({read.refusal}) and no write can "
+        f"repair that — close the investigation and the host will record what happened."
+    )
 
 
 def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
@@ -191,10 +224,16 @@ def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
     the worse failure. Read with the document as its OWN baseline, the reading
     `committed_investigation_reason` takes: the repair set has to be derived from the same
     verdict the close renders, or the verb is offered on findings the close never names."""
+    return repairable_in(read_companion(deps))
+
+
+def repairable_in(read: CompanionRead) -> tuple[Diagnostic, ...]:
+    """`repairable_diagnostics` over one reading — the verb that repairs hands the reading it
+    derived its set from to the rewrite, the way the close hands its one read to every gate."""
     from defender.skills.invlang.validate import ATTR_UPDATES_LOCUS as REPAIRABLE_BLOCK
     from defender.skills.invlang.validate import diagnose
 
-    text = read_companion(deps).text
+    text = read.text
     if not text:
         return ()
     try:
@@ -289,7 +328,10 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     # The gate is FORCED, not chosen: `_check_closed_vocab` walks the FULL proposed document,
     # so a landed warn row re-fires on every subsequent append anyway. Without the gate the
     # choices are grandfathering — which dead-letters the run at persist — or a wedged document.
-    flagged = flagged_diagnostics(deps)
+    # ONE reading: the window is derived from it and the append is built on it, so the gate
+    # cannot judge one document while the write extends another (see `CompanionRead`).
+    read = read_companion(deps)
+    flagged = flagged_in(read)
     if flagged:
         raise ModelRetry(flagged_write_refusal("append_block", flagged))
     read_decision = permission.decide_read(
@@ -297,12 +339,9 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     )
     if not read_decision.allow:
         raise ModelRetry(read_decision.reason)
-    try:
-        current = read_text_utf8(p) if p.is_file() else ""
-    except UnicodeDecodeError:
-        raise ModelRetry(
-            "investigation.md is not valid UTF-8 text (binary or corrupt)"
-        ) from None
+    if read.text is None:
+        raise ModelRetry(unreadable_write_refusal("append_block", read))
+    current = read.text
     # Separate with a newline only when the document does not already end in one. Existing
     # bytes are never rewritten — not even trailing whitespace — so an append cannot itself
     # trip the append-only check it is about to face. An EMPTY append gets no separator: the
@@ -501,7 +540,7 @@ def _warn_over(text: str) -> tuple[Diagnostic, ...]:
 #: `\u2028` or `\u2029` FLAGGED but UNADDRESSABLE: `old_row` matched no whole line, so the
 #: repair refused while `append_block` and the close both refused for that same flagged row —
 #: a permanently wedged run, reachable from one `append_block` carrying one of those bytes.
-#: `\r\n` / `\r` never reach here: `read_text_utf8` translates them on read.
+#: `\r\n` / `\r` never reach here: `read_plain` translates them on read (universal newlines).
 #: Spelled as ESCAPES, never literal codepoints: two of them are invisible line breaks and
 #: would split THIS file for anything that reads it the way the tokenizer reads a fence.
 #: Captured, not consumed, so every untouched line keeps the separator the model wrote.
@@ -588,7 +627,8 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
     # The REPAIR set, not the warn window: an error-severity row blocks every write just as
     # hard and used to be unreachable by the one verb that could clear it. See
     # `repairable_diagnostics`.
-    diags = repairable_diagnostics(deps)
+    read = read_companion(deps)
+    diags = repairable_in(read)
     flagged = _flagged_rows(diags)
     if not flagged:
         # Deliberately the SAME refusal a never-flagged `old_row` earns once the window has
@@ -609,7 +649,10 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
             + "\n".join(f"  {row}" for row in flagged)
         )
 
-    current = read_text_utf8(p)
+    # The rows above were derived from THIS reading; the rewrite is built from the same one.
+    # `flagged` is non-empty, so the document was read.
+    assert read.text is not None
+    current = read.text
     lines, seps = _split_lines(current)
     whole = [i for i, line in enumerate(lines) if line.strip() == old_row]
     if not whole:

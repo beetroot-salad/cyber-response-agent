@@ -321,7 +321,7 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
 
 
 def _record_dict(
-    verdict: challenge_gate.GateVerdict, disposition: str, deps: AgentDeps, *, reviewed: bool,
+    verdict: challenge_gate.GateVerdict, disposition: str, *, reviewed: bool,
 ) -> dict:
     """The numbered review record. `detail` is here and NOT on report.md by decision: the
     diagnostic may quote a stage's own words, and this is the one artifact no prompt reads
@@ -368,6 +368,24 @@ class _CloseFields:
     #: (mechanism A's whole point is visibility on every close). Empty only on the bypass
     #: site, where a forced close skipped the document gate (see that site).
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = ()
+
+
+def _fields_from(
+    verdict: challenge_gate.GateVerdict, *,
+    material: tuple[RecommendedLead, ...] = (),
+    ceiling_test: tuple[CeilingReceipt, ...] = (),
+    runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = (),
+) -> _CloseFields:
+    """The verdict's own scalars into the commit's bundle — ONE copy for the three commit sites
+    (the bypass, the reviewed site, the unreadable-companion arm), so a field added to either
+    side is threaded once rather than at three literal sites where the one forgotten silently
+    commits a default. The companion-derived fields are the caller's: only the reviewed site
+    has a body to carry them from."""
+    return _CloseFields(
+        outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
+        material=material, turns_used=verdict.turns_used, failure_kind=verdict.failure_kind,
+        ceiling_test=ceiling_test, runtime_evidence=runtime_evidence,
+    )
 
 
 def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are already bundled
@@ -439,10 +457,12 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     forced: bool = False,
 ) -> CloseResult:
     """`forced` distinguishes the FRAMEWORK's close from the model's. Only the driver's
-    `_close_a_run_cut_short` sets it — on every exit that stopped the model before it could
-    close (the request ceiling, the tool-retry budget, the tool-call budget, the circuit
-    breaker) — and it buys exemption from the two document gates below — the invlang structure
-    check and the flagged-row window. Defaulted False so every other caller is gated.
+    `_close_a_run_cut_short` sets it — on the exits that stopped the model before it could
+    close and are the model's own (the request ceiling, the tool-retry budget; the circuit
+    breaker and the budget kill are deliberately not closed as a verdict — see the driver's
+    `_CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE`) — and it buys exemption from the two
+    document gates below — the invlang structure check and the flagged-row window. Defaulted
+    False so every other caller is gated.
 
     Both exemptions rest on the same fact: a run cut short has no model left to repair with,
     so gating the forced close would dead-letter the run at persist for a MISSING report.md.
@@ -509,12 +529,24 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # each gate answering "cannot look" its own way (the window fell open, the structure check
     # fell open, the price gate refused, the review read a lenient decode), which is how a
     # confident disposition came to commit against a document the validator never checked.
-    # The model's close is a review that cannot run: overruled to the host's `unresolved`
-    # with the typed failure kind the projector arm uses for the same fact. The host's forced
-    # close proceeds off the empty document — `unresolved` owes nothing and is not reviewed —
-    # because a refusal here would end the run with NO report.md, the dead-letter the forced
-    # exemption exists to prevent.
+    # Two answers, keyed on whether a retry can change anything (`CompanionRead.retryable`):
+    #   * an I/O fault is a REFUSAL — the same "not permitted while the gate cannot look" the
+    #     close always gave — because overruling on it would let one hiccup of the run dir's
+    #     mount terminally replace a settled `malicious` with `unresolved` (the commit is
+    #     terminal; the retry would be refused as already closed). If the fault persists the
+    #     retry budget runs out and the host's forced close ends at the same `unresolved`.
+    #   * undecodable bytes or a planted entry are the document's own state, and no retry
+    #     changes them: the model's close is a review that cannot run, overruled to the host's
+    #     `unresolved` with the typed failure kind the projector arm uses for the same fact.
+    # The host's forced close proceeds off the empty document either way — `unresolved` owes
+    # nothing and is not reviewed — because a refusal there would end the run with NO
+    # report.md, the dead-letter the forced exemption exists to prevent.
     if read.text is None and not forced:
+        if read.retryable:
+            raise ModelRetry(
+                f"close blocked: `investigation.md` could not be read ({read.refusal}). A "
+                f"close is not permitted while the gate cannot look — retry."
+            )
         return _overrule_unreadable_companion(
             deps, read, disposition, validator=validator, evidence=evidence,
         )
@@ -570,12 +602,9 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             outcome=STANDS, disposition=disposition, cause=CAUSE_NOT_REVIEWED, detail="",
             material=(), turns_used=0, failure_kind=None,
         )
-        fields = _CloseFields(
-            outcome=unreviewed.outcome, cause=unreviewed.cause, detail=unreviewed.detail,
-            material=(), turns_used=unreviewed.turns_used, failure_kind=unreviewed.failure_kind,
-        )
         return _commit(
-            deps, disposition, fields, _record_dict(unreviewed, disposition, deps, reviewed=False),
+            deps, disposition, _fields_from(unreviewed),
+            _record_dict(unreviewed, disposition, reviewed=False),
             validator=validator, evidence=evidence,
         )
 
@@ -586,7 +615,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         RecommendedLead(target=target, ask=ask, origin="review")
         for target, ask in verdict.material
     )
-    record = _record_dict(verdict, disposition, deps, reviewed=True)
+    record = _record_dict(verdict, disposition, reviewed=True)
 
     if verdict.outcome == CHALLENGED:
         turn = state.turns  # already incremented inside challenge_gate for this attempt
@@ -607,10 +636,8 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # `inconclusive`, so this is populated exactly when the committed disposition IS
     # `inconclusive` — the one case where the report carries the receipts it paid its entry
     # price with.
-    fields = _CloseFields(
-        outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
-        material=material, turns_used=verdict.turns_used,
-        failure_kind=verdict.failure_kind,
+    fields = _fields_from(
+        verdict, material=material,
         ceiling_test=(
             conclude_ceiling_test_rows(companion) if verdict.disposition == CEILING_DISPOSITION else ()
         ),
@@ -666,7 +693,8 @@ def _overrule_unreadable_companion(
     deps: AgentDeps, read: CompanionRead, disposition: str, *,
     validator: ArtifactValidator, evidence: str | None,
 ) -> CloseResult:
-    """The model's close over a companion the close could not read: committed as the review
+    """The model's close over a companion no retry will make readable (undecodable bytes, a
+    planted entry — never the I/O fault, which is refused instead): committed as the review
     that cannot run it is (`challenge_gate.review_cannot_run`) — the host's `unresolved`, the
     record naming what was under review and why nothing could judge it. The same commit the
     reviewed site makes for a projector that cannot project, minus the companion-derived
@@ -674,12 +702,9 @@ def _overrule_unreadable_companion(
     verdict = challenge_gate.review_cannot_run(
         deps, read.refusal or "investigation.md could not be read",
     )
-    fields = _CloseFields(
-        outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail, material=(),
-        turns_used=verdict.turns_used, failure_kind=verdict.failure_kind,
-    )
     return _commit(
-        deps, verdict.disposition, fields, _record_dict(verdict, disposition, deps, reviewed=True),
+        deps, verdict.disposition, _fields_from(verdict),
+        _record_dict(verdict, disposition, reviewed=True),
         validator=validator, evidence=evidence,
     )
 

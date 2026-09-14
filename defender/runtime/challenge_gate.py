@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -357,11 +358,24 @@ def review_cannot_run(deps: Any, reason: str) -> GateVerdict:
     judged, and this is where that answer becomes a verdict.
 
     The round's traces get their incomplete rows, as every other early end of a round does, so
-    a review that never started is not left reading as if no round had been attempted."""
+    a review that never started is not left reading as if no round had been attempted. That
+    write is CONTAINED here, unlike the gate's own marker calls: those are reached on a fault
+    of the REVIEW (a stage, a projection), while this arm is reached on a fault of the RUN DIR's
+    own contents, which is the one place a write beside the unreadable file is likeliest to
+    fail too. A trace row that cannot be written is logged and the verdict still returns; the
+    verdict, not the row, is what the close commits, and an `OSError` escaping a tool body
+    ends the run with no report.md at all."""
     from .close_tool import STAGE_ERROR
 
     state = ReviewState.of(deps)
-    _mark_traces_incomplete(deps, state.turns, reason)
+    try:
+        _mark_traces_incomplete(deps, state.turns, reason)
+    except OSError as exc:
+        print(
+            f"[gate] the review-cannot-run marker could not be written ({exc!r}); the verdict "
+            f"stands without its trace rows",
+            file=sys.stderr,
+        )
     return _fail("companion", StageOutcome(None, STAGE_ERROR, reason), turns_used=state.turns)
 
 
