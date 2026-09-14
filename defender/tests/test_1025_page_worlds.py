@@ -1162,3 +1162,87 @@ def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
     assert len(tiles) == 4, [t.text() for t in tiles]
     assert f"of {S.world_author + S.defender_withheld}" in tiles[2].text(), tiles[2].text()
     assert page.by_id, "no page"
+
+
+# ---------------------------------------------------------------------------------------
+# The review of PR #1042 — headings count the list they head; the ledger and the document
+# are two slots
+# ---------------------------------------------------------------------------------------
+
+
+def test_1025_the_worlds_and_leads_headings_count_exactly_the_sections_under_them(tmp_path):
+    """"Worlds (N)" is the number of `world-*` sections rendered and "Leads (M)" the number of
+    `leads-*` blocks — the roster is classified ONCE at load and both headings count that same
+    list. Before, the worlds heading counted the entries (omitting the stray `runs/` dirs it
+    still rendered sections for) and the leads heading counted every roster label (including
+    the unnameable ones it then skipped): "Worlds (3)" over four sections plus one unnameable
+    line, "Leads (5)" over four blocks."""
+    ep = E.sample_episode(tmp_path)
+    (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
+    (ep.dir / "runs" / "bad name!" / "gather_raw").mkdir(parents=True)
+    page = render(ep)
+    world_sections = page.ids_with("world-")
+    leads_blocks = page.ids_with("leads-")
+    assert len(world_sections) == len(E.WORLDS) + 1, world_sections
+    assert len(leads_blocks) == len(world_sections), (leads_blocks, world_sections)
+    worlds_heading = page.section("sec-worlds").find_all("h2")[0].text()
+    leads_heading = page.section("sec-leads").find_all("h2")[0].text()
+    assert worlds_heading == f"Worlds ({len(world_sections)})", worlds_heading
+    assert leads_heading == f"Leads ({len(leads_blocks)})", leads_heading
+    assert "unnameable entry" in page.text_of("sec-worlds")
+    assert "bad name!" in page.text_of("sec-worlds")
+
+
+def test_1025_each_missing_archived_leaf_names_itself(tmp_path):
+    """A world with neither `report.md` nor `investigation.md` archived shows one arm per leaf,
+    each naming its file — not the same two words twice."""
+    ep = E.sample_episode(tmp_path)
+    for name in ("report.md", "investigation.md"):
+        (ep.world(E.GRADED_WORLD) / name).unlink()
+    world = _world(page := render(ep), E.GRADED_WORLD)
+    assert "report.md: not archived" in world, world
+    assert "investigation.md: not archived" in world, world
+    assert world.count("not archived") == 2, world
+    assert page.text_of(f"leads-{E.GRADED_WORLD}")  # positive control: the block still renders
+
+
+def test_1025_a_missing_or_unreadable_served_ledger_costs_the_leads_block_only_the_ledger(tmp_path):
+    """The served ledger and `investigation.md` are two records read by two readers: with the
+    ledger gone (or a link planted at its name) the block reads the ledger's own note and STILL
+    carries every investigation-derived fact — the resolutions, the hand-off note, the
+    referenced-lead roster. Before, the page read both through the composed `read_world_facts`,
+    which refuses on the ledger FIRST, so a missing ledger erased an intact document and the
+    loss was reported under the wrong label, "investigation record unavailable"."""
+    ep = E.sample_episode(tmp_path)
+    ledger = ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl"
+    ledger.unlink()
+    E.plant_link(ep.dir / "served" / f"{T.world_token(E.WITHHELD_WORLD)}.jsonl",
+                 ep.dir / "family.yaml")
+    page = render(ep)
+    for label, note in ((E.GRADED_WORLD, "served ledger: absent"),
+                        (E.WITHHELD_WORLD, "served ledger unreadable")):
+        block = page.text_of(f"leads-{label}")
+        assert note in block, block
+        assert "investigation record unavailable" not in block, block
+        assert "the hand-off was revisited after the branch" in block, block
+        assert f"summary of l-001 for {label}" in block, block
+        assert "l-00c" in block, block
+    # and the converse: an unreadable document with an intact ledger names the document
+    E.plant_raw(ep.world(E.CONTROL) / "investigation.md", b"\xff\xfe\x00 not text")
+    block = render(ep).text_of(f"leads-{E.CONTROL}")
+    assert "investigation record unavailable" in block, block
+    assert "served ledger" not in block, block
+
+
+def test_1025_a_non_markdown_entry_under_gather_summaries_is_invisible_to_the_leads_block(tmp_path):
+    """`gather_summaries/` holds summaries — `.md` plain files; anything else there is not a
+    summary and the block says nothing about it, whatever its name. Before, a non-`.md` entry
+    with a hostile stem alone produced an "unnameable entry (gather summary)" line."""
+    ep = E.sample_episode(tmp_path)
+    summaries = ep.world(E.GRADED_WORLD) / "gather_summaries"
+    (summaries / "foo bar.txt").write_text("not a summary", encoding="utf-8")
+    (summaries / "notes.json").write_text("{}", encoding="utf-8")
+    block = render(ep).text_of(f"leads-{E.GRADED_WORLD}")
+    assert "gather summary" not in block, block
+    assert "foo bar" not in block, block
+    assert "l-001" in block  # positive control

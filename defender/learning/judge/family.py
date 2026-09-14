@@ -130,7 +130,11 @@ def screened_yaml_mapping(path: Path, *, what: str) -> dict[str, Any] | None:
 
     from defender._yaml import safe_load
 
-    if not (path.exists() or path.is_symlink()):
+    # `entry_present` (one `lstat`), not `exists() or is_symlink()`: `Path.exists()` follows
+    # the link and on 3.11 re-raises a permission fault from the directory above, so a link
+    # planted into a mode-000 directory crashed the read with a bare `PermissionError` instead
+    # of landing in the refusal below (#1025).
+    if not entry_present(path):
         return None
     text, refusal = read_guarded(path)
     if text is None:
@@ -152,7 +156,7 @@ def _default_review_reader(path: Path) -> dict[str, Any]:
 
     from defender._yaml import safe_load
 
-    if not (path.exists() or path.is_symlink()):
+    if not entry_present(path):
         return {}
     text, refusal = read_guarded(path)
     if text is None:
@@ -184,7 +188,7 @@ def _default_samples_reader(path: Path) -> dict[str, Any]:
 
     from defender._yaml import safe_load
 
-    if not (path.exists() or path.is_symlink()):
+    if not entry_present(path):
         return {}
     text, _refusal = read_guarded(path)
     if text is None:
@@ -997,20 +1001,60 @@ def read_archived_report(path: Path) -> ReportRead:
     return parse_report_text(text)
 
 
-def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
-    """Read one world's archived record: the ledger, the document and the report, once."""
-    world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
-    ledger_path = world_ledger_path(episode_dir, label, episode_token=episode_token)
-    ledger_rows, malformed = _read_world_ledger(
-        ledger_path, world_token_for(episode_token, label))
+@dataclass(frozen=True)
+class InvestigationFacts:
+    """What one world's archived `investigation.md` says on its own — the half of `WorldFacts`
+    that needs no ledger. Its own read (`read_investigation_facts`) because the two records
+    fail independently: a served ledger that is absent or unreadable says nothing about whether
+    the document was archived, and a reader that wants the document alone (the episode page,
+    rendering a world's leads block) must not lose it to the ledger's refusal (#1025)."""
+
+    investigation_text: str
+    resolution_moved: bool
+    resolutions_by_lead: dict[str, list[dict[str, Any]]]
+    unlanded_document_rows: tuple[str, ...] = ()
+
+    @property
+    def referenced_leads(self) -> frozenset[str]:
+        """The lead ids this world's own `:T resolutions` rows name."""
+        return frozenset(self.resolutions_by_lead)
+
+
+def read_investigation_facts(world_dir: Path, *, world: str) -> InvestigationFacts:
+    """`worlds/<label>/investigation.md` alone: its text and its resolution facts, or the
+    archived-text refusal (`JudgeRefused`) when the document is absent or not readable."""
     text = _read_archived_text(
-        world_dir / INVESTIGATION_NAME, world=label, role=INVESTIGATION_NAME)
-    moved, by_lead, unlanded = _resolution_facts(text, world=label)
+        Path(world_dir) / INVESTIGATION_NAME, world=world, role=INVESTIGATION_NAME)
+    moved, by_lead, unlanded = _resolution_facts(text, world=world)
+    return InvestigationFacts(
+        investigation_text=text, resolution_moved=moved, resolutions_by_lead=by_lead,
+        unlanded_document_rows=unlanded)
+
+
+def read_world_ledger(episode_dir: Path, label: str, *, episode_token: str,
+                      ) -> tuple[list[dict[str, Any]], int]:
+    """This world's own served-ledger rows and its malformed-row count — the ledger half of
+    `WorldFacts`, at the ONE spelling of the ledger's path (`world_ledger_path`). Refuses
+    (`JudgeRefused`) on an absent or unreadable ledger, as `_read_world_ledger` states."""
+    return _read_world_ledger(
+        world_ledger_path(episode_dir, label, episode_token=episode_token),
+        world_token_for(episode_token, label))
+
+
+def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
+    """Read one world's archived record: the ledger, the document and the report, once — the
+    composition of `read_world_ledger` and `read_investigation_facts`, in that order, so the
+    grading path's refusal on a missing ledger comes first exactly as before."""
+    world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
+    ledger_rows, malformed = read_world_ledger(episode_dir, label, episode_token=episode_token)
+    document = read_investigation_facts(world_dir, world=label)
     return WorldFacts(
-        ledger_rows=ledger_rows, malformed_rows=malformed, investigation_text=text,
+        ledger_rows=ledger_rows, malformed_rows=malformed,
+        investigation_text=document.investigation_text,
         report=read_archived_report(world_dir / REPORT_NAME),
-        resolution_moved=moved, resolutions_by_lead=by_lead,
-        unlanded_document_rows=unlanded,
+        resolution_moved=document.resolution_moved,
+        resolutions_by_lead=document.resolutions_by_lead,
+        unlanded_document_rows=document.unlanded_document_rows,
     )
 
 
@@ -1464,11 +1508,12 @@ def grade_family(
 
 
 __all__ = [
-    "FamilyGrade", "MECHANICAL_WORLD_BUCKET", "ReachabilityFacts", "WorldFacts",
+    "FamilyGrade", "InvestigationFacts", "MECHANICAL_WORLD_BUCKET", "ReachabilityFacts",
+    "WorldFacts",
     "declares_difference", "discriminator_of", "episode_id_of", "grade_family",
     "is_gradable_row", "json_mapping", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "own_h_rows", "raw_manifest", "read_review_record",
-    "read_samples_record", "read_world_facts", "sample_patterns", "scope_params",
+    "read_investigation_facts", "read_samples_record", "read_world_facts", "read_world_ledger", "sample_patterns", "scope_params",
     "screened_yaml_mapping", "staged_patterns", "world_label_names_directory", "world_pattern",
     "world_review_block",
 ]

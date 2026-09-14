@@ -856,6 +856,18 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                     # counted as unqueueable OR withheld — it was never eligible in the first
                     # place, and the family record's own outcome is the artifact for it.
                     continue
+                if route != ROUTE_DEFENDER:
+                    # EXHAUSTIVE, with the residue said out loud. `graded_labels` is walked
+                    # from the FIRST gradable row per label while `row_of` keeps the LAST, so
+                    # a record naming one world twice (once gradable, once not) reaches here
+                    # as `ROUTE_UNGRADABLE`; an open `else` filed that finding as a DEFENDER
+                    # lesson — the one lane `route_finding` had just said it must not take.
+                    unqueueable.append(
+                        f"{run_id}/{label}/{draw}/{index}: routed `{route}`"
+                        f"{' (' + route_reason + ')' if route_reason else ''} — the label's "
+                        "row is not one this pass queues from; the record names the world "
+                        "on more than one row")
+                    continue
                 row = build_finding_row(
                     run_id=run_id, label=label, draw=str(draw), index=index,
                     subject=SUBJECT_DEFENDER, finding=finding, alert_rule_key=alert_rule_key,

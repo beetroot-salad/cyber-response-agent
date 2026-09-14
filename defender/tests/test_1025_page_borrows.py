@@ -332,3 +332,29 @@ def test_1025_the_docstring_names_the_launchers_real_hook():
     assert "cli.py::_render_document" not in source
     cli_source = Path(E.mod("learning.branch.cli").__file__).read_text(encoding="utf-8")
     assert "def _render_page(" in cli_source
+
+
+def test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a_defender_lesson(
+        tmp_path):
+    """`enqueue_report` walks `graded_labels` off the FIRST gradable row per label while `row_of`
+    keeps the LAST, so a `judge.yaml` naming one world on two rows (gradable, then ungradable)
+    reaches `route_finding` with the ungradable row and is answered `ROUTE_UNGRADABLE` — a lane
+    the pass's if-chain did not handle, so the finding fell through to the DEFENDER row build:
+    a `subject: world` finding appended to `findings.jsonl` as `subject: defender`, and no line
+    said so. The dispatch is exhaustive now: the residue is named on `unqueueable` and the
+    finding reaches neither channel."""
+    enqueue = E.mod("learning.judge.enqueue")
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    doc["worlds"].append(E.ungradable_row(E.GRADED_WORLD))
+    E.draw_document(ep.dir, E.GRADED_WORLD, 0,
+                    E.draw_doc(findings=[E.finding(subject="world", claim="about the world")]))
+    report = enqueue.enqueue_report(ep.dir, doc, queue_dir=tmp_path / "queue")
+    coord = f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/0"
+    assert report.appended == 0, report
+    assert not [r for r in report.world_rows if r["finding_id"] == coord], report.world_rows
+    assert any(line.startswith(coord) and "ungradable" in line for line in report.unqueueable), \
+        report.unqueueable
+    queue = tmp_path / "queue"
+    for row_file in queue.rglob("*.jsonl"):
+        assert "about the world" not in row_file.read_text(encoding="utf-8"), row_file

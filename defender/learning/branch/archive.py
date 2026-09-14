@@ -50,7 +50,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from defender._io import guarded_mkdir, read_guarded, write_guarded
+from defender._io import entry_present, guarded_mkdir, read_guarded, write_guarded
 from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file
 from defender.learning.lead_repository import (
     refuse_non_artifacts,
@@ -111,7 +111,11 @@ def read_family_stamp(episode_dir: Path) -> dict[str, Any] | None:
     is reachable from a sibling box's rw bind, exactly like every other episode-root record.
     """
     path = Path(episode_dir) / FAMILY_STAMP_NAME
-    if not (path.exists() or path.is_symlink()):
+    # `entry_present` (one `lstat`), not `exists() or is_symlink()`: `Path.exists()` follows the
+    # link and on 3.11 re-raises a permission fault from the directory above, so a link planted
+    # into a mode-000 directory escaped as a bare `PermissionError` instead of the typed refusal
+    # every caller handles (#1025).
+    if not entry_present(path):
         return None
     # A directory squatting the name is refused by `read_guarded` itself (`IsADirectoryError`
     # is an `OSError`, one of its own refusal classes) — no separate `is_dir()` check, which

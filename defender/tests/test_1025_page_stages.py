@@ -671,3 +671,46 @@ def test_1025_a_symlinked_tool_trace_in_a_run_dir(tmp_path):
     assert "no result event (refused)" in runs, runs
     assert "$8.88" not in page.text, runs
     assert f"${S.run_cost[E.CONTROL]:.4f}" in runs
+
+
+# ---------------------------------------------------------------------------------------
+# The review of PR #1042 — a priced row is finite and non-negative; one digit alphabet
+# ---------------------------------------------------------------------------------------
+
+
+def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp_path):
+    """A wire-log `usage` block is box-writable: token counts of `-50000000` and `1e999` priced
+    straight into tile 4 and the stages total as `$-146.7500` / `$inf` while the chip beside
+    the row already said "unpriced". `_priced` now answers `None` for a cost that is not a
+    finite non-negative number — the same gate `_result_event` puts on `total_cost_usd`."""
+    ep = E.sample_episode(tmp_path)
+    rows = E.trace_rows("questioner:neg")
+    rows[1]["usage"]["input_tokens"] = -50_000_000
+    E.write_trace(ep.dir, "questioner:neg", rows)
+    rows = E.trace_rows("questioner:inf")
+    rows[1]["usage"]["input_tokens"] = 1e999
+    E.write_trace(ep.dir, "questioner:inf", rows)
+    page = render(ep)
+    for stem in ("tx-questioner_neg_trace", "tx-questioner_inf_trace"):
+        assert "unpriced" in page.text_of(stem), page.text_of(stem)
+    stages = page.text_of("sec-stages")
+    assert "$-" not in stages, stages
+    assert "$inf" not in stages, stages
+    assert "$nan" not in stages, stages
+    assert "$-" not in page.text_of("sec-verdict")
+    assert E.SAMPLE.total_cost in page.text_of("sec-verdict"), "positive control: the sample total"
+
+
+def test_1025_a_judge_stem_with_a_non_ascii_digit_is_unattributed_not_a_draw(tmp_path):
+    """`draws_on_disk_report` holds a draw stem to ASCII digits (the F-7 decision: `'١'` is
+    UNDECODABLE); the transcript router must read the same alphabet. Before, `str.isdigit`
+    admitted the Arabic-Indic digit, so `judge_<label>_١_trace` rendered as a second block of
+    that world's draws and never reached the unattributed list."""
+    ep = E.sample_episode(tmp_path)
+    E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:١", prompt="an odd-digit draw")
+    page = render(ep)
+    order = _tx_order(page, "stage-judge")
+    assert f"tx-judge_{E.GRADED_WORLD}_١_trace" not in order, order
+    assert "unattributed traces" in page.text_of("sec-stages")
+    assert f"judge_{E.GRADED_WORLD}_١_trace" in page.text_of("sec-stages")
+    assert f"tx-judge_{E.GRADED_WORLD}_0_trace" in order  # positive control

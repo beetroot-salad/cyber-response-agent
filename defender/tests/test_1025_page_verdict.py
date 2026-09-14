@@ -1389,3 +1389,36 @@ def test_1025_render_reflects_a_not_graded_to_graded_transition_across_two_calls
     assert "STAMP-REASON-EARLIER" not in second.raw
     assert len(_tiles(second)) == 4
     assert len(_rows(second)) == S.findings
+
+
+# ---------------------------------------------------------------------------------------
+# The review of PR #1042 — one normalizer on tile 1; the record's own family outcome
+# ---------------------------------------------------------------------------------------
+
+
+def test_1025_tile_one_reads_verdict_and_declared_through_the_one_normalizer_the_contrast_uses(tmp_path):
+    """`verdict: ' benign '` against `declared: 'benign'` is the same disposition on BOTH of
+    tile 1's figures — the contrast count already put both sides through the vocabulary's
+    normalizer (which strips); the agreement count compared the raw strings and read "verdict
+    = declared on 0 of 1" beside a contrast figure that treated them as one word."""
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    graded = next(w for w in doc["worlds"] if w["world"] == E.GRADED_WORLD)
+    graded["declared"] = "benign"
+    graded["verdict"] = " benign "
+    E.write_judge(ep.dir, doc)
+    tile = _tile(render(ep), 0).text()
+    assert "verdict = declared on 1 of 1" in tile, tile
+
+
+def test_1025_an_empty_family_outcome_is_the_badge_word_not_an_absence(tmp_path):
+    """`family_outcome` is the record's own `str | None`: the badge shows the recorded word
+    whenever one is recorded, an empty string included — never the verdict word in its place
+    (`is not None`, not `or`)."""
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    doc["family_outcome"] = ""
+    E.write_judge(ep.dir, doc)
+    page = render(ep)
+    assert page.one(cls="vd-badge").text() == "", page.one(cls="vd-badge").text()
+    assert doc["verdict_word"] in page.one(cls="vd-meta").text()  # positive control

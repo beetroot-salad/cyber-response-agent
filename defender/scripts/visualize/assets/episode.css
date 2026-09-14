@@ -1,0 +1,190 @@
+/* ======================================================================================
+   The episode page's own stylesheet (#1025) — inlined AFTER the run pages' shared
+   `styles.css`, which supplies the tokens (`--bg`, `--text`, `--accent-*`), the two-column
+   `.layout` / `nav.toc` / `article.content` frame, the sticky `header.top` and the wrapping
+   rules. Everything below is this page's vocabulary: every class `visualize_episode.py`
+   emits has its rule here (`test_1025_every_class_the_page_emits_has_a_rule` holds the two
+   in step). The few names shared with the run pages' transcript (`.tx-entry`, `.tx-stream`,
+   `.tx-search`) are re-declared under `.episode` so that page's grid layout for a transcript
+   turn — which put this page's response text into a 56px gutter column — does not apply.
+   ====================================================================================== */
+
+/* ----- Sections, headings, the shared refusal line ----- */
+.episode section { margin-bottom: 36px; }
+.episode section > h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: 0.7px; font-weight: 600;
+  color: var(--text-dim); margin: 0 0 12px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.episode header.top .byline { padding: 8px 0 10px; }
+.episode .hd-sep { margin: 0 6px; opacity: 0.5; }
+.episode .hd-alert { color: var(--accent-alert); font-weight: 600; }
+.episode .hd-source, .episode .hd-branch, .episode .hd-knobs, .episode .hd-commit { color: var(--text-dim); }
+.episode .hd-wall, .episode .hd-lower-bound {
+  font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.episode .unnameable {
+  font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--warn);
+  padding: 4px 8px; margin: 4px 0; border-left: 3px solid var(--warn); background: var(--bg-2);
+  overflow-wrap: anywhere;
+}
+.episode q.verbatim { font-style: italic; color: var(--text); overflow-wrap: anywhere; }
+.episode q.verbatim::before, .episode q.verbatim::after { color: var(--text-dim); }
+
+/* ----- Verdict: band, lede, tiles, cards, accounting ----- */
+.episode .vd-band {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--border);
+  margin-bottom: 12px; overflow-wrap: anywhere;
+}
+.episode .vd-badge { font-size: 18px; font-weight: 700; color: var(--text-bright); }
+.episode .vd-meta { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim); }
+.episode .vd-reason { color: var(--warn); overflow-wrap: anywhere; }
+.episode .vd-family-draw { margin: 6px 0; padding: 8px 12px; border-left: 3px solid var(--accent-learning); background: var(--bg-3); }
+.episode .vd-family-item { overflow-wrap: anywhere; line-height: 1.55; }
+.episode .vd-outcome { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; color: var(--accent-learning); margin-left: 6px; }
+.episode .vd-family-failed { color: var(--bad); margin: 6px 0; overflow-wrap: anywhere; }
+.episode .vd-lede { margin: 8px 0 14px; color: var(--text); overflow-wrap: anywhere; }
+.episode .vd-tile {
+  display: inline-block; vertical-align: top; min-width: 180px; max-width: 100%;
+  margin: 0 10px 10px 0; padding: 10px 14px; border-radius: 6px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  font-size: 15px; font-weight: 600; color: var(--text-bright); overflow-wrap: anywhere;
+}
+.episode .vd-word { color: var(--accent-judge); margin-left: 6px; }
+.episode .vd-nonladder { font-size: 11px; font-weight: 400; color: var(--text-dim); }
+.episode .vd-caption { font-size: 11px; font-weight: 400; color: var(--text-dim); margin-top: 4px; line-height: 1.5; }
+.episode .vd-cards { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 12px; }
+.episode .vd-cause {
+  flex: 1 1 260px; min-width: 0; padding: 10px 12px; border-radius: 6px;
+  background: var(--bg-3); border: 1px solid var(--border-2); overflow-wrap: anywhere;
+}
+.episode .vd-cause > a { display: block; margin-top: 6px; font-size: 12px; }
+.episode .vd-off-roster { font-size: 11px; color: var(--warn); font-style: italic; }
+.episode .vd-chip {
+  display: inline-block; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 10.5px;
+  color: var(--text-dim); background: var(--bg-2); border: 1px solid var(--border-2);
+  border-radius: 3px; padding: 0 5px; margin: 4px 4px 0 0;
+}
+.episode .vd-envelope { font-size: 12px; color: var(--bad); margin-top: 4px; }
+.episode .vd-discard { font-size: 12px; color: var(--warn); margin: 6px 0; overflow-wrap: anywhere; }
+.episode .vd-acct { font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+.episode .vd-acct > summary { cursor: pointer; user-select: none; color: var(--text); }
+.episode .vd-acct > div { padding: 2px 0 2px 14px; overflow-wrap: anywhere; }
+.episode .vd-disagree { color: var(--bad); font-weight: 600; }
+.episode .vd-guide { margin-bottom: 14px; }
+.episode .vd-guide-row { font-size: 12.5px; color: var(--text-dim); padding: 2px 0; overflow-wrap: anywhere; }
+
+/* ----- Worlds: one section per roster item ----- */
+.episode .w-section {
+  padding: 10px 14px; margin-bottom: 12px; border-radius: 6px;
+  background: var(--bg-2); border: 1px solid var(--border); overflow-wrap: anywhere;
+}
+.episode .w-name { font-weight: 600; color: var(--text-bright); }
+.episode .w-state { color: var(--text-dim); font-style: italic; }
+.episode .w-verdict { font-size: 15px; font-weight: 700; color: var(--accent-judge); }
+.episode .w-declared { color: var(--text-dim); }
+.episode .w-reason { color: var(--warn); }
+.episode .w-unreadable, .episode .w-skipped { font-size: 12px; color: var(--warn); }
+.episode .w-ladder, .episode .w-chip {
+  display: inline-block; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px;
+  color: var(--text-dim); background: var(--bg-3); border: 1px solid var(--border-2);
+  border-radius: 3px; padding: 0 6px; margin: 4px 4px 0 0;
+}
+.episode .w-bucket { font-weight: 600; color: var(--text); }
+.episode .w-envelope { font-size: 12px; color: var(--bad); margin-top: 4px; }
+.episode .w-axis { margin: 6px 0; color: var(--text); }
+.episode .w-cost, .episode .w-wall {
+  font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim);
+  margin-left: 8px;
+}
+.episode .w-archive, .episode .w-prov, .episode .w-scrub, .episode .w-review {
+  font-size: 12px; color: var(--text-dim); margin-top: 2px;
+}
+.episode .w-report { margin-top: 6px; color: var(--text); }
+/* Bucket accents — the same seven words the findings rows carry. */
+.episode .bucket-lead-set { color: var(--accent-defender); }
+.episode .bucket-observability { color: var(--accent-oracle); }
+.episode .bucket-decision-discipline { color: var(--accent-judge); }
+.episode .bucket-analyze-discipline { color: var(--accent-learning); }
+.episode .bucket-mechanical { color: var(--accent-raw); }
+.episode .bucket-story-overlay-gap { color: var(--accent-actor); }
+.episode .bucket-lead-quality { color: var(--code); }
+.episode .bucket-other { color: var(--text-dim); }
+
+/* ----- Findings: one <details> group per disposition heading ----- */
+.episode details.fg { margin-bottom: 8px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg-2); }
+.episode details.fg > summary { cursor: pointer; user-select: none; padding: 8px 12px; font-weight: 600; color: var(--text-bright); overflow-wrap: anywhere; }
+.episode .fr-row { padding: 8px 12px; border-top: 1px solid var(--border-2); line-height: 1.55; overflow-wrap: anywhere; }
+.episode .fr-world { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; color: var(--code); margin-right: 6px; }
+.episode .fr-bucket { font-size: 11px; font-weight: 600; margin-right: 6px; }
+.episode .fr-subject { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 10.5px; color: var(--text-dim); }
+.episode .fr-stub { font-size: 12px; color: var(--warn); font-style: italic; }
+.episode .fr-claim { margin: 4px 0 2px; color: var(--text); }
+.episode .fr-root { font-size: 13px; color: var(--text-dim); margin: 2px 0; }
+.episode .fr-anchor, .episode .fr-topic, .episode .fr-evidence, .episode .fr-world-field, .episode .fr-recorded-id {
+  display: inline-block; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px;
+  color: var(--text-dim); margin: 2px 8px 0 0;
+}
+.episode .fr-evidence { color: var(--code); }
+.episode .fr-outcome { display: inline-block; font-size: 11px; color: var(--accent-learning); margin: 2px 0 0; }
+.episode .fr-off-roster { font-size: 12px; color: var(--warn); }
+.episode .fr-dropped, .episode .fr-unreadable, .episode .fr-skipped { font-size: 12px; color: var(--warn); padding: 2px 0; overflow-wrap: anywhere; }
+
+/* ----- Stages: the timing table, one block per step, the transcripts ----- */
+.episode .stage-timing { margin-bottom: 14px; }
+.episode .st-row, .episode .rn-row {
+  font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; padding: 3px 0;
+  border-bottom: 1px solid var(--border-2); overflow-wrap: anywhere;
+}
+.episode .st-total, .episode .rn-total { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--text-bright); padding: 4px 0; }
+.episode .st-caption { font-size: 11px; color: var(--text-dim); font-style: italic; padding: 2px 0; }
+.episode .st-error, .episode .st-unattributed { font-size: 12px; color: var(--warn); padding: 4px 0; overflow-wrap: anywhere; }
+.episode .stage-block { margin-bottom: 12px; padding: 8px 12px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--border-2); }
+.episode .rn-row { padding-left: 16px; color: var(--text-dim); }
+.episode .rn-launcher { font-size: 10.5px; color: var(--accent-raw); margin-left: 6px; }
+.episode .rn-launcher-wall { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim); padding: 3px 0 3px 16px; }
+.episode .tx-stream { display: block; margin: 8px 0 0; padding: 8px 10px; border-radius: 5px; background: var(--bg-3); border: 1px solid var(--border-2); }
+.episode .tx-search { display: none; }
+.episode .tx-label { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; color: var(--code); margin-bottom: 4px; }
+.episode .tx-request, .episode .tx-entry, .episode .tx-failure {
+  display: block; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5;
+  padding: 6px 8px; margin: 4px 0; border-radius: 4px; background: var(--bg);
+}
+.episode .tx-request { border-left: 3px solid var(--accent-defender); color: var(--text-dim); }
+.episode .tx-request > details > summary { cursor: pointer; user-select: none; font-size: 11px; color: var(--text-dim); }
+.episode .tx-entry { border-left: 3px solid var(--accent-judge); color: var(--text); }
+.episode .tx-failure { border-left: 3px solid var(--bad); color: var(--bad); }
+.episode .tx-model, .episode .tx-usage, .episode .tx-cost, .episode .tx-wall {
+  display: inline-block; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 10.5px;
+  color: var(--text-dim); margin: 4px 8px 0 0; white-space: nowrap;
+}
+.episode .tx-note, .episode .tx-unreadable { font-size: 11px; color: var(--warn); font-style: italic; }
+
+/* ----- Leads: one block per roster item ----- */
+.episode .leads-section {
+  padding: 10px 14px; margin-bottom: 12px; border-radius: 6px;
+  background: var(--bg-2); border: 1px solid var(--border); overflow-wrap: anywhere;
+}
+.episode .ld-served, .episode .ld-investigation, .episode .ld-moved { font-size: 12px; color: var(--warn); padding: 2px 0; }
+.episode .ld-lead { padding: 6px 0; border-top: 1px solid var(--border-2); line-height: 1.55; }
+.episode .ld-id { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--code); margin-right: 8px; }
+.episode .ld-goal { color: var(--text); }
+.episode .ld-params, .episode .ld-payload {
+  display: block; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px;
+  color: var(--text-dim); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.episode .ld-summary { display: block; margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.episode .ld-resolution { font-size: 12px; color: var(--accent-learning); padding-left: 12px; overflow-wrap: anywhere; }
+
+/* ----- Records: one line per field ----- */
+.episode .rc-story { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 8px; }
+.episode .rc-predicate, .episode .rc-envelope { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--code); overflow-wrap: anywhere; }
+.episode .rc-world, .episode .rc-pattern, .episode .rc-staged-row, .episode .rc-invention, .episode .rc-mismatch-key, .episode .rc-dirty {
+  font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim); padding: 1px 0 1px 12px; overflow-wrap: anywhere;
+}
+.episode .rc-samples, .episode .rc-staged, .episode .rc-review, .episode .rc-provenance, .episode .rc-review-episode, .episode .rc-review-worlds, .episode .rc-teardown-at, .episode .rc-commit, .episode .rc-model, .episode .rc-allow-dirty {
+  font-size: 12px; color: var(--text-dim); padding: 2px 0; overflow-wrap: anywhere;
+}
+.episode .rc-teardown-fail { font-size: 12px; color: var(--bad); padding: 2px 0 2px 12px; overflow-wrap: anywhere; }

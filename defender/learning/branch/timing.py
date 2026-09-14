@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._clock import now_iso, parse_iso_utc
-from defender._io import read_guarded, write_guarded
+from defender._io import entry_present, read_guarded, write_guarded
 from defender.learning.branch.steps import STEPS, Step
 
 #: The record's name at the episode root — sibling of `provenance.json`, the family stamp.
@@ -150,7 +150,11 @@ def read_stage_timings(episode_dir: Path) -> list[dict[str, Any]]:
     episode that aborted before its first step.
     """
     path = timing_path(episode_dir)
-    if not (path.exists() or path.is_symlink()):
+    # `entry_present` (one `lstat`), not `exists() or is_symlink()`: `Path.exists()` follows the
+    # link and on 3.11 re-raises a permission fault from the directory above, so a link planted
+    # into a mode-000 directory escaped as a bare `PermissionError` instead of the typed refusal
+    # every caller handles (#1025).
+    if not entry_present(path):
         return []
     text, refusal = read_guarded(path)
     if text is None:

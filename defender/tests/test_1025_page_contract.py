@@ -24,6 +24,7 @@ call through `E.mod` so the failure is the missing module, once per test.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -830,3 +831,156 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
     assert launch.rc == 0, "a refused page write changed the exit status"
     assert "could not be rendered" in err, err
     assert not (launched / E.PAGE_NAME).exists()
+
+
+# ---------------------------------------------------------------------------------------
+# The review of PR #1042 — the page's own stylesheet, the standalone script, and location
+# independence for an UNHEALTHY episode
+# ---------------------------------------------------------------------------------------
+
+
+def _css_classes(css: str) -> set[str]:
+    """Every `.name` a stylesheet's selectors mention."""
+    return set(re.findall(r"\.([A-Za-z_][\w-]*)", re.sub(r"\{[^}]*\}", "", css)))
+
+
+def _page_classes(page: E.Page) -> set[str]:
+    out: set[str] = set()
+    for node in page.root.descendants():
+        out |= node.classes
+    return out
+
+
+def test_1025_every_class_the_page_emits_has_a_rule_in_the_css_it_ships(tmp_path):
+    """The page inlines the run pages' shared stylesheet for the frame — and that sheet knows
+    NOTHING of this page's vocabulary (`vd-*`, `w-*`, `fr-*`, `st-*`, `ld-*`, `rc-*`, …): the
+    one rule it did hit, `.tx-entry`'s two-column grid, put every response's text into a 56px
+    gutter, and the long-token wrapping fix lived on classes the page never used. So: every
+    class the rendered page emits — the healthy sample AND the refusal-heavy shapes (a stray
+    run dir, an unnameable label, an unreadable record, an unattributed trace) — has a rule in
+    the CSS the page ships, and every transcript class the shared sheet ALSO styles is
+    re-declared under the page's own scope so the shared layout cannot win."""
+    module = visualize_episode()
+    shipped = module.CSS + module.EPISODE_CSS
+    styled = _css_classes(shipped)
+    own = _css_classes(module.EPISODE_CSS)
+
+    ep = E.sample_episode(tmp_path, timing=True)
+    (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
+    (ep.dir / "runs" / "bad name!" / "gather_raw").mkdir(parents=True)
+    E.plant_raw(ep.dir / "staged.yaml", b"\xff\xfe not text")
+    E.write_trace(ep.dir, "judge:nobody:0", prompt="an unattributed draw")
+    E.write_trace(ep.dir, "questioner:z", usage=None, duration_ms=None, model=None)
+    doc = E.sample_grade()
+    doc["worlds"].append(E.ungradable_row("ghost_world"))
+    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/9: dropped"]
+    E.write_judge(ep.dir, doc)
+    page = render(ep)
+
+    emitted = _page_classes(page)
+    assert emitted >= {"vd-tile", "w-section", "fr-row", "st-row", "ld-lead", "rc-story",
+                       "tx-entry", "tx-request", "stage-block", "leads-section", "unnameable",
+                       "st-unattributed"}, "positive control: the shapes this test is about"
+    unstyled = sorted(emitted - styled)
+    assert not unstyled, f"classes with no rule in the shipped CSS: {unstyled}"
+    # the run pages' transcript vocabulary the page reuses must be this page's own rule
+    for shared in emitted & _css_classes(module.CSS):
+        if shared in ("layout", "content", "top", "byline", "toc", "item", "episode"):
+            continue  # the frame: the shared sheet's rule IS the one wanted
+        assert shared in own, f".{shared} is styled only by the run pages' sheet"
+    assert re.search(r"\.episode \.tx-entry[^{]*\{[^}]*display: block", module.EPISODE_CSS)
+    for wrapping in ("tx-request", "tx-entry", "fr-row", "w-section", "ld-summary", "vd-tile"):
+        assert re.search(rf"\.episode [^{{]*\.{wrapping}[^{{]*\{{[^}}]*overflow-wrap: anywhere",
+                         module.EPISODE_CSS), f".{wrapping} does not wrap a long token"
+
+
+def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path):
+    """The docstring's promise — `python defender/scripts/visualize/visualize_episode.py <dir>`
+    — with `PYTHONPATH` unset and the cwd elsewhere: the script puts its own package on the
+    path (the bootstrap `visualize_run.py` carries), writes the page and exits 0. The `main`
+    guard test sets `PYTHONPATH` explicitly and so never exercised the documented spelling."""
+    ep = E.sample_episode(tmp_path)
+    script = Path(visualize_episode().__file__)
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    proc = subprocess.run([sys.executable, str(script), str(ep.dir)], env=env,
+                          capture_output=True, text=True, cwd=str(elsewhere))
+    assert proc.returncode == 0, proc.stderr
+    assert "ModuleNotFoundError" not in proc.stderr, proc.stderr
+    assert proc.stdout.strip() == str(ep.page), proc.stdout
+    assert E.read_page(ep).text_of("sec-case")
+
+
+def _unhealthy(ep: E.Episode) -> None:
+    """Every refusal sentence the page can render, planted at once: undecodable bytes at the
+    five episode-root records, a link at a world's report, a torn document at another's
+    investigation, the served ledger gone for a third, a bad timing document."""
+    for name in ("staged.yaml", "review.yaml", "samples.yaml", "provenance.json"):
+        E.plant_raw(ep.dir / name, b"\xff\xfe\x00 not text")
+    E.plant_raw(ep.dir / "timing.json", b"[not the record")
+    E.plant_link(ep.world(E.GRADED_WORLD) / "report.md", ep.dir / "family.yaml")
+    E.plant_raw(ep.world(E.WITHHELD_WORLD) / "investigation.md", b"\xff\xfe\x00 not text")
+    (ep.dir / "served" / f"{T.world_token(E.CONTROL)}.jsonl").unlink()
+    E.plant_link(ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl",
+                 ep.dir / "family.yaml")
+
+
+def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically_from_two_roots(
+        tmp_path, monkeypatch):
+    """d05/x24 for the shape it never held on: every reader's refusal sentence embeds the
+    absolute path (`read_guarded`'s alias sentence, an errno's `'/abs/…'`, `<name> at <path>`),
+    so a page with one refused slot named the operator's root and two copies of one unhealthy
+    archive rendered byte-different. The loader takes the episode directory's spelling out of
+    every refusal at ONE boundary; each refusal is still on the page, in its own slot."""
+    for var in (T.RUNS_BASE_ENV, T.EPISODES_BASE_ENV):
+        monkeypatch.delenv(var, raising=False)
+    built = E.sample_episode(tmp_path, root=tmp_path / "build")
+    _unhealthy(built)
+    one = E.copy_episode(built, tmp_path / "root-one" / "copy-one")
+    two = E.copy_episode(built, tmp_path / "root-two" / "nested" / "renamed-two")
+    page = render(one)
+    render(two)
+    text = one.page.read_text(encoding="utf-8")
+    for absent in (str(tmp_path), "root-one", "copy-one", "renamed-two"):
+        assert absent not in text, f"{absent!r} leaked into the page"
+    assert one.page.read_bytes() == two.page.read_bytes(), "the two copies rendered differently"
+    # positive control: every refusal is still said, in its slot
+    records = page.text_of("sec-records")
+    for slot in ("staging record unreadable", "review record unreadable",
+                 "samples record unreadable", "provenance record unreadable"):
+        assert slot in records, records
+    assert "timing record unreadable" in page.text_of("sec-stages")
+    assert "could not be read" in page.section(f"world-{E.GRADED_WORLD}").find_all(
+        cls="w-report")[0].text()
+    assert "investigation record unavailable" in page.text_of(f"leads-{E.WITHHELD_WORLD}")
+    assert "served ledger: absent" in page.text_of(f"leads-{E.CONTROL}")
+    assert "served ledger unreadable" in page.text_of(f"leads-{E.GRADED_WORLD}")
+
+
+@NOT_ROOT
+def test_1025_a_link_into_an_unreadable_directory_at_a_records_name_is_that_slots_refusal(tmp_path):
+    """`Path.exists()` follows a link and, on 3.11, re-raises a permission fault from the
+    directory above — which is why `_io.entry_present` exists. The readers this page borrows
+    (`read_staged`, `read_family_stamp`, `read_stage_timings`, the YAML screens) asked
+    `exists() or is_symlink()` anyway, so a link planted at `staged.yaml` into a mode-000
+    directory escaped as a bare `PermissionError`, past the page's `StagingRefused` boundary,
+    and took the whole render down. Now each is its own slot's refusal, and the page renders."""
+    ep = E.sample_episode(tmp_path, timing=True)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    for name in ("staged.yaml", "provenance.json", "timing.json", "review.yaml", "samples.yaml"):
+        (ep.dir / name).unlink()
+        (vault / name).write_text("planted", encoding="utf-8")
+        E.plant_link(ep.dir / name, vault / name)
+    vault.chmod(0)
+    try:
+        page = render(ep)
+    finally:
+        vault.chmod(0o700)
+    records = page.text_of("sec-records")
+    for slot in ("staging record unreadable", "provenance record unreadable",
+                 "review record unreadable", "samples record unreadable"):
+        assert slot in records, records
+    assert "timing record unreadable" in page.text_of("sec-stages")
+    assert str(tmp_path) not in page.raw

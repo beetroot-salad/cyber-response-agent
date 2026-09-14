@@ -44,7 +44,7 @@ import yaml
 
 from defender import _yaml
 from defender._clock import now_iso
-from defender._io import guarded_mkdir, open_guarded, read_guarded, write_guarded
+from defender._io import entry_present, guarded_mkdir, open_guarded, read_guarded, write_guarded
 from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
@@ -377,7 +377,11 @@ def read_staged(episode_dir: Path) -> list[dict]:
     # as no rows; PRESENT and not a plain file (a link planted at the name) is refused rather
     # than read as empty, which would have teardown sweep nothing while a live alias sits
     # right there under the name meant to account for it.
-    if not (path.exists() or path.is_symlink()):
+    # `entry_present` (one `lstat`), not `exists() or is_symlink()`: `Path.exists()` follows the
+    # link and on 3.11 re-raises a permission fault from the directory above, so a link planted
+    # into a mode-000 directory escaped as a bare `PermissionError` instead of the typed refusal
+    # every caller handles (#1025).
+    if not entry_present(path):
         return []
     text, refusal = read_guarded(path)
     if text is None:

@@ -57,8 +57,11 @@ RECORD_NAMES = ("judge.yaml", "review.yaml", "samples.yaml", "family.yaml", "sta
                 "timing.json", "provenance.json")
 PACKAGE_READERS = ("read_grade", "draws_on_disk_report", "read_stage_timings", "raw_manifest",
                    "read_review_record", "read_samples_record", "read_staged",
-                   "world_review_block", "read_world_facts", "leads_by_id", "lead_chain",
-                   "json_mapping", "read_family_stamp")
+                   # The ledger and the investigation document are TWO reads, each its own
+                   # slot (#1025): the page never asks the composed `read_world_facts`, whose
+                   # ledger-first refusal cost the leads block an intact `investigation.md`.
+                   "world_review_block", "read_world_ledger", "read_investigation_facts",
+                   "leads_by_id", "lead_chain", "json_mapping", "read_family_stamp")
 MARKUP = "<script>alert(1)</script><img src=x onerror=alert(1)>"
 
 
