@@ -386,6 +386,53 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
     assert record(run_dir, 1) == challenged_record, "the challenged record was overwritten"
 
 
+def test_budget_kill_and_circuit_breaker_after_a_challenged_inconclusive(tmp_path):
+    """The other two exits that stop the model before it can close — the tool-call budget's
+    tail kill and the circuit breaker's abort — take the SAME post-loop forced close the
+    request ceiling and the retry budget take: `unresolved`, `CAUSE_NOT_REVIEWED`, no stage
+    dispatched, the challenged attempt's record intact, and the exit reason still naming
+    what cut the run short. One close keyed on the exit class, not one written into each
+    arm — the arm that forgot it reopened the dead-letter once already.
+
+    Each kill is raised from the model call, the seam the real kills reach the loop through
+    (a tool hook and a gather agent both propagate them past `agent.iter`); what is under
+    test is the driver's classification and its close, not where the kill originated."""
+    from defender.hooks.budget_enforcer import BudgetKill
+    from defender.runtime import driver
+    from defender.runtime.circuit_breaker import RunAborted
+    from defender.tests._invlang_warn_836 import build_main_agent
+
+    class _Killed:
+        __name__ = "Killed"
+
+        def __init__(self, exc: BaseException) -> None:
+            self.exc = exc
+
+        def __call__(self, _messages, _info):
+            raise self.exc
+
+    kills = {
+        BudgetKill("budget tail exhausted at read_file"): "BudgetKill",
+        RunAborted(5, ["elastic"]): "RunAborted",
+    }
+    for exc, expected_reason in kills.items():
+        deps, run_dir = _challenged_inconclusive(tmp_path / expected_reason)
+        challenged_record = record(run_dir, 1)
+        stages = recording(holds())
+        agent = build_main_agent(_Killed(exc), review_stages=stages.bundle())
+        _run, truncated_by, exit_reason = asyncio.run(driver._drive_agent(
+            agent, "go", deps, _spec923.NullStore(), "sid", bounds(),
+        ))
+        assert exit_reason == expected_reason, exit_reason
+        assert truncated_by is not None
+        assert stages.calls == [], f"the forced close dispatched {stages.calls}"
+        assert review_state(deps).closed is True
+        fm = frontmatter(run_dir)
+        assert fm["disposition"] == HOST_ONLY_DISPOSITION, expected_reason
+        assert fm["cause"] == CAUSE_NOT_REVIEWED, expected_reason
+        assert record(run_dir, 1) == challenged_record, "the challenged record was overwritten"
+
+
 def test_disposition_threaded_seams(tmp_path):
     """`composer_projection` accepts the reviewed disposition and renders a different host
     sentence for `inconclusive` than for a confident close, and `_route` receives it — the gate

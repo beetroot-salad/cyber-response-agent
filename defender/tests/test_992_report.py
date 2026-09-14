@@ -50,8 +50,6 @@ from defender.tests._spec992 import (
     frontmatter,
     gap,
     holds,
-    lenient_text,
-    non_utf8_companion,
     note_text,
     noted_companion,
     priced_block,
@@ -101,11 +99,9 @@ def test_reviewed_inconclusive_carries_receipts(tmp_path):
     rows citing one ref with different states are not collapsed — the lead-anchored
     consistency check refuses the inconsistent one at the price gate (rg4).
 
-    The non-UTF-8 byte is the one in-process input on which a strict and a lenient decode of
-    the companion differ, and it is M4's discriminating input: the close reads the file ONCE,
-    prices it and reviews it off the same lenient decode, and the block carries the rows that
-    one parse produced — the review ran (every role called), the close stands, and nothing
-    failed over a byte the price gate had already read past."""
+    The close reads the file ONCE and the block carries the rows that one parse produced; a
+    companion that read cannot decode never reaches the review at all (a row of
+    test_992_routing's machinery-failure arms)."""
     golden = ceiling_companion()
     deps, run_dir = deps_over(tmp_path / "holds", golden)
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
@@ -126,19 +122,6 @@ def test_reviewed_inconclusive_carries_receipts(tmp_path):
         assert "ceiling_test" not in head, (name, head)
         assert receipt_note_lines(body) == [], (name, body)
         assert "ceiling_test" in (run_dir / "investigation.md").read_text(encoding="utf-8")
-
-    # The non-UTF-8 companion: one read, one decode, priced and reviewed off the same body.
-    # The byte sits in prose outside every fence, so the lenient parse's rows are the golden's.
-    raw = non_utf8_companion()
-    deps, run_dir = deps_over(tmp_path / "non-utf8", raw)
-    stages = recording(holds())
-    assert close_with(deps, GAP, stages).outcome == STANDS
-    assert stages.calls == ["support", "ablation", "composer"], stages.calls
-    assert frontmatter(run_dir)["disposition"] == GAP
-    head, body = report_parts(run_dir)
-    assert head.endswith(priced_block(lenient_text(raw))), head
-    assert priced_block(lenient_text(raw)) == priced_block(golden)
-    assert len(receipt_note_lines(body)) == len(V2SSHD_RECEIPTS)
 
     # The baseline block rides beside the receipts on the reviewed path too.
     with_baseline = _tacit983.inconclusive_document(

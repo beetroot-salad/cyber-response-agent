@@ -67,7 +67,7 @@ def _companion(deps):
     from defender.runtime.tools import read_companion
     from defender.skills.invlang.parser import parse_dense_companion
 
-    return parse_dense_companion(read_companion(deps).lenient)[0]
+    return parse_dense_companion(read_companion(deps).text or "")[0]
 
 
 def _real_targets(deps) -> list[str]:

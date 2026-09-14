@@ -341,6 +341,14 @@ _PRE_RECORD_NOTE = (
 )
 
 
+def _bypass_note(record: dict) -> str:
+    """The note beside an attempt that bypassed the gate — ONE chooser for the run-level strip
+    (every attempt bypassed) and the per-attempt row (this one did), so a mixed pre-#992 run —
+    one attempt challenged, the next an `inconclusive` that bypassed by the set of its day —
+    cannot show today's bypass set beside the row that predates it."""
+    return _BYPASS_NOTE if isinstance(record.get("reviewed"), bool) else _PRE_RECORD_NOTE
+
+
 #: What the gate skipped BEFORE the record said so. A record with no `reviewed` field was
 #: written when `inconclusive` and `unresolved` were the bypass set, so for that record the
 #: disposition alone still tells the two populations apart. Frozen history, not the live
@@ -558,11 +566,10 @@ def render_review_gate(
     # render apart.
     reviewed = [(n, r) for n, r in records if _was_reviewed(r)]
     if not reviewed:
-        said_so = any(isinstance(r.get("reviewed"), bool) for _, r in records)
         body = (
             '<div class="rv-strip"><span class="rv-badge rv-skip">not reviewed</span>'
             f'<span class="rv-cause">{esc(cause)}</span></div>'
-            + (_BYPASS_NOTE if said_so else _PRE_RECORD_NOTE)
+            + _bypass_note(records[-1][1])
         )
         return (section("sec-review", "review", "Review gate", subtitle, body), 0)
     traces = _read_role_traces(run_dir)
@@ -612,7 +619,7 @@ def render_review_gate(
         detail_html = (
             f'<div class="rv-detail">{pre_text_untrusted(detail)}</div>' if detail.strip() else ""
         )
-        roles_html = _BYPASS_NOTE if bypassed else _review_role_html(traces, n)
+        roles_html = _bypass_note(rec) if bypassed else _review_role_html(traces, n)
         rows.append(
             f'<div class="rv-attempt">'
             f'<div class="rv-head"><span class="rv-n">attempt {n}</span>'

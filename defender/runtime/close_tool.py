@@ -505,22 +505,33 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # repair with, so gating it would dead-letter the run at persist for a MISSING report.md,
     # before investigation.md is validated at all. Every close the MODEL invokes is gated.
     read = tools_mod.read_companion(deps)
-    if not forced:
-        flagged = tools_mod.flagged_in(read)
-        if flagged:
-            raise ModelRetry(tools_mod.flagged_write_refusal(
-                "close_investigation", flagged, offered_text=False,
-            ))
+    # A COMPANION THAT COULD NOT BE READ is decided here, once, ahead of every gate — not by
+    # each gate answering "cannot look" its own way (the window fell open, the structure check
+    # fell open, the price gate refused, the review read a lenient decode), which is how a
+    # confident disposition came to commit against a document the validator never checked.
+    # The model's close is a review that cannot run: overruled to the host's `unresolved`
+    # with the typed failure kind the projector arm uses for the same fact. The host's forced
+    # close proceeds off the empty document — `unresolved` owes nothing and is not reviewed —
+    # because a refusal here would end the run with NO report.md, the dead-letter the forced
+    # exemption exists to prevent.
+    if read.text is None and not forced:
+        return _overrule_unreadable_companion(
+            deps, read, disposition, validator=validator, evidence=evidence,
+        )
+    text = _document_or_empty(read)
+    if not forced and (flagged := tools_mod.flagged_in(read)):
+        raise ModelRetry(tools_mod.flagged_write_refusal(
+            "close_investigation", flagged, offered_text=False,
+        ))
     # The dispositions carrying a structural entry price, collected here as well as at the
     # `investigation.md` write gate. AFTER the terminal-close refusal so R4's ordering holds,
     # and before the gate so a close that owes the price never spends a review.
-    companion = _refuse_if_entry_price_is_owed(read, disposition, forced=forced)
+    companion = _refuse_if_entry_price_is_owed(text, disposition, forced=forced)
     # The check the close never had (#961). Every other write verb meets the invlang schema
     # through `permission.decide_write`; the close is the verb that PUBLISHES — report.md
     # commits against this document and the review gate parses it — so it was the one path on
     # which an error-severity document reached a committed disposition. It reads through
-    # `tools_mod`, beside the repair window above, so both document gates share one reader and
-    # one answer to "the document could not be read at all" (H7: fail open).
+    # `tools_mod`, beside the repair window above, so both document gates judge one reading.
     #
     # LAST of the three document gates, and the order is load-bearing. This one runs the WHOLE
     # validator, which includes rules conditioned on the disposition the DOCUMENT concludes —
@@ -534,10 +545,8 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     #
     # `forced` is exempt with the flagged-row window above, for that exemption's own reason:
     # a run cut short has no model left to repair with.
-    if not forced:
-        structure = tools_mod.committed_document_refusal(read)
-        if structure is not None:
-            raise ModelRetry(structure)
+    if not forced and (structure := tools_mod.committed_document_refusal(read)) is not None:
+        raise ModelRetry(structure)
     # #923 fork J4, narrowed by #992: `unresolved` is the ONE verdict matched by VALUE that
     # skips the live review — it is the host's own account of a run that ended without a
     # settled finding (a gate overrule, a review that could not complete, or the driver's own
@@ -635,6 +644,46 @@ async def _tool_close_investigation(
     return result.message
 
 
+def _document_or_empty(read: CompanionRead) -> str:
+    """The text the close's gates judge. Only the HOST's forced close reaches here with a
+    companion that could not be read (the model's is overruled first), and for it the empty
+    document is the honest input: `unresolved` owes nothing and is not reviewed, and a refusal
+    would end the run with NO report.md — the dead-letter the forced exemption exists to
+    prevent. Logged here, once, where it is acted on — the reader itself runs on every model
+    request and says nothing."""
+    if read.text is None:
+        print(
+            f"[close] forced close: `investigation.md` could not be read ({read.refusal}); "
+            f"closing the host's own verdict off an empty document rather than dead-lettering "
+            f"the run",
+            file=sys.stderr,
+        )
+        return ""
+    return read.text
+
+
+def _overrule_unreadable_companion(
+    deps: AgentDeps, read: CompanionRead, disposition: str, *,
+    validator: ArtifactValidator, evidence: str | None,
+) -> CloseResult:
+    """The model's close over a companion the close could not read: committed as the review
+    that cannot run it is (`challenge_gate.review_cannot_run`) — the host's `unresolved`, the
+    record naming what was under review and why nothing could judge it. The same commit the
+    reviewed site makes for a projector that cannot project, minus the companion-derived
+    fields: there is no body to carry receipts or baseline rows from."""
+    verdict = challenge_gate.review_cannot_run(
+        deps, read.refusal or "investigation.md could not be read",
+    )
+    fields = _CloseFields(
+        outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail, material=(),
+        turns_used=verdict.turns_used, failure_kind=verdict.failure_kind,
+    )
+    return _commit(
+        deps, verdict.disposition, fields, _record_dict(verdict, disposition, deps, reviewed=True),
+        validator=validator, evidence=evidence,
+    )
+
+
 def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> None:
     """`unresolved` (#923) has exactly one legal caller — the driver's own forced close — and
     exactly one illegal spelling for that caller to reach for instead. Both refusals sit at
@@ -671,7 +720,7 @@ def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> N
 
 
 def _refuse_if_entry_price_is_owed(
-    read: CompanionRead, disposition: str, *, forced: bool = False,
+    text: str, disposition: str, *, forced: bool = False,
 ) -> CompanionBody:
     """Collect the structural price this close's KEYWORD owes, refuse if it is unpaid, and
     hand back the PARSED `investigation.md` the price was read off.
@@ -695,40 +744,28 @@ def _refuse_if_entry_price_is_owed(
     goes through the OWNER's `_DISPOSITION_GATES` and nothing in this module is keyed on a
     disposition, so a fourth priced keyword is a row there rather than a branch here.
 
-    Fails CLOSED on both ways the check can fail to happen. COULD NOT LOOK (`read.fault`) is a
-    refusal: every close reads this file, so an EACCES, an EIO or a run dir that is not a
-    directory reaches this gate, and there the empty text would mean "this gate did not run",
-    waiving `benign`'s entire price on an I/O fault — and `false-positive` fails closed over an
-    empty read where `benign` fails open, so swallowing would leave the two priced keywords
-    disagreeing about what a fault means. And the parse is wrapped here because this gate
-    parses a file it did not write — an imported run dir, a replayed fixture, a hand edit.
-    Either fault would otherwise leave the close as a traceback rather than a refusal.
+    `text` is the close's one reading, already known to be a document (the close decides a
+    companion that could not be read before this gate; see `tools.CompanionRead`). NEVER
+    WRITTEN is `""`: an unwritten companion states no defect, names no entity check and
+    records no alerted entity, so it owes every priced keyword its whole price and the caller
+    denies with the same actionable text a blank `:T conclude` earns.
 
-    NEVER WRITTEN is neither: an unwritten companion states no defect, names no entity check
-    and records no alerted entity, so it owes BOTH priced keywords their whole price and the
-    caller denies with the same actionable text a blank `:T conclude` earns. Undecodable BYTES
-    are priced off the lenient decode (`read.lenient`): the file IS readable, and replacing the
-    bad byte leaves every readable `??` slot and unfulfilled contract still owed, where `""`
-    would waive the whole price over one byte.
+    Fails CLOSED when the parse fails: this gate parses a file it did not write — an imported
+    run dir, a replayed fixture, a hand edit — and an empty text would mean "this gate did not
+    run", waiving the whole price. The parse fault would otherwise leave the close as a
+    traceback rather than a refusal.
 
     `forced` is exempt from the PARSE fault, on the terms the driver's own forced-close comment
-    sets and the two document gates above already honour: the framework's close has no model
-    left to repair a document with, so a refusal there ends the run with NO report.md and
+    sets and the two document gates already honour: the framework's close has no model left
+    to repair a document with, so a refusal there ends the run with NO report.md and
     dead-letters it at persist — worse than publishing a disposition off a companion nothing
-    could read. It is exempt from the parse alone, never from the PRICE: an unparseable
+    could parse. It is exempt from the parse alone, never from the PRICE: an unparseable
     document yields the empty body, which owes every priced keyword its whole price, so a forced
     close of a priced keyword is still refused for what it did not pay. (`unresolved`, the one
     disposition forced today, owes nothing and commits.)
     """
-    if read.fault is not None:
-        raise ModelRetry(
-            f"close blocked: `investigation.md` could not be read ({read.fault}), so the entry "
-            f"price your disposition may owe could not be checked. This is a fault in the run "
-            f"dir, not something to conclude around — a close is not permitted while the gate "
-            f"cannot look."
-        )
     try:
-        companion, _warnings = parse_dense_companion(read.lenient)
+        companion, _warnings = parse_dense_companion(text)
     except Exception as exc:
         if not forced:
             raise ModelRetry(

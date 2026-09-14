@@ -14,7 +14,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import read_text_utf8, write_guarded
+from defender._io import TEXT_READ_ERRORS, read_plain, read_text_utf8, write_guarded
 from .. import permission
 
 # The SAME byte ruler the artifact bounds are measured with — a write tool that reports
@@ -47,60 +47,42 @@ class CompanionRead:
     price gate decoded with replacement and collected the price, the review decoded strictly
     and failed the run over the byte the price gate had already read past.
 
-    THE THREE ANSWERS A READ CAN GIVE, each a different thing to a gate:
+    THE THREE ANSWERS A READ CAN GIVE:
 
-      * NEVER WRITTEN — `text == ""`, `lenient == ""`, no fault. Not an error: an unwritten
-        companion has no repair window and nothing to validate, and it owes every priced
-        keyword its whole price.
-      * COULD NOT LOOK — `fault` names the I/O error. The structure gates fail OPEN on it (H7:
-        an unrelated read fault must not manufacture an unclosable run); the price gate fails
-        CLOSED (a gate that cannot look must not report clean).
-      * DOES NOT DECODE — `text is None`, no fault, `lenient` carries the bytes with the bad
-        ones replaced. The structure gates fail OPEN here too (#836: a replacement character
-        mid-header would make the validator report a broken block nobody wrote); the price gate
-        and the review work over `lenient` — the file IS readable, and replacing one byte leaves
-        every readable slot and receipt exactly where it was. `append_block` refuses an
-        undecodable document on the way in, so this is only ever a file that arrived some other
-        way.
+      * NEVER WRITTEN — `text == ""`. Not an error: an unwritten companion has no repair window
+        and nothing to validate, and it owes every priced keyword its whole price.
+      * READ — `text` is the document, decoded strictly with universal newlines, exactly as
+        `Path.read_text` would have handed it to the gates that used to read for themselves.
+      * COULD NOT BE READ — `text is None` and `refusal` says why: an I/O fault (EACCES, EIO), a
+        non-plain entry at the name (a symlink, a hard link, a directory, a fifo — the read
+        goes through `_io.read_plain`, the guarded read every artifact in the box-writable tree
+        takes, so a planted entry is refused at the open rather than followed or blocked on),
+        or bytes that are not UTF-8. ONE answer for all of them, because every gate answers it
+        the same way: the per-request window derivation is empty (fail open — a wedged run is
+        the worse failure), and the close cannot judge a document it cannot read, so the MODEL's
+        close is overruled to the host's `unresolved` as a review that cannot run and the HOST's
+        forced close proceeds off an empty body (`unresolved` owes nothing and is not
+        reviewed). No gate reads a lenient decode: replacing a bad byte and judging the rest
+        would let a confident disposition commit against a document the validator never
+        checked. `append_block` refuses undecodable bytes on the way in, so an undecodable
+        companion only ever arrived some other way (an import, a hand edit)."""
 
-    Both decodes are of the SAME bytes, read once; `lenient == text` whenever `text` is not
-    None."""
-
-    #: The document decoded strictly, `""` when never written, `None` when its bytes do not
-    #: decode or could not be read.
+    #: The document, `""` when never written, `None` when it could not be read.
     text: str | None
-    #: The same bytes decoded with replacement — `""` when never written or unreadable.
-    lenient: str
-    #: The I/O fault, when the file exists but could not be read.
-    fault: str | None = None
-
-
-def _universal_newlines(text: str) -> str:
-    """What `Path.read_text` does on the way in and `bytes.decode` does not: `\r\n` and `\r`
-    become `\n`, so a document read as bytes tokenizes exactly as one read as text."""
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+    #: Why it could not be read — set exactly when `text is None`.
+    refusal: str | None = None
 
 
 def read_companion(deps: AgentDeps) -> CompanionRead:
-    """The one read. Never raises — each gate answers the fault its own way (see
-    `CompanionRead`), and the read is taken on EVERY model request (`prepare=`), where a raise
-    would be a wedge."""
-    p = _investigation_path(deps)
+    """The one read. Never raises — the read is taken on EVERY model request (`prepare=`),
+    where a raise would be a wedge — and never logs: the close's refusal and the forced
+    close's own log name the reason where it is acted on, not once per request."""
     try:
-        raw = p.read_bytes()
+        return CompanionRead(text=read_plain(_investigation_path(deps)))
     except FileNotFoundError:
-        return CompanionRead(text="", lenient="")
-    except OSError as exc:
-        print(f"[tools] investigation.md could not be read: {exc!r}", file=sys.stderr)
-        return CompanionRead(text=None, lenient="", fault=exc.strerror or str(exc))
-    lenient = _universal_newlines(raw.decode("utf-8", errors="replace"))
-    try:
-        return CompanionRead(text=_universal_newlines(raw.decode("utf-8")), lenient=lenient)
-    except UnicodeDecodeError as exc:
-        print(f"[tools] investigation.md is not valid UTF-8 ({exc}); the structure gates treat "
-              f"it as unreadable and the price gate reads it with the bad bytes replaced",
-              file=sys.stderr)
-        return CompanionRead(text=None, lenient=lenient)
+        return CompanionRead(text="")
+    except TEXT_READ_ERRORS as exc:
+        return CompanionRead(text=None, refusal=str(exc))
 
 
 def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
@@ -147,22 +129,13 @@ def committed_document_refusal(read: CompanionRead) -> str | None:
     have to agree about what "cannot look" means. Splitting them put that agreement in two
     files the first time and it did not survive the trip.
 
-    THE READ IS THE STRICT ONE, and that is the whole subtlety. Two conditions look alike from
-    the close and are not:
-
-      * the document DECODES and does not validate — the author wrote something malformed,
-        the close is what publishes it, and it is refused (#961);
-      * the document's BYTES do not decode — nothing can be derived from it at all. That is
-        H7's condition, and #836 settled it: fail OPEN, because converting an unrelated read
-        fault into an unclosable run is the wedge class that mechanism exists to remove.
-
-    Judging the lenient decode would collapse the two and answer the second with the first:
-    the replacement character lands mid-header, the validator reports a broken block the
-    author never wrote, and the run can no longer close. So `read.text` (strict, `None` when
-    the bytes do not decode) is what keeps this gate's `None` meaning "publishable" rather
-    than "unreadable". A document that never decodes is still gated on the way IN —
-    `append_block` refuses it for its own pre-existing reason — so nothing gated can create
-    one.
+    Judges `read.text` and nothing else. A document that DECODES and does not validate is the
+    author's malformed document, the close is what publishes it, and it is refused (#961). A
+    document that could not be read — `text is None` — is not this gate's question: the close
+    decides that case ONCE, before any gate, as a review that cannot run (see `CompanionRead`),
+    so this returns `None` for it and is never what stands between such a document and a
+    commit. No lenient decode is judged here: a replacement character mid-header would make
+    the validator report a broken block nobody wrote (#836).
 
     ABSENCE is not a fault: a close on a run with no companion is the entry-price gate's
     question, not this one's, and it asks it separately."""

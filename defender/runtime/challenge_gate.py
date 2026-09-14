@@ -346,6 +346,25 @@ def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
     )
 
 
+def review_cannot_run(deps: Any, reason: str) -> GateVerdict:
+    """The verdict for a close whose companion could not be read at all (`tools.CompanionRead`
+    with no text: an I/O fault, a planted non-plain entry at the name, bytes that are not
+    UTF-8). Decided by the close BEFORE any gate or stage, and reported exactly as the
+    projector arm reports a body it cannot project from — the host's `unresolved`,
+    `CAUSE_REVIEW_INCOMPLETE`, failure kind `error`, the reason on the record — because it is
+    the same fact: a review that cannot run. The gate used to reach this on its own strict
+    second read of the file; now the close's one read is what says the document cannot be
+    judged, and this is where that answer becomes a verdict.
+
+    The round's traces get their incomplete rows, as every other early end of a round does, so
+    a review that never started is not left reading as if no round had been attempted."""
+    from .close_tool import STAGE_ERROR
+
+    state = ReviewState.of(deps)
+    _mark_traces_incomplete(deps, state.turns, reason)
+    return _fail("companion", StageOutcome(None, STAGE_ERROR, reason), turns_used=state.turns)
+
+
 async def _dispatch(
     role: str, stages: Any, render: Callable[[str], str], bounds: Bounds,
 ) -> StageOutcome:

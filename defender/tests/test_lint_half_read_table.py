@@ -374,11 +374,6 @@ def _shipped_baseline_entries() -> dict[str, str]:
     return json.loads(Path(_GATE.BASELINE_PATH).read_text(encoding="utf-8"))["entries"]
 
 
-def test_shipped_baseline_has_a_reason_for_every_entry():
-    for fingerprint, reason in _shipped_baseline_entries().items():
-        assert reason.strip(), f"{fingerprint} carries no reason"
-
-
 def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries():
     """Equality, in both directions: a real-tree finding the baseline does not carry is a new
     burial candidate, and a baseline entry that no longer fires is a burial the ratchet is

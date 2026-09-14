@@ -85,7 +85,7 @@ it, on turn count and raised-ask state no review role can see:
 | `stands` | the drafted disposition commits — a confident close under "the story settled", an `inconclusive` one under "the ceiling claim was examined" | `outcome: stands` |
 | `challenged` | **nothing commits** — the ask comes back as discriminating material and the agent gets another ANALYZE/GATHER turn (`EXTRA_TURN_BOUND = 2`) | not written yet |
 | `forced-inconclusive` | a gap with no measurable ask, a repeat ask that bought nothing, or the turn budget spent — the host's own verdict replaces the drafted one, whichever it was | `disposition: unresolved` |
-| `forced-inconclusive` + `failure_kind` | **fail closed** — a stage raised, timed out, replied unreadably, or no reviewer was bound | `disposition: unresolved`, `failure_kind: timeout\|error\|unreadable` |
+| `forced-inconclusive` + `failure_kind` | **fail closed** — a stage raised, timed out, replied unreadably, no reviewer was bound, or the close could not read `investigation.md` at all (not UTF-8, an I/O fault, a planted entry at the name) | `disposition: unresolved`, `failure_kind: timeout\|error\|unreadable` |
 
 One rule for every reviewed disposition: an unexamined claim never commits as
 the model's claim. `inconclusive` is overridden by the same arms, to the same

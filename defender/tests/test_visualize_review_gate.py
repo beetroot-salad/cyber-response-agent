@@ -236,6 +236,14 @@ def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_
     second = html.split("attempt 2", 1)[1]
     assert "not reviewed" in second
     assert "rv-stands" not in second, "the bypassed attempt must not claim a review held"
+    # The per-attempt row chooses its note the way the run-level strip does: neither record
+    # says whether a review ran, so the bypassed row is a PRE-record row, and today's bypass
+    # set — "every disposition but unresolved" — must not sit beside an `inconclusive` that
+    # bypassed by the set of its day.
+    assert "predates the close saying whether a review ran" in second
+    assert "which commits immediately" not in second, (
+        "a pre-record row was annotated with today's bypass set"
+    )
 
 
 def test_the_headline_badge_does_not_claim_a_review_that_never_ran(tmp_path):

@@ -61,20 +61,19 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
     worktree_package_guard,
 )
 from defender.tests._spec992 import (
-    CEILING_EXAMINED,
-    CONFIDENT,
-    CONFIDENT_QUESTION,
-    GAP,
-    UNRESOLVED,
-    SHIPPED_CAUSES,
     bounds,
     ceiling_companion,
+    CEILING_EXAMINED,
     close_with,
+    CONFIDENT,
+    CONFIDENT_QUESTION,
     deps_over,
     frontmatter,
+    GAP,
     gap,
     holds,
     host_text,
+    non_utf8_companion,
     priced_block,
     raises,
     receipt_note_lines,
@@ -85,10 +84,12 @@ from defender.tests._spec992 import (
     report_parts,
     report_text,
     review_state,
+    SHIPPED_CAUSES,
     sleeps,
     sparse_companion,
     trace_files,
     trace_rows,
+    UNRESOLVED,
 )
 
 _ALL_ROLES = ("support", "ablation", "composer")
@@ -296,6 +297,10 @@ def _faults() -> list[tuple[str, Any, Any, Any, str]]:
          recording(json.dumps({"finding": "gap", "review": "r", "ask": ""})), None, UNREADABLE),
         ("partially-bound-ablation-dispatched", None,
          recording(holds(), unbound=("ablation",)), None, STAGE_ERROR),
+        # A5: the close's ONE read cannot decode the companion, so the review cannot run —
+        # decided ahead of every gate and stage, reported as the projector arm reports a
+        # body it cannot project from. The bundle is sound; no stage is called.
+        ("companion-not-utf8", non_utf8_companion(), recording(holds()), None, STAGE_ERROR),
     ]
 
 
@@ -303,9 +308,9 @@ def test_machinery_failure_overrides_review_incomplete(tmp_path):
     """Each way the review can fail on an `inconclusive` close — an unbound bundle (`None` and
     an empty `ReviewStages()`), a stage that raises, a stage that times out, an empty lens
     reading, an unreadable composer reply (not JSON, a finding outside {holds, gap}, `ask: ""`),
-    and a partially bound bundle whose unbound role is dispatched (§7 FK-2) — fails CLOSED
-    exactly as it does on a
-    confident close: `disposition: unresolved`, `outcome: forced-inconclusive`, `cause:
+    a partially bound bundle whose unbound role is dispatched (§7 FK-2), and a companion the
+    close's one read cannot decode (A5: a review that cannot run, decided ahead of every
+    stage) — fails CLOSED exactly as it does on a confident close: `disposition: unresolved`, `outcome: forced-inconclusive`, `cause:
     CAUSE_REVIEW_INCOMPLETE`, the stage's `failure_kind` in both the report frontmatter and the
     record, the record still naming `inconclusive` as what was under review, and an
     `incomplete` row on every role's trace; the whole review fails as a unit (a composer fault

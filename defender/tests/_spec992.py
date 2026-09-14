@@ -186,13 +186,10 @@ def sparse_companion(*rows: str, disposition: str = GAP) -> str:
 def non_utf8_companion() -> bytes:
     """The golden with ONE undecodable byte in its prose, outside every invlang fence.
 
-    Real input through the real primitive: the one in-process input on which a strict and a
-    lenient decode of the companion differ. The close reads the file ONCE and decodes it
-    leniently for the price gate and the review alike (`tools.read_companion`), so the fences
-    are priced untouched and the review judges the same body — the divergence this fixture
-    used to drive (the gate's own strict second read refusing what the price gate had read
-    past) no longer exists, and what it now discriminates is that M4's receipts come from that
-    one parse."""
+    Real input through the real primitive: the companion the close's one read
+    (`tools.read_companion`, over `_io.read_plain`) cannot decode. No gate reads a lenient
+    decode of it — the close decides an unreadable companion once, ahead of every gate, as a
+    review that cannot run — so this is a row of d14's machinery-failure arms, not d18's."""
     raw = (GOLDEN_V2SSHD / "investigation.md").read_bytes()
     marker = b"Alert `v2-sshd-success-after-failures`"
     assert marker in raw, "the golden's prose moved; re-anchor"
@@ -498,13 +495,6 @@ def noted_companion(note_len: int) -> str:
     return sparse_companion(f"state=query-failed ref=l-002 note={note_text(note_len)}")
 
 
-def lenient_text(raw: bytes) -> str:
-    """The bytes as the close reads them for the price gate and the review — `errors="replace"`,
-    the decode `tools.read_companion` puts in `lenient` — so a scenario can name the parse
-    M4's receipts come from."""
-    return raw.decode("utf-8", errors="replace")
-
-
 #: How many `query-failed` leads the wide companion declares — enough that the block cap, not
 #: the lead count, bounds how many receipts pay.
 _WIDE_LEAD_COUNT = 16
@@ -578,7 +568,6 @@ __all__ = [
     "gap",
     "holds",
     "host_text",
-    "lenient_text",
     "non_utf8_companion",
     "normalized",
     "note_text",

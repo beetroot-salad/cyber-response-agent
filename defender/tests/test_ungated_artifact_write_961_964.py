@@ -166,23 +166,51 @@ def test_the_frameworks_forced_close_is_exempt(tmp_path):
     assert (run / "report.md").is_file(), "the framework must always be able to close"
 
 
-def test_an_undecodable_document_still_closes(tmp_path):
-    """H7's condition, and the line the close's structure check has to keep straight.
+def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_path):
+    """H7's condition, and the line the close has to keep straight.
 
-    A document that DECODES and does not validate is refused. A document whose BYTES do not
-    decode is a different thing — nothing can be derived from it at all — and #836 settled
-    that one: fail OPEN, because turning an unrelated read fault into an unclosable run is the
-    wedge that mechanism exists to remove.
+    A document that DECODES and does not validate is refused — the author's malformed
+    document, repairable. A document that cannot be READ is a different thing — nothing can
+    be derived from it — and it must not manufacture an unclosable run (#836's wedge class),
+    nor may the model's verdict commit against it: no gate ever looked at what the
+    disposition claims to conclude. So the close decides it ONCE, ahead of every gate, as
+    the review that cannot run it is — the host's `unresolved` with the typed failure kind —
+    for every way the read can fail: bytes that are not UTF-8, a planted entry at the name
+    (a directory, a fifo that would block a plain read forever), an I/O fault.
 
-    Reading leniently would collapse the two and answer the second with the first: the
-    replacement character lands mid-header and the validator reports a broken block nobody
-    wrote."""
-    deps, run = main_deps(tmp_path)
-    (run / "investigation.md").write_bytes(b"```invlang\n:R attr\xff\xfe updates\n```\n")
+    Three shapes through the real reader, each asserting the same commit."""
+    import os
+    from defender._vocab import HOST_ONLY_DISPOSITION
+    from defender.runtime.close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR
+    from defender.tests._spec992 import frontmatter, record
 
-    _close(deps, "inconclusive")
+    def plant_undecodable(path):
+        path.write_bytes(b"```invlang\n:R attr\xff\xfe updates\n```\n")
 
-    assert (run / "report.md").is_file()
+    def plant_directory(path):
+        path.mkdir()
+
+    def plant_fifo(path):
+        os.mkfifo(path)
+
+    for name, plant in [
+        ("undecodable", plant_undecodable), ("directory", plant_directory), ("fifo", plant_fifo),
+    ]:
+        deps, run = main_deps(tmp_path / name)
+        plant(run / "investigation.md")
+
+        result = _close(deps, "malicious")
+
+        assert result.outcome == FORCED_INCONCLUSIVE, name
+        assert result.failure_kind == STAGE_ERROR, name
+        fm = frontmatter(run)
+        assert fm["disposition"] == HOST_ONLY_DISPOSITION, (name, fm)
+        assert fm["cause"] == CAUSE_REVIEW_INCOMPLETE, (name, fm)
+        rec = record(run, 1)
+        assert rec["reviewed_disposition"] == "malicious", (name, rec)
+        assert rec["reviewed"] is True, "a review that could not run was still attempted"
+        assert rec["failure_kind"] == STAGE_ERROR, (name, rec)
+        assert "\ncompanion: " in rec["detail"], (name, rec)  # framed, like every stage detail
 
 
 def test_the_price_gate_still_answers_first_for_what_it_prices(tmp_path):
@@ -209,55 +237,68 @@ def test_the_price_gate_still_answers_first_for_what_it_prices(tmp_path):
 
 def test_one_read_answers_every_gate(tmp_path):
     """The close takes ONE reading of `investigation.md` and hands it to every gate, so the
-    gates cannot disagree about which bytes they judged — and each still answers a read that
-    could not fully look the way its own rule says (H7 / #836 / the price gate's fail-closed).
+    gates cannot disagree about which bytes they judged — and the reading has exactly three
+    answers, of which only one reaches a gate as a document.
 
-    Three inputs, one reader, and what each gate sees:
+      * never written — `""`: the repair window is empty, the structure check is `None`, and
+        the price gate owes every priced keyword its whole price;
+      * read — the text, with universal newlines, exactly as `Path.read_text` hands it: a
+        document with CRLF endings reaches every gate as it always did;
+      * could not be read — `None`, with the refusal: bytes that do not decode, a non-plain
+        entry at the name, an I/O fault. ONE answer, not three, because no gate treats them
+        apart: the per-request window falls open (a wedged run is the worse failure), and the
+        close decides the rest before any gate (`test_an_unreadable_document_closes_
+        unresolved_not_the_models_verdict`). No lenient decode exists for a gate to read.
 
-      * never written — the repair window is empty, the structure check is `None`, and the
-        price gate gets `""`, which owes every priced keyword its whole price;
-      * bytes that do not decode — the strict text is `None` (both structure gates fail OPEN),
-        the lenient text carries the replacement character in place of the bad byte, and the
-        price gate and the review both work off THAT — the file is readable, and one bad byte
-        does not waive a price or fail a review the same bytes had already paid for;
-      * could not be read at all — `fault` names it; the structure gates fail open on the
-        `None` text and the price gate refuses on the fault.
-    """
+    The read goes through the guarded primitive every artifact in the box-writable tree takes,
+    so a fifo planted at the name is refused at the open rather than blocked on: the arm
+    enforces its own bound, since a reader that hangs would wedge CI instead of failing."""
+    import os
+    import signal
+
+    from defender._io import ALIAS_READ_REFUSAL
     from defender.runtime.tools import (
         committed_document_refusal, flagged_in, read_companion,
     )
 
     deps, run = main_deps(tmp_path)
     absent = read_companion(deps)
-    assert (absent.text, absent.lenient, absent.fault) == ("", "", None)
+    assert (absent.text, absent.refusal) == ("", None)
     assert (flagged_in(absent), committed_document_refusal(absent)) == ((), None)
+
+    (run / "investigation.md").write_bytes(_CLEAN_DOC.replace("\n", "\r\n").encode("utf-8"))
+    assert read_companion(deps) == read_companion(deps)
+    assert read_companion(deps).text == _CLEAN_DOC
 
     (run / "investigation.md").write_bytes(b"```invlang\n:R attr\xff\xfe updates\n```\n")
     undecodable = read_companion(deps)
-    assert (undecodable.text, undecodable.fault) == (None, None)
-    assert undecodable.lenient == "```invlang\n:R attr\ufffd\ufffd updates\n```\n"
-    assert flagged_in(undecodable) == (), "an undecodable document is no window (fail open)"
-    assert committed_document_refusal(undecodable) is None, "H7: fail open, not a broken block"
+    assert undecodable.text is None
+    assert "utf-8" in undecodable.refusal
+    assert flagged_in(undecodable) == (), "an unreadable document is no window (fail open)"
+    assert committed_document_refusal(undecodable) is None, "not this gate's question"
 
     (run / "investigation.md").unlink()
     (run / "investigation.md").mkdir()
-    unreadable = read_companion(deps)
-    assert (unreadable.text, unreadable.lenient) == (None, "")
-    assert unreadable.fault, "an I/O fault is named, so the price gate can refuse on it"
-    assert (flagged_in(unreadable), committed_document_refusal(unreadable)) == ((), None)
+    squatted = read_companion(deps)
+    assert squatted.text is None
+    assert ALIAS_READ_REFUSAL in squatted.refusal
+    assert (flagged_in(squatted), committed_document_refusal(squatted)) == ((), None)
 
+    (run / "investigation.md").rmdir()
+    os.mkfifo(run / "investigation.md")
 
-def test_a_read_as_bytes_tokenizes_like_a_read_as_text(tmp_path):
-    """`Path.read_text` folds `\r\n` and `\r` to `\n` on the way in; a bytes read does not,
-    and the one reader now reads bytes so both decodes are of the same bytes. The fold is
-    reapplied, so a document with CRLF endings reaches every gate as it always did."""
-    from defender.runtime.tools import read_companion
+    def _timed_out(signum, frame):
+        raise AssertionError("read_companion blocked on a fifo planted at investigation.md")
 
-    deps, run = main_deps(tmp_path)
-    (run / "investigation.md").write_bytes(_CLEAN_DOC.replace("\n", "\r\n").encode("utf-8"))
-    read = read_companion(deps)
-    assert read.text == _CLEAN_DOC
-    assert read.lenient == _CLEAN_DOC
+    previous = signal.signal(signal.SIGALRM, _timed_out)
+    signal.alarm(5)
+    try:
+        planted = read_companion(deps)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+    assert planted.text is None
+    assert ALIAS_READ_REFUSAL in planted.refusal
 
 
 def test_a_committed_unfenced_header_does_not_make_the_run_unclosable(tmp_path):
