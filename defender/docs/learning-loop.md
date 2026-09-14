@@ -329,7 +329,7 @@ $DEFENDER_EPISODES_BASE/<episode_id>/
     judge/<n>.yaml            # one per judge draw
   runs/                       # the siblings' live run dirs (disposable)
   judge.yaml                  # written last; its presence certifies the pass
-  learning.html                # the episode page (#1025) — rendered after judge.yaml, from the episode dir alone
+  learning.html               # the episode page (#1025) — rendered after judge.yaml, from the episode dir alone
 
 defender/learning/_pending/{findings,consumed}.jsonl + findings.held_report.log
 defender/lessons/*.md         # committed lessons read at PLAN time

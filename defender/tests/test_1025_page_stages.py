@@ -250,6 +250,30 @@ def test_1025_a_steps_ended_at_sorts_before_its_started_at(tmp_path):
     assert "9m00s" in page.text
 
 
+def test_1025_a_repeated_steps_own_wall_excludes_an_inverted_sibling_entry(tmp_path):
+    """A repeated step's OWN wall (its first entry's start to its last entry's end, J15) is
+    computed the same way the header wall already is (p5, the test above): an inverted entry
+    among the repeats contributes to neither side of min(start)/max(end) for the row's own
+    span, not only for the page-wide header. A buggy filter that excludes an inverted entry's
+    pair from the header aggregate but not from this row's own aggregate would let one bad
+    entry stretch a repeated step's displayed wall past what its trustworthy entries alone
+    cover.
+    """
+    ep = E.sample_episode(tmp_path)
+    steps = E.six_steps()
+    steps.append(("staging", "2026-09-09T10:10:00Z", "2026-09-09T10:09:00Z"))
+    E.write_timing(ep.dir, steps)
+    page = render(ep)
+    timing = page.text_of("stage-timing")
+    row = timing[timing.index("staging"):timing.index("review")]
+    assert "2 entries" in row, row
+    # The clean single staging entry alone (10:02–10:03Z) is 1m00s. If the inverted second
+    # entry's own timestamps (10:09–10:10Z) leaked into the span, min(start)=10:02 and
+    # max(end)=10:09 would read 7m00s instead.
+    assert "1m00s" in row, row
+    assert "7m00s" not in row, row
+
+
 def test_1025_what_the_header_wall_covers(tmp_path):
     """With `timing.json` present the header wall is labelled as the launcher's wall from the
     first step's `started_at` to the last step's `ended_at` (11m00s) — the label says it
@@ -546,6 +570,27 @@ def test_1025_six_transcript_streams_and_one_set_of_controls(tmp_path):
         assert holder.find_all(cls="tx-search") == [control], "a control outside its stream"
 
 
+def test_1025_a_hostile_wire_logs_trace_stem(tmp_path):
+    """A `wire_logs/*_trace.jsonl` stem built to break out of its `id="tx-…"` attribute reaches
+    the page unexploited: `esc()` HTML-escapes the quote, so the whole hostile stem stays
+    contained inside the id's own attribute value — the stream's `<div>` carries no separate
+    `onmouseover` attribute, and the stream still renders its content (J5, adversary finding 2).
+    Unlike a label or a gather-summary stem, a trace stem is not grammar-gated through
+    `_safe_id`; this test pins today's escape-only defense so a regression there is caught even
+    without that gate.
+    """
+    ep = E.sample_episode(tmp_path)
+    stem = 'questioner_hostile" onmouseover=alert(1) x="'
+    E.write_trace(ep.dir, stem, reply="THE HOSTILE STREAM'S REPLY")
+    page = render(ep)
+    expected_id = f"tx-{stem}_trace"
+    node = page.by_id.get(expected_id)
+    assert node is not None, (expected_id, page.ids_with("tx-"))
+    assert "onmouseover" not in node.attrs, node.attrs
+    assert set(node.attrs) == {"id", "class"}, node.attrs
+    assert "THE HOSTILE STREAM'S REPLY" in node.text()
+
+
 # ---------------------------------------------------------------------------------------
 # J15 / J17
 # ---------------------------------------------------------------------------------------
@@ -570,13 +615,17 @@ def test_1025_timing_json_lists_the_same_step_twice_or_out_of_launch_order(tmp_p
 
 
 def test_1025_a_result_event_that_is_forged_or_misplaced(tmp_path):
-    """A result event with a string, NaN or negative `total_cost_usd` reads "unusable result
-    event" with no dollar figure — never coerced, never a raise; only the LAST row is a result
-    event, so an earlier `type: result` row followed by another row is not one and the run
-    reads "no result event" (J17).
+    """A result event with a string, `None`, NaN or negative `total_cost_usd` reads "unusable
+    result event" with no dollar figure — never coerced, never a raise; only the LAST row is a
+    result event, so an earlier `type: result` row followed by another row is not one and the run
+    reads "no result event" (J17). `None` is its own case, not just a variant of the string arm:
+    `isinstance(None, (int, float))` is `False` for the same reason the string arm is, but a
+    caller that gated on `cost is not None` first (a plausible near-miss) would let this one
+    through to a bare arithmetic op on `None` — the spec adversary's own probe caught exactly
+    this shape (J17 finding, PR #1042).
     """
     ep = E.sample_episode(tmp_path)
-    for forged in ("12.5", math.nan, -3.0):
+    for forged in ("12.5", None, math.nan, -3.0):
         E.write_tool_trace(ep.run(E.GRADED_WORLD), [E.result_event(cost=forged)])
         page = render(ep)
         runs = page.text_of("stage-runs")
@@ -590,6 +639,22 @@ def test_1025_a_result_event_that_is_forged_or_misplaced(tmp_path):
     runs = render(ep).text_of("stage-runs")
     assert "no result event" in runs, runs
     assert "$7.77" not in runs, runs
+
+
+def test_1025_a_result_event_with_no_total_cost_usd_key_at_all(tmp_path):
+    """A result event that never carries `total_cost_usd` (not merely a null value — the key
+    itself absent, as a truncated or hand-rolled writer might leave it) reads "unusable result
+    event" the same as every other unusable shape, through the same `.get(...)` default rather
+    than a `KeyError` (J17 finding, PR #1042).
+    """
+    ep = E.sample_episode(tmp_path)
+    row = E.result_event()
+    del row["total_cost_usd"]
+    E.write_tool_trace(ep.run(E.GRADED_WORLD), [row])
+    page = render(ep)
+    runs = page.text_of("stage-runs")
+    assert "unusable result event" in runs, runs
+    assert f"${S.run_cost[E.CONTROL]:.4f}" in runs
 
 
 def test_1025_a_symlinked_tool_trace_in_a_run_dir(tmp_path):

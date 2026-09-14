@@ -350,6 +350,26 @@ def test_1025_cli_argument_names_an_existing_regular_file_not_a_directory(tmp_pa
     assert not ep.page.exists()
 
 
+def test_1025_the_main_guard_wires_the_process_own_argv_not_a_hardcoded_empty_list(tmp_path):
+    """Run as a real subprocess (`python visualize_episode.py <dir>`), the `if __name__ ==
+    "__main__"` line passes the process's own `sys.argv[1:]` to `main` — never a literal `[]` a
+    smoke-test snippet's copy/paste could leave behind. Every other CLI test in this suite drives
+    `main(argv)` in-process through `cli()` above, which imports the module and calls the
+    function directly — it cannot see the `__main__` guard line at all, hardcoded argv included;
+    only a real subprocess, argv and all, exercises it (spec adversary finding 3, PR #1042). A
+    hardcoded `main([])` is the discriminator here: given a real directory argument, it would
+    still call `main` with an empty list, and exit 1 as if no argument were given at all.
+    """
+    ep = E.sample_episode(tmp_path)
+    script = T.DEFENDER / "scripts" / "visualize" / "visualize_episode.py"
+    env = dict(os.environ, PYTHONPATH=str(T.DEFENDER.parent))
+    proc = subprocess.run([sys.executable, str(script), str(ep.dir)], env=env,
+                          capture_output=True, text=True, cwd=str(tmp_path))
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert proc.stdout.strip() == str(ep.page), (proc.stdout, proc.stderr)
+    assert ep.page.is_file()
+
+
 def test_1025_relative_and_trailing_slash_arguments(tmp_path, monkeypatch, capsys):
     """The page lands at `<episode_dir>/learning.html` for a cwd-relative path, a trailing
     slash and resolvable `..` segments alike; every link on the page is relative

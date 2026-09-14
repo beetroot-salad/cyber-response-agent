@@ -665,6 +665,21 @@ def test_1025_a_judge_trace_for_a_world_or_draw_the_record_lacks(tmp_path):
     assert f"tx-judge_{E.FAMILY}_0_trace" in page.by_id
 
 
+def test_1025_a_roster_labels_own_draw_past_a_small_fixed_bound(tmp_path):
+    """A roster label's OWN draw at a high index still renders its block and is never listed
+    as unattributed — membership is decided by `_stem_names_label`'s digit-only-remainder
+    check, not a `range(N)`-bounded set of literal stems that would silently misclassify every
+    draw at or past its own bound (O4).
+    """
+    ep = E.sample_episode(tmp_path)
+    E.write_trace(ep.dir, f"judge:{E.FAMILY}:50", usage=(100_000, 20_000), duration_ms=1000.0,
+                  prompt="A LATE FAMILY DRAW")
+    page = render(ep)
+    assert f"tx-judge_{E.FAMILY}_50_trace" in page.by_id
+    assert "A LATE FAMILY DRAW" in page.raw
+    assert "unattributed traces" not in page.text_of("sec-stages")
+
+
 def test_1025_a_run_directory_whose_name_is_not_episode_dash_label(tmp_path):
     """Every artifact dir under `runs/` gets a section (O5); one whose name does not decompose
     into `<episode_id>-<label>` is labelled by its full name and marked "not declared in the

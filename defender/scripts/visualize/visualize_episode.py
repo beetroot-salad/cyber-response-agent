@@ -212,11 +212,11 @@ def _read_staged(episode_dir: Path) -> _Record:
         rows = staging.read_staged(episode_dir)
     except staging.StagingRefused as bad:
         return _Record(present=True, error=f"staging record unreadable: {bad}")
-    # `read_staged` is `artifact_file`-screened against a PLANTED alias but still opens the
-    # plain file it confirms is there with a bare `read_text` — a permission-denied regular
-    # file (root ignores this; a real non-root run does not, #1025) reaches this call as an
-    # un-typed `OSError`/`PermissionError`, which is this record's own slot's business, never
-    # the whole page's.
+    # `read_staged` now screens through `read_guarded`, which folds a permission-denied regular
+    # file (root ignores this; a real non-root run does not, #1025) into `StagingRefused` above
+    # rather than letting it escape as a bare `OSError`/`PermissionError` — this arm is kept as
+    # a defensive backstop should that change, so this record's own slot still answers rather
+    # than the whole page's render.
     except OSError as bad:
         return _Record(present=True, error=f"staging record unreadable: {bad}")
     if not rows and not present:
@@ -785,7 +785,7 @@ def _finding_disposition(  # noqa: PLR0913, C901 — the enqueue's own subject/w
         if coord in unqueueable:
             return "unqueueable", unqueueable[coord]
         if coord in world_findings_by_coord:
-            return "world_author" if row_state != "family" else "world_author", None
+            return "world_author", None
         return "never_on_record", None
     if subject != "defender":
         if coord in unqueueable:
@@ -955,7 +955,7 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
     for draw in sorted(family_groups, key=lambda d: (isinstance(d, str), d)):
         outcome = _family_draw_outcome(episode_dir, draw)
         items = "".join(f'<div class="vd-family-item">{_uv(f.topic)}: {_uv(f.claim)}'
-                        f' <span class="vd-outcome">{esc(outcome)}</span></div>'
+                        f' <span class="vd-outcome">{_uv(outcome)}</span></div>'
                         for f in family_groups[draw])
         lede_parts.append(f'<div class="vd-family-draw">{items}</div>')
 
@@ -965,16 +965,16 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
 
     badge_word = getattr(grade, "family_outcome", None) or grade.verdict_word
     queued = grade.enqueued_rows + grade.world_enqueued_rows
-    lede_line = (f"{esc(grade.verdict_word)} · {queued} "
+    lede_line = (f"{_uv(grade.verdict_word)} · {queued} "
                 f"findings queued · {counts['withheld']} withheld")
     if counts["withheld"]:
         first_reason = next((f.reason for f in rows if f.disposition == "withheld"), None)
         if first_reason:
-            lede_line += f" ({esc(str(first_reason))})"
+            lede_line += f" ({_uv(first_reason)})"
     lede_parts.append(f'<div class="vd-lede">{lede_line}</div>')
 
-    badge = f'<span class="vd-badge">{esc(str(badge_word))}</span>'
-    meta = f'<span class="vd-meta">{esc(grade.episode_outcome)} · {esc(grade.verdict_word)}</span>'
+    badge = f'<span class="vd-badge">{_uv(badge_word)}</span>'
+    meta = f'<span class="vd-meta">{_uv(grade.episode_outcome)} · {_uv(grade.verdict_word)}</span>'
 
     measuring = {w.label for w in entries.values()
                 if w.row is not None and not w.row.get("ungradable")
@@ -998,7 +998,7 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
         f'<div class="vd-tile" id="vd-tile-1">{len(measuring)} of {len(graded)} graded '
         f'measuring · {contrasting} of {len(measuring)} contrast the control · verdict = '
         f'declared on {agree} of {len(measuring)} '
-        f'<span class="vd-word">{esc(grade.verdict_word)}</span>{verdict_note}</div>')
+        f'<span class="vd-word">{_uv(grade.verdict_word)}</span>{verdict_note}</div>')
 
     withheld_captions = []
     for w in entries.values():
@@ -1190,6 +1190,13 @@ def _trace_cost(episode_dir: Path, role_prefix: str) -> tuple[float, float, int,
         if role_prefix == Step.JUDGE and not agent.startswith("judge_"):
             continue
         total_calls += 1
+        # `artifact_file` (lstat) ahead of the read: `wire_logs/` sits under the episode dir, a
+        # tree a sibling box has an rw bind on (`judge.__init__._write_wire_log`'s own docstring
+        # names it), and `read_jsonl_rows_report` is the shared tolerant reader's own bare
+        # `is_file()` + `read_text` — unguarded on its own, exactly the pattern `_result_event`
+        # above already screens before calling it.
+        if not artifact_file(path):
+            continue
         rows, _bad = read_jsonl_rows_report(path)
         call_priced = False
         for row in rows:
@@ -1539,10 +1546,14 @@ def _render_stages(episode_dir: Path, manifest: dict[str, Any], grade: Any, timi
             if durations:
                 # The row's own wall is its FIRST entry's start to its LAST entry's end (J15) —
                 # never a sum, which double-counts a repeated step's own reported span.
+                # POSITIVE only — the same filter `header_walls` above already applies: an
+                # inverted entry's own pair is untrustworthy (its own cell already shows "—"
+                # for exactly this reason) and must widen or narrow neither aggregate, the
+                # row's own span included, not only the page-wide header (#1025 p5).
                 span_starts = [r["started_at"] for r in entries_for_step
-                              if _wall_between(r["started_at"], r["ended_at"]) is not None]
+                              if (_wall_between(r["started_at"], r["ended_at"]) or 0) > 0]
                 span_ends = [r["ended_at"] for r in entries_for_step
-                            if _wall_between(r["started_at"], r["ended_at"]) is not None]
+                            if (_wall_between(r["started_at"], r["ended_at"]) or 0) > 0]
                 wall_text = fmt_duration(_wall_span(span_starts, span_ends))
             else:
                 wall_text = "—"
@@ -1700,6 +1711,10 @@ def _comparator_cost(episode_dir: Path) -> tuple[float, int]:
     if not artifact_dir(wire):
         return 0.0, 0
     for path in sorted(wire.glob("comparator_*_trace.jsonl")):
+        # `artifact_file` ahead of the read — see `_trace_cost`'s own comment: `wire_logs/` is
+        # a tree a sibling box can write, and the shared tolerant reader below does not screen.
+        if not artifact_file(path):
+            continue
         rows, _bad = read_jsonl_rows_report(path)
         for row in rows:
             if row.get("kind") == "response" and isinstance(row.get("usage"), dict) \
@@ -1710,17 +1725,22 @@ def _comparator_cost(episode_dir: Path) -> tuple[float, int]:
 
 
 def _unattributed_traces(episode_dir: Path, entries: dict[str, WorldEntry]) -> list[str]:
+    """Every `judge_*_trace.jsonl` stem that names no roster label or `family` (O4: its cost is
+    still priced into the judge row; only the transcript BLOCK is withheld). Membership goes
+    through `_stem_names_label`, the same digit-only-remainder check `_transcript_blocks_for_step`
+    uses to route a KNOWN label's own draws — not a `range(N)`-bounded set of literal stems,
+    which silently misclassified every draw at or past its bound as unattributed."""
     wire = episode_dir / "wire_logs"
     if not artifact_dir(wire):
         return []
-    known = {f"judge_{label}_{n}" for label in [*entries, "family"] for n in range(50)}
+    known_labels = [*entries, "family"]
     out = []
     for path in sorted(wire.glob("judge_*_trace.jsonl")):
         if "_framed_trace" in path.name:
             continue
-        stem = path.name[: -len("_trace.jsonl")]
-        if stem not in known:
-            out.append(path.name[: -len(".jsonl")])
+        full_stem = path.name[: -len(".jsonl")]
+        if not any(_stem_names_label(full_stem, label) for label in known_labels):
+            out.append(full_stem)
     return out
 
 
@@ -1740,18 +1760,27 @@ def _transcript_blocks_for_step(episode_dir: Path, step: str, episode_id: str,  
         # produced episode writes only the FRAMED twin for a judge call (no plain trace), so
         # the stem set is the union of both — never just the plain trace files' own names.
         judge_stems = _trace_stems(wire, Step.JUDGE)
-        family_stems = sorted((s for s in judge_stems if s.startswith("judge_family_")),
+        family_stems = sorted((s for s in judge_stems if _stem_names_label(s, "family")),
                               key=lambda s: _draw_key_stem(s, "family"))
         for stem in family_stems:
             blocks.append(_transcript_block(episode_dir, stem))
         for label in sorted(entries):
-            prefix = f"judge_{label}_"
-            label_stems = sorted((s for s in judge_stems if s.startswith(prefix)),
+            # `_stem_names_label`, not a bare `startswith`: two roster labels where one is the
+            # other's own prefix (`baseline` / `baseline_2`, both legal under `is_valid_run_id`,
+            # `_` included) would otherwise have `baseline`'s filter admit `baseline_2`'s own
+            # stems too — the SAME transcript rendered twice, once misattributed to the wrong
+            # world's block (#1025).
+            label_stems = sorted((s for s in judge_stems if _stem_names_label(s, label)),
                                  key=lambda s: _draw_key_stem(s, label))
             for stem in label_stems:
                 blocks.append(_transcript_block(episode_dir, stem))
     elif step == "review":
         for path in sorted(wire.glob("comparator_*_trace.jsonl")):
+            # `artifact_file` ahead of the read — see `_trace_cost`'s own comment: `wire_logs/`
+            # is a tree a sibling box can write, and the shared tolerant reader below does not
+            # screen.
+            if not artifact_file(path):
+                continue
             comp_rows, _bad = read_jsonl_rows_report(path)
             if comp_rows:
                 blocks.append(_transcript_block(episode_dir, path.name[: -len(".jsonl")]))
@@ -1761,6 +1790,19 @@ def _transcript_blocks_for_step(episode_dir: Path, step: str, episode_id: str,  
                 stem = path.name[: -len(".jsonl")]
                 blocks.append(f'<div class="tx-note">{esc(stem)}: 0 rows</div>')
     return "".join(blocks)
+
+
+def _stem_names_label(stem: str, label: str) -> bool:
+    """Does `stem` (`judge_<label>_<n>_trace`) name a draw of `label` ITSELF — never a
+    DIFFERENT label that merely has `label` as its own string prefix (#1025). `judge_baseline_`
+    is a prefix of `judge_baseline_2_3_trace` too, so a bare `startswith` would have world
+    `baseline`'s filter admit world `baseline_2`'s own stems — both legal labels under
+    `is_valid_run_id`, `_` included. The remainder between the prefix and `_trace` must be the
+    draw index's OWN digit spelling, with nothing else in it."""
+    prefix = f"judge_{label}_"
+    if not stem.startswith(prefix):
+        return False
+    return stem[len(prefix):-len("_trace")].isdigit()
 
 
 def _draw_key_stem(stem: str, label: str) -> int:
@@ -1790,7 +1832,11 @@ def _trace_stems(wire: Path, role_prefix: str) -> set[str]:
 
 def _transcript_block(episode_dir: Path, stem: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one call's request/response rendering, every response field independently absent
     path = episode_dir / "wire_logs" / f"{stem}.jsonl"
-    rows, unreadable = read_jsonl_rows_report(path)
+    # `artifact_file`, the same screen `framed_path` gets three lines down: `wire_logs/` is a
+    # tree a sibling box can write, and the shared tolerant reader does not screen on its own.
+    # Absent is unchanged (a stem with no plain trace file, #1025 J13a/b) — `artifact_file` is
+    # `False` there too, same as the unscreened read's own "not found" answer.
+    rows, unreadable = read_jsonl_rows_report(path) if artifact_file(path) else ([], 0)
     framed_path = episode_dir / "wire_logs" / f"{stem[:-len('_trace')]}_framed_trace.jsonl"
     framed = None
     if artifact_file(framed_path):

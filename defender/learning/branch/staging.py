@@ -44,7 +44,7 @@ import yaml
 
 from defender import _yaml
 from defender._clock import now_iso
-from defender._io import guarded_mkdir, open_guarded, write_guarded
+from defender._io import guarded_mkdir, open_guarded, read_guarded, write_guarded
 from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
@@ -366,22 +366,25 @@ def read_staged(episode_dir: Path) -> list[dict]:
     under a token the next episode is about to reuse.
     """
     path = staged_path(episode_dir)
-    # `artifact_file` (lstat), not `is_file()`: `staged.yaml` is the SOLE record that a cluster
-    # write happened and it lives in the episode dir, whose lower components a sibling's box can
-    # write. `is_file()` stats THROUGH a link, so a link planted at this name would have teardown
-    # reconcile against a record written somewhere else — deleting names this code did not write,
-    # or leaving live the ones it did.
+    # `read_guarded` (open `O_NOFOLLOW` + `fstat`), not `artifact_file` (`lstat`) then a bare
+    # `read_text`: `staged.yaml` is the SOLE record that a cluster write happened and it lives
+    # in the episode dir, whose lower components a sibling's box can write. An `lstat`-then-
+    # `read_text` pair answers about whatever the name meant a moment ago, and the window
+    # between the two calls is exactly where a plant belongs — the same TOCTOU `read_guarded`
+    # exists to close for every other reader of this tree (`archive.read_family_stamp`,
+    # `family._read_archived_text`).
     # ABSENT (#1025 O8) is the ordinary case — no cluster write has happened yet — and answers
     # as no rows; PRESENT and not a plain file (a link planted at the name) is refused rather
     # than read as empty, which would have teardown sweep nothing while a live alias sits
     # right there under the name meant to account for it.
     if not (path.exists() or path.is_symlink()):
         return []
-    if not artifact_file(path):
+    text, refusal = read_guarded(path)
+    if text is None:
         raise StagingRefused(
-            f"{STAGED_FILENAME} at {path} is refused: not a plain file")
+            f"{STAGED_FILENAME} at {path} is refused: {refusal}")
     try:
-        rows = _yaml.safe_load(path.read_text(encoding="utf-8"))
+        rows = _yaml.safe_load(text)
     except yaml.YAMLError as bad:
         raise StagingRefused(
             f"{STAGED_FILENAME} at {path} does not parse ({bad}) — acting on a staging record "

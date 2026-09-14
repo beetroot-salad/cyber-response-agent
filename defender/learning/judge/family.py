@@ -63,11 +63,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._io import read_guarded, read_jsonl_rows_report
 from defender._run_paths import artifact_dir, artifact_file
 from defender._report import ReportRead, read_report
 from defender._run_id import is_valid_run_id
-from defender._vocab import normalized_disposition
+from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.learning.branch.ledger import (
     APPLIER_DECISIONS,
     FAULT,
@@ -967,16 +968,40 @@ def world_ledger_path(episode_dir: Path, label: str, *, episode_token: str) -> P
 
 def _read_archived_report(path: Path) -> ReportRead:
     """`report.md` through the world-archive screen (#1025 O8) — a symlink or a FIFO at the
-    name reads as a report with no headline, never followed and never raised; `_report.
-    read_report` stays the repo-wide accessor, untouched, for every one of its eight other
-    callers, and is called here once the screen has cleared."""
-    if (path.exists() or path.is_symlink()) and not artifact_file(path):
+    name reads as a report with no headline, never followed and never raised.
+
+    Screened with `read_guarded` (open `O_NOFOLLOW` + `fstat`) rather than an `artifact_file`
+    `lstat` taken ahead of `read_report`'s own bare `is_file()` + read: the lstat-then-open
+    form leaves the exact TOCTOU window `read_guarded` exists to close between the screen and
+    the open — a plant landing in that window would still be followed. `_report.read_report`
+    stays the repo-wide accessor, untouched, for every one of its eight other callers; this
+    mirrors its frontmatter/disposition parse over text `read_guarded` has already screened,
+    rather than handing it the path to reopen unguarded."""
+    if not (path.exists() or path.is_symlink()):
+        return read_report(path)  # absent: `read_report`'s own "not found" branch, verbatim
+    text, refusal = read_guarded(path)
+    if text is None:
         return ReportRead(
             disposition=None,
             reason=f"report.md could not be read: refusing to read through a non-plain or "
-                   f"aliased entry: {path}",
+                   f"aliased entry: {refusal}",
             frontmatter={}, body="", text="")
-    return read_report(path)
+    try:
+        frontmatter, body = parse_frontmatter(text)
+    except FrontmatterError as e:
+        # No frontmatter means no headline, but the bytes are still the report a view renders
+        # — the same partial-result posture `read_report` takes for the same case.
+        return ReportRead(disposition=None, reason=f"report.md {e}", frontmatter={}, body=text,
+                          text=text)
+    raw = frontmatter.get("disposition")
+    disposition = normalized_disposition(raw)
+    if disposition is None:
+        return ReportRead(
+            disposition=None,
+            reason=f"report.md disposition={raw!r} not in {sorted(DISPOSITION_ENUM)}",
+            frontmatter=frontmatter, body=body, text=text)
+    return ReportRead(disposition=disposition, reason=None, frontmatter=frontmatter, body=body,
+                      text=text)
 
 
 def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
