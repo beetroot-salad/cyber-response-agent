@@ -61,9 +61,11 @@ code, the investigator never occupies it, and it writes no `##` header into
 
 ## The close is gated
 
-`close_investigation` does not commit a **confident** disposition (anything but
-`inconclusive`) on the agent's say-so. It runs a live write-time review first —
-`runtime/challenge_gate.py`, dispatching into `runtime/review/`.
+`close_investigation` does not commit a disposition on the agent's say-so —
+only the host's own `unresolved` is exempt. It runs a live write-time review
+first — `runtime/challenge_gate.py`, dispatching into `runtime/review/` — a
+confident close against its conclusion, `inconclusive` against its ceiling
+claim (#992).
 
 **Two blind lenses, then a composer.** The lenses read a *projection* of
 `investigation.md` with the whole `:T` family (belief movement — resolutions,

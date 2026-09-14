@@ -2,24 +2,31 @@
 review record, stage invocation with a real wall-clock deadline, and the trace rows.
 
 `challenge_gate(deps, disposition, *, stages, bounds) -> GateVerdict` is the seam the close
-tool drives for a CONFIDENT disposition. It never writes report.md or the review record
-itself — the close tool (`close_tool.py`) owns both writes, in record-first order, and is the
-one place a fault is held until both are attempted.
+tool drives for every disposition but the host's own `unresolved` (#923) — a CONFIDENT
+disposition against its conclusion, and since #992, `inconclusive` against its ceiling claim.
+It never writes report.md or the review record itself — the close tool (`close_tool.py`) owns
+both writes, in record-first order, and is the one place a fault is held until both are
+attempted.
 
 The reviewer is BLIND LENSES plus a COMPOSER. Each lens reads a projection of the
 investigation that withholds the belief movement it is asked to reconstruct, and they run
 concurrently because none reads another's output. The composer runs last and is the only role
 that sees both the readings and the investigation's own account — it may be anchored by that
-account precisely because the independent work is already banked.
+account precisely because the independent work is already banked. The composer's own user
+message carries the question it is being asked, keyed on the disposition the close was called
+with (`composer_projection`'s `disposition` argument) — a confident close asks whether the
+conclusion follows, `inconclusive` asks whether the ceiling holds.
 
 The lens set is SUPPORT and its ABLATION: one reading of what the observed evidence carries,
 and the same reading again with one load-bearing edge withheld — a soundness check plus a
 sensitivity check, which is what the two-member `holds`/`gap` finding can carry.
 
-FAIL CLOSED: a stage raising, timing out, or otherwise not completing overrides the confident
-finding to the host's own `unresolved` (#923) — never a silently-committed close. It commits the SAME outcome as an
-override the evidence produced; what separates the two is the typed `failure_kind`, set only
-when the machinery is what failed.
+FAIL CLOSED: a stage raising, timing out, or otherwise not completing overrides a CONFIDENT
+finding to the host's own `unresolved` (#923) — never a silently-committed close. An
+`inconclusive` close has no confident verdict to override, so a machinery failure there stands
+as `inconclusive` instead, with the same typed `failure_kind` marking the machinery as what
+broke. Either way it commits the SAME outcome as an override the evidence produced; what
+separates the two is the typed `failure_kind`, set only when the machinery is what failed.
 """
 
 from __future__ import annotations
@@ -309,19 +316,29 @@ class GateVerdict:
     failure_kind: str | None
 
 
-def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
+def _fail(role: str, outcome: StageOutcome, *, turns_used: int, disposition: str) -> GateVerdict:
     """Every way the review can fail to deliver: one outcome, one cause, and the typed kind
     carrying which. The kind comes from the stage outcome rather than from this function, so a
     timeout and a raise stay apart without a branch here to keep in step with the one in
     `_call_stage`.
 
+    #992's M3: a CONFIDENT disposition has no verdict left to trust once the machinery that was
+    supposed to check it broke, so it is overridden to the host's own `unresolved`. An
+    `inconclusive` close has no confident verdict to override — the machinery failure means the
+    CEILING claim went unexamined, not that it was refuted — so it stands as `inconclusive`
+    with the same `CAUSE_REVIEW_INCOMPLETE` cause and the same typed `failure_kind`.
+
     `turns_used` is the run's OWN count, passed in rather than written as zero: a challenged
     close comes back and reviews again, so a hardcoded zero reports a second-pass fault as a run
     that had spent no forced turn."""
-    from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE
+    from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STANDS
 
+    if disposition == "inconclusive":
+        outcome_, verdict_disposition = STANDS, disposition
+    else:
+        outcome_, verdict_disposition = FORCED_INCONCLUSIVE, HOST_ONLY_DISPOSITION
     return GateVerdict(
-        outcome=FORCED_INCONCLUSIVE, disposition=HOST_ONLY_DISPOSITION,
+        outcome=outcome_, disposition=verdict_disposition,
         cause=CAUSE_REVIEW_INCOMPLETE, detail=f"{role}: {outcome.detail}",
         material=(), turns_used=turns_used, failure_kind=outcome.failure_kind,
     )
@@ -369,10 +386,19 @@ def _route(
 ) -> GateVerdict:
     """The composer's finding, plus host state no review role can see, into one arm.
 
-    The reviewer never picks the outcome. Whether a gap becomes `challenged` or
-    `forced-inconclusive` turns on the turn count, the raised-ask state and the cap — none of
-    which a review role is shown, and all of which decide what the run can still afford."""
+    The reviewer never picks the outcome. Whether a gap becomes `challenged` or an override
+    turns on the turn count, the raised-ask state and the cap — none of which a review role is
+    shown, and all of which decide what the run can still afford.
+
+    #992's M3: every arm that overrides a CONFIDENT disposition to the host's own `unresolved`
+    instead STANDS as `inconclusive`, with the same cause, when that is what the close was
+    called with — there is no confident verdict here to override, and the disposition is
+    already the honest "I could not settle this" the override exists to record. `M3 is total by
+    construction`: every arm below routes through `_verdict`, which asserts the returned
+    verdict's disposition against what an `inconclusive` close may commit, so a missed arm fails
+    loudly rather than silently committing `unresolved`."""
     from .close_tool import (
+        CAUSE_CEILING_EXAMINED,
         CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
         CAUSE_NOTHING_LEFT_TO_ASK,
         CAUSE_STORY_SETTLED,
@@ -383,14 +409,29 @@ def _route(
         STANDS,
     )
 
-    def _verdict(outcome, verdict_disposition, cause, detail, *, material=()) -> GateVerdict:
+    is_inconclusive = disposition == "inconclusive"
+
+    def _verdict(
+        confident_outcome, confident_disposition, cause, detail, *, material=(),
+    ) -> GateVerdict:
+        # `confident_outcome`/`confident_disposition` are what a CONFIDENT close gets; an
+        # `inconclusive` close never leaves this function carrying `forced-inconclusive` or
+        # `unresolved` — see this function's own docstring (M3 is total by construction).
+        if is_inconclusive and confident_outcome == FORCED_INCONCLUSIVE:
+            outcome, verdict_disposition = STANDS, disposition
+        else:
+            outcome, verdict_disposition = confident_outcome, confident_disposition
+        assert not (is_inconclusive and verdict_disposition == HOST_ONLY_DISPOSITION), (
+            f"an inconclusive close routed to {verdict_disposition!r} — a missed arm"
+        )
         return GateVerdict(
             outcome=outcome, disposition=verdict_disposition, cause=cause, detail=detail,
             material=material, turns_used=state.turns, failure_kind=None,
         )
 
     if review.holds:
-        return _verdict(STANDS, disposition, CAUSE_STORY_SETTLED, review.review)
+        cause = CAUSE_CEILING_EXAMINED if is_inconclusive else CAUSE_STORY_SETTLED
+        return _verdict(STANDS, disposition, cause, review.review)
 
     if review.ask is None:
         # A gap with nothing measurable behind it. Forcing the host verdict costs the run
@@ -427,12 +468,16 @@ def _route(
 
 
 async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bounds) -> GateVerdict:
-    """Review one CONFIDENT disposition: the blind lenses, then the composer, then routing.
+    """Review one disposition — confident, or (#992) `inconclusive` — never `unresolved`: the
+    blind lenses, then the composer, then routing.
 
     Each lens reads a projection of the investigation that withholds the belief movement it
     is asked to reconstruct, and they run CONCURRENTLY because none of them reads another's
     output. The composer runs after all of them and is the only role that sees both the
-    readings and the investigation's own account."""
+    readings and the investigation's own account. `disposition` is the close's own argument —
+    the gate never re-derives which question it is asking from anything else, including what
+    the companion itself concludes — and it threads through to `composer_projection` (which
+    question) and to `_route`/`_fail` (which outcome an override becomes)."""
     from defender._io import TEXT_READ_ERRORS, read_text_utf8
 
     from .close_tool import STAGE_ERROR, UNREADABLE
@@ -468,10 +513,10 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
         ablated = ablation_target(companion)
     except unreadable_document as e:
         _mark_traces_incomplete(deps, round_no, str(e))
-        return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)), turns_used=state.turns)
+        return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)), turns_used=state.turns, disposition=disposition)
     except Exception as e:  # noqa: BLE001 — a projector fault is a review that cannot run
         _mark_traces_incomplete(deps, round_no, repr(e))
-        return _fail("projector", StageOutcome(None, STAGE_ERROR, repr(e)), turns_used=state.turns)
+        return _fail("projector", StageOutcome(None, STAGE_ERROR, repr(e)), turns_used=state.turns, disposition=disposition)
     # Each lens is a RENDERER, not a rendered string: `_fresh_stage_request` mints the call's
     # own salt and the projection is framed on it, so the prompt cannot be built before the
     # salt exists.
@@ -509,16 +554,18 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     for lens, outcome in zip(lenses, outcomes, strict=True):
         if not outcome.ok:
             _mark_traces_incomplete(deps, round_no, outcome.detail or "stage fault")
-            return _fail(lens, outcome, turns_used=state.turns)
+            return _fail(lens, outcome, turns_used=state.turns, disposition=disposition)
         try:
             readings[lens] = read_lens_reading(outcome.text)
         except Unreadable as e:
             _mark_traces_incomplete(deps, round_no, str(e))
-            return _fail(lens, StageOutcome(None, UNREADABLE, str(e)), turns_used=state.turns)
+            return _fail(lens, StageOutcome(None, UNREADABLE, str(e)), turns_used=state.turns, disposition=disposition)
 
     composer = await _dispatch(
         "composer", stages,
-        lambda salt: composer_projection(companion, readings, salt, ablated=ablated).text,
+        lambda salt: composer_projection(
+            companion, readings, salt, ablated=ablated, disposition=disposition,
+        ).text,
         bounds,
     )
     _write_trace_row(
@@ -527,12 +574,12 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     )
     if not composer.ok:
         _mark_traces_incomplete(deps, round_no, composer.detail or "stage fault")
-        return _fail("composer", composer, turns_used=state.turns)
+        return _fail("composer", composer, turns_used=state.turns, disposition=disposition)
     try:
         review = read_composer_reply(composer.text, refs=citable_refs(companion))
     except Unreadable as e:
         _mark_traces_incomplete(deps, round_no, str(e))
-        return _fail("composer", StageOutcome(None, UNREADABLE, str(e)), turns_used=state.turns)
+        return _fail("composer", StageOutcome(None, UNREADABLE, str(e)), turns_used=state.turns, disposition=disposition)
 
     return _route(state, bounds, disposition, review, companion)
 

@@ -74,9 +74,10 @@ writable scratch space.
 - **`review_{role}_trace.jsonl`** — one per role in `challenge_gate.REVIEW_ROLES`
   (`support`, `ablation`, `composer`): a JSON metadata row per call, plus the
   role's raw framed reply. A round that ended early is marked `incomplete` on
-  every role's trace rather than left reading as if it had completed. An
-  `inconclusive` or `unresolved` close is never reviewed, so it leaves
-  neither these nor a meaningful record.
+  every role's trace rather than left reading as if it had completed. Only an
+  `unresolved` close is never reviewed (#992), so it alone leaves neither
+  these nor a meaningful record; an `inconclusive` close is reviewed exactly
+  like a confident one, against its ceiling claim rather than a verdict.
 - **`executed_queries.jsonl`** (the queries table) + **`gather_raw/{lead_id}.lead.json`**
   (the leads table) — the two canonical tables, each written **live** during the
   run by its own generator (`scripts/gather_tools/record_query.py` and

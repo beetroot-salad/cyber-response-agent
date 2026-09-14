@@ -518,17 +518,20 @@ confident finding. `disposition` is the closed enum:
   its name and description claim, and the one lead that tested the
   alerted entity independently came back clean. It describes the
   detector, not the world: it is not a cheaper `benign`.
-- `inconclusive` — YOU ran out of data and cannot settle the case.
-  Commits immediately, no review, and the learning loop authors no lesson
-  from it — your receipt is the whole record of what was missing. Now
-  OWES an entry price: a `ceiling_test`
+- `inconclusive` — YOU ran out of data and cannot settle the case. OWES
+  an entry price: a `ceiling_test`
   RECEIPT in `:T conclude`, pointing at a `:L findings` lead this run
   dispatched that failed or came back empty (`ref=<lead-id>`), or naming
   a capability this deployment does not provide at all (`cap=<system>`)
   — the host verifies it against your own transcript, so say what you
   could not check by pointing at the attempt, not by writing a sentence
   about it. See `skills/invlang/SKILL.md` §`:T conclude` for the row
-  shape.
+  shape. Like a confident close, it passes a live challenge review — but
+  the review judges your CEILING claim, not a verdict: whether anything
+  measurable remained that the record neither cited nor tested. It may
+  come back challenged with one ask, exactly like a confident close; the
+  learning loop authors no lesson from a standing `inconclusive` either
+  way.
 - `malicious` — confident escalate, story confirmed.
 - `unresolved` — the HOST's own verdict, never yours. Recorded when a
   run is cut short without a settled finding — a challenge review that
@@ -550,26 +553,34 @@ against the keyword you CLOSE under, never the one you concluded under, so
 concluding under a cheaper keyword buys nothing: the log still has to have
 paid.
 
-Every confident disposition — anything but `inconclusive` — passes a live
-challenge gate before it commits. When the gate is not satisfied yet, the call
-returns without committing, names what to investigate further, and you
-get another ANALYZE/GATHER turn before calling `close_investigation`
-again — this is a normal part of the loop, not an error.
+Every disposition but `unresolved` — the host's own verdict — passes a
+live challenge gate before it commits: a confident disposition against
+its conclusion, `inconclusive` against its ceiling claim. When the gate
+is not satisfied yet, the call returns without committing, names what
+to investigate further, and you get another ANALYZE/GATHER turn before
+calling `close_investigation` again — this is a normal part of the
+loop, not an error.
 
 The reviewer reads your record, not your reasoning about it. It
 reconstructs what your evidence supports without seeing which way you
-moved anything, and asks whether your conclusion follows. So the thing
-that makes a close survive is a record whose belief movements cite the
-observations that actually carry them — not a more confident write-up.
-Write `:T resolutions` rows that name the edges and resolutions they
-rest on, and the review has something to agree with.
+moved anything, and for a confident close asks whether your conclusion
+follows; for `inconclusive` it asks whether your ceiling holds — whether
+the record left anything measurable that would have separated the
+ceiling from a settled finding. So the thing that makes a close survive
+is a record whose belief movements cite the observations that actually
+carry them — not a more confident write-up. Write `:T resolutions` rows
+that name the edges and resolutions they rest on, and the review has
+something to agree with.
 
-A review that cannot run fails closed: the confident disposition is
+A review that cannot run fails closed: a confident disposition is
 recorded as `unresolved` — the host's own verdict, never something you
-write — with the reason on the report. Draft the disposition your
-evidence actually supports and close on it — do not pre-emptively call
-`inconclusive` to route around a challenge, and do not re-close to try
-for a different answer. A committed close is terminal either way.
+write — with the reason on the report. An `inconclusive` close has no
+confident verdict for the host to override, so it stands `inconclusive`
+instead, with the reason on the report the same way. Draft the
+disposition your evidence actually supports and close on it — do not
+pre-emptively call `inconclusive` to route around a challenge, and do
+not re-close to try for a different answer. A committed close is
+terminal either way.
 
 **Write discipline.** ANALYZE (the `:R`/`:T resolutions` append to
 `investigation.md`) and the `close_investigation` call are separate

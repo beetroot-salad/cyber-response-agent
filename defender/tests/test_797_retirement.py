@@ -230,9 +230,13 @@ def test_797_the_two_vocabularies_carry_no_member_without_a_producer():
             f"a report cause still names an alternative account: {cause!r} — nothing in the "
             "tree offers one"
         )
-    assert len(close_tool.REPORT_CAUSES) == 6, (
+    # #992 (§7 FK-10) adds a SEVENTH member — the ceiling-held arm's own cause — beside the
+    # six that survived the coherence checker's retirement, so the producer-per-member rule
+    # (this test's own point) is what pins the count at seven, not six.
+    assert len(close_tool.REPORT_CAUSES) == 7, (
         f"the cause set is {close_tool.REPORT_CAUSES} — six survive the retirement of the "
-        "seventh, and the set was neither emptied nor regrown"
+        "no-story cause, plus #992's ceiling-held cause, and the set was neither emptied nor "
+        "regrown beyond that"
     )
 
 
@@ -255,13 +259,14 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     disposition alone would pass just as well if the gate had decided the case on evidence it
     never looked at.
 
-    An `inconclusive` close is the positive control: it bypasses the gate entirely, so it
-    still commits its own disposition and names no failure kind — which is what shows the
-    override above is the gate acting rather than the close tool being broken."""
+    An `inconclusive` close reviewed through the same unbound bundle is the positive control:
+    since #992 it fails the gate closed exactly as a confident close does, standing
+    `inconclusive` (there is no confident verdict to override) with the same
+    `CAUSE_REVIEW_INCOMPLETE`/`failure_kind` — which is what shows the override above is the
+    gate acting on the disposition's own account, not the close tool being broken."""
     pytest.importorskip("pydantic_ai")
     from defender._frontmatter import split_frontmatter
     from defender.runtime.close_tool import (
-        CAUSE_NOT_REVIEWED,
         CAUSE_REVIEW_INCOMPLETE,
         FORCED_INCONCLUSIVE,
         STAGE_ERROR,
@@ -302,27 +307,28 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
         f"the run gets an anonymous stage error: {record['detail']!r}"
     )
 
-    # Positive control: the gate reviews CONFIDENT closes only.
+    # Positive control, updated for #992: the gate now reviews `inconclusive` too, so an
+    # UNBOUND bundle fails IT closed the same way — standing `inconclusive` (there is no
+    # confident verdict here to override) with `CAUSE_REVIEW_INCOMPLETE` and a `failure_kind`,
+    # never the un-gated `CAUSE_NOT_REVIEWED` #923 pinned here before #992.
     bypass_deps, bypass_dir = _main_deps(tmp_path / "bypass")
-    # #923: `inconclusive` now carries its own entry price — a `ceiling_test` row naming a
-    # source or capability — collected before the bypass below is ever reached. The golden
-    # fixture's own investigation.md already names its gaps there, so writing it is what keeps
-    # this control about the GATE (nothing left to review) rather than about the price.
+    # `inconclusive` carries its own entry price — a `ceiling_test` row naming a source or
+    # capability — collected before the gate is ever reached. The golden fixture's own
+    # investigation.md already names its gaps there, so writing it is what keeps this control
+    # about the GATE (an unbound bundle) rather than about the price.
     (bypass_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     bypass = close_investigation(bypass_deps, "inconclusive", stages=ReviewStages())
     assert bypass.outcome == STANDS
-    assert bypass.cause == CAUSE_NOT_REVIEWED
-    assert bypass.failure_kind is None, (
-        "the un-gated path names a failure kind, so the assertion above is about the close "
-        "tool rather than about the gate"
+    assert bypass.cause == CAUSE_REVIEW_INCOMPLETE
+    assert bypass.failure_kind == STAGE_ERROR, (
+        "an unbound bundle on an inconclusive close is the machinery failing, exactly as it "
+        "is on a confident close"
     )
     bypass_fm, _r, _b = split_frontmatter(
         (bypass_dir / "report.md").read_text(encoding="utf-8")
     )
     assert bypass_fm["disposition"] == "inconclusive"
-    assert "failure_kind" not in bypass_fm, (
-        "the un-gated close writes a failure kind, so its absence proves nothing above"
-    )
+    assert bypass_fm["failure_kind"] == STAGE_ERROR
 
 
 #: The two #791 demands whose SUBJECT #797 deletes — the live projection stage, and the spec

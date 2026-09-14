@@ -1,5 +1,7 @@
-"""The close tool: the ONLY writer of report.md, and the seam through which a confident
-disposition passes the live write-time challenge gate before it commits.
+"""The close tool: the ONLY writer of report.md, and the seam through which every disposition
+but the host's own `unresolved` passes the live write-time challenge gate before it commits —
+a confident disposition against its conclusion, `inconclusive` (#992) against its ceiling
+claim.
 
 `close_investigation(deps, disposition, *, stages, bounds=None) -> CloseResult` is the SYNC
 host-level close (what a test, or any synchronous host caller, drives directly).
@@ -74,11 +76,14 @@ FORCED_INCONCLUSIVE = "forced-inconclusive"
 CLOSE_RETURNS: tuple[str, ...] = (CHALLENGED, STANDS, FORCED_INCONCLUSIVE)
 COMMITTED_OUTCOMES: tuple[str, ...] = (STANDS, FORCED_INCONCLUSIVE)
 
-#: The two UNCERTAIN verdicts the live review is never spent on — the model's own
-#: `inconclusive` and the host's own `unresolved` (#923). Matched by VALUE over the whole
-#: vocabulary, not by `forced`; see the dispatch site for why keying it on the flag instead
-#: was rejected.
-NO_REVIEW_DISPOSITIONS: tuple[str, ...] = ("inconclusive", HOST_ONLY_DISPOSITION)
+#: The one UNCERTAIN verdict the live review is never spent on — the host's own `unresolved`
+#: (#923). #992 puts the model's own `inconclusive` through the same review every confident
+#: close passes: it asserts a ceiling claim ("nothing further could be measured"), and that
+#: claim is exactly what the review can judge. `unresolved` alone stays out — it is evidence
+#: about the RUN (cut short, overruled, machinery broke), never a claim about the world.
+#: Matched by VALUE over the whole vocabulary, not by `forced`; see the dispatch site for why
+#: keying it on the flag instead was rejected.
+NO_REVIEW_DISPOSITIONS: tuple[str, ...] = (HOST_ONLY_DISPOSITION,)
 
 # HOW THE REVIEW FAILED — the typed, countable half of "why". The cause cannot do this job: it
 # is a sentence whose wording nothing promises to keep stable, and a fleet query counting
@@ -136,6 +141,14 @@ CAUSE_TURN_BUDGET_SPENT = (
 CAUSE_NOTHING_LEFT_TO_ASK = (
     "nothing discriminating remains that the investigation was not already asked for"
 )
+#: §7 FK-10 (human, against the judge): the SEVENTH member — the ceiling-held arm's OWN
+#: sentence. A composer `holds` on an `inconclusive` close judges the CEILING claim, not a
+#: verdict, so it earns a sentence distinct from `CAUSE_STORY_SETTLED` (which stays the
+#: confident `holds` arm's alone) — "the finding follows" and "nothing further could be
+#: measured" are different claims about different questions.
+CAUSE_CEILING_EXAMINED = (
+    "the challenge review examined the ceiling claim and found nothing further measurable"
+)
 
 REPORT_CAUSES: tuple[str, ...] = (
     CAUSE_NOT_REVIEWED,
@@ -144,6 +157,7 @@ REPORT_CAUSES: tuple[str, ...] = (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_TURN_BUDGET_SPENT,
     CAUSE_NOTHING_LEFT_TO_ASK,
+    CAUSE_CEILING_EXAMINED,
 )
 
 #: The challenged attempt commits nothing, so it has no cause to write. Spelled as a constant
@@ -234,13 +248,14 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     baseline cell that rides into this body (`_RENDERED_BASELINE_CELLS`) the way it already did
     in a `ceiling_test` note, and bounds the rendered baseline block.
 
-    THE HALF THAT IS STILL OPEN, recorded rather than implied closed. Only the BASELINE block
-    is bounded. A `ceiling_test` `note` is unbounded body text — `_MAX_CEILING_FRONTMATTER_BYTES`
-    caps the FRONTMATTER triples and nothing caps the notes, on the older argument that "a size
-    cap on ungated text is itself a gate" — and `inconclusive` is the one disposition that
-    renders both families at once. So enough note text still renders a file over
-    `_artifact_schema.REPORT_FILE_MAX`, and the baseline bound is sized to leave room for it
-    rather than to make it unreachable.
+    BOTH body families are bounded (§7 R6, #992): the baseline block always was, and the
+    accumulated `ceiling_test` note text now is too — `_MAX_CEILING_NOTE_BYTES`, charged at the
+    entry-price gate beside `_MAX_CEILING_FRONTMATTER_BYTES`'s cap on the frontmatter triples —
+    on the older argument that "a size cap on ungated text is itself a gate", refuted by a
+    9000-byte note that used to pass this gate and strand the run at
+    `_artifact_schema.REPORT_FILE_MAX` after the review was already spent. `inconclusive` is the
+    one disposition that renders both families at once, and both bounds together are sized to
+    leave that whole-file cap unreachable by notes alone.
 
     The frontmatter block is built by the gate that PRICED these receipts (`ceiling_test_block`)
     rather than interpolated here — ONE renderer for both, because the bound the price gate
@@ -497,36 +512,32 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         structure = tools_mod.committed_document_refusal(deps)
         if structure is not None:
             raise ModelRetry(structure)
-    # #923 fork J4 — HUMAN, resolved at §7 round 2: matched by VALUE, over the whole
-    # vocabulary, never keyed on `forced`. Both uncertain verdicts skip the live review — the
-    # model's own `inconclusive` did before this change, and the host's own `unresolved` must
-    # for the same reason (no CONFIDENT finding to challenge). Keying this on `forced` instead
-    # was considered and rejected: `forced=True` also reaches this branch carrying a CONFIDENT
-    # verdict (a host-forced `malicious`, say), and that close must still spend its review —
-    # `... or forced:` would let the host commit any verdict unreviewed.
+    # #923 fork J4, narrowed by #992: `unresolved` is the ONE verdict matched by VALUE that
+    # skips the live review — it is the host's own account of a run that ended without a
+    # settled finding (a gate overrule, a review that could not complete, or the driver's own
+    # retry-exhaustion close), never a claim about the world, so there is nothing for a review
+    # to judge. `inconclusive` now spends the same review a confident close does (#992): its
+    # `ceiling_test` receipt asserts a claim — nothing further could be measured — and that is
+    # exactly what the review judges. Keying this on `forced` instead of value was considered
+    # and rejected: `forced=True` also reaches this function carrying a CONFIDENT verdict (a
+    # host-forced `malicious`, say), and that close must still spend its review — `... or
+    # forced:` would let the host commit any verdict unreviewed.
     if disposition in NO_REVIEW_DISPOSITIONS:
-        # The gate reviews CONFIDENT closes only, so nothing was reviewed and there is no
-        # stage output to diagnose — the empty detail here is the honest value, not a gap.
+        # The gate reviews everything but `unresolved`, so nothing was reviewed here and there
+        # is no stage output to diagnose — the empty detail is the honest value, not a gap.
+        # `unresolved` carries NEITHER companion-derived field, the baseline included: a forced
+        # close skips the document gate (retry exhaustion has no model left to repair with), so
+        # publishing model free text there would put text through no structural check into the
+        # one artifact no model can be asked to fix — and text the report schema then refused
+        # would fail the forced close on a MISSING report.md, which is the dead-letter that
+        # exemption exists to prevent.
         record = {
             "verdict": STANDS, "reviewed_disposition": disposition, "detail": "",
             "failure_kind": None,
         }
-        # #923: `inconclusive` carries the gap claim it just paid its entry price with into
-        # the committed report — the one place model text belongs on this path. `unresolved`
-        # is the host's own verdict and carries NEITHER companion-derived field, the baseline
-        # included: a forced close skips the document gate (retry exhaustion has no model left
-        # to repair with), so publishing model free text there would put text through no
-        # structural check into the one artifact no model can be asked to fix — and text the
-        # report schema then refused would fail the forced close on a MISSING report.md, which
-        # is the dead-letter that exemption exists to prevent.
-        model_authored = disposition == "inconclusive"
         fields = _CloseFields(
             outcome=STANDS, cause=CAUSE_NOT_REVIEWED, detail="", material=(),
             turns_used=0, failure_kind=None,
-            ceiling_test=conclude_ceiling_test_rows(companion) if model_authored else (),
-            runtime_evidence=(
-                conclude_runtime_evidence_rows(companion) if model_authored else ()
-            ),
         )
         return _commit(deps, disposition, fields, record, validator=validator, evidence=evidence)
 
@@ -550,14 +561,21 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             failure_kind=verdict.failure_kind,
         )
 
-    # #983 mechanism A, O3. The POST-REVIEW site, which is the one every CONFIDENT close takes
-    # — `benign` among them, and that is the disposition the baseline exists to be visible on.
-    # `ceiling_test` is deliberately absent here (a reviewed close is not an `inconclusive`
-    # one); the baseline is not, because recurrence context is descriptive on every close.
+    # #983 mechanism A, O3, plus #992's M4. The POST-REVIEW site, which every close now takes
+    # once it clears `NO_REVIEW_DISPOSITIONS` — confident members and, since #992,
+    # `inconclusive`. `runtime_evidence` rides on every disposition, because recurrence context
+    # is descriptive on every close. `ceiling_test` is keyed on the VERDICT's disposition, not
+    # the argument the close was called with: a confident close's `_route` arm never returns
+    # `inconclusive`, so this is populated exactly when the committed disposition IS
+    # `inconclusive` — the one case where the report carries the receipts it paid its entry
+    # price with.
     fields = _CloseFields(
         outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
         material=material, turns_used=verdict.turns_used,
         failure_kind=verdict.failure_kind,
+        ceiling_test=(
+            conclude_ceiling_test_rows(companion) if verdict.disposition == "inconclusive" else ()
+        ),
         runtime_evidence=conclude_runtime_evidence_rows(companion),
     )
     return _commit(deps, verdict.disposition, fields, record, validator=validator,
@@ -770,19 +788,22 @@ def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) ->
         ctx: RunContext[AgentDeps], disposition: DispositionArg
     ) -> str:
         """Commit this investigation's disposition once ANALYZE has reached a confident
-        finding. `disposition` is a closed enum whose members are in this tool's own schema,
-        never free text, and the value is compared EXACTLY — a near miss is refused rather
-        than guessed at, so send the keyword with nothing around it. See SKILL §REPORT for
-        what each one claims, and for the `detection_notes` + `entity_check` rows
-        `false-positive` requires in `:T conclude`. This is the ONLY way to record report.md —
-        write_file/edit_file cannot reach it. A confident disposition passes a live challenge
-        gate before it commits; if the gate is not satisfied yet, this call returns without
-        committing and the investigation continues for another ANALYZE/GATHER turn."""
+        finding, or once you have run out of data and the case is `inconclusive`.
+        `disposition` is a closed enum whose members are in this tool's own schema, never free
+        text, and the value is compared EXACTLY — a near miss is refused rather than guessed
+        at, so send the keyword with nothing around it. See SKILL §REPORT for what each one
+        claims, and for the `detection_notes` + `entity_check` rows `false-positive` requires
+        in `:T conclude`. This is the ONLY way to record report.md — write_file/edit_file
+        cannot reach it. A confident disposition, or `inconclusive`, passes a live challenge
+        gate before it commits — against the conclusion or against the ceiling claim
+        respectively; if the gate is not satisfied yet, this call returns without committing
+        and the investigation continues for another ANALYZE/GATHER turn."""
         return await _tool_close_investigation(ctx.deps, disposition, stages=stages, bounds=bounds)
 
 
 __all__ = [
     "BUDGET_EXEMPT_TOOLS",
+    "CAUSE_CEILING_EXAMINED",
     "CAUSE_EVIDENCE_CANNOT_DISCRIMINATE",
     "CAUSE_NOTHING_LEFT_TO_ASK",
     "CAUSE_NOT_REVIEWED",

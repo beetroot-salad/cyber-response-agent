@@ -223,12 +223,44 @@ _COMPOSER_ASK = (
     "and what it concluded. Each lens reached its reading without seeing that account."
 )
 
+#: M5 — the confident question composer.md carried in its own system prompt before #992 and
+#: now carries in the composer's USER message instead (M2), so the system prompt stays
+#: disposition-neutral. Every confident member (`benign`, `false-positive`, `malicious`) shares
+#: this one sentence — O5 requires a binary confident/inconclusive branch, never a per-member
+#: one.
+_CONFIDENT_HOST_QUESTION = (
+    "This investigation reached a confident disposition. Judge whether the conclusion follows "
+    "from the record as written — not whether it is true."
+)
+
+#: M2, §7 FK-6 — the ceiling variant: the run closed `inconclusive` and its `ceiling_test`
+#: receipts (and any `ceiling_rationale`) are its own account of the ceiling, below. The lenses
+#: above read the same record WITHOUT that claim, so a lens naming something measurable the
+#: record neither cited nor tested is exactly the finding this question exists to surface.
+#: FK-6: the missed measurement must be named by an id ALREADY RECORDED (`v-`/`e-`/`l-`/`h-`),
+#: agreeing with the `citable_refs` guard the ask's `target` is read through — following this
+#: sentence literally cannot produce the uncitable name that guard refuses.
+_CEILING_HOST_QUESTION = (
+    "This investigation closed `inconclusive`, claiming a ceiling — that nothing further "
+    "could be measured. Its `ceiling_test` receipts (and any `ceiling_rationale`) are its own "
+    "account of that ceiling, in the record below. The lenses above read the same record "
+    "WITHOUT that claim. Did any of them name something measurable — an entity, edge, lead or "
+    "hypothesis, already recorded under a `v-`, `e-`, `l-` or `h-` id — that the record "
+    "neither cited nor tested? If so, return `gap` with that one ask; if nothing measurable "
+    "was missed, return `holds`."
+)
+
+
+def _host_question(disposition: str) -> str:
+    return _CEILING_HOST_QUESTION if disposition == "inconclusive" else _CONFIDENT_HOST_QUESTION
+
 
 def composer_projection(
     companion: CompanionBody, readings: dict[str, str], salt: str,
-    *, ablated: tuple[str, int] | None = None,
+    *, ablated: tuple[str, int] | None = None, disposition: str,
 ) -> Projection:
-    """The composer's input: every lens reading, and then the WHOLE companion.
+    """The composer's input: every lens reading, the HOST QUESTION keyed on `disposition`, and
+    then the WHOLE companion.
 
     The one projection that withholds nothing. The composer is allowed to be anchored by the
     investigation's own account precisely because the independent work is already banked — it
@@ -236,10 +268,16 @@ def composer_projection(
     readings come first, so the account is what gets weighed against them rather than the
     frame they are read through.
 
-    Each reading is framed INDIVIDUALLY and the host's own sentences stay outside every
-    frame — a lens reading is model prose written after reading payload-derived data, so it
-    is untrusted for the same reason the record is, and folding the host's ablation note in
-    beside it would hand the composer host instructions marked as data."""
+    `disposition` is the close's OWN argument, never re-derived from what the companion's own
+    `:T conclude` block says — a document that concludes `malicious` while the close is called
+    `inconclusive` still gets the ceiling question, and the confident conclude block rides
+    along as ordinary companion content the composer may cite.
+
+    Each reading is framed INDIVIDUALLY and the host's own sentences — including the question
+    below — stay outside every frame: a lens reading is model prose written after reading
+    payload-derived data, so it is untrusted for the same reason the record is, and folding a
+    host sentence in beside it would hand the composer host instructions marked as data."""
+    question = _host_question(disposition)
     lenses = "\n\n".join(
         f"### Lens: {lens}\n{_wrap(reading, 'untrusted', salt)}"
         for lens, reading in sorted(readings.items())
@@ -259,7 +297,7 @@ def composer_projection(
     return Projection(
         lens="composer",
         text=(
-            f"{_COMPOSER_ASK}\n\n## Lens readings\n{lenses}\n\n"
+            f"{_COMPOSER_ASK}\n\n{question}\n\n## Lens readings\n{lenses}\n\n"
             f"## The investigation's own account (host-rendered)\n{UNTRUSTED_NOTE}\n"
             f"{_wrap(body, 'untrusted', salt)}\n"
         ),

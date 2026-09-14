@@ -1115,6 +1115,23 @@ def _walk_ceiling_rows(companion: CompanionBody, rows: Any) -> _CeilingWalk:
 #: rather than against any one receipt's size.
 _MAX_CEILING_FRONTMATTER_BYTES = 300
 
+#: §7 R6 (human, against the judge's parity recommendation) — a FIX, not parity: the
+#: accumulated rendered `ceiling_test` NOTE text (the analyst-facing free text in the report
+#: BODY; see `render_report`'s docstring) is bounded here, at BOTH boundaries this gate is
+#: collected from, the same way the frontmatter block above is. Before #992 it was unbounded,
+#: on the argument that "a size cap on ungated text is itself a gate" — real today (a9000-byte
+#: note passes this gate and strands the run at `_artifact_schema.validate_report`'s whole-file
+#: cap, after the review has already been spent). The VALUE is sized off the sibling
+#: model-authored body family in the same report, `_MAX_RUNTIME_EVIDENCE_BODY_BYTES` (2048): the
+#: two share one order of magnitude, and 512 (frontmatter) + 2048 (this) + 2048 (runtime
+#: evidence) = 4608 stays well under `_artifact_schema.REPORT_FILE_MAX` (8192) — the note is
+#: refused before it can ever, alone or together with the sibling family, reach that cap.
+_MAX_CEILING_NOTE_BYTES = 2048
+
+
+def _ceiling_note_bytes(receipts: Sequence[CeilingReceipt]) -> int:
+    return sum(len(r.note.encode("utf-8")) for r in receipts if r.note)
+
 
 def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
     """`inconclusive` owes a named gap (O1, #923 §7 round 4 REPLACEMENT): at least one
@@ -1138,6 +1155,14 @@ def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
             f"disposition inconclusive blocked: the accumulated `ceiling_test` receipts are "
             f"{total_bytes} bytes, over the {_MAX_CEILING_FRONTMATTER_BYTES}-byte bound — "
             f"name fewer, more specific gaps rather than every one in full"
+        )
+    note_bytes = _ceiling_note_bytes(walk.paying)
+    if note_bytes > _MAX_CEILING_NOTE_BYTES:
+        errors.append(
+            f"disposition inconclusive blocked: the accumulated `ceiling_test` notes are "
+            f"{note_bytes} bytes, over the {_MAX_CEILING_NOTE_BYTES}-byte bound — shorten the "
+            f"notes; they are free text for the human analyst, never required to make a "
+            f"receipt pay"
         )
     if not walk.paying:
         errors.append(

@@ -187,9 +187,12 @@ def test_skipped_ablation_is_not_reported_as_ok(tmp_path):
     assert "no strong belief movement" in html
 
 
-def test_inconclusive_close_says_it_was_never_reviewed(tmp_path):
-    """An `inconclusive` close bypasses the gate. Its record is `stands` — which must not
-    render as "a review ran and the disposition survived"."""
+def test_pre_change_inconclusive_close_says_it_was_never_reviewed(tmp_path):
+    """A PRE-#992 `inconclusive` close bypassed the gate — no trace rows of any kind survive on
+    disk. Its record is `stands` — which must not render as "a review ran and the disposition
+    survived" — and §7 FK-8 re-keys that split on the trace rows an attempt left behind, never
+    on `reviewed_disposition`'s value (which a post-change reviewed `inconclusive` shares with
+    this population)."""
     run = tmp_path / "run"
     run.mkdir()
     _write_report(run, disposition="inconclusive", outcome="stands",
@@ -202,7 +205,7 @@ def test_inconclusive_close_says_it_was_never_reviewed(tmp_path):
     html, n = render_review_gate(run, parse_report(run))
     assert n == 0
     assert "not reviewed" in html
-    assert "confident closes only" in html
+    assert "unresolved" in html, "the bypass note no longer names what actually bypasses"
 
 
 def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_path):

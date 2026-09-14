@@ -164,7 +164,9 @@ def test_the_tool_description_no_longer_copies_the_member_list(tmp_path):
 
     Asserted as "not all of the members appear as literals" rather than as an exact string:
     `false-positive` legitimately survives in the sentence about the `detection_notes` +
-    `entity_check` rows it requires, and pinning the exact replacement wording would make this
+    `entity_check` rows it requires, and — since #992 — `inconclusive` legitimately survives
+    too, in the sentence about the `ceiling_test` row it requires and the sentence naming which
+    closes pass the live challenge gate; pinning the exact replacement wording would make this
     a diff test. What must not survive is the ENUMERATION — the hand-maintained list that #806
     had to sync by hand.
 
@@ -181,11 +183,12 @@ def test_the_tool_description_no_longer_copies_the_member_list(tmp_path):
         f"the close tool's description was emptied rather than trimmed: {description!r}"
     )
     copied = [member for member in DISPOSITION_VALUES if member in description]
-    assert len(copied) <= 1, (
+    assert len(copied) <= 2, (
         "the tool description still enumerates the vocabulary "
         f"({copied!r}) — the schema's enum is where the members now live, and a second copy "
-        "is the hand-synced surface this change removes. ONE member may survive as prose "
-        "about its own entry price; two or more is a list, whatever it is punctuated as"
+        "is the hand-synced surface this change removes. `false-positive` and `inconclusive` "
+        "(#992) may each survive as prose about their own entry price / review obligation; "
+        "three or more is a list, whatever it is punctuated as"
     )
 
 
