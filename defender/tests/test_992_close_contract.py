@@ -358,14 +358,18 @@ def test_driver_forced_unresolved_survives_after_a_challenged_inconclusive(tmp_p
 
 
 def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
-    """A run whose `inconclusive` close was challenged and which then hits
-    `UsageLimitExceeded` ends with no report.md and no forced commit; the numbered record of
-    the challenged attempt is the distinguishing residue on disk (C17-adjacent: the driver's
-    limit arm forces nothing)."""
+    """A run whose `inconclusive` close was challenged and which then hits the request ceiling
+    is force-closed `unresolved` by the driver exactly as a retry-exhausted run is: one
+    post-loop close for every exit that stops the model before it can close, not one written
+    into each arm. `inconclusive` is the disposition that by definition arrives near
+    exhaustion, and a challenge spends the extra turn, so this is the ceiling's ordinary
+    customer — a run ending here with no report.md dead-letters at persist. The forced close
+    dispatches no stage, and the challenged attempt's numbered record survives beside it."""
     from defender.runtime import driver
     from defender.tests._invlang_warn_836 import build_main_agent
 
     deps, run_dir = _challenged_inconclusive(tmp_path)
+    challenged_record = record(run_dir, 1)
     stages = recording(holds())
     agent = build_main_agent(_spec923.StuckModel(), review_stages=stages.bundle())
     _run, truncated_by, exit_reason = asyncio.run(driver._drive_agent(
@@ -374,11 +378,12 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
     ))
     assert exit_reason == "UsageLimitExceeded", exit_reason
     assert truncated_by is not None
-    assert not (run_dir / "report.md").exists(), "the request-limit exit forced a commit"
-    assert stages.calls == []
-    assert review_state(deps).closed is False
-    assert record_files(run_dir) == [1]
-    assert record(run_dir, 1)["verdict"] == CHALLENGED
+    assert stages.calls == [], f"the forced close dispatched {stages.calls}"
+    assert review_state(deps).closed is True
+    fm = frontmatter(run_dir)
+    assert fm["disposition"] == HOST_ONLY_DISPOSITION
+    assert fm["cause"] == CAUSE_NOT_REVIEWED
+    assert record(run_dir, 1) == challenged_record, "the challenged record was overwritten"
 
 
 def test_disposition_threaded_seams(tmp_path):

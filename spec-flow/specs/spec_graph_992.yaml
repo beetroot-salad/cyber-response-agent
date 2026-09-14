@@ -572,7 +572,7 @@ demands:
       `wire_logs/review_{role}_trace.jsonl` holds one row per attempt, each labelled with that
       attempt's `round` (= the turn at gate entry), appended never replaced, so the run page's
       per-round reader can glob and sort them — no torn line, no lost row.
-  - id: s55_usage_limit_after_a_challenged_inconclusive_forces_nothing
+  - id: s55_usage_limit_after_a_challenged_inconclusive_is_force_closed
     kind: behavior
     form: test
     discharged_by: test_usage_limit_exceeded_after_a_challenged_inconclusive
@@ -583,8 +583,10 @@ demands:
     premises: [55]
     seed_docstring: >-
       A run whose `inconclusive` close was challenged and which then hits `UsageLimitExceeded`
-      ends with no report.md and no forced commit; the numbered record of the challenged attempt
-      is the distinguishing residue on disk (C17-adjacent: the driver's limit arm forces nothing).
+      is force-closed `unresolved` by the driver's one post-loop close, as a retry-exhausted run
+      is; the numbered record of the challenged attempt survives beside the forced report.
+      (Reversed at finalize: the design's "forces nothing, as today" named the arm, but #992
+      changed who reaches it — a challenged `inconclusive` is the ceiling's ordinary customer.)
   - id: s58_pre_gate_refusal_leaves_no_review_residue
     kind: negative      # positive control: d9 (a challenged attempt DOES write the watermark and a record)
     form: test

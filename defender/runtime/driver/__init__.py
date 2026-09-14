@@ -278,48 +278,10 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         # RS6: a stubborn model that keeps retrying a call the gate refuses (e.g. a write of
         # report.md) exhausts the framework's shared tool-retry budget (`DEFAULT_TOOL_RETRIES`)
         # and pydantic_ai raises this; no other handler here catches it, so uncaught it takes
-        # the process down. Force the unresolved close directly, bypassing the model — which
-        # is exactly what got stuck — rather than end with no disposition at all.
-        print(f"[run.py] {e}; forcing an unresolved close (retry budget exhausted)",
-              file=sys.stderr)
+        # the process down.
+        print(f"[run.py] {e}; writing partial trace (retry budget exhausted)", file=sys.stderr)
         truncated_by = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
         exit_reason = "UnexpectedModelBehavior"
-        # R4: this handler bypasses the gate and commits through the same path, so on a run
-        # whose disposition ALREADY committed it would replace a confident finding with the
-        # unresolved one it forces and destroy that close's review record. A run that errors
-        # AFTER closing keeps what it decided; the error survives in the logs above.
-        if challenge_gate.ReviewState.of(deps).closed:
-            print("[run.py] the investigation already closed; keeping its disposition",
-                  file=sys.stderr)
-        else:
-            try:
-                from ..close_tool import _close_investigation_async
-
-                # #923: the HOST's own verdict, not the model's — `unresolved` short-circuits
-                # ahead of the gate (the one member of `close_tool.NO_REVIEW_DISPOSITIONS`
-                # since #992 put `inconclusive` through the review), so no stage and no bound
-                # is ever consumed here; the run's own bounds are threaded anyway rather than
-                # re-resolved, so this limb cannot end up acting on a different value from the
-                # one the rest of the run was built with. It also carries no entry price
-                # (`inconclusive` does, and a forced caller has no model left to pay it with).
-                #: `forced=True`: the framework's own close is exempt from BOTH document
-                #: gates — the flagged-row window and the invlang structure check (#961). No
-                #: model is left to repair either, and refusing here would end the run with NO
-                #: report.md — dead-lettering it at persist for the wrong reason. A malformed
-                #: companion is worse to publish than a well-formed one; a run with no
-                #: disposition at all is worse than either. Every close the MODEL invokes is
-                #: still gated by both.
-                await _close_investigation_async(
-                    deps, HOST_ONLY_DISPOSITION, stages=None, bounds=bounds, forced=True,
-                )
-            except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
-                # ...but it must not SWALLOW it either: logging alone left a forced close that
-                # failed indistinguishable downstream from one that committed (same
-                # truncated_by, same exit_reason), and the run dead-lettered at persist for a
-                # missing artifact, invisibly. The exit reason carries the failure.
-                print(f"[run.py] forced close after retry exhaustion also failed "
-                      f"({close_err!r})", file=sys.stderr)
-                exit_reason = "ForcedCloseFailed"
     except RunAborted as e:
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
         truncated_by = session_store.TRUNCATED_BY_ABORTED
@@ -338,7 +300,59 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         exit_reason = "StoreAppendError"
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
+    if truncated_by in _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE:
+        exit_reason = await _close_a_run_cut_short(deps, bounds, exit_reason)
     return run, truncated_by, exit_reason
+
+
+#: The exits on which the MODEL was stopped before it could close — by the request ceiling,
+#: the tool-retry budget, the tool-call budget or the circuit breaker. Each ends with no
+#: report.md unless the host writes one, and a run with no report.md dead-letters at persist
+#: for a missing artifact. The store arm is deliberately absent: a run whose history store
+#: failed stops without writing another word against it, by that arm's own fail-closed rule.
+_CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE = frozenset({
+    session_store.TRUNCATED_BY_REQUEST_LIMIT,
+    session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
+    session_store.TRUNCATED_BY_BUDGET,
+    session_store.TRUNCATED_BY_ABORTED,
+})
+
+
+async def _close_a_run_cut_short(
+    deps: AgentDeps, bounds: challenge_gate.Bounds, exit_reason: str,
+) -> str:
+    """The host's own `unresolved` close for a run the framework cut short, so every such run
+    ends with a report.md. ONE place, after the loop, keyed on the exit class rather than
+    written into each arm — an arm that forgot it (the request-limit arm did, until #992 let
+    a challenged `inconclusive` reach that ceiling) reopened the dead-letter.
+
+    Returns the exit reason to record: the caller's, or `ForcedCloseFailed` when this close
+    itself failed — logging alone left a forced close that failed indistinguishable
+    downstream from one that committed, and the run dead-lettered invisibly.
+
+    R4: a run that was cut short AFTER closing keeps what it decided; forcing here would
+    replace a confident finding with `unresolved` and destroy that close's review record.
+
+    `forced=True` and `stages=None`: `unresolved` is the host's verdict, the one disposition
+    the gate does not review (`close_tool.NO_REVIEW_DISPOSITIONS`), and a forced close is
+    exempt from both document gates — no model is left to repair anything, and refusing
+    would end the run with no report.md for the wrong reason. The run's own bounds are
+    threaded so this limb cannot act on a different value from the rest of the run."""
+    if challenge_gate.ReviewState.of(deps).closed:
+        print("[run.py] the investigation already closed; keeping its disposition",
+              file=sys.stderr)
+        return exit_reason
+    print("[run.py] forcing an unresolved close", file=sys.stderr)
+    try:
+        from ..close_tool import _close_investigation_async
+
+        await _close_investigation_async(
+            deps, HOST_ONLY_DISPOSITION, stages=None, bounds=bounds, forced=True,
+        )
+    except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
+        print(f"[run.py] the forced close also failed ({close_err!r})", file=sys.stderr)
+        return "ForcedCloseFailed"
+    return exit_reason
 
 
 def _dispatch_catalogs(defender_dir: Path, roster: RosterRead) -> tuple[str | None, str | None]:
