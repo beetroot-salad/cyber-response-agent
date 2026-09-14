@@ -564,10 +564,19 @@ def render_review_gate(
         + _review_cost_html(costs)
     )
     if failure_kind:
+        v = close_vocabulary()
         strip += (
-            '<div class="rv-failnote">The review did not complete, so the close failed '
-            "<strong>closed</strong> — this is the machinery breaking, not a finding about "
-            "the case.</div>"
+            (
+                '<div class="rv-failnote">The review did not complete, so this close stands '
+                "on the host's own account — <strong>the machinery broke</strong>, not a "
+                "finding about the case.</div>"
+            )
+            if outcome == v.stands
+            else (
+                '<div class="rv-failnote">The review did not complete, so the close failed '
+                "<strong>closed</strong> — this is the machinery breaking, not a finding "
+                "about the case.</div>"
+            )
         )
 
     rows: list[str] = []

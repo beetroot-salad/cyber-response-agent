@@ -749,10 +749,16 @@ class CeilingReceipt:
     """One parsed `ceiling_test` row. `state`/`ref`/`cap` are the STRUCTURED half — closed
     vocabulary plus an id, mechanically checked against this run's own transcript — and the
     only part that rides into the committed report's frontmatter (`ceiling_test_block`). `note`
-    is free text FOR THE HUMAN ANALYST: it gates NOTHING (`_check_ceiling_receipt` never reads
-    it for anything but the one injection check every model-authored report field gets) and
-    rides into the report BODY, never the frontmatter — because it gates nothing, it can never
-    strand a run on a value the write gate accepted and the close then refused."""
+    is free text FOR THE HUMAN ANALYST: `_check_ceiling_receipt` never reads it for anything
+    but the one injection check every model-authored report field gets, and (since #992's §7
+    R6) the accumulated bytes across every receipt's note, charged at the entry-price gate
+    alongside the structured half — a run that would strand later on an oversized note is
+    refused here instead, before any review stage spends a call on it. It rides into the
+    report BODY, never the frontmatter, only once it has cleared that bound.
+
+    Since #992, `inconclusive`'s note also reaches the ceiling composer verbatim, inside the
+    untrusted frame — it steers a review now, where before this change `inconclusive` had
+    none."""
 
     state: str
     ref: str | None
