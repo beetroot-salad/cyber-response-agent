@@ -3,10 +3,9 @@
 The structured surface the agent writes into `investigation.md`. This file
 is a reference overview; the authoring spec is
 `defender/skills/invlang/SKILL.md`, and the dense block-tag grammar is
-`docs/dense-investigation-format.md`. This is the **defender's** invlang —
-the structural validator (`skills/invlang/validate.py`) runs on every
-`investigation.md` write, through `runtime/permission/files.py`; `soc-agent/`
-runs a stricter, hook-validated variant of the same language.
+`docs/dense-investigation-format.md`. The structural validator
+(`skills/invlang/validate.py`) runs on every `investigation.md` write, through
+`runtime/permission/files.py`.
 
 ## What it is
 

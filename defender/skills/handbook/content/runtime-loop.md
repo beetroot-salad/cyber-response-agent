@@ -41,11 +41,12 @@ code, the investigator never occupies it, and it writes no `##` header into
   the entity's baseline. Author `:H` (hypotheses + predictions) and `:L`
   (lead) blocks. PLAN does **not** pick a query template — that's gather's
   job. Read any relevant `lessons/` here before writing blocks.
-- **GATHER** — dispatch the gather subagent (Haiku) per lead via `Task`. It
-  picks a query template, binds params, calls the typed `query` tool (the
-  harness captures the payload), and returns a tight summary plus the `queries[]` it ran and the
-  path to the raw payload. Multiple PLAN leads → parallel `Task` calls in
-  one assistant message.
+- **GATHER** — dispatch the gather subagent per lead with the `gather` tool
+  (a cheaper model, GLM 5.3 Flash by default). It picks a query template,
+  binds params, calls the typed `query` tool (the harness captures the
+  payload and writes the queries-table row), and returns a tight summary —
+  the only thing that enters the main context. Multiple PLAN leads →
+  parallel `gather` calls in one assistant message.
 - **ANALYZE** — record what gather's summary showed and grade it against the
   PLAN predictions with `:R` blocks (`++`/`+`/`-`/`--`). Decide whether
   there's enough to disposition; if not, loop back to PLAN.
@@ -101,7 +102,7 @@ phase machinery (`_LOOP_VERBS`, `phase_color`) deliberately does not know it.
 
 This is the load-bearing rule of the runtime loop:
 
-- **The only way to query a data source is a `Task` → gather dispatch.** The
+- **The only way to query a data source is a `gather` dispatch.** The
   main loop never calls the query tool (the `query(system=…, verb=…)`
   dispatch backed by each system's `VERBS` registry) itself, and never
   redirects a query payload to a file it then reads — that's the same
@@ -114,15 +115,10 @@ This is the load-bearing rule of the runtime loop:
   context; that's what made the dispatch cheap. (ANALYZE may Grep a specific
   raw payload as a last resort when a summary is thin; Read it whole only if
   Grep doesn't narrow it.)
-- **Haiku is the default** for gather because its job is mechanical (pick
-  template, bind params, run CLI, summarize); the system CLIs enforce
-  structural correctness. Escalate to Sonnet only when a dispatch genuinely
-  needs multi-step reasoning — and prefer fixing the SKILL or CLI guardrails
-  over routing more dispatches to the heavier model.
-- **Absolute paths in the dispatch.** The subagent runs in a
-  Claude-Code-managed worktree whose cwd is not under `DEFENDER_DIR`;
-  relative paths silently resolve against the wrong tree. Use the absolute
-  `DEFENDER_DIR` from the workspace map.
+- **A cheaper model is the default** for gather (GLM 5.3 Flash) because its
+  job is mechanical (pick template, bind params, run the CLI, summarize); the
+  system CLIs enforce structural correctness, so the lighter model carries
+  the load without losing rigor.
 
 See `defender/skills/gather/SKILL.md` for the subagent's own contract and
 `content/run-artifacts.md` for the two-table + by-ref payload shapes.

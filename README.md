@@ -130,8 +130,8 @@ python3 defender/run.py <alert.json>
 Notes:
 
 - run dirs are created under `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`), outside the repo
-- pass `--no-learn` to skip enqueuing the learning step while iterating on the runtime loop only
-- the learning loop runs off-process — a worker drains the queue with `python3 defender/learning/loop.py --learn-drain`; run one dir directly with `python3 defender/learning/loop.py <run_dir>`
+- pass `--no-learn` to skip the catalog-curation enqueue, the one automatic post-step, while iterating on the runtime loop only
+- the learning loop runs off-process and is operator-initiated: fork a finished run with `python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>`, then fold the queued findings with `python3 defender/learning/loop.py --author-drain` (`--lead-author-drain` serves the catalog-curation queue)
 
 Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `executed_queries.jsonl`, `tool_trace.jsonl`, `runtime.html`, an `wire_logs/` directory holding the run's wire log (`llm_requests.jsonl`), and a `gather_raw/` directory of lead sidecars + per-query payloads.
 
