@@ -111,14 +111,41 @@ def _prepare(tmp_path, *, capture=None, siblings_at: str | None = "deadbee",
 
 def _refused_before_spending(launch: Launch, *argv_extra: str) -> str:
     """Run the launch, require the preflight's own refusal class, and require that NOTHING was
-    spent: no questioner call, no staged name, no episode directory. Returns the message."""
+    spent: no questioner call, no role-model preflight (the one in-process pass that sources a
+    billable key), no cluster call at all — not the probe, not the sweep — no staged name, no
+    episode directory. Returns the message.
+
+    The role and cluster pins are here, on EVERY refusal, because an anchor check sited after
+    the role preflight and the sweep greens every message assertion while sourcing keys and
+    touching the namespace first (adversary H4)."""
     with pytest.raises(_cli().LauncherRefused) as refusal:
         launch.run(*argv_extra)
     assert launch.questioner.calls == 0, "the questioner was paid before the refusal"
+    assert launch.roles == [], "the paid role preflight ran before the anchor was judged"
+    assert launch.door.ops == [], "the cluster was touched before the anchor was judged"
     assert launch.door.created() == [], "a name was staged before the refusal"
     assert launch.spawn.launches == [], "a sibling started after the refusal"
     assert not launch.episode_dir.exists(), "an episode directory was claimed for a refused launch"
     return str(refusal.value)
+
+
+def _never_waivable(message: str, *phrases: str) -> None:
+    """A refusal the override does not reach NAMES ITS OWN SHAPE and does not offer the flag.
+
+    The rule the messages hold to: `--allow-dirty` appears in a refusal exactly when passing it
+    would let the launch through. A kitchen-sink message that names every field and offers the
+    flag on every shape satisfied every substring the suite asked for (adversary H1) while
+    telling an operator with a commit mismatch to waive it."""
+    for phrase in phrases:
+        assert phrase in message, (phrase, message)
+    assert "allow-dirty" not in message, message
+
+
+def _waivable(message: str, *phrases: str) -> None:
+    """A refusal the override reaches names its shape AND offers the flag."""
+    for phrase in phrases:
+        assert phrase in message, (phrase, message)
+    assert "allow-dirty" in message, message
 
 
 def _accepted(launch: Launch, *argv_extra: str) -> dict:
@@ -145,9 +172,7 @@ def test_976_a_source_with_no_stamp_is_refused_before_the_questioner_and_never_w
         launch = _prepare(tmp_path)
         (launch.src / "provenance.json").unlink()
         message = _refused_before_spending(launch, *argv)
-        assert "source" in message, message
-        assert "provenance" in message, message
-        assert launch.roles == [], "the paid role preflight ran before the source was judged"
+        _never_waivable(message, "source", "no usable provenance stamp")
 
 
 def test_976_a_source_whose_git_could_not_be_asked_is_refused_and_never_waived(tmp_path):
@@ -163,10 +188,7 @@ def test_976_a_source_whose_git_could_not_be_asked_is_refused_and_never_waived(t
         launch = _prepare(tmp_path)
         T.source_stamp(launch.src, commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE)
         message = _refused_before_spending(launch, *argv)
-        assert "source" in message, message
-        assert "commit" in message, message
-        assert T.GIT_UNAVAILABLE in message, message
-        assert launch.roles == []
+        _never_waivable(message, "source", "names no commit", T.GIT_UNAVAILABLE)
 
 
 def test_976_a_dirty_source_is_refused_without_the_override_and_proceeds_with_it(tmp_path):
@@ -178,9 +200,7 @@ def test_976_a_dirty_source_is_refused_without_the_override_and_proceeds_with_it
     launch = _prepare(tmp_path)
     T.source_stamp(launch.src, dirty=True)
     message = _refused_before_spending(launch)
-    assert "source" in message, message
-    assert "dirty" in message, message
-    assert "allow-dirty" in message, message
+    _waivable(message, "source", "did not certify clean", "dirty=True")
 
     waived = _prepare(tmp_path)
     T.source_stamp(waived.src, dirty=True)
@@ -197,8 +217,7 @@ def test_976_a_source_whose_tree_state_is_unknown_is_refused_without_the_overrid
     launch = _prepare(tmp_path)
     T.source_stamp(launch.src, dirty=None, unavailable=T.GIT_STATUS_FAILED)
     message = _refused_before_spending(launch)
-    assert "source" in message, message
-    assert "dirty" in message, message
+    _waivable(message, "source", "did not certify clean", "dirty=None", T.GIT_STATUS_FAILED)
 
     waived = _prepare(tmp_path)
     T.source_stamp(waived.src, dirty=None, unavailable=T.GIT_STATUS_FAILED)
@@ -230,10 +249,14 @@ def test_976_a_live_tree_at_another_commit_is_refused_and_never_waived(tmp_path)
     the capture having been taken exactly once, and `--allow-dirty` does not waive a commit
     mismatch. Without this, the exact drift #976 was filed for is paid for and then (at best)
     found at verify."""
-    for argv in ((), ("--allow-dirty",)):
-        launch = _prepare(tmp_path, capture=T.source_capture(commit="0ther"))
+    for argv, live in (((), "0ther"), (("--allow-dirty",), "0ther"), ((), "deadbee0"),
+                       ((), "deadbe")):
+        # `deadbee0` and `deadbe` are the abbreviated-sha shapes: a prefix comparison in either
+        # direction reads them as the source's `deadbee` (adversary H2). Equality is the rule.
+        launch = _prepare(tmp_path, capture=T.source_capture(commit=live))
         message = _refused_before_spending(launch, *argv)
-        assert "commit" in message, message
+        _never_waivable(message, "live tree is at commit", repr(live), "'deadbee'")
+        assert "scope" not in message, ("a commit mismatch is not a scope mismatch", message)
         assert launch.capture.calls == 1, "the live tree was captured other than once"
 
 
@@ -245,7 +268,7 @@ def test_976_a_live_tree_git_cannot_answer_for_is_refused_and_never_waived(tmp_p
         launch = _prepare(tmp_path, capture=T.source_capture(
             commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE))
         message = _refused_before_spending(launch, *argv)
-        assert "commit" in message, message
+        _never_waivable(message, "live tree's commit could not be captured", T.GIT_UNAVAILABLE)
         assert launch.capture.calls == 1
 
 
@@ -257,8 +280,7 @@ def test_976_a_dirty_live_tree_is_refused_without_the_override_and_proceeds_with
     for."""
     launch = _prepare(tmp_path, capture=T.source_capture(dirty=True))
     message = _refused_before_spending(launch)
-    assert "dirty" in message, message
-    assert "allow-dirty" in message, message
+    _waivable(message, "live tree", "did not certify it clean", "dirty=True")
 
     waived = _prepare(tmp_path, capture=T.source_capture(dirty=True))
     stamp = _accepted(waived, "--allow-dirty")
@@ -273,7 +295,8 @@ def test_976_a_live_tree_of_unknown_state_is_refused_without_the_override(tmp_pa
     launch = _prepare(tmp_path, capture=T.source_capture(
         dirty=None, unavailable=T.GIT_STATUS_FAILED))
     message = _refused_before_spending(launch)
-    assert "dirty" in message, message
+    _waivable(message, "live tree", "did not certify it clean", "dirty=None",
+              T.GIT_STATUS_FAILED)
 
     waived = _prepare(tmp_path, capture=T.source_capture(
         dirty=None, unavailable=T.GIT_STATUS_FAILED))
@@ -289,7 +312,7 @@ def test_976_a_live_scope_differing_from_the_sources_is_refused_and_never_waived
     for argv in ((), ("--allow-dirty",)):
         launch = _prepare(tmp_path, capture=T.source_capture(scope="defender"))
         message = _refused_before_spending(launch, *argv)
-        assert "scope" in message, message
+        _never_waivable(message, "measured over scope", "'defender'", "'repo'")
 
 
 def test_976_a_source_stamped_before_scope_existed_is_compared_on_commit_alone(tmp_path):
@@ -329,6 +352,16 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
     assert sorted(p.name for p in (ep / "worlds").iterdir()) == list(T.WORLDS)
     assert T.review_doc(ep)["episode"]["outcome"] == "incomplete"
 
+    # EQUALITY, NOT PREFIX (adversary H2): siblings at `cafe10` and at `cafe` are not siblings
+    # of a `cafe1` source, whichever side an abbreviated sha would be read as extending.
+    for extended in ("cafe10", "cafe"):
+        near = [T.sibling_run_dir(base / extended, w, commit=extended) for w in T.WORLDS]
+        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{extended}")
+        report = _cli().verify_family(ep, near, source=T.provenance_record(commit="cafe1"))
+        assert report["outcome"] == "incomplete", extended
+        assert "commit" in report["reason"], report["reason"]
+        assert not (ep / "provenance.json").exists()
+
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-anchored")
     report = _cli().verify_family(ok, dirs, source=T.provenance_record(commit="cafe1"))
     assert report["outcome"] == "accepted"
@@ -345,11 +378,15 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
     base, _src = T.runs_base(tmp_path)
     dirs = [T.sibling_run_dir(base, w) for w in T.WORLDS]
 
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-scoped")
-    report = _cli().verify_family(ep, dirs, source=T.provenance_record(scope="defender"))
-    assert report["outcome"] == "incomplete"
-    assert "scope" in report["reason"], report["reason"]
-    assert not (ep / "provenance.json").exists()
+    # WITH AND WITHOUT THE OVERRIDE (adversary H3): a scope mismatch is not dirt, so
+    # `--allow-dirty` does not reach it at this tier any more than at preflight.
+    for allow_dirty in (False, True):
+        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-scoped-{allow_dirty}")
+        report = _cli().verify_family(ep, dirs, source=T.provenance_record(scope="defender"),
+                                      allow_dirty=allow_dirty)
+        assert report["outcome"] == "incomplete", allow_dirty
+        assert "scope" in report["reason"], report["reason"]
+        assert not (ep / "provenance.json").exists()
 
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-unscoped")
     report = _cli().verify_family(ok, dirs, source=T.provenance_record(scope=None))
@@ -399,6 +436,31 @@ def test_976_a_launch_whose_siblings_ran_another_commit_ends_incomplete_end_to_e
     assert record["outcome"] == "incomplete"
     assert "commit" in record["reason"], record["reason"]
     assert not (launch.episode_dir / "provenance.json").exists()
+
+
+def test_976_the_anchor_verify_judges_is_the_one_preflight_read_not_a_second_read(tmp_path):
+    """M5 through the real launcher: the source stamp `verify_family` holds the siblings to is
+    the record `preflight_episode` read and judged — threaded, never re-read. The source run
+    dir is a prior box's writable bind, so a stamp rewritten while the family runs is exactly
+    the anchor a second read would swap in. Here the source is re-stamped `cafe1` from inside
+    the spawn seam (after preflight, before verify): siblings at `deadbee` are accepted
+    against the `deadbee` the preflight read, and the family stamp carries THAT record.
+    Without this, `_run_episode` could drop the preflight's return and re-read the source at
+    verify, and the suite would not notice (adversary H5)."""
+    launch = _prepare(tmp_path)
+    honest = launch.spawn
+
+    def rewrite_then_run(argv, **kw):
+        T.source_stamp(launch.src, commit="cafe1")
+        return honest(argv, **kw)
+
+    launch.spawn = rewrite_then_run
+    assert launch.run() == 0
+    assert honest.launches, "no sibling was launched — the rewrite never happened"
+    assert T.review_doc(launch.episode_dir)["episode"]["outcome"] == "accepted"
+    stamp = launch.family_stamp
+    assert stamp["source"]["commit"] == "deadbee"
+    assert stamp["agreed"]["commit"] == "deadbee"
 
 
 def test_976_the_override_does_not_waive_a_sibling_commit_mismatch_end_to_end(tmp_path):
