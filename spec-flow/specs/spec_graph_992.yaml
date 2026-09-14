@@ -1,0 +1,1643 @@
+schema_version: 2
+design: "992"   # gh issue #992 — the one close that claims a ceiling is the one no lens ever reads.
+                # THE AUTHORITATIVE TEXT is the issue body + the 2026-09-01 intent/design comment
+                # (O1–O5, M1–M5, 13 claims) + the 2026-09-13 drift addendum (C14–C17), mirrored at
+                # `.spec-flow/design-992.md`. TWO CORRECTIONS RIDE OVER IT (handoff.refuted): the
+                # addendum's C16 is REFUTED — `_replay_harness.drive` binds a `holds` composer bundle
+                # by default, so no "judgement for write-tests" is owed — and the design's
+                # "three review calls is the floor" is two when no strong belief move cites an edge.
+tests: defender/tests   # the suite this graph derives (profile `tests.dir`). check_binds scans its
+                        # docstrings NON-RECURSIVELY over this one directory, so every #992 test file
+                        # lives here (not under tests/e2e/). PHASE E (80-author-digest.md) authored one
+                        # test per `form: test` demand, named by its `discharged_by`, across five
+                        # UNMARKED modules (CI-selected, never `pytest.mark.gate` — G8):
+                        # test_992_close_contract.py, test_992_composer_payload.py,
+                        # test_992_routing.py, test_992_report.py, test_992_readers.py, with the
+                        # shared machinery in tests/_spec992.py. All 47 are RED at 67d29090 on the
+                        # missing feature and GREEN against a scratch sketch of M1–M4 + FK-10 + R6.
+base: 67d29090          # main — the base every line anchor below was re-pinned against (10-brief).
+
+# ===========================================================================================
+# READ THIS FIRST
+#
+# THE CHANGE. `inconclusive` stops bypassing the challenge review. M1 shrinks
+# `NO_REVIEW_DISPOSITIONS` (close_tool.py:81) to `("unresolved",)`; M2 gives the composer a
+# disposition-keyed host sentence in its USER message (composer_projection gains `disposition`;
+# composer.md loses its confident framing); M3 threads the reviewed disposition into `_route`
+# and `_fail` so no arm hands an `inconclusive` close back as `unresolved` (STANDS/inconclusive
+# with the same cause; CHALLENGED and holds unchanged; a routing miss asserts at the commit);
+# M4 carries `ceiling_test` receipts on the reviewed commit path keyed on the VERDICT's
+# disposition; M5 leaves every confident-path behaviour as it was.
+#
+# WHAT A COLD READER MUST NOT RE-DERIVE FROM THE DOC:
+#   1. C16 IS REFUTED (G4/x1, executed). Every e2e replay through `drive` already reaches the
+#      gate BOUND and, after M1, commits stands/CAUSE_STORY_SETTLED with three `ok` trace rows —
+#      never STAGE_ERROR. Only test_797_retirement.py:312 and an explicit `_spec923.close(stages=None)`
+#      reach the gate unbound. The suite must not be "repaired" against a fault that does not occur.
+#   2. THE COMPOSER-UNREADABLE SITE CARRIES `failure_kind: unreadable`, NOT `error` (rg3, executed):
+#      `_fail` hardcodes `cause=CAUSE_REVIEW_INCOMPLETE` at all six sites and the kind is the
+#      stage outcome's. The primary answerer's `error` on FK-15/FK-16 is corrected here.
+#   3. M4 SOURCES RECEIPTS FROM THE PRICE GATE'S PARSE (design M4, C14, G18), not from the gate's
+#      own second read. The primary's #9/#34/#36 answers said the reverse; the corrected value is
+#      the report carries the PRICED rows, the composer judges the second read.
+#   4. THE PER-CLOSE REVIEW FLOOR IS TWO CALLS (G12/x10, executed): the ablation lens is skipped
+#      with a `skipped` trace row (no `ok` key) when `ablation_target` is None.
+#   5. SIX TEST FILES ARE DARK IN CI (G8): `pytestmark = pytest.mark.gate` on test_923_* and
+#      test_tacit_*_991; CI's only pytest step deselects `gate`. Nothing #992 pins may live there.
+#
+# NAME RECONCILIATION (three coining passes → one namespace). Actors and boundaries are named
+# what the code names them: `_close_investigation_async` (the close's body; the brief's
+# "close_investigation" ENTRY is the boundary `close_investigation`, the seam with two vias),
+# `challenge_gate`, `_route`, `_fail`, `composer_projection`, `support_projection`,
+# `run_investigation` (profile contextAliases.driver), `visualize_runtime`, `visualize_run`.
+# The stage seams keep the extraction's ids `support`/`ablation`/`composer` (fields of
+# `ReviewStages`); sinks are `report_md`, `review_record`, `review_trace`, `llm_requests_jsonl`.
+# Axes are declared ONCE below: `run_dir`, `turn`, `role` — the brief's "round" is a ROW field of
+# review_trace, not a path axis. Claim ids: C1–C17 inherited (design doc), G1–G24 (10-brief),
+# x1–x15 (20-demands), rg1–rg4 (46-reground), a1–a4 (this assembly's own executions).
+#
+# THE GATE BLOCK IS WRITTEN (gate leaf, phase D step 6, from `spec-graph gate --residue` and
+# 60-residue.md) AND §7 IS APPLIED (70-resolutions.md, 2026-09-13/14): 8 human decisions, two of
+# them AGAINST the judge's recommendation — FK-10 (a SEVENTH REPORT_CAUSES member, "the challenge
+# review examined the ceiling claim and found nothing further measurable", for the ceiling-held
+# arm; d10's cause and d23's "exactly six" both move) and R6 (the `ceiling_test` note is CAPPED
+# at the entry-price gate, not left to parity — a6 shows a 9000-char note strands a run today).
+# Every fork, silent branch and residue item carries its `resolved_by` in handoff.forks; the five
+# cells the assembler left unbound are bound or closed by citation; `spec-graph lint/gate/claims/
+# actors` all exit clean against the recorded state.
+# ===========================================================================================
+
+demands:
+  # 28 inherited from 20-demands.md verbatim in id, kind, form and `discharged_by` (25 test,
+  # 3 clause). `binds` is EXTENDED where assembly pulled a per-cell address into existence that
+  # the demand's docstring seed already exercises (a demand at facet altitude does not discharge
+  # an R3/R4 cell) — every extension is named in the demand's `assembly_note`. `premises` lists
+  # the settled phase-C premises the demand carries as rows (45-dispositions numbering); the
+  # `rows` sentence says what each row adds to the seed, for phase E. Then the phase-D block:
+  # `s_*` demands minted one per settled premise NO inherited demand held (17 test, 1 clause).
+
+  # ---- demand #0: the return-value contract ------------------------------------------------
+  - id: d0_inconclusive_close_return_contract
+    kind: behavior
+    form: test
+    discharged_by: test_inconclusive_close_return_contract
+    binds:
+      - "interacts(run_investigation->close_investigation).response"
+      - "interacts(_close_investigation_async->report_md)"
+      - "interacts(_close_investigation_async->review_record)"
+      - CloseResult
+      - CLOSE_RETURNS
+      - "close_investigation.access[tool]"
+    assembly_note: >-
+      +`close_investigation.access[tool]` — the seed's last clause ("the tool lane returns exactly
+      result.message", x15) is the model-lane cell; d2 exercises the host cell.
+    resolution: >-
+      §7 FK-10 (human): the `cause` on `stands` is one of SIX named causes now — the five the
+      seed lists plus the seventh REPORT_CAUSES member for the ceiling-held arm
+      (s_fk10_ceiling_held_commits_its_own_cause); CAUSE_NOT_REVIEWED stays `unresolved`'s alone.
+
+  # ---- O1 / M1: the review is spent -------------------------------------------------------
+  - id: d1_inconclusive_spends_the_review
+    kind: behavior
+    form: test
+    discharged_by: test_inconclusive_spends_the_review
+    binds:
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[inconclusive]"
+      - "drives(_close_investigation_async->challenge_gate)"
+      - "interacts(challenge_gate->support)"
+      - "interacts(challenge_gate->ablation)"
+      - "interacts(challenge_gate->composer)"
+      - "interacts(challenge_gate->review_trace)"
+      - "ReviewStages.domain.distinguished[fully-bound]"
+    assembly_note: "+`ReviewStages.domain.distinguished[fully-bound]` — the seed drives a fully bound bundle."
+  - id: d2_no_review_set_is_exactly_unresolved
+    kind: domain-outcome
+    form: test
+    discharged_by: test_no_review_set_is_exactly_unresolved
+    binds:
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[unresolved]"
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[inconclusive]"
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[benign]"
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[false-positive]"
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[malicious]"
+      - "drives(_close_investigation_async->challenge_gate)"
+      - "close_investigation.access[host]"
+      - "close_investigation.access[tool]"
+    assembly_note: >-
+      +both `close_investigation.access` cells — the seed drives the four model members through
+      the model lane and `unresolved` through `forced=True` (the host lane); a confident member
+      on the forced lane still spends the review (the parity R3 asks for, per cell).
+
+  # ---- O1 / M2: the composer's ceiling question --------------------------------------------
+  - id: d3_composer_user_message_carries_the_ceiling_question
+    kind: shape
+    form: test
+    discharged_by: test_composer_user_message_carries_the_ceiling_question
+    binds: ["interacts(challenge_gate->composer).payload", composer_projection]
+    premises: [1]
+    rows: >-
+      #1 — the host sentence is keyed on the disposition ARGUMENT the close was called with; a
+      document whose conclude block reads confident while the close says `inconclusive` gets the
+      ceiling sentence only, the confident conclude block riding as companion content (if the
+      price gate refuses the mismatch first the row collapses into d20 — author probe P13 LANDED
+      in phase E: `pays_every_price(malicious)` closed `inconclusive` reaches the gate, the row stands).
+  - id: d4_composer_md_is_disposition_neutral
+    kind: behavior
+    form: test
+    discharged_by: test_composer_md_is_disposition_neutral
+    binds: [composer_md, "interacts(challenge_gate->composer).payload"]
+    assembly_note: >-
+      STRENGTHENED per 45-dispositions SB-1: the assertion covers every confident-question
+      sentence of composer.md (lines 1-2, 9 "judge whether the conclusion follows", 25-26, 32
+      "when the evidence carries the conclusion"), not only the opening sentence — grep-level:
+      no "conclusion follows", "confident disposition", "evidence carries the conclusion" —
+      while keeping test_796_reply's pinned phrases (x9: "opposite disposition"; support's
+      "do not see" untouched).
+  - id: d5_ceiling_claim_withheld_from_lenses
+    kind: negative      # positive control: d6
+    form: test
+    discharged_by: test_ceiling_claim_withheld_from_lenses
+    binds:
+      - "interacts(challenge_gate->support).payload"
+      - "interacts(challenge_gate->ablation).payload"
+      - support_projection
+    premises: [80]
+    rows: "#80 — a sparse inconclusive companion (no strong move) reads on the lens path exactly as a confident one; the lens cut is unchanged (F9/G12)."
+  - id: d6_ceiling_claim_reaches_composer_inside_untrusted_frame
+    kind: shape
+    form: test
+    discharged_by: test_ceiling_claim_reaches_composer_inside_untrusted_frame
+    binds: ["interacts(challenge_gate->composer).payload", composer_projection]
+    premises: [79, 88]
+    rows: >-
+      #79 — a receipt note written to steer the reviewer arrives verbatim, framed, and the
+      `CeilingReceipt.note` docstring stops saying it gates nothing (d26); #88 — a note that
+      addresses the reviewer directly changes neither the reply contract nor the record: the
+      frame is the defence.
+  - id: d7_reply_contract_shared
+    kind: behavior
+    form: test
+    discharged_by: test_reply_contract_shared_on_inconclusive
+    binds:
+      - "interacts(challenge_gate->composer).response"
+      - read_composer_reply
+      - citable_refs
+      - "read_composer_reply.domain.distinguished[uncited-target]"
+      - "read_composer_reply.domain.distinguished[holds-with-ask]"
+      - "citable_refs.domain.distinguished[unrecorded-id]"
+    premises: [86]
+    rows: >-
+      FK-6 (settled A by rg3): an ask naming an id the record never recorded is `Unreadable` →
+      stands/inconclusive/CAUSE_REVIEW_INCOMPLETE/`failure_kind: unreadable` — never
+      CAUSE_EVIDENCE_CANNOT_DISCRIMINATE; FK-13 (settled by rg1): unrecognised extra top-level
+      keys on a `holds` reply are ignored, on `inconclusive` exactly as on `malicious`; FK-5
+      (settled by rg2): `ask: null` ≡ omitted key (readable, → d11's arm), `ask: ""` is
+      `Unreadable` (→ d14's arm); #86 — shape only, engagement is the Measurement's.
+    assembly_note: "+three per-cell addresses the seed names (uncited target, holds carrying an ask, an unrecorded id)."
+  - id: d8_review_roster_unchanged
+    kind: negative      # positive control: d1
+    form: test
+    discharged_by: test_review_roster_unchanged
+    binds: [ReviewStages, REVIEW_ROLES, composer_md, support_md]
+
+  # ---- O2 / M3: the challenge, and the routing arms -----------------------------------------
+  - id: d9_gap_with_ask_challenges_inconclusive
+    kind: behavior
+    form: test
+    discharged_by: test_gap_with_ask_challenges_inconclusive
+    binds:
+      - "interacts(run_investigation->close_investigation).response"
+      - _route
+      - ReviewState
+      - "interacts(_close_investigation_async->review_record)"
+      - "read_composer_reply.domain.distinguished[gap-with-ask]"
+      - "citable_refs.domain.distinguished[recorded-id]"
+      - "citable_refs.domain.distinguished[receipted-lead]"
+    resolution: >-
+      §7 FK-1 (auto, judge's A): an ask naming a lead a `ceiling_test` receipt already priced
+      is a LEGAL target — `challenged`, exactly as any citable ask; no host-side discount, no new
+      `_route` arm. The cell is now bound as a row of this sweep. SB-2 (auto): its three-attempt
+      row (three numbered records, three rounds of trace rows, one terminal report) is s62's.
+    premises: [19, 45]
+    rows: >-
+      #19 — a citable ask for a dimension of a recorded-but-never-led entity is a legal gap →
+      challenged, nothing extra recorded first; #45 — the second inconclusive close after a
+      challenge is reviewed again against the inherited turns/raised_asks; FK-1 (judge: A,
+      NON-MATERIAL, open at §7) — an ask naming a lead a `ceiling_test` receipt already priced is
+      a legal target (membership is the guard; no host-side discount) — pin as a row ONLY if §7
+      takes A; its cell `citable_refs.domain.distinguished[receipted-lead]` is left UNBOUND so the
+      gate names it.
+    assembly_note: "+`read_composer_reply[gap-with-ask]` and `citable_refs[recorded-id]` — the seed's composer `gap` with a citable ask."
+  - id: d10_holds_commits_inconclusive_story_settled
+    kind: domain-outcome
+    form: test
+    discharged_by: test_holds_commits_inconclusive_ceiling_examined   # RENAMED at §7 (was test_holds_commits_inconclusive_story_settled): the cause is no longer CAUSE_STORY_SETTLED
+    binds:
+      - _route
+      - "interacts(_close_investigation_async->report_md)"
+      - "read_composer_reply.domain.distinguished[holds]"
+      - REPORT_CAUSES
+    resolution: >-
+      §7 FK-10 (human, AGAINST the judge's recommendation): a composer `holds` on an
+      `inconclusive` close commits `disposition: inconclusive`, `outcome: stands`, `cause:` THE
+      SEVENTH REPORT_CAUSES MEMBER — "the challenge review examined the ceiling claim and found
+      nothing further measurable" — no `failure_kind`, record `verdict: stands`. The seed's
+      CAUSE_STORY_SETTLED is the CONFIDENT holds arm's sentence only (s_fk10 pins the pair).
+    premises: [16]
+    rows: >-
+      #16 — a `holds` whose review prose disputes the receipts still commits story-settled; the
+      dispute rides only as the record's framed `detail`; FK-7 (judge: A, non-material) — a
+      record that already settles the case is the same `holds` row: the ceiling review judges the
+      ceiling, not the verdict (the honest limit, routed to Measurement).
+    assembly_note: "+`read_composer_reply[holds]` — the seed's finding."
+  - id: d11_null_ask_gap_stands_cannot_discriminate
+    kind: domain-outcome
+    form: test
+    discharged_by: test_null_ask_gap_stands_cannot_discriminate
+    binds:
+      - _route
+      - "interacts(_close_investigation_async->report_md)"
+      - "interacts(challenge_gate->review_trace)"
+      - "read_composer_reply.domain.distinguished[gap-null-ask]"
+      - "read_composer_reply.domain.distinguished[gap-omitted-ask]"
+    assembly_note: "+the two readable no-ask spellings rg2 proved identical (`ask: null`, omitted key)."
+  - id: d12_repeat_ask_stands_nothing_left_to_ask
+    kind: domain-outcome
+    form: test
+    discharged_by: test_repeat_ask_stands_nothing_left_to_ask
+    binds: [_route, ReviewState, "interacts(_close_investigation_async->report_md)"]
+    premises: [17, 49]
+    rows: >-
+      #17 — the host's `raised_asks` watermark, not the composer's memory, decides a repeat;
+      #49 — the watermark carries across a confident→inconclusive switch on one run (F2).
+  - id: d13_spent_pool_stands_turn_budget_spent
+    kind: domain-outcome
+    form: test
+    discharged_by: test_spent_pool_stands_turn_budget_spent
+    binds: [_route, Bounds, ReviewState, "interacts(_close_investigation_async->report_md)"]
+    premises: [48]
+    rows: >-
+      #48 — the inherited `turns` is the confident attempt's spend; FK-11 (judge: A, non-material)
+      — manufactured novelty that defeats the watermark still ends at `Bounds.extra_turns` with
+      CAUSE_TURN_BUDGET_SPENT and never `unresolved`: the bound is the safety property.
+  - id: d14_machinery_failure_stands_review_incomplete
+    kind: behavior
+    form: test
+    discharged_by: test_machinery_failure_stands_review_incomplete
+    binds:
+      - _fail
+      - "interacts(_close_investigation_async->report_md)"
+      - "interacts(_close_investigation_async->review_record)"
+      - "interacts(challenge_gate->review_trace)"
+      - "ReviewStages.domain.distinguished[none]"
+      - "ReviewStages.domain.distinguished[empty-ReviewStages]"
+      - "read_composer_reply.domain.distinguished[not-json]"
+      - "read_composer_reply.domain.distinguished[finding-outside-vocabulary]"
+      - "read_composer_reply.domain.distinguished[gap-empty-string-ask]"
+      - "investigation_md.domain.distinguished[unreadable-at-second-read]"
+      - "investigation_md.domain.distinguished[non-utf8-at-second-read]"
+      - "ReviewStages.domain.distinguished[partially-bound]"
+    resolution: >-
+      §7 FK-2 (human, with the judge): a PARTIALLY bound bundle is a supported shape; when the
+      unbound role is dispatched (ablation unbound on a companion WITH a strong move) the review
+      fails uniformly — stands/inconclusive/CAUSE_REVIEW_INCOMPLETE/`error`, incomplete rows on
+      all roles (x12/a1) — one more row of this sweep; when the unbound role is skipped the
+      review completes. The cell is now bound.
+    premises: [24, 25, 26, 27, 28, 29, 31, 32, 33, 35]
+    rows: >-
+      Every row commits stands/inconclusive/CAUSE_REVIEW_INCOMPLETE with the stage's kind and an
+      `incomplete` row on EVERY role (G21). #24 support raises → `error`, whole review fails as a
+      unit; #25 ablation times out → `timeout`; #26 composer fails after both lenses `ok` →
+      `error`, incomplete rows beside the lenses' ok rows; #27 all three fail → the first fault's
+      kind, indistinguishable in report/record from a single fault; #28 provider unreachable for
+      one role → as #24/#26; #29 ablation `skipped` row and `incomplete` row coexist; #31 support
+      and composer faults → support's kind (checked first; the composer never runs after a lens
+      fault); #32 mixed ok/incomplete rows on one round; #33/#35 investigation.md unreadable or
+      not UTF-8 at the gate's second read → the projector arm, `error` (x6, a3). Phase E FOLDED #33
+      into #35 (F-7): a read fault (EACCES/removed/locked) on the file the price gate just read is
+      unreachable in-process without a hook between the two reads — the price gate would refuse
+      first (x6/a4) — so the non-UTF-8 byte is the ONE primitive that fails the gate's strict
+      second read alone, and it discharges both cells (`unreadable-at-second-read`,
+      `non-utf8-at-second-read`) through one projector-arm row. FK-15/FK-16
+      (settled by rg3): a non-JSON reply and a finding outside {holds,gap} are `unreadable`, NOT
+      `error`; rg2: `ask: ""` is `unreadable`. FK-2 (judge: A, MATERIAL-small, open at §7): a
+      PARTIALLY bound bundle whose unbound role is dispatched fails exactly like the unbound case
+      (x12, a1) — its cell `ReviewStages.domain.distinguished[partially-bound]` is left UNBOUND so
+      the gate names the human's confirmation that partial binding is a supported shape.
+    assembly_note: "+eleven per-cell addresses, each a fault the seed enumerates."
+  - id: d15_inconclusive_never_leaves_as_unresolved
+    kind: negative      # positive controls: d17 (the same arms on a confident close do commit unresolved) and d24 (the driver still can)
+    form: test
+    discharged_by: test_inconclusive_never_leaves_as_unresolved
+    binds:
+      - "interacts(_close_investigation_async->report_md)"
+      - "interacts(run_investigation->close_investigation).response"
+      - FORCED_INCONCLUSIVE
+      - HOST_ONLY_DISPOSITION
+  - id: d16_routing_miss_fails_loud
+    kind: behavior
+    form: clause        # recorded downgrade (20-demands): driving a routing miss needs a fake challenge_gate, a setattr the lint ratchets; d15's arm sweep is the executable face
+    binds: [_close_investigation_async, GateVerdict]
+    outcome: {nl: "Where the reviewed commit happens, an inconclusive close asserts that the verdict's disposition equals the disposition that entered the gate, so a routing arm that still hands back the host's own verdict raises rather than committing `unresolved`."}
+    premises: [78]
+    rows: "#78 — what the driver does with the raise is reality-lane (author probe P1, open); the assertion at the commit site is the pin."
+
+  # ---- O5 / M5: the confident path --------------------------------------------------------
+  - id: d17_confident_path_unchanged
+    kind: parity
+    form: test
+    discharged_by: test_confident_path_unchanged
+    binds:
+      - _route
+      - _fail
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[malicious]"
+      - "interacts(challenge_gate->composer).payload"
+      - "interacts(_close_investigation_async->report_md)"
+
+  # ---- O4 / M4: the receipts ----------------------------------------------------------------
+  - id: d18_reviewed_inconclusive_carries_receipts
+    kind: behavior
+    form: test
+    discharged_by: test_reviewed_inconclusive_carries_receipts
+    binds:
+      - "interacts(_close_investigation_async->report_md)"
+      - _CloseFields
+      - conclude_ceiling_test_rows
+      - "interacts(_close_investigation_async->investigation_md)"
+    premises: [30, 84]
+    rows: >-
+      #30 — receipts land identically when the ablation lens was skipped; #84 — receipt notes
+      render identically whatever the review found, the cause alone distinguishes; FK-3 (settled
+      by rg4): two rows citing one ref with different states are not collapsed — the
+      lead-anchored consistency check refuses the inconsistent one at the price gate, so the
+      reviewed block equals what the bypass path writes for the same companion; FK-17/18/19
+      (promotions, judge's value): the block carries the rows the PRICE GATE parsed, never the
+      gate's second read — a fault fixture forcing the two reads apart is the only way to see it
+      (`investigation_md.domain.distinguished[rewritten-between-reads]` left UNBOUND for the
+      gate leaf to route as an obligation or a §7 no).
+    assembly_note: "+`interacts(_close_investigation_async->investigation_md)` — the seed's receipts are the price gate's parse of that read (correction 3 above)."
+  - id: d19_confident_and_forced_commits_carry_no_ceiling_test
+    kind: negative      # positive control: d18
+    form: test
+    discharged_by: test_confident_and_forced_commits_carry_no_ceiling_test
+    binds: ["interacts(_close_investigation_async->report_md)", _CloseFields]
+    premises: [2]
+    rows: "#2 — a confident close over a document whose conclude block says inconclusive commits no `ceiling_test` block (keyed on the verdict's disposition) while the receipts stay visible to the composer (C3)."
+
+  # ---- ordering, prompts, visualizer, vocabularies, survival, seams -------------------------
+  - id: d20_gates_ahead_of_the_review_spend_no_stage
+    kind: negative      # positive control: d1
+    form: test
+    discharged_by: test_gates_ahead_of_the_review_spend_no_stage
+    binds:
+      - _refuse_if_entry_price_is_owed
+      - "drives(_close_investigation_async->challenge_gate)"
+      - "interacts(challenge_gate->support)"
+      - "investigation_md.domain.distinguished[absent-or-empty]"
+    premises: [15, 50]
+    rows: >-
+      #15 — a malformed cap/state field is refused at the price gate, no second validation at the
+      gate's read; #50 — a second close attempt after a terminal commit is refused as already
+      closed before any price or stage, report.md never re-written; FK-4 (judge: A, non-material)
+      — receipts pushing the block past `_MAX_CEILING_FRONTMATTER_BYTES` are refused pre-gate, no
+      stage called (G13: the worst reviewed case fits in 457 of 512 B — s90).
+    assembly_note: "+`investigation_md.domain.distinguished[absent-or-empty]` — a4's break-attempt (no/empty companion → ModelRetry before any stage)."
+  - id: d21_investigator_prompt_states_the_review
+    kind: behavior
+    form: test
+    discharged_by: test_investigator_prompt_states_the_review
+    binds: [SKILL_md, close_investigation]
+    premises: [77]
+    rows: "#77 — post-M1 SKILL.md says an inconclusive close is reviewed and may come back challenged; 'do not route around a challenge' stays (G15: every roster naming the four members keeps `unresolved`)."
+  - id: d22_visualizer_renders_a_reviewed_inconclusive
+    kind: behavior
+    form: test
+    discharged_by: test_visualizer_renders_a_reviewed_inconclusive
+    binds:
+      - _was_reviewed
+      - _BYPASS_NOTE
+      - _gate_badge_html
+      - "interacts(visualize_runtime->review_record)"
+      - "interacts(visualize_run->report_md)"
+      - "_was_reviewed.domain.distinguished[post-change-reviewed-record]"
+      - "_was_reviewed.domain.distinguished[pre-change-inconclusive-record]"
+      - "interacts(visualize_runtime->review_trace)"
+      - "interacts(visualize_runtime->NO_REVIEW_DISPOSITIONS)"
+    resolution: >-
+      §7 FK-8 + FK-14 (human, with the judge): RE-KEYED. `_was_reviewed` decides reviewed /
+      unreviewed from WHAT THE ATTEMPT LEFT BEHIND — that round's trace rows and, for the
+      terminal attempt, the report's cause — never from `NO_REVIEW_DISPOSITIONS`; `_BYPASS_NOTE`'s
+      logic follows. The fixture carries TWO populations: a post-change reviewed `inconclusive`
+      (record stands/inconclusive, cause the seventh member, three trace files) that renders
+      as reviewed with its role traces and counts as reviewed; and a PRE-#992 `inconclusive` dir
+      (record stands/inconclusive, cause CAUSE_NOT_REVIEWED, NO trace files) that renders
+      "not reviewed" in BOTH the § Review gate section (guard :544-551, per-attempt :580-600,
+      the reviewed count) AND the headline badge (`_gate_badge_html`, cause-keyed) — one page,
+      one answer, on old and new dirs alike (the five Measurement run dirs are the old ones).
+      R8's census of readers keyed on the split is s_fk8's.
+    assembly_note: >-
+      FK-8 / FK-14 (judge: A — re-key `_was_reviewed` on what the attempt left behind; MATERIAL,
+      open at §7) decide this demand's key: under A the seed's "counts as reviewed" keys on the
+      record (trace rows / cause), not the constant, and gains a two-population fixture (a
+      pre-#992 inconclusive dir beside a post-change one — the five Measurement run dirs are in
+      that population, F6/x7). The cell `_was_reviewed.domain.distinguished[pre-change-inconclusive-record]`
+      is left UNBOUND so the gate names the fork.
+  - id: d23_vocabularies_and_types_unchanged
+    kind: negative      # positive control: d10–d14 (every named member is exercised)
+    form: test
+    discharged_by: test_vocabularies_and_types_unchanged
+    binds: [CLOSE_RETURNS, REPORT_CAUSES, CloseResult, GateVerdict]
+    resolution: >-
+      §7 FK-10 (human, AGAINST the judge's recommendation): REPORT_CAUSES gains a SEVENTH member
+      — "the challenge review examined the ceiling claim and found nothing further measurable" —
+      so the seed's "still exactly its six sentences" becomes SEVEN: the six inherited sentences
+      verbatim plus the new one, appended; CLOSE_RETURNS, CloseResult and GateVerdict are still
+      unchanged (no new outcome, no new field). case_ticket's membership check imports the
+      tuple (case_ticket.py:304-313) and so covers seven; G13's headroom is recomputed as a5.
+    premises: [57]
+    rows: >-
+      #57 — `stands` gains a fourth meaning and the cause is the distinction (accepted by the
+      doc); FK-10 (judge: A, MATERIAL wording, open at §7) — the ceiling-held ticket line reads
+      CAUSE_STORY_SETTLED's disposition-agnostic sentence; if §7 takes B the pin "REPORT_CAUSES
+      still exactly its six sentences" is what moves (prefer rewording the member over a seventh).
+  - id: d24_driver_forced_unresolved_survives_after_a_challenged_inconclusive
+    kind: survival
+    form: test
+    discharged_by: test_driver_forced_unresolved_survives_after_a_challenged_inconclusive
+    binds:
+      - "drives(run_investigation->_close_investigation_async)"
+      - HOST_ONLY_DISPOSITION
+      - "interacts(_close_investigation_async->report_md)"
+    premises: [54]
+    rows: "#54 — the earlier challenged attempt's record and trace rows survive on disk beside the forced `unresolved` report."
+  - id: d25_disposition_threaded_seams
+    kind: seam
+    form: test          # discharged largely by construction: d3/d17 drive composer_projection with the disposition, d10–d14 drive _route/_fail through the gate
+    discharged_by: test_disposition_threaded_seams
+    binds: [composer_projection, _route, _fail]
+  - id: d26_bypass_prose_surfaces_reworded
+    kind: coherence
+    form: clause        # recorded downgrade: comment/docstring/doc maintenance, not e2e behaviour; conservation rides census C8 + G7 + the judge's extensions
+    binds: [SKILL_md, composer_md, _BYPASS_NOTE]
+    outcome: {nl: "Every prose surface that states the bypass is reworded per C8, the addendum and the census extensions: close_tool.py:1-2, 60-66, 71-72, 119-122, 228, 260, 553-556 and the tool docstring; challenge_gate.py:4, 19-23 (the FAIL-CLOSED doctrine narrowed to confident closes) and :430; review/__init__.py:1, 8; driver/__init__.py:290-313's forced-close comment; visualize_runtime.py:340-344 (`_BYPASS_NOTE` names `unresolved` only), :544, :569-573 (the fail note stops saying 'the close failed closed' on a standing `inconclusive` — FK-9), :584; _gating.py:340-343 and skills/invlang/SKILL.md:579 (`CeilingReceipt.note` no longer 'gates nothing' — it steers a review); `STANDS`'s docstring names its fourth meaning; the close-tool docstring states the omission limit (FK-12); handbook run-artifacts.md:78 and runtime-loop.md:65, 85-86 (:85's pre-#923 `disposition: inconclusive` becomes `unresolved`, G23); defender/CLAUDE.md:15; defender/docs/review-gate-retirement.md:47; defender/docs/learning-architecture-redesign.md:373; scripts/lint/lint_half_read_table_baseline.json:4-5's reason text is left as x13 requires (keeps `bypass`/`NO_REVIEW_DISPOSITIONS`). Phase F (F-6): SKILL.md:521-523's second clause — 'the learning loop authors no lesson from it' — is an unverified claim about the #922 pipeline (C15 says learning/ reads no cause; it does read `disposition`): at implementation, verify against learning/branch and learning/judge whether an `inconclusive` run is excluded from lesson authoring, and keep or drop that clause accordingly."}
+    rejected: [{nl: "The lens prompts (support.md's 'confident conclusion') are not reworded — a lens never sees `conclude`, so the framing is inert and O5 forbids touching it."}]
+    premises: [75]
+    rows: "#75 (census extension) — `_gating.py:340-343`, `skills/invlang/SKILL.md:579`, `close_tool.py:228,260` all repeat 'gates nothing'; FK-9 and FK-12 add their surfaces above."
+  - id: d27_bypass_pins_flipped
+    kind: coherence
+    form: clause        # recorded downgrade: suite maintenance of tests that pin the bypass; their replacements are d1, d2, d14, d22
+    binds: [NO_REVIEW_DISPOSITIONS, _was_reviewed]
+    outcome: {nl: "The tests that pin the bypass flip rather than being deleted: test_797_retirement.py:312-325's inconclusive control now expects `stands`/`inconclusive`/CAUSE_REVIEW_INCOMPLETE/`error` on an empty bundle; _spec923.py:111-117 sets BYPASS_BY_MEMBER['inconclusive'] = True; test_visualize_review_gate.py:191-250's two TRACELESS inconclusive fixtures are the HISTORICAL population under FK-8 (a record with no trace rows for its round and cause CAUSE_NOT_REVIEWED renders 'not reviewed' — d22/s_fk8 REQUIRE it) and STAY GREEN, unflipped; only the `'confident closes only'` literal at :204 follows `_BYPASS_NOTE`'s rewording (F-1); test_797_retirement.py:233's `len(REPORT_CAUSES) == 6` flips to 7 with the producer NAMED — s_fk10 (the ceiling-held `holds` arm) — so #797's own reason (no producer-less member) survives (F-2, §7 FK-10 KEPT); test_923_readers.py:246-256 stops asserting the bypass and its :250-254 calls of `_was_reviewed` with a bare `{reviewed_disposition}` dict move to the re-keyed input (FK-8: the record plus that round's traces / the cause); and the mention-only docstrings/comments (test_disposition_tool_schema_750.py:279,314; test_ungated_artifact_write_961_964.py:109; test_787_review_cost.py:286; test_runtime_evidence_report_983.py:8; e2e/test_tacit_authz_e2e_983.py:357; e2e/test_replay_skeleton.py:61; test_salt_origin_647.py:290-291) stop saying `inconclusive` skips the review — those replays now record a COMPLETED review (FK-20, G4); test_lint_half_read_table.py:404-429's baseline reason text is left (x13)."}
+    assembly_note: "FK-20 (promotion; ledger decides): no fixture needs re-binding — `drive` binds a `holds` bundle already; only the comments become false and are reworded here."
+
+  # =========================================================================================
+  # PHASE D — settled phase-C premises no inherited demand held. One demand per premise whose
+  # expected value is a DISTINCT observable (17 test), one parity demand for the eleven
+  # executable "identical to a confident close on the same fault" rows, one clause for the six
+  # parity rows whose value waits on an open author probe. `discharged_by` is the premise's own
+  # name (none collides with `defender/tests`). The seed is the judge's settled sentence.
+  # =========================================================================================
+
+  - id: s23_no_strong_belief_move_dispatches_two_stages
+    kind: behavior
+    form: test
+    discharged_by: test_inconclusive_close_whose_record_has_no_strong_belief_move
+    binds:
+      - "interacts(challenge_gate->ablation)"
+      - "interacts(challenge_gate->review_trace)"
+      - "interacts(challenge_gate->composer).payload"
+    premises: [23]
+    seed_docstring: >-
+      An `inconclusive` close whose record carries no strong belief move dispatches the support
+      lens and the composer only — two calls — writes a `skipped` ablation trace row carrying no
+      `ok` key, and the composer's ceiling sentence is unchanged (a2: the two-call floor is the
+      base behaviour on a confident close today).
+  - id: s51_receipts_are_re_priced_at_every_attempt
+    kind: behavior
+    form: test
+    discharged_by: test_stale_receipts_across_reclose_after_more_investigation
+    binds:
+      - "interacts(_close_investigation_async->investigation_md)"
+      - _refuse_if_entry_price_is_owed
+      - "interacts(_close_investigation_async->report_md)"
+    premises: [51, 37]
+    seed_docstring: >-
+      A challenged `inconclusive` re-closed after the investigation added a receipt commits the
+      receipts as the file stands at the SECOND attempt — re-priced from the file, no carry-over
+      from the first attempt's parse (#37: the no-writer invariant between the price read and the
+      gate read holds within one attempt only; the second attempt's price gate re-reads the
+      investigator's writes by design).
+  - id: s52_trace_rows_accumulate_one_per_role_per_attempt
+    kind: uniqueness
+    form: test
+    discharged_by: test_trace_rows_accumulate_across_multiple_close_attempts
+    binds: ["review_trace.identity", "interacts(challenge_gate->review_trace)"]
+    premises: [52]
+    seed_docstring: >-
+      Across a challenged attempt and a standing re-close on one run, each role's
+      `wire_logs/review_{role}_trace.jsonl` holds one row per attempt, each labelled with that
+      attempt's `round` (= the turn at gate entry), appended never replaced, so the run page's
+      per-round reader can glob and sort them — no torn line, no lost row.
+  - id: s55_usage_limit_after_a_challenged_inconclusive_forces_nothing
+    kind: behavior
+    form: test
+    discharged_by: test_usage_limit_exceeded_after_a_challenged_inconclusive
+    binds:
+      - "drives(run_investigation->_close_investigation_async)"
+      - "interacts(_close_investigation_async->review_record)"
+      - "interacts(_close_investigation_async->report_md)"
+    premises: [55]
+    seed_docstring: >-
+      A run whose `inconclusive` close was challenged and which then hits `UsageLimitExceeded`
+      ends with no report.md and no forced commit; the numbered record of the challenged attempt
+      is the distinguishing residue on disk (C17-adjacent: the driver's limit arm forces nothing).
+  - id: s58_pre_gate_refusal_leaves_no_review_residue
+    kind: negative      # positive control: d9 (a challenged attempt DOES write the watermark and a record)
+    form: test
+    discharged_by: test_first_close_attempt_refused_pre_gate_leaves_no_residue
+    binds: [ReviewState, "interacts(challenge_gate->review_trace)", _refuse_if_entry_price_is_owed]
+    premises: [58]
+    seed_docstring: >-
+      An `inconclusive` close refused before the gate (entry price owed) leaves `ReviewState`
+      untouched — turns 0, raised_asks empty, closed False — and writes no trace row and no
+      record: the only ReviewState writers are `_route` on CHALLENGED and `_commit`.
+  - id: s60_forced_close_ignores_inflight_review_bookkeeping
+    kind: behavior
+    form: test
+    discharged_by: test_forced_close_ignores_inflight_review_bookkeeping
+    binds: [ReviewState, HOST_ONLY_DISPOSITION, "drives(run_investigation->_close_investigation_async)"]
+    premises: [60]
+    seed_docstring: >-
+      The driver's forced `unresolved` close after a challenged `inconclusive` neither resets nor
+      routes on `turns`/`raised_asks`; the driver's guard consults `closed` only, and the forced
+      commit leaves the counters as the challenge left them.
+  - id: s61_record_numbering_is_contiguous_across_mixed_arms
+    kind: uniqueness
+    form: test
+    discharged_by: test_record_numbering_contiguity_across_mixed_arms
+    binds:
+      - "review_record.identity"
+      - "interacts(challenge_gate->review_record)"
+      - "interacts(_close_investigation_async->review_record)"
+    premises: [61]
+    seed_docstring: >-
+      Two challenged attempts and a standing third on one run write `review_record.1.json`,
+      `.2.json`, `.3.json` — the challenged arms number `state.turns` after `_route`'s increment,
+      the commit arm `turns+1` — contiguous, no gap, no collision, each with distinct content
+      (the composition-frame uniqueness demand for the sink's two writers).
+  - id: s62_terminal_report_reflects_the_final_attempt_and_records_persist
+    kind: behavior
+    form: test
+    discharged_by: test_terminal_report_reflects_final_attempt_only
+    binds: ["review_record.identity", "interacts(_close_investigation_async->report_md)"]
+    premises: [62]
+    seed_docstring: >-
+      After two challenges and a standing third attempt, report.md carries the final verdict only
+      and no challenge history, while the three numbered records and three rounds of trace rows
+      persist and the run page renders every attempt ("3 close attempts") — SB-1's sibling SB-2,
+      settled: history lives in the per-attempt channels, never in a new report field.
+  - id: s63_re_closed_as_confident_gets_the_confident_sentence_and_the_shared_pool
+    kind: behavior
+    form: test
+    discharged_by: test_challenged_inconclusive_re_closed_as_a_confident_disposition
+    binds: ["interacts(challenge_gate->composer).payload", ReviewState, _route]
+    premises: [63]
+    seed_docstring: >-
+      A challenged `inconclusive` re-closed as `malicious` gets the confident host sentence, is
+      routed against the inherited `turns` and `raised_asks`, and numbers its record with the
+      same formulas — the pool and watermark are per run, not per disposition.
+  - id: s64_re_close_with_a_new_receipt_is_reviewed_fresh
+    kind: behavior
+    form: test
+    discharged_by: test_challenged_inconclusive_re_closed_with_a_new_receipt_for_the_asked_target
+    binds: [_route, ReviewState, "interacts(_close_investigation_async->report_md)"]
+    premises: [64]
+    seed_docstring: >-
+      Re-closing `inconclusive` with a new `ceiling_test` receipt for the asked target: the
+      second review sees the receipt fresh; a `holds` commits the ceiling-held cause (§7 FK-10's
+      seventh member — CAUSE_STORY_SETTLED is the confident arm's; phase E corrected this seed)
+      with the expanded set; a re-ask on the same target now counts as fresh because the record
+      mentions it more than when first asked (d12's condition), pool permitting.
+  - id: s76_the_reworded_tool_docstring_reaches_every_run
+    kind: coherence
+    form: test
+    discharged_by: test_close_tool_description_changes_reach_every_run
+    binds: ["close_investigation.access[tool]", SKILL_md]
+    premises: [76]
+    seed_docstring: >-
+      The close tool's registered description (the schema every run's model reads) no longer says
+      `inconclusive` commits unreviewed and says the same thing SKILL.md says; no golden or
+      schema pin holds the old sentence.
+  - id: s90_reviewed_inconclusive_frontmatter_fits_the_cap_with_the_longest_cause
+    kind: behavior
+    form: test
+    discharged_by: test_reviewed_inconclusive_report_frontmatter_stays_under_its_cap_with_the_longest_cause
+    binds: ["interacts(_close_investigation_async->report_md).payload", REPORT_CAUSES]
+    premises: [90]
+    seed_docstring: >-
+      A reviewed `inconclusive` with the longest REPORT_CAUSES member, a `failure_kind`, and a
+      `ceiling_test` block at `_MAX_CEILING_FRONTMATTER_BYTES` commits (457 of 512 B, G13/a5);
+      `validate_report` refuses an overflow; the seventh cause EXISTS (§7 FK-10, d23 — phase E
+      corrected this seed's "no seventh cause") and rides the arm with no `failure_kind`.
+  - id: s91_benign_and_false_positive_share_the_confident_sentence
+    kind: parity
+    form: test
+    discharged_by: test_confident_members_other_than_malicious_share_the_host_sentence
+    binds:
+      - "interacts(challenge_gate->composer).payload"
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[benign]"
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[false-positive]"
+    premises: [91]
+    seed_docstring: >-
+      `benign` and `false-positive` closes hand the composer the identical confident sentence
+      `malicious` does — O5 requires a binary inconclusive/confident branch, never a per-member one.
+  - id: s71_headline_badge_reads_the_cause_only_for_not_reviewed
+    kind: behavior
+    form: test
+    discharged_by: test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap
+    binds: [_gate_badge_html, "interacts(visualize_run->report_md)"]
+    premises: [71]
+    seed_docstring: >-
+      A ceiling-held `inconclusive` (the seventh cause after §7 FK-10; this seed said
+      CAUSE_STORY_SETTLED) and an unaffordable gap (CAUSE_EVIDENCE_CANNOT_DISCRIMINATE /
+      TURN_BUDGET_SPENT) render the identical `gate: stands` headline badge; the cause text is
+      where a reader learns which (F5).
+  - id: s21_composer_receives_exactly_one_host_question
+    kind: negative      # positive control: d3 (the ceiling sentence IS present)
+    form: test
+    discharged_by: test_composer_receives_exactly_one_host_question
+    binds: ["interacts(challenge_gate->composer).payload", composer_md]
+    premises: [21]
+    seed_docstring: >-
+      For an `inconclusive` close the composer's full prompt (system + user) carries the ceiling
+      question and NOT the confident "does the conclusion follow" question anywhere — one
+      question per close (SB-1 settled; d4 pins the system prompt half, this pins the composed
+      whole).
+  - id: s11_rationale_and_receipts_reach_the_composer_independently
+    kind: behavior
+    form: test
+    discharged_by: test_ceiling_rationale_and_receipts_present_independently
+    binds: ["interacts(challenge_gate->composer).payload", "interacts(_close_investigation_async->report_md)"]
+    premises: [11]
+    seed_docstring: >-
+      Receipt rows without a `ceiling_rationale` and a rationale without rows both reach the
+      composer's projection and both commit; neither absence is a refusal.
+  - id: s_fault_handling_parity_with_a_confident_close
+    kind: parity
+    form: test
+    discharged_by: test_fault_handling_parity_with_a_confident_close
+    binds:
+      - "read_composer_reply.domain.distinguished[ask-at-prose-cap]"
+      - "read_composer_reply.domain.distinguished[ask-over-prose-cap]"
+      - "read_composer_reply.domain.distinguished[extra-keys]"
+      - "citable_refs.domain.distinguished[case-variant]"
+      - "interacts(_close_investigation_async->report_md)"
+      - "interacts(_close_investigation_async->review_record)"
+      - "interacts(challenge_gate->review_trace)"
+      - _route
+    premises: [5, 12, 38, 39, 40, 43, 56, 59, 68, 81, 85]
+    seed_docstring: >-
+      For each row, driving the same fault on an `inconclusive` close and on a `malicious` close
+      produces the same observable class (the value is whatever the base does — asserted as
+      equality across the two dispositions, never as a #992-specific literal): #5 an ask at and
+      one past ASK_PROSE_MAX; #12 a case/whitespace variant of a citable target (exact-match
+      membership); FK-13 extra top-level keys ignored (rg1); #38 report.md write fails after the
+      record committed; #39 record write fails before report.md; #40 one role's trace append
+      fails; #43 record fails and report commits; #56 null-ask/repeat/budget conditions
+      co-occurring resolve in source order; #59 `ReviewState.disposition` is written by `_commit`
+      alone; #68 a new mention only inside a receipt note counts whatever `_mentions` counts;
+      #81 ask-target content beyond membership is not screened; #85 malformed-but-plausible
+      receipt rows render as `render_report` renders them today.
+  - id: s_parity_rows_awaiting_an_author_probe
+    kind: parity
+    form: clause        # the value is an open author/dependency probe's; the contract is parity, so nothing #992-specific can be asserted until the probe lands
+    binds: [Bounds, "interacts(_close_investigation_async->report_md)", "drives(_close_investigation_async->challenge_gate)"]
+    outcome: {nl: "Six settled parity rows are identical to a confident close on the same fault and carry no #992-specific value: #42 the report schema refusing a reviewed inconclusive after the review was spent (author probe P12 LANDED by a6 — a 9000-char note reached the commit-site refusal — and then CLOSED by §7 R6's cap: after the fix a reviewed inconclusive cannot reach REPORT_FILE_MAX by notes, which s_ceiling_test_note_overflow's N-receipt row pins (F-3); runtime_evidence's own bound is _MAX_RUNTIME_EVIDENCE_BODY_BYTES); #44 the same close attempt retried after a transient failure (dependency probe 4); #47 the shared request budget exhausted before the stages run (dependency probe 7); #65 a challenged inconclusive with no tool budget left for the round (author P7); #67 a resumed branch after a challenged inconclusive (author P2); #89 the close turn blocking for up to three stage deadlines (author P6). Each becomes a row of s_fault_handling_parity_with_a_confident_close if its probe lands executable; none is a design decision."}
+    premises: [42, 44, 47, 65, 67, 89]
+
+  # =========================================================================================
+  # PHASE D-GATE — minted by the gate leaf from the R6/R7 residue `spec-graph gate` cannot
+  # discharge by address-matching alone (rules.md: "Test obligations ... Minted as an
+  # executable demand from phase D's residue and reviewed at §7"). Reviewed, not authored,
+  # by the human — §7 may reword or waive either.
+  # =========================================================================================
+
+  - id: s_ceiling_test_note_overflow_on_reviewed_path
+    kind: negative   # positive control: the same path with the rendered notes AT the cap commits (d18/s90 territory)
+    form: test
+    discharged_by: test_reviewed_inconclusive_ceiling_note_overflow_is_refused
+    binds:
+      - "interacts(_close_investigation_async->report_md)"
+      - "interacts(_close_investigation_async->report_md).payload"
+      - _refuse_if_entry_price_is_owed
+      - "investigation_md.domain.distinguished[over-cap-ceiling-note]"
+      - "drives(_close_investigation_async->challenge_gate)"
+    resolution: >-
+      §7 R6 (human, AGAINST the judge's parity recommendation) — RE-SCOPED FROM PARITY TO A FIX.
+      The `ceiling_test` `note` is unbounded model-authored body text (render_report's own
+      docstring, close_tool.py:237-244) and a6 shows the hole is real TODAY: the entry-price
+      gate accepts a 9000-character note (`_check_inconclusive_gating` → no error) and the
+      close then refuses at the commit — `ModelRetry: report.md is 9255 bytes, over the
+      8192-byte limit` — on an append-only companion, i.e. a permanently stranded run. The
+      demand: the accumulated RENDERED `ceiling_test` note lines are BOUNDED at the entry-price
+      gate — `_check_inconclusive_gating`, collected at BOTH boundaries (the investigation.md
+      write gate and the close) — with the same refusal shape the same function already uses
+      for the over-cap receipt block ("disposition inconclusive blocked: the accumulated
+      `ceiling_test` receipts are N bytes, over the M-byte bound — …") and the baseline block
+      ("… render N bytes of `report.md` body, over the 2048-byte bound — …"): an over-cap note
+      is refused BEFORE any stage runs (no trace row, no record) and never reaches the commit;
+      at-cap notes commit on the reviewed path with the notes rendered in full. CAP VALUE
+      (spine's assumption, handoff.deviations): 2048 bytes over the rendered note block — the
+      bound this codebase already applies to the sibling model-authored body family in the
+      same report (`_MAX_RUNTIME_EVIDENCE_BODY_BYTES = 2048`, _gating.py:1314, "sized well
+      under the file cap with the frontmatter, the ceiling notes and the close's own sentence
+      still to fit beside it"); 512 + 2048 + 2048 = 4608 leaves 3584 B of the 8192 B file cap.
+      The `</report>` literal in a note is ALREADY refused by `_gating` (close_tool.py:233-235)
+      and stays a row of this test.
+    rows: >-
+      R6 obligation as the gate leaf wrote it: M4 makes the REVIEWED close a NEW caller of
+      render_report carrying REAL `ceiling_test` rows (C6), so this pre-existing, documented
+      hazard is newly reached by this graph's own delta; s90 pins only the frontmatter byte cap.
+
+  - id: s_case_ticket_closing_comment_under_new_cooccurrence
+    kind: coherence
+    form: test
+    discharged_by: test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close
+    binds:
+      - "interacts(case_ticket->report_md)"
+      - "interacts(case_ticket->REPORT_CAUSES)"
+    resolution: >-
+      §7 FK-10 (human): drive a reviewed, ceiling-held `inconclusive` close through to the
+      ticket bridge and assert the closing comment carries `disposition: inconclusive`,
+      `outcome: stands` and the SEVENTH cause sentence — "the challenge review examined the
+      ceiling claim and found nothing further measurable" — verbatim, and that
+      `case_ticket.py:304-313`'s membership check (which imports REPORT_CAUSES) accepts it;
+      a machinery-failed `inconclusive` (stands + failure_kind + CAUSE_REVIEW_INCOMPLETE, FK-9's
+      co-occurrence) renders through the same reader without claiming a settled finding.
+    rows: >-
+      R7 obligation (both case_ticket edges — the same reader, the same unmoved-mirror
+      concern): `case_ticket` reads report_md's outcome/cause/failure_kind for its closing
+      comment (G19) and checks REPORT_CAUSES membership only; d26's prose-rewording list does
+      not name scripts/case_history/case_ticket.py.
+
+  # =========================================================================================
+  # §7-APPLY (70-resolutions.md) — three demands minted from the human's decisions.
+  # =========================================================================================
+
+  - id: s_fk10_ceiling_held_commits_its_own_cause
+    kind: domain-outcome
+    form: test
+    discharged_by: test_ceiling_held_inconclusive_commits_the_seventh_cause_and_a_confident_holds_does_not
+    binds:
+      - _route
+      - REPORT_CAUSES
+      - "interacts(_close_investigation_async->report_md)"
+      - "read_composer_reply.domain.distinguished[holds]"
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[inconclusive]"
+      - "NO_REVIEW_DISPOSITIONS.domain.distinguished[malicious]"
+    seed_docstring: >-
+      REPORT_CAUSES has exactly seven members: the six shipped sentences verbatim plus "the
+      challenge review examined the ceiling claim and found nothing further measurable". A
+      composer `holds` on an `inconclusive` close commits `outcome: stands` with THAT sentence
+      as `cause` (and the ticket's closing comment carries it — s_case_ticket…); a composer
+      `holds` on a `malicious` close still commits `cause: CAUSE_STORY_SETTLED` and never the
+      new sentence; no other arm (null ask, repeat, spent pool, machinery failure) carries it.
+      Frontmatter headroom with the new member: a5.
+  - id: s_fk6_ceiling_sentence_names_a_recorded_id
+    kind: shape
+    form: test
+    discharged_by: test_the_ceiling_sentence_asks_for_a_recorded_id
+    binds:
+      - "interacts(challenge_gate->composer).payload"
+      - composer_projection
+      - citable_refs
+    seed_docstring: >-
+      The host's ceiling sentence in the composer's user message (M2, `inconclusive` only)
+      states that the missed measurement must be named by an id ALREADY IN THE RECORD — a
+      `v-`/`e-`/`l-`/`h-` id — and the ask's `target` is read through the same `citable_refs`
+      guard: the sentence and the guard agree, so following the sentence literally cannot
+      produce the uncitable name the guard refuses. Routing of an uncitable name is unchanged
+      (rg3: `Unreadable` → stands/inconclusive/CAUSE_REVIEW_INCOMPLETE/`unreadable`, d7).
+  - id: s_fk8_every_reader_of_the_reviewed_split_agrees
+    kind: coherence
+    form: test
+    discharged_by: test_every_reader_of_the_reviewed_split_agrees_on_both_populations
+    binds:
+      - "interacts(visualize_runtime->review_record)"
+      - "interacts(visualize_runtime->review_trace)"
+      - "interacts(visualize_runtime->NO_REVIEW_DISPOSITIONS)"
+      - "interacts(visualize_run->report_md)"
+      - _BYPASS_NOTE
+    seed_docstring: >-
+      R8's join census for FK-8's re-key — every consumer of `_was_reviewed`'s answer, derived
+      by search (visualize_runtime.py:546 the reviewed list and its count; :585/:600 the
+      per-attempt bypassed flag and its `_BYPASS_NOTE` vs role-trace rendering; :359 the
+      constant read that goes away; visualize_run.py:108-133 the cause-keyed headline;
+      tests/test_923_readers.py:250-254 the bare-dict callers; test_visualize_review_gate's
+      fixtures): over one run dir of each population (pre-#992 inconclusive with no traces;
+      post-change reviewed inconclusive with three trace files) every one of those readers
+      resolves the SAME answer — the count, the section guard, the per-attempt roles/bypass
+      note and the headline badge never disagree — and no reader still keys on
+      `NO_REVIEW_DISPOSITIONS` for the split.
+
+structure:
+  # THE AXIS REGISTRY — every `key_axes` / `interpolates` member below is one of these. The
+  # brief's "round" (review_trace rows) is a row FIELD, not a path axis; the record's `turn`
+  # is minted from `ReviewState.turns` (+1 on the commit arms) and IS a path axis.
+  axes: [run_dir, turn, role]
+
+  actors:
+    # --- the change's own actors (provenance: design) -------------------------------------
+    - {id: _close_investigation_async, frame: leg,         provenance: design}  # close_tool.py:405 — the close's body behind both lanes; M1's branch :507, M4's commit :557-564
+    - {id: challenge_gate,             frame: leg,         provenance: design}  # challenge_gate.py:429 — reads investigation.md :466-467, dispatches the three stages, routes
+    - {id: _route,                     frame: leg,         provenance: design}  # challenge_gate.py:367 — already takes `disposition` (G3); M3 moves its three FORCED arms
+    - {id: _fail,                      frame: leg,         provenance: design}  # challenge_gate.py:312 — six sites :471,474,512,517,530,535 (G2); M3 threads the disposition
+    - {id: composer_projection,        frame: leg,         provenance: design}  # review/projector.py:227 — M2 adds `disposition` and the second host sentence
+    - {id: support_projection,         frame: leg,         provenance: design}  # review/projector.py:269 — the lens cut, UNCHANGED (d5)
+    - {id: run_investigation,          frame: composition, provenance: design}  # driver/__init__.py — resolves stages :512-516, the ONLY forced=True caller :312-314
+    - {id: visualize_runtime,          frame: leg,         provenance: design}  # scripts/visualize/visualize_runtime.py — _was_reviewed :347, _BYPASS_NOTE :340, render_review_gate :516
+    - {id: visualize_run,              frame: leg,         provenance: design}  # scripts/visualize/visualize_run.py::_gate_badge_html :108-133 (x14)
+    # --- the grounded neighbourhood (provenance: code) — what reality imposes ------------
+    - {id: live_review_stages,         frame: composition, provenance: code}    # review_roles.py:229 — one Agent per role via _make_live_stage :149; prompts read once per role
+    - {id: RequestLogger,              frame: leg,         provenance: code}    # runtime/observe.py::RequestLogger — live stages' wire rows (agent_id review:{lens}); fakes write nothing (F1)
+    - {id: replay_drive,               frame: composition, provenance: code}    # tests/e2e/_replay_harness.py::drive :434-560 — binds a `holds` bundle when review_stages is None (G4)
+    - {id: read_report,                frame: leg,         provenance: code}    # defender/_report.py::read_report :93 — case_ticket, evals/held_out, learning branch/episode.verdicts read through it
+    - {id: case_ticket,                frame: leg,         provenance: code}    # scripts/case_history/case_ticket.py:298-313 — closing comment carries disposition+outcome; cause ∈ REPORT_CAUSES membership
+    - {id: validate_report,            frame: leg,         provenance: code}    # defender/_artifact_schema.py::validate_report — REPORT_FRONTMATTER_MAX=512, REPORT_FILE_MAX=8192, on every commit :369-374
+    - {id: review_cost_by_lens,        frame: leg,         provenance: code}    # scripts/visualize/visualize_messages.py:281 — the review-cost reader of llm_requests.jsonl
+    - {id: lint_half_read_table,       frame: leg,         provenance: code}    # scripts/lint/lint_half_read_table.py — fingerprints _close_investigation_async's literal branches (G20)
+
+  boundaries:
+
+    # ===== the seam ==========================================================================
+    - id: close_investigation
+      provenance: design
+      # The close's entry, reached over TWO vias: the sync host lane `close_investigation`
+      # (close_tool.py:567, returns CloseResult) and the model lane `_tool_close_investigation`
+      # (:584, registered by register_close_tool :755 with sequential=True, returns
+      # `result.message` only — x15). Both funnel into `_close_investigation_async`, so the
+      # ordered refusals are shared; the difference is WHO may pass `forced` and what comes back.
+      facets:
+        access:
+          constraints_by_via:
+            host:
+              trust: operator
+              constraints: [enum-membership, host-only-refusal-unless-forced, terminal-check, flagged-rows-window, entry-price, structure-check, returns-CloseResult]
+            tool:
+              trust: attacker-influenced
+              constraints: [enum-membership, host-only-refusal, terminal-check, flagged-rows-window, entry-price, structure-check, sequential, returns-message-only]
+
+    # ===== the set M1 shrinks ===================================================================
+    - id: NO_REVIEW_DISPOSITIONS
+      provenance: design
+      # close_tool.py:81 — `("inconclusive", HOST_ONLY_DISPOSITION)` today; design → `("unresolved",)`.
+      # Code readers: :507 (the bypass branch) and visualize_runtime.py:331,336 → _was_reviewed
+      # (G1). The five distinguished members are the whole DISPOSITION_ENUM: d2 drives each on its
+      # own lane; only `unresolved` commits without a stage call after M1.
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "A tuple of DISPOSITION_ENUM members that skip the live review. Membership is tested by value, never keyed on `forced` (#923 J4)."}
+          default: "('inconclusive', 'unresolved')"
+          distinguished: [inconclusive, unresolved, benign, false-positive, malicious]
+          falsy_valid: false
+          documented_alternatives: []
+
+    # ===== the run-dir sinks ====================================================================
+    - id: report_md
+      provenance: design
+      # `<run_dir>/report.md` — written by `_commit` (close_tool.py:342-402, write_guarded
+      # mode=replace, record FIRST, report SECOND), rendered by render_report :195-283, validated
+      # by validate_report on every commit. The delta changes its CONTRACT: `disposition:
+      # inconclusive` now co-occurs with `outcome: stands` + a `failure_kind` (F7) and with a
+      # `ceiling_test:` block on the reviewed path (M4). Frontmatter cap 512 B; worst reviewed
+      # inconclusive 457 B (G13).
+      facets:
+        identity:
+          key_axes: [run_dir]
+          evidence: {nl: "One report per run: the path is the fixed name `report.md` under the run dir (close_tool.py:_commit, `deps.run_dir / 'report.md'`); a second commit is refused by the terminal check (#50), so the single writer never writes twice."}
+          sharing: unique-key
+        payload:
+          parts:
+            - {role: frontmatter, source: "template:render_report", slots: {disposition: GateVerdict, outcome: CLOSE_RETURNS, cause: REPORT_CAUSES, failure_kind: GateVerdict, ceiling_test: conclude_ceiling_test_rows}}
+            - {role: body, source: "template:render_report", slots: {receipt_notes: conclude_ceiling_test_rows, runtime_evidence: _CloseFields}}
+          invariants: [all-slots-bound]
+          nl: "The analyst-facing report: host-chosen frame (disposition/outcome/cause/failure_kind) plus the priced receipts (ref/state/cap in frontmatter, note lines in the body) and the runtime_evidence block; a literal `</report>` is refused by the schema."
+    - id: review_record
+      provenance: design
+      # `<run_dir>/review_record.{turn}.json` — `{verdict, reviewed_disposition, detail(framed),
+      # failure_kind}` (_record_dict :306-317). TWO writers: the commit arms (close_tool.py:357-361,
+      # turn = state.turns+1) and the challenged arm (challenge_gate.write_review_record :146 via
+      # close_tool.py:543-545, turn = state.turns, already incremented in _route). After M1 an
+      # `inconclusive` attempt writes a REAL verdict here (F1). Reader: visualize_runtime only
+      # (test_923_readers:222-240 pins no consumer outside the runtime view).
+      facets:
+        identity:
+          key_axes: [run_dir, turn]
+          evidence: {nl: "Path template `review_record.{turn}.json` under the run dir (challenge_gate.review_record_path); `turn` read off the two writer sites named above — the numbering formulas are what s61 pins contiguous."}
+          sharing: unique-key
+    - id: review_trace
+      provenance: design
+      # `<run_dir>/wire_logs/review_{role}_trace.jsonl` — one file per REVIEW_ROLES member, rows
+      # `{round, ok|skipped|incomplete, …, raw_reply?}`; the sole writer is `_write_trace_row`
+      # (challenge_gate.py:256-270, guarded append, guarded_mkdir of wire_logs/), reached from the
+      # gate's lens/composer rows and from `_mark_traces_incomplete` (one row per role on every
+      # `_fail`, G21). `round` = state.turns at gate entry.
+      facets:
+        identity:
+          key_axes: [run_dir, role]
+          evidence: {nl: "Path template `wire_logs/review_{role}_trace.jsonl` (challenge_gate.review_trace_path); role ∈ REVIEW_ROLES; rows append across attempts, distinguished by their `round` field."}
+          sharing: serialized-append
+    - id: llm_requests_jsonl
+      provenance: code
+      # `<run_dir>/wire_logs/llm_requests.jsonl` — RequestLogger's stream; LIVE review stages write
+      # `review:{lens}` rows through the run's logger (_make_live_stage), fake bundles write
+      # nothing. After M1 an inconclusive close is a NEW writer disposition (F1) but the writer's
+      # handling is untouched (#41 dropped); test_replay_skeleton:171-178 pins zero `review:` rows
+      # in a hermetic replay (#72).
+      facets:
+        identity:
+          key_axes: [run_dir]
+          evidence: {nl: "Fixed file name under the run dir (profile `wire_log` resource: observe.RequestLogger); rows append per request."}
+          sharing: serialized-append
+
+    # ===== the three stage seams and their prompts =============================================
+    - id: support
+      provenance: design
+      # `ReviewStages.support` — the support lens; its payload is `support_projection(companion,
+      # salt)`: the companion WITHOUT `conclude`/`closed_loops` (INFERENCE_COMPANION_KEYS, C3), so
+      # no ceiling receipt, rationale or note reaches it (d5). Prompt: support.md, UNTOUCHED.
+      facets:
+        payload:
+          parts:
+            - {role: system, source: "const:support_md"}
+            - {role: user, source: "template:support_projection", slots: {companion: investigation_md}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The blind lens reading request over the observation-only projection, framed on the call's own salt."
+    - id: ablation
+      provenance: design
+      # `ReviewStages.ablation` — the support lens again with one strong-move edge withheld;
+      # dispatched ONLY when `ablation_target(companion)` is non-None, else a `skipped` trace row
+      # and two stages run (G12/x10, a2).
+      facets:
+        payload:
+          parts:
+            - {role: system, source: "const:support_md"}
+            - {role: user, source: "template:support_projection", slots: {companion: investigation_md}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The same observation-only projection minus the ablated edge; the lens is not told anything is missing."
+    - id: composer
+      provenance: design
+      # `ReviewStages.composer` — M2's surface. System: composer.md (read once per role by
+      # role_prompt). User: `composer_projection(companion, readings, salt, ablated=…)` today =
+      # _COMPOSER_ASK + `## Lens readings` (each framed) + optional host ablation note OUTSIDE any
+      # frame + `## The investigation's own account (host-rendered)` = UNTRUSTED_NOTE + framed
+      # json.dumps(companion). M2 adds a `disposition` parameter and a second host sentence beside
+      # _COMPOSER_ASK, outside every frame, keyed inconclusive/confident.
+      facets:
+        payload:
+          parts:
+            - {role: system, source: "const:composer_md"}
+            - {role: user, source: "template:composer_projection", slots: {host_sentence: NO_REVIEW_DISPOSITIONS, lens_readings: support, ablation_note: ablation, companion: investigation_md}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The composer's input: the disposition-keyed host sentence and _COMPOSER_ASK outside every frame, each lens reading individually framed, the whole companion (receipts, notes, ceiling_rationale included) inside the call's salted untrusted frame."
+    - id: composer_md
+      provenance: design
+      # runtime/review/prompts/composer.md — M2 reframes it disposition-neutral. Pinned phrases
+      # that must survive (x9): "opposite disposition"; no issue numbers. Line 28-30 already
+      # offers `{"finding":"gap","ask":null}` (x5 refuted the design's "the prompt does not offer
+      # that shape").
+      facets: {}
+    - id: support_md
+      provenance: code
+      # runtime/review/prompts/support.md — untouched (O5); "confident conclusion" there is inert
+      # framing because a lens never sees `conclude`. Pinned phrase (x9): "do not see".
+      facets: {}
+    - id: SKILL_md
+      provenance: design
+      # defender/SKILL.md — the investigator's system prompt: :514 "confident finding", :521-522
+      # "Commits immediately, no review", :553-557 "anything but `inconclusive` passes", :567-572
+      # fail-closed + "do not pre-emptively call `inconclusive` to route around a challenge".
+      # Not hash-pinned by any test (G16). Every roster naming the four model members must keep
+      # `unresolved` (G15).
+      facets: {}
+
+    # ===== the review's own contracts ===========================================================
+    - id: ReviewStages
+      provenance: design
+      # review_roles.py:189-226 — three fields support/ablation/composer; `stage(role)` raises
+      # UnboundReviewStage for an unbound field; the fully-unbound spellings are `None` (the
+      # driver's fall-through) and `ReviewStages()`; both land in _dispatch's STAGE_ERROR arm
+      # (x12, a1). PARTIAL binding is what the harness's `bundle()` builds routinely — FK-2.
+      facets:
+        domain:
+          type: object
+          refinement: {nl: "A bundle of up to three stage callables; the gate reads one per REVIEW_ROLES member through `stages.stage(role)` inside `_dispatch`'s fault arm."}
+          default: live_review_stages
+          distinguished: [fully-bound, none, empty-ReviewStages, partially-bound]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: REVIEW_ROLES
+      provenance: design
+      # challenge_gate.py:45 — `("support", "ablation", "composer")`, the one home for the trace
+      # roster; `_mark_traces_incomplete` iterates it (G21). Unchanged by the design (d8).
+      facets: {}
+    - id: ReviewState
+      provenance: design
+      # challenge_gate.py:116-131 — per-run, in `deps.review_state["state"]`: turns, raised_asks,
+      # closed, disposition. Writers: `_route` (raised_asks + turns, CHALLENGED only :419-420),
+      # `_commit` (closed, disposition :391-393). SHARED across a confident→inconclusive re-close
+      # on one run (F2) — the design's CAUSE_TURN_BUDGET_SPENT / NOTHING_LEFT_TO_ASK reachability.
+      facets: {}
+    - id: Bounds
+      provenance: code
+      # challenge_gate.py:75-104 — extra_turns=EXTRA_TURN_BOUND=2 (>0, < DEFAULT_TOOL_RETRIES),
+      # stage_timeout=DEFENDER_REVIEW_STAGE_TIMEOUT_SECONDS (450), base_request_limit. No knob
+      # gains a documented alternative from this change (brief: crosses_validation n/a), so this
+      # stays a facetless read-only input rather than a domain that mints obligations nobody asked for.
+      facets: {}
+    - id: read_composer_reply
+      provenance: design
+      # review/reply.py:123-180 — `read_composer_reply(text, refs=citable_refs(companion))`:
+      # FINDINGS={holds,gap}; ask target ∈ citable_refs; ASK_PROSE_MAX=500; a `holds` carrying an
+      # ask and a `gap` whose ask is neither an object nor null are `Unreadable`. ONE contract for
+      # both dispositions (M2). The members are the reply SHAPES the arms turn on; values from
+      # rg1/rg2/rg3.
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "The composer's reply as one JSON object `{finding, review, ask}`; the reader pulls exactly those three keys via .get and never inspects extras (rg1)."}
+          default: holds
+          distinguished: [holds, gap-with-ask, gap-null-ask, gap-omitted-ask, gap-empty-string-ask, holds-with-ask, uncited-target, not-json, finding-outside-vocabulary, extra-keys, ask-at-prose-cap, ask-over-prose-cap]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: citable_refs
+      provenance: design
+      # review/reply.py:79 — the ids an ask may name: vertices, edges, hypotheses, lead ids the
+      # investigation recorded; exact-match membership (C7). FK-1 asks whether a lead a
+      # `ceiling_test` receipt already priced is a legal target (judge: yes — membership only).
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "A frozenset of recorded ids; membership is exact — no case, whitespace or receipt-aware normalisation."}
+          default: recorded-id
+          distinguished: [recorded-id, unrecorded-id, receipted-lead, case-variant]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: GateVerdict
+      provenance: design
+      # challenge_gate.py:296-309 — outcome ∈ CLOSE_RETURNS, disposition, cause ∈ REPORT_CAUSES|
+      # NO_CAUSE, detail, material, turns_used, failure_kind ∈ FAILURE_KINDS|None. Producers:
+      # `_route._verdict` (4 arms) and `_fail` (6 sites). No new field (d23).
+      facets: {}
+    - id: CloseResult
+      provenance: design
+      # close_tool.py:178 — the sync host lane's return; outcome ∈ CLOSE_RETURNS, message,
+      # material, record_path, cause, detail, turns_used, failure_kind. Never reaches the model (x15).
+      facets: {}
+    - id: CLOSE_RETURNS
+      provenance: design
+      # close_tool.py:74 — (challenged, stands, forced-inconclusive). No new member: a standing
+      # inconclusive commits `stands` (d23).
+      facets: {}
+    - id: REPORT_CAUSES
+      provenance: design
+      # close_tool.py:140 — six sentences (CAUSE_NOT_REVIEWED, STORY_SETTLED, REVIEW_INCOMPLETE,
+      # EVIDENCE_CANNOT_DISCRIMINATE, TURN_BUDGET_SPENT, NOTHING_LEFT_TO_ASK). No seventh (d23,
+      # FK-10 open on wording). `_fail` hardcodes CAUSE_REVIEW_INCOMPLETE at all six sites (rg3).
+      facets: {}
+    - id: HOST_ONLY_DISPOSITION
+      provenance: design
+      # close_tool.py — `"unresolved"`, the host's verdict: refused as a model argument
+      # (`_refuse_if_host_only_verdict_misused` :591-623, C9); the only member left in
+      # NO_REVIEW_DISPOSITIONS after M1; what `_route`/`_fail`'s FORCED arms stop returning for
+      # an inconclusive close (M3).
+      facets: {}
+    - id: FORCED_INCONCLUSIVE
+      provenance: design
+      # close_tool.py:72 — the outcome name `"forced-inconclusive"` (NOT a disposition): what the
+      # FORCED arms return for a confident close and never for an inconclusive one after M3.
+      facets: {}
+    - id: _CloseFields
+      provenance: design
+      # close_tool.py:320-340 — the commit's scalar bundle; `ceiling_test` is populated on the
+      # bypass site today (:526-529) and, after M4, on the reviewed site (:557-562) when
+      # `verdict.disposition == "inconclusive"`; `runtime_evidence` already flows on both (C14).
+      facets: {}
+    - id: conclude_ceiling_test_rows
+      provenance: code
+      # skills/invlang/validate/_gating.py:1194-1218 — the receipts M4 reuses VERBATIM from the
+      # bypass path; dedup keyed on (state, ref|cap), per-row lead-anchored consistency check
+      # refuses an inconsistent state (rg4). Reused, not changed.
+      facets: {}
+    - id: _refuse_if_entry_price_is_owed
+      provenance: design
+      # close_tool.py:626-701 — the price gate: reads investigation.md ONCE via
+      # parse_dense_companion (pinned by test_tacit_authz_hardening_991:202-246), returns the parsed
+      # CompanionBody M4's receipts come from; refuses BEFORE any stage runs (d20, a4). Its
+      # ordering ahead of the review is the design's key flow; its predicate is unchanged.
+      facets: {}
+
+    # ===== the companion document ================================================================
+    - id: investigation_md
+      provenance: design
+      # `<run_dir>/investigation.md` — read TWICE on an inconclusive close after M1: the price
+      # gate's parse (receipts) and the gate's own read_text_utf8 + parse_investigation
+      # (challenge_gate.py:466-467, EmptyInvestigation/TEXT_READ_ERRORS → the projector `_fail`
+      # arm). Sequential tool, one process, no writer between the two reads (F3/G18) — the
+      # `rewritten-between-reads` member is reachable ONLY through a fault fixture (FK-17/18/19).
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "The investigator's invlang document; an inconclusive that reaches the gate has a companion with paying ceiling_test rows, hence non-empty (x6/a4)."}
+          default: paying-companion
+          distinguished: [absent-or-empty, unreadable-at-second-read, non-utf8-at-second-read, rewritten-between-reads, over-cap-ceiling-note]
+          falsy_valid: false
+          documented_alternatives: []
+
+    # ===== the run page's readers M1 moves ======================================================
+    - id: _was_reviewed
+      provenance: design
+      # visualize_runtime.py:347-359 — splits reviewed/unreviewed attempts on
+      # `reviewed_disposition ∉ NO_REVIEW_DISPOSITIONS`, the CONSTANT, not the record (G17). After
+      # M1 every pre-#992 inconclusive run dir (record stands/inconclusive, cause NOT_REVIEWED, no
+      # traces — the five Measurement runs among them) renders as reviewed here while the headline
+      # badge (cause-keyed) says not reviewed (F6, x7). FK-8/FK-14: re-key on the record (judge A).
+      facets:
+        domain:
+          type: object
+          refinement: {nl: "One review_record.N.json (plus, under reading A, that round's trace rows / the report's cause) → reviewed or not."}
+          default: post-change-reviewed-record
+          distinguished: [post-change-reviewed-record, pre-change-inconclusive-record]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: _BYPASS_NOTE
+      provenance: design
+      # visualize_runtime.py:340-344 — the run page's bypass sentence; names `unresolved` only after M1.
+      facets: {}
+    - id: _gate_badge_html
+      provenance: design
+      # visualize_run.py:108-133 — headline badge keys failure_kind → `cause == CAUSE_NOT_REVIEWED`
+      # → outcome; renders `gate: stands (error)` for the new stands+failure_kind combination (F7).
+      facets: {}
+    - id: half_read_baseline
+      provenance: code
+      # scripts/lint/lint_half_read_table_baseline.json:4-5 — two fingerprints on
+      # _close_investigation_async's literal `"inconclusive"` branches; M1 removes one literal and
+      # M4 adds another, so both fingerprints persist and the reason text (which describes the
+      # bypass) becomes stale prose the gate never fails on (G20, x13, F4).
+      facets: {}
+
+  interacts:
+    # --- the seam, over two vias -------------------------------------------------------------
+    - {from: run_investigation,          to: close_investigation,  mode: invoke, via: api,  provenance: design}   # registers the tool (model lane) and is the forced=True host caller
+    - {from: replay_drive,               to: close_investigation,  mode: invoke, via: api,  provenance: code}     # the e2e harness's host-lane close; binds a holds bundle by default (G4)
+    # --- the set and the branch --------------------------------------------------------------
+    - {from: _close_investigation_async, to: NO_REVIEW_DISPOSITIONS, mode: read, via: api,  provenance: design}   # close_tool.py:507 — M1's branch
+    - {from: visualize_runtime,          to: NO_REVIEW_DISPOSITIONS, mode: read, via: api,  provenance: design}   # visualize_runtime.py:331,336 → _was_reviewed (moved by d22 under FK-8 A; reworded under B)
+    # --- the companion, read twice -------------------------------------------------------------
+    - {from: _close_investigation_async, to: investigation_md,      mode: read, via: fs,   provenance: design}   # the price gate's parse (:704-737) — M4's receipts
+    - {from: challenge_gate,             to: investigation_md,      mode: read, via: fs,   provenance: design}   # :466-467 read_text_utf8 + parse_investigation — what the composer sees
+    - {from: _close_investigation_async, to: _refuse_if_entry_price_is_owed, mode: invoke, via: api, provenance: design}
+    - {from: _close_investigation_async, to: conclude_ceiling_test_rows,     mode: invoke, via: api, provenance: design}   # M4: on the reviewed site too
+    # --- the three stages ------------------------------------------------------------------------
+    - {from: challenge_gate, to: support,  mode: invoke, via: api, provenance: design, sends: payload, transport: llm}
+    - {from: challenge_gate, to: ablation, mode: invoke, via: api, provenance: design, sends: payload, transport: llm}   # only when ablation_target is non-None
+    - {from: challenge_gate, to: composer, mode: invoke, via: api, provenance: design, sends: payload, transport: llm}
+    - {from: challenge_gate, to: ReviewStages,       mode: read,   via: api, provenance: design}   # stages.stage(role) inside _dispatch
+    - {from: challenge_gate, to: REVIEW_ROLES,       mode: read,   via: api, provenance: design}   # _mark_traces_incomplete's roster
+    - {from: live_review_stages, to: REVIEW_ROLES,   mode: read,   via: api, provenance: code}     # one live stage per role
+    - {from: live_review_stages, to: composer_md,    mode: read,   via: fs,  provenance: code}     # role_prompt, once per role (C10)
+    - {from: live_review_stages, to: support_md,     mode: read,   via: fs,  provenance: code}
+    - {from: challenge_gate, to: read_composer_reply, mode: invoke, via: api, provenance: design}
+    - {from: challenge_gate, to: citable_refs,       mode: read,   via: api, provenance: design}
+    # --- routing and its inputs ----------------------------------------------------------------
+    - {from: challenge_gate, to: ReviewState,         mode: read,  via: api, provenance: design}   # round_no = state.turns
+    - {from: _route,         to: ReviewState,         mode: write, via: api, provenance: design}   # raised_asks + turns, CHALLENGED only
+    - {from: _close_investigation_async, to: ReviewState, mode: write, via: api, provenance: design}   # _commit: closed, disposition; R4 terminal check reads it
+    - {from: challenge_gate, to: Bounds,              mode: read,  via: api, provenance: design}   # stage_timeout
+    - {from: _route,         to: Bounds,              mode: read,  via: api, provenance: design}   # extra_turns
+    - {from: _route,         to: REPORT_CAUSES,       mode: read,  via: api, provenance: design}
+    - {from: _fail,          to: REPORT_CAUSES,       mode: read,  via: api, provenance: design}   # CAUSE_REVIEW_INCOMPLETE at all six sites (rg3)
+    - {from: case_ticket,    to: REPORT_CAUSES,       mode: read,  via: api, provenance: code}     # membership check only (G19)
+    - {from: _route,         to: HOST_ONLY_DISPOSITION, mode: read, via: api, provenance: design} # the three FORCED arms M3 moves
+    - {from: _fail,          to: HOST_ONLY_DISPOSITION, mode: read, via: api, provenance: design}
+    - {from: _close_investigation_async, to: HOST_ONLY_DISPOSITION, mode: read, via: api, provenance: design}   # _refuse_if_host_only_verdict_misused
+    - {from: _route,         to: FORCED_INCONCLUSIVE, mode: read,  via: api, provenance: design}
+    - {from: _fail,          to: FORCED_INCONCLUSIVE, mode: read,  via: api, provenance: design}
+    - {from: _route,         to: GateVerdict,         mode: write, via: api, provenance: design}
+    - {from: _fail,          to: GateVerdict,         mode: write, via: api, provenance: design}
+    - {from: _close_investigation_async, to: GateVerdict,  mode: read,  via: api, provenance: design}   # verdict.disposition, verdict.outcome — M3's commit assertion, M4's key
+    - {from: _close_investigation_async, to: CLOSE_RETURNS, mode: read,  via: api, provenance: design}
+    - {from: _close_investigation_async, to: CloseResult,   mode: write, via: api, provenance: design}
+    - {from: _close_investigation_async, to: _CloseFields,  mode: write, via: api, provenance: design}
+    # --- the sinks -----------------------------------------------------------------------------
+    - {from: _close_investigation_async, to: report_md,     mode: write, via: fs, provenance: design, sends: payload, interpolates: [run_dir]}
+    - {from: _close_investigation_async, to: review_record, mode: write, via: fs, provenance: design, interpolates: [run_dir, turn]}   # commit arms, turn = turns+1
+    - {from: challenge_gate,             to: review_record, mode: write, via: fs, provenance: design, interpolates: [run_dir, turn]}   # challenged arm, turn = turns
+    - {from: challenge_gate,             to: review_trace,  mode: write, via: fs, provenance: design, interpolates: [run_dir, role]}
+    - {from: RequestLogger,              to: llm_requests_jsonl, mode: write, via: fs, provenance: code, interpolates: [run_dir]}
+    # --- the readers of the sinks ------------------------------------------------------------
+    - {from: visualize_run,     to: report_md,     mode: read, via: fs, provenance: design}   # _gate_badge_html (moved: d22/s71)
+    - {from: visualize_runtime, to: review_record, mode: read, via: fs, provenance: design}   # _review_records, _was_reviewed
+    - {from: visualize_runtime, to: review_trace,  mode: read, via: fs, provenance: design}   # _read_role_traces
+    - {from: read_report,       to: report_md,     mode: read, via: fs, provenance: code}     # disposition/outcome/cause read through the shared accessor
+    - {from: case_ticket,       to: report_md,     mode: read, via: fs, provenance: code}     # closing comment; cause membership
+    - {from: validate_report,   to: report_md,     mode: read, via: fs, provenance: code}     # the write gate: caps, refused literal
+    - {from: review_cost_by_lens, to: llm_requests_jsonl, mode: read, via: fs, provenance: code}
+    - {from: lint_half_read_table, to: half_read_baseline, mode: read, via: fs, provenance: code}
+    # --- the prompt and the run page's own surfaces -------------------------------------------
+    - {from: run_investigation, to: SKILL_md,        mode: read,   via: prompt, provenance: design}   # the investigator's system prompt (M1's O2 half)
+    - {from: visualize_runtime, to: _was_reviewed,   mode: invoke, via: api,    provenance: design}
+    - {from: visualize_runtime, to: _BYPASS_NOTE,    mode: read,   via: api,    provenance: design}
+    - {from: visualize_run,     to: _gate_badge_html, mode: invoke, via: api,   provenance: design}
+
+  drives:
+    - {from: run_investigation,          to: _close_investigation_async, provenance: design, multiplicity: serial}   # the retry-exhaustion limb (forced=True, unresolved, stages=None) and the registered tool
+    - {from: replay_drive,               to: _close_investigation_async, provenance: code,   multiplicity: serial}   # the e2e harness's close
+    - {from: _close_investigation_async, to: challenge_gate,            provenance: design, multiplicity: serial}   # only when disposition ∉ NO_REVIEW_DISPOSITIONS — M1 adds inconclusive
+    - {from: challenge_gate,             to: _route,                    provenance: design, multiplicity: serial}
+    - {from: challenge_gate,             to: _fail,                     provenance: design, multiplicity: serial}   # six sites
+    - {from: challenge_gate,             to: composer_projection,       provenance: design, multiplicity: serial}   # inside _dispatch's fault arm (G11/a3)
+    - {from: challenge_gate,             to: support_projection,        provenance: design, multiplicity: concurrent}   # the lenses run under asyncio.gather
+    - {from: run_investigation,          to: live_review_stages,        provenance: code,   multiplicity: serial}   # driver:512-516 when no bundle is injected (C17)
+    - {from: live_review_stages,         to: RequestLogger,             provenance: code,   multiplicity: serial}   # every live stage writes through the run's logger
+
+claims:
+  # =========================================================================================
+  # THE LEDGER — four coining passes, one namespace, ids kept:
+  #   C1–C17  inherited from the design doc's two `claims:` blocks (`source: discuss`), each
+  #           re-verified at 67d29090 by 10-brief. TWO ARE WRONG: C16 refuted (G4/x1, executed),
+  #           C8 short (G5–G7). C6 and C16 carry this run's EXECUTED instrument (x2, G4) because
+  #           the sweep's stamp carries a verdict, not an instrument (rules.md, the ledger).
+  #   G1–G24  raised by the grounding leaf (10-brief). G5/G6 are retyped `behavior` (they ran
+  #           the suite — a census closes on a search, and these did not); G8 closes on its grep
+  #           (the collect-only run corroborates); G13 and G20 are `behavior` (each computed or
+  #           ran something); G11 and G12 are re-executed here (a3, a2) rather than left closed
+  #           on a read; G18's sentence is written as the structural read it is.
+  #   x1–x15  raised by the extraction leaf (20-demands). x6, x10, x12 are re-executed here
+  #           (a4, a2, a1) — behavior claims closed on a read are exactly what the instrument
+  #           table refuses; x15 is written as the structural read it is.
+  #   rg1–rg4 the four re-ground probes (46-reground), executed against the production functions.
+  #   a1–a4   this assembly's own executions (scratch script probes_992.py, worktree venv,
+  #           PYTHONPATH=<worktree>), each with a positive control where the claim is a negative.
+  # =========================================================================================
+
+  # ---- inherited ---------------------------------------------------------------------------
+  - {id: C1, source: discuss, kind: referential, claim: "inconclusive commits ahead of the gate; only confident closes reach challenge_gate", probe: "read close_tool._close_investigation_async — bypass branch close_tool.py:507-533, reviewed path :535-564 (re-pinned at 67d29090)", probe_kind: read, observed: "as stated; the branch keys on `disposition in NO_REVIEW_DISPOSITIONS` at :507", verdict: holds}
+  - {id: C2, source: discuss, kind: referential, claim: "the composer and lens prompts are framed for a confident verdict", probe: "read runtime/review/prompts/composer.md and support.md", probe_kind: read, observed: "composer.md:1-2 'reached a confident disposition'; support.md:1 'confident conclusion'; composer.md frames the confident question again at :9, :25-26, :32 (SB-1)", verdict: holds}
+  - {id: C3, source: discuss, kind: referential, claim: "the lens projection withholds the ceiling claim; the composer projection withholds nothing", probe: "read projector.py:78 INFERENCE_COMPANION_KEYS, support_projection :269, composer_projection :227-266", probe_kind: read, observed: "INFERENCE_COMPANION_KEYS=('conclude','closed_loops') cut from the lens view; composer_projection renders the whole companion inside the untrusted frame; ceiling_rationale is a real companion scalar (skills/invlang/schema.py:350) inside conclude", verdict: holds}
+  - {id: C4, source: discuss, kind: referential, claim: "the issue's quoted ceiling row is the pre-#923 free-prose form; the trials carry checked receipts", probe: "read the baseline and t1 :T conclude blocks and report.md under /workspace/.defender-runs/; git log for #923 (inherited, not re-run — the run dirs are present and unchanged)", probe_kind: read, observed: "baseline investigation.md:220 free prose; t1 :136 state=query-empty ref=l-006; #923 merged 2026-08-30 as #982", verdict: holds}
+  - {id: C5, source: discuss, kind: behavior, claim: "the ablation lens would dispatch on every inconclusive run here", probe: "ablation_target(parse(investigation.md)) over the 5 inconclusive runs, re-executed by the cold reviewer (inherited, not re-run at 67d29090)", probe_kind: executed, observed: "baseline e-007, t1 e-003, t2 e-003, t3 e-001, t4 e-005 — all non-None; the GENERAL floor is two calls (x10/a2)", verdict: holds}
+  - {id: C6, source: discuss, kind: behavior, claim: "the reviewed commit path drops the ceiling_test receipts", probe: "EXECUTED this run (x2, G5): NO_REVIEW_DISPOSITIONS shrunk to (HOST_ONLY_DISPOSITION,) in the worktree, ran tests/e2e/test_tacit_authz_e2e_983.py::test_runtime_evidence_lands_in_an_inconclusive_report_body and test_replay_skeleton::test_replay_golden_v2sshd, read their run dirs; reverted", probe_kind: executed, observed: "body lacked `ceiling_test`; report.md committed with NO ceiling_test block; the reviewed `_CloseFields` at close_tool.py:557-562 has no ceiling_test kwarg", verdict: holds}
+  - {id: C7, source: discuss, kind: referential, claim: "a gap with a null ask is readable today and its route is the demotion arm", probe: "read reply.py:155-160 and challenge_gate.py:395-402", probe_kind: read, observed: "`if raw_ask is None: return Review(..., ask=None)`; `_route`'s `review.ask is None` arm → FORCED_INCONCLUSIVE/unresolved/CAUSE_EVIDENCE_CANNOT_DISCRIMINATE; rg2 confirms by execution", verdict: holds}
+  - {id: C8, source: discuss, kind: census, claim: "these are all the surfaces that read the bypass set or state the bypass in prose", probe: "grep NO_REVIEW_DISPOSITIONS|bypass|no review|commits immediately over defender/ and docs/, cold-reviewed; RE-RUN by 10-brief as G1/G7 plus the M1-only test run (G5/G6)", probe_kind: search, observed: "SHORT: four gate-lane/CI-lane tests flip on M1/M4 that the list does not name (test_923_readers[visualize_runtime], test_923_host_verdict::test_no_host_terminated_run_appears_in_the_gap_set, test_923_entry_price::test_an_inconclusive_close_naming_a_receipt_commits, test_923_authoring_surfaces::test_the_cause_stays_composed…, test_tacit_authz_e2e_983::test_runtime_evidence_lands_in_an_inconclusive_report_body) and two files are missed (scripts/lint/lint_half_read_table_baseline.json:4-5, visualize_run.py:117-131); the judge adds _gating.py:340-343's siblings skills/invlang/SKILL.md:579 and close_tool.py:228,260, and visualize_runtime.py:569-573", verdict: refuted}
+  - {id: C9, source: discuss, kind: referential, claim: "a forced close cannot carry inconclusive", probe: "read _refuse_if_host_only_verdict_misused close_tool.py:591-623", probe_kind: read, observed: "close_tool.py:618-623 — forced=True with anything but the host-only verdict is refused", verdict: holds}
+  - {id: C10, source: discuss, kind: referential, claim: "role prompts are bound once per role at the composition root; the bundle has exactly three stages and refuses other names", probe: "read review_roles.live_review_stages :229-267 and ReviewStages.stage :204-226", probe_kind: read, observed: "prompts read at :251-254 once per role; ReviewStages fields support/ablation/composer; stage() raises UnboundReviewStage / refuses unknown names", verdict: holds}
+  - {id: C11, source: discuss, kind: reachability, claim: "a challenged confident close can be re-closed inconclusive and commit without review (an EXISTENCE demonstrated by construction, so `holds` rather than the universal's `unrefuted` ceiling)", probe: "cold reviewer executed: malicious close with scripted gap+ask → challenged; then inconclusive with an empty ReviewStages() (inherited, mechanism unchanged at 67d29090: R4 check :451-457, turn numbering :356-357)", probe_kind: executed, observed: "second attempt committed inconclusive, cause CAUSE_NOT_REVIEWED, review_record.2.json written; state.turns==1 numbers the record but nothing on the bypass path reads it", verdict: holds}
+  - {id: C12, source: discuss, kind: census, claim: "no code reader assumes a cause co-occurs only with outcome forced-inconclusive", probe: "cold reviewer read every consumer of REPORT_CAUSES / CAUSE_* / outcome under scripts/ and learning/; re-grepped by 10-brief (G19) — the visualize_run anchor is :108-133, not :170-182 (x14)", probe_kind: search, observed: "visualize_run.py:108-133 keys failure_kind, then cause == not_reviewed_cause, then outcome; visualize_runtime.py:539-600 renders them separately; case_ticket.py:304-313 checks membership only; learning/ reads no cause", verdict: holds}
+  - {id: C13, source: discuss, kind: referential, claim: "a challenged run that exhausts retries is force-closed unresolved by the driver with no receipts", probe: "read driver/__init__.py:290-313 and close_tool.py:521-529", probe_kind: read, observed: "forced close passes unresolved, stages=None; ceiling_test=() for anything but a model-authored inconclusive", verdict: holds}
+  - {id: C14, source: discuss, kind: referential, claim: "the reviewed commit path already threads runtime_evidence; only ceiling_test is missing there", probe: "read close_tool.py:553-562 vs :526-529", probe_kind: read, observed: "runtime_evidence=conclude_runtime_evidence_rows(companion) at :561; no ceiling_test kwarg", verdict: holds}
+  - {id: C15, source: discuss, kind: census, claim: "the new learning pipeline reads no gate cause/outcome/failure_kind from report.md", probe: "grep cause|failure_kind|outcome|CAUSE_|forced-inconclusive over defender/learning (re-grepped by 10-brief: zero hits for CAUSE_|forced-inconclusive|failure_kind|REPORT_CAUSES)", probe_kind: search, observed: "hits are episode outcomes (judge/__init__.py:204, branch/episode.py:114) and quarantine's own cause repr; directions.py deleted in e9e11a48 (#922)", verdict: holds}
+  - {id: C16, source: discuss, kind: behavior, claim: "an inconclusive e2e replay with no bundle bound will, after M1, reach the gate as an unbound bundle and fail closed at dispatch", probe: "EXECUTED this run (G4/x1): NO_REVIEW_DISPOSITIONS shrunk to (HOST_ONLY_DISPOSITION,) in the worktree; ran the 983 e2e inconclusive scenario and tests/e2e/test_replay_skeleton.py::test_replay_golden_v2sshd; read report.md, review_record.1.json, wire_logs/; read _replay_harness.drive :545-546 and _box665.make_run_dir :416-430; reverted", probe_kind: executed, observed: "REFUTED: drive() substitutes bundle(composer=composer_reply('holds')) whenever review_stages is None, so the replays dispatched all three roles (ok: true), recorded {verdict: stands, reviewed_disposition: inconclusive} and committed cause CAUSE_STORY_SETTLED with no failure_kind — never STAGE_ERROR; make_run_dir hand-writes report.md and never closes. Only test_797_retirement.py:312 (ReviewStages()) and an explicit _spec923.close(stages=None) reach the gate unbound", verdict: refuted}
+  - {id: C17, source: discuss, kind: referential, claim: "production never passes an unbound bundle", probe: "read driver/__init__.py:512-516", probe_kind: read, observed: "review_stages if not None else review_roles.live_review_stages(...)", verdict: holds}
+
+  # ---- raised by the grounding leaf (10-brief) --------------------------------------------
+  - {id: G1, kind: census, claim: "code readers of NO_REVIEW_DISPOSITIONS are exactly close_tool.py:81 (def), :507 (branch), :798 (__all__), visualize_runtime.py:331,336 (feeding _was_reviewed :359); driver/__init__.py:299-300 names it in a comment only", probe: "grep -rn NO_REVIEW_DISPOSITIONS over the tree; pyrefly-refs close_tool.py:81 (guard tripped: in-function import not walked) cross-checked with pyrefly-refs visualize_runtime.py:331 --defs → close_tool.py:81", probe_kind: search, observed: "6 files by grep; 2 real code readers; 4 prose/docstring mentions (driver comment, test_lint_half_read_table:404,429, test_runtime_evidence_report_983:8, test_tacit_authz_e2e_983:357)", verdict: holds}
+  - {id: G2, kind: census, claim: "_fail has exactly six call sites and _route one; no test calls either directly", probe: "pyrefly-refs challenge_gate.py:312 _fail → 7 refs in 1 file; grep '_route(\\|_fail(' tests/", probe_kind: search, observed: "_fail: :471,474,512,517,530,535; _route: :537; tests reference the names only in docstrings (test_923_host_verdict:9,173,217)", verdict: holds}
+  - {id: G3, kind: referential, claim: "_route already takes the reviewed disposition as its third positional and uses it in the holds and CHALLENGED arms; only _fail lacks it", probe: "read challenge_gate.py:367-426, :312-327", probe_kind: read, observed: "def _route(state, bounds, disposition, review, companion); _verdict(STANDS, disposition, …) at :392, CHALLENGED at :423; _fail(role, outcome, *, turns_used) hardcodes HOST_ONLY_DISPOSITION", verdict: holds}
+  - {id: G4, kind: behavior, claim: "an inconclusive e2e replay driven through _replay_harness.drive with no review_stages reaches the gate BOUND (holds composer) after M1 and commits stands/CAUSE_STORY_SETTLED with three trace files — never STAGE_ERROR", probe: "shrank NO_REVIEW_DISPOSITIONS to (HOST_ONLY_DISPOSITION,) in the worktree, ran the 983 e2e inconclusive scenario, read its report.md, review_record.1.json and wire_logs/; reverted", probe_kind: executed, observed: "report: outcome=stands, cause='the challenge review ran and left nothing about the finding unsettled', no failure_kind; record: verdict=stands reviewed_disposition=inconclusive detail=framed 'reads sound'; wire_logs/review_{support,ablation,composer}_trace.jsonl present. drive() :545-546 binds bundle(composer=composer_reply('holds')) when review_stages is None", verdict: holds}
+  - {id: G5, kind: behavior, claim: "M1 alone (tuple shrunk, nothing else) fails exactly these in the CI-selected lane: test_visualize_review_gate::test_inconclusive_close_says_it_was_never_reviewed, ::test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands, test_797_retirement::test_797_a_confident_close_fails_closed_when_no_stage_is_bound (bypass.outcome forced-inconclusive != stands), test_tacit_authz_e2e_983::test_runtime_evidence_lands_in_an_inconclusive_report_body (body lacks ceiling_test)", probe: "pytest over 18 candidate files, -m 'not live and not gate', baseline 223 passed; under M1-only 4 failed / 219 passed", probe_kind: executed, observed: "as listed; the fourth is an M4 witness (goes green when ceiling_test rides the reviewed path)", verdict: holds}
+  - {id: G6, kind: behavior, claim: "M1 alone also fails these gate-marked (CI-dark) tests: test_923_readers::…[visualize_runtime] (_was_reviewed({'reviewed_disposition':'inconclusive'}) now True), test_923_host_verdict::test_the_no_review_bypass_matches_both_verdicts_and_no_others (observed inconclusive=True vs BYPASS_BY_MEMBER False), ::test_no_host_terminated_run_appears_in_the_gap_set (report ceiling_test empty), test_923_entry_price::test_an_inconclusive_close_naming_a_receipt_commits ({'ref':'l-002','state':'query-failed'} not in []), test_923_authoring_surfaces::test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_chosen (ceiling_test rows)", probe: "pytest over the six gate-marked files without the marker filter, M1-only; 6 failed / 86 passed; reverted", probe_kind: executed, observed: "5 attributable to M1/M4; the 6th (test_tacit_authz_hardening_991::test_the_skill_and_the_format_doc_agree_with_the_code) fails on the CLEAN tree from defender/ cwd — relative Path('defender/skills/invlang/SKILL.md')", verdict: holds}
+  - {id: G7, kind: census, claim: "prose/code surfaces stating the bypass or keying on it that C8 does not list: scripts/lint/lint_half_read_table_baseline.json:4-5 (reason text), visualize_run.py:117-131 (_gate_badge_html: 'gate: not reviewed' iff cause == CAUSE_NOT_REVIEWED), visualize_runtime.py:347-359 (_was_reviewed semantics), :519 and :530 ('every CONFIDENT close'), :569-573 (the failure-mode note), review/projector.py:101, review/reply.py:10,58,109, review_roles.py:114-115, handbook/SKILL.md:38, handbook/content/design.md:71,93, learning-loop.md:113, CLAUDE.md:37, docs/review-gate-retirement.md:4,37-41,63,86,166, test_salt_origin_647.py:290-291 (comment), test_878_fault_path_refusals.py:85, test_disposition_tool_schema_750.py:279", probe: "grep -rn -i 'commits unreviewed|without a challenge review|skips the review|no review|not reviewed|commits immediately|bypass|never reviewed|unreviewed|route around|confident disposition|confident close|confident finding|confident conclusion' over defender/ docs/ scripts/ (py, md, json, yaml), hand-classified", probe_kind: search, observed: "the 'every confident close passes' family stays TRUE after M1 (it is incomplete, not false); the ones that become FALSE are the first three plus the design's own list", verdict: holds}
+  - {id: G8, kind: census, claim: "six whole test files are module-marked pytest.mark.gate and CI has no pytest step selecting the gate marker", probe: "grep -rln '^pytestmark = pytest.mark.gate' defender/tests; grep -n '-m ' .github/workflows/ci.yml; corroborated by pytest --collect-only -m 'not live and not gate' over the six files", probe_kind: search, observed: "test_923_authoring_surfaces.py, test_923_entry_price.py, test_923_host_verdict.py, test_923_readers.py, test_tacit_authz_hardening_991.py, test_tacit_registry_authoring_991.py; ci.yml:172 is the only pytest over tests/ and deselects gate; 'no tests collected (92 deselected)'; the marker's documented meaning (pyproject.toml:71-78) is 'a repo-wide lint gate CI already runs', which these behavioural suites are not", verdict: holds}
+  - {id: G9, kind: referential, claim: "the reviewed commit path commits verdict.disposition, not the argument", probe: "read close_tool.py:563-564", probe_kind: read, observed: "_commit(deps, verdict.disposition, fields, record, …)", verdict: holds}
+  - {id: G10, kind: referential, claim: "every direct close_investigation/_close_investigation_async caller in tests that closes inconclusive binds a holds bundle, except test_797_retirement.py:312 (ReviewStages()) and any _spec923.close(..., stages=None)", probe: "grep -rn 'close_investigation(' tests/; read each helper (_spec923.close :328-343, test_invlang_warn_window_836._close :82-95, test_ungated_artifact_write_961_964._close :72-84, test_disposition_tool_schema_750._stages :78-80, test_invlang_fix_row_836 :706,867)", probe_kind: search, observed: "as stated; _spec923._UNBOUND sentinel → holds bundle; explicit None passes through", verdict: holds}
+  - {id: G11, kind: behavior, claim: "the composer projection is rendered inside _dispatch's fault arm, so a render fault on an inconclusive companion is STAGE_ERROR → _fail, not an exception past the close", probe: "read challenge_gate.py:330-349; EXECUTED as a3 (below)", probe_kind: executed, observed: "stage lookup + _fresh_stage_request(render) inside one try; a3: a render callable that raises ValueError returns StageOutcome(ok=False, failure_kind='error', detail='render fault …') with the bound stage never called; the positive control (non-raising render) returns ok=True with the composer's reply", verdict: holds}
+  - {id: G12, kind: behavior, claim: "the ablation lens is dispatched only when ablation_target(companion) is non-None; otherwise a {skipped: …} trace row (no ok key) is written and two stages run", probe: "read challenge_gate.py:480-497; projector.ablation_target :188-218; EXECUTED as a2 (below)", probe_kind: executed, observed: "min-footprint edge among supporting_edges of STRONG_WEIGHTS resolutions; None when no strong move. a2: on _spec923.pays_every_price('malicious') ablation_target is None, a recording bundle sees calls ['support', 'composer'], and wire_logs/review_ablation_trace.jsonl holds {round: 0, skipped: 'no strong belief movement cites an edge to withhold'} with no ok key", verdict: holds}
+  - {id: G13, kind: behavior, claim: "the reviewed-inconclusive frontmatter stays under the 512-byte cap in the worst case", probe: "computed len('disposition: inconclusive\\noutcome: stands\\ncause: <longest REPORT_CAUSES>\\nfailure_kind: unreadable\\n') + _MAX_CEILING_FRONTMATTER_BYTES in the worktree venv", probe_kind: executed, observed: "longest cause = CAUSE_EVIDENCE_CANNOT_DISCRIMINATE (82 chars); head 157 B + 300 B = 457 B (today's inconclusive: 105 + 300 = 405 B); validate_report measures the raw block via _utf8_len (:137); s90 pins the commit itself", verdict: holds}
+  - {id: G14, kind: referential, claim: "no prompt-asset lint or test other than test_796_reply.py reads runtime/review/prompts/", probe: "grep -rn 'review/prompts\\|composer.md\\|role_prompt' scripts/lint/*.py defender/tests defender/scripts", probe_kind: search, observed: "test_796_reply.py only (test_947_triplet_launcher's role_prompt is the questioner's learning/branch asset)", verdict: holds}
+  - {id: G15, kind: referential, claim: "test_923_readers._no_roster_enumerates_a_stale_vocabulary requires any shipped prose that names all four model members to also name `unresolved`", probe: "read test_923_readers.py:266-278, _MEMBER_ROSTER :59", probe_kind: read, observed: "constraint on the SKILL.md/handbook rewording: keep `unresolved` in every roster that enumerates the four", verdict: holds}
+  - {id: G16, kind: referential, claim: "the tool docstring the model reads (close_tool.py:772-780) and SKILL.md:553-557 both state that only confident dispositions pass the gate; SKILL.md:521-522 states inconclusive 'Commits immediately, no review'", probe: "read both; grep 'SKILL.md' tests/ for sha/hash", probe_kind: read, observed: "as stated; SKILL.md is not hash-pinned by any test", verdict: holds}
+  - {id: G17, kind: referential, claim: "visualize_runtime._was_reviewed keys on close_vocabulary().unreviewed_dispositions (the constant), and render_review_gate's 'not reviewed' guard and per-attempt badge both derive from it; nothing in review_record.N.json distinguishes a bypassed attempt from a reviewed one except the absence of trace rows", probe: "read visualize_runtime.py:347-359, :544-551, :580-600; close_tool._record_dict :305-317 and the bypass literal :510-513", probe_kind: read, observed: "bypass record = {verdict: stands, reviewed_disposition, detail: '', failure_kind: None} — identical in shape to a holds review's record except detail", verdict: holds}
+  - {id: G18, kind: referential, claim: "the price gate hands back the parsed CompanionBody it built, and challenge_gate.py:466-467 performs its own read_text_utf8 + parse_investigation of the same file", probe: "read close_tool.py:626-701, :495; challenge_gate.py:466-467; register_close_tool :767", probe_kind: read, observed: "companion = _refuse_if_entry_price_is_owed(...) in close_tool; parse_investigation(read_text_utf8(deps.run_dir / 'investigation.md')) in challenge_gate; the close tool is registered sequential=True and no writer of investigation.md runs between", verdict: holds}
+  - {id: G19, kind: referential, claim: "learning/ has no reader of gate cause/outcome/failure_kind; case_ticket tests REPORT_CAUSES membership only; visualize_run keys failure_kind→cause==not_reviewed→outcome", probe: "grep -rn 'CAUSE_\\|forced-inconclusive\\|failure_kind\\|REPORT_CAUSES\\|not_reviewed_cause' learning/ scripts/ _report.py evals/", probe_kind: search, observed: "hits only in scripts/case_history/case_ticket.py:298-313, scripts/visualize/visualize_run.py:111-133, visualize_runtime.py:315-336,542-573; evals/oracle_golden/report.py's CAUSE_MIN_* are unrelated", verdict: holds}
+  - {id: G20, kind: behavior, claim: "half-read-table lint fires today on _close_investigation_async with fingerprints …unread:benign and …unread:false-positive, both baselined; the baseline gate fails only on NEW fingerprints", probe: "ran lint_half_read_table._scan() in the worktree venv; read _baseline.gate :68-115 and the baseline json", probe_kind: executed, observed: "2 findings, both baselined with reasons naming the #923 bypass", verdict: holds}
+  - {id: G21, kind: referential, claim: "REVIEW_ROLES is the one home for the trace roster and _mark_traces_incomplete iterates it; _fail never writes traces itself", probe: "read challenge_gate.py:45, :275-290, :312-327", probe_kind: read, observed: "as stated; every _fail site is preceded by _mark_traces_incomplete", verdict: holds}
+  - {id: G22, kind: referential, claim: "the run's request ceiling at driver:265-266 is base_request_limit plus extra_turns for EVERY run, independent of disposition", probe: "read driver/__init__.py:265-266", probe_kind: read, observed: "UsageLimits(request_limit=challenge_gate.raised_request_limit(bounds))", verdict: holds}
+  - {id: G23, kind: referential, claim: "runtime-loop.md:85 already states a falsehood at base: `forced-inconclusive` → `disposition: inconclusive`", probe: "read defender/skills/handbook/content/runtime-loop.md:84-86 vs close_tool.py:68-72 / challenge_gate._fail", probe_kind: read, observed: "since #923 the forced outcome commits `unresolved`", verdict: holds}
+  - {id: G24, kind: census, claim: "phase-E harness surface for an inconclusive close: _spec923 (main_deps, ab3_deps, close, paid/PAYING_ROW/SECOND_PAYING_ROW/CAPABILITY_ROW, pays_every_price, gapless, committed, committed_verdict, drive_to_retry_exhaustion, HOST_CAUSE literal :444), _review_bundle (bundle, composer_reply, stage, LENS_READING), _invlang_warn_836.recording_stages (records stage calls), _tacit983.scene.inconclusive_document, _replay_harness (drive, ReplayFn, Turn; review_stages/bounds seams), fixtures-e2e/golden-v2sshd (inconclusive golden used by test_replay_skeleton:55-84 and test_salt_origin_647:270-303)", probe: "grep -n '^def \\|^[A-Z_]* = ' tests/_spec923.py tests/_review_bundle.py tests/_tacit983.py; read _replay_harness.drive :434-560", probe_kind: search, observed: "as listed; a2/a4 below drove _spec923.main_deps + close + recording_stages successfully in the worktree venv", verdict: holds}
+
+  # ---- raised by the extraction leaf (20-demands) -----------------------------------------
+  - {id: x1, kind: behavior, claim: "after M1, the e2e replays that close inconclusive reach the gate with an UNBOUND bundle and fail closed (C16)", probe: "shrank NO_REVIEW_DISPOSITIONS to (HOST_ONLY_DISPOSITION,) in the worktree, ran tests/e2e/test_replay_skeleton.py::test_replay_golden_v2sshd and read its run dir; read _replay_harness.drive :545-546 and _box665.make_run_dir :416-430; reverted", probe_kind: executed, observed: "replay PASSED; wire_logs/ holds review_support/ablation/composer_trace.jsonl each with {round: 0, ok: true}; review_record.1.json = {verdict: stands, reviewed_disposition: inconclusive, detail: <framed 'reads sound'>, failure_kind: null}; report.md = disposition inconclusive / outcome stands / cause CAUSE_STORY_SETTLED with NO ceiling_test block", verdict: refuted}
+  - {id: x2, kind: behavior, claim: "an O4 regression (receipts dropped on the reviewed path) is already caught by a test in the tree", probe: "same shrink; ran tests/e2e/test_tacit_authz_e2e_983.py::test_runtime_evidence_lands_in_an_inconclusive_report_body", probe_kind: executed, observed: "FAILED on `assert 'ceiling_test' in body` — body carried the runtime-evidence line only; the assertion reads the body note, not the frontmatter block, so the block itself has no pin today", verdict: holds}
+  - {id: x3, kind: behavior, claim: "exactly the tests the doc lists as flipping under M1 flip, and nothing else in those files", probe: "same shrink; ran tests/test_797_retirement.py, tests/test_923_host_verdict.py::test_the_no_review_bypass_matches_both_verdicts_and_no_others, tests/test_visualize_review_gate.py", probe_kind: executed, observed: "test_797 control: 'forced-inconclusive' != 'stands' (pre-M3 routing); test_923: observed {'inconclusive': True} vs settled False; test_visualize_review_gate: inconclusive_close_says_it_was_never_reviewed, a_bypassed_attempt_beside_a_reviewed_one (2 != 1), the_headline_badge (passes — keys on cause); no other failure", verdict: holds}
+  - {id: x4, kind: referential, claim: "_route and _fail both need to LEARN the reviewed disposition", probe: "read challenge_gate.py:367-369 (_route signature) and :312-327 (_fail signature); grep '_fail(' for call sites", probe_kind: read, observed: "_route(state, bounds, disposition, review, companion) already carries it and uses it on the STANDS/CHALLENGED arms, hardcoding HOST_ONLY_DISPOSITION only on the three FORCED arms; _fail(role, outcome, *, turns_used) lacks it; six _fail sites at :471, :474, :512, :517, :530, :535", verdict: holds}
+  - {id: x5, kind: referential, claim: "the composer prompt does not offer the null-ask gap shape; the host merely tolerates it", probe: "read runtime/review/prompts/composer.md", probe_kind: read, observed: "lines 20-22: 'Return no ask when nothing measurable would settle the gap; an unmeasurable gap is still a gap'; lines 28-30 give {\"finding\": \"gap\", \"review\": ..., \"ask\": null} as the third example shape", verdict: refuted}
+  - {id: x6, kind: reachability, claim: "for an inconclusive close the projector's EmptyInvestigation arm is unreachable — the price gate refuses first", probe: "read close_tool.py:465-506 ordering and _gating.entry_price on an empty CompanionBody; BREAK-ATTEMPT EXECUTED as a4 (below): an inconclusive close over a missing and over an empty investigation.md, with a recording bundle, plus a positive control", probe_kind: executed, observed: "both break-attempts raise ModelRetry('close blocked: `inconclusive` says the investigating model could not settle the case…') with stage calls [] and no wire_logs/; the projector _fail arm remains reachable for inconclusive only through a read fault or a document rewritten between the price and the gate", verdict: unrefuted}
+  - {id: x7, kind: behavior, claim: "after M1 two readers of one run disagree on a pre-#992 inconclusive run dir: § Review gate says reviewed, the headline says not reviewed", probe: "read visualize_runtime._was_reviewed :340-358 (keys on reviewed_disposition membership) vs visualize_run._gate_badge_html :108-133 (keys on cause == CAUSE_NOT_REVIEWED); the x3 run drove hand-written records of exactly that shape", probe_kind: executed, observed: "under the shrunk set the review-gate section counted the {stands, inconclusive, CAUSE_NOT_REVIEWED} record as reviewed (n went 1→2) while the headline badge test still passed with 'not reviewed'", verdict: holds}
+  - {id: x8, kind: referential, claim: "composer_projection has no direct test today; the ablation-note delivery M2 mirrors is unpinned", probe: "grep composer_projection over defender/tests", probe_kind: search, observed: "no hits; the projector suite (test_796_projector.py) covers the lens cut and the ablation target only", verdict: holds}
+  - {id: x9, kind: referential, claim: "test_796_reply.py's prompt-hygiene walk covers the composer through a local ROLES tuple and pins the phrase 'opposite disposition'", probe: "read tests/test_796_reply.py:28, :43-58, :74-75", probe_kind: read, observed: "ROLES = ('support', 'composer') — not REVIEW_ROLES; asserts each prompt non-empty, names no issue number, composer contains 'opposite disposition', support contains 'do not see' — M2's rewrite must keep those phrases", verdict: holds}
+  - {id: x10, kind: behavior, claim: "three review calls is the floor per inconclusive close", probe: "read challenge_gate.py:455-471 and C5's sample; EXECUTED as a2 (below)", probe_kind: executed, observed: "a companion with no strong belief move dispatches support + composer only — two calls, with a `skipped` ablation row; three is the floor only when an ablation edge exists (true of all five sampled runs)", verdict: refuted}
+  - {id: x11, kind: referential, claim: "the addendum's drift anchors resolve, and one census surface is already stale in a second way", probe: "grep inconclusive over SKILL.md, handbook run-artifacts.md / runtime-loop.md, CLAUDE.md, docs", probe_kind: search, observed: "SKILL.md:521-523 'Commits immediately, no review, and the learning loop authors no lesson from it', :553 'anything but inconclusive', :569-571; run-artifacts.md:78; runtime-loop.md:65, :85-86 — where :85 still says forced-inconclusive → `disposition: inconclusive` (pre-#923 stale, should read unresolved); CLAUDE.md:15; defender/docs/review-gate-retirement.md exists (docs/ at repo root does not); learning-architecture-redesign.md:373", verdict: holds}
+  - {id: x12, kind: behavior, claim: "the two unbound-bundle spellings in the suite both reach _dispatch's STAGE_ERROR arm", probe: "read tests/_spec923.py:322-335 and tests/test_797_retirement.py:274; review_roles.ReviewStages.stage :212-222; EXECUTED as a1 (below)", probe_kind: executed, observed: "a1: _dispatch('support', None, …) → ok=False failure_kind='error' detail=\"'NoneType' object has no attribute 'stage'\"; _dispatch('support', ReviewStages(), …) → ok=False failure_kind='error' detail='the support stage is not bound — …'; test_797 asserts 'not bound' in the record detail", verdict: holds}
+  - {id: x13, kind: referential, claim: "the half-read-table lint baseline entries for close_tool survive M1/M4 without an update", probe: "read scripts/lint/lint_half_read_table_baseline.json:4-5 and tests/test_lint_half_read_table.py:404-429", probe_kind: read, observed: "fingerprints are file:function:table:unread:key with no line number; M4's `verdict.disposition == \"inconclusive\"` literal in the same function keeps both findings firing; the test requires the reason text to mention 'bypass' or 'NO_REVIEW_DISPOSITIONS', which it does — leave the reason text alone or keep those words", verdict: holds}
+  - {id: x14, kind: referential, claim: "the cause/outcome consumer C12 cites at visualize_run.py:170-182 is the headline's call site, not the reader", probe: "grep _gate_badge_html scripts/visualize/visualize_run.py", probe_kind: search, observed: "defined at :108-133 (failure_kind → cause == not_reviewed_cause → outcome); called at :171", verdict: holds}
+  - {id: x15, kind: referential, claim: "the model-facing lane `_tool_close_investigation` hands the model `result.message` alone; the CloseResult object never reaches it", probe: "read close_tool.py:590-594 (_tool_close_investigation) and :759-783 (the registered tool)", probe_kind: read, observed: "`return result.message` — so d0's structured assertions belong on the sync host entry, and the tool lane is pinned by the message text alone", verdict: holds}
+
+  # ---- the re-ground probes (46-reground) ---------------------------------------------------
+  - {id: rg1, kind: behavior, claim: "a `holds` reply carrying unrecognised top-level keys is ignored by read_composer_reply, not refused", probe: "read_composer_reply(json.dumps({finding: holds, review: 'it holds', bogus_extra_field: 123, another_one: {x: 1}}), refs=frozenset({'v-1','e-1'})) in the worktree venv", probe_kind: executed, observed: "Review(finding='holds', review='it holds', ask=None); reply.py:136,143,158 read exactly three keys via .get and never inspect obj.keys() — settles FK-13 as parity", verdict: holds}
+  - {id: rg2, kind: behavior, claim: "on a `gap` reply, `ask: null` and an omitted `ask` key are identical and readable while `ask: \"\"` is Unreadable", probe: "read_composer_reply over the three payloads in the worktree venv", probe_kind: executed, observed: "null → Review(ask=None); omitted → the identical Review(ask=None) (reply.py:158-160); '' → Unreadable('the composer's ask is neither an object nor null') (reply.py:166-167) — settles FK-5 as parity with per-spelling values", verdict: holds}
+  - {id: rg3, kind: behavior, claim: "_fail carries cause=CAUSE_REVIEW_INCOMPLETE at every one of its six sites and only failure_kind varies; the composer-Unreadable site (:535) carries failure_kind='unreadable'", probe: "called challenge_gate._fail directly with each site's StageOutcome shape (projector STAGE_ERROR ×2, lens TIMEOUT, lens UNREADABLE, composer STAGE_ERROR, composer UNREADABLE) in the worktree venv", probe_kind: executed, observed: "all six: cause='the challenge review did not complete', outcome='forced-inconclusive', disposition='unresolved'; failure_kind = the outcome's ('error'/'timeout'/'unreadable'); :535 → 'unreadable'. Settles FK-6's discount (no _fail site ever carries CAUSE_EVIDENCE_CANNOT_DISCRIMINATE) and corrects FK-15/16 to `unreadable`", verdict: holds}
+  - {id: rg4, kind: behavior, claim: "conclude_ceiling_test_rows on two rows citing the same ref with different states preserves the state consistent with the lead's own fail_reason and refuses the other with a named error — never a silent collapse or last-wins", probe: "parse_investigation + _walk_ceiling_rows + conclude_ceiling_test_rows over a _spec923 document with 'state=query-failed ref=l-002' and 'state=query-empty ref=l-002' (l-002 carries a fail_reason), both row orders, in the worktree venv", probe_kind: executed, observed: "paying [('query-failed','l-002')] in both orders; the query-empty row lands in walk.errors ('`state=query-empty` but lead l-002 records a `fail_reason`…') which _check_inconclusive_gating turns into a blocking refusal; dedup identity is (state, ref|cap) at _gating.py:1088-1090 — settles FK-3 as parity", verdict: holds}
+
+  # ---- this assembly's own executions (scratchpad probes_992.py) -----------------------------
+  - {id: a1, kind: behavior, claim: "both unbound-bundle spellings (`None` and `ReviewStages()`) return a STAGE_ERROR StageOutcome from _dispatch rather than raising", probe: "asyncio.run(_dispatch('support', stages, lambda salt: 'projection', default_bounds())) for stages in (None, ReviewStages()) — PYTHONPATH=<worktree> uv run python, from defender/", probe_kind: executed, observed: "None → ok=False failure_kind='error' detail=\"'NoneType' object has no attribute 'stage'\"; ReviewStages() → ok=False failure_kind='error' detail='the support stage is not bound — this bundle was built by a composition root that never held a run dir'", verdict: holds}
+  - {id: a2, kind: behavior, claim: "a close over a companion with no strong belief move dispatches exactly two stages (support, composer) and writes a `skipped` ablation trace row with no `ok` key", probe: "_spec923.main_deps(tmp, pays_every_price('malicious')); ablation_target(parse_investigation(companion)) is None; _spec923.close(deps, 'malicious', stages=recording_stages('holds').bundle()); read wire_logs/review_*_trace.jsonl", probe_kind: executed, observed: "calls=['support', 'composer'], outcome='stands'; support {round: 0, ok: true}; ablation {round: 0, skipped: 'no strong belief movement cites an edge to withhold'}; composer {round: 0, ok: true}", verdict: holds}
+  - {id: a3, kind: behavior, claim: "a render callable that raises inside _dispatch yields a STAGE_ERROR outcome without calling the bound stage; a non-raising render calls it", probe: "asyncio.run(_dispatch('composer', bundle(composer=composer_reply('holds')), render, default_bounds())) with render raising ValueError, then with a plain render (positive control)", probe_kind: executed, observed: "raising: ok=False failure_kind='error' detail='render fault on a hostile companion'; control: ok=True text='{\"finding\": \"holds\", \"review\": \"reads sound\", \"ask\": null}'", verdict: holds}
+  - {id: a4, kind: reachability, claim: "an inconclusive close over a missing or an empty investigation.md never reaches a stage — the entry price gate refuses first (break-attempt for x6)", probe: "_spec923.main_deps with companion None and with '' ; _spec923.close(deps, 'inconclusive', stages=recording_stages('holds').bundle()); positive controls: the same bundle on pays_every_price('malicious') (dispatches) and on pays_every_price('inconclusive') at base (commits unreviewed, calls=[], cause CAUSE_NOT_REVIEWED — M1 not yet shipped)", probe_kind: executed, observed: "both break-attempts: ModelRetry 'close blocked: `inconclusive` says the investigating model could not settle the case, which is worth nothing to an analyst unless the report names what specific…', calls=[], no report.md, no wire_logs/; malicious control calls=['support','composer'] outcome='stands'", verdict: unrefuted}
+
+  # ---- §7-apply executions (scratchpad probes_992_s7.py) -------------------------------------
+  - {id: a5, kind: behavior, claim: "with FK-10's seventh REPORT_CAUSES member the worst-case reviewed-inconclusive frontmatter still fits the 512-byte cap", probe: "computed in the worktree venv: len(REPORT_CAUSES)=6 today, longest 82 chars; the new sentence is 84 chars; head bytes for {inconclusive, stands, <cause>, [failure_kind: unreadable]} + _MAX_CEILING_FRONTMATTER_BYTES (300)", probe_kind: executed, observed: "worst case is unchanged at 457 B (CAUSE_EVIDENCE_CANNOT_DISCRIMINATE + failure_kind: unreadable); the seventh sentence rides the holds arm, which carries no failure_kind: 134 + 300 = 434 B; even the impossible co-occurrence (seventh sentence + unreadable) is 159 + 300 = 459 B < 512. The new sentence becomes the LONGEST member (84 > 82) — a future eighth longer than 137 chars breaches the cap (F8's headroom note stands)", verdict: holds}
+  - {id: a6, kind: behavior, claim: "today the entry-price gate accepts a ceiling_test note of any length and the close refuses the rendered report at the commit — a permanently stranded run on an append-only companion (R6's hole is real)", probe: "_spec923.paid('state=query-failed ref=l-002 note=' + 'x'*9000): _check_inconclusive_gating(parse_investigation(text)) and _spec923.close(main_deps(tmp, text), 'inconclusive'); positive control with a 1500-char note", probe_kind: executed, observed: "price gate: errors == []; close: ModelRetry 'report.md is 9255 bytes, over the 8192-byte limit — trim it and rewrite.' — refused at validate_report, after the price was paid and (after M1) after the review would have been spent; control: 1500-char note → stands, report.md 1755 bytes. Existing sibling bounds: _MAX_CEILING_FRONTMATTER_BYTES=300 (accumulated receipt triples), _MAX_RUNTIME_EVIDENCE_BODY_BYTES=2048 (accumulated baseline body block, same gate, same refusal shape), ASK_PROSE_MAX=500 (a per-field silent truncation, not a refusal)", verdict: holds}
+
+gate:
+  # Written by the gate leaf from `spec-graph gate --residue` (45 computed firings: R1 x4,
+  # R2 x3, R3 x2, R4 x31, R7 x5) plus the three judgment halves (R0 reconciliation, R5
+  # tightening, R6 rendered-sink walk) and R8's join census. 36 of the 45 computed firings
+  # (R1 x4, R2 x3, R3 x2, R4 x27) are ALREADY answered by an existing `form: test` demand
+  # whose `binds` matches the address — `spec-graph gate` (bare) confirms this directly from
+  # `demands:` with no `gate:` entry needed, so they are credited here by name, not
+  # re-entered as spend-points (60-residue.md payload carries the full table). The remaining
+  # 9 computed firings (R4 x4, R7 x5) plus R0's FK-6 finding, R5's and R6's judgment
+  # obligations, and R8's fired:false are the entries below.
+  evaluated:
+    - {rule: R0, fired: true}   # formal half CLEAN (spec-graph gate/lint); reconciliation half fired once — FK-6 (hole, below)
+    - {rule: R1, fired: true}   # 4/4 pre-discharged by demand: composer.payload (d3,d6); support/ablation.payload (d5); report_md.payload (d0,d18,s90)
+    - {rule: R2, fired: true}   # 3/3 pre-discharged by demand: report_md.identity (d0 — bare-edge bind covers the facet); review_record.identity (s61); review_trace.identity (s52)
+    - {rule: R3, fired: true}   # 2/2 pre-discharged by demand: close_investigation.access[host]/[tool] (d2, per-cell)
+    - {rule: R4, fired: true}   # 27/31 pre-discharged by demand (table in 60-residue.md); 4 holes below (FK-1, FK-2, FK-8/14, FK-17/18/19)
+    - {rule: R5, fired: true}   # M1 tightens NO_REVIEW_DISPOSITIONS; judgment extension considered — obligation below (d16 is a clause, does not pre-discharge)
+    - {rule: R6, fired: true}   # rendered-sink walk over report_md/composer/review_record; one uncovered slot found — obligation below
+    - {rule: R7, fired: true}   # 5 firings: 3 pre-discharged (unaffected readers, cited), 2 coherence obligations (case_ticket, below)
+    - {rule: R8, fired: true}
+      # §7 took FK-8's option A, so R8 FIRES retroactively as the gate leaf's entry foresaw:
+      # `_was_reviewed`'s answer changes DERIVATION (from the NO_REVIEW_DISPOSITIONS constant
+      # to the attempt's own residue — trace rows / cause). The join census (readers keyed on
+      # that answer) is derived by search and carried in the R8 obligation below; the
+      # per-reader join-resolve demand is s_fk8_every_reader_of_the_reviewed_split_agrees.
+  obligations:
+    - rule: R5
+      element: _close_investigation_async
+      witness: >-
+        M1 tightens NO_REVIEW_DISPOSITIONS so an `inconclusive` close can no longer be built
+        to commit unreviewed; the safe-by-construction guard — a routing arm that hands back
+        the host's own verdict raises rather than silently committing `unresolved` — is
+        recorded only as clause d16, which per schema.md does not pre-discharge ("a
+        clause-form binding... leaves the obligation open"). The obligation stays open until
+        write-code-from-spec's adversary can drive a routing miss through a real seam
+        (handoff.deferred names the monkeypatch-lint obstacle to a fake challenge_gate).
+      discharged_by: d16_routing_miss_fails_loud   # clause today; write-code-from-spec owes the executable extension
+    - rule: R6
+      element: "interacts(_close_investigation_async->report_md).payload"
+      witness: >-
+        render_report's own docstring (defender/runtime/close_tool.py:227-244) records
+        `ceiling_test.note` as unbounded, model-authored body text (chooser: the
+        investigating model, via investigation.md) rendered by raw f-string interpolation
+        (:264-266) — no per-note sanitizer or cap, only `validate_report`'s whole-file
+        `REPORT_FILE_MAX` cap and its `</report>` delimiter refusal police it, and the
+        docstring itself names this "the half that is still open". M4 makes the REVIEWED
+        close a NEW caller of render_report carrying REAL `ceiling_test` rows (C6: the
+        reviewed path dropped them before #992), so this pre-existing, already-documented
+        hazard is newly reached by this graph's own delta. No #992 demand drives an oversized
+        or `</report>`-bearing note through the reviewed path to confirm the whole-file gate
+        still catches it there — s90 pins only the frontmatter byte cap, not the body note.
+        §7 (human, against the parity recommendation): RE-SCOPED TO A FIX — the accumulated
+        rendered notes are bounded at the entry-price gate (a6 shows the hole is real today).
+      discharged_by: s_ceiling_test_note_overflow_on_reviewed_path   # §7: re-scoped to a cap at the price gate
+    - rule: R7
+      element: "interacts(case_ticket->report_md)"
+      witness: >-
+        `case_ticket` reads report_md's `outcome`/`cause`/`failure_kind` for its closing
+        comment (G19); FK-10 names the sentence it renders on a ceiling-held close —
+        "the challenge review ran and left nothing about the finding unsettled" — as saying
+        "the finding" on a close that found nothing, and FK-9's sibling novelty (`outcome:
+        stands` beside a `failure_kind` for the first time) is the same new co-occurrence
+        reaching this reader. No demand pins case_ticket's rendering under it, and d26's
+        prose-rewording list does not name scripts/case_history/case_ticket.py — write per
+        rules.md as a coherence witness (per the orchestrator's read of FK-9/FK-10), not
+        dismissed as noise.
+      discharged_by: s_case_ticket_closing_comment_under_new_cooccurrence   # minted below; §7 confirms, keyed to FK-10's wording answer
+    - rule: R7
+      element: "interacts(case_ticket->REPORT_CAUSES)"
+      witness: >-
+        `case_ticket` checks `REPORT_CAUSES` membership only (G19); FK-10 asks whether
+        `CAUSE_STORY_SETTLED`'s disposition-agnostic sentence needs a reword now that it
+        fires beside a `failure_kind`/`stands` co-occurrence it did not before. Membership
+        survives either way, but no coherence demand pins case_ticket's OWN rendering of that
+        member under the new co-occurrence — same fork as the sibling edge above, same
+        proposed demand once §7 answers.
+      discharged_by: s_case_ticket_closing_comment_under_new_cooccurrence   # minted below; same demand as the sibling edge
+    - rule: R8
+      element: _was_reviewed
+      witness: >-
+        §7 FK-8 (human): `_was_reviewed` is re-keyed from the constant (G17) to what the
+        attempt left behind, so every reader that keys on its answer must still resolve the
+        same join over BOTH populations. Census (grep `_was_reviewed|unreviewed_dispositions|
+        _BYPASS_NOTE` over defender/, excluding .venv): visualize_runtime.py:546 (the reviewed
+        list and count), :585 + :600 (per-attempt bypassed flag → _BYPASS_NOTE vs role traces),
+        :359 (the constant read that goes away), :331/:336 (`close_vocabulary().
+        unreviewed_dispositions`, now consumed by `_BYPASS_NOTE` only); visualize_run.py:108-133
+        (the cause-keyed headline — the reader that must AGREE); tests/test_923_readers.py:
+        250-254 (bare `{reviewed_disposition}` callers — flip, d27); test_visualize_review_gate.py
+        fixtures (must write trace rows for reviewed attempts, d27). No reader outside
+        scripts/visualize/ and those two test files keys on the split.
+      discharged_by: [s_fk8_every_reader_of_the_reviewed_split_agrees, d22_visualizer_renders_a_reviewed_inconclusive]
+  holes:
+    - rule: R0
+      element: "composer.md's M2 ceiling-question wording (design sentence, no bound element)"
+      witness: >-
+        The design's M2 ceiling-question sentence ("something measurable … that the record
+        neither cited nor tested") is a normative constraint on composer.md's wording that
+        binds no formal element: d3/d4/d6/s21 pin the sentence's PRESENCE and its
+        disposition-neutral framing, but none pins the judge's recommended fix (require the
+        named thing be a recorded id — v-/e-/l-/h-) that FK-6 leaves open. R0's bidirectional
+        reconciliation finds this design sentence with no bound address — carried by hand per
+        the phase-D digest's own flag (50-graph-digest.md red flag #1: "FK-6 has no cell at
+        all").
+      routed_to: "handoff.forks FK-6 — resolved at §7"
+      resolution: "§7 (human, with the judge): M2's ceiling sentence requires the missed measurement be named by an id already in the record (v-/e-/l-/h-); routing unchanged (rg3)."
+      resolved_to: s_fk6_ceiling_sentence_names_a_recorded_id
+    - rule: R4
+      element: "ReviewStages.domain.distinguished[partially-bound]"
+      witness: >-
+        A partially-bound `ReviewStages` (ablation unbound, support/composer bound) on an
+        inconclusive close is undemonstrated as a supported shape; FK-2 judges it fails
+        exactly like the fully-unbound case (x12/a1: UnboundReviewStage → STAGE_ERROR →
+        stands/inconclusive/CAUSE_REVIEW_INCOMPLETE/error, uniform across roles), but the
+        human must confirm partial binding is legitimate (the harness's `bundle()` builds it
+        routinely) before the cell binds a row of d14.
+      routed_to: "handoff.forks FK-2 — resolved at §7"
+      resolution: "§7 (human, with the judge): partial binding is a supported shape; when the unbound role is dispatched the review fails uniformly (x12/a1). The cell is bound as a row of d14."
+      resolved_to: d14_machinery_failure_stands_review_incomplete
+    - rule: R4
+      element: "citable_refs.domain.distinguished[receipted-lead]"
+      witness: >-
+        Whether an ask naming a lead a `ceiling_test` receipt already priced is a legal
+        target is FK-1's open policy question (judge: A — membership is the guard, a
+        host-side discount would be a new `_route` arm the design forbids; non-material). The
+        cell stays unbound until §7 answers, then a row of d9.
+      routed_to: "handoff.forks FK-1 — resolved at §7"
+      resolution: "§7 (auto, judge's A): a receipted lead is a legal ask target; the cell is bound as a row of d9."
+      resolved_to: d9_gap_with_ask_challenges_inconclusive
+    - rule: R4
+      element: "investigation_md.domain.distinguished[rewritten-between-reads]"
+      witness: >-
+        Whether the gate's second read of investigation.md seeing a shrunk `ceiling_test`
+        list (a writer landing between the price gate's parse and the gate's own read) needs
+        its own fault-injection row is FK-17/18/19's judgment call — the ledger already
+        resolves WHAT commits when this happens (the priced rows, G18/C14/M4), but not
+        whether a test should force the divergence via a fixture to prove it, since production
+        cannot reach it within one sequential tool call (G18).
+      routed_to: "handoff.forks FK-17/FK-18/FK-19 — resolved at §7"
+      resolution: "§7 (auto, judge's value): no dedicated fault-injection fixture; the priced rows ride into the report (d18's rows) and the divergence is unreachable in production within one sequential tool call — a documented limit, closed by citation."
+      cites: [G18]
+    - rule: R4
+      element: "_was_reviewed.domain.distinguished[pre-change-inconclusive-record]"
+      witness: >-
+        FK-8/FK-14 ask whether `_was_reviewed` should re-key off the record (trace rows /
+        the report's cause) rather than the `NO_REVIEW_DISPOSITIONS` constant it reads today
+        (G17) — the five Measurement run dirs are pre-#992 inconclusive dirs affected either
+        way (F6/x7), and d22's own key plus two rows of d9/d14 stay unwritten until this
+        settles. Also R8's trigger, tracked here rather than duplicated in gate.evaluated.
+      routed_to: "handoff.forks FK-8/FK-14 — resolved at §7"
+      resolution: "§7 (human, with the judge): re-key `_was_reviewed` on the record; the cell is bound by d22 (two-population fixture) and R8's join demand s_fk8."
+      resolved_to: d22_visualizer_renders_a_reviewed_inconclusive
+    # R7's three genuinely-unaffected readers: no demand is owed (rules.md's "known noise
+    # mode"), so each closes as a hole resolved by citation rather than a pre-discharge
+    # credit (schema.md's `pre_discharged` shape names a demand that does not exist here —
+    # rules.md's alternative for exactly this case: "a hole resolved as 'not reachable' ...
+    # closes only by citing a ledger claim id"). No `resolved_to`: no demand is spawned.
+    - rule: R7
+      element: "interacts(read_report->report_md)"
+      resolution: >-
+        Not owed. `read_report` is the shared accessor G19's census walked
+        (visualize_run.py:108-133, visualize_runtime.py:315-336,542-573): it reads
+        disposition/outcome/cause through one join point that keys on membership and
+        co-occurrence, not on which disposition produced them — the delta adds a new
+        co-occurrence (`stands` + `failure_kind` + `ceiling_test`), it does not change what
+        this reader keys on.
+      cites: [G19]
+    - rule: R7
+      element: "interacts(validate_report->report_md)"
+      resolution: >-
+        Not owed. `validate_report` is a byte-cap / schema-shape gate over the rendered
+        frontmatter, content-blind to disposition semantics; G13's executed computation
+        shows the worst reviewed-inconclusive frontmatter (457 of 512 B) stays inside the
+        cap this reader already enforces — the reader's own logic is untouched by the delta.
+      cites: [G13]
+    - rule: R7
+      element: "interacts(live_review_stages->REVIEW_ROLES)"
+      resolution: >-
+        Not owed. C10: role prompts are bound once per role at the composition root and the
+        bundle has exactly three fixed stage names (`support`/`ablation`/`composer`),
+        refusing any other — `live_review_stages`'s read of `REVIEW_ROLES` is a closed
+        enumeration `challenge_gate`'s routing changes (`_fail`/`_route` learning the
+        disposition) do not touch.
+      cites: [C10]
+  pre_discharged: []
+    # 36 of the 45 computed firings (R1 x4, R2 x3, R3 x2, R4 x27) are pre-discharged
+    # directly by an existing `form: test` demand's `binds` — `spec-graph gate` (bare)
+    # confirms each from `demands:` with no entry needed here (schema.md: a bare-root/edge
+    # bind covers every facet of that root, so e.g. d0's edge bind answers R2's
+    # `report_md.identity`). The full element → demand table is in 60-residue.md's payload.
+
+actor_waivers:
+  cli: >-
+    defender/learning/branch/cli.py re-executes run.py as a sibling subprocess (the episode
+    launcher). §7 (human): waived — it reaches `run_investigation` as a whole and never the
+    close's seam, the review stages or any #992 surface; the sibling process runs the same
+    driver this graph models as `run_investigation`.
+  generate_case: >-
+    defender/evals/oracle_golden/generate_case.py re-executes run.py (plus controls,
+    story_from_run, ticket_adapter) to mint a golden case. §7 (human): waived — same reason:
+    it drives `run_investigation` end to end and touches nothing #992 changes directly.
+
+handoff:
+
+  forks:
+    # 45-dispositions' 20 forks + 2 silent branches + 60-residue's 12 residue items, every one
+    # with its §7 disposition (70-resolutions.md, 2026-09-13/14): `resolved_by: human` = one of
+    # the 8 AskUserQuestion rows; `auto` = the judge's/gate's recommendation taken by the spine;
+    # `citation` = closed in phase D by a ledger claim. HUMAN AGAINST RECOMMENDATION: FK-10, R6.
+    - "FK-1 [#6] — the composer's ask names a lead a ceiling_test receipt already priced. Reading A: a legal target (membership is the guard; a host-side discount would be a new `_route` arm the design forbids). `citable_refs[receipted-lead]` bound as a row of d9. resolved_by: auto"
+    - "FK-2 [#7, MATERIAL small] — `ReviewStages` partially bound on an inconclusive close. Reading A: a supported shape (the harness's bundle() builds it); when the unbound role is dispatched the review fails uniformly — stands/inconclusive/CAUSE_REVIEW_INCOMPLETE/error, incomplete rows on all roles (x12/a1); skipped ablation never touches the field. `ReviewStages[partially-bound]` bound as a row of d14. resolved_by: human"
+    - "FK-3 [#8] — duplicate ceiling_test refs with different states. Parity with `conclude_ceiling_test_rows` (rg4: `(state, ref)` dedup; the lead-anchored consistency check refuses the mismatched row at the price gate); row of d18. resolved_by: auto (settled by re-ground)"
+    - "FK-4 [#13] — many receipts near the frontmatter cap. Refused at the price gate by the 300 B byte cap (G13/F8; a5 recomputed with the seventh cause: 457 B worst case unchanged); row of d20; H's overflow answer discounted. resolved_by: auto"
+    - "FK-5 [#14] — `ask: null` / `ask: \"\"` / omitted `ask`. Parity (rg2: null ≡ omitted readable → d11's arm; \"\" Unreadable → d14's arm); rows of d7/d11/d14. resolved_by: auto (settled by re-ground)"
+    - "FK-6 [#18, MATERIAL] — the composer names an id the record never recorded. Routing: A (rg3: Unreadable → stands/inconclusive/CAUSE_REVIEW_INCOMPLETE/`unreadable`, row of d7). Wording (the R0 hole): M2's ceiling sentence REQUIRES the missed measurement be named by an id already in the record (v-/e-/l-/h-) — demand s_fk6_ceiling_sentence_names_a_recorded_id. resolved_by: human"
+    - "FK-7 [#20] — the record already settles the case; the run under-concluded. `holds` → the ceiling-held arm's sentence (after FK-10: the seventh member), d10's own row; the honest limit of a ceiling review, routed to Measurement. resolved_by: auto"
+    - "FK-8 [#69, MATERIAL] — a pre-#992 inconclusive run dir renders 'reviewed' in § Review gate and 'not reviewed' in the headline after M1 (F6/x7). Reading A: RE-KEY `_was_reviewed` on what the attempt left behind (trace rows / cause), never on NO_REVIEW_DISPOSITIONS; d22 reworded with a two-population fixture, both surfaces say 'not reviewed' on the old population; `_BYPASS_NOTE` follows; R8 fires and its census demand is s_fk8_every_reader_of_the_reviewed_split_agrees. resolved_by: human"
+    - "FK-9 [#70] — `outcome: stands` beside a `failure_kind`: visualize_runtime.py:569-573's 'the close failed closed — machinery breaking' note is false prose on a standing inconclusive. Reword to disposition-neutral true prose; row of d26. resolved_by: auto"
+    - "FK-10 [#73, MATERIAL] — the ticket says 'the finding' on a close that found nothing. Reading B′ — AGAINST the judge's A: a SEVENTH REPORT_CAUSES member for the ceiling-held `inconclusive` `stands` arm, 'the challenge review examined the ceiling claim and found nothing further measurable'; confident closes keep CAUSE_STORY_SETTLED. d23 re-pinned at seven; d10's cause and test name changed; new demand s_fk10_ceiling_held_commits_its_own_cause; s_case_ticket… asserts the sentence reaches the ticket; case_ticket's membership imports the tuple (covers seven); headroom recomputed (a5). The two R7 case_ticket obligations fold into this decision. Phase F (F-2, human, FK-10 KEPT): the seventh member flips test_797_retirement.py:233's six-member pin to seven — recorded in d27 with s_fk10 named as the producer. resolved_by: human"
+    - "FK-11 [#82] — manufactured novelty exhausts the shared turn pool. Accepted, bounded by EXTRA_TURN_BOUND=2 (the design priced it); row of d13. resolved_by: auto"
+    - "FK-12 [#83] — the alert data never yields an id for the governance system the ceiling rests on. Known limit, out of scope, stated in the close-tool docstring rewrite (d26); no test. resolved_by: auto"
+    - "FK-13 [#4] — a `holds` reply with unrecognised extra keys. Parity (rg1: ignored); row of d7 / s_fault_handling_parity. resolved_by: auto (settled by re-ground)"
+    - "FK-14 [#53, MATERIAL, rides FK-8] — a fleet mixing pre- and post-change inconclusive dirs. Decided with FK-8 (A): every dir renders by what it left behind; the two-population fixture on d22 is the pin, no separate test. resolved_by: human"
+    - "FK-15 [#3] — a non-JSON composer reply → `failure_kind: unreadable`, not the primary's `error` (rg3); row of d14. resolved_by: auto (settled by re-ground)"
+    - "FK-16 [#10] — a `finding` outside {holds, gap} → `unreadable` (rg3); row of d14. resolved_by: auto (settled by re-ground)"
+    - "FK-17 [#9] — the gate's second read sees an empty ceiling_test list. The committed block carries the PRICE GATE's rows (design M4, C14, G18); no dedicated fault-injection fixture — a documented limit (the divergence is unreachable within one sequential tool call); the R4 cell `investigation_md[rewritten-between-reads]` closed by citation (G18). resolved_by: auto"
+    - "FK-18 [#34] — the two independent reads see different content. Same root and value as FK-17. resolved_by: auto"
+    - "FK-19 [#36] — lenient price-gate read vs strict gate read. The receipts ride from the first read; a strict-read failure is the projector arm (d18's machinery-failure row, #33); P4 LANDED (F-5): the two readers differ — the price gate decodes with errors=replace, the gate reads strictly — instrument `_spec992.non_utf8_companion`, driven in d14 and d18. resolved_by: auto"
+    - "FK-20 [#92] — 'a pre-change inconclusive replay now records a machinery failure'. Refuted by the ledger (C16/G4/x1): those replays record a COMPLETED review; d27 rewords comments only. resolved_by: auto"
+    - "SB-1 [#21] — one question per composer: d4 strengthened to every confident-question sentence of composer.md; s21 pins the composed whole. resolved_by: auto"
+    - "SB-2 [#62] — terminal report = the final attempt; per-attempt records and trace rows persist (s62, row of d9). resolved_by: auto"
+    - "RES-R5 [obligation] — M1 tightens NO_REVIEW_DISPOSITIONS; the safe-by-construction guard is clause d16. Keep d16 as a clause; write-code-from-spec's adversary attempts the executable form (handoff.deferred, handoff.deviations). resolved_by: auto"
+    - "RES-R6 [obligation, MATERIAL] — `ceiling_test.note` unbounded on a newly-reached path (a6: real today — a 9000-char note passes the price gate and strands the run at the commit). Reading (b) — AGAINST the judge's parity recommendation: FIX — the accumulated rendered notes are bounded at the entry-price gate (both boundaries) with the same refusal shape as the over-cap receipt block; cap value 2048 B (the sibling `_MAX_RUNTIME_EVIDENCE_BODY_BYTES`) is the spine's ASSUMPTION pending the implementer (handoff.deviations). Demand s_ceiling_test_note_overflow_on_reviewed_path re-scoped. resolved_by: human"
+    - "RES-R7 case_ticket→report_md and case_ticket→REPORT_CAUSES [2 obligations] — folded into FK-10's decision: s_case_ticket_closing_comment_under_new_cooccurrence asserts the seventh sentence reaches the ticket resolution and the membership check covers seven. resolved_by: human"
+    - "RES-R7 read_report→report_md, validate_report→report_md, live_review_stages→REVIEW_ROLES [3 holes] — the rule's noise mode: each reader keys on nothing the delta moves. resolved_by: citation (G19, G13, C10)"
+    - "RES-R0 FK-6 wording [hole] — see FK-6. resolved_by: human"
+    - "RES-R4 FK-1 / FK-2 / FK-8 / rewritten-between-reads [4 holes] — see FK-1 (auto, bound on d9), FK-2 (human, bound on d14), FK-8 (human, bound on d22 + s_fk8), FK-17 (auto, closed by citation G18). resolved_by: as named"
+    - "G8 [process] — six `pytest.mark.gate` files are CI-dark (test_923_* ×4, test_tacit_*_991 ×2). Left as-is; a separate issue; handoff.deviations names the O5 witness it leaves unverified. resolved_by: human"
+    - "ACTORS [process] — two unmodelled re-exec drivers (`learning/branch/cli.py`, `evals/oracle_golden/generate_case.py`). Waived under `actor_waivers`: each reaches `run_investigation` as a whole, never the close. resolved_by: human"
+    - "C16 / C8 [corrections] — proceed with the corrections folded in (handoff.refuted); no kick-back to discuss-issue. resolved_by: human"
+
+  refuted:
+    - "C16 — the addendum's 'fixtures silently switch to the gate ran and broke' premise and its 'one judgement surfaced for write-tests'. `_replay_harness.drive` (:545-546) already binds a `holds` composer bundle when review_stages is None (G4/x1, executed), so every replay through it records a COMPLETED review after M1 — stands/CAUSE_STORY_SETTLED, three `ok` trace rows, `reviewed_disposition: inconclusive` — and no decision is owed. The recommendation the addendum offered is the harness's existing default. Only test_797_retirement.py:312 (ReviewStages()) and an explicit `_spec923.close(stages=None)` reach the gate unbound."
+    - "C8 — 'these are all the surfaces'. SHORT (G5–G7): four gate-lane tests plus the 983 e2e test flip on M1/M4 and are not in the flip list (three of them are M4 witnesses that go green once ceiling_test rides the reviewed path); two files are missed (the half-read-table baseline's reason text; visualize_run.py:117-131); the judge adds three 'gates nothing' siblings and the fail note. The enumerators and phase E treat the ARTIFACT's d26/d27 outcome sentences as the census of record, not the doc's list."
+    - "x5 — 'the prompt does not offer that shape; the host tolerates it' (design M3). composer.md:28-30 already offers `{\"finding\": \"gap\", \"review\": …, \"ask\": null}` verbatim, so M3's tolerant routing of a null-ask gap is mandatory, not optional; the M2 rewrite decides whether to keep the third example (keeping it is consistent with the retained JSON-shape doctrine)."
+    - "x10 — 'three review calls is the floor per inconclusive close' (design Security/scale line). Two when no strong belief move cites an edge (G12/a2: a `skipped` ablation row, support + composer only); three only when an ablation edge exists — true of all five sampled runs (C5), so the Measurement is unaffected and the prose is wrong."
+    - "The primary answerer's #9/#34/#36 (FK-17/18/19) — M4 does NOT source receipts from the gate's second read; the design (M4 'companion_text is already in hand from the price gate'), the addendum (C14) and the brief (G18) all place them on the price gate's parse. The committed block carries the PRICED rows."
+    - "The primary answerer's #3/#10 (FK-15/16) — a non-JSON reply and an out-of-vocabulary finding are `failure_kind: unreadable`, not `error` (rg3, executed at every _fail site)."
+    - "x7-adjacent design sentence 'code readers keep working because they import the set' (M1) — true of records written AFTER the change only; `visualize_runtime._was_reviewed` reads the constant, not the record (G17), so every pre-#992 inconclusive run dir re-renders as reviewed (F6, x7). Routed as FK-8."
+
+  deferred:
+    - "The composer's disposition-keyed user sentence is a wholly new surface with no execution-context census until code exists; its only caller today is challenge_gate (composer_projection referenced at :442,521 — G2-adjacent). write-code-from-spec §3 runs `spec-graph actors` once real code exists."
+    - "d16's commit-site assertion (a routing miss raises rather than committing `unresolved`) is a clause: driving a routing miss needs a fake challenge_gate, a setattr the monkeypatch lint ratchets. write-code-from-spec's adversary should attempt exactly that miss (an arm left on HOST_ONLY_DISPOSITION) against d15's sweep and d16's assertion."
+    - "Open author/dependency probes that six settled parity rows wait on (s_parity_rows_awaiting_an_author_probe): P2 (resumed branch), P6 (main-lane bound under three stage deadlines), P7 (no tool budget for the round), dependency probes 4 (retry after transient) and 7 (request budget exhausted before the stages). Also P1 (what the driver does with d16's raise), P3 (the run page's counting of a mixed round), P9 (what `_mentions` counts inside a receipt note), PO1/PO3 (adversarial receipt rows / ask-target content). LANDED in phase E / phase F (F-5): P4 — the two readers DO differ (`_read_companion_text` decodes with errors=replace, the gate's `read_text_utf8` is strict; instrument: `_spec992.non_utf8_companion`, driven in d14 and d18); P12 — a 9000-char note reached the commit-site refusal (a6) and §7 R6 closed the hazard with the cap (instrument: the note ladder and N-receipt row of s_ceiling_test_note_overflow); P13 — the price gate lets a keyword/document mismatch reach the gate (instrument: d3's `pays_every_price(malicious)` closed `inconclusive`, green against the phase-E sketch). None changes a #992 demand's meaning; each fixes a row's expected value."
+    - "C4/C5/C11 are inherited without re-execution at 67d29090 (their inputs — the run dirs and the ab3 golden — are present and unchanged)."
+    - "The Measurement (bg5): offline replay of the five inconclusive run dirs through `close_investigation(..., stages=live_review_stages(...))` is the follow-up to implementation, not a gate on it — and the procedure as written DESTROYS its baselines (#66: the sync host close replaces report.md and review_record.1.json and appends live review:* rows to the historical llm_requests.jsonl). The follow-up must copy the five run dirs first."
+
+  drops:
+    # Every phase-C premise not in the suite/forks above lands here with its reason (rules.md).
+    - "45-dispositions #22 `test_the_gate_seam_handed_the_host_only_disposition_directly` — dropped by the judge: no caller outside the close tool exists (C1, C9, G2); `unresolved` never enters the gate (d2); d16's commit-site assertion is the loud-failure pin."
+    - "45-dispositions #41 `test_llm_requests_log_write_fails_during_a_live_review_call` — dropped by the judge: RequestLogger and its fault handling are untouched (F1 names a new writer disposition, not new handling); no #992 observable."
+    - "45-dispositions #46 `test_two_close_attempts_for_the_same_run_arrive_concurrently` — dropped by the judge: unreachable by construction — the close tool is registered sequential=True and one process owns a run (G18)."
+    - "settled #66 `test_host_level_replay_over_a_run_dir_that_already_holds_a_report` — no #992 demand on the close tool; the Measurement's own hazard (handoff.deferred)."
+    - "settled #72 `test_review_spend_appears_on_an_inconclusive_run_page` — live `review:*` rows feed the existing cost reader (needs a live model — the Measurement's); the hermetic half (zero review: wire rows in a replay) is ALREADY pinned by tests/e2e/test_replay_skeleton.py:171-178 and stands unchanged (F1)."
+    - "settled #74 `test_investigator_is_told_nothing_when_its_inconclusive_stood_only_because_the_review_broke` — no obligation on the message beyond the outcome word; the report carries the kind (d14)."
+    - "settled #87 `test_receipt_note_and_rationale_steer_the_ceiling_composer_toward_holds` — no mechanical guard beyond lens independence (design Security); efficacy is measured, not pinned (bg12)."
+    - "`no-consequence` calls from the brief's flagged-fact table, carried so phase F sees the call rather than the silence: F3 (two reads of investigation.md in one sequential attempt — G18; #37 folded into s51), F4 (M4's second literal branch keeps the half-read-table fingerprint — G20/x13; the reason text is d26's last clause), F8 (457 B of 512 — G13, s90), F10 (the composer already sees the whole companion on every confident close — C3), F12 (the driver's forced close never reaches _dispatch — the pin test_923_host_verdict:212-235 is CI-dark, G8), F13 (_spec923.HOST_CAUSE is a fixture default for reader tests about unresolved), F14 (box hygiene: uv run in a fresh worktree mints a bare 3.14 venv)."
+    - "20-demands background bg1–bg12 — classified non-normative by the extraction leaf; none carries a demand (bg5/bg12 → Measurement, above)."
+
+  deviations:
+    - "KNOWN LIMIT OF THE SUITE — six test files are CI-DARK (G8: `pytestmark = pytest.mark.gate` on test_923_{host_verdict,readers,entry_price,authoring_surfaces}.py and test_tacit_{authz_hardening,registry_authoring}_991.py; CI's only pytest step deselects `gate`). Three of the design's O4/O5 witnesses and d27's flips live there and are asserted by nothing CI runs. Phase E puts every #992 test in an UNMARKED file under defender/tests. §7 (human): the six files are LEFT AS-IS — a separate issue, not this diff — so the design's O5 witness 'confident cases of test_923_host_verdict pass unchanged' and d27's flips in test_923_readers/_spec923 stay unverified by CI until it lands."
+    - "KNOWN LIMIT OF THE SUITE — d16 (a routing miss fails loud) and d26/d27 (prose and pin maintenance) are clauses; the executable faces are d15's arm sweep, d21/d22, and the flipped tests. A build that silently leaves one _fail site on HOST_ONLY_DISPOSITION for `inconclusive` is caught by d14/d15 only if the sweep drives THAT site — phase E must drive all six (:471,474,512,517,530,535) and the three _route FORCED arms individually."
+    - "KNOWN LIMIT OF THE SUITE — s_parity_rows_awaiting_an_author_probe holds six settled parity rows as a clause because their values wait on open probes (handoff.deferred). They ship untested unless a probe lands executable before phase E; the parity form needs no #992 value, so a probe that lands promotes the row into s_fault_handling_parity_with_a_confident_close."
+    - "RESOLVED at §7 — the five fork cells the assembler left unbound are closed: ReviewStages[partially-bound] → d14 (human), citable_refs[receipted-lead] → d9 (auto), _was_reviewed[pre-change-inconclusive-record] → d22 + s_fk8 (human), investigation_md[rewritten-between-reads] → closed by citation G18 (auto, no fixture), FK-6's wording → s_fk6 (human). `spec-graph gate` exits clean against the recorded state."
+    - "ASSUMPTION (the spine's, pending the implementer) — the cap on `ceiling_test` notes (s_ceiling_test_note_overflow_on_reviewed_path) is pinned at 2048 BYTES over the ACCUMULATED rendered note lines, refused at the entry-price gate at both boundaries with the existing refusal shape. The value is the codebase's own bound on the sibling model-authored body family in the same report (`_MAX_RUNTIME_EVIDENCE_BODY_BYTES = 2048`, _gating.py:1314) and the arithmetic fits (512 + 2048 + 2048 = 4608 of 8192); the human decided the FIX and asked the assembler to name the bound. The implementer may argue a different value or a per-note bound (ASK_PROSE_MAX=500 is the per-field analogue, but it truncates silently rather than refusing) — either way the test asserts refusal-before-any-stage at the bound the code declares, and the bound must leave the file cap unreachable by notes alone."
+    - "KNOWN LIMIT OF THE SUITE — R5's tightening obligation stays covered by a CLAUSE only (d16): a routing miss that hands an inconclusive close back as `unresolved` is asserted at the commit site, and no test drives the miss because a fake challenge_gate is a setattr the monkeypatch lint ratchets. §7 (auto) kept it so; write-code-from-spec's adversary owes the attempt (handoff.deferred). d14/d15 drive every `_fail` site and `_route` arm individually, which is the executable face."
+    - "KNOWN LIMIT OF THE SPEC — `llm_requests_jsonl` and `RequestLogger` are modelled code-provenance although M1 makes `inconclusive` a new writer DISPOSITION of that stream (F1): the writer and its handling are untouched (#41 dropped), so the graph carries the fact as a comment and s72's drop entry, not as a delta edge. If write-code-from-spec touches the logger, this is unspecified here."
+    - "DEGRADATION — the escalation set was not hedges ∪ forks (45-dispositions red flag): one hedged premise (#53, FK-14) has no escalation measurement and is routed by the judge's reading alone; one fork-marked premise (#6, FK-1) was escalated without a hedge. Both are recorded as forks above with that provenance."
+    - "PROCESS — four behavior claims inherited closed on a read (G11, G12, x6, x12) were RE-EXECUTED at assembly (a1–a4) rather than carried as instrument findings or demoted; two more (C6, C16) carry this run's executions (x2, G4). Four claims (G7, G18, G22, x15) are worded as the one-line structural reads they are, after the typing grammar caught 'fail-closed', 'return value', 'raised by' in sentences that predict nothing — the reader should check that no rewording changed a claim's meaning (none did: each names a line and what is on it)."
+    - "COUNTS AFTER §7-APPLY, computed from this file (yaml.safe_load + len; see 55-graph-resolved.md): 51 demands = 28 inherited (25 test + 3 clause) + 18 phase-D minted (17 test + 1 clause) + 2 gate-minted (test) + 3 §7-minted (test); 47 distinct `discharged_by` names (d10's renamed at §7), none existing in defender/tests; 66 claims = 17 inherited + 24 brief + 15 extraction + 4 re-ground + 6 assembly (a1–a6); 17 actors; 32 boundaries; 54 interacts; 9 drives; 3 axes; 0 `unknown` slots; 2 actor_waivers. 45-dispositions' 92 premises: 67 settled → 31 rows of inherited demands, 15 minted test demands, 11 in the parity test, 6 in the parity clause, 4 dropped with reasons; 22 forks/silent branches + 12 residue items → handoff.forks with resolved_by (8 human rows, 17 auto bullets, 3 by citation, per 70-resolutions.md); 3 judge drops → handoff.drops. Recount before trusting."
