@@ -67,22 +67,22 @@ def materialize_run_dir(
     paths.gather_raw.mkdir(parents=True)
     shutil.copy(alert, paths.alert)
     # STAMPED HERE, at the one place a run the box will EXECUTE is ever materialised, so no
-    # caller can forget — the branch launcher materialises its siblings through this same call
-    # (`learning/branch/cli.materialize_worlds`), which is what makes a family's worlds
-    # comparable on their code rather than merely assumed to be. Captured BEFORE the box exists
-    # and before any agent is alive, because the run dir is the box's rw bind and a stamp
-    # written later is a stamp the run could have moved.
+    # caller can forget — a branched family's siblings are `run.py --resume` PROCESSES, each of
+    # which reaches this call and stamps itself, and `learning/branch/cli.verify_family` is
+    # what compares those per-process stamps against each other and against the source run's
+    # (#976). Captured BEFORE the box exists and before any agent is alive, because the run dir
+    # is the box's rw bind and a stamp written later is a stamp the run could have moved.
     #
-    # NOT every `RunPaths` bundle: the learning loop's ARCHIVED episode under
-    # `LoopPaths.runs_dir` is mkdir'd by `learning/core/persist.py` rather than through here.
-    # It carries the SOURCE run's stamp, copied across with the other shared inputs, because
-    # the stamp of the archive directory itself would name whenever the drain happened to run
-    # rather than what the investigation executed.
+    # NOT every run-dir-shaped bundle: the branch archive (`learning/branch/archive.py`)
+    # copies each sibling's stamp into `worlds/<X>/` rather than materialising through here,
+    # because the stamp of the archive directory itself would name whenever the archive
+    # happened to be taken rather than what the investigation executed. Nothing else copies a
+    # stamp — in particular the learning loop's own `learning/core` writes none.
     #
-    # `provenance` is the caller's when it has one. A sibling family passes ONE capture for all
-    # N worlds: taken per world here, a commit landing mid-launch would give siblings different
-    # records, and the comparison this stamp exists to protect would be the thing it failed to
-    # notice.
+    # `provenance` is the caller's when it has one; nothing in the tree passes one today. The
+    # branch launcher does NOT take one capture for all N worlds — a launcher-moment record
+    # could only ever describe the launcher's process, and the family stamp is a conclusion
+    # about the siblings' own per-process records, anchored to the source's.
     _stamp(paths.provenance, provenance, model=model)
     return run_dir
 
