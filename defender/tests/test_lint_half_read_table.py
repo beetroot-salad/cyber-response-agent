@@ -374,23 +374,13 @@ def _shipped_baseline_entries() -> dict[str, str]:
     return json.loads(Path(_GATE.BASELINE_PATH).read_text(encoding="utf-8"))["entries"]
 
 
-def test_shipped_baseline_has_a_reason_for_every_entry():
-    entries = _shipped_baseline_entries()
-    assert entries, "an empty baseline makes this test vacuous — assert something or delete it"
-    for fingerprint, reason in entries.items():
-        assert reason.strip(), f"{fingerprint} carries no reason"
-
-
 def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries():
-    """The real-tree POSITIVE control, and the only test that has one since #879 stopped
-    being a live finding.
-
-    `test_real_tree_clean` and `test_its_motivating_finding_is_fixed_and_not_baselined` both
-    assert an ABSENCE, so a scanner that regressed into finding nothing on the real tree
-    passes both — and the synthetic fixtures cannot catch that, because they exercise a tree
-    this gate's import-edge and key-identity rules never have to resolve for real. Equality
-    (rather than "something was found") also catches the other direction: a baseline entry
-    that no longer fires is a burial the ratchet is still carrying."""
+    """Equality, in both directions: a real-tree finding the baseline does not carry is a new
+    burial candidate, and a baseline entry that no longer fires is a burial the ratchet is
+    still carrying. The baseline is EMPTY today — the one collision it carried (#923's bypass
+    branching on the literal `inconclusive`) went with #992, which names that member once in
+    the vocabulary — so this is no longer a real-tree positive control; the synthetic fixtures
+    above are the positive controls, and the real tree is the negative one."""
     assert {f.fingerprint for f in _GATE._scan()} == set(_shipped_baseline_entries())
 
 
@@ -400,14 +390,13 @@ def test_its_motivating_finding_is_fixed_and_not_baselined():
     with no reader at the close; it now dispatches through `disposition_entry_price`, which
     reads `_DISPOSITION_GATES` whole.
 
-    #923 legitimately adds ONE NEW, unrelated collision at this same file: the no-review
-    bypass (`if disposition in NO_REVIEW_DISPOSITIONS:`, matching the model's `inconclusive`
-    and the host's `unresolved`) answers a different question from the entry price ("does this
-    verdict skip the live review", not "what does this verdict owe") and shares nothing but
-    the literal spelling with `_DISPOSITION_GATES`'s keys — baselined, with its own reason,
-    distinct from #879's shape. What #879 pins is narrower than "nothing fires at this file at
-    all": every finding that DOES fire here must be an EXPLAINED false positive, not the price
-    dispatch itself regressing into a literal branch.
+    A branch at this file on a disposition the table also keys (#923's bypass once matched the
+    literal `inconclusive`) is a collision, not the price dispatch — it answers "does this
+    verdict skip the live review", not "what does this verdict owe" — and is baselined with a
+    reason that says so. What #879 pins is narrower than "nothing fires at this file at all":
+    every finding that DOES fire here must be an EXPLAINED false positive, not the price
+    dispatch itself regressing into a literal branch. (Nothing fires here today: #992 spells
+    the ceiling member as `CEILING_DISPOSITION` rather than a literal.)
 
     Not `gate`-marked: the code-smells step's exit-0 check covers the tree being clean; this
     covers the ONE site the gate was written for being clean for the right reason.
@@ -431,7 +420,7 @@ def test_its_motivating_finding_is_fixed_and_not_baselined():
     ), "a close_tool finding is baselined without pointing at the #923 bypass — #879 may be back"
 
 
-@pytest.mark.gate  # covered by code-smells' "Half-read-table gate"
+@pytest.mark.gate
 def test_real_tree_clean():
     """`gate`-marked: the code-smells step runs this same `main([])` over this same tree and
     blocks on it, so the `test` job's copy was pure duplicate cost on CI's critical path."""

@@ -169,7 +169,7 @@ def test_d_lint_suppression(tmp_path):
     assert gate._scan(bare) == []
 
 
-@pytest.mark.gate  # covered by code-smells' "Hand-rolled-frontmatter gate"
+@pytest.mark.gate
 def test_d_lint_real_tree_clean():
     """`gate`-marked: the code-smells step runs this same `main([])` and blocks on it."""
     gate = _GATE

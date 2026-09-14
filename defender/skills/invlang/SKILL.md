@@ -576,9 +576,11 @@ summary                "Login matched established bastion usage"
       ceiling_test  state=nothing-to-try cap=sandbox.detonate note=confirming ?post-install-implant would require sandbox detonation, and neither is in the runtime tool surface
 
   `note` is free text FOR THE ANALYST reading the report — explain the
-  gap in your own words. It gates NOTHING (only `state`/`ref`/`cap` are
-  checked) and rides into the report BODY, not the frontmatter, so a long
-  note never risks the close. Two rows claiming the SAME `(state, ref)`
+  gap in your own words. Only `state`/`ref`/`cap` are checked against the
+  transcript, and it rides into the report BODY, not the frontmatter —
+  but the notes across every receipt are bounded in total, so keep each
+  one to what the gap actually needs: an oversized note is refused before
+  the close, not after. Two rows claiming the SAME `(state, ref)`
   or `(state, cap)` do not pay for two gaps. Omit the row (or write
   `none`) when nothing was out of reach. `ceiling_rationale` is the
   companion scalar: why concluding anyway is sound despite those gaps.

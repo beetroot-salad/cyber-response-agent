@@ -52,7 +52,7 @@ def read_guarded(path: Path) -> tuple[str | None, str | None]:
     Same return shape as :func:`read_text_soft` — ``(text, None)`` or ``(None, reason)`` — so it
     drops in wherever a reader already tolerates "could not read this". What it adds is that a
     path which is not a plain, single-linked regular file is a REFUSAL rather than a read of
-    whatever the entry points at.
+    whatever the entry points at. The read itself is :func:`read_plain`; this is the fold.
 
     WHY A SEPARATE FUNCTION RATHER THAN A CHECK EACH CALLER WRITES. Every read of a path inside
     a run dir, an episode dir or the drain corpus is a read from a tree a live box is root on,
@@ -62,16 +62,37 @@ def read_guarded(path: Path) -> tuple[str | None, str | None]:
     hard link, and before that no screen at all. Two guards on one path that do not match is
     not a bug you fix once.
 
+    ABSENT is a refusal here, unlike on the write side where it is the ordinary case: a file
+    that is not there is not a file to read, and folding it in with the alias refusal is right
+    because no caller of THIS can act on the two differently — both mean "you have no content".
+    The reason string tells them apart for a log. The one reader that does act on them
+    differently — the companion reader, for which an unwritten document is turn 1's ordinary
+    state — takes :func:`read_plain` and catches the absence itself.
+    """
+    try:
+        return read_plain(path), None
+    except TEXT_READ_ERRORS as e:
+        return None, str(e)
+
+
+def read_plain(path: Path) -> str:
+    """The guarded read as a RAISING primitive: the text of the plain, single-linked regular
+    file at ``path``, read with universal newlines exactly as ``Path.read_text`` would — or the
+    exception that stopped it, every one a member of :data:`TEXT_READ_ERRORS`:
+
+      * ``FileNotFoundError`` — nothing at the name;
+      * an ``OSError`` carrying :data:`ALIAS_READ_REFUSAL` — the entry is not a plain file: a
+        symlink (refused at the open, ``ELOOP``), a hard link (``EMLINK``, the write side's
+        own errno for the shape ``O_NOFOLLOW`` cannot refuse), a directory, fifo, socket or
+        device (``ELOOP``, as the write side folds them);
+      * any other ``OSError`` — the file is there and could not be read (``EACCES``, ``EIO``);
+      * ``UnicodeDecodeError`` — its bytes are not UTF-8.
+
     STRICTLY STRONGER THAN AN ``lstat`` THEN A READ, which is what the hand-written version was.
     The plainness question is asked of the OPEN DESCRIPTOR: ``O_NOFOLLOW`` refuses a symlink at
     the open itself, and ``fstat`` then judges the very object that was opened. A check-then-act
     pair answers about whatever the name meant a moment ago, and the window between them is
     exactly where a plant belongs.
-
-    ABSENT is a refusal here, unlike on the write side where it is the ordinary case: a file
-    that is not there is not a file to read, and folding it in with the alias refusal is right
-    because no caller of this can act on the two differently — both mean "you have no content".
-    The reason string tells them apart for a log.
     """
     # `O_NONBLOCK` IS NOT AN OPTIMISATION, it is the only thing standing between this and a
     # hang. An ordinary `O_RDONLY` open of a FIFO BLOCKS until some process opens the write
@@ -79,10 +100,7 @@ def read_guarded(path: Path) -> tuple[str | None, str | None]:
     # wedge the caller forever rather than be refused. Non-blocking makes the open return at
     # once; `fstat` then refuses it like any other non-regular entry. On a regular file the
     # flag does nothing at all, so the ordinary path is unchanged.
-    try:
-        fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
-    except TEXT_READ_ERRORS as e:
-        return None, str(e)
+    fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
     try:
         st = os.fstat(fd)
         # A hard link is the shape `O_NOFOLLOW` cannot refuse — the open SUCCEEDS (B9) — so the
@@ -90,13 +108,14 @@ def read_guarded(path: Path) -> tuple[str | None, str | None]:
         # directory, fifo, socket or device lands in the same refusal for the reason
         # `_refuse_unless_plain` gives: a caller must not have to tell those apart from a
         # planted symlink to know it has no artifact.
-        if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
-            return None, f"{ALIAS_READ_REFUSAL}: {path}"
+        is_hardlink = stat.S_ISREG(st.st_mode) and st.st_nlink > 1
+        if is_hardlink or not stat.S_ISREG(st.st_mode):
+            raise OSError(
+                errno.EMLINK if is_hardlink else errno.ELOOP, ALIAS_READ_REFUSAL, str(path),
+            )
         with os.fdopen(fd, "r", encoding="utf-8") as fh:
             fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
-            return fh.read(), None
-    except TEXT_READ_ERRORS as e:
-        return None, str(e)
+            return fh.read()
     finally:
         if fd >= 0:
             os.close(fd)

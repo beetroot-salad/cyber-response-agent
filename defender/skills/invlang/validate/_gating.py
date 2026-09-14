@@ -749,10 +749,16 @@ class CeilingReceipt:
     """One parsed `ceiling_test` row. `state`/`ref`/`cap` are the STRUCTURED half — closed
     vocabulary plus an id, mechanically checked against this run's own transcript — and the
     only part that rides into the committed report's frontmatter (`ceiling_test_block`). `note`
-    is free text FOR THE HUMAN ANALYST: it gates NOTHING (`_check_ceiling_receipt` never reads
-    it for anything but the one injection check every model-authored report field gets) and
-    rides into the report BODY, never the frontmatter — because it gates nothing, it can never
-    strand a run on a value the write gate accepted and the close then refused."""
+    is free text FOR THE HUMAN ANALYST: `_check_ceiling_receipt` never reads it for anything
+    but the one injection check every model-authored report field gets, and (since #992's §7
+    R6) the accumulated bytes across every receipt's note, charged at the entry-price gate
+    alongside the structured half — a run that would strand later on an oversized note is
+    refused here instead, before any review stage spends a call on it. It rides into the
+    report BODY, never the frontmatter, only once it has cleared that bound.
+
+    Since #992, `inconclusive`'s note also reaches the ceiling composer verbatim, inside the
+    untrusted frame — it steers a review now, where before this change `inconclusive` had
+    none."""
 
     state: str
     ref: str | None
@@ -1115,6 +1121,36 @@ def _walk_ceiling_rows(companion: CompanionBody, rows: Any) -> _CeilingWalk:
 #: rather than against any one receipt's size.
 _MAX_CEILING_FRONTMATTER_BYTES = 300
 
+#: §7 R6 (human, against the judge's parity recommendation) — a FIX, not parity: the
+#: accumulated rendered `ceiling_test` NOTE text (the analyst-facing free text in the report
+#: BODY; see `render_report`'s docstring) is bounded here, at BOTH boundaries this gate is
+#: collected from, the same way the frontmatter block above is. Before #992 it was unbounded,
+#: on the argument that "a size cap on ungated text is itself a gate" — real today (a9000-byte
+#: note passes this gate and strands the run at `_artifact_schema.validate_report`'s whole-file
+#: cap, after the review has already been spent). The VALUE is sized off the sibling
+#: model-authored body family in the same report, `_MAX_RUNTIME_EVIDENCE_BODY_BYTES` (2048): the
+#: two share one order of magnitude, and 300 (frontmatter) + 2048 (this) + 2048 (runtime
+#: evidence) = 4396 stays well under `_artifact_schema.REPORT_FILE_MAX` (8192) — the note is
+#: refused before it can ever, alone or together with the sibling family, reach that cap.
+#: Charged on the RENDERED body lines (`ceiling_note_block`), state and ref included, not on
+#: the raw note text — a bound is only a bound on what ships if it measures the bytes written.
+_MAX_CEILING_NOTE_BYTES = 2048
+
+
+def ceiling_note_block(receipts: Sequence[CeilingReceipt]) -> str:
+    """The `report.md` BODY lines for the receipts' NOTES — one per receipt that carries one,
+    naming the state and whichever of `ref`/`cap` the receipt has (exactly one is set;
+    `_check_ceiling_receipt` refuses any other shape), then the model's free text. The note is
+    for the human analyst and decides nothing about the verdict (`CeilingReceipt`).
+
+    THE one renderer, for the reason `ceiling_test_block` and `runtime_evidence_block` are:
+    the gate that BOUNDS this text (`_check_inconclusive_gating`) and `close_tool.render_report`,
+    which EMITS it, measure and write the same bytes. Leading newline per line, none when no
+    receipt carries a note, so the caller appends this to a body it has already opened."""
+    return "".join(
+        f"\nceiling_test ({r.state}, {r.ref or r.cap}): {r.note}" for r in receipts if r.note
+    )
+
 
 def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
     """`inconclusive` owes a named gap (O1, #923 §7 round 4 REPLACEMENT): at least one
@@ -1138,6 +1174,15 @@ def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
             f"disposition inconclusive blocked: the accumulated `ceiling_test` receipts are "
             f"{total_bytes} bytes, over the {_MAX_CEILING_FRONTMATTER_BYTES}-byte bound — "
             f"name fewer, more specific gaps rather than every one in full"
+        )
+    note_bytes = len(ceiling_note_block(walk.paying).encode("utf-8"))
+    if note_bytes > _MAX_CEILING_NOTE_BYTES:
+        errors.append(
+            f"disposition inconclusive blocked: the accumulated `ceiling_test` notes render "
+            f"{note_bytes} bytes of `report.md` body, over the {_MAX_CEILING_NOTE_BYTES}-byte "
+            f"bound — shorten the "
+            f"notes; they are free text for the human analyst, never required to make a "
+            f"receipt pay"
         )
     if not walk.paying:
         errors.append(

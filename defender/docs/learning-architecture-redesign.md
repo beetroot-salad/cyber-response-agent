@@ -370,9 +370,10 @@ mutation target. Today the review record persists `verdict` / `reviewed_disposit
 `detail` / `failure_kind`, and its only readers are `close_tool`, `challenge_gate`,
 `_run_paths` and the visualizer. Nothing under `learning/` consumes it.
 
-**`inconclusive` bypasses the gate** (`close_tool.py:436`), which makes review a one-way
-ratchet: it manufactures the one disposition class it never examines. The fix is a rule worth
-having anyway — **`inconclusive` must name a missing source.** Not "I gave up" but a typed,
+**`inconclusive` bypassed the gate** (until #992 — it now spends the same review a confident
+close does, judged against its ceiling claim), which made review a one-way ratchet: it
+manufactured the one disposition class it never examined. The other half of the fix is a rule
+worth having anyway — **`inconclusive` must name a missing source.** Not "I gave up" but a typed,
 falsifiable claim: *predicate P would resolve this; no system in this deployment exposes P.*
 That is adjudicable by the reachability check run in reverse, and a forced close that cannot
 produce the claim should be refused rather than committed. It also fills the hole the training

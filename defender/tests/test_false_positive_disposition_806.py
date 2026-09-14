@@ -458,31 +458,36 @@ def test_the_grounding_clause_is_what_makes_the_open_slot_check_bite(tmp_path):
     assert disposition_entry_price("benign", _PROLOGUE + conclude).owed == ()
 
 
-def test_a_companion_that_cannot_be_read_refuses_the_close(tmp_path):
+def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_path):
     """A gate that cannot look must not report clean (#618/#621/#652).
 
     Once every close reads this file, an I/O fault reaches a gate none of them used to — and
     swallowing it to `""` would not mean "nothing was written", it would mean "this gate did
     not run". That waives `benign`'s whole price, because that price refuses CONTRADICTIONS
     and an empty read carries none; `false-positive`'s would still be refused, so the two
-    priced keywords would disagree about what a fault means. Induced through the real
-    primitive — `investigation.md` as a DIRECTORY, so `read_text` raises a real `OSError`
-    regardless of the uid running the suite (a chmod would not: CI is non-root, this container
-    is not).
+    priced keywords would disagree about what a fault means. The close therefore decides an
+    unreadable companion ONCE, ahead of every gate, and the same way for every keyword: the
+    model's verdict is overruled to the host's `unresolved` as a review that cannot run, the
+    record naming the fault. Induced through the real primitive — `investigation.md` as a
+    DIRECTORY, so the guarded read refuses it regardless of the uid running the suite (a chmod
+    would not: CI is non-root, this container is not).
 
-    Both priced keywords are driven, and the refusal is asserted to be the FAULT's rather than
-    either price's — a test that only checked "something was refused" would pass against the
+    Both priced keywords are driven, and the commit is asserted to be the FAULT's rather than
+    either keyword's — a test that only checked "a report was written" would pass against
     fail-open code for `false-positive`."""
     import asyncio
 
-    from pydantic_ai.exceptions import ModelRetry
-
+    from defender._io import ALIAS_READ_REFUSAL
+    from defender._vocab import HOST_ONLY_DISPOSITION
     from defender.agents import MAIN_DEF
     from defender.runtime import challenge_gate
     from defender.runtime.agent_definition import bind
-    from defender.runtime.close_tool import _close_investigation_async
+    from defender.runtime.close_tool import (
+        CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR, _close_investigation_async,
+    )
     from defender.tests._review_bundle import bundle as _bundle
     from defender.tests._review_bundle import composer_reply as _composer
+    from defender.tests._spec992 import frontmatter, record
 
     for disposition in ("benign", "false-positive"):
         run_dir = tmp_path / disposition / "run"
@@ -491,13 +496,17 @@ def test_a_companion_that_cannot_be_read_refuses_the_close(tmp_path):
         dfn = tmp_path / disposition / "defender"
         dfn.mkdir(exist_ok=True)
         deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
-        with pytest.raises(ModelRetry) as e:
-            asyncio.run(_close_investigation_async(
-                deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
-                bounds=challenge_gate.default_bounds(),
-            ))
-        assert "could not be read" in str(e.value), disposition
-        assert not (run_dir / "report.md").exists(), disposition
+        result = asyncio.run(_close_investigation_async(
+            deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
+            bounds=challenge_gate.default_bounds(),
+        ))
+        assert (result.outcome, result.failure_kind) == (FORCED_INCONCLUSIVE, STAGE_ERROR), disposition
+        fm = frontmatter(run_dir)
+        assert fm["disposition"] == HOST_ONLY_DISPOSITION, (disposition, fm)
+        assert fm["cause"] == CAUSE_REVIEW_INCOMPLETE, (disposition, fm)
+        rec = record(run_dir, 1)
+        assert rec["reviewed_disposition"] == disposition
+        assert ALIAS_READ_REFUSAL in rec["detail"], (disposition, rec)
 
 
 def test_an_absent_companion_is_not_a_fault(tmp_path):

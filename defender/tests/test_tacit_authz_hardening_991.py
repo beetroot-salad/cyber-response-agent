@@ -53,10 +53,10 @@ from defender.skills.invlang.validate import validate_companion
 from defender.tests import _tacit983 as scene
 from defender.tests._spec923 import close, committed, main_deps
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
+    REPO_ROOT,
     worktree_package_guard,
 )
 
-pytestmark = pytest.mark.gate
 
 
 def _errors(document: str) -> list[str]:
@@ -199,8 +199,9 @@ def test_the_hosts_own_forced_close_publishes_no_companion_prose(tmp_path) -> No
         )
 
 
-def test_this_module_parses_the_companion_once_and_inside_its_own_guard() -> None:
-    """`close_tool` reads the companion through ONE parse, and that parse is the wrapped one.
+def test_the_close_reads_and_parses_the_companion_once_inside_its_own_guard() -> None:
+    """The close takes ONE read of `investigation.md` and ONE parse of it, and that parse is
+    the wrapped one.
 
     `_refuse_if_entry_price_is_owed` wraps its parse deliberately — "this gate parses a file it
     did not write — an imported run dir, a replayed fixture, a hand edit. Either fault would
@@ -208,21 +209,28 @@ def test_this_module_parses_the_companion_once_and_inside_its_own_guard() -> Non
     `disposition_entry_price` short-circuits AHEAD of its own parse for any unpriced keyword, so
     on a `malicious` or `unresolved` close the report readers' parse was the FIRST one and it
     was bare — outside the guard whose whole job is to turn that fault into a refusal. An
-    `inconclusive` close read the same document three times over inside this module alone.
+    `inconclusive` close read the same document three times over inside this module alone,
+    and four times over the whole close: the two document gates held their own readings
+    behind `tools_mod`, and the review gate took a strict read of the file the price gate had
+    just decoded leniently — one document, two decoders, two answers.
 
-    SCOPED TO THIS MODULE, which is narrower than "the close parses once" and is the honest
-    claim: the two document gates a non-forced close runs first (`flagged_diagnostics` and
-    `committed_document_refusal`) hold their OWN readings behind `tools_mod`, and a source count
-    here cannot see them. What is pinned is that this module does not add a second.
+    THE WHOLE CLOSE, not this module alone: `close_tool` calls `read_companion(` exactly once
+    and hands that read to both document gates and the price gate; `challenge_gate` takes the
+    parsed body and reads no file. A gate that wanted its own reading would have to
+    reintroduce a read here or in the gate, and this is where that shows.
 
     ASSERTED ON THE SOURCE, and stated as the limitation it is: today's tokenizer is extremely
     tolerant (a truncated header, a stray null byte and unfenced prose all parse to warnings),
     so no text drives the traceback this guards. That makes the property structural — one call
     site, inside the guard — and a shape assertion is the instrument that matches it. The
     functional half is the suites either side of this one: the readers now take a
-    `CompanionBody`, so a caller that wanted to parse would have to reintroduce one.
+    `CompanionBody`, so a caller that wanted to parse would have to reintroduce one, and
+    `test_992_report` drives the one input a strict and a lenient decode disagree on through
+    the whole close.
     """
     import inspect
+
+    from defender.runtime import challenge_gate
 
     source = Path(inspect.getsourcefile(close_tool)).read_text(encoding="utf-8")
     calls = source.count("parse_dense_companion(")
@@ -231,6 +239,21 @@ def test_this_module_parses_the_companion_once_and_inside_its_own_guard() -> Non
         f"in this module, and each extra one is a full re-read of a file the guard has already "
         f"vetted"
     )
+    reads = source.count("read_companion(")
+    assert reads == 1, (
+        f"`close_tool` makes {reads} `read_companion(` calls — one read, handed to every gate"
+    )
+    body = source.split("def _close_investigation_async", 1)[1]
+    for own_read in ("read_text", "read_bytes"):
+        assert own_read not in body, (
+            f"the close took its own reading ({own_read!r}) beside the one it hands out"
+        )
+    gate_source = Path(inspect.getsourcefile(challenge_gate)).read_text(encoding="utf-8")
+    for own_read in ("read_text", "read_bytes", "parse_dense_companion(", "parse_investigation("):
+        assert own_read not in gate_source, (
+            f"`challenge_gate` takes its own reading ({own_read!r}) of a document the close "
+            f"already parsed and handed in"
+        )
 
     guard = inspect.getsource(close_tool._refuse_if_entry_price_is_owed)
     assert "parse_dense_companion(" in guard, (
@@ -835,8 +858,10 @@ def test_the_skill_and_the_format_doc_agree_with_the_code() -> None:
 
     Asserted as CONTENT, not as a file hash: what has to survive an edit is that both rules are
     findable where a writer looks, not any particular sentence."""
-    skill = Path("defender/skills/invlang/SKILL.md").read_text(encoding="utf-8")
-    fmt = Path("docs/dense-investigation-format.md").read_text(encoding="utf-8")
+    # Anchored on the tree, not the cwd: CI runs pytest from `defender/`, and a cwd-relative
+    # path there opens nothing.
+    skill = (REPO_ROOT / "defender/skills/invlang/SKILL.md").read_text(encoding="utf-8")
+    fmt = (REPO_ROOT / "docs/dense-investigation-format.md").read_text(encoding="utf-8")
 
     for taught, why in (
         ("hit:", "the `hit:` outcome the write gate now demands"),

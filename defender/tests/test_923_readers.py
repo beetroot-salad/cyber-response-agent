@@ -50,7 +50,6 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
     worktree_package_guard,
 )
 
-pytestmark = pytest.mark.gate
 
 _NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,

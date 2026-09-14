@@ -409,7 +409,7 @@ def test_the_readers_of_a_laundered_value_are_not_reported():
         assert reader not in reported
 
 
-@pytest.mark.gate  # covered by code-smells' "Un-narrowed-parse gate"
+@pytest.mark.gate
 def test_real_tree_clean():
     """`gate`-marked: the code-smells step runs this same `main([])` over this same tree and
     blocks on it, so the `test` job's copy would be duplicate cost on CI's critical path."""

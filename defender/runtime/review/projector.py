@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from defender._untrusted import wrap as _wrap
+from defender._vocab import CEILING_DISPOSITION
 from defender.skills.invlang import _walkers, vocab
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.schema import CompanionBody
@@ -47,6 +48,7 @@ __all__ = [
     "ablation_target",
     "observation_only",
     "parse_investigation",
+    "require_investigation",
     "support_projection",
 ]
 
@@ -111,16 +113,22 @@ class Projection:
     text: str
 
 
-def parse_investigation(text: str) -> CompanionBody:
-    """The parsed companion, or `EmptyInvestigation`. The one entry point — every projection
-    is built from this rather than from the raw document."""
-    companion, _warnings = parse_dense_companion(text)
+def require_investigation(companion: CompanionBody) -> CompanionBody:
+    """The parsed companion a projection may be built from, or `EmptyInvestigation`. The gate
+    hands in the close's own parse; this is the check that it holds anything at all."""
     if not companion:
         raise EmptyInvestigation(
             "the investigation carried no parseable invlang — a projection built from it "
             "would ask a lens to reconstruct from nothing"
         )
     return companion
+
+
+def parse_investigation(text: str) -> CompanionBody:
+    """`require_investigation` over a parse of the raw document — for a reader that holds only
+    the text (a test, a replayed fixture); the live close parses once and hands the body in."""
+    companion, _warnings = parse_dense_companion(text)
+    return require_investigation(companion)
 
 
 def _without(record: Any, keys: tuple[str, ...]) -> dict:
@@ -223,12 +231,66 @@ _COMPOSER_ASK = (
     "and what it concluded. Each lens reached its reading without seeing that account."
 )
 
+#: M5 — the confident question composer.md carried in its own system prompt before #992 and
+#: now carries in the composer's USER message instead (M2), so the system prompt stays
+#: disposition-neutral. Every confident member shares this one sentence — O5 requires a binary
+#: confident/inconclusive branch, never a per-member one — and the host's own `unresolved`
+#: never reaches a composer at all.
+#:
+#: POLARITY: composer.md's answer contract is fixed once for every question it may be handed —
+#: "yes" is `holds`, "no" is `gap` — so every host question here is phrased so that "yes"
+#: means the close stands. A question phrased the other way round would have the composer
+#: follow the contract into the inverse finding.
+_CONFIDENT_HOST_QUESTION = (
+    "This investigation reached a confident disposition. Judge whether the conclusion follows "
+    "from the record as written — not whether it is true."
+)
+
+#: M2, §7 FK-6 — the ceiling variant: the run closed `inconclusive` and its `ceiling_test`
+#: receipts (and any `ceiling_rationale`) are its own account of the ceiling. The lenses read
+#: the same record WITHOUT that claim, so a lens naming something measurable the record neither
+#: cited nor tested is exactly the finding this question exists to surface. Both the receipts
+#: and the readings sit BELOW the question in the composer's message (`composer_projection`
+#: puts every host sentence ahead of the framed content), which is what the sentence says.
+#: FK-6: the missed measurement must be named by an id ALREADY RECORDED (`v-`/`e-`/`l-`/`h-`),
+#: agreeing with the `citable_refs` guard the ask's `target` is read through — following this
+#: sentence literally cannot produce the uncitable name that guard refuses.
+#:
+#: THE NULL-ASK GAP IS SPELLED OUT, because composer.md's shared doctrine and this question
+#: would otherwise disagree about it. The doctrine says "return no ask when nothing measurable
+#: would settle it; an unmeasurable gap is still a gap" — right for the confident question,
+#: where the record can fail to carry its conclusion with nothing left to measure. For THIS
+#: question "nothing measurable would settle it" is the ceiling claim holding, so a `gap` with
+#: no ask is the composer conceding the claim while answering `gap`, and `_route` commits that
+#: answer as the host's `unresolved` over an `inconclusive` whose ceiling was real. The
+#: sentence therefore closes the arm: a `gap` here always names the measurement, and a composer
+#: that cannot name one returns `holds`. `_route` stays disposition-blind (A1); the question
+#: itself is where the two answers are made to agree.
+_CEILING_HOST_QUESTION = (
+    "This investigation closed `inconclusive`, claiming a ceiling — that nothing further "
+    "could be measured. Its `ceiling_test` receipts (and any `ceiling_rationale`) are its own "
+    "account of that ceiling, in the record below. The lenses below read the same record "
+    "WITHOUT that claim. Judge whether the ceiling claim holds: does the record cite or test "
+    "everything measurable the lenses name — every entity, edge, lead or hypothesis already "
+    "recorded under a `v-`, `e-`, `l-` or `h-` id? If it does, return `holds`; if a lens named "
+    "something measurable the record neither cited nor tested, return `gap` with that one ask. "
+    "For this question a `gap` always names its ask: if you cannot name something measurable "
+    "already recorded under one of those ids, the ceiling claim holds — return `holds`, never "
+    "a `gap` with no ask. Over-crediting and weight are not this question; only whether "
+    "something measurable was left uncited and untested."
+)
+
+
+def _host_question(disposition: str) -> str:
+    return _CEILING_HOST_QUESTION if disposition == CEILING_DISPOSITION else _CONFIDENT_HOST_QUESTION
+
 
 def composer_projection(
     companion: CompanionBody, readings: dict[str, str], salt: str,
-    *, ablated: tuple[str, int] | None = None,
+    *, ablated: tuple[str, int] | None = None, disposition: str,
 ) -> Projection:
-    """The composer's input: every lens reading, and then the WHOLE companion.
+    """The composer's input: every lens reading, the HOST QUESTION keyed on `disposition`, and
+    then the WHOLE companion.
 
     The one projection that withholds nothing. The composer is allowed to be anchored by the
     investigation's own account precisely because the independent work is already banked — it
@@ -236,10 +298,16 @@ def composer_projection(
     readings come first, so the account is what gets weighed against them rather than the
     frame they are read through.
 
-    Each reading is framed INDIVIDUALLY and the host's own sentences stay outside every
-    frame — a lens reading is model prose written after reading payload-derived data, so it
-    is untrusted for the same reason the record is, and folding the host's ablation note in
-    beside it would hand the composer host instructions marked as data."""
+    `disposition` is the close's OWN argument, never re-derived from what the companion's own
+    `:T conclude` block says — a document that concludes `malicious` while the close is called
+    `inconclusive` still gets the ceiling question, and the confident conclude block rides
+    along as ordinary companion content the composer may cite.
+
+    Each reading is framed INDIVIDUALLY and the host's own sentences — including the question
+    below — stay outside every frame: a lens reading is model prose written after reading
+    payload-derived data, so it is untrusted for the same reason the record is, and folding a
+    host sentence in beside it would hand the composer host instructions marked as data."""
+    question = _host_question(disposition)
     lenses = "\n\n".join(
         f"### Lens: {lens}\n{_wrap(reading, 'untrusted', salt)}"
         for lens, reading in sorted(readings.items())
@@ -259,7 +327,7 @@ def composer_projection(
     return Projection(
         lens="composer",
         text=(
-            f"{_COMPOSER_ASK}\n\n## Lens readings\n{lenses}\n\n"
+            f"{_COMPOSER_ASK}\n\n{question}\n\n## Lens readings\n{lenses}\n\n"
             f"## The investigation's own account (host-rendered)\n{UNTRUSTED_NOTE}\n"
             f"{_wrap(body, 'untrusted', salt)}\n"
         ),

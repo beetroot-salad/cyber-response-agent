@@ -44,7 +44,10 @@ indistinguishable from a review that ran and found nothing. Its witness is
 which now drives it through an unbound bundle: `forced-inconclusive`, cause "the challenge
 review did not complete", `failure_kind: error`, detail from `UnboundReviewStage`.
 
-`inconclusive` closes are unaffected — they bypass the gate, as they always did.
+`inconclusive` closes were unaffected at the time — they bypassed the gate, as they always
+had. **That changed with #992**: `inconclusive` now takes the same gate, against its ceiling
+claim rather than a verdict. The sentence above is history from before that change, kept for
+the same reason the rest of this document is.
 
 ## What #796 must not re-derive
 
