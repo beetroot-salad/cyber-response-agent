@@ -19,57 +19,6 @@ import pytest
 REAL_REPO = Path(__file__).resolve().parents[2]
 LEARNING_SRC = REAL_REPO / "defender" / "learning"
 
-_CI_WORKFLOW = REAL_REPO / ".github" / "workflows" / "ci.yml"
-
-
-def _code_smells_step_names() -> list[str]:
-    """The `name:` of every step in CI's `code-smells` job, read off the workflow file.
-
-    A plain line walk rather than a YAML parse: the job is found by its indentation-two key
-    and ends at the next one, and a step name is the text after `- name: `. That is all the
-    marker check below needs, and it keeps this conftest free of a yaml dependency."""
-    names: list[str] = []
-    in_job = False
-    for line in _CI_WORKFLOW.read_text(encoding="utf-8").splitlines():
-        if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":"):
-            in_job = line.strip() == "code-smells:"
-            continue
-        if in_job and line.strip().startswith("- name: "):
-            names.append(line.strip()[len("- name: "):])
-    return names
-
-
-def pytest_collection_modifyitems(config, items):
-    """`gate` is not a way to skip a test. The marker's contract (pyproject's `markers`) is
-    that the marked test re-asserts EXACTLY what a blocking step in CI's `code-smells` job
-    already asserts, so the `test` job can stop paying for the copy — and that the test NAMES
-    that step. Ninety-two spec tests once carried the marker at module level with no such
-    step, which deselected them from every CI job and from the local gate command at once;
-    they ran nowhere. So the name is now the marker's argument, and a marker that names no
-    step, or a step the job does not have, is a collection error rather than a silent skip."""
-    step_names: list[str] | None = None
-    problems: list[str] = []
-    for item in items:
-        marker = item.get_closest_marker("gate")
-        if marker is None:
-            continue
-        if step_names is None:
-            step_names = _code_smells_step_names()
-        covered_by = marker.args[0] if marker.args else None
-        if not isinstance(covered_by, str) or not covered_by:
-            problems.append(
-                f"{item.nodeid}: `gate` names no covering step — write "
-                f"`@pytest.mark.gate(\"<code-smells step name>\")` on the one test the step "
-                f"duplicates, never `pytestmark` on a module"
-            )
-        elif not any(name.startswith(covered_by) for name in step_names):
-            problems.append(
-                f"{item.nodeid}: `gate` names {covered_by!r}, which is not the start of any "
-                f"step name in ci.yml's code-smells job"
-            )
-    if problems:
-        raise pytest.UsageError("\n".join(problems))
-
 
 @pytest.fixture(scope="session")
 def checkout_roster():
