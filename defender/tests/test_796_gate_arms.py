@@ -55,9 +55,19 @@ def _deps(tmp_path: Path):
 
 def _run(deps, bundle, *, disposition="malicious", bounds=None):
     return asyncio.run(challenge_gate.challenge_gate(
-        deps, disposition, stages=bundle,
+        deps, disposition, _companion(deps), stages=bundle,
         bounds=bounds if bounds is not None else challenge_gate.default_bounds(),
     ))
+
+
+def _companion(deps):
+    """The close's one read and parse of the run's document, done here because these tests
+    drive the gate directly rather than through the close that would hand the body in — the
+    same reader, so a missing file reaches the gate as the empty body the close would give it."""
+    from defender.runtime.tools import read_companion
+    from defender.skills.invlang.parser import parse_dense_companion
+
+    return parse_dense_companion(read_companion(deps).lenient)[0]
 
 
 def _real_targets(deps) -> list[str]:

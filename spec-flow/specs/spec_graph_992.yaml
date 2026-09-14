@@ -39,7 +39,8 @@ base: 67d29090          # main — the base every line anchor below was re-pinne
 #      stage outcome's. The primary answerer's `error` on FK-15/FK-16 is corrected here.
 #   3. M4 SOURCES RECEIPTS FROM THE PRICE GATE'S PARSE (design M4, C14, G18), not from the gate's
 #      own second read. The primary's #9/#34/#36 answers said the reverse; the corrected value is
-#      the report carries the PRICED rows, the composer judges the second read.
+#      the report carries the PRICED rows. (A5: there is no second read any more — the composer
+#      judges the same parse.)
 #   4. THE PER-CLOSE REVIEW FLOOR IS TWO CALLS (G12/x10, executed): the ablation lens is skipped
 #      with a `skipped` trace row (no `ok` key) when `ablation_target` is None.
 #   5. SIX TEST FILES ARE DARK IN CI (G8): `pytestmark = pytest.mark.gate` on test_923_* and
@@ -94,6 +95,21 @@ base: 67d29090          # main — the base every line anchor below was re-pinne
 #   A4. G8 IS FIXED, NOT WORKED AROUND: the six dark modules lose their module-level marker and
 #       run in CI; `gate` now takes the covering code-smells step as its argument and
 #       tests/conftest.py refuses collection otherwise.
+#   A5. THE CLOSE READS THE COMPANION ONCE. `investigation.md` was read FOUR times on the way
+#       to a commit — the flagged-row window, the entry price, the structure check and the
+#       review gate — each with its own decoder, and FK-19's landed divergence (the price gate
+#       decoded with replacement and collected the price; the gate's strict `read_text_utf8`
+#       then failed the run over the byte the price gate had read past) was one document
+#       getting two answers. `tools.read_companion` takes one read (`CompanionRead`: the strict
+#       text, the lenient text, the I/O fault), both document gates and the price gate judge
+#       it, and `challenge_gate` takes the close's parsed `CompanionBody` as an argument and
+#       reads no file. The `investigation_md` cells `unreadable-at-second-read`,
+#       `non-utf8-at-second-read` and `rewritten-between-reads` name a read that no longer
+#       happens and are retired; `non_utf8_companion` becomes M4's DISCRIMINATING input
+#       (d18: the review runs and stands, the block carries the lenient parse's rows) and
+#       leaves d14's sweep. Each gate keeps its own answer to a read that could not fully look
+#       (H7/#836 fail-open on the structure gates, fail-closed at the price gate), pinned in
+#       test_ungated_artifact_write_961_964 `test_one_read_answers_every_gate`.
 # ===========================================================================================
 
 demands:
@@ -324,8 +340,6 @@ demands:
       - "read_composer_reply.domain.distinguished[not-json]"
       - "read_composer_reply.domain.distinguished[finding-outside-vocabulary]"
       - "read_composer_reply.domain.distinguished[gap-empty-string-ask]"
-      - "investigation_md.domain.distinguished[unreadable-at-second-read]"
-      - "investigation_md.domain.distinguished[non-utf8-at-second-read]"
       - "ReviewStages.domain.distinguished[partially-bound]"
     resolution: >-
       §7 FK-2 (human, with the judge): a PARTIALLY bound bundle is a supported shape; when the
@@ -342,13 +356,11 @@ demands:
       kind, indistinguishable in report/record from a single fault; #28 provider unreachable for
       one role → as #24/#26; #29 ablation `skipped` row and `incomplete` row coexist; #31 support
       and composer faults → support's kind (checked first; the composer never runs after a lens
-      fault); #32 mixed ok/incomplete rows on one round; #33/#35 investigation.md unreadable or
-      not UTF-8 at the gate's second read → the projector arm, `error` (x6, a3). Phase E FOLDED #33
-      into #35 (F-7): a read fault (EACCES/removed/locked) on the file the price gate just read is
-      unreachable in-process without a hook between the two reads — the price gate would refuse
-      first (x6/a4) — so the non-UTF-8 byte is the ONE primitive that fails the gate's strict
-      second read alone, and it discharges both cells (`unreadable-at-second-read`,
-      `non-utf8-at-second-read`) through one projector-arm row. FK-15/FK-16
+      fault); #32 mixed ok/incomplete rows on one round; #33/#35 (investigation.md unreadable or
+      not UTF-8 at the gate's second read → the projector arm) are RETIRED by A5: the gate
+      takes the close's one parse and reads nothing, so there is no second read to fail — a
+      read fault is the price gate's refusal before any stage (x6/a4), and the non-UTF-8 byte
+      is priced and reviewed off one lenient decode (d18's row). FK-15/FK-16
       (settled by rg3): a non-JSON reply and a finding outside {holds,gap} are `unreadable`, NOT
       `error`; rg2: `ask: ""` is `unreadable`. FK-2 (judge: A, MATERIAL-small, open at §7): a
       PARTIALLY bound bundle whose unbound role is dispatched fails exactly like the unbound case
@@ -394,6 +406,7 @@ demands:
       - _CloseFields
       - conclude_ceiling_test_rows
       - "interacts(_close_investigation_async->investigation_md)"
+      - "investigation_md.domain.distinguished[non-utf8]"
     premises: [30, 84]
     rows: >-
       #30 — receipts land identically when the ablation lens was skipped; #84 — receipt notes
@@ -401,10 +414,12 @@ demands:
       by rg4): two rows citing one ref with different states are not collapsed — the
       lead-anchored consistency check refuses the inconsistent one at the price gate, so the
       reviewed block equals what the bypass path writes for the same companion; FK-17/18/19
-      (promotions, judge's value): the block carries the rows the PRICE GATE parsed, never the
-      gate's second read — a fault fixture forcing the two reads apart is the only way to see it
-      (`investigation_md.domain.distinguished[rewritten-between-reads]` left UNBOUND for the
-      gate leaf to route as an obligation or a §7 no).
+      (promotions, judge's value): the block carries the rows the PRICE GATE parsed — and since
+      A5 that parse is the ONLY one: the review judges the same `CompanionBody`, so no fixture
+      can force two reads apart (`rewritten-between-reads` retired). The non-UTF-8 companion
+      is the discriminating row: one read, one lenient decode, the review runs (support,
+      ablation, composer all called), the close stands, and the block equals
+      `priced_block(lenient_text(raw))` — which is the golden's, the byte being in prose.
     assembly_note: "+`interacts(_close_investigation_async->investigation_md)` — the seed's receipts are the price gate's parse of that read (correction 3 above)."
   - id: d19_confident_and_forced_commits_carry_no_ceiling_test
     kind: negative      # positive control: d18
@@ -1168,26 +1183,30 @@ structure:
       facets: {}
     - id: _refuse_if_entry_price_is_owed
       provenance: design
-      # close_tool.py:626-701 — the price gate: reads investigation.md ONCE via
-      # parse_dense_companion (pinned by test_tacit_authz_hardening_991:202-246), returns the parsed
-      # CompanionBody M4's receipts come from; refuses BEFORE any stage runs (d20, a4). Its
-      # ordering ahead of the review is the design's key flow; its predicate is unchanged.
+      # close_tool.py — the price gate: takes the close's one `CompanionRead` (A5) and parses
+      # it ONCE via parse_dense_companion (pinned by test_tacit_authz_hardening_991's
+      # `test_the_close_reads_and_parses_the_companion_once_inside_its_own_guard`), returns the
+      # parsed CompanionBody M4's receipts come from AND the review judges; refuses BEFORE any
+      # stage runs (d20, a4). Its ordering ahead of the review is the design's key flow; its
+      # predicate is unchanged.
       facets: {}
 
     # ===== the companion document ================================================================
     - id: investigation_md
       provenance: design
-      # `<run_dir>/investigation.md` — read TWICE on an inconclusive close after M1: the price
-      # gate's parse (receipts) and the gate's own read_text_utf8 + parse_investigation
-      # (challenge_gate.py:466-467, EmptyInvestigation/TEXT_READ_ERRORS → the projector `_fail`
-      # arm). Sequential tool, one process, no writer between the two reads (F3/G18) — the
-      # `rewritten-between-reads` member is reachable ONLY through a fault fixture (FK-17/18/19).
+      # `<run_dir>/investigation.md` — read ONCE on every close (A5): `tools.read_companion`
+      # takes the bytes, decodes them strictly for the structure gates and leniently for the
+      # price gate, and the price gate's parse is the `CompanionBody` the review takes as an
+      # argument (`challenge_gate(deps, disposition, companion, ...)`; `EmptyInvestigation` →
+      # the projector `_fail` arm is what is left, unreachable for a priced keyword). The
+      # three `*-at-second-read`/`rewritten-between-reads` members named a read that no longer
+      # happens; `non-utf8` is the decoder-divergence input, now a row of d18.
       facets:
         domain:
           type: str
           refinement: {nl: "The investigator's invlang document; an inconclusive that reaches the gate has a companion with paying ceiling_test rows, hence non-empty (x6/a4)."}
           default: paying-companion
-          distinguished: [absent-or-empty, unreadable-at-second-read, non-utf8-at-second-read, rewritten-between-reads, over-cap-ceiling-note]
+          distinguished: [absent-or-empty, non-utf8, over-cap-ceiling-note]
           falsy_valid: false
           documented_alternatives: []
 
@@ -1526,18 +1545,8 @@ gate:
       routed_to: "handoff.forks FK-1 — resolved at §7"
       resolution: "§7 (auto, judge's A): a receipted lead is a legal ask target; the cell is bound as a row of d9."
       resolved_to: d9_gap_with_ask_challenges_inconclusive
-    - rule: R4
-      element: "investigation_md.domain.distinguished[rewritten-between-reads]"
-      witness: >-
-        Whether the gate's second read of investigation.md seeing a shrunk `ceiling_test`
-        list (a writer landing between the price gate's parse and the gate's own read) needs
-        its own fault-injection row is FK-17/18/19's judgment call — the ledger already
-        resolves WHAT commits when this happens (the priced rows, G18/C14/M4), but not
-        whether a test should force the divergence via a fixture to prove it, since production
-        cannot reach it within one sequential tool call (G18).
-      routed_to: "handoff.forks FK-17/FK-18/FK-19 — resolved at §7"
-      resolution: "§7 (auto, judge's value): no dedicated fault-injection fixture; the priced rows ride into the report (d18's rows) and the divergence is unreachable in production within one sequential tool call — a documented limit, closed by citation."
-      cites: [G18]
+    # (R4 `investigation_md[rewritten-between-reads]` — closed by citation G18 at §7; the cell
+    # is RETIRED by A5, the gate no longer takes a read of its own for a writer to land between.)
     - rule: R4
       element: "_was_reviewed.domain.distinguished[pre-change-inconclusive-record]"
       witness: >-

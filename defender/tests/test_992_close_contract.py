@@ -412,7 +412,8 @@ def test_disposition_threaded_seams(tmp_path):
     def _gate(name: str, disposition: str, stages):
         deps, _run_dir = deps_over(tmp_path / name, ceiling_companion())
         return asyncio.run(challenge_gate.challenge_gate(
-            deps, disposition, stages=stages.bundle(), bounds=challenge_gate.default_bounds(),
+            deps, disposition, companion, stages=stages.bundle(),
+            bounds=challenge_gate.default_bounds(),
         ))
 
     held = _gate("held", GAP, recording(holds()))

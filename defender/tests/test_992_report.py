@@ -25,7 +25,6 @@ from defender.runtime.close_tool import (
     CLOSE_RETURNS,
     FAILURE_KINDS,
     REPORT_CAUSES,
-    STAGE_ERROR,
     STANDS,
     CloseResult,
 )
@@ -51,6 +50,7 @@ from defender.tests._spec992 import (
     frontmatter,
     gap,
     holds,
+    lenient_text,
     non_utf8_companion,
     note_text,
     noted_companion,
@@ -101,10 +101,11 @@ def test_reviewed_inconclusive_carries_receipts(tmp_path):
     rows citing one ref with different states are not collapsed — the lead-anchored
     consistency check refuses the inconsistent one at the price gate (rg4).
 
-    The one in-process input on which the price gate's lenient parse and the gate's strict
-    second read differ — a non-UTF-8 byte — now fails closed before any block is rendered, so
-    M4's "the block comes from the price gate's parse" has no discriminating input left; it
-    is read off the commit site instead."""
+    The non-UTF-8 byte is the one in-process input on which a strict and a lenient decode of
+    the companion differ, and it is M4's discriminating input: the close reads the file ONCE,
+    prices it and reviews it off the same lenient decode, and the block carries the rows that
+    one parse produced — the review ran (every role called), the close stands, and nothing
+    failed over a byte the price gate had already read past."""
     golden = ceiling_companion()
     deps, run_dir = deps_over(tmp_path / "holds", golden)
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
@@ -126,17 +127,18 @@ def test_reviewed_inconclusive_carries_receipts(tmp_path):
         assert receipt_note_lines(body) == [], (name, body)
         assert "ceiling_test" in (run_dir / "investigation.md").read_text(encoding="utf-8")
 
-    # The non-UTF-8 divergence: the strict second read refuses, the close fails closed, and no
-    # block is rendered from either parse.
+    # The non-UTF-8 companion: one read, one decode, priced and reviewed off the same body.
+    # The byte sits in prose outside every fence, so the lenient parse's rows are the golden's.
     raw = non_utf8_companion()
     deps, run_dir = deps_over(tmp_path / "non-utf8", raw)
-    divergent = close_with(deps, GAP, recording(holds()))
-    assert (divergent.outcome, divergent.cause, divergent.failure_kind) == (
-        "forced-inconclusive", CAUSE_REVIEW_INCOMPLETE, STAGE_ERROR,
-    )
+    stages = recording(holds())
+    assert close_with(deps, GAP, stages).outcome == STANDS
+    assert stages.calls == ["support", "ablation", "composer"], stages.calls
+    assert frontmatter(run_dir)["disposition"] == GAP
     head, body = report_parts(run_dir)
-    assert "ceiling_test" not in head, head
-    assert receipt_note_lines(body) == []
+    assert head.endswith(priced_block(lenient_text(raw))), head
+    assert priced_block(lenient_text(raw)) == priced_block(golden)
+    assert len(receipt_note_lines(body)) == len(V2SSHD_RECEIPTS)
 
     # The baseline block rides beside the receipts on the reviewed path too.
     with_baseline = _tacit983.inconclusive_document(

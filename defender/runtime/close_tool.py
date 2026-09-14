@@ -54,6 +54,7 @@ from defender.skills.invlang.validate import (
 
 from . import challenge_gate
 from . import tools as tools_mod
+from .tools import CompanionRead
 from .agent_role import AgentRole
 from .tools import AgentDeps
 
@@ -438,15 +439,25 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     forced: bool = False,
 ) -> CloseResult:
     """`forced` distinguishes the FRAMEWORK's close from the model's. Only the driver's
-    retry-exhaustion limb sets it, and it buys exemption from the two document gates below —
-    the invlang structure check and the flagged-row window. Defaulted False so every other
-    caller is gated.
+    `_close_a_run_cut_short` sets it — on every exit that stopped the model before it could
+    close (the request ceiling, the tool-retry budget, the tool-call budget, the circuit
+    breaker) — and it buys exemption from the two document gates below — the invlang structure
+    check and the flagged-row window. Defaulted False so every other caller is gated.
 
     Both exemptions rest on the same fact: a run cut short has no model left to repair with,
     so gating the forced close would dead-letter the run at persist for a MISSING report.md.
     A malformed companion is worse to publish than a well-formed one, but a run with no
     disposition at all is worse than either, and the frontmatter still records honestly which
-    way the close went."""
+    way the close went.
+
+    THE COMPANION IS READ ONCE. Four gates judge `investigation.md` on the way to a commit —
+    the flagged-row window, the entry price, the structure check and the challenge review —
+    and each used to take its own reading with its own decoder, so one document could get two
+    answers: the price gate decoded with replacement and collected the price, the review
+    decoded strictly and failed the run over the byte the price gate had read past. One
+    `CompanionRead` at the top, one parse of it here, and the parsed body threaded into the
+    review: the review judges the document the price gate priced and the report carries the
+    rows that review saw."""
     if deps.role is not AgentRole.MAIN:
         raise ModelRetry(
             "close_investigation is reachable only from the investigator (main) role — "
@@ -493,8 +504,9 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # The framework's FORCED close is the one exception: a run cut short has no model left to
     # repair with, so gating it would dead-letter the run at persist for a MISSING report.md,
     # before investigation.md is validated at all. Every close the MODEL invokes is gated.
+    read = tools_mod.read_companion(deps)
     if not forced:
-        flagged = tools_mod.flagged_diagnostics(deps)
+        flagged = tools_mod.flagged_in(read)
         if flagged:
             raise ModelRetry(tools_mod.flagged_write_refusal(
                 "close_investigation", flagged, offered_text=False,
@@ -502,7 +514,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # The dispositions carrying a structural entry price, collected here as well as at the
     # `investigation.md` write gate. AFTER the terminal-close refusal so R4's ordering holds,
     # and before the gate so a close that owes the price never spends a review.
-    companion = _refuse_if_entry_price_is_owed(deps, disposition, forced=forced)
+    companion = _refuse_if_entry_price_is_owed(read, disposition, forced=forced)
     # The check the close never had (#961). Every other write verb meets the invlang schema
     # through `permission.decide_write`; the close is the verb that PUBLISHES — report.md
     # commits against this document and the review gate parses it — so it was the one path on
@@ -523,7 +535,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # `forced` is exempt with the flagged-row window above, for that exemption's own reason:
     # a run cut short has no model left to repair with.
     if not forced:
-        structure = tools_mod.committed_document_refusal(deps)
+        structure = tools_mod.committed_document_refusal(read)
         if structure is not None:
             raise ModelRetry(structure)
     # #923 fork J4, narrowed by #992: `unresolved` is the ONE verdict matched by VALUE that
@@ -559,7 +571,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         )
 
     verdict = await challenge_gate.challenge_gate(
-        deps, disposition, stages=stages, bounds=bounds,
+        deps, disposition, companion, stages=stages, bounds=bounds,
     )
     material = tuple(
         RecommendedLead(target=target, ask=ask, origin="review")
@@ -659,24 +671,23 @@ def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> N
 
 
 def _refuse_if_entry_price_is_owed(
-    deps: AgentDeps, disposition: str, *, forced: bool = False,
+    read: CompanionRead, disposition: str, *, forced: bool = False,
 ) -> CompanionBody:
     """Collect the structural price this close's KEYWORD owes, refuse if it is unpaid, and
     hand back the PARSED `investigation.md` the price was read off.
 
     Returning the parsed document is what keeps #923's coverage channel honest: the
     `ceiling_test` rows the close carries into `report.md` must be the rows this gate just
-    priced. Re-reading the file at the commit made the bound a bound on one snapshot and the
-    report a copy of another — a document rewritten between the two calls ships rows nothing
-    charged.
+    priced, and — since the review takes this same object — the rows the review judged.
+    Re-reading the file at the commit made the bound a bound on one snapshot and the report a
+    copy of another — a document rewritten between the two calls ships rows nothing charged.
 
-    The BODY rather than the text, so this module parses the companion exactly once — the two
-    document gates above hold their own readings, and what is removed here is the SECOND parse
-    on this path. `disposition_entry_price` short-circuits ahead of its own parse for any
-    unpriced keyword, so a `malicious` or `unresolved` close used to reach the report readers
-    with no parse having happened yet — and theirs was bare, which turned a document this gate
-    could not read into a traceback rather than the refusal the wrapping below exists to
-    produce.
+    The BODY rather than the text, so the close parses the companion exactly once, here, and
+    every later reader takes the body. `disposition_entry_price` short-circuits ahead of its
+    own parse for any unpriced keyword, so a `malicious` or `unresolved` close used to reach
+    the report readers with no parse having happened yet — and theirs was bare, which turned a
+    document this gate could not read into a traceback rather than the refusal the wrapping
+    below exists to produce.
 
     `report.md` is written FROM the close's disposition argument and nothing else on that path
     reads the companion, so a price collected only at the `investigation.md` write gate is owed
@@ -684,11 +695,21 @@ def _refuse_if_entry_price_is_owed(
     goes through the OWNER's `_DISPOSITION_GATES` and nothing in this module is keyed on a
     disposition, so a fourth priced keyword is a row there rather than a branch here.
 
-    Fails CLOSED on both ways the check can fail to happen: the read raises its own
-    `ModelRetry` for an I/O fault (see `_read_companion_text`), and the parse is wrapped here
-    because this gate parses a file it did not write — an imported run dir, a replayed fixture,
-    a hand edit. Either fault would otherwise leave the close as a traceback rather than a
-    refusal.
+    Fails CLOSED on both ways the check can fail to happen. COULD NOT LOOK (`read.fault`) is a
+    refusal: every close reads this file, so an EACCES, an EIO or a run dir that is not a
+    directory reaches this gate, and there the empty text would mean "this gate did not run",
+    waiving `benign`'s entire price on an I/O fault — and `false-positive` fails closed over an
+    empty read where `benign` fails open, so swallowing would leave the two priced keywords
+    disagreeing about what a fault means. And the parse is wrapped here because this gate
+    parses a file it did not write — an imported run dir, a replayed fixture, a hand edit.
+    Either fault would otherwise leave the close as a traceback rather than a refusal.
+
+    NEVER WRITTEN is neither: an unwritten companion states no defect, names no entity check
+    and records no alerted entity, so it owes BOTH priced keywords their whole price and the
+    caller denies with the same actionable text a blank `:T conclude` earns. Undecodable BYTES
+    are priced off the lenient decode (`read.lenient`): the file IS readable, and replacing the
+    bad byte leaves every readable `??` slot and unfulfilled contract still owed, where `""`
+    would waive the whole price over one byte.
 
     `forced` is exempt from the PARSE fault, on the terms the driver's own forced-close comment
     sets and the two document gates above already honour: the framework's close has no model
@@ -699,9 +720,15 @@ def _refuse_if_entry_price_is_owed(
     close of a priced keyword is still refused for what it did not pay. (`unresolved`, the one
     disposition forced today, owes nothing and commits.)
     """
-    companion_text = _read_companion_text(Path(deps.run_dir) / "investigation.md")
+    if read.fault is not None:
+        raise ModelRetry(
+            f"close blocked: `investigation.md` could not be read ({read.fault}), so the entry "
+            f"price your disposition may owe could not be checked. This is a fault in the run "
+            f"dir, not something to conclude around — a close is not permitted while the gate "
+            f"cannot look."
+        )
     try:
-        companion, _warnings = parse_dense_companion(companion_text)
+        companion, _warnings = parse_dense_companion(read.lenient)
     except Exception as exc:
         if not forced:
             raise ModelRetry(
@@ -732,39 +759,6 @@ def _refuse_if_entry_price_is_owed(
         # gate already hands the model the same diagnostics one per line.
         raise ModelRetry("close blocked: " + price.rationale + "\n" + "\n".join(price.owed))
     return companion
-
-
-def _read_companion_text(path: Path) -> str:
-    """The investigation log as text, or empty when it was never written.
-
-    NEVER WRITTEN is not an error to raise here: an unwritten companion states no defect, names
-    no entity check and records no alerted entity, so it owes BOTH priced keywords their whole
-    price and the caller denies with the same actionable text a blank `:T conclude` earns.
-
-    COULD NOT LOOK is a different answer. Every close reads this file, so an EACCES, an EIO or
-    a run dir that is not a directory reaches this gate, and there `""` would mean "this gate
-    did not run", waiving `benign`'s entire price on an I/O fault — and `false-positive` fails
-    closed over an empty read where `benign` fails open, so swallowing would leave the two
-    priced keywords disagreeing about what a fault means. A gate that cannot look must not
-    report clean, so the fault becomes a refusal.
-
-    Undecodable BYTES are read leniently, which is neither of those: the file IS readable, and
-    replacing the bad byte leaves every readable `??` slot and unfulfilled contract still owed,
-    where `""` would waive the whole price over one byte. `investigation.md` is written through
-    `append_block`, which refuses an undecodable document, so this is reached only by a file
-    that arrived some other way.
-    """
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        return ""
-    except OSError as exc:
-        raise ModelRetry(
-            f"close blocked: `investigation.md` could not be read ({exc.strerror or exc}), so "
-            f"the entry price your disposition may owe could not be checked. This is a fault "
-            f"in the run dir, not something to conclude around — a close is not permitted "
-            f"while the gate cannot look."
-        ) from exc
 
 
 #: The `disposition` argument AS THE MODEL IS OFFERED IT: a plain `str` carrying the owner's

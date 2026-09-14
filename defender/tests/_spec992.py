@@ -186,10 +186,13 @@ def sparse_companion(*rows: str, disposition: str = GAP) -> str:
 def non_utf8_companion() -> bytes:
     """The golden with ONE undecodable byte in its prose, outside every invlang fence.
 
-    Real input through the real primitive: the price gate reads leniently (`errors="replace"`)
-    and prices the fences untouched, so the close reaches the gate — whose strict
-    `read_text_utf8` raises. The one within-process way the gate's SECOND read alone fails
-    (x6/a4): a missing or empty companion is refused by the price gate first."""
+    Real input through the real primitive: the one in-process input on which a strict and a
+    lenient decode of the companion differ. The close reads the file ONCE and decodes it
+    leniently for the price gate and the review alike (`tools.read_companion`), so the fences
+    are priced untouched and the review judges the same body — the divergence this fixture
+    used to drive (the gate's own strict second read refusing what the price gate had read
+    past) no longer exists, and what it now discriminates is that M4's receipts come from that
+    one parse."""
     raw = (GOLDEN_V2SSHD / "investigation.md").read_bytes()
     marker = b"Alert `v2-sshd-success-after-failures`"
     assert marker in raw, "the golden's prose moved; re-anchor"
@@ -496,8 +499,9 @@ def noted_companion(note_len: int) -> str:
 
 
 def lenient_text(raw: bytes) -> str:
-    """The bytes as the PRICE GATE reads them — `errors="replace"`, the decode
-    `_read_companion_text` applies — so a scenario can name the parse M4's receipts come from."""
+    """The bytes as the close reads them for the price gate and the review — `errors="replace"`,
+    the decode `tools.read_companion` puts in `lenient` — so a scenario can name the parse
+    M4's receipts come from."""
     return raw.decode("utf-8", errors="replace")
 
 

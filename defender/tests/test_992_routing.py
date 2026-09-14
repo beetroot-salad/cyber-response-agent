@@ -20,11 +20,12 @@ per-disposition literal.
 THE SWEEP DISCIPLINE (handoff.deviations): a build that silently special-cases one `_fail` site
 or one `_route` override arm for `inconclusive` is caught here only if the sweep drives THAT
 site, so `_arms()` names each `_route` arm and `_faults()` each reachable `_fail` site
-individually (:471 the strict second read, :512 a lens not ok, :517 a lens unreadable, :530 the
-composer not ok, :535 the composer unreadable). The sixth site, :474 — a generic projector
-exception — is unreachable for an `inconclusive` close within one process: `iter_resolutions`
-and the parser guard every shape the walk reads, and any document the gate cannot parse was
-already refused by the price gate (x6/a4). It is recorded here rather than driven.
+individually (:512 a lens not ok, :517 a lens unreadable, :530 the composer not ok, :535 the
+composer unreadable). The projector's two sites — an empty body and a generic projector
+exception — are unreachable for an `inconclusive` close within one process: the gate takes
+the close's own parse rather than a read of its own, `iter_resolutions` and the parser guard
+every shape the walk reads, and any document the gate cannot parse or that holds nothing was
+already refused by the price gate (x6/a4). They are recorded here rather than driven.
 
 The composer-unreadable rows pin `failure_kind: unreadable`, never `error` (rg3, executed at
 every site); the ceiling-held `holds` arm pins the SEVENTH cause (§7 FK-10), never
@@ -74,7 +75,6 @@ from defender.tests._spec992 import (
     gap,
     holds,
     host_text,
-    non_utf8_companion,
     priced_block,
     raises,
     receipt_note_lines,
@@ -294,8 +294,6 @@ def _faults() -> list[tuple[str, Any, Any, Any, str]]:
          recording(json.dumps({"finding": "maybe", "review": "r"})), None, UNREADABLE),
         ("gap-empty-string-ask", None,
          recording(json.dumps({"finding": "gap", "review": "r", "ask": ""})), None, UNREADABLE),
-        ("non-utf8-at-the-gates-second-read", non_utf8_companion(), recording(holds()), None,
-         STAGE_ERROR),
         ("partially-bound-ablation-dispatched", None,
          recording(holds(), unbound=("ablation",)), None, STAGE_ERROR),
     ]
@@ -305,8 +303,8 @@ def test_machinery_failure_overrides_review_incomplete(tmp_path):
     """Each way the review can fail on an `inconclusive` close — an unbound bundle (`None` and
     an empty `ReviewStages()`), a stage that raises, a stage that times out, an empty lens
     reading, an unreadable composer reply (not JSON, a finding outside {holds, gap}, `ask: ""`),
-    an investigation.md the gate's own strict second read cannot decode, and a partially bound
-    bundle whose unbound role is dispatched (§7 FK-2) — fails CLOSED exactly as it does on a
+    and a partially bound bundle whose unbound role is dispatched (§7 FK-2) — fails CLOSED
+    exactly as it does on a
     confident close: `disposition: unresolved`, `outcome: forced-inconclusive`, `cause:
     CAUSE_REVIEW_INCOMPLETE`, the stage's `failure_kind` in both the report frontmatter and the
     record, the record still naming `inconclusive` as what was under review, and an

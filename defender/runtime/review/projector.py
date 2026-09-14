@@ -48,6 +48,7 @@ __all__ = [
     "ablation_target",
     "observation_only",
     "parse_investigation",
+    "require_investigation",
     "support_projection",
 ]
 
@@ -112,16 +113,22 @@ class Projection:
     text: str
 
 
-def parse_investigation(text: str) -> CompanionBody:
-    """The parsed companion, or `EmptyInvestigation`. The one entry point — every projection
-    is built from this rather than from the raw document."""
-    companion, _warnings = parse_dense_companion(text)
+def require_investigation(companion: CompanionBody) -> CompanionBody:
+    """The parsed companion a projection may be built from, or `EmptyInvestigation`. The gate
+    hands in the close's own parse; this is the check that it holds anything at all."""
     if not companion:
         raise EmptyInvestigation(
             "the investigation carried no parseable invlang — a projection built from it "
             "would ask a lens to reconstruct from nothing"
         )
     return companion
+
+
+def parse_investigation(text: str) -> CompanionBody:
+    """`require_investigation` over a parse of the raw document — for a reader that holds only
+    the text (a test, a replayed fixture); the live close parses once and hands the body in."""
+    companion, _warnings = parse_dense_companion(text)
+    return require_investigation(companion)
 
 
 def _without(record: Any, keys: tuple[str, ...]) -> dict:

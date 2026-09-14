@@ -1,7 +1,7 @@
 """The live write-time review gate's HARNESS: bounds, per-run review state, the numbered
 review record, stage invocation with a real wall-clock deadline, and the trace rows.
 
-`challenge_gate(deps, disposition, *, stages, bounds) -> GateVerdict` is the seam the close
+`challenge_gate(deps, disposition, companion, *, stages, bounds) -> GateVerdict` is the seam the close
 tool drives for every disposition but the host's own `unresolved` (#923) — a CONFIDENT
 disposition against its conclusion, and since #992, `inconclusive` against its ceiling claim.
 It never writes report.md or the review record itself — the close tool (`close_tool.py`) owns
@@ -49,6 +49,7 @@ from typing import Any
 from defender._env import env_int
 from defender._untrusted import wrap_fresh
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION
+from defender.skills.invlang.schema import CompanionBody
 
 EXTRA_TURN_BOUND = 2
 
@@ -453,7 +454,9 @@ def _route(
     )
 
 
-async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bounds) -> GateVerdict:
+async def challenge_gate(
+    deps: Any, disposition: str, companion: CompanionBody, *, stages: Any, bounds: Bounds,
+) -> GateVerdict:
     """Review one disposition — confident, or (#992) `inconclusive` — never `unresolved`: the
     blind lenses, then the composer, then routing.
 
@@ -465,15 +468,22 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     the companion itself concludes — and it threads through to `composer_projection` (which
     question) and to `_route` (what a stands or a challenge carries). It does NOT reach `_fail`
     or `_route`'s override arms: an override commits the same thing whatever was under
-    review."""
-    from defender._io import TEXT_READ_ERRORS, read_text_utf8
+    review.
 
+    `companion` is the close's ONE parse of `investigation.md` — the body the entry-price gate
+    just priced, handed in rather than re-read. The gate used to take its own strict read of
+    the file the price gate had decoded leniently, so one document got two answers: the price
+    collected, then the review failed over the byte the price gate had read past. Every reader
+    on the close now judges the same object, and the receipts the report carries are the rows
+    the review saw. What is left for this gate to refuse is a body with nothing in it
+    (`EmptyInvestigation`) — unreachable for a priced keyword, which the price gate refused
+    first, reachable for a confident close over an empty or unparseable document."""
     from .close_tool import STAGE_ERROR, UNREADABLE
     from .review.projector import (
         EmptyInvestigation,
         ablation_target,
         composer_projection,
-        parse_investigation,
+        require_investigation,
         support_projection,
     )
     from .review.reply import Unreadable, citable_refs, read_composer_reply, read_lens_reading
@@ -484,22 +494,16 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     # otherwise be indistinguishable from the first's on disk.
     round_no = state.turns
 
-    # A read AND a parse under one `try`, so the guard is the composed tuple `_io` publishes —
-    # a `UnicodeDecodeError` is a `ValueError`, NOT an `OSError`, and an `except OSError` here
-    # would let an undecodable investigation.md raise past the gate, past the close tool and
-    # into a driver that classifies five exception kinds and not that one.
-    unreadable_document: tuple[type[BaseException], ...] = (EmptyInvestigation, *TEXT_READ_ERRORS)
-    # The ablation target is chosen under the SAME guard: another walk over the same
-    # model-authored document, so another step that can raise past all three frames.
+    # The ablation target is chosen under the SAME guard as the emptiness check: a walk over a
+    # model-authored document, so a step that can raise past all three frames.
     #
     # The ablation is the SUPPORT lens again under one withheld edge — same role, same model,
     # same effort, same prompt — so its reading is a difference against the support reading
     # and not a difference between two configurations. A record with no strong belief movement
     # has nothing load-bearing to withhold; that is recorded rather than passed over.
     try:
-        companion = parse_investigation(read_text_utf8(deps.run_dir / "investigation.md"))
-        ablated = ablation_target(companion)
-    except unreadable_document as e:
+        ablated = ablation_target(require_investigation(companion))
+    except EmptyInvestigation as e:
         _mark_traces_incomplete(deps, round_no, str(e))
         return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)), turns_used=state.turns)
     except Exception as e:  # noqa: BLE001 — a projector fault is a review that cannot run

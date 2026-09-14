@@ -207,6 +207,59 @@ def test_the_price_gate_still_answers_first_for_what_it_prices(tmp_path):
     )
 
 
+def test_one_read_answers_every_gate(tmp_path):
+    """The close takes ONE reading of `investigation.md` and hands it to every gate, so the
+    gates cannot disagree about which bytes they judged — and each still answers a read that
+    could not fully look the way its own rule says (H7 / #836 / the price gate's fail-closed).
+
+    Three inputs, one reader, and what each gate sees:
+
+      * never written — the repair window is empty, the structure check is `None`, and the
+        price gate gets `""`, which owes every priced keyword its whole price;
+      * bytes that do not decode — the strict text is `None` (both structure gates fail OPEN),
+        the lenient text carries the replacement character in place of the bad byte, and the
+        price gate and the review both work off THAT — the file is readable, and one bad byte
+        does not waive a price or fail a review the same bytes had already paid for;
+      * could not be read at all — `fault` names it; the structure gates fail open on the
+        `None` text and the price gate refuses on the fault.
+    """
+    from defender.runtime.tools import (
+        committed_document_refusal, flagged_in, read_companion,
+    )
+
+    deps, run = main_deps(tmp_path)
+    absent = read_companion(deps)
+    assert (absent.text, absent.lenient, absent.fault) == ("", "", None)
+    assert (flagged_in(absent), committed_document_refusal(absent)) == ((), None)
+
+    (run / "investigation.md").write_bytes(b"```invlang\n:R attr\xff\xfe updates\n```\n")
+    undecodable = read_companion(deps)
+    assert (undecodable.text, undecodable.fault) == (None, None)
+    assert undecodable.lenient == "```invlang\n:R attr\ufffd\ufffd updates\n```\n"
+    assert flagged_in(undecodable) == (), "an undecodable document is no window (fail open)"
+    assert committed_document_refusal(undecodable) is None, "H7: fail open, not a broken block"
+
+    (run / "investigation.md").unlink()
+    (run / "investigation.md").mkdir()
+    unreadable = read_companion(deps)
+    assert (unreadable.text, unreadable.lenient) == (None, "")
+    assert unreadable.fault, "an I/O fault is named, so the price gate can refuse on it"
+    assert (flagged_in(unreadable), committed_document_refusal(unreadable)) == ((), None)
+
+
+def test_a_read_as_bytes_tokenizes_like_a_read_as_text(tmp_path):
+    """`Path.read_text` folds `\r\n` and `\r` to `\n` on the way in; a bytes read does not,
+    and the one reader now reads bytes so both decodes are of the same bytes. The fold is
+    reapplied, so a document with CRLF endings reaches every gate as it always did."""
+    from defender.runtime.tools import read_companion
+
+    deps, run = main_deps(tmp_path)
+    (run / "investigation.md").write_bytes(_CLEAN_DOC.replace("\n", "\r\n").encode("utf-8"))
+    read = read_companion(deps)
+    assert read.text == _CLEAN_DOC
+    assert read.lenient == _CLEAN_DOC
+
+
 def test_a_committed_unfenced_header_does_not_make_the_run_unclosable(tmp_path):
     """The close reads the document as ITS OWN BASELINE, not against no baseline at all.
 
@@ -244,7 +297,7 @@ def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
     ships after the bytes landed judges what is already committed, and #962 is exactly one.
     """
     from defender.runtime.tools import (
-        _tool_fix_row, committed_document_refusal, flagged_diagnostics,
+        _tool_fix_row, committed_document_refusal, flagged_diagnostics, read_companion,
         repairable_diagnostics,
     )
 
@@ -255,11 +308,11 @@ def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
     assert [d.locus.row_text for d in repairable_diagnostics(deps)] == [
         "l-001|v-001|class|workstation"
     ]
-    assert committed_document_refusal(deps) is not None
+    assert committed_document_refusal(read_companion(deps)) is not None
 
     _tool_fix_row(deps, "l-001|v-001|class|workstation", "")
 
-    assert committed_document_refusal(deps) is None
+    assert committed_document_refusal(read_companion(deps)) is None
     _close(deps, "inconclusive")
     assert (run / "report.md").is_file()
 

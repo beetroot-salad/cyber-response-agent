@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,13 +38,87 @@ def _investigation_path(deps: AgentDeps) -> Path:
     return deps.run_dir / "investigation.md"
 
 
-def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
-    """The run's currently-open repair window, re-derived from disk on every call.
+@dataclass(frozen=True)
+class CompanionRead:
+    """ONE reading of `investigation.md`, taken once and handed to every gate that judges the
+    document as it stands — the repair window, the close's structure check, its entry price and
+    its challenge review. The close used to take four readings of the same file, one per gate,
+    each with its own decoder, and two of them could answer differently about one document: the
+    price gate decoded with replacement and collected the price, the review decoded strictly
+    and failed the run over the byte the price gate had already read past.
 
-    FAILS OPEN on all three paths that read it (`prepare=`, the write gate, the close gate).
-    An unreadable or undecodable `investigation.md` is an unrelated fault; converting it into
-    "every write and the close are refused" would manufacture the unclosable run this mechanism
-    exists to avoid. `append_block` still refuses an undecodable document for its own reason.
+    THE THREE ANSWERS A READ CAN GIVE, each a different thing to a gate:
+
+      * NEVER WRITTEN — `text == ""`, `lenient == ""`, no fault. Not an error: an unwritten
+        companion has no repair window and nothing to validate, and it owes every priced
+        keyword its whole price.
+      * COULD NOT LOOK — `fault` names the I/O error. The structure gates fail OPEN on it (H7:
+        an unrelated read fault must not manufacture an unclosable run); the price gate fails
+        CLOSED (a gate that cannot look must not report clean).
+      * DOES NOT DECODE — `text is None`, no fault, `lenient` carries the bytes with the bad
+        ones replaced. The structure gates fail OPEN here too (#836: a replacement character
+        mid-header would make the validator report a broken block nobody wrote); the price gate
+        and the review work over `lenient` — the file IS readable, and replacing one byte leaves
+        every readable slot and receipt exactly where it was. `append_block` refuses an
+        undecodable document on the way in, so this is only ever a file that arrived some other
+        way.
+
+    Both decodes are of the SAME bytes, read once; `lenient == text` whenever `text` is not
+    None."""
+
+    #: The document decoded strictly, `""` when never written, `None` when its bytes do not
+    #: decode or could not be read.
+    text: str | None
+    #: The same bytes decoded with replacement — `""` when never written or unreadable.
+    lenient: str
+    #: The I/O fault, when the file exists but could not be read.
+    fault: str | None = None
+
+
+def _universal_newlines(text: str) -> str:
+    """What `Path.read_text` does on the way in and `bytes.decode` does not: `\r\n` and `\r`
+    become `\n`, so a document read as bytes tokenizes exactly as one read as text."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def read_companion(deps: AgentDeps) -> CompanionRead:
+    """The one read. Never raises — each gate answers the fault its own way (see
+    `CompanionRead`), and the read is taken on EVERY model request (`prepare=`), where a raise
+    would be a wedge."""
+    p = _investigation_path(deps)
+    try:
+        raw = p.read_bytes()
+    except FileNotFoundError:
+        return CompanionRead(text="", lenient="")
+    except OSError as exc:
+        print(f"[tools] investigation.md could not be read: {exc!r}", file=sys.stderr)
+        return CompanionRead(text=None, lenient="", fault=exc.strerror or str(exc))
+    lenient = _universal_newlines(raw.decode("utf-8", errors="replace"))
+    try:
+        return CompanionRead(text=_universal_newlines(raw.decode("utf-8")), lenient=lenient)
+    except UnicodeDecodeError as exc:
+        print(f"[tools] investigation.md is not valid UTF-8 ({exc}); the structure gates treat "
+              f"it as unreadable and the price gate reads it with the bad bytes replaced",
+              file=sys.stderr)
+        return CompanionRead(text=None, lenient=lenient)
+
+
+def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
+    """The run's currently-open repair window, re-derived from disk on every call — the
+    per-request (`prepare=`) and write-gate reading. The close hands its own single read to
+    `flagged_in` instead, so its window and its structure check are judged on one document.
+
+    FAILS OPEN on every path that reads it. An unreadable or undecodable `investigation.md` is
+    an unrelated fault; converting it into "every write and the close are refused" would
+    manufacture the unclosable run this mechanism exists to avoid. `append_block` still refuses
+    an undecodable document for its own reason."""
+    return flagged_in(read_companion(deps))
+
+
+def flagged_in(read: CompanionRead) -> tuple[Diagnostic, ...]:
+    """The repair window over one reading. ABSENCE is the ordinary "no window open" case, not
+    a fault: `prepare=` runs on EVERY model request, including turn 1 before any write verb
+    has created the file — and a read that could not look is the same empty window (fail open).
 
     A warn diagnostic carrying NO `locus` is not in the window: the window is the set of rows
     `fix_row` can address, so counting a locus-less finding would refuse the append AND the
@@ -51,13 +126,10 @@ def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
     that from being load-bearing."""
     from defender.skills.invlang.validate import warn_diagnostics
 
-    p = _investigation_path(deps)
-    # ABSENCE is the ordinary "no window open" case, not a fault: `prepare=` runs on EVERY
-    # model request, including turn 1 before any write verb has created the file.
-    if not p.is_file():
+    if not read.text:
         return ()
     try:
-        return _addressable(warn_diagnostics(read_text_utf8(p)))
+        return _addressable(warn_diagnostics(read.text))
     except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
         print(
             f"[tools] repair-window derivation failed, treating it as empty: {e!r}",
@@ -66,17 +138,17 @@ def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
         return ()
 
 
-def committed_document_refusal(deps: AgentDeps) -> str | None:
+def committed_document_refusal(read: CompanionRead) -> str | None:
     """The close's structural verdict on `investigation.md` as it stands — the refusal text,
     or `None` when the document is publishable. #961.
 
-    Lives beside `flagged_diagnostics` and not in the close because the two are ONE reading of
-    one document, taken at the same moment, and they have to agree about what "cannot look"
-    means. Splitting them put that agreement in two files the first time and it did not
-    survive the trip.
+    Lives beside `flagged_in` and not in the close because the two are ONE reading of one
+    document, taken at the same moment — the `CompanionRead` the close hands both — and they
+    have to agree about what "cannot look" means. Splitting them put that agreement in two
+    files the first time and it did not survive the trip.
 
-    THE READ IS STRICT, and that is the whole subtlety. Two conditions look alike from the
-    close and are not:
+    THE READ IS THE STRICT ONE, and that is the whole subtlety. Two conditions look alike from
+    the close and are not:
 
       * the document DECODES and does not validate — the author wrote something malformed,
         the close is what publishes it, and it is refused (#961);
@@ -84,11 +156,11 @@ def committed_document_refusal(deps: AgentDeps) -> str | None:
         H7's condition, and #836 settled it: fail OPEN, because converting an unrelated read
         fault into an unclosable run is the wedge class that mechanism exists to remove.
 
-    Reading leniently (`errors="replace"`) collapses the two and answers the second with the
-    first: the replacement character lands mid-header, the validator reports a broken block
-    the author never wrote, and the run can no longer close. So the strict read is what keeps
-    this gate's `None` meaning "publishable" rather than "unreadable", and the fail-open arm
-    below is what keeps H7 true. A document that never decodes is still gated on the way IN —
+    Judging the lenient decode would collapse the two and answer the second with the first:
+    the replacement character lands mid-header, the validator reports a broken block the
+    author never wrote, and the run can no longer close. So `read.text` (strict, `None` when
+    the bytes do not decode) is what keeps this gate's `None` meaning "publishable" rather
+    than "unreadable". A document that never decodes is still gated on the way IN —
     `append_block` refuses it for its own pre-existing reason — so nothing gated can create
     one.
 
@@ -96,19 +168,9 @@ def committed_document_refusal(deps: AgentDeps) -> str | None:
     question, not this one's, and it asks it separately."""
     from defender._artifact_schema import committed_investigation_reason
 
-    p = _investigation_path(deps)
-    if not p.is_file():
+    if not read.text:
         return None
-    try:
-        text = read_text_utf8(p)
-    except Exception as e:  # noqa: BLE001 — fail open (H7); a wedged run is the worse failure
-        print(
-            f"[tools] investigation.md could not be read for the close's structure check, "
-            f"treating it as publishable: {e!r}",
-            file=sys.stderr,
-        )
-        return None
-    return committed_investigation_reason(text)
+    return committed_investigation_reason(read.text)
 
 
 def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
@@ -159,11 +221,10 @@ def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
     from defender.skills.invlang.validate import ATTR_UPDATES_LOCUS as REPAIRABLE_BLOCK
     from defender.skills.invlang.validate import diagnose
 
-    p = _investigation_path(deps)
-    if not p.is_file():
+    text = read_companion(deps).text
+    if not text:
         return ()
     try:
-        text = read_text_utf8(p)
         return tuple(
             d for d in _addressable(diagnose(text, text))
             if d.locus is not None and d.locus.row_text
