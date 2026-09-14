@@ -64,6 +64,12 @@ from defender.runtime.scrub import verdict_path
 #: the ledger compare on, and the archive is what a human opens.
 WORLDS_DIRNAME = "worlds"
 
+#: Where a sibling's run dir lives, relative to its episode. The child process is handed this as
+#: its own `DEFENDER_RUNS_BASE`, so the run dir it materialises is inside the episode rather than
+#: beside the source run. Owned here, beside the other episode-layout names, so the launcher
+#: that writes the tree and the page that reads it spell the segment once.
+RUNS_SUBDIR = "runs"
+
 #: The scrub verdict's name INSIDE the archive. Deliberately not the sidecar's own spelling
 #: (`<run>.scrub-verdict.json`): inside `worlds/<X>/` the world is the directory, so the name
 #: that carried the run id outside it would carry a run id here that nothing may resolve.

@@ -693,9 +693,9 @@ demands:
       no string literal equal to any of `judge.yaml`, `review.yaml`, `samples.yaml`,
       `family.yaml`, `staged.yaml`, `timing.json`, `provenance.json`, `judge` (dir), and no
       `from … import _name` across modules; its reads resolve to `read_grade`,
-      `draws_on_disk`, `read_stage_timings`, `raw_manifest`, `read_review_record`,
+      `draws_on_disk_report`, `read_stage_timings`, `raw_manifest`, `read_review_record`,
       `read_samples_record`, `read_staged`, `world_review_block`, `read_world_facts`,
-      `leads_by_id`, `lead_chain`, `json_mapping`, `read_report`/`parse_report`; the
+      `leads_by_id`, `lead_chain`, `json_mapping`, `read_archived_report`; the
       repo-wide census of record-name literals is unchanged from x18. Rejected: rendering
       "what the judge was shown" from `learning.judge.render.render` — never imported for a
       call. Rejected (the footer half of brief fact F15, O6 — 92-reconciliation F-3): the

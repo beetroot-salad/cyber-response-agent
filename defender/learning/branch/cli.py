@@ -78,6 +78,7 @@ from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.archive import (
     FAMILY_STAMP_NAME,
     REVIEW_NAME,
+    RUNS_SUBDIR,
     SAMPLES_NAME,
     WORLDS_DIRNAME,
 )
@@ -106,11 +107,6 @@ from defender.runtime.branch._family import (
 #: reader that re-derives it silently restores both, so with the variable unset the launcher
 #: REFUSES naming it rather than inventing a location.
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
-
-#: Where a sibling's run dir lives, relative to its episode. The child process is handed this as
-#: its own `DEFENDER_RUNS_BASE`, so the run dir it materialises is inside the episode rather than
-#: beside the source run.
-RUNS_SUBDIR = "runs"
 
 #: The three outcomes an episode can end in. `incomplete` is a MODELLED outcome carrying a
 #: reason rather than the absence of a file (§7 FORK-1): every question about a partially good

@@ -1,11 +1,20 @@
 """#1025 — the episode page: `render_episode(episode_dir) -> Path` renders `learning.html`
 beside `judge.yaml` from an episode directory alone, and `main(argv)` is the standalone CLI.
-The launcher (`branch/cli.py::_render_page`) calls `render_episode` after the JUDGE clock frame
+The launcher (`branch/cli.py::_render_document`) calls `render_episode` after the JUDGE clock frame
 closes, under its own non-fatal boundary.
 
-Only `family.yaml` refuses the whole page (d01) — every other record a reader refuses renders
-that reader's refusal sentence, escaped, in its own slot, and the page always reads through the
-package readers below rather than re-parsing any record itself.
+TWO PHASES, ONE BOUNDARY. `load_episode` reads every record the page shows — the manifest, the
+six episode-level records, each world's draw documents, result event, archive and leads, the
+wire logs — EXACTLY ONCE, into the typed model below (`_Episode`), and runs the findings walk
+once over it. The section renderers take the model and never touch the directory. That is what
+makes the page's contract hold by construction rather than by inspection: only `family.yaml`
+refuses the whole page (d01); every other record a reader refuses, or a field whose shape is
+not the one the writer produces, lands in ITS OWN slot at load time — a `_Record.error`, an
+empty list, a `None` — and renders as that slot's own sentence. A renderer that only ever sees
+values the loader has already typed cannot take the page down over one stray scalar in one
+file, and no renderer can disagree with another about what a record says, because there is one
+reading of it. The page always reads through the package readers rather than re-parsing any
+record itself.
 """
 from __future__ import annotations
 
@@ -15,25 +24,36 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from defender._io import read_guarded, read_jsonl_rows_report, write_guarded
-from defender._report import read_report
+from defender._artifact_schema import INVESTIGATION_NAME, REPORT_NAME
+from defender._io import read_jsonl_rows_report, write_guarded
+from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
-from defender._run_paths import PROVENANCE, artifact_dir, artifact_file
+from defender._run_paths import PROVENANCE, WIRE_LOG_DIR, artifact_dir, artifact_file
 from defender._vocab import normalized_judge_outcome
 from defender.learning.branch import archive, staging
 from defender.learning.branch import timing as timing_mod
+from defender.learning.branch.cli import RUNS_SUBDIR
 from defender.learning.branch.steps import STEPS, Step
 from defender.learning.judge import JudgeRefused, read_grade
 from defender.learning.judge import family
-from defender.learning.judge.enqueue import draws_on_disk, draws_on_disk_report
+from defender.learning.judge.enqueue import DrawsSkipReport, draws_on_disk_report
+from defender.learning.judge.render import episode_alert
+from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
 from defender.runtime.branch._family import episode_token_for
 from defender.scripts import pricing
-from defender.scripts.visualize.visualize_primitives import esc, fmt_duration
+from defender.scripts.visualize.visualize_primitives import (
+    CSS,
+    EVENT_HANDLER_RE,
+    esc,
+    fmt_duration,
+)
 
 PAGE_NAME = "learning.html"
 
-_ASSETS = Path(__file__).resolve().parent / "assets"
-CSS = (_ASSETS / "styles.css").read_text(encoding="utf-8")
+#: The run's own event stream, at the run dir's root (`_run_paths` names why it stays there).
+_TOOL_TRACE_NAME = "tool_trace.jsonl"
+#: The family's own draw documents live under this pseudo-label beside the worlds.
+_FAMILY_LABEL = "family"
 
 _LADDER_WORDS = ("undecidable", "caught", "survived", "discard", "corpus-contradiction")
 
@@ -94,26 +114,34 @@ def _v(x: Any) -> str:
     return _uv(x)
 
 
-#: The same event-handler predicate `visualize_primitives.esc_untrusted` splits on (an
-#: `on<word>=`-shaped attribute, case-insensitive), spelled once here rather than imported: this
-#: page splits it across an ELEMENT boundary (`<wbr>`, a void tag with no text of its own), not
-#: `esc_untrusted`'s zero-width character. Both defeat a naive "onerror=" scan of the raw bytes,
-#: but only the element boundary survives a round trip through this page's own text reader: a
-#: `<wbr>` contributes nothing to `Node.text()`'s walk, so the two text pieces either side of it
-#: concatenate back to the ORIGINAL word exactly — which several of this page's own adversarial
-#: tests assert directly (`word in page.text`), a check a zero-width character would fail.
-_EVENT_HANDLER_RE = re.compile(r"\bon(?=[a-zA-Z]\w*\s*=)", re.IGNORECASE)
-
-
 def _uv(x: Any) -> str:
     """`_v`, through the untrusted escape — for a value whose source is a model-authored
-    record."""
+    record.
+
+    The SAME event-handler predicate `visualize_primitives.esc_untrusted` splits on, imported
+    rather than respelled: this page splits it across an ELEMENT boundary (`<wbr>`, a void tag
+    with no text of its own), not `esc_untrusted`'s zero-width character. Both defeat a naive
+    "onerror=" scan of the raw bytes, but only the element boundary survives a round trip
+    through this page's own text reader: a `<wbr>` contributes nothing to `Node.text()`'s walk,
+    so the two text pieces either side of it concatenate back to the ORIGINAL word exactly —
+    which several of this page's own adversarial tests assert directly (`word in page.text`),
+    a check a zero-width character would fail."""
     if x is None:
         return "—"
     if isinstance(x, bool):
         return "True" if x else "False"
     escaped = esc(x if isinstance(x, str) else str(x))
-    return _EVENT_HANDLER_RE.sub(lambda m: m.group(0) + "<wbr>", escaped)
+    return EVENT_HANDLER_RE.sub(lambda m: m.group(0) + "<wbr>", escaped)
+
+
+def _raw(x: Any) -> str:
+    """`x` as plain text with no markup escaping — for building a string another function will
+    escape exactly once. `None` reads as the same em dash `_v`/`_uv` show."""
+    if x is None:
+        return "—"
+    if isinstance(x, bool):
+        return "True" if x else "False"
+    return x if isinstance(x, str) else str(x)
 
 
 def _unnameable(raw: str, *, what: str) -> str:
@@ -124,20 +152,24 @@ def _money(cost: float) -> str:
     return f"${cost:.4f}"
 
 
-# =========================================================================================
-# Section / block chrome
-# =========================================================================================
+def _items(x: Any) -> list[Any]:
+    """A record field that the writer produces as a list, or nothing: a scalar where a list
+    belongs is that field's own absence, never the page's crash."""
+    return x if isinstance(x, list) else []
+
+
+def _mapping(x: Any) -> dict[str, Any]:
+    """The mapping twin of `_items`."""
+    return x if isinstance(x, dict) else {}
+
+
+def _count(x: Any) -> int | None:
+    """A non-negative integer field, or `None` for anything else (a bool is not a count)."""
+    return x if isinstance(x, int) and not isinstance(x, bool) and x >= 0 else None
 
 
 def _page_section(anchor: str, title: str, body: str) -> str:
     return f'<section id="{esc(anchor)}"><h2>{esc(title)}</h2>{body}</section>'
-
-
-def _block(anchor: str, title: str, body: str, *, cls: str = "") -> str:
-    id_attr = f' id="{esc(anchor)}"' if anchor else ""
-    cls_attr = f' class="{esc(cls)}"' if cls else ""
-    return (f'<div{id_attr}{cls_attr}><h3>{esc(title)}</h3>'
-            f'<div class="body">{body}</div></div>')
 
 
 # =========================================================================================
@@ -175,22 +207,10 @@ def _strict_samples_reader(path: Path) -> dict[str, Any]:
     """The page's own STRICT reading of `samples.yaml` (#1025 F-4) — through `read_samples_
     record`'s `reader=` seam. The DEFAULT reader `read_samples_record` uses everywhere else
     stays permissive (#1007 M4/O5); this one refuses what it cannot read so the page's
-    "unreadable" state is distinguishable from "absent"."""
-    if not (path.exists() or path.is_symlink()):
-        return {}
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise JudgeRefused(f"{path} could not be read: {refusal}")
-    import yaml
-
-    from defender._yaml import safe_load
-    try:
-        doc = safe_load(text) or {}
-    except yaml.YAMLError as bad:
-        raise JudgeRefused(f"{path} could not be read: {bad}") from bad
-    if not isinstance(doc, dict):
-        raise JudgeRefused(f"{path} is not a mapping")
-    return doc
+    "unreadable" state is distinguishable from "absent". The screen itself is the package's
+    one home for a YAML record read (`screened_yaml_mapping`), not a second spelling of it."""
+    doc = family.screened_yaml_mapping(path, what=archive.SAMPLES_NAME)
+    return doc if doc is not None else {}
 
 
 def _read_samples(episode_dir: Path) -> _Record:
@@ -249,8 +269,52 @@ def _read_grade(episode_dir: Path) -> _Record:
 
 
 # =========================================================================================
-# Roster and per-world facts
+# The model — what one read of the episode directory says
 # =========================================================================================
+
+
+class _ResultEvent:
+    """A run's terminal `result` row off its own event stream: `(cost, wall_ms, state)`, where
+    `state` is one of absent / refused / none / unusable / ok."""
+
+    __slots__ = ("cost", "wall_ms", "state")
+
+    def __init__(self, cost: float | None, wall_ms: float | None, state: str) -> None:
+        self.cost = cost
+        self.wall_ms = wall_ms
+        self.state = state
+
+
+class _WorldArchive:
+    """What `worlds/<label>/` holds for the world section: the archived report (`None` when
+    nothing is at its name), whether the investigation is archived, and the two JSON stamps."""
+
+    __slots__ = ("report", "investigation_present", "provenance", "scrub")
+
+    def __init__(self, *, report: ReportRead | None, investigation_present: bool,
+                 provenance: dict[str, Any] | None, scrub: dict[str, Any] | None) -> None:
+        self.report = report
+        self.investigation_present = investigation_present
+        self.provenance = provenance
+        self.scrub = scrub
+
+
+class _WorldLeads:
+    """One world's leads block, read: the served-ledger note (or `None`), whether the world is
+    archived at all, the investigation's refusal (or `None`), whether the hand-off moved, the
+    gather-summary stems that could not be named, and every lead's chain in roster order —
+    `None` where the lead's own read was refused."""
+
+    __slots__ = ("ledger_note", "archived", "facts_error", "moved", "unnameable_summaries",
+                 "chains")
+
+    def __init__(self) -> None:
+        self.ledger_note: str | None = None
+        self.archived = False
+        self.facts_error: str | None = None
+        self.moved = False
+        self.unnameable_summaries: list[str] = []
+        self.chains: list[tuple[str, dict[str, Any] | None]] = []
 
 
 class WorldEntry:
@@ -261,259 +325,120 @@ class WorldEntry:
         self.row: dict[str, Any] | None = None  # judge.yaml row, if any
         self.role: str | None = None
         self.run_dir_name: str | None = None  # the runs/ dir that decomposed to this label
+        self.result: _ResultEvent | None = None  # `None` when there is no run dir at all
+        self.archive: _WorldArchive | None = None  # `None` when worlds/<label> is not a dir
 
 
-def _decompose_run_dir(name: str, *, episode_id: str) -> str | None:
-    prefix = f"{episode_id}-"
-    if name.startswith(prefix) and len(name) > len(prefix):
-        return name[len(prefix):]
-    return None
+class _Trace:
+    """One model call's wire record, by stem (`<agent>_trace`): the plain trace file's state
+    (absent / refused / ok) with its rows and unreadable-line count, and the framed twin —
+    whether one is on disk, and its first row when it could be read."""
+
+    __slots__ = ("stem", "plain", "rows", "unreadable", "framed_present", "framed")
+
+    def __init__(self, stem: str) -> None:
+        self.stem = stem
+        self.plain = "absent"
+        self.rows: list[dict[str, Any]] = []
+        self.unreadable = 0
+        self.framed_present = False
+        self.framed: dict[str, Any] | None = None
 
 
-def _build_roster(episode_dir: Path, manifest: dict[str, Any], grade_row_labels: list[str],  # noqa: C901, PLR0912 — one union-membership decision (manifest ∪ judge.yaml rows ∪ runs/ dirs), the roster every other section keys on
-                   *, episode_id: str, grade_exists: bool) -> tuple[dict[str, WorldEntry], list[str], int]:
-    """Every world label the page must give a section to: manifest worlds ∪ `judge.yaml`
-    rows ∪ `runs/` directories that decompose to `<episode_id>-<label>` (#1025 J7/J8).
+class _WireLogs:
+    """`wire_logs/`, read once. Every question the stages section asks of the directory — a
+    role's stems, a role's priced cost, the comparator's, the unattributed judge stems — is a
+    walk over `traces`, never a second glob."""
 
-    Returns the entries by label (manifest order first, then extras), the list of
-    undecomposable `runs/` directory FULL NAMES (each gets its own section keyed by that full
-    name), and the count of `worlds/` directories that are on neither the manifest nor the
-    record (reported on one templated line, never rendered)."""
-    entries: dict[str, WorldEntry] = {}
-    order: list[str] = []
-    # A manifest world with NEITHER a `judge.yaml` row NOR any archive evidence contributes a
-    # section only once the episode has reached RUNS at all — either `runs/` still exists, or a
-    # grade landed at some point (and `runs/` was pruned afterward, J8). An episode that never
-    # got past REVIEW/STAGING (a rejection, an abort) has neither and has a manifest but no
-    # world to show anything about yet (#1025 J7/J8).
-    reached_runs = artifact_dir(episode_dir / "runs") or grade_exists
-    raw_worlds = manifest.get("worlds")
-    for w in raw_worlds if isinstance(raw_worlds, list) else []:
-        if not isinstance(w, dict):
-            continue
-        label = w.get("world_id")
-        if not isinstance(label, str):
-            continue
-        if label not in entries:
-            if not reached_runs:
+    __slots__ = ("present", "traces")
+
+    def __init__(self) -> None:
+        self.present = False
+        self.traces: dict[str, _Trace] = {}
+
+    def stems_for(self, role_prefix: str) -> set[str]:
+        """Every call's own STEM for a role — the union of plain trace files and framed twins,
+        since a launcher-produced episode writes only the framed one for some roles (#1025
+        J13a/b): a stem with no plain trace file still gets a block, built entirely from its
+        framed record."""
+        return {s for s, t in self.traces.items()
+                if s.startswith(role_prefix) and (t.plain != "absent" or t.framed_present)}
+
+    def plain_stems(self, *, agent_prefix: str) -> list[str]:
+        """The stems whose PLAIN trace file is on disk (readable or not), whose agent id starts
+        with `agent_prefix`, in name order."""
+        return sorted(s for s, t in self.traces.items()
+                      if t.plain != "absent" and s[: -len("_trace")].startswith(agent_prefix))
+
+    def role_cost(self, role_prefix: str) -> tuple[float, float, int, int]:
+        """`(cost, wall_ms, priced_calls, total_calls)` for every trace file this stage's role
+        owns — one call per FILE. A call is "priced" when its response row carries `usage` and a
+        `model` the pricing table resolves; the wall total sums `duration_ms` only where present,
+        independently of whether the call priced (#1025 J13b)."""
+        agent_prefix = "questioner" if role_prefix == "questioner" else "judge_"
+        total = 0.0
+        wall = 0.0
+        priced_calls = 0
+        total_calls = 0
+        for stem in self.plain_stems(agent_prefix=agent_prefix):
+            trace = self.traces[stem]
+            total_calls += 1
+            if trace.plain != "ok":
                 continue
-            entries[label] = WorldEntry(label)
-            order.append(label)
-        entries[label].in_manifest = True
-        # keep the FIRST manifest entry's fields as the section's own; the guide renders every
-        # entry verbatim regardless (J7 iii).
-        if entries[label].manifest_doc is None:
-            entries[label].manifest_doc = w
-            entries[label].role = w.get("role") if isinstance(w.get("role"), str) else None
+            call_priced = False
+            for row in trace.rows:
+                if row.get("kind") != "response":
+                    continue
+                cost = _priced(row.get("model"), row.get("usage"))
+                if cost is not None:
+                    total += cost
+                    call_priced = True
+                duration = row.get("duration_ms")
+                if isinstance(duration, (int, float)):
+                    wall += duration
+            if call_priced:
+                priced_calls += 1
+        return total, wall, priced_calls, total_calls
 
-    for label in grade_row_labels:
-        if not isinstance(label, str):
-            continue
-        if label not in entries:
-            entries[label] = WorldEntry(label)
-            order.append(label)
-
-    stray_run_dirs: list[str] = []
-    runs_dir = episode_dir / "runs"
-    off_roster_run_dirs = 0
-    if artifact_dir(runs_dir):
-        for child in sorted(p.name for p in runs_dir.iterdir() if artifact_dir(p)):
-            label = _decompose_run_dir(child, episode_id=episode_id)
-            if label is None:
-                stray_run_dirs.append(child)
+    def comparator_cost(self) -> tuple[float, int]:
+        """`(cost, priced calls)` — `calls` counts response rows that actually priced, not files:
+        an empty (or response-less) comparator trace contributes a file to the stream list but no
+        call here, so the review row still reads "no model calls" (#1025 J13b)."""
+        total = 0.0
+        calls = 0
+        for stem in self.plain_stems(agent_prefix="comparator_"):
+            trace = self.traces[stem]
+            if trace.plain != "ok":
                 continue
-            if label not in entries:
-                entries[label] = WorldEntry(label)
-                order.append(label)
-            entries[label].run_dir_name = child
-
-    worlds_dir = episode_dir / "worlds"
-    if artifact_dir(worlds_dir):
-        for wchild in worlds_dir.iterdir():
-            if not artifact_dir(wchild):
-                continue
-            if wchild.name == "family":
-                continue
-            if wchild.name not in entries:
-                off_roster_run_dirs += 1
-
-    return entries, [*order, *stray_run_dirs], off_roster_run_dirs
+            for row in trace.rows:
+                if row.get("kind") != "response":
+                    continue
+                cost = _priced(row.get("model"), row.get("usage"))
+                if cost is not None:
+                    total += cost
+                    calls += 1
+        return total, calls
 
 
-# =========================================================================================
-# The rendered document
-# =========================================================================================
-
-
-def _encode_page(html_text: str) -> bytes:
-    """The document's bytes (#1025 F-7): `errors="replace"` turns a lone surrogate into the
-    encoder's own replacement character, but it leaves a literal NUL untouched — U+0000 encodes
-    to a plain 0x00 byte under UTF-8 — so a NUL is substituted with U+FFFD FIRST, on the same
-    path as a lone surrogate, and never reaches the guarded write."""
-    return html_text.replace("\x00", "�").encode("utf-8", errors="replace")
-
-
-def render_episode(episode_dir: Path) -> Path:
-    episode_dir = Path(episode_dir)
-    html_text = build_page(episode_dir)
-    page_path = episode_dir / PAGE_NAME
-    write_guarded(page_path, _encode_page(html_text), mode="replace")
-    return page_path
-
-
-def build_page(episode_dir: Path) -> str:
-    manifest = family.raw_manifest(episode_dir)  # d01: the ONE fatal refusal
-    episode_id = family.episode_id_of(manifest)
-    try:
-        episode_token = episode_token_for(episode_id)
-    except Exception:  # noqa: BLE001 — a token that cannot be built names no world's ledger; every read below degrades on its own
-        episode_token = episode_id
-
-    grade_rec = _read_grade(episode_dir)
-    grade = grade_rec.value
-    grade_row_labels: list[str] = []
-    for r in (grade.worlds if grade else []):
-        if isinstance(r, dict):
-            w = r.get("world")
-            if isinstance(w, str):
-                grade_row_labels.append(w)
-    review_rec = _read_review(episode_dir)
-    samples_rec = _read_samples(episode_dir)
-    staged_rec = _read_staged(episode_dir)
-    stamp_rec = _read_family_stamp(episode_dir)
-    timing_rec = _read_timing(episode_dir)
-
-    entries, roster_order, off_roster = _build_roster(
-        episode_dir, manifest, grade_row_labels, episode_id=episode_id,
-        grade_exists=grade is not None)
-    if grade is not None:
-        for row in grade.worlds:
-            if isinstance(row, dict) and isinstance(row.get("world"), str):
-                w = entries.get(row["world"])
-                if w is not None:
-                    w.row = row
-
-    control_label = _control_label(manifest)
-
-    body = "".join([
-        _render_header(episode_dir, manifest, grade, episode_id, samples_rec),
-        _render_verdict(episode_dir, manifest, grade, grade_rec, entries, roster_order,
-                        control_label, episode_id, episode_token, review_rec, timing_rec),
-        _render_worlds(episode_dir, manifest, entries, roster_order, control_label,
-                       review_rec, grade, episode_id),
-        _render_findings(episode_dir, manifest, grade, grade_rec, entries, roster_order,
-                         episode_id, off_roster),
-        _render_stages(episode_dir, manifest, grade, timing_rec, entries,
-                       roster_order, episode_id, episode_token),
-        _render_leads(episode_dir, entries, roster_order, review_rec, episode_id,
-                     episode_token),
-        _render_records(episode_dir, manifest, review_rec, samples_rec, staged_rec, stamp_rec,
-                        episode_id),
-    ])
-    nav = _render_nav(body)
-
-    title = f"episode — {esc(episode_id)}"
-    doc = f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>{title}</title>
-<style>{CSS}</style></head><body id="top">
-<div class="layout">
-{nav}
-<article class="content">
-{body}
-</article>
-</div>
-</body></html>
-"""
-    return doc
-
-
-def _control_label(manifest: dict[str, Any]) -> str | None:
-    worlds = manifest.get("worlds")
-    if not isinstance(worlds, list):
+def _priced(model: Any, usage: Any) -> float | None:
+    """This response row's bill, or `None` when it does not price: no `usage` mapping, no
+    `model` string, a model the table does not know, or token counts that are not numbers — a
+    wire log sits in a tree a sibling box can write, so a count spelled as text is that row's
+    own unpriced state, never the page's crash."""
+    if not (isinstance(usage, dict) and isinstance(model, str)):
         return None
-    for w in worlds:
-        if isinstance(w, dict) and w.get("role") == "A" and isinstance(w.get("world_id"), str):
-            return w["world_id"]
-    return None
-
-
-def _render_nav(body: str) -> str:
-    ids = re.findall(r'id="([^"]+)"', body)
-    items = []
-    for i in ids:
-        if i.startswith("world-") or i.startswith("fg-") or i.startswith("sec-"):
-            items.append(f'<li><a href="#{esc(i)}">{esc(i)}</a></li>')
-    return f'<nav><ul>{"".join(items)}</ul></nav>'
-
-
-# =========================================================================================
-# Header
-# =========================================================================================
-
-
-def _render_header(episode_dir: Path, manifest: dict[str, Any], grade: Any, episode_id: str,
-                   samples_rec: _Record) -> str:
-    from defender.learning.judge.render import episode_alert
-
-    labels: list[str] = []
-    for w in (manifest.get("worlds") or []):
-        if isinstance(w, dict):
-            wid = w.get("world_id")
-            if isinstance(wid, str):
-                labels.append(wid)
-    if not labels:
-        worlds_dir = episode_dir / "worlds"
-        labels = sorted(p.name for p in worlds_dir.iterdir()
-                        if artifact_dir(p) and p.name != "family") if artifact_dir(worlds_dir) else []
-    alert = episode_alert(episode_dir, labels)
-    rule = alert.get("rule") if isinstance(alert, dict) else None
-    rule_name = rule.get("name") if isinstance(rule, dict) else None
-    alert_bits = []
-    if isinstance(alert, dict) and alert.get("alert_id") is not None and rule_name:
-        alert_bits.append(f'<span class="hd-alert">{_uv(rule_name)}</span>')
-    else:
-        alert_bits.append('<span class="hd-alert">alert rule: not on the record</span>')
-
-    source_run_id = manifest.get("source_run_id")
-    branch_message_id = manifest.get("branch_message_id")
-    meta_bits = list(alert_bits)
-    if isinstance(source_run_id, str):
-        meta_bits.append(f'<span class="hd-source">source {_v(source_run_id)}</span>')
-    if branch_message_id is not None:
-        meta_bits.append(f'<span class="hd-branch">branch message {_v(branch_message_id)}</span>')
-
-    if grade is not None:
-        knobs = grade.knobs if isinstance(grade.knobs, dict) else {}
-        draws = grade.draws if isinstance(grade.draws, dict) else {}
-        model = knobs.get("model", "?")
-        effort = knobs.get("effort", "?")
-        cap = knobs.get("payload_cap", "?")
-        configured = draws.get("configured", "?")
-        completed = draws.get("completed", "?")
-        knob_line = (f"{_v(model)} / {_v(effort)} / cap {_v(cap)} / "
-                    f"draws {_v(configured)}/{_v(completed)}")
-        meta_bits.append(f'<span class="hd-knobs">{knob_line}</span>')
-        if grade.lessons_commit:
-            meta_bits.append(f'<span class="hd-commit">{_v(str(grade.lessons_commit)[:8])}</span>')
-
-    meta = '<span class="hd-sep"> · </span>'.join(meta_bits)
-    return f"""
-<header class="top" id="sec-case">
-  <h1>episode {_v(episode_id)}</h1>
-  <div class="byline">{meta}</div>
-</header>
-"""
-
-
-# =========================================================================================
-# The findings walk — shared by the verdict tiles and the findings section
-# =========================================================================================
+    try:
+        cost = pricing.usage_cost(model, usage)
+        pricing.model_key(model)
+    except (pricing.UnknownModel, TypeError, ValueError):
+        return None
+    return cost
 
 
 class _Finding:
     __slots__ = ("row_id", "label", "draw", "index", "subject", "claim", "root_cause",
                  "anchor", "topic", "bucket", "evidence", "world_field", "disposition",
-                 "reason", "stub", "recorded_id", "dropped", "outcome")
+                 "reason", "stub", "recorded_id", "outcome", "raw")
 
     row_id: Any
     label: Any
@@ -531,17 +456,376 @@ class _Finding:
     reason: Any
     stub: Any
     recorded_id: Any
-    dropped: Any
     outcome: Any
+    raw: Any
 
     def __init__(self, **kw: Any) -> None:
         for slot in self.__slots__:
             setattr(self, slot, kw.get(slot))
 
 
+class _Findings:
+    """The findings walk's one answer, shared by the verdict tiles, the cards and the findings
+    section: the rows, the disposition counts, each label's draw-read report, the failed draws,
+    each draw's dropped count, and each heading's group number — the `fg-<n>` a card's footer
+    links and the findings section renders are the SAME numbering by construction."""
+
+    __slots__ = ("rows", "counts", "world_reports", "draw_failures", "dropped", "group_index")
+
+    def __init__(self) -> None:
+        self.rows: list[_Finding] = []
+        self.counts = {"defender": 0, "world_author": 0, "withheld": 0, "unqueueable": 0,
+                       "dropped": 0, "never_eligible": 0, "mappings": 0}
+        self.world_reports: dict[str, DrawsSkipReport] = {}
+        self.draw_failures: list[tuple[str, int, str]] = []
+        self.dropped: list[tuple[str, int, int]] = []
+        self.group_index: dict[str, int] = {}
+
+
+class _Episode:
+    """One read of the episode directory — everything a section renders, already typed."""
+
+    def __init__(self, episode_dir: Path, manifest: dict[str, Any]) -> None:
+        self.dir = episode_dir
+        self.manifest = manifest
+        self.episode_id = family.episode_id_of(manifest)
+        try:
+            self.episode_token = episode_token_for(self.episode_id)
+        except Exception:  # noqa: BLE001 — a token that cannot be built names no world's ledger; every read below degrades on its own
+            self.episode_token = self.episode_id
+        # The manifest's world entries, as MAPPINGS: a scalar where the list belongs, or a
+        # scalar among the entries, is nothing to render a section for.
+        self.manifest_worlds: list[dict[str, Any]] = [
+            w for w in _items(manifest.get("worlds")) if isinstance(w, dict)]
+        self.control_label: str | None = next(
+            (w["world_id"] for w in self.manifest_worlds
+             if w.get("role") == "A" and isinstance(w.get("world_id"), str)), None)
+        self.grade_rec = _Record()
+        self.review_rec = _Record()
+        self.samples_rec = _Record()
+        self.staged_rec = _Record()
+        self.stamp_rec = _Record()
+        self.timing_rec = _Record()
+        self.entries: dict[str, WorldEntry] = {}
+        self.roster_order: list[str] = []
+        self.off_roster = 0
+        self.archived_world_dirs: list[str] = []
+        self.alert: Any = None
+        self.draws: dict[str, tuple[dict[int, dict[str, Any]], DrawsSkipReport]] = {}
+        #: One leads block per ROSTER label — a `runs/` directory that decomposed to no world
+        #: (J7 iv) gets one too, keyed by its full name, so the section reads the same for it.
+        self.leads: dict[str, _WorldLeads] = {}
+        self.wire = _WireLogs()
+        self.findings = _Findings()
+        self.total_cost = 0.0
+        self.worlds_wall = ""
+        self.lower_bound = ""
+
+    @property
+    def grade(self) -> Any:
+        return self.grade_rec.value
+
+    @property
+    def not_graded(self) -> bool:
+        """J14: a `not_graded` stamp voids the whole family's word."""
+        return self.grade is not None and self.grade.not_graded is not None
+
+    def manifest_world(self, label: str) -> dict[str, Any] | None:
+        """The FIRST manifest entry naming `label` — the section's own; the guide renders every
+        entry verbatim regardless (J7 iii)."""
+        return next((w for w in self.manifest_worlds if w.get("world_id") == label), None)
+
+    def review_block(self, label: str) -> dict[str, Any] | None:
+        if not (self.review_rec.ok and isinstance(self.review_rec.value, dict)):
+            return None
+        return family.world_review_block(self.review_rec.value, label)
+
+
+# =========================================================================================
+# Loading — the one pass over the directory
+# =========================================================================================
+
+
+def load_episode(episode_dir: Path) -> _Episode:
+    """Every record the page shows, read once. Raises `JudgeRefused` for the manifest alone
+    (d01: the ONE fatal refusal); every other refusal is a slot on the model."""
+    episode_dir = Path(episode_dir)
+    ep = _Episode(episode_dir, family.raw_manifest(episode_dir))
+
+    ep.grade_rec = _read_grade(episode_dir)
+    ep.review_rec = _read_review(episode_dir)
+    ep.samples_rec = _read_samples(episode_dir)
+    ep.staged_rec = _read_staged(episode_dir)
+    ep.stamp_rec = _read_family_stamp(episode_dir)
+    ep.timing_rec = _read_timing(episode_dir)
+
+    grade = ep.grade
+    grade_rows = [r for r in (_items(grade.worlds) if grade is not None else [])
+                  if isinstance(r, dict) and isinstance(r.get("world"), str)]
+    worlds_dir = episode_dir / archive.WORLDS_DIRNAME
+    if artifact_dir(worlds_dir):
+        ep.archived_world_dirs = sorted(
+            p.name for p in worlds_dir.iterdir() if artifact_dir(p) and p.name != _FAMILY_LABEL)
+    ep.entries, ep.roster_order, ep.off_roster = _build_roster(
+        ep, [r["world"] for r in grade_rows], grade_exists=grade is not None)
+    for row in grade_rows:
+        w = ep.entries.get(row["world"])
+        if w is not None:
+            w.row = row
+
+    labels = [w["world_id"] for w in ep.manifest_worlds if isinstance(w.get("world_id"), str)]
+    ep.alert = episode_alert(episode_dir, labels or ep.archived_world_dirs)
+
+    for label in [*ep.entries, _FAMILY_LABEL]:
+        ep.draws[label] = draws_on_disk_report(
+            worlds_dir / label / archive.DRAWS_DIRNAME)
+    for w in ep.entries.values():
+        if w.run_dir_name is not None:
+            w.result = _result_event(episode_dir / RUNS_SUBDIR / w.run_dir_name)
+        w.archive = _load_world_archive(worlds_dir / w.label)
+    for label in ep.roster_order:
+        ep.leads[label] = _load_world_leads(ep, label)
+
+    ep.wire = _load_wire_logs(episode_dir / WIRE_LOG_DIR)
+    ep.findings = _walk_findings(ep)
+    ep.total_cost, ep.worlds_wall, ep.lower_bound = _cost_totals(ep)
+    return ep
+
+
+def _decompose_run_dir(name: str, *, episode_id: str) -> str | None:
+    prefix = f"{episode_id}-"
+    if name.startswith(prefix) and len(name) > len(prefix):
+        return name[len(prefix):]
+    return None
+
+
+def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — one union-membership decision (manifest ∪ judge.yaml rows ∪ runs/ dirs), the roster every other section keys on
+                  *, grade_exists: bool) -> tuple[dict[str, WorldEntry], list[str], int]:
+    """Every world label the page must give a section to: manifest worlds ∪ `judge.yaml`
+    rows ∪ `runs/` directories that decompose to `<episode_id>-<label>` (#1025 J7/J8).
+
+    Returns the entries by label (manifest order first, then extras), the list of
+    undecomposable `runs/` directory FULL NAMES (each gets its own section keyed by that full
+    name), and the count of `worlds/` directories that are on neither the manifest nor the
+    record (reported on one templated line, never rendered)."""
+    entries: dict[str, WorldEntry] = {}
+    order: list[str] = []
+    runs_dir = ep.dir / RUNS_SUBDIR
+    # A manifest world with NEITHER a `judge.yaml` row NOR any archive evidence contributes a
+    # section only once the episode has reached RUNS at all — either `runs/` still exists, or a
+    # grade landed at some point (and `runs/` was pruned afterward, J8). An episode that never
+    # got past REVIEW/STAGING (a rejection, an abort) has neither and has a manifest but no
+    # world to show anything about yet (#1025 J7/J8).
+    reached_runs = artifact_dir(runs_dir) or grade_exists
+    for w in ep.manifest_worlds:
+        label = w.get("world_id")
+        if not isinstance(label, str):
+            continue
+        if label not in entries:
+            if not reached_runs:
+                continue
+            entries[label] = WorldEntry(label)
+            order.append(label)
+        entries[label].in_manifest = True
+        # keep the FIRST manifest entry's fields as the section's own; the guide renders every
+        # entry verbatim regardless (J7 iii).
+        if entries[label].manifest_doc is None:
+            entries[label].manifest_doc = w
+            entries[label].role = w.get("role") if isinstance(w.get("role"), str) else None
+
+    for label in grade_row_labels:
+        if label not in entries:
+            entries[label] = WorldEntry(label)
+            order.append(label)
+
+    stray_run_dirs: list[str] = []
+    if artifact_dir(runs_dir):
+        for child in sorted(p.name for p in runs_dir.iterdir() if artifact_dir(p)):
+            label = _decompose_run_dir(child, episode_id=ep.episode_id)
+            if label is None:
+                stray_run_dirs.append(child)
+                continue
+            if label not in entries:
+                entries[label] = WorldEntry(label)
+                order.append(label)
+            entries[label].run_dir_name = child
+
+    off_roster = sum(1 for name in ep.archived_world_dirs if name not in entries)
+    return entries, [*order, *stray_run_dirs], off_roster
+
+
+def _result_event(run_dir: Path) -> _ResultEvent:
+    trace = run_dir / _TOOL_TRACE_NAME
+    if not (trace.exists() or trace.is_symlink()):
+        return _ResultEvent(None, None, "absent")
+    if not artifact_file(trace):
+        return _ResultEvent(None, None, "refused")
+    rows, _bad = read_jsonl_rows_report(trace)
+    if not rows or rows[-1].get("type") != "result":
+        return _ResultEvent(None, None, "none")
+    last = rows[-1]
+    cost = last.get("total_cost_usd")
+    duration = last.get("duration_ms")
+    wall = float(duration) if isinstance(duration, (int, float)) else None
+    if not isinstance(cost, (int, float)) or isinstance(cost, bool) or not math.isfinite(cost) \
+            or cost < 0:
+        return _ResultEvent(None, wall, "unusable")
+    return _ResultEvent(float(cost), wall, "ok")
+
+
+def _load_world_archive(world_dir: Path) -> _WorldArchive | None:
+    if not artifact_dir(world_dir):
+        return None
+    report_path = world_dir / REPORT_NAME
+    report = None
+    if report_path.exists() or report_path.is_symlink():
+        # The world-archive screen (`read_guarded`: open `O_NOFOLLOW` + `fstat`), not an lstat
+        # taken ahead of a bare read — the same one reader the judge's own pass uses for these
+        # bytes, so a link planted at the name is refused at the open itself.
+        report = family.read_archived_report(report_path)
+    inv_path = world_dir / INVESTIGATION_NAME
+    return _WorldArchive(
+        report=report,
+        investigation_present=inv_path.exists() or inv_path.is_symlink(),
+        provenance=family.json_mapping(world_dir / PROVENANCE),
+        scrub=family.json_mapping(world_dir / archive.SCRUB_VERDICT_NAME))
+
+
+def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, PLR0912 — the served ledger, the archive notes and every lead's chain are one world's leads block (#1025 O3)
+    leads = _WorldLeads()
+    world_dir = ep.dir / archive.WORLDS_DIRNAME / label
+
+    ledger_path = family.world_ledger_path(ep.dir, label, episode_token=ep.episode_token)
+    if not (ledger_path.exists() or ledger_path.is_symlink()):
+        leads.ledger_note = "served ledger: absent"
+    elif not artifact_file(ledger_path):
+        leads.ledger_note = "served ledger unreadable"
+    else:
+        try:
+            # `read_jsonl_rows_report` is the shared tolerant reader's own bare `read_text` —
+            # it survives a torn line or an undecodable byte but not a permission-denied
+            # regular file (root ignores this; a real non-root run does not, #1025), which
+            # reaches this call as an un-typed `OSError`. This world's leads block is its own
+            # slot, never the whole page.
+            _rows, malformed = read_jsonl_rows_report(ledger_path)
+            if malformed:
+                leads.ledger_note = f"{malformed} malformed row"
+        except OSError:
+            leads.ledger_note = "served ledger unreadable"
+
+    leads.archived = artifact_dir(world_dir)
+    if not leads.archived:
+        return leads
+
+    inv_path = world_dir / INVESTIGATION_NAME
+    facts = None
+    if inv_path.exists() or inv_path.is_symlink():
+        try:
+            facts = family.read_world_facts(ep.dir, label, episode_token=ep.episode_token)
+        except JudgeRefused as bad:
+            leads.facts_error = str(bad)
+        except Exception as bad:  # noqa: BLE001
+            leads.facts_error = str(bad)
+
+    try:
+        all_leads = family.leads_by_id(world_dir)
+    except Exception:  # noqa: BLE001
+        all_leads = {}
+
+    summaries_dir = world_dir / archive.GATHER_SUMMARIES_DIRNAME
+    summary_stems = set()
+    if artifact_dir(summaries_dir) and not summaries_dir.is_symlink():
+        for p in summaries_dir.iterdir():
+            if p.suffix == ".md" and artifact_file(p):
+                summary_stems.add(p.stem)
+            elif not p.name.endswith(".md") and _safe_id(p.stem) is None:
+                leads.unnameable_summaries.append(p.stem)
+
+    if facts is not None:
+        roster = set(facts.referenced_leads) | summary_stems
+        resolutions_by_lead = facts.resolutions_by_lead
+        leads.moved = bool(facts.resolution_moved)
+    else:
+        roster = set(all_leads) | summary_stems
+        resolutions_by_lead = {}
+
+    for lead_id in sorted(roster):
+        try:
+            # `lead_chain`'s own gather-summary read is `errors="replace"` for a BAD byte but
+            # a bare `read_text` for a permission-denied file (root ignores this; a real
+            # non-root run does not, #1025) — this one lead's row is its own slot, never the
+            # whole page.
+            chain = family.lead_chain(world_dir, lead_id, resolutions_by_lead, leads=all_leads)
+        except OSError:
+            chain = None
+        leads.chains.append((lead_id, chain))
+    return leads
+
+
+def _load_wire_logs(wire: Path) -> _WireLogs:
+    logs = _WireLogs()
+    if not artifact_dir(wire):
+        return logs
+    logs.present = True
+    for path in sorted(wire.glob("*.jsonl")):
+        name = path.name
+        if "_framed_trace" in name:
+            if not name.endswith("_framed_trace.jsonl"):
+                continue
+            stem = name[: -len("_framed_trace.jsonl")] + "_trace"
+            trace = logs.traces.setdefault(stem, _Trace(stem))
+            trace.framed_present = True
+            if artifact_file(path):
+                frows, _ = read_jsonl_rows_report(path)
+                if frows:
+                    trace.framed = frows[0]
+            continue
+        if not name.endswith("_trace.jsonl"):
+            continue
+        stem = name[: -len(".jsonl")]
+        trace = logs.traces.setdefault(stem, _Trace(stem))
+        # `artifact_file` (lstat) ahead of the read: `wire_logs/` sits under the episode dir, a
+        # tree a sibling box has an rw bind on (`judge.__init__._write_wire_log`'s own docstring
+        # names it), and `read_jsonl_rows_report` is the shared tolerant reader's own bare
+        # `is_file()` + `read_text` — unguarded on its own.
+        if not artifact_file(path):
+            trace.plain = "refused"
+            continue
+        trace.plain = "ok"
+        trace.rows, trace.unreadable = read_jsonl_rows_report(path)
+    return logs
+
+
+def _cost_totals(ep: _Episode) -> tuple[float, str, str]:
+    total = 0.0
+    walls = []
+    for w in ep.entries.values():
+        if w.result is None:
+            continue
+        if w.result.cost is not None:
+            total += w.result.cost
+        if w.result.wall_ms:
+            walls.append(w.result.wall_ms)
+    q_cost, q_wall_ms, _qp, _qt = ep.wire.role_cost("questioner")
+    j_cost, j_wall_ms, _jp, _jt = ep.wire.role_cost(Step.JUDGE)
+    total += q_cost + j_cost
+    if walls:
+        wall_range = f"{fmt_duration(min(walls))}–{fmt_duration(max(walls))}"
+        lower_bound = f"≈ {fmt_duration(q_wall_ms + j_wall_ms + max(walls))} lower bound on wall: model calls + longest world"
+    else:
+        wall_range = ""
+        lower_bound = ""
+    return total, wall_range, lower_bound
+
+
+# =========================================================================================
+# The findings walk — run once at load, read by the verdict tiles and the findings section
+# =========================================================================================
+
+
 def _unqueueable_lookup(grade: Any) -> dict[str, str]:
     out: dict[str, str] = {}
-    for line in getattr(grade, "unqueueable_findings", None) or []:
+    for line in _items(getattr(grade, "unqueueable_findings", None)):
         if not isinstance(line, str) or ": " not in line:
             continue
         coord, reason = line.split(": ", 1)
@@ -554,7 +838,7 @@ def _unqueueable_lookup(grade: Any) -> dict[str, str]:
 
 def _world_findings_lookup(grade: Any) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
-    for row in getattr(grade, "world_findings", None) or []:
+    for row in _items(getattr(grade, "world_findings", None)):
         if not isinstance(row, dict):
             continue
         fid = row.get("finding_id")
@@ -567,48 +851,69 @@ def _world_findings_lookup(grade: Any) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _walk_findings(  # noqa: C901, PLR0912, PLR0915
-    episode_dir: Path, entries: dict[str, WorldEntry], grade: Any, grade_ok: bool,
-    *, episode_id: str,
-) -> tuple[list[_Finding], dict[str, int], dict[str, Any], list[tuple[str, int, str]]]:
+def _withheld_by_label(grade: Any) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for item in _items(getattr(grade, "withheld_findings", None)):
+        if isinstance(item, dict) and isinstance(item.get("world"), str):
+            out.setdefault(item["world"], []).append(item)
+    return out
+
+
+def _bump(counts: dict[str, int], disposition: str) -> None:
+    key = {"defender": "defender", "world_author": "world_author", "withheld": "withheld",
+          "unqueueable": "unqueueable", "never_eligible": "never_eligible"}.get(disposition)
+    if key:
+        counts[key] += 1
+
+
+def _finding_fields(finding: dict[str, Any]) -> dict[str, Any]:
+    """The row's own fields off one draw finding, as `_Finding` keyword arguments."""
+    return {"claim": finding.get("claim"), "root_cause": finding.get("root_cause"),
+            "anchor": finding.get("anchor"), "topic": finding.get("topic"),
+            "bucket": finding.get("bucket"), "evidence": finding.get("evidence"),
+            "world_field": finding.get("world"), "raw": finding}
+
+
+def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
     """Every finding row the page shows, keyed `(label, draw, index)` — the page's own
     disposition rule mirrors `enqueue_report`'s (#1025 amendment 3): the record's own signals
     (`unqueueable_findings`, a world's `withheld_reason`, the family/verdict word) decide each
     row's fate, never a re-run of the enqueue pass itself."""
-    rows: list[_Finding] = []
-    counts = {"defender": 0, "world_author": 0, "withheld": 0, "unqueueable": 0, "dropped": 0,
-              "never_eligible": 0, "mappings": 0}
-    world_reports: dict[str, Any] = {}
-    draw_failures: list[tuple[str, int, str]] = []
+    out = _Findings()
+    rows = out.rows
+    counts = out.counts
+    grade = ep.grade
+    entries = ep.entries
+    roster_labels = [*entries, _FAMILY_LABEL]
 
-    roster_labels = list(entries) + ["family"]
+    for label in roster_labels:
+        docs, report = ep.draws[label]
+        out.world_reports[label] = report
+        for draw, doc in docs.items():
+            dropped = _count(doc.get("dropped_findings"))
+            if dropped is not None:
+                counts["dropped"] += dropped
+            if not _items(doc.get("findings")) and doc.get("failure_reason"):
+                out.draw_failures.append((label, draw, doc["failure_reason"]))
+            elif dropped is not None:
+                out.dropped.append((label, draw, dropped))
 
-    def _draws_for(label: str) -> tuple[dict[int, dict[str, Any]], Any]:
-        from defender.learning.judge.enqueue import draws_on_disk_report
-        d = Path(episode_dir) / archive.WORLDS_DIRNAME / label / archive.DRAWS_DIRNAME
-        docs, report = draws_on_disk_report(d)
-        world_reports[label] = report
-        return docs, report
-
-    if not grade_ok:
+    if grade is None:
         # No grade record at all: every on-disk finding renders under one group, undisposed.
         for label in roster_labels:
-            docs, _report = _draws_for(label)
+            docs, _report = ep.draws[label]
             for draw, doc in docs.items():
-                findings = doc.get("findings") if isinstance(doc, dict) else None
-                for index, finding in enumerate(findings or []):
+                for index, finding in enumerate(_items(doc.get("findings"))):
                     if not isinstance(finding, dict):
                         continue
                     counts["mappings"] += 1
                     rows.append(_Finding(
                         row_id=f"f-{label}-{draw}-{index}", label=label, draw=draw,
                         index=index, subject=finding.get("subject"),
-                        claim=finding.get("claim"), root_cause=finding.get("root_cause"),
-                        anchor=finding.get("anchor"), topic=finding.get("topic"),
-                        bucket=finding.get("bucket"), evidence=finding.get("evidence"),
-                        world_field=finding.get("world"), disposition="no_grade",
-                        reason=None, stub=False, recorded_id=None))
-        return rows, counts, world_reports, draw_failures
+                        disposition="no_grade", reason=None, stub=False, recorded_id=None,
+                        **_finding_fields(finding)))
+        out.group_index = _group_numbering(rows)
+        return out
 
     withheld_reasons = {}
     for w in entries.values():
@@ -629,76 +934,70 @@ def _walk_findings(  # noqa: C901, PLR0912, PLR0915
     world_findings_by_coord = _world_findings_lookup(grade)
     seen_coords: set[str] = set()
 
+    def _row_state_of(label: str) -> str | None:
+        entry = entries.get(label)
+        if label == _FAMILY_LABEL:
+            return "family"
+        if entry is not None and entry.row is not None:
+            return "ungradable" if entry.row.get("ungradable") else "graded"
+        if entry is not None and entry.in_manifest:
+            return "no_grade_row"
+        return None
+
+    def _dispose(label: str, row_state: str, subject: Any, coord: str) -> tuple[str, str | None]:
+        return _finding_disposition(
+            row_state=row_state, entry=entries.get(label), subject=subject, coord=coord,
+            unqueueable=unqueueable, withheld_reasons=withheld_reasons, measuring=measuring,
+            defender_blocked=defender_blocked, verdict_word=verdict_word,
+            world_findings_by_coord=world_findings_by_coord)
+
     for label in roster_labels:
         entry = entries.get(label)
-        row_state: str
-        if label == "family":
-            row_state = "family"
-        elif entry is not None and entry.row is not None:
-            row_state = "ungradable" if entry.row.get("ungradable") else "graded"
-        elif entry is not None and entry.in_manifest:
-            row_state = "no_grade_row"
-        else:
+        row_state = _row_state_of(label)
+        if row_state is None:
             continue
 
-        docs, _report = _draws_for(label)
+        docs, _report = ep.draws[label]
         for draw, doc in docs.items():
-            findings = doc.get("findings") if isinstance(doc, dict) else None
-            if not findings and isinstance(doc, dict) and doc.get("failure_reason"):
-                draw_failures.append((label, draw, doc["failure_reason"]))
-            for index, finding in enumerate(findings or []):
+            for index, finding in enumerate(_items(doc.get("findings"))):
                 if not isinstance(finding, dict):
                     continue
                 counts["mappings"] += 1
                 coord = f"{label}/{draw}/{index}"
                 seen_coords.add(coord)
-                subject = finding.get("subject")
-                disposition, reason = _finding_disposition(
-                    row_state=row_state, entry=entry, subject=subject, coord=coord,
-                    unqueueable=unqueueable, withheld_reasons=withheld_reasons,
-                    measuring=measuring, defender_blocked=defender_blocked,
-                    verdict_word=verdict_word, world_findings_by_coord=world_findings_by_coord)
+                # ABSENT reads as the defender's, exactly as `enqueue_report` reads it
+                # (`finding.get("subject", SUBJECT_DEFENDER)`, enqueue.py): the pre-#1007 draw
+                # shape carries no `subject` at all, and the real pass queued those as defender
+                # findings — a page that read the absence as "names neither channel" contradicted
+                # the record's own `enqueued_rows` on the very archive it was built to explain.
+                subject = finding.get("subject", SUBJECT_DEFENDER)
+                disposition, reason = _dispose(label, row_state, subject, coord)
                 _bump(counts, disposition)
-                dropped = doc.get("dropped_findings") if isinstance(doc, dict) else None
-                outcome = doc.get("episode_outcome") if isinstance(doc, dict) else None
                 recorded = world_findings_by_coord.get(coord)
                 recorded_id = recorded.get("finding_id") if isinstance(recorded, dict) else None
                 rows.append(_Finding(
                     row_id=f"f-{label}-{draw}-{index}", label=label, draw=draw, index=index,
-                    subject=subject, claim=finding.get("claim"), dropped=dropped,
-                    root_cause=finding.get("root_cause"), anchor=finding.get("anchor"),
-                    topic=finding.get("topic"), bucket=finding.get("bucket"),
-                    evidence=finding.get("evidence"), world_field=finding.get("world"),
-                    disposition=disposition, reason=reason, stub=False,
-                    recorded_id=recorded_id, outcome=outcome))
+                    subject=subject, disposition=disposition, reason=reason, stub=False,
+                    recorded_id=recorded_id, outcome=doc.get("episode_outcome"),
+                    **_finding_fields(finding)))
 
         for mech_index, finding in enumerate(
-                (entry.row.get("mechanical_world_findings") if entry and entry.row else None)
-                or []):
+                _items(entry.row.get("mechanical_world_findings")) if entry and entry.row
+                else []):
             if not isinstance(finding, dict):
                 continue
             coord = f"{label}/mechanical/{mech_index}"
             seen_coords.add(coord)
             counts["mappings"] += 1
-            disposition, reason = _finding_disposition(
-                row_state=row_state, entry=entry, subject="world", coord=coord,
-                unqueueable=unqueueable, withheld_reasons=withheld_reasons, measuring=measuring,
-                defender_blocked=defender_blocked, verdict_word=verdict_word,
-                world_findings_by_coord=world_findings_by_coord)
+            disposition, reason = _dispose(label, row_state, SUBJECT_WORLD, coord)
             _bump(counts, disposition)
             rows.append(_Finding(
                 row_id=f"f-{label}-mechanical-{mech_index}", label=label, draw="mechanical",
-                index=mech_index, subject="world", claim=finding.get("claim"),
-                root_cause=finding.get("root_cause"), anchor=finding.get("anchor"),
-                topic=finding.get("topic"), bucket=finding.get("bucket"),
-                evidence=finding.get("evidence"), world_field=finding.get("world"),
-                disposition=disposition, reason=reason, stub=False, recorded_id=None))
+                index=mech_index, subject=SUBJECT_WORLD, disposition=disposition,
+                reason=reason, stub=False, recorded_id=None, **_finding_fields(finding)))
 
     # Record-only stubs: a recorded coordinate whose draw DOCUMENT is absent (J9b).
-    present_docs: dict[str, set[int]] = {}
-    for label in roster_labels:
-        docs, _report = _draws_for(label)
-        present_docs[label] = set(docs)
+    present_docs = {label: set(ep.draws[label][0]) for label in roster_labels}
 
     for coord, row in world_findings_by_coord.items():
         label, draw_s, index_s = coord.rsplit("/", 2)
@@ -711,63 +1010,52 @@ def _walk_findings(  # noqa: C901, PLR0912, PLR0915
         if coord in seen_coords:
             continue
         entry = entries.get(label)
-        row_state = ("family" if label == "family" else
+        row_state = ("family" if label == _FAMILY_LABEL else
                     ("ungradable" if entry and entry.row and entry.row.get("ungradable") else
                      ("graded" if entry and entry.row else "no_grade_row")))
-        disposition, reason = _finding_disposition(
-            row_state=row_state, entry=entry, subject="world", coord=coord,
-            unqueueable=unqueueable, withheld_reasons=withheld_reasons, measuring=measuring,
-            defender_blocked=defender_blocked, verdict_word=verdict_word,
-            world_findings_by_coord=world_findings_by_coord)
+        disposition, reason = _dispose(label, row_state, SUBJECT_WORLD, coord)
         counts["mappings"] += 1
         _bump(counts, disposition)
         rows.append(_Finding(
             row_id=f"f-{label}-{draw_s}-{index_s}", label=label, draw=draw_s, index=index_s,
-            subject="world", claim=row.get("finding"), root_cause=None, anchor=None, topic=None,
-            bucket=None, evidence=None, world_field=None, disposition=disposition, reason=reason,
-            stub=True, recorded_id=row.get("finding_id")))
+            subject=SUBJECT_WORLD, claim=row.get("finding"), disposition=disposition,
+            reason=reason, stub=True, recorded_id=row.get("finding_id")))
 
-    already_withheld_labels = {f.label for f in rows if f.disposition == "withheld"}
+    # A recorded withheld entry whose own draw document is present is ALREADY a row above —
+    # the record carries the finding whole (`enqueue_report`'s `withheld_findings`, the same
+    # mapping the draw document holds), so the join is the finding itself. Only an entry no
+    # on-disk withheld row matches gets a record-only stub (J9b's grain is the DOCUMENT): a
+    # world whose surviving documents carry two of its four recorded withheld findings shows
+    # all four, the two without a document flagged as such, rather than the two that survive.
+    on_disk_withheld: dict[str, list[dict[str, Any]]] = {}
+    for f in rows:
+        if f.disposition == "withheld" and not f.stub:
+            on_disk_withheld.setdefault(f.label, []).append(f.raw)
     for label, wlist in _withheld_by_label(grade).items():
-        if label in already_withheld_labels:
-            # The on-disk walk already produced this world's withheld rows from its own draw
-            # documents — a second, record-only stub per entry would double it (J9b's grain is
-            # the DOCUMENT, and a present document needs no stub).
-            continue
-        entry = entries.get(label)
-        docs, _report = _draws_for(label)
+        unmatched = list(on_disk_withheld.get(label, []))
         for n, item in enumerate(wlist):
-            finding = item.get("finding") if isinstance(item, dict) else None
+            finding = item.get("finding")
             if not isinstance(finding, dict):
+                continue
+            if finding in unmatched:
+                unmatched.remove(finding)
                 continue
             counts["mappings"] += 1
             counts["withheld"] += 1
-            reason = item.get("reason") if isinstance(item, dict) else None
             rows.append(_Finding(
                 row_id=f"f-{label}-withheld-{n}", label=label, draw=None, index=None,
-                subject="defender", claim=finding.get("claim"),
-                root_cause=finding.get("root_cause"), anchor=finding.get("anchor"),
-                topic=finding.get("topic"), bucket=finding.get("bucket"),
-                evidence=finding.get("evidence"), world_field=finding.get("world"),
-                disposition="withheld", reason=reason, stub=True,
-                recorded_id=finding.get("finding_id")))
+                subject=SUBJECT_DEFENDER, disposition="withheld", reason=item.get("reason"),
+                stub=True, recorded_id=finding.get("finding_id"), **_finding_fields(finding)))
 
-    return rows, counts, world_reports, draw_failures
-
-
-def _withheld_by_label(grade: Any) -> dict[str, list[dict[str, Any]]]:
-    out: dict[str, list[dict[str, Any]]] = {}
-    for item in getattr(grade, "withheld_findings", None) or []:
-        if isinstance(item, dict) and isinstance(item.get("world"), str):
-            out.setdefault(item["world"], []).append(item)
+    out.group_index = _group_numbering(rows)
     return out
 
 
-def _bump(counts: dict[str, int], disposition: str) -> None:
-    key = {"defender": "defender", "world_author": "world_author", "withheld": "withheld",
-          "unqueueable": "unqueueable", "never_eligible": "never_eligible"}.get(disposition)
-    if key:
-        counts[key] += 1
+def _group_numbering(rows: list[_Finding]) -> dict[str, int]:
+    """Each group heading's `fg-<n>`, numbered by first appearance in row order — the one
+    numbering both the findings section and the cards' footers render."""
+    return {h: n for n, h in enumerate(dict.fromkeys(_disposition_heading_raw(f) for f in rows),
+                                       start=1)}
 
 
 def _finding_disposition(  # noqa: PLR0913, C901 — the enqueue's own subject/withheld/blocked precedence (#1025 amendment 3), mirrored as one decision
@@ -781,13 +1069,13 @@ def _finding_disposition(  # noqa: PLR0913, C901 — the enqueue's own subject/w
         return "world_ungradable", reason
     if row_state == "no_grade_row":
         return "no_grade_row", None
-    if subject == "world" or row_state == "family":
+    if subject == SUBJECT_WORLD or row_state == "family":
         if coord in unqueueable:
             return "unqueueable", unqueueable[coord]
         if coord in world_findings_by_coord:
             return "world_author", None
         return "never_on_record", None
-    if subject != "defender":
+    if subject != SUBJECT_DEFENDER:
         if coord in unqueueable:
             return "unqueueable", unqueueable[coord]
         return "unqueueable", f"subject {subject!r} names neither channel"
@@ -798,12 +1086,6 @@ def _finding_disposition(  # noqa: PLR0913, C901 — the enqueue's own subject/w
     if defender_blocked and label in measuring:
         return "never_eligible", str(verdict_word)
     return "defender", None
-
-
-_DISPOSITION_HEADING = {
-    "defender": "defender: enqueued",
-    "world_author": "world author: enqueued",
-}
 
 
 def _disposition_heading_raw(f: _Finding) -> str:
@@ -819,7 +1101,7 @@ def _disposition_heading_raw(f: _Finding) -> str:
     if f.disposition == "withheld":
         return f"defender: withheld — {_raw(f.reason)}"
     if f.disposition == "unqueueable":
-        addressee = "defender" if f.subject == "defender" else "world author"
+        addressee = "defender" if f.subject == SUBJECT_DEFENDER else "world author"
         return f"{addressee}: unqueueable — {_raw(f.reason)}"
     if f.disposition == "never_eligible":
         return f"defender: never eligible — verdict {_raw(f.reason)}"
@@ -832,94 +1114,114 @@ def _disposition_heading_raw(f: _Finding) -> str:
     return "no grade record — not enqueued"
 
 
-def _raw(x: Any) -> str:
-    """`x` as plain text with no markup escaping — for building a string another function will
-    escape exactly once. `None` reads as the same em dash `_v`/`_uv` show."""
-    if x is None:
-        return "—"
-    if isinstance(x, bool):
-        return "True" if x else "False"
-    return x if isinstance(x, str) else str(x)
+# =========================================================================================
+# The rendered document
+# =========================================================================================
 
 
-def _finding_row_html(f: _Finding) -> str:  # noqa: C901 — one row's worth of optional fields, each independently absent
-    bits = [f'<span class="fr-world">{_uv(f.label)}</span>']
-    if f.bucket is not None:
-        cls = _BUCKET_CLASS.get(f.bucket, "bucket-other")
-        bits.append(f'<span class="fr-bucket {cls}">{_uv(f.bucket)}</span>')
-    if f.subject is not None:
-        bits.append(f'<span class="fr-subject">{_uv(f.subject)}</span>')
-    if f.stub:
-        bits.append('<div class="fr-stub">draw document absent</div>')
-        if f.claim:
-            bits.append(f'<div class="fr-claim">{_uv(f.claim)}</div>')
+def _encode_page(html_text: str) -> bytes:
+    """The document's bytes (#1025 F-7): `errors="replace"` turns a lone surrogate into the
+    encoder's own replacement character, but it leaves a literal NUL untouched — U+0000 encodes
+    to a plain 0x00 byte under UTF-8 — so a NUL is substituted with U+FFFD FIRST, on the same
+    path as a lone surrogate, and never reaches the guarded write."""
+    return html_text.replace("\x00", "�").encode("utf-8", errors="replace")
+
+
+def _write_page(episode_dir: Path, html_text: str) -> Path:
+    page_path = Path(episode_dir) / PAGE_NAME
+    write_guarded(page_path, _encode_page(html_text), mode="replace")
+    return page_path
+
+
+def render_episode(episode_dir: Path) -> Path:
+    return _write_page(episode_dir, build_page(episode_dir))
+
+
+def build_page(episode_dir: Path) -> str:
+    return _render_document(load_episode(Path(episode_dir)))
+
+
+def _render_document(ep: _Episode) -> str:
+    body = "".join([
+        _render_header(ep),
+        _render_verdict(ep),
+        _render_worlds(ep),
+        _render_findings_section(ep),
+        _render_stages(ep),
+        _render_leads_section(ep),
+        _render_records(ep),
+    ])
+    nav = _render_nav(body)
+
+    title = f"episode — {esc(ep.episode_id)}"
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>{title}</title>
+<style>{CSS}</style></head><body id="top">
+<div class="layout">
+{nav}
+<article class="content">
+{body}
+</article>
+</div>
+</body></html>
+"""
+
+
+def _render_nav(body: str) -> str:
+    ids = re.findall(r'id="([^"]+)"', body)
+    items = []
+    for i in ids:
+        if i.startswith("world-") or i.startswith("fg-") or i.startswith("sec-"):
+            items.append(f'<li><a href="#{esc(i)}">{esc(i)}</a></li>')
+    return f'<nav><ul>{"".join(items)}</ul></nav>'
+
+
+# =========================================================================================
+# Header
+# =========================================================================================
+
+
+def _render_header(ep: _Episode) -> str:
+    manifest = ep.manifest
+    grade = ep.grade
+    alert = ep.alert
+    rule = alert.get("rule") if isinstance(alert, dict) else None
+    rule_name = rule.get("name") if isinstance(rule, dict) else None
+    alert_bits = []
+    if isinstance(alert, dict) and alert.get("alert_id") is not None and rule_name:
+        alert_bits.append(f'<span class="hd-alert">{_uv(rule_name)}</span>')
     else:
-        if f.claim is not None:
-            bits.append(f'<div class="fr-claim">{_uv(f.claim)}</div>')
-        if f.root_cause is not None:
-            bits.append(f'<div class="fr-root">{_uv(f.root_cause)}</div>')
-        if f.anchor is not None:
-            bits.append(f'<span class="fr-anchor">{_uv(f.anchor)}</span>')
-        if f.topic is not None:
-            bits.append(f'<span class="fr-topic">{_uv(f.topic)}</span>')
-        if isinstance(f.evidence, list):
-            for e in f.evidence:
-                bits.append(f'<span class="fr-evidence">{_uv(e)}</span>')
-        if f.world_field is not None:
-            bits.append(f'<span class="fr-world-field">{_uv(f.world_field)}</span>')
-    if f.recorded_id is not None:
-        bits.append(f'<span class="fr-recorded-id">{_uv(f.recorded_id)}</span>')
-    if f.outcome is not None:
-        # J10: the draw's own `episode_outcome` word, bound beside its findings.
-        bits.append(f'<span class="fr-outcome">{_v(f.outcome)}</span>')
-    # The row's own id embeds its world LABEL verbatim (`f-<label>-<draw>-<index>`); a label
-    # that fails the id grammar must never reach an attribute, so such a row renders with no
-    # id at all rather than the raw label smuggled into one (#1025 J5).
-    id_attr = f' id="{esc(f.row_id)}"' if _safe_id(f.label) else ""
-    # Joined with a real space, not "": two adjacent inline `<span>`s with nothing between them
-    # let the test harness's whitespace-collapsing `text()` glue their words into one token —
-    # which is how an unrelated world label ending in "...session" and a bucket value starting
-    # "analyze..." produced the literal substring "nan" on the page (#1025).
-    return f'<div{id_attr} class="fr-row">{" ".join(bits)}</div>'
+        alert_bits.append('<span class="hd-alert">alert rule: not on the record</span>')
 
+    source_run_id = manifest.get("source_run_id")
+    branch_message_id = manifest.get("branch_message_id")
+    meta_bits = list(alert_bits)
+    if isinstance(source_run_id, str):
+        meta_bits.append(f'<span class="hd-source">source {_v(source_run_id)}</span>')
+    if branch_message_id is not None:
+        meta_bits.append(f'<span class="hd-branch">branch message {_v(branch_message_id)}</span>')
 
-def _render_findings_body(rows: list[_Finding], grade: Any, grade_ok: bool, episode_id: str,
-                          world_reports: dict[str, Any],
-                          draw_failures: list[tuple[str, Any, str]] | None = None) -> str:
-    groups: dict[str, list[_Finding]] = {}
-    for f in rows:
-        heading = _disposition_heading_raw(f)
-        groups.setdefault(heading, []).append(f)
+    if grade is not None:
+        knobs = _mapping(grade.knobs)
+        draws = _mapping(grade.draws)
+        model = knobs.get("model", "?")
+        effort = knobs.get("effort", "?")
+        cap = knobs.get("payload_cap", "?")
+        configured = draws.get("configured", "?")
+        completed = draws.get("completed", "?")
+        knob_line = (f"{_v(model)} / {_v(effort)} / cap {_v(cap)} / "
+                    f"draws {_v(configured)}/{_v(completed)}")
+        meta_bits.append(f'<span class="hd-knobs">{knob_line}</span>')
+        if grade.lessons_commit:
+            meta_bits.append(f'<span class="hd-commit">{_v(str(grade.lessons_commit)[:8])}</span>')
 
-    parts = []
-    for n, (heading, group_rows) in enumerate(groups.items(), start=1):
-        rows_html = "".join(_finding_row_html(f) for f in group_rows)
-        parts.append(f'<details id="fg-{n}" class="fg"><summary>{_uv(heading)}</summary>'
-                    f'{rows_html}</details>')
-    body = "".join(parts)
-
-    dropped_seen: set[tuple[str, Any]] = set()
-    dropped_bits = []
-    for f in rows:
-        key = (f.label, f.draw)
-        if key in dropped_seen or f.dropped is None:
-            continue
-        dropped_seen.add(key)
-        dropped_bits.append(f'<div class="fr-dropped">draw {_v(f.draw)} of {_v(f.label)}: '
-                           f'{_v(f.dropped)} dropped</div>')
-    for label, draw, failure_reason in draw_failures or []:
-        dropped_seen.add((label, draw))
-        dropped_bits.append(f'<div class="fr-dropped">draw {_v(draw)} of {_v(label)}: '
-                           f'{_uv(failure_reason)} —</div>')
-    body += "".join(dropped_bits)
-
-    unreadable_total = sum(r.unreadable for r in world_reports.values())
-    skipped_total = sum(r.skipped for r in world_reports.values())
-    if unreadable_total:
-        body += f'<div class="fr-unreadable">{unreadable_total} draw documents unreadable</div>'
-    if skipped_total:
-        body += f'<div class="fr-skipped">{skipped_total} skipped</div>'
-    return body
+    meta = '<span class="hd-sep"> · </span>'.join(meta_bits)
+    return f"""
+<header class="top" id="sec-case">
+  <h1>episode {_v(ep.episode_id)}</h1>
+  <div class="byline">{meta}</div>
+</header>
+"""
 
 
 # =========================================================================================
@@ -927,33 +1229,34 @@ def _render_findings_body(rows: list[_Finding], grade: Any, grade_ok: bool, epis
 # =========================================================================================
 
 
-def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, grade_rec: _Record,  # noqa: C901, PLR0912, PLR0913, PLR0915 — the band, lede, four tiles and cards are one section (#1025 O1/O2), each reading its own record fields
-                    entries: dict[str, WorldEntry], roster_order: list[str],
-                    control_label: str | None, episode_id: str, episode_token: str,
-                    review_rec: _Record, timing_rec: _Record) -> str:
-    if grade is not None and grade.not_graded is not None:
+def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the band, lede, four tiles and cards are one section (#1025 O1/O2)
+    grade = ep.grade
+    if ep.not_graded:
         stamp = grade.not_graded
         band = (f'<div class="vd-band">not graded: '
                f'<span class="vd-reason">{_uv(stamp.reason)}</span></div>')
         return _page_section("sec-verdict", "Verdict", band)
 
-    if not grade_rec.ok:
-        band = f'<div class="vd-band">{esc(grade_rec.error)}</div>'
+    if not ep.grade_rec.ok:
+        band = f'<div class="vd-band">{esc(ep.grade_rec.error)}</div>'
         return _page_section("sec-verdict", "Verdict", band)
     if grade is None:
         band = '<div class="vd-band">no grade record</div>'
         return _page_section("sec-verdict", "Verdict", band)
 
-    rows, counts, _world_reports, _draw_failures = _walk_findings(
-        episode_dir, entries, grade, True, episode_id=episode_id)
+    entries = ep.entries
+    rows = ep.findings.rows
+    counts = ep.findings.counts
 
     lede_parts = []
     family_groups: dict[Any, list[_Finding]] = {}
     for f in rows:
-        if f.label == "family" and f.disposition != "never_on_record":
+        if f.label == _FAMILY_LABEL and f.disposition != "never_on_record":
             family_groups.setdefault(f.draw, []).append(f)
+    family_docs = ep.draws[_FAMILY_LABEL][0]
     for draw in sorted(family_groups, key=lambda d: (isinstance(d, str), d)):
-        outcome = _family_draw_outcome(episode_dir, draw)
+        doc = family_docs.get(draw) if isinstance(draw, int) else None
+        outcome = str(doc.get("episode_outcome", "")) if isinstance(doc, dict) else ""
         items = "".join(f'<div class="vd-family-item">{_uv(f.topic)}: {_uv(f.claim)}'
                         f' <span class="vd-outcome">{_uv(outcome)}</span></div>'
                         for f in family_groups[draw])
@@ -968,7 +1271,7 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
     lede_line = (f"{_uv(grade.verdict_word)} · {queued} "
                 f"findings queued · {counts['withheld']} withheld")
     if counts["withheld"]:
-        first_reason = next((f.reason for f in rows if f.disposition == "withheld"), None)
+        first_reason = _first_withheld_reason(rows)
         if first_reason:
             lede_line += f" ({_uv(first_reason)})"
     lede_parts.append(f'<div class="vd-lede">{lede_line}</div>')
@@ -981,14 +1284,16 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
                 and w.row.get("withheld_reason") is None}
     graded = {w.label for w in entries.values()
              if w.row is not None and not w.row.get("ungradable")}
-    control_declared = _normalized(_control_declared(manifest, control_label))
+    control_world = ep.manifest_world(ep.control_label) if ep.control_label else None
+    control_declared = _normalized_disposition(
+        control_world.get("disposition_declared") if control_world else None)
     contrasting = 0
     agree = 0
     for label in measuring:
         row = entries[label].row
         if row is None:
             continue
-        if _normalized(row.get("declared")) != control_declared:
+        if _normalized_disposition(row.get("declared")) != control_declared:
             contrasting += 1
         if row.get("verdict") == row.get("declared"):
             agree += 1
@@ -1015,7 +1320,7 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
     findings_total = counts["mappings"]
     split_parts = [f"{counts['defender']} defender", f"{counts['world_author']} world author",
                   f"{counts['withheld']} withheld", f"{counts['unqueueable']} unqueueable",
-                  "0 dropped"]
+                  f"{counts['dropped']} dropped"]
     if counts["never_eligible"]:
         split_parts.append(f"{counts['never_eligible']} never eligible")
     # THE WALK'S OWN COUNT (J9c) — never `grade.enqueued_rows`, which is the RECORD's figure
@@ -1025,7 +1330,6 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
         f'<div class="vd-tile" id="vd-tile-3">{tile_queued} of '
         f'{findings_total} <div class="vd-caption">{" / ".join(split_parts)}</div></div>')
 
-    total_cost, worlds_wall, lower_bound = _cost_totals(episode_dir, manifest, entries)
     # The lower-bound label is the STAGES header's own fallback caption — owed whenever there is
     # no REAL wall to compute from: absent (`present=False`) and present-but-unreadable
     # (`ok=False`, the STAGES table's own distinct "timing record unreadable" refusal) both
@@ -1033,14 +1337,15 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
     # though the stage table itself tells the two apart (spec resolution, PR body). With a
     # genuinely readable, non-empty record the header carries the real figure instead, and this
     # tile must not repeat the fallback beside it.
-    bound_html = f'<br>{lower_bound}' if not (timing_rec.ok and timing_rec.value) else ""
+    timing_rec = ep.timing_rec
+    bound_html = f'<br>{ep.lower_bound}' if not (timing_rec.ok and timing_rec.value) else ""
     tile4 = (
-        f'<div class="vd-tile" id="vd-tile-4">{_money(total_cost)}'
-        f'<div class="vd-caption">{worlds_wall}{bound_html}</div></div>')
+        f'<div class="vd-tile" id="vd-tile-4">{_money(ep.total_cost)}'
+        f'<div class="vd-caption">{ep.worlds_wall}{bound_html}</div></div>')
 
     cards = []
     for w in entries.values():
-        if w.label == control_label or w.row is None or w.row.get("ungradable"):
+        if w.label == ep.control_label or w.row is None or w.row.get("ungradable"):
             continue
         row = w.row
         header = f"{_v(row.get('declared'))} → {_v(row.get('verdict'))}"
@@ -1048,22 +1353,31 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
                   else _v(row.get("bucket")))
         chip_bits = "".join(f'<span class="vd-chip">{_v(k)}={_v(row.get(k))}</span>'
                            for k in _CHIP_FIELDS if k in row)
-        reach = (family.world_review_block(review_rec.value, w.label)
-                if review_rec.ok and isinstance(review_rec.value, dict) else None)
+        reach = ep.review_block(w.label)
         envelope_note = ""
         if isinstance(reach, dict) and reach.get("envelope_failed"):
             first_line = str(reach["envelope_failed"]).splitlines()[0]
             envelope_note = f'<div class="vd-envelope">{_uv(first_line)}</div>'
-        world_group = [f for f in rows if f.label == w.label and f.subject == "defender"]
+        # The footer counts this world's DEFENDER rows and links the group its first one sits
+        # in — the same rows, so the count and the anchor cannot name different things; a
+        # world-author row that happens to come first in the walk is not what "N findings ·
+        # enqueued" is about.
+        world_group = [f for f in rows if f.label == w.label and f.subject == SUBJECT_DEFENDER]
         n_findings = len(world_group)
-        footer_word = "withheld" if row.get("withheld_reason") is not None else "enqueued"
-        group_id = f"fg-{_group_index_for(w.label, rows)}"
+        if row.get("withheld_reason") is not None:
+            footer_word = "withheld"
+        elif world_group and all(f.disposition == "never_eligible" for f in world_group):
+            footer_word = "never eligible"
+        else:
+            footer_word = "enqueued"
+        group_n = (ep.findings.group_index.get(_disposition_heading_raw(world_group[0]), 1)
+                   if world_group else 1)
         off_roster_note = ("" if w.in_manifest or w.run_dir_name is not None
                           else '<div class="vd-off-roster">not in the manifest</div>')
         cards.append(
             f'<div class="vd-cause">{_uv(w.label)} {header} {heading}{off_roster_note}'
             f'{chip_bits}{envelope_note}'
-            f'<a href="#{esc(group_id)}">{n_findings} findings · {footer_word}</a>'
+            f'<a href="#fg-{group_n}">{n_findings} findings · {footer_word}</a>'
             f'</div>')
 
     discard = getattr(grade, "discard_evidence", None)
@@ -1080,27 +1394,9 @@ def _render_verdict(episode_dir: Path, manifest: dict[str, Any], grade: Any, gra
     return _page_section("sec-verdict", "Verdict", body)
 
 
-def _group_index_for(label: str, rows: list[_Finding]) -> int:
-    groups: dict[str, int] = {}
-    n = 0
-    for f in rows:
-        h = _disposition_heading_raw(f)
-        if h not in groups:
-            n += 1
-            groups[h] = n
-        if f.label == label:
-            return groups[h]
-    return 1
-
-
-def _control_declared(manifest: dict[str, Any], control_label: str | None) -> Any:
-    for w in manifest.get("worlds") or []:
-        if isinstance(w, dict) and w.get("world_id") == control_label:
-            return w.get("disposition_declared")
-    return None
-
-
-def _normalized(value: Any) -> Any:
+def _normalized_disposition(value: Any) -> Any:
+    """A declared/verdict disposition through the vocabulary's own normalizer, for the tile's
+    control-contrast count — the raw value where it is not a string the normalizer knows."""
     if not isinstance(value, str):
         return value
     try:
@@ -1110,115 +1406,6 @@ def _normalized(value: Any) -> Any:
         return value
 
 
-def _family_draw_outcome(episode_dir: Path, draw: Any) -> str:
-    d = Path(episode_dir) / archive.WORLDS_DIRNAME / "family" / archive.DRAWS_DIRNAME
-    docs = draws_on_disk(d)
-    doc = docs.get(draw) if isinstance(draw, int) else None
-    if isinstance(doc, dict):
-        return str(doc.get("episode_outcome", ""))
-    return ""
-
-
-def _cost_totals(episode_dir: Path, manifest: dict[str, Any],
-                 entries: dict[str, WorldEntry]) -> tuple[float, str, str]:
-    total = 0.0
-    walls = []
-    for w in entries.values():
-        run_dir = _run_dir_path(episode_dir, w)
-        if run_dir is None:
-            continue
-        cost, wall_ms, _state = _result_event(run_dir)
-        if cost is not None:
-            total += cost
-        if wall_ms:
-            walls.append(wall_ms)
-    q_cost, q_wall_ms, _qp, _qt = _trace_cost(episode_dir, "questioner")
-    j_cost, j_wall_ms, _jp, _jt = _trace_cost(episode_dir, Step.JUDGE)
-    total += q_cost + j_cost
-    if walls:
-        wall_range = f"{fmt_duration(min(walls))}–{fmt_duration(max(walls))}"
-        lower_bound = f"≈ {fmt_duration(q_wall_ms + j_wall_ms + max(walls))} lower bound on wall: model calls + longest world"
-    else:
-        wall_range = ""
-        lower_bound = ""
-    return total, wall_range, lower_bound
-
-
-def _run_dir_path(episode_dir: Path, w: WorldEntry) -> Path | None:
-    p = episode_dir / "runs"
-    if w.run_dir_name:
-        return p / w.run_dir_name
-    return None
-
-
-def _result_event(run_dir: Path) -> tuple[float | None, float | None, str]:
-    trace = run_dir / "tool_trace.jsonl"
-    if not (trace.exists() or trace.is_symlink()):
-        return None, None, "absent"
-    if not artifact_file(trace):
-        return None, None, "refused"
-    rows, _bad = read_jsonl_rows_report(trace)
-    if not rows or rows[-1].get("type") != "result":
-        return None, None, "none"
-    last = rows[-1]
-    cost = last.get("total_cost_usd")
-    duration = last.get("duration_ms")
-    if not isinstance(cost, (int, float)) or isinstance(cost, bool) or not math.isfinite(cost) \
-            or cost < 0:
-        return None, duration if isinstance(duration, (int, float)) else None, "unusable"
-    return float(cost), float(duration) if isinstance(duration, (int, float)) else None, "ok"
-
-
-def _trace_cost(episode_dir: Path, role_prefix: str) -> tuple[float, float, int, int]:  # noqa: C901 — the priced/wall-time split per call, one pass over one stream
-    """`(cost, wall_ms, priced_calls, total_calls)` for every trace file this stage's role
-    owns — one call per FILE. A call is "priced" when its response row carries `usage` and a
-    `model` the pricing table resolves; the wall total sums `duration_ms` only where present,
-    independently of whether the call priced (#1025 J13b)."""
-    total = 0.0
-    wall = 0.0
-    priced_calls = 0
-    total_calls = 0
-    wire = episode_dir / "wire_logs"
-    if not artifact_dir(wire):
-        return 0.0, 0.0, 0, 0
-    for path in sorted(wire.glob("*.jsonl")):
-        if "_framed_trace" in path.name or not path.name.endswith("_trace.jsonl"):
-            continue
-        agent = path.name[: -len("_trace.jsonl")]
-        if role_prefix == "questioner" and not agent.startswith("questioner"):
-            continue
-        if role_prefix == Step.JUDGE and not agent.startswith("judge_"):
-            continue
-        total_calls += 1
-        # `artifact_file` (lstat) ahead of the read: `wire_logs/` sits under the episode dir, a
-        # tree a sibling box has an rw bind on (`judge.__init__._write_wire_log`'s own docstring
-        # names it), and `read_jsonl_rows_report` is the shared tolerant reader's own bare
-        # `is_file()` + `read_text` — unguarded on its own, exactly the pattern `_result_event`
-        # above already screens before calling it.
-        if not artifact_file(path):
-            continue
-        rows, _bad = read_jsonl_rows_report(path)
-        call_priced = False
-        for row in rows:
-            if row.get("kind") != "response":
-                continue
-            usage = row.get("usage")
-            model = row.get("model")
-            duration = row.get("duration_ms")
-            if isinstance(usage, dict) and isinstance(model, str):
-                try:
-                    total += pricing.usage_cost(model, usage)
-                    pricing.model_key(model)
-                    call_priced = True
-                except pricing.UnknownModel:
-                    pass
-            if isinstance(duration, (int, float)):
-                wall += duration
-        if call_priced:
-            priced_calls += 1
-    return total, wall, priced_calls, total_calls
-
-
 def _render_queue_accounting(grade: Any, counts: dict[str, int], rows: list[_Finding]) -> str:
     lines = [
         f'defender: {grade.enqueued_rows} enqueued to {_uv(grade.enqueued_to)}',
@@ -1226,7 +1413,7 @@ def _render_queue_accounting(grade: Any, counts: dict[str, int], rows: list[_Fin
         f'withheld {counts["withheld"]} ({_v(_first_withheld_reason(rows))})',
         f'unqueueable {counts["unqueueable"]}',
         f'malformed {grade.queue_malformed_rows} / {grade.world_queue_malformed_rows}',
-        'dropped 0',
+        f'dropped {counts["dropped"]}',
         f'family malformed replies {grade.family_malformed_replies}',
     ]
     discard = getattr(grade, "discard_evidence", None)
@@ -1238,7 +1425,7 @@ def _render_queue_accounting(grade: Any, counts: dict[str, int], rows: list[_Fin
                           f'{abs(grade.enqueued_rows - counts["defender"])}</span>')
     lines.append(record_vs_page)
 
-    recorded_withheld = len(getattr(grade, "withheld_findings", None) or [])
+    recorded_withheld = len(_items(getattr(grade, "withheld_findings", None)))
     matched = min(recorded_withheld, counts["withheld"])
     withheld_line = f'withheld list: {recorded_withheld} entries · {matched} matched'
     if recorded_withheld != counts["withheld"]:
@@ -1246,7 +1433,7 @@ def _render_queue_accounting(grade: Any, counts: dict[str, int], rows: list[_Fin
                          f'{abs(recorded_withheld - counts["withheld"])}</span>')
     lines.append(withheld_line)
 
-    for line in getattr(grade, "unqueueable_findings", None) or []:
+    for line in _items(getattr(grade, "unqueueable_findings", None)):
         lines.append(_uv(str(line)))
 
     return f'<details class="vd-acct"><summary>Queue accounting</summary>' \
@@ -1265,13 +1452,9 @@ def _first_withheld_reason(rows: list[_Finding]) -> str | None:
 # =========================================================================================
 
 
-def _render_worlds(episode_dir: Path, manifest: dict[str, Any], entries: dict[str, WorldEntry],
-                   roster_order: list[str], control_label: str | None, review_rec: _Record,
-                   grade: Any, episode_id: str) -> str:
+def _render_worlds(ep: _Episode) -> str:
     guide_rows = []
-    for w in manifest.get("worlds") or []:
-        if not isinstance(w, dict):
-            continue
+    for w in ep.manifest_worlds:
         label = w.get("world_id")
         if not isinstance(label, str):
             guide_rows.append(_unnameable(str(label), what="world label"))
@@ -1280,8 +1463,8 @@ def _render_worlds(episode_dir: Path, manifest: dict[str, Any], entries: dict[st
         if safe is None:
             guide_rows.append(_unnameable(label, what="world label"))
             continue
-        declared = _declared_for(label, w, entries)
-        if label == control_label:
+        declared = _declared_for(label, w, ep.entries)
+        if label == ep.control_label:
             guide_rows.append(f'<div class="vd-guide-row">{esc(label)} — '
                              f'the branch point untouched, not graded · {_v(declared)}</div>')
             continue
@@ -1291,13 +1474,10 @@ def _render_worlds(episode_dir: Path, manifest: dict[str, Any], entries: dict[st
         guide_rows.append(f'<div class="vd-guide-row">{esc(label)} '
                          f'({esc(str(w.get("role")))}) {_v(declared)} {axis_html}</div>')
 
-    sections = []
-    for label in roster_order:
-        sections.append(_render_one_world(episode_dir, manifest, entries, label, control_label,
-                                          review_rec, grade, episode_id))
+    sections = [_render_one_world(ep, label) for label in ep.roster_order]
 
     body = f'<div class="vd-guide">{"".join(guide_rows)}</div>{"".join(sections)}'
-    return _page_section("sec-worlds", f"Worlds ({len(entries)})", body)
+    return _page_section("sec-worlds", f"Worlds ({len(ep.entries)})", body)
 
 
 def _declared_for(label: str, manifest_world: dict[str, Any],
@@ -1308,51 +1488,43 @@ def _declared_for(label: str, manifest_world: dict[str, Any],
     return manifest_world.get("disposition_declared")
 
 
-def _render_one_world(  # noqa: C901, PLR0912, PLR0915 — one world's whole section (state, ladder, chips, archive, review) is one demand (#1025 J7/J8/J16)
-                      episode_dir: Path, manifest: dict[str, Any],
-                      entries: dict[str, WorldEntry], label: str, control_label: str | None,
-                      review_rec: _Record, grade: Any, episode_id: str) -> str:
+def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one world's whole section (state, ladder, chips, archive, review) is one demand (#1025 J7/J8/J16)
     safe = _safe_id(label)
     if safe is None:
         return _unnameable(label, what="world directory")
-    entry = entries.get(label)
+    entry = ep.entries.get(label)
     if entry is None:
         # A `runs/` directory whose name did not decompose into `<episode_id>-<label>` (J7
         # iv) — it is not a world at all, so it gets a minimal section keyed on its own full
         # name rather than the normal record-driven rendering.
-        run_dir = episode_dir / "runs" / label
-        if artifact_dir(run_dir):
-            link = f"runs/{label}/runtime.html"
-            return (f'<div id="world-{esc(safe)}" class="w-section">'
-                   f'<span class="w-name">{_v(label)}</span>'
-                   f'<div class="w-state">not declared in the manifest</div>'
-                   f'<a href="{esc(link)}">runtime</a></div>')
-        entry = WorldEntry(label)
+        link = f"{RUNS_SUBDIR}/{label}/runtime.html"
+        return (f'<div id="world-{esc(safe)}" class="w-section">'
+               f'<span class="w-name">{_v(label)}</span>'
+               f'<div class="w-state">not declared in the manifest</div>'
+               f'<a href="{esc(link)}">runtime</a></div>')
+    grade = ep.grade
     # J14: a `not_graded` stamp voids the whole family's word, so every world's RECORD-derived
     # state (the ladder, the bucket, the withheld reason) is exactly what an episode with no
     # grade at all shows — "not graded" — even though the row is still physically on the
     # document; the run-dir/archive-derived parts below are unaffected.
-    not_graded = grade is not None and grade.not_graded is not None
-    row = None if not_graded else entry.row
+    row = None if ep.not_graded else entry.row
     bits = []
-    if grade is not None and not not_graded and row is None and not entry.in_manifest \
+    if grade is not None and not ep.not_graded and row is None and not entry.in_manifest \
             and entry.run_dir_name is None:
         bits.append('<div class="w-state">not in the manifest</div>')
 
-    draws_dir = episode_dir / archive.WORLDS_DIRNAME / label / archive.DRAWS_DIRNAME
-    _docs, draws_report = draws_on_disk_report(draws_dir)
+    _docs, draws_report = ep.draws[label]
     if draws_report.unreadable:
         bits.append(f'<div class="w-unreadable">{draws_report.unreadable} draw documents '
                    f'unreadable</div>')
     if draws_report.skipped:
         bits.append(f'<div class="w-skipped">{draws_report.skipped} skipped</div>')
 
+    manifest_world = ep.manifest_world(label)
     if row is None:
         bits.append('<div class="w-state">not graded</div>')
-        manifest_world = next((w for w in manifest.get("worlds") or []
-                              if isinstance(w, dict) and w.get("world_id") == label), None)
         if manifest_world is not None:
-            declared = _declared_for(label, manifest_world, entries)
+            declared = _declared_for(label, manifest_world, ep.entries)
             bits.append(f'<div class="w-declared">{_v(declared)}</div>')
     elif row.get("ungradable"):
         bits.append('<div class="w-state">ungradable</div>')
@@ -1365,59 +1537,54 @@ def _render_one_world(  # noqa: C901, PLR0912, PLR0915 — one world's whole sec
         bits.append(f'<div class="w-verdict">{_v(row.get("verdict"))}</div>')
         bits.append(_ladder_html(row))
 
-    bits.append(_chip_html(row, review_rec, label))
+    bits.append(_chip_html(row, ep.review_block(label)))
 
-    manifest_world = next((w for w in manifest.get("worlds") or []
-                          if isinstance(w, dict) and w.get("world_id") == label), None)
     if manifest_world is not None:
         axis = manifest_world.get("axis")
         if isinstance(axis, str):
             bits.append(f'<div class="w-axis"><q class="verbatim">{_uv(axis)}</q></div>')
 
-    run_dir = episode_dir / "runs" / f"{episode_id}-{label}"
-    if artifact_dir(run_dir):
-        cost, wall_ms, state = _result_event(run_dir)
-        link = f"runs/{episode_id}-{label}/runtime.html"
+    result = entry.result
+    if result is not None:
+        link = f"{RUNS_SUBDIR}/{entry.run_dir_name}/runtime.html"
         bits.append(f'<a href="{esc(link)}">runtime</a>')
-        if state == "ok" and cost is not None:
-            bits.append(f'<span class="w-cost">{_money(cost)}</span>')
-            if wall_ms:
-                bits.append(f'<span class="w-wall">{fmt_duration(wall_ms)}</span>')
-        elif state == "refused":
+        if result.state == "ok" and result.cost is not None:
+            bits.append(f'<span class="w-cost">{_money(result.cost)}</span>')
+            if result.wall_ms:
+                bits.append(f'<span class="w-wall">{fmt_duration(result.wall_ms)}</span>')
+        elif result.state == "refused":
             bits.append('<span class="w-cost">no result event (refused)</span>')
         else:
             bits.append('<span class="w-cost">no result event</span>')
     else:
         bits.append('<div class="w-archive">run directory absent</div>')
 
-    world_dir = episode_dir / "worlds" / label
-    if not artifact_dir(world_dir):
+    archived = entry.archive
+    if archived is None:
         bits.append('<div class="w-archive">not archived</div>')
     else:
-        report_path = world_dir / "report.md"
-        if not (report_path.exists() or report_path.is_symlink()):
+        if archived.report is None:
             bits.append('<div class="w-archive">not archived</div>')
-        elif artifact_file(report_path):
-            # Screened: this world's own archived report, through the package reader — a
-            # symlink at the name is refused above rather than followed here.
-            report = read_report(report_path)
-            bits.append(f'<div class="w-report">{_v(report.disposition_or_unknown)}</div>')
         else:
-            bits.append('<div class="w-archive">report record unreadable</div>')
-        if (not (world_dir / "investigation.md").exists()
-                and not (world_dir / "investigation.md").is_symlink()):
+            headline = archived.report.disposition_or_unknown
+            if archived.report.disposition is None and archived.report.reason:
+                # No headline: the reader's own reason (a refused entry at the name, a
+                # frontmatter that did not parse, a disposition outside the vocabulary) is the
+                # slot's answer, beside the placeholder.
+                headline += f" — {archived.report.reason}"
+            bits.append(f'<div class="w-report">{_v(headline)}</div>')
+        if not archived.investigation_present:
             bits.append('<div class="w-archive">not archived</div>')
-        prov = family.json_mapping(world_dir / PROVENANCE)
-        if prov is not None:
-            bits.append(f'<div class="w-prov">{_v(prov.get("commit"))}</div>')
+        if archived.provenance is not None:
+            bits.append(f'<div class="w-prov">{_v(archived.provenance.get("commit"))}</div>')
         else:
             bits.append('<div class="w-prov">absent</div>')
-        scrub = family.json_mapping(world_dir / archive.SCRUB_VERDICT_NAME)
-        if scrub is None:
+        if archived.scrub is None:
             bits.append('<div class="w-scrub">not recorded</div>')
         else:
-            bits.append(f'<div class="w-scrub">{_v(scrub)}</div>')
+            bits.append(f'<div class="w-scrub">{_v(archived.scrub)}</div>')
 
+    review_rec = ep.review_rec
     review_worlds = review_rec.value.get("worlds") if review_rec.ok and isinstance(
         review_rec.value, dict) else None
     review_entry = review_worlds.get(label) if isinstance(review_worlds, dict) else None
@@ -1459,10 +1626,8 @@ def _ladder_html(row: dict[str, Any]) -> str:
     return "".join(bits)
 
 
-def _chip_html(row: dict[str, Any] | None, review_rec: _Record, label: str) -> str:
+def _chip_html(row: dict[str, Any] | None, reach: dict[str, Any] | None) -> str:
     bits = []
-    reach = (family.world_review_block(review_rec.value, label)
-            if review_rec.ok and isinstance(review_rec.value, dict) else None)
     for field in _CHIP_FIELDS:
         if row is not None and field in row:
             bits.append(f'<span class="w-chip">{esc(field)}: {_v(row[field])}</span>')
@@ -1488,20 +1653,90 @@ def _chip_html(row: dict[str, Any] | None, review_rec: _Record, label: str) -> s
     return "".join(bits)
 
 
-def _render_findings(episode_dir: Path, manifest: dict[str, Any], grade: Any, grade_rec: _Record,
-                     entries: dict[str, WorldEntry], roster_order: list[str],
-                     episode_id: str, off_roster: int) -> str:
-    if grade is not None and grade.not_graded is not None:
+# =========================================================================================
+# Findings section
+# =========================================================================================
+
+
+def _finding_row_html(f: _Finding) -> str:  # noqa: C901 — one row's worth of optional fields, each independently absent
+    bits = [f'<span class="fr-world">{_uv(f.label)}</span>']
+    if f.bucket is not None:
+        cls = _BUCKET_CLASS.get(f.bucket, "bucket-other")
+        bits.append(f'<span class="fr-bucket {cls}">{_uv(f.bucket)}</span>')
+    if f.subject is not None:
+        bits.append(f'<span class="fr-subject">{_uv(f.subject)}</span>')
+    if f.stub:
+        bits.append('<div class="fr-stub">draw document absent</div>')
+        if f.claim:
+            bits.append(f'<div class="fr-claim">{_uv(f.claim)}</div>')
+    else:
+        if f.claim is not None:
+            bits.append(f'<div class="fr-claim">{_uv(f.claim)}</div>')
+        if f.root_cause is not None:
+            bits.append(f'<div class="fr-root">{_uv(f.root_cause)}</div>')
+        if f.anchor is not None:
+            bits.append(f'<span class="fr-anchor">{_uv(f.anchor)}</span>')
+        if f.topic is not None:
+            bits.append(f'<span class="fr-topic">{_uv(f.topic)}</span>')
+        for e in _items(f.evidence):
+            bits.append(f'<span class="fr-evidence">{_uv(e)}</span>')
+        if f.world_field is not None:
+            bits.append(f'<span class="fr-world-field">{_uv(f.world_field)}</span>')
+    if f.recorded_id is not None:
+        bits.append(f'<span class="fr-recorded-id">{_uv(f.recorded_id)}</span>')
+    if f.outcome is not None:
+        # J10: the draw's own `episode_outcome` word, bound beside its findings.
+        bits.append(f'<span class="fr-outcome">{_v(f.outcome)}</span>')
+    # The row's own id embeds its world LABEL verbatim (`f-<label>-<draw>-<index>`); a label
+    # that fails the id grammar must never reach an attribute, so such a row renders with no
+    # id at all rather than the raw label smuggled into one (#1025 J5).
+    id_attr = f' id="{esc(f.row_id)}"' if _safe_id(f.label) else ""
+    # Joined with a real space, not "": two adjacent inline `<span>`s with nothing between them
+    # let the test harness's whitespace-collapsing `text()` glue their words into one token —
+    # which is how an unrelated world label ending in "...session" and a bucket value starting
+    # "analyze..." produced the literal substring "nan" on the page (#1025).
+    return f'<div{id_attr} class="fr-row">{" ".join(bits)}</div>'
+
+
+def _render_findings_body(findings: _Findings) -> str:
+    groups: dict[str, list[_Finding]] = {}
+    for f in findings.rows:
+        groups.setdefault(_disposition_heading_raw(f), []).append(f)
+
+    parts = []
+    for heading, group_rows in groups.items():
+        rows_html = "".join(_finding_row_html(f) for f in group_rows)
+        n = findings.group_index[heading]
+        parts.append(f'<details id="fg-{n}" class="fg"><summary>{_uv(heading)}</summary>'
+                    f'{rows_html}</details>')
+    body = "".join(parts)
+
+    dropped_bits = []
+    for label, draw, dropped in findings.dropped:
+        dropped_bits.append(f'<div class="fr-dropped">draw {_v(draw)} of {_v(label)}: '
+                           f'{_v(dropped)} dropped</div>')
+    for label, draw, failure_reason in findings.draw_failures:
+        dropped_bits.append(f'<div class="fr-dropped">draw {_v(draw)} of {_v(label)}: '
+                           f'{_uv(failure_reason)} —</div>')
+    body += "".join(dropped_bits)
+
+    unreadable_total = sum(r.unreadable for r in findings.world_reports.values())
+    skipped_total = sum(r.skipped for r in findings.world_reports.values())
+    if unreadable_total:
+        body += f'<div class="fr-unreadable">{unreadable_total} draw documents unreadable</div>'
+    if skipped_total:
+        body += f'<div class="fr-skipped">{skipped_total} skipped</div>'
+    return body
+
+
+def _render_findings_section(ep: _Episode) -> str:
+    if ep.not_graded:
         return _page_section("sec-findings", "Findings (0)", "")
-    grade_ok = grade is not None
-    rows, _walk_counts, world_reports, draw_failures = _walk_findings(
-        episode_dir, entries, grade, grade_ok, episode_id=episode_id)
-    body = _render_findings_body(rows, grade, grade_ok, episode_id, world_reports,
-                                 draw_failures)
-    if off_roster:
-        body += (f'<div class="fr-off-roster">{off_roster} entries under worlds/ are not on '
+    body = _render_findings_body(ep.findings)
+    if ep.off_roster:
+        body += (f'<div class="fr-off-roster">{ep.off_roster} entries under worlds/ are not on '
                 f'the record</div>')
-    n = len(rows)
+    n = len(ep.findings.rows)
     return _page_section("sec-findings", f"Findings ({n})", body)
 
 
@@ -1510,51 +1745,40 @@ def _render_findings(episode_dir: Path, manifest: dict[str, Any], grade: Any, gr
 # =========================================================================================
 
 
-def _render_stages(episode_dir: Path, manifest: dict[str, Any], grade: Any, timing_rec: _Record,  # noqa: C901, PLR0912, PLR0915 — the stage table, the two clocks and every trace block are one section (#1025 O4)
-                   entries: dict[str, WorldEntry], roster_order: list[str], episode_id: str,
-                   episode_token: str) -> str:
+def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the stage table, the two clocks and every trace block are one section (#1025 O4)
+    timing_rec = ep.timing_rec
     rows_by_step: dict[str, list[dict[str, Any]]] = {}
     if timing_rec.ok:
         for row in timing_rec.value or []:
             rows_by_step.setdefault(row["step"], []).append(row)
-
-    total_cost, worlds_wall, lower_bound = _cost_totals(episode_dir, manifest, entries)
-    q_cost, q_wall_ms, q_priced, q_calls = _trace_cost(episode_dir, "questioner")
-    j_cost, j_wall_ms, j_priced, j_calls = _trace_cost(episode_dir, Step.JUDGE)
+    q_cost, q_wall_ms, q_priced, q_calls = ep.wire.role_cost("questioner")
+    j_cost, j_wall_ms, j_priced, j_calls = ep.wire.role_cost(Step.JUDGE)
+    review_total, review_calls = ep.wire.comparator_cost()
 
     table_rows = []
-    header_walls = []
+    header_walls: list[tuple[str, str]] = []
     for step in STEPS:
         entries_for_step = rows_by_step.get(str(step), [])
         if timing_rec.error:
             wall_text = ""
         elif entries_for_step:
-            starts = [r["started_at"] for r in entries_for_step]
-            ends = [r["ended_at"] for r in entries_for_step]
-            durations = []
-            for r in entries_for_step:
-                d = _wall_between(r["started_at"], r["ended_at"])
-                if d is not None:
-                    durations.append(d)
-                    # Only a POSITIVE duration feeds the header span: an inverted row (`d <= 0`,
-                    # `_wall_between`'s own negative-duration sentinel) already shows "—" in its
-                    # own cell rather than a number, and letting its untrustworthy pair still
-                    # widen or narrow min(start)/max(end) would silently corrupt the one
-                    # aggregate the row's own display just refused to state (#1025 p5).
-                    if d > 0:
-                        header_walls.append((r["started_at"], r["ended_at"]))
+            walls = [(r, _wall_between(r["started_at"], r["ended_at"])) for r in entries_for_step]
+            durations = [d for _r, d in walls if d is not None]
+            # Only a NON-INVERTED pair feeds either span: an inverted row (`d < 0`,
+            # `_wall_between`'s own sentinel) already shows "—" in its own cell rather than a
+            # number, and letting its untrustworthy pair still widen or narrow min(start)/
+            # max(end) would silently corrupt the one aggregate the row's own display just
+            # refused to state (#1025 p5). A ZERO-length pair is not inverted: the clock stamps
+            # whole seconds (`now_iso()`), so a step that starts and ends within one is a real
+            # step whose endpoints belong in the span.
+            trusted = [r for r, d in walls if d is not None and d >= 0]
+            header_walls.extend((r["started_at"], r["ended_at"]) for r in trusted)
             if durations:
                 # The row's own wall is its FIRST entry's start to its LAST entry's end (J15) —
-                # never a sum, which double-counts a repeated step's own reported span.
-                # POSITIVE only — the same filter `header_walls` above already applies: an
-                # inverted entry's own pair is untrustworthy (its own cell already shows "—"
-                # for exactly this reason) and must widen or narrow neither aggregate, the
-                # row's own span included, not only the page-wide header (#1025 p5).
-                span_starts = [r["started_at"] for r in entries_for_step
-                              if (_wall_between(r["started_at"], r["ended_at"]) or 0) > 0]
-                span_ends = [r["ended_at"] for r in entries_for_step
-                            if (_wall_between(r["started_at"], r["ended_at"]) or 0) > 0]
-                wall_text = fmt_duration(_wall_span(span_starts, span_ends))
+                # never a sum, which double-counts a repeated step's own reported span — over
+                # the same trusted pairs the header uses.
+                wall_text = fmt_duration(_wall_span([r["started_at"] for r in trusted],
+                                                    [r["ended_at"] for r in trusted]))
             else:
                 wall_text = "—"
             if len(entries_for_step) > 1:
@@ -1562,24 +1786,11 @@ def _render_stages(episode_dir: Path, manifest: dict[str, Any], grade: Any, timi
         else:
             wall_text = "not on the record"
         if str(step) == "questioner":
-            if not q_calls:
-                cost_text = "no cost recorded"
-            elif q_priced < q_calls:
-                cost_text = (f"{_money(q_cost)} · {q_calls} traces · {fmt_duration(q_wall_ms)} · "
-                            f"partial — {q_priced} of {q_calls} calls priced")
-            else:
-                cost_text = f"{_money(q_cost)} · {q_calls} traces · {fmt_duration(q_wall_ms)}"
+            cost_text = _role_cost_text(q_cost, q_wall_ms, q_priced, q_calls)
         elif str(step) == Step.JUDGE:
-            if not j_calls:
-                cost_text = "no cost recorded"
-            elif j_priced < j_calls:
-                cost_text = (f"{_money(j_cost)} · {j_calls} traces · {fmt_duration(j_wall_ms)} · "
-                            f"partial — {j_priced} of {j_calls} calls priced")
-            else:
-                cost_text = f"{_money(j_cost)} · {j_calls} traces · {fmt_duration(j_wall_ms)}"
+            cost_text = _role_cost_text(j_cost, j_wall_ms, j_priced, j_calls)
         elif str(step) == "review":
-            comp_cost, comp_calls = _comparator_cost(episode_dir)
-            cost_text = f"{_money(comp_cost)}" if comp_calls else "no model calls"
+            cost_text = f"{_money(review_total)}" if review_calls else "no model calls"
         elif str(step) == "runs":
             # The RUNS step's own row names no model calls — its cost lives on the per-run
             # sub-rows below, which are not "no model calls" (they are model calls the worlds
@@ -1600,41 +1811,39 @@ def _render_stages(episode_dir: Path, manifest: dict[str, Any], grade: Any, timi
         header_wall_text = fmt_duration(_wall_span(starts, ends))
         table = "".join(table_rows)
     else:
-        header_wall_text = lower_bound
+        header_wall_text = ep.lower_bound
         table = '<div class="st-caption">model-call time — no timing record</div>' + "".join(table_rows)
 
-    review_total, review_calls = _comparator_cost(episode_dir)
-    # `total_cost` (from `_cost_totals`) already sums the worlds' results PLUS questioner and
-    # judge traces — adding `q_cost`/`j_cost` again here would double them.
-    grand_total = total_cost + review_total
+    # `ep.total_cost` already sums the worlds' results PLUS questioner and judge traces —
+    # adding `q_cost`/`j_cost` again here would double them.
+    grand_total = ep.total_cost + review_total
     # No line at all — not "$0.0000" — when nothing anywhere priced: a launcher-produced
     # episode with no trace files owes no total any more than its own rows owe one (#1025,
     # matching the runs section's own `any_costed` guard just below).
-    if q_calls or j_calls or review_calls or total_cost:
+    if q_calls or j_calls or review_calls or ep.total_cost:
         table += (f'<div class="st-total">{_money(grand_total)} — excludes gather subagents and '
                 f'the review gate</div>')
 
     runs_rows = []
     runs_total = 0.0
     any_costed = False
-    for w in entries.values():
-        run_dir = episode_dir / "runs" / f"{episode_id}-{w.label}"
-        if not artifact_dir(run_dir):
+    for w in ep.entries.values():
+        result = w.result
+        if result is None:
             continue
-        cost, wall_ms, state = _result_event(run_dir)
-        if state == "ok" and cost is not None:
+        if result.state == "ok" and result.cost is not None:
             any_costed = True
-            runs_total += cost
-            runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} {_money(cost)} '
-                            f'{fmt_duration(wall_ms) if wall_ms else ""} '
+            runs_total += result.cost
+            runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} {_money(result.cost)} '
+                            f'{fmt_duration(result.wall_ms) if result.wall_ms else ""} '
                             f'<span class="rn-launcher">result event</span></div>')
-        elif state == "refused":
+        elif result.state == "refused":
             runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} '
                             f'no result event (refused)</div>')
-        elif state == "unusable":
+        elif result.state == "unusable":
             runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} '
                             f'unusable result event</div>')
-        elif state == "absent":
+        elif result.state == "absent":
             # No `tool_trace.jsonl` at all — a launcher-produced run that never wrote one, not
             # a sibling whose trace simply lacks a terminal result row (#1025). "no result
             # event" implies a trace WAS read; here nothing was there to read at all, so the
@@ -1662,18 +1871,18 @@ def _render_stages(episode_dir: Path, manifest: dict[str, Any], grade: Any, timi
         anchor = stages_id_map.get(str(step))
         id_attr = f' id="{esc(anchor)}"' if anchor else ""
         stage_blocks.append(f'<div{id_attr} class="stage-block">{content}{extra}'
-                           f'{_transcript_blocks_for_step(episode_dir, str(step), episode_id, entries)}'
+                           f'{_transcript_blocks_for_step(ep, str(step))}'
                            f'</div>')
 
     timing_block = f'<div id="stage-timing" class="stage-timing">{table}</div>'
-    unattributed = _unattributed_traces(episode_dir, entries)
+    unattributed = _unattributed_traces(ep)
     unattributed_html = ""
     if unattributed:
         unattributed_html = (f'<div class="st-unattributed">unattributed traces: '
                             f'{", ".join(esc(n) for n in unattributed)}</div>')
 
     if timing_rec.error or not header_walls:
-        header_line = f'<div class="hd-lower-bound">{esc(lower_bound)}</div>'
+        header_line = f'<div class="hd-lower-bound">{esc(ep.lower_bound)}</div>'
     else:
         header_line = (f'<div class="hd-wall">{esc(header_wall_text)} — the launcher\'s wall '
                       f'from the first step\'s start to the last step\'s end; excludes '
@@ -1683,13 +1892,24 @@ def _render_stages(episode_dir: Path, manifest: dict[str, Any], grade: Any, timi
     return _page_section("sec-stages", "Stages (6)", body)
 
 
+def _role_cost_text(cost: float, wall_ms: float, priced: int, calls: int) -> str:
+    if not calls:
+        return "no cost recorded"
+    if priced < calls:
+        return (f"{_money(cost)} · {calls} traces · {fmt_duration(wall_ms)} · "
+                f"partial — {priced} of {calls} calls priced")
+    return f"{_money(cost)} · {calls} traces · {fmt_duration(wall_ms)}"
+
+
 def _wall_between(start: str, end: str) -> float | None:
+    """The pair's wall in ms: `None` where either stamp does not parse, `-1` where the pair is
+    INVERTED (the end precedes the start), the plain delta — zero included — otherwise."""
     from defender._clock import parse_iso_utc
     a, b = parse_iso_utc(start), parse_iso_utc(end)
     if a is None or b is None:
         return None
     delta = (b - a).total_seconds() * 1000
-    return delta if delta > 0 else -1
+    return delta if delta >= 0 else -1
 
 
 def _wall_span(starts: list[str], ends: list[str]) -> float:
@@ -1701,70 +1921,34 @@ def _wall_span(starts: list[str], ends: list[str]) -> float:
     return (max(parsed_ends) - min(parsed_starts)).total_seconds() * 1000
 
 
-def _comparator_cost(episode_dir: Path) -> tuple[float, int]:
-    """`(cost, priced calls)` — `calls` counts response rows that actually priced, not files:
-    an empty (or response-less) comparator trace contributes a file to the stream list but no
-    call here, so the review row still reads "no model calls" (#1025 J13b)."""
-    wire = episode_dir / "wire_logs"
-    total = 0.0
-    calls = 0
-    if not artifact_dir(wire):
-        return 0.0, 0
-    for path in sorted(wire.glob("comparator_*_trace.jsonl")):
-        # `artifact_file` ahead of the read — see `_trace_cost`'s own comment: `wire_logs/` is
-        # a tree a sibling box can write, and the shared tolerant reader below does not screen.
-        if not artifact_file(path):
-            continue
-        rows, _bad = read_jsonl_rows_report(path)
-        for row in rows:
-            if row.get("kind") == "response" and isinstance(row.get("usage"), dict) \
-                    and isinstance(row.get("model"), str):
-                total += pricing.usage_cost(row["model"], row["usage"])
-                calls += 1
-    return total, calls
-
-
-def _unattributed_traces(episode_dir: Path, entries: dict[str, WorldEntry]) -> list[str]:
+def _unattributed_traces(ep: _Episode) -> list[str]:
     """Every `judge_*_trace.jsonl` stem that names no roster label or `family` (O4: its cost is
     still priced into the judge row; only the transcript BLOCK is withheld). Membership goes
     through `_stem_names_label`, the same digit-only-remainder check `_transcript_blocks_for_step`
     uses to route a KNOWN label's own draws — not a `range(N)`-bounded set of literal stems,
     which silently misclassified every draw at or past its bound as unattributed."""
-    wire = episode_dir / "wire_logs"
-    if not artifact_dir(wire):
-        return []
-    known_labels = [*entries, "family"]
-    out = []
-    for path in sorted(wire.glob("judge_*_trace.jsonl")):
-        if "_framed_trace" in path.name:
-            continue
-        full_stem = path.name[: -len(".jsonl")]
-        if not any(_stem_names_label(full_stem, label) for label in known_labels):
-            out.append(full_stem)
-    return out
+    known_labels = [*ep.entries, _FAMILY_LABEL]
+    return [stem for stem in ep.wire.plain_stems(agent_prefix="judge_")
+            if not any(_stem_names_label(stem, label) for label in known_labels)]
 
 
-def _transcript_blocks_for_step(episode_dir: Path, step: str, episode_id: str,  # noqa: C901 — one discovery pass per role, family-first ordering included (#1025 J13c)
-                                entries: dict[str, WorldEntry]) -> str:
-    if step not in ("questioner", Step.JUDGE, "review"):
-        return ""
-    wire = episode_dir / "wire_logs"
-    if not artifact_dir(wire):
+def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 — one discovery pass per role, family-first ordering included (#1025 J13c)
+    if step not in ("questioner", Step.JUDGE, "review") or not ep.wire.present:
         return ""
     blocks = []
     if step == "questioner":
-        for stem in sorted(_trace_stems(wire, "questioner")):
-            blocks.append(_transcript_block(episode_dir, stem))
+        for stem in sorted(ep.wire.stems_for("questioner")):
+            blocks.append(_transcript_block(ep.wire.traces[stem]))
     elif step == Step.JUDGE:
         # Family first (J13c/d29), then each roster world in numeric draw order. A launcher-
         # produced episode writes only the FRAMED twin for a judge call (no plain trace), so
         # the stem set is the union of both — never just the plain trace files' own names.
-        judge_stems = _trace_stems(wire, Step.JUDGE)
-        family_stems = sorted((s for s in judge_stems if _stem_names_label(s, "family")),
-                              key=lambda s: _draw_key_stem(s, "family"))
+        judge_stems = ep.wire.stems_for(Step.JUDGE)
+        family_stems = sorted((s for s in judge_stems if _stem_names_label(s, _FAMILY_LABEL)),
+                              key=lambda s: _draw_key_stem(s, _FAMILY_LABEL))
         for stem in family_stems:
-            blocks.append(_transcript_block(episode_dir, stem))
-        for label in sorted(entries):
+            blocks.append(_transcript_block(ep.wire.traces[stem]))
+        for label in sorted(ep.entries):
             # `_stem_names_label`, not a bare `startswith`: two roster labels where one is the
             # other's own prefix (`baseline` / `baseline_2`, both legal under `is_valid_run_id`,
             # `_` included) would otherwise have `baseline`'s filter admit `baseline_2`'s own
@@ -1773,21 +1957,17 @@ def _transcript_blocks_for_step(episode_dir: Path, step: str, episode_id: str,  
             label_stems = sorted((s for s in judge_stems if _stem_names_label(s, label)),
                                  key=lambda s: _draw_key_stem(s, label))
             for stem in label_stems:
-                blocks.append(_transcript_block(episode_dir, stem))
+                blocks.append(_transcript_block(ep.wire.traces[stem]))
     elif step == "review":
-        for path in sorted(wire.glob("comparator_*_trace.jsonl")):
-            # `artifact_file` ahead of the read — see `_trace_cost`'s own comment: `wire_logs/`
-            # is a tree a sibling box can write, and the shared tolerant reader below does not
-            # screen.
-            if not artifact_file(path):
+        for stem in ep.wire.plain_stems(agent_prefix="comparator_"):
+            trace = ep.wire.traces[stem]
+            if trace.plain != "ok":
                 continue
-            comp_rows, _bad = read_jsonl_rows_report(path)
-            if comp_rows:
-                blocks.append(_transcript_block(episode_dir, path.name[: -len(".jsonl")]))
+            if trace.rows:
+                blocks.append(_transcript_block(trace))
             else:
                 # J13b: an empty comparator trace prices nothing and is listed by stem rather
                 # than rendered as a stream with no rows.
-                stem = path.name[: -len(".jsonl")]
                 blocks.append(f'<div class="tx-note">{esc(stem)}: 0 rows</div>')
     return "".join(blocks)
 
@@ -1815,34 +1995,16 @@ def _draw_key_stem(stem: str, label: str) -> int:
         return 0
 
 
-def _trace_stems(wire: Path, role_prefix: str) -> set[str]:
-    """Every call's own STEM (`<agent>_trace`, never `..._framed_trace`) for a role — the
-    union of plain trace files and framed twins, since a launcher-produced episode writes only
-    the framed one for some roles (#1025 J13a/b): a stem with no plain trace file still gets a
-    block, built entirely from its framed record."""
-    stems: set[str] = set()
-    for path in wire.glob(f"{role_prefix}*_trace.jsonl"):
-        if "_framed_trace" in path.name:
-            continue
-        stems.add(path.name[: -len(".jsonl")])
-    for path in wire.glob(f"{role_prefix}*_framed_trace.jsonl"):
-        stems.add(path.name[: -len("_framed_trace.jsonl")] + "_trace")
-    return stems
+def _message_parts(row: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
+    """A wire row's `message` mapping and its `parts` list — each the empty value where the
+    row does not carry that shape."""
+    msg = _mapping(row.get("message"))
+    return msg, _items(msg.get("parts"))
 
 
-def _transcript_block(episode_dir: Path, stem: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one call's request/response rendering, every response field independently absent
-    path = episode_dir / "wire_logs" / f"{stem}.jsonl"
-    # `artifact_file`, the same screen `framed_path` gets three lines down: `wire_logs/` is a
-    # tree a sibling box can write, and the shared tolerant reader does not screen on its own.
-    # Absent is unchanged (a stem with no plain trace file, #1025 J13a/b) — `artifact_file` is
-    # `False` there too, same as the unscreened read's own "not found" answer.
-    rows, unreadable = read_jsonl_rows_report(path) if artifact_file(path) else ([], 0)
-    framed_path = episode_dir / "wire_logs" / f"{stem[:-len('_trace')]}_framed_trace.jsonl"
-    framed = None
-    if artifact_file(framed_path):
-        frows, _ = read_jsonl_rows_report(framed_path)
-        if frows:
-            framed = frows[0]
+def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call's request/response rendering, every response field independently absent
+    rows = trace.rows
+    framed = trace.framed
 
     agent_id = None
     if isinstance(framed, dict) and isinstance(framed.get("agent_id"), str):
@@ -1873,10 +2035,10 @@ def _transcript_block(episode_dir: Path, stem: str) -> str:  # noqa: C901, PLR09
     else:
         request = next((r for r in rows if r.get("kind") == "request"), None)
         if request is not None:
-            msg = request.get("message") or {}
+            msg, parts = _message_parts(request)
             instructions = msg.get("instructions")
             prompt_text = ""
-            for part in msg.get("parts") or []:
+            for part in parts:
                 if isinstance(part, dict) and part.get("part_kind") == "user-prompt":
                     prompt_text = part.get("content") or ""
             entries_html.append(f'<div class="tx-request">{_uv(prompt_text)}'
@@ -1889,21 +2051,16 @@ def _transcript_block(episode_dir: Path, stem: str) -> str:  # noqa: C901, PLR09
         model = row.get("model")
         usage = row.get("usage")
         duration = row.get("duration_ms")
-        parts = (row.get("message") or {}).get("parts") or []
+        _msg, parts = _message_parts(row)
         text = next((p.get("content") for p in parts if isinstance(p, dict)
                     and p.get("part_kind") == "text"), "")
-        priced = None
-        if isinstance(usage, dict) and isinstance(model, str):
-            try:
-                priced = pricing.usage_cost(model, usage)
-                pricing.model_key(model)
-            except pricing.UnknownModel:
-                priced = None
+        priced = _priced(model, usage)
         line_bits = [f'<div class="tx-entry">{_uv(text)}']
         if model:
             line_bits.append(f'<span class="tx-model">{_v(model)}</span>')
-        if isinstance(usage, dict):
-            line_bits.append(f'<span class="tx-usage">{usage.get("input_tokens", 0):,}</span>')
+        input_tokens = _count(usage.get("input_tokens", 0)) if isinstance(usage, dict) else None
+        if input_tokens is not None:
+            line_bits.append(f'<span class="tx-usage">{input_tokens:,}</span>')
         else:
             line_bits.append('<span class="tx-usage">unpriced</span>')
         if priced is not None:
@@ -1915,11 +2072,12 @@ def _transcript_block(episode_dir: Path, stem: str) -> str:  # noqa: C901, PLR09
         line_bits.append('</div>')
         entries_html.append("".join(line_bits))
     framed_has_response = framed is not None and (framed.get("failure") or framed.get("reply"))
-    if not framed_has_response and not any(r.get("kind") == "response" for r in rows):
+    if not framed_has_response and not has_plain_response:
         entries_html.append('<div class="tx-entry">no response recorded</div>')
 
-    unreadable_html = f'<div class="tx-unreadable">{unreadable} unreadable rows</div>' if unreadable else ""
-    return (f'<div id="tx-{esc(stem)}" class="tx-stream">'
+    unreadable_html = (f'<div class="tx-unreadable">{trace.unreadable} unreadable rows</div>'
+                       if trace.unreadable else "")
+    return (f'<div id="tx-{esc(trace.stem)}" class="tx-stream">'
           f'<div class="tx-search"></div>'
           f'{"".join(entries_html)}{unreadable_html}</div>')
 
@@ -1929,87 +2087,33 @@ def _transcript_block(episode_dir: Path, stem: str) -> str:  # noqa: C901, PLR09
 # =========================================================================================
 
 
-def _render_leads(episode_dir: Path, entries: dict[str, WorldEntry], roster_order: list[str],
-                  review_rec: _Record, episode_id: str, episode_token: str) -> str:
+def _render_leads_section(ep: _Episode) -> str:
     blocks = []
-    for label in roster_order:
-        safe = _safe_id(label)
-        if safe is None:
+    for label in ep.roster_order:
+        if _safe_id(label) is None:
             continue
-        blocks.append(_render_world_leads(episode_dir, label, episode_token))
-    return _page_section("sec-leads", f"Leads ({len(roster_order)})", "".join(blocks))
+        blocks.append(_render_world_leads(label, ep.leads[label]))
+    return _page_section("sec-leads", f"Leads ({len(ep.roster_order)})", "".join(blocks))
 
 
-def _render_world_leads(episode_dir: Path, label: str, episode_token: str) -> str:  # noqa: C901, PLR0912, PLR0915 — the served ledger, the archive notes and every lead's chain are one world's leads block (#1025 O3)
-    world_dir = episode_dir / "worlds" / label
+def _render_world_leads(label: str, leads: _WorldLeads) -> str:
     bits = []
+    if leads.ledger_note is not None:
+        bits.append(f'<div class="ld-served">{esc(leads.ledger_note)}</div>')
 
-    ledger_path = family.world_ledger_path(episode_dir, label, episode_token=episode_token)
-    if not (ledger_path.exists() or ledger_path.is_symlink()):
-        bits.append('<div class="ld-served">served ledger: absent</div>')
-    elif not artifact_file(ledger_path):
-        bits.append('<div class="ld-served">served ledger unreadable</div>')
-    else:
-        try:
-            # `read_jsonl_rows_report` is the shared tolerant reader's own bare `read_text` —
-            # it survives a torn line or an undecodable byte but not a permission-denied
-            # regular file (root ignores this; a real non-root run does not, #1025), which
-            # reaches this call as an un-typed `OSError`. This world's leads block is its own
-            # slot, never the whole page.
-            _rows, malformed = read_jsonl_rows_report(ledger_path)
-            if malformed:
-                bits.append(f'<div class="ld-served">{malformed} malformed row</div>')
-        except OSError:
-            bits.append('<div class="ld-served">served ledger unreadable</div>')
-
-    if not artifact_dir(world_dir):
+    if not leads.archived:
         return f'<div id="leads-{esc(label)}" class="leads-section">not archived' \
               f'{"".join(bits)}</div>'
 
-    inv_path = world_dir / "investigation.md"
-    facts = None
-    facts_error = None
-    if not (inv_path.exists() or inv_path.is_symlink()):
-        pass
-    else:
-        try:
-            facts = family.read_world_facts(episode_dir, label, episode_token=episode_token)
-        except JudgeRefused as bad:
-            facts_error = str(bad)
-        except Exception as bad:  # noqa: BLE001
-            facts_error = str(bad)
-
-    if facts_error is not None:
+    if leads.facts_error is not None:
         bits.append(f'<div class="ld-investigation">investigation record unavailable: '
-                   f'{esc(facts_error)}</div>')
-
-    try:
-        all_leads = family.leads_by_id(world_dir)
-    except Exception:  # noqa: BLE001
-        all_leads = {}
-
-    summaries_dir = world_dir / "gather_summaries"
-    summary_stems = set()
-    if artifact_dir(summaries_dir) and not summaries_dir.is_symlink():
-        for p in summaries_dir.iterdir():
-            if p.suffix == ".md" and artifact_file(p):
-                summary_stems.add(p.stem)
-            elif not p.name.endswith(".md"):
-                s = _safe_id(p.stem)
-                if s is None:
-                    bits.append(_unnameable(p.stem, what="gather summary"))
-
-    if facts is not None:
-        referenced = set(facts.referenced_leads)
-        roster = referenced | summary_stems
-    else:
-        roster = set(all_leads) | summary_stems
-
-    resolutions_by_lead = facts.resolutions_by_lead if facts is not None else {}
-    if facts is not None and facts.resolution_moved:
+                   f'{esc(leads.facts_error)}</div>')
+    for stem in leads.unnameable_summaries:
+        bits.append(_unnameable(stem, what="gather summary"))
+    if leads.moved:
         bits.append('<div class="ld-moved">the hand-off was revisited after the branch</div>')
 
-    for lead_id in sorted(roster):
+    for lead_id, chain in leads.chains:
         safe = _safe_id(lead_id)
         # `names_one_file` (family's own path-traversal screen) decides whether this id ever
         # reaches a real file at all — when it does not, `lead_chain` already answers safely
@@ -2021,32 +2125,22 @@ def _render_world_leads(episode_dir: Path, label: str, episode_token: str) -> st
         if file_safe and safe is None:
             bits.append(_unnameable(lead_id, what="lead id"))
             continue
-        try:
-            # `lead_chain`'s own gather-summary read is `errors="replace"` for a BAD byte but
-            # a bare `read_text` for a permission-denied file (root ignores this; a real
-            # non-root run does not, #1025) — this one lead's row is its own slot, never the
-            # whole page.
-            chain = family.lead_chain(world_dir, lead_id, resolutions_by_lead, leads=all_leads)
-        except OSError:
-            id_attr = f' id="ld-{esc(label)}-{esc(safe)}"' if safe is not None else ""
+        id_attr = f' id="ld-{esc(label)}-{esc(safe)}"' if safe is not None else ""
+        if chain is None:
             bits.append(f'<div{id_attr} class="ld-lead">'
                        f'<span class="ld-id">{_uv(lead_id)}</span>'
                        f'<span class="ld-summary">lead unreadable</span></div>')
             continue
-        goal = chain.get("goal")
-        params = chain.get("params")
-        summary = chain.get("summary")
-        payload = chain.get("payload") or []
-        resolutions = chain.get("resolutions") or []
+        payload = _items(chain.get("payload"))
+        resolutions = _items(chain.get("resolutions"))
         resolutions_html = "".join(f'<div class="ld-resolution">{_uv(r)}</div>'
                                   for r in resolutions)
-        id_attr = f' id="ld-{esc(label)}-{esc(safe)}"' if safe is not None else ""
         bits.append(f'<div{id_attr} class="ld-lead">'
                    f'<span class="ld-id">{_uv(lead_id)}</span>'
-                   f'<span class="ld-goal">{_uv(goal)}</span>'
-                   f'<span class="ld-params">{_uv(params)}</span>'
+                   f'<span class="ld-goal">{_uv(chain.get("goal"))}</span>'
+                   f'<span class="ld-params">{_uv(chain.get("params"))}</span>'
                    f'<span class="ld-payload">{"".join(_uv(str(d)) for d in payload)}</span>'
-                   f'<span class="ld-summary">{_uv(summary)}</span>'
+                   f'<span class="ld-summary">{_uv(chain.get("summary"))}</span>'
                    f'{resolutions_html}'
                    f'</div>')
 
@@ -2058,24 +2152,20 @@ def _render_world_leads(episode_dir: Path, label: str, episode_token: str) -> st
 # =========================================================================================
 
 
-def _render_records(episode_dir: Path, manifest: dict[str, Any], review_rec: _Record,  # noqa: C901, PLR0912 — every episode-level record's own slot in one section (#1025 O8)
-                    samples_rec: _Record, staged_rec: _Record, stamp_rec: _Record,
-                    episode_id: str) -> str:
-    bits = []
-    base_story = manifest.get("base_story")
-    bits.append(f'<div class="rc-story">{_uv(base_story)}</div>')
-    discriminator = manifest.get("discriminator")
+def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episode-level record's own slot in one section (#1025 O8)
+    samples_rec, staged_rec, review_rec, stamp_rec = (
+        ep.samples_rec, ep.staged_rec, ep.review_rec, ep.stamp_rec)
+    bits = [f'<div class="rc-story">{_uv(ep.manifest.get("base_story"))}</div>']
+    discriminator = ep.manifest.get("discriminator")
     if isinstance(discriminator, dict):
         predicate = discriminator.get("predicate")
         bits.append(f'<div class="rc-predicate">{_uv(predicate)}</div>')
-        envelope = discriminator.get("envelope")
-        if isinstance(envelope, dict):
-            params = envelope.get("params")
-            if isinstance(params, dict) and "query" in params:
-                bits.append(f'<div class="rc-envelope">{_uv(params["query"])}</div>')
+        params = _mapping(_mapping(discriminator.get("envelope")).get("params"))
+        if "query" in params:
+            bits.append(f'<div class="rc-envelope">{_uv(params["query"])}</div>')
 
-    for w in manifest.get("worlds") or []:
-        if isinstance(w, dict) and isinstance(w.get("world_id"), str):
+    for w in ep.manifest_worlds:
+        if isinstance(w.get("world_id"), str):
             bits.append(f'<div class="rc-world">{_uv(w["world_id"])}</div>')
 
     if samples_rec.error:
@@ -2083,7 +2173,7 @@ def _render_records(episode_dir: Path, manifest: dict[str, Any], review_rec: _Re
     elif not samples_rec.present:
         bits.append('<div class="rc-samples">absent</div>')
     else:
-        for pattern in samples_rec.value or {}:
+        for pattern in _mapping(samples_rec.value):
             bits.append(f'<div class="rc-pattern">{_uv(pattern)}</div>')
 
     if staged_rec.error:
@@ -2091,38 +2181,38 @@ def _render_records(episode_dir: Path, manifest: dict[str, Any], review_rec: _Re
     elif not staged_rec.present:
         bits.append('<div class="rc-staged">absent</div>')
     else:
-        for row in staged_rec.value or []:
-            bits.append(f'<div class="rc-staged-row">{_uv(row.get("name"))}</div>')
+        for row in _items(staged_rec.value):
+            bits.append(f'<div class="rc-staged-row">{_uv(_mapping(row).get("name"))}</div>')
 
     if review_rec.error:
         bits.append(f'<div class="rc-review">{esc(review_rec.error)}</div>')
     elif not review_rec.present:
         bits.append('<div class="rc-review">absent</div>')
     else:
-        review_doc = review_rec.value if isinstance(review_rec.value, dict) else {}
+        review_doc = _mapping(review_rec.value)
         episode_block = review_doc.get("episode")
         if isinstance(episode_block, dict):
             bits.append(f'<div class="rc-review-episode">{_uv(episode_block.get("decision"))}'
                        f' {_uv(episode_block.get("outcome"))}</div>')
         else:
             bits.append('<div class="rc-review-episode">absent</div>')
-        if not isinstance(review_doc.get("worlds"), dict):
+        review_worlds = review_doc.get("worlds")
+        if not isinstance(review_worlds, dict):
             bits.append('<div class="rc-review-worlds">absent</div>')
         teardown = review_doc.get("teardown")
         if isinstance(teardown, dict):
             bits.append(f'<div class="rc-teardown-at">{_uv(teardown.get("at"))}</div>')
-            for failure in teardown.get("failures") or []:
+            for failure in _items(teardown.get("failures")):
                 if isinstance(failure, dict):
                     bits.append(f'<div class="rc-teardown-fail">{_uv(failure.get("name"))} '
                                f'{_uv(failure.get("detail"))}</div>')
-        for _label, block in (review_doc.get("worlds") or {}).items() if isinstance(
-                review_doc.get("worlds"), dict) else []:
+        for block in _mapping(review_worlds).values():
             if isinstance(block, dict):
-                for inv in block.get("inventions") or []:
+                for inv in _items(block.get("inventions")):
                     bits.append(f'<div class="rc-invention">{_uv(inv)}</div>')
                 consistency = block.get("consistency")
                 if isinstance(consistency, dict):
-                    for key in consistency.get("control_mismatch_keys") or []:
+                    for key in _items(consistency.get("control_mismatch_keys")):
                         bits.append(f'<div class="rc-mismatch-key">{_uv(key)}</div>')
 
     if stamp_rec.error:
@@ -2130,14 +2220,15 @@ def _render_records(episode_dir: Path, manifest: dict[str, Any], review_rec: _Re
     elif not stamp_rec.present:
         bits.append('<div class="rc-provenance">absent</div>')
     else:
-        agreed = stamp_rec.value.get("agreed") if isinstance(stamp_rec.value, dict) else {}
+        stamp = _mapping(stamp_rec.value)
+        agreed = stamp.get("agreed")
         if isinstance(agreed, dict):
             bits.append(f'<div class="rc-commit">{_v(agreed.get("commit"))}</div>')
             bits.append(f'<div class="rc-model">{_v(agreed.get("model"))}</div>')
-            for path_ in agreed.get("dirty_paths") or []:
+            for path_ in _items(agreed.get("dirty_paths")):
                 bits.append(f'<div class="rc-dirty">{_uv(path_)}</div>')
         bits.append(f'<div class="rc-allow-dirty">allow_dirty: '
-                   f'{_v(stamp_rec.value.get("allow_dirty"))}</div>')
+                   f'{_v(stamp.get("allow_dirty"))}</div>')
 
     return _page_section("sec-records", "Records", "".join(bits))
 
@@ -2145,6 +2236,21 @@ def _render_records(episode_dir: Path, manifest: dict[str, Any], review_rec: _Re
 # =========================================================================================
 # CLI
 # =========================================================================================
+
+
+def _diagnostics(ep: _Episode) -> list[str]:
+    """The stderr lines the CLI echoes beside the page path — off the MODEL's own refusal
+    slots, never a scan of the rendered bytes (a model-authored claim containing the words "no
+    grade record" is that finding's text, not a diagnostic)."""
+    lines = []
+    for name, rec in (("grade", ep.grade_rec), ("timing", ep.timing_rec),
+                      ("review", ep.review_rec), ("samples", ep.samples_rec),
+                      ("staging", ep.staged_rec), ("provenance", ep.stamp_rec)):
+        if rec.error:
+            lines.append(f"{name} record unreadable")
+    if ep.grade_rec.ok and ep.grade is None:
+        lines.append("no grade record")
+    return lines
 
 
 def main(argv: list[str]) -> int:
@@ -2159,25 +2265,20 @@ def main(argv: list[str]) -> int:
         print(f"not a directory: {episode_dir}", file=sys.stderr)
         return 1
     try:
-        html_text = build_page(episode_dir)
+        ep = load_episode(episode_dir)
     except JudgeRefused as bad:
         # ONE LINE: the manifest's own refusal may wrap a multi-line YAML parser error, and
         # d01 promises the CLI one reason line, not the parser's whole traceback-shaped text.
         print(" ".join(str(bad).split()), file=sys.stderr)
         return 1
     try:
-        page_path = episode_dir / PAGE_NAME
-        write_guarded(page_path, _encode_page(html_text), mode="replace")
+        page_path = _write_page(episode_dir, _render_document(ep))
     except OSError as bad:
         print(str(bad), file=sys.stderr)
         return 1
     print(page_path)
-    for sentence in ("grade record unreadable", "timing record unreadable",
-                     "review record unreadable", "samples record unreadable",
-                     "staging record unreadable", "provenance record unreadable",
-                     "no grade record"):
-        if sentence in html_text:
-            print(sentence, file=sys.stderr)
+    for line in _diagnostics(ep):
+        print(line, file=sys.stderr)
     return 0
 
 

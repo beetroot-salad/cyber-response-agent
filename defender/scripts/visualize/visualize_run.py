@@ -33,6 +33,8 @@ from defender.scripts.visualize.visualize_data import (
     transcript_phase_map,
 )
 from defender.scripts.visualize.visualize_primitives import (
+    ASSETS,
+    CSS,
     esc,
     fmt_duration,
     parse_report,
@@ -281,12 +283,10 @@ def _lead_summary(leads: list) -> str:
 
 
 
-_ASSETS = Path(__file__).resolve().parent / "assets"
-CSS = (_ASSETS / "styles.css").read_text(encoding="utf-8")
 
 
 
-RUNTIME_JS = (_ASSETS / "runtime.js").read_text(encoding="utf-8")
+RUNTIME_JS = (ASSETS / "runtime.js").read_text(encoding="utf-8")
 
 
 

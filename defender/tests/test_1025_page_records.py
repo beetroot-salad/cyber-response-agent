@@ -55,7 +55,7 @@ VULTURE_BASELINE = REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.json"
 PAGE_PATH = "scripts/visualize/visualize_episode.py"
 RECORD_NAMES = ("judge.yaml", "review.yaml", "samples.yaml", "family.yaml", "staged.yaml",
                 "timing.json", "provenance.json")
-PACKAGE_READERS = ("read_grade", "draws_on_disk", "read_stage_timings", "raw_manifest",
+PACKAGE_READERS = ("read_grade", "draws_on_disk_report", "read_stage_timings", "raw_manifest",
                    "read_review_record", "read_samples_record", "read_staged",
                    "world_review_block", "read_world_facts", "leads_by_id", "lead_chain",
                    "json_mapping", "read_family_stamp")
@@ -618,11 +618,12 @@ def test_1025_the_page_module_reads_every_record_through_its_package_reader_spel
     """The page module's AST contains no `yaml.safe_load` / `json.loads` call, no string
     constant equal to any of `judge.yaml`, `review.yaml`, `samples.yaml`, `family.yaml`,
     `staged.yaml`, `timing.json`, `provenance.json`, `judge`, and no `from … import _name`
-    across modules; its reads resolve to the package readers (`read_grade`, `draws_on_disk`,
+    across modules; its reads resolve to the package readers (`read_grade`, `draws_on_disk_report`,
     `read_stage_timings`, `raw_manifest`, `read_review_record`, `read_samples_record`,
     `read_staged`, `world_review_block`, `read_world_facts`, `leads_by_id`, `lead_chain`,
-    `json_mapping`, `read_family_stamp`, `read_report` / `parse_report`), each named in the
-    module; the repo-wide census of record-name literals has one home per name (x18).
+    `json_mapping`, `read_family_stamp`, `read_archived_report` — the world-archive reader
+    path's own screened `report.md` read), each named in the module; the repo-wide census of
+    record-name literals has one home per name (x18).
     Rejected: `learning.judge.render.render` is never imported for a call. Rejected, the
     footer half of brief fact F15 (O6, 92-reconciliation F-3): the module never names
     `render_footer`, `_lesson_changes`, `_git` or `subprocess` — anywhere, as a name, an
@@ -651,7 +652,7 @@ def test_1025_the_page_module_reads_every_record_through_its_package_reader_spel
         n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
     for reader in PACKAGE_READERS:
         assert reader in names, f"the page never names {reader}"
-    assert "read_report" in names or "parse_report" in names
+    assert "read_archived_report" in names
     for checkout_bound in ("render_footer", "_lesson_changes", "_git", "subprocess"):
         assert checkout_bound not in names | imported, f"the page names {checkout_bound}"
     shipped = R._shipped_modules()

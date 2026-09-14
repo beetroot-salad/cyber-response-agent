@@ -966,7 +966,7 @@ def world_ledger_path(episode_dir: Path, label: str, *, episode_token: str) -> P
     return Path(episode_dir) / "served" / f"{world_token_for(episode_token, label)}.jsonl"
 
 
-def _read_archived_report(path: Path) -> ReportRead:
+def read_archived_report(path: Path) -> ReportRead:
     """`report.md` through the world-archive screen (#1025 O8) — a symlink or a FIFO at the
     name reads as a report with no headline, never followed and never raised.
 
@@ -1015,7 +1015,7 @@ def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> Wo
     moved, by_lead, unlanded = _resolution_facts(text, world=label)
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed, investigation_text=text,
-        report=_read_archived_report(world_dir / "report.md"),
+        report=read_archived_report(world_dir / "report.md"),
         resolution_moved=moved, resolutions_by_lead=by_lead,
         unlanded_document_rows=unlanded,
     )
