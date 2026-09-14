@@ -371,8 +371,15 @@ def read_staged(episode_dir: Path) -> list[dict]:
     # write. `is_file()` stats THROUGH a link, so a link planted at this name would have teardown
     # reconcile against a record written somewhere else — deleting names this code did not write,
     # or leaving live the ones it did.
-    if not artifact_file(path):
+    # ABSENT (#1025 O8) is the ordinary case — no cluster write has happened yet — and answers
+    # as no rows; PRESENT and not a plain file (a link planted at the name) is refused rather
+    # than read as empty, which would have teardown sweep nothing while a live alias sits
+    # right there under the name meant to account for it.
+    if not (path.exists() or path.is_symlink()):
         return []
+    if not artifact_file(path):
+        raise StagingRefused(
+            f"{STAGED_FILENAME} at {path} is refused: not a plain file")
     try:
         rows = _yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as bad:

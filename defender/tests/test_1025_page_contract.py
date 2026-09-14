@@ -669,6 +669,11 @@ def test_1025_questioner_or_staging_abort_leaves_a_partial_directory(tmp_path, m
     questioner = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID))
     ep2, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused, questioner=questioner)
     assert not (ep2 / "family.yaml").exists(), "the control failed: the manifest was written"
+    # The abort above still primes the capture before the interrupt lands (priming precedes the
+    # questioner in the launcher's own order) and that print is real launcher stderr, not the
+    # standalone CLI's — drained here so the assertion below is about the CLI's OWN report,
+    # not noise the launcher run left sitting in the shared capsys buffer.
+    capsys.readouterr()
     rc, out, err = cli([str(ep2)], capsys)
     assert rc == 1, (out, err)
     assert len(_err_lines(err)) == 1, (out, err)

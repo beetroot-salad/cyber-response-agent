@@ -738,10 +738,18 @@ class Rescue:
         self.fifo = Path(fifo)
         self.after = after
         self.fed = False
+        self._cancel = threading.Event()
         self._thread = threading.Thread(target=self._feed, daemon=True)
 
     def _feed(self) -> None:
-        time.sleep(self.after)
+        # Waited on the cancel event, not a bare `sleep`: `__exit__` sets it the moment the
+        # guarded call inside the `with` block has already RETURNED — and reaching `__exit__`
+        # at all already proves that call did not block, so there is nothing left to rescue.
+        # Without this, a correctly-screened reader still paid the full `after` seconds on
+        # every run (the wait was unconditional), which is the tax `_feed`'s own docstring says
+        # a screened reader should never owe.
+        if self._cancel.wait(self.after):
+            return
         try:
             fd = os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK)
         except OSError:
@@ -755,6 +763,7 @@ class Rescue:
         return self
 
     def __exit__(self, *exc: Any) -> None:
+        self._cancel.set()
         self._thread.join(timeout=self.after + 5)
 
 

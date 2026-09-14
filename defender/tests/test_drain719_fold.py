@@ -106,8 +106,10 @@ def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path:
     # in NAME ONLY with invlang/advisory.py's AdvisorySection renderer), taking it to 14 again,
     # and `_rows_for` (lead_zero.py's own executed_queries.jsonl reader collides in NAME ONLY
     # with #832's payload_view.py in-memory reducer helper, merged into main concurrently),
-    # taking it to 15.
-    assert len(entries) == 15, f"baseline is {len(entries)} entries, expected 15"
+    # taking it to 15. #1025's episode page then added five more (`_block`, `_control_declared`,
+    # `_normalized`, `_render_findings`, `_render_leads` — each colliding in NAME ONLY with an
+    # unrelated existing helper, annotated distinct-ok in the baseline), taking it to 20.
+    assert len(entries) == 20, f"baseline is {len(entries)} entries, expected 20"
 
     proc = subprocess.run(
         ["python3", "scripts/lint/lint_duplicate_helpers.py"],

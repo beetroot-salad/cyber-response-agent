@@ -437,6 +437,74 @@ def _first_nonempty(*values: Any) -> Any:
     return values[-1] if values else None
 
 
+@dataclass
+class DrawsSkipReport:
+    """What `draws_on_disk_report` did NOT turn into a draw document, classified (#1025 J9d):
+    `unreadable` is a FAULT — torn, undecodable, symlinked/hard-linked, or a stem outside the
+    ASCII-digit alphabet entirely (the human's F-7 decision: a non-ASCII digit like `'١'` is
+    UNDECODABLE, never merely skipped); `skipped` is a stem that reads fine but is not the
+    canonical spelling of its own index (`01.yaml` beside `1.yaml`) — `draws_on_disk` ignores
+    it BY DESIGN (d39), and it is reported separately so a reader can tell "this stem was never
+    meant to be read" from "this document could not be read"."""
+
+    unreadable: int = 0
+    skipped: int = 0
+
+
+def draws_on_disk_report(draw_dir: Path) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
+    """`draws_on_disk`'s own body, PLUS what it skipped, classified — the one reader (#1025 O8:
+    "the one draw reader returns its skip list"). `draws_on_disk` is this function with the
+    report half dropped, so the two can never read the same directory two different ways."""
+    report = DrawsSkipReport()
+    # `artifact_dir`, not `is_dir()`: the draw directory lives under the episode dir, and a
+    # link planted at its name would have the TARGET's `<n>.yaml` files read back as this
+    # episode's own draws and queued as its findings.
+    if not artifact_dir(draw_dir):
+        return {}, report
+    out: dict[int, dict[str, Any]] = {}
+    for path in draw_dir.glob("*.yaml"):
+        # `isascii()` AND `isdigit()`: `str.isdigit()` is true for superscripts and every
+        # non-ASCII digit script, and `int()` accepts neither — so `'²'.yaml` in a directory the
+        # box can reach passed the filter and raised `ValueError` out of the whole pass. The two
+        # tests have to answer the same question about the same string.
+        if not (path.stem.isascii() and path.stem.isdigit()):
+            report.unreadable += 1
+            continue
+        # AND THE STEM MUST BE THE INT'S OWN SPELLING. `int("01") == int("1")`, so `01.yaml` and
+        # `1.yaml` — this design writes only the second, but P4 says a retry clobbers and cleans
+        # nothing up, and the directory is a tree a box can write — collapse onto one key over an
+        # UNORDERED `glob`, so which document becomes `<run>/<label>/1/<index>` differs between
+        # runs. `finding_id` is P5's sole idempotency key, so that either suppresses a real
+        # finding or gives two different ones the same id.
+        if path.stem != str(int(path.stem)):
+            report.skipped += 1
+            continue
+        # THE SCREENED READ, like every other reader of this tree (`family.json_mapping`,
+        # `family.screened_yaml_mapping`): the directory was judged by `lstat` above, but the
+        # LEAF was read through a plain `read_text`, which follows a link — a symlink planted
+        # at `worlds/<X>/judge/3.yaml` had the target's findings queued as this episode's own
+        # on the bare re-enqueue path. `read_guarded` asks the plainness question of the open
+        # descriptor; a link, a hard link, an unreadable or undecodable entry is SKIPPED, the
+        # same answer a torn document gets below — the draw is not there to read.
+        text, _refusal = read_guarded(path)
+        if text is None:
+            report.unreadable += 1
+            continue
+        try:
+            # `_yaml.safe_load` for the same reason every other parse in this package uses it:
+            # a `RecursionError` out of a deeply nested draw file is neither a `ValueError` nor
+            # a `YAMLError`, so it escaped this handler and every one above it.
+            doc = _yaml_safe_load(text) or {}
+        except (ValueError, yaml.YAMLError):
+            report.unreadable += 1
+            continue
+        if isinstance(doc, dict):
+            out[int(path.stem)] = doc
+        else:
+            report.unreadable += 1
+    return dict(sorted(out.items())), report
+
+
 def draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
     """Every draw document in `draw_dir`, keyed by draw index, in draw order.
 
@@ -448,47 +516,7 @@ def draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
     which puts draw 10 between 1 and 2 the moment an operator asks for ten draws. A caller that
     DID produce them passes them in (`drawn=`) rather than having them read back, which is both
     the cheaper path and the only one that cannot pick up a file this pass did not write."""
-    # `artifact_dir`, not `is_dir()`: the draw directory lives under the episode dir, and a
-    # link planted at its name would have the TARGET's `<n>.yaml` files read back as this
-    # episode's own draws and queued as its findings.
-    if not artifact_dir(draw_dir):
-        return {}
-    out: dict[int, dict[str, Any]] = {}
-    for path in draw_dir.glob("*.yaml"):
-        # `isascii()` AND `isdigit()`: `str.isdigit()` is true for superscripts and every
-        # non-ASCII digit script, and `int()` accepts neither — so `'²'.yaml` in a directory the
-        # box can reach passed the filter and raised `ValueError` out of the whole pass. The two
-        # tests have to answer the same question about the same string.
-        if not (path.stem.isascii() and path.stem.isdigit()):
-            continue
-        # AND THE STEM MUST BE THE INT'S OWN SPELLING. `int("01") == int("1")`, so `01.yaml` and
-        # `1.yaml` — this design writes only the second, but P4 says a retry clobbers and cleans
-        # nothing up, and the directory is a tree a box can write — collapse onto one key over an
-        # UNORDERED `glob`, so which document becomes `<run>/<label>/1/<index>` differs between
-        # runs. `finding_id` is P5's sole idempotency key, so that either suppresses a real
-        # finding or gives two different ones the same id.
-        if path.stem != str(int(path.stem)):
-            continue
-        # THE SCREENED READ, like every other reader of this tree (`family.json_mapping`,
-        # `family.screened_yaml_mapping`): the directory was judged by `lstat` above, but the
-        # LEAF was read through a plain `read_text`, which follows a link — a symlink planted
-        # at `worlds/<X>/judge/3.yaml` had the target's findings queued as this episode's own
-        # on the bare re-enqueue path. `read_guarded` asks the plainness question of the open
-        # descriptor; a link, a hard link, an unreadable or undecodable entry is SKIPPED, the
-        # same answer a torn document gets below — the draw is not there to read.
-        text, _refusal = read_guarded(path)
-        if text is None:
-            continue
-        try:
-            # `_yaml.safe_load` for the same reason every other parse in this package uses it:
-            # a `RecursionError` out of a deeply nested draw file is neither a `ValueError` nor
-            # a `YAMLError`, so it escaped this handler and every one above it.
-            doc = _yaml_safe_load(text) or {}
-        except (ValueError, yaml.YAMLError):
-            continue
-        if isinstance(doc, dict):
-            out[int(path.stem)] = doc
-    return dict(sorted(out.items()))
+    return draws_on_disk_report(draw_dir)[0]
 
 
 def enqueue(episode_dir: Path, grade: Any, *, queue_dir: Path | None = None,

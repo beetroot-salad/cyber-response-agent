@@ -744,9 +744,15 @@ def _read_world_ledger(path: Path, world_token: str) -> tuple[list[dict[str, Any
     ledger's own decision words is malformed for this reader even though it parsed."""
     # `artifact_file`, the same `lstat` posture `Ledger._absorb` takes on these very bytes: the
     # served ledger sits under the episode dir and a link at its name would have another file's
-    # rows read as this world's decisions.
+    # rows read as this world's decisions. ABSENT (#1025 O8) is the ordinary case for a caller
+    # that reads outside the tier-1 gate (`_grade_world` already refused a missing ledger via
+    # `_missing_required_input` before this is ever reached on the grading path) — a partial
+    # archive, or a page rendering a world whose ledger the launcher never wrote — and answers
+    # as no rows read rather than a refusal; PRESENT and not a plain file is still refused.
+    if not (path.exists() or path.is_symlink()):
+        return [], 0
     if not artifact_file(path):
-        raise JudgeRefused(f"the ledger at {path} is absent")
+        raise JudgeRefused(f"the ledger at {path} is refused: not a plain file")
     parsed, malformed = read_jsonl_rows_report(path)
     kept: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -862,15 +868,21 @@ def _resolution_facts(
 
 
 def _read_archived_text(path: Path, *, world: str, role: str) -> str:
-    """One archived document's text, with an unreadable one answered as this design's refusal.
+    """One archived document's text, with a PRESENT-BUT-BAD one answered as this design's
+    refusal — an ABSENT one, by contrast, is the ordinary case (a sibling that died before
+    writing one, an archive still mid-copy) and answers as an empty document rather than a
+    refusal, so a caller reading a partial archive gets what the world DOES have.
 
-    A bare `read_text` here raises `UnicodeDecodeError` on an archived document carrying one
-    undecodable byte — a `ValueError`, not an `OSError`, so it escapes every handler between
-    here and the launcher and takes an otherwise-clean episode down with it."""
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as bad:
-        raise JudgeRefused(f"world {world!r}: {role} could not be read: {bad}") from bad
+    Screened through `read_guarded` (#1025 O8): the archive sits in a tree a sibling box's rw
+    bind reaches, so a symlink or a FIFO at the name is something the model planted, refused
+    without being opened — never a bare `read_text`, which follows the link and would hand an
+    outside file's bytes back as this world's own archived text."""
+    if not (path.exists() or path.is_symlink()):
+        return ""
+    text, refusal = read_guarded(path)
+    if text is None:
+        raise JudgeRefused(f"world {world!r}: {role} could not be read: {refusal}")
+    return text
 
 
 def _read_verdict(report: ReportRead, *, world: str) -> str:
@@ -953,6 +965,20 @@ def world_ledger_path(episode_dir: Path, label: str, *, episode_token: str) -> P
     return Path(episode_dir) / "served" / f"{world_token_for(episode_token, label)}.jsonl"
 
 
+def _read_archived_report(path: Path) -> ReportRead:
+    """`report.md` through the world-archive screen (#1025 O8) — a symlink or a FIFO at the
+    name reads as a report with no headline, never followed and never raised; `_report.
+    read_report` stays the repo-wide accessor, untouched, for every one of its nine other
+    callers, and is called here once the screen has cleared."""
+    if (path.exists() or path.is_symlink()) and not artifact_file(path):
+        return ReportRead(
+            disposition=None,
+            reason=f"report.md could not be read: refusing to read through a non-plain or "
+                   f"aliased entry: {path}",
+            frontmatter={}, body="", text="")
+    return read_report(path)
+
+
 def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
     """Read one world's archived record: the ledger, the document and the report, once."""
     world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
@@ -964,7 +990,7 @@ def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> Wo
     moved, by_lead, unlanded = _resolution_facts(text, world=label)
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed, investigation_text=text,
-        report=read_report(world_dir / "report.md"),
+        report=_read_archived_report(world_dir / "report.md"),
         resolution_moved=moved, resolutions_by_lead=by_lead,
         unlanded_document_rows=unlanded,
     )

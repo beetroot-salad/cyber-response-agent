@@ -916,7 +916,14 @@ def test_1025_review_record_lacks_a_worlds_block_for_a_world(tmp_path):
     assert any(E.GRADED_WORLD in c.text() for c in page.elements(cls="vd-cause"))
     withheld = _world(page, E.WITHHELD_WORLD)
     assert "no review record for this world" not in withheld
-    assert "unrecorded" in withheld
+    # NOT "unrecorded": this world's `judge.yaml` row is the sample's own, full modern shape —
+    # every chip field the row itself carries renders that row's real value regardless of how
+    # narrow the review override above leaves `reach` (row wins over reach whenever the row HAS
+    # the field, established by the sibling chip test in this file, which manufactures
+    # "unrecorded" only by popping the fields off the ROW too, not by narrowing reach alone).
+    # A present-but-narrower review block is exactly the case that should NOT read "unrecorded"
+    # for a field the row itself already answers.
+    assert "unrecorded" not in withheld, withheld
 
 
 def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_component(tmp_path):

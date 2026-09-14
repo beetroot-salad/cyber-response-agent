@@ -312,7 +312,11 @@ def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_pat
         stages = page.text_of("sec-stages")
         assert "timing record unreadable" in stages, stages
         assert "not on the record" not in stages, stages
-        assert "1m00s" not in stages
+        # Scoped to the TABLE (`stage-timing`), not the whole section: `sec-stages` also holds
+        # every call's own transcript block, and the sample's real judge response durations
+        # legitimately format to "1m00s" there — unrelated to whether `timing.json` itself
+        # parsed. The docstring's own claim is about the table's wall column, not the section.
+        assert "1m00s" not in page.text_of("stage-timing")
         assert page.text_of("sec-verdict") == intact["sec-verdict"]
         assert page.text_of("sec-worlds") == intact["sec-worlds"]
 

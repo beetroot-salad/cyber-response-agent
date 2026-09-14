@@ -44,11 +44,13 @@ be trusted after that, and the launcher's own verification is what should have c
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
-from defender._io import guarded_mkdir, write_guarded
+from defender._io import guarded_mkdir, read_guarded, write_guarded
 from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file
 from defender.learning.lead_repository import (
     refuse_non_artifacts,
@@ -85,6 +87,40 @@ JUDGE_NAME = "judge.yaml"
 #: once for the same reason as the three records above: the writer (`judge/__init__.py`), the
 #: enqueue's re-read and the episode page all address it.
 DRAWS_DIRNAME = "judge"
+
+#: The episode-root family stamp's name — same spelling as a WORLD's own flat run stamp
+#: (`_run_paths.PROVENANCE`), a DIFFERENT shape at the same file name (#1025 fk-8/J12). Moved
+#: here from `branch/cli.py` (its previous sole owner) so the reader below and the writer share
+#: one spelling; bound nowhere else.
+FAMILY_STAMP_NAME = "provenance.json"
+
+
+def read_family_stamp(episode_dir: Path) -> dict[str, Any] | None:
+    """The episode-root family stamp — `{agreed: {...}, allow_dirty}` — or `None` when nothing
+    is at the name (#1025 J12).
+
+    A public accessor distinct from the per-world run-stamp reader (`family.json_mapping`,
+    tolerant and shape-agnostic): this one KNOWS the family stamp's own shape and refuses a
+    directory or a document that is not it, through `read_guarded`'s screen — the episode dir
+    is reachable from a sibling box's rw bind, exactly like every other episode-root record.
+    """
+    path = Path(episode_dir) / FAMILY_STAMP_NAME
+    if not (path.exists() or path.is_symlink()):
+        return None
+    # A directory squatting the name is refused by `read_guarded` itself (`IsADirectoryError`
+    # is an `OSError`, one of its own refusal classes) — no separate `is_dir()` check, which
+    # would be an unscreened read of the same box-writable entry `read_guarded` already judges.
+    text, refusal = read_guarded(path)
+    if text is None:
+        raise ValueError(f"{FAMILY_STAMP_NAME} at {path} could not be read: {refusal}")
+    try:
+        doc = json.loads(text)
+    except (ValueError, RecursionError) as bad:
+        raise ValueError(f"{FAMILY_STAMP_NAME} at {path} is not the family stamp: {bad}") from bad
+    if not (isinstance(doc, dict) and isinstance(doc.get("agreed"), dict)
+            and "allow_dirty" in doc):
+        raise ValueError(f"{FAMILY_STAMP_NAME} at {path} is not the family stamp")
+    return doc
 
 
 class ArchiveRefused(ValueError):
@@ -277,6 +313,7 @@ __all__ = [
     # an absent `gather_summaries/` is a note on the record, not a refusal.
     "ALERT_NAME",
     "DRAWS_DIRNAME",
+    "FAMILY_STAMP_NAME",
     "GATHER_SUMMARIES_DIRNAME",
     "JUDGE_NAME",
     "LESSONS_LOADED_NAME",
@@ -287,4 +324,5 @@ __all__ = [
     "WORLDS_DIRNAME",
     "ArchiveRefused",
     "archive_episode",
+    "read_family_stamp",
 ]
