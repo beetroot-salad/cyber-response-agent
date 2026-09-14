@@ -536,7 +536,7 @@ confident finding. `disposition` is the closed enum:
 - `unresolved` — the HOST's own verdict, never yours. Recorded when a
   run is cut short without a settled finding — a challenge review that
   overruled your close, a review that could not complete, or the
-  framework's own retry-exhaustion close — and refused if you supply it
+  framework's own close of a run cut short — and refused if you supply it
   as an argument here. If you cannot settle the case, close
   `inconclusive` and name the gap; do not reach for this member.
 

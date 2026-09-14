@@ -188,11 +188,11 @@ def test_skipped_ablation_is_not_reported_as_ok(tmp_path):
 
 
 def test_pre_change_inconclusive_close_says_it_was_never_reviewed(tmp_path):
-    """A PRE-#992 `inconclusive` close bypassed the gate — no trace rows of any kind survive on
-    disk. Its record is `stands` — which must not render as "a review ran and the disposition
-    survived" — and §7 FK-8 re-keys that split on the trace rows an attempt left behind, never
-    on `reviewed_disposition`'s value (which a post-change reviewed `inconclusive` shares with
-    this population)."""
+    """A PRE-#992 `inconclusive` close bypassed the gate, and its record predates the `reviewed`
+    field. Its record is `stands` — which must not render as "a review ran and the disposition
+    survived" — so for a record with no `reviewed` field the split falls back to the bypass set
+    of its day, where `inconclusive` was a member. A post-change reviewed `inconclusive` shares
+    the `reviewed_disposition` value but carries `reviewed: true`, and renders apart."""
     run = tmp_path / "run"
     run.mkdir()
     _write_report(run, disposition="inconclusive", outcome="stands",
@@ -205,7 +205,11 @@ def test_pre_change_inconclusive_close_says_it_was_never_reviewed(tmp_path):
     html, n = render_review_gate(run, parse_report(run))
     assert n == 0
     assert "not reviewed" in html
-    assert "unresolved" in html, "the bypass note no longer names what actually bypasses"
+    assert "predates the close saying whether a review ran" in html, (
+        "a pre-record row must not be annotated with today's bypass set — that note says "
+        "`inconclusive` is reviewed, beside a row that says it was not"
+    )
+    assert "unresolved" not in html
 
 
 def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_path):

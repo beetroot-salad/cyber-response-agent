@@ -30,7 +30,9 @@ from defender.runtime.close_tool import (
     register_close_tool,
 )
 from defender.scripts.visualize.visualize_run import _gate_badge_html
-from defender.scripts.visualize.visualize_runtime import _BYPASS_NOTE, render_review_gate
+from defender.scripts.visualize.visualize_runtime import (
+    _BYPASS_NOTE, _PRE_RECORD_NOTE, render_review_gate,
+)
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
@@ -223,7 +225,11 @@ def _split_answers(run_dir: Path) -> dict:
         "count": n,
         "section-guard": "not reviewed" in html.split("attempt 1")[0] if "attempt 1" in html else "not reviewed" in html,
         "attempt-badge-reviewed": "rv-stands" in html,
-        "bypass-note": _BYPASS_NOTE in html,
+        # Either "no review ran" note: the live one names today's bypass set, the other says
+        # the record predates the close writing `reviewed` — never the live one beside a row
+        # it would contradict.
+        "bypass-note": (_BYPASS_NOTE in html) or (_PRE_RECORD_NOTE in html),
+        "live-bypass-note": _BYPASS_NOTE in html,
         "role-cards": all(f">{role}<" in html for role in REVIEW_ROLES),
         "headline-not-reviewed": "not reviewed" in badge,
     }
@@ -250,11 +256,13 @@ def test_every_reader_of_the_reviewed_split_agrees_on_both_populations(tmp_path)
 
     assert reviewed == {
         "count": 1, "section-guard": False, "attempt-badge-reviewed": True,
-        "bypass-note": False, "role-cards": True, "headline-not-reviewed": False,
+        "bypass-note": False, "live-bypass-note": False, "role-cards": True,
+        "headline-not-reviewed": False,
     }, reviewed
     assert historical == {
         "count": 0, "section-guard": True, "attempt-badge-reviewed": False,
-        "bypass-note": True, "role-cards": False, "headline-not-reviewed": True,
+        "bypass-note": True, "live-bypass-note": False, "role-cards": False,
+        "headline-not-reviewed": True,
     }, historical
 
     # The two populations are told apart by the record's own word, not by the disposition on

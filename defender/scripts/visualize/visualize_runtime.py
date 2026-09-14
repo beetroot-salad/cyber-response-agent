@@ -332,6 +332,14 @@ _BYPASS_NOTE = (
     "<code>unresolved</code>, which commits immediately</div>"
 )
 
+#: The same strip for a record from before the close wrote `reviewed` — the note must not
+#: describe today's bypass set beside a row that predates it (an `inconclusive` from when
+#: that disposition was not reviewed, badged "not reviewed" next to a note saying it is).
+_PRE_RECORD_NOTE = (
+    '<div class="empty">this record predates the close saying whether a review ran; by the '
+    "bypass set of its day, none did</div>"
+)
+
 
 #: What the gate skipped BEFORE the record said so. A record with no `reviewed` field was
 #: written when `inconclusive` and `unresolved` were the bypass set, so for that record the
@@ -544,18 +552,20 @@ def render_review_gate(
     cause = str(fm.get("cause", ""))
     failure_kind = fm.get("failure_kind")
 
-    # A close that bypasses the gate entirely (only the host's own `unresolved` does, #992)
-    # has the honest "nothing was reviewed" record, not a review that found nothing — and the
-    # record itself says which (`_was_reviewed`), so a pre-#992 `inconclusive` bypass and a
-    # post-change reviewed one — which share the same `reviewed_disposition` — render apart.
-    traces = _read_role_traces(run_dir)
+    # A close that bypassed the gate has the honest "nothing was reviewed" record, not a review
+    # that found nothing — and the record itself says which (`_was_reviewed`), so a pre-#992
+    # `inconclusive` bypass and a reviewed one — which share the same `reviewed_disposition` —
+    # render apart.
     reviewed = [(n, r) for n, r in records if _was_reviewed(r)]
     if not reviewed:
+        said_so = any(isinstance(r.get("reviewed"), bool) for _, r in records)
         body = (
             '<div class="rv-strip"><span class="rv-badge rv-skip">not reviewed</span>'
-            f'<span class="rv-cause">{esc(cause)}</span></div>' + _BYPASS_NOTE
+            f'<span class="rv-cause">{esc(cause)}</span></div>'
+            + (_BYPASS_NOTE if said_so else _PRE_RECORD_NOTE)
         )
         return (section("sec-review", "review", "Review gate", subtitle, body), 0)
+    traces = _read_role_traces(run_dir)
 
     committed = report.disposition_or_unknown
     kind_html = (

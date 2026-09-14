@@ -1,4 +1,4 @@
-"""The blind lenses and the composer that review a confident close.
+"""The blind lenses and the composer that review a close — confident or `inconclusive`.
 
 The reviewer's own half of the gate: the projections each lens reads (`projector`), the role
 prompts they run under, and the reading of what they return (`reply`). `challenge_gate` keeps

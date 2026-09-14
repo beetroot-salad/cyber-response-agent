@@ -41,7 +41,7 @@ from __future__ import annotations
 # up to it, and the tool schema / refusal text are read in one round trip, so a member that did
 # not sort last would have to be INSERTED rather than appended. It is the verdict the HOST
 # records when it terminates a run without a settled finding — a gate overrule, a review that
-# could not complete, or the driver's own retry-exhaustion close — and it is never written by
+# could not complete, or the driver's own close of a run cut short — and it is never written by
 # the investigating model: `inconclusive` keeps that meaning and stays the model's own "I could
 # not settle this", now priced (`skills/invlang/validate/_gating.py`). No code path may hand a
 # model-authored close this member; see `HOST_ONLY_DISPOSITION` below and its refusal at every
@@ -59,6 +59,12 @@ DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
 #: `test_923_authoring_surfaces.py`'s census, not by this comment — keep it a pointer to that
 #: census rather than a list someone has to remember to grow.
 HOST_ONLY_DISPOSITION = "unresolved"
+
+#: The member that pays for its close with `ceiling_test` receipts — the model's own "I could
+#: not settle this" (priced in `skills/invlang/validate/_gating.py`, reviewed since #992). The
+#: three places the review branches on it (the composer's host question, the standing cause,
+#: the receipts a report carries) share this spelling rather than a literal each.
+CEILING_DISPOSITION = "inconclusive"
 
 # What a surface shows where a disposition should be and none could be read. Beside the
 # vocabulary for the same reason the normalizer is: every reader that degrades rather than

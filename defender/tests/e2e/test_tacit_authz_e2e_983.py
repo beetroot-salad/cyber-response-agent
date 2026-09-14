@@ -352,11 +352,10 @@ def test_runtime_evidence_lands_in_a_benign_report_body(tmp_path):
 
 
 def test_runtime_evidence_lands_in_an_inconclusive_report_body(tmp_path):
-    """...and on the OTHER `_CloseFields` construction site too.
-
-    `inconclusive` skips the review and commits from the `NO_REVIEW_DISPOSITIONS` branch. Both
-    sites, because mechanism A's whole point is visibility on every close and a field wired at
-    one site is a field that reports the baseline for half the corpus."""
+    """...and on an `inconclusive` close too, beside the `ceiling_test` note lane it shares the
+    body with. Since #992 `inconclusive` spends the same review a confident close does and
+    commits from the same site; what this pins is that the baseline line rides on THAT
+    disposition's report as well — mechanism A's whole point is visibility on every close."""
     doc = scene.inconclusive_document(rows=scene.consult_block(scene.consultation_row()))
     run_dir, replay = _run(tmp_path, doc, "inconclusive", run_id="tacit-inconclusive-body")
 

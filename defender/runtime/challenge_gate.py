@@ -48,7 +48,7 @@ from typing import Any
 
 from defender._env import env_int
 from defender._untrusted import wrap_fresh
-from defender._vocab import HOST_ONLY_DISPOSITION
+from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION
 
 EXTRA_TURN_BOUND = 2
 
@@ -416,7 +416,7 @@ def _route(
         )
 
     if review.holds:
-        cause = CAUSE_CEILING_EXAMINED if disposition == "inconclusive" else CAUSE_STORY_SETTLED
+        cause = CAUSE_CEILING_EXAMINED if disposition == CEILING_DISPOSITION else CAUSE_STORY_SETTLED
         return _verdict(STANDS, disposition, cause, review.review)
 
     if review.ask is None:

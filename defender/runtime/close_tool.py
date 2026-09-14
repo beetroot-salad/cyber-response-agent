@@ -35,7 +35,9 @@ from defender._untrusted import wrap_fresh
 # the vocabulary imports it from the owner, so a consumer's import list never doubles as
 # someone else's distribution channel. Both halves are used — the set for the exact membership
 # test in `_close_investigation_async`, the ordered tuple for the argument schema below.
-from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
+from defender._vocab import (
+    CEILING_DISPOSITION, DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION,
+)
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.schema import CompanionBody
@@ -68,10 +70,10 @@ CHALLENGED = "challenged"
 #: The drafted disposition is committed unchanged — the gate never ran, or it ran and the
 #: counter-story did not survive, or the challenger declined to argue one.
 STANDS = "stands"
-#: The drafted CONFIDENT disposition is overridden to the HOST's own `unresolved` (#923;
-#: the OUTCOME keeps its name, which is the value fleet queries and the run pages key on).
-#: Every way the gate can refuse to let a confident finding stand lands here; WHICH way is
-#: the cause's job.
+#: The drafted disposition — confident or `inconclusive` — is overridden to the HOST's own
+#: `unresolved` (#923; the OUTCOME keeps its name, which is the value fleet queries and the
+#: run pages key on). Every way the gate can refuse to let a finding stand lands here; WHICH
+#: way is the cause's job.
 FORCED_INCONCLUSIVE = "forced-inconclusive"
 
 CLOSE_RETURNS: tuple[str, ...] = (CHALLENGED, STANDS, FORCED_INCONCLUSIVE)
@@ -317,7 +319,9 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
     )
 
 
-def _record_dict(verdict: challenge_gate.GateVerdict, disposition: str, deps: AgentDeps) -> dict:
+def _record_dict(
+    verdict: challenge_gate.GateVerdict, disposition: str, deps: AgentDeps, *, reviewed: bool,
+) -> dict:
     """The numbered review record. `detail` is here and NOT on report.md by decision: the
     diagnostic may quote a stage's own words, and this is the one artifact no prompt reads
     verbatim. It is framed rather than dropped, so the words survive somewhere a human can
@@ -329,11 +333,12 @@ def _record_dict(verdict: challenge_gate.GateVerdict, disposition: str, deps: Ag
     happened to carry a row for the round — and each reconstruction broke the moment what it
     keyed on moved (a reviewed and a bypassed `inconclusive` share one disposition string; a run
     dir written before the traces moved under `wire_logs/` has no row to find). The record is
-    the attempt's own account; it says whether the gate ran."""
+    the attempt's own account; it says whether the gate ran. ONE builder for both sites, so
+    the bypass record and the reviewed record cannot drift into two shapes."""
     return {
         "verdict": verdict.outcome,
         "reviewed_disposition": disposition,
-        "reviewed": True,
+        "reviewed": reviewed,
         "detail": wrap_fresh(verdict.detail, "untrusted") if verdict.detail else "",
         "failure_kind": verdict.failure_kind,
     }
@@ -357,10 +362,10 @@ class _CloseFields:
     #: every other close, the bypass site's `unresolved` included.
     ceiling_test: tuple[CeilingReceipt, ...] = ()
     #: #983: the `:R consultations` BASELINE rows the companion recorded, carried into the
-    #: committed report's BODY. Populated on the reviewed site on every disposition that
-    #: reaches it — mechanism A's whole point is visibility on every close, and the
-    #: disposition O3 needs it on (`benign`) is a reviewed one. Never on the bypass site: an
-    #: `unresolved` report carries no companion-derived text at all (see that site).
+    #: committed report's BODY. Populated on the reviewed site on every commit that leaves
+    #: it — the disposition that stood AND the host's `unresolved` the override arms commit
+    #: (mechanism A's whole point is visibility on every close). Empty only on the bypass
+    #: site, where a forced close skipped the document gate (see that site).
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = ()
 
 
@@ -437,7 +442,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     the invlang structure check and the flagged-row window. Defaulted False so every other
     caller is gated.
 
-    Both exemptions rest on the same fact: retry exhaustion has no model left to repair with,
+    Both exemptions rest on the same fact: a run cut short has no model left to repair with,
     so gating the forced close would dead-letter the run at persist for a MISSING report.md.
     A malformed companion is worse to publish than a well-formed one, but a run with no
     disposition at all is worse than either, and the frontmatter still records honestly which
@@ -482,11 +487,10 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             "both the recorded disposition and the first close's own review record."
         )
     # TOP of the close — after the two cheap well-formedness refusals above, and before ANY
-    # disposition branch. Inside a branch, `inconclusive` (which commits early, ahead of the
-    # gate) could dodge the obligation entirely, and the reviewer's model calls would be spent
-    # on a close that is going to be refused anyway.
+    # disposition branch, so no branch can dodge the obligation and no reviewer's model calls
+    # are spent on a close that is going to be refused anyway.
     #
-    # The framework's FORCED close is the one exception: retry exhaustion has no model left to
+    # The framework's FORCED close is the one exception: a run cut short has no model left to
     # repair with, so gating it would dead-letter the run at persist for a MISSING report.md,
     # before investigation.md is validated at all. Every close the MODEL invokes is gated.
     if not forced:
@@ -517,7 +521,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # no review is spent on a close that is going to be refused (H5's reason).
     #
     # `forced` is exempt with the flagged-row window above, for that exemption's own reason:
-    # retry exhaustion has no model left to repair with.
+    # a run cut short has no model left to repair with.
     if not forced:
         structure = tools_mod.committed_document_refusal(deps)
         if structure is not None:
@@ -525,7 +529,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # #923 fork J4, narrowed by #992: `unresolved` is the ONE verdict matched by VALUE that
     # skips the live review — it is the host's own account of a run that ended without a
     # settled finding (a gate overrule, a review that could not complete, or the driver's own
-    # retry-exhaustion close), never a claim about the world, so there is nothing for a review
+    # close of a run cut short), never a claim about the world, so there is nothing for a review
     # to judge. `inconclusive` now spends the same review a confident close does (#992): its
     # `ceiling_test` receipt asserts a claim — nothing further could be measured — and that is
     # exactly what the review judges. Keying this on `forced` instead of value was considered
@@ -536,20 +540,23 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         # The gate reviews everything but `unresolved`, so nothing was reviewed here and there
         # is no stage output to diagnose — the empty detail is the honest value, not a gap.
         # `unresolved` carries NEITHER companion-derived field, the baseline included: a forced
-        # close skips the document gate (retry exhaustion has no model left to repair with), so
+        # close skips the document gate (a run cut short has no model left to repair with), so
         # publishing model free text there would put text through no structural check into the
         # one artifact no model can be asked to fix — and text the report schema then refused
         # would fail the forced close on a MISSING report.md, which is the dead-letter that
         # exemption exists to prevent.
-        record = {
-            "verdict": STANDS, "reviewed_disposition": disposition, "reviewed": False,
-            "detail": "", "failure_kind": None,
-        }
-        fields = _CloseFields(
-            outcome=STANDS, cause=CAUSE_NOT_REVIEWED, detail="", material=(),
-            turns_used=0, failure_kind=None,
+        unreviewed = challenge_gate.GateVerdict(
+            outcome=STANDS, disposition=disposition, cause=CAUSE_NOT_REVIEWED, detail="",
+            material=(), turns_used=0, failure_kind=None,
         )
-        return _commit(deps, disposition, fields, record, validator=validator, evidence=evidence)
+        fields = _CloseFields(
+            outcome=unreviewed.outcome, cause=unreviewed.cause, detail=unreviewed.detail,
+            material=(), turns_used=unreviewed.turns_used, failure_kind=unreviewed.failure_kind,
+        )
+        return _commit(
+            deps, disposition, fields, _record_dict(unreviewed, disposition, deps, reviewed=False),
+            validator=validator, evidence=evidence,
+        )
 
     verdict = await challenge_gate.challenge_gate(
         deps, disposition, stages=stages, bounds=bounds,
@@ -558,7 +565,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         RecommendedLead(target=target, ask=ask, origin="review")
         for target, ask in verdict.material
     )
-    record = _record_dict(verdict, disposition, deps)
+    record = _record_dict(verdict, disposition, deps, reviewed=True)
 
     if verdict.outcome == CHALLENGED:
         turn = state.turns  # already incremented inside challenge_gate for this attempt
@@ -584,7 +591,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         material=material, turns_used=verdict.turns_used,
         failure_kind=verdict.failure_kind,
         ceiling_test=(
-            conclude_ceiling_test_rows(companion) if verdict.disposition == "inconclusive" else ()
+            conclude_ceiling_test_rows(companion) if verdict.disposition == CEILING_DISPOSITION else ()
         ),
         runtime_evidence=conclude_runtime_evidence_rows(companion),
     )
@@ -626,7 +633,7 @@ def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> N
     * fork F2 — HUMAN: a non-forced (i.e. MODEL) caller supplying `unresolved` is refused.
       `unresolved` is the HOST's own verdict, recorded when a run terminates without a settled
       finding (a gate overrule, a review that could not complete, or the driver's
-      retry-exhaustion close) — never model-authored. The model is offered this member for
+      close of a run cut short) — never model-authored. The model is offered this member for
       free by the tool's own JSON schema (`DispositionArg` derives it from the ordered tuple
       with nobody editing this file) and is held to a narrower set here; both halves of that
       divergence are deliberate and both are witnessed.
@@ -639,11 +646,11 @@ def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> N
         raise ModelRetry(
             f"disposition {HOST_ONLY_DISPOSITION!r} is recorded by the host when a run "
             "terminates without a settled finding — a gate overrule, a review that could not "
-            "complete, or a retry-exhaustion close. Report what you could not settle as "
+            "complete, or the close of a run cut short. Report what you could not settle as "
             "'inconclusive' instead, naming the gap; the investigating model never commits "
             f"{HOST_ONLY_DISPOSITION!r} itself."
         )
-    if forced and disposition == "inconclusive":
+    if forced and disposition == CEILING_DISPOSITION:
         raise ModelRetry(
             "a forced close must not commit 'inconclusive' — that verdict is reserved for the "
             "investigating model's own close and now carries an entry price a forced caller "

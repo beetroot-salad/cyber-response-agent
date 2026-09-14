@@ -58,7 +58,8 @@ def test_replay_golden_v2sshd(tmp_path):
     inv_text = (GOLDEN / "investigation.md").read_text()
 
     # #774/R1: report.md is no longer model-writable — re-recorded against the close tool
-    # (disposition inconclusive, so it commits immediately with no gate work at all).
+    # (disposition inconclusive; since #992 that spends the review too, replayed here through
+    # the harness's fake review bundle).
     # #810: investigation.md is landed by `append_block`, main's only writer. Onto an empty
     # run dir the append IS the create, which is why the golden still reconstructs whole.
     replay = ReplayFn([

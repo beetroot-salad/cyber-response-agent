@@ -55,7 +55,7 @@ writable scratch space.
   | `malicious` | `unresolved`); schema lives in `defender/SKILL.md` §REPORT.
   `unresolved` (#923) is the HOST's own verdict — recorded when a run is cut
   short without a settled finding (a gate overrule, a review that could not
-  complete, or the framework's own retry-exhaustion close) — never written by
+  complete, or the framework's own close of a run cut short) — never written by
   the investigating model. It also carries
   the gate's `outcome` (`stands` | `forced-inconclusive`), a `cause` sentence
   drawn from `close_tool.REPORT_CAUSES`, and — only when the review itself

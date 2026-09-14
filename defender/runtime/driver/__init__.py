@@ -319,8 +319,8 @@ _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE = frozenset({
 
 
 async def _close_a_run_cut_short(
-    deps: AgentDeps, bounds: challenge_gate.Bounds, exit_reason: str,
-) -> str:
+    deps: AgentDeps, bounds: challenge_gate.Bounds, exit_reason: str | None,
+) -> str | None:
     """The host's own `unresolved` close for a run the framework cut short, so every such run
     ends with a report.md. ONE place, after the loop, keyed on the exit class rather than
     written into each arm — an arm that forgot it (the request-limit arm did, until #992 let

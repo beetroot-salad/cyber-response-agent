@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from defender._untrusted import wrap as _wrap
+from defender._vocab import CEILING_DISPOSITION
 from defender.skills.invlang import _walkers, vocab
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.schema import CompanionBody
@@ -259,7 +260,7 @@ _CEILING_HOST_QUESTION = (
 
 
 def _host_question(disposition: str) -> str:
-    return _CEILING_HOST_QUESTION if disposition == "inconclusive" else _CONFIDENT_HOST_QUESTION
+    return _CEILING_HOST_QUESTION if disposition == CEILING_DISPOSITION else _CONFIDENT_HOST_QUESTION
 
 
 def composer_projection(

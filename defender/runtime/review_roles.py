@@ -112,7 +112,7 @@ class ComposerDeps(AgentDeps):
 
 # The lens reads; the composer judges. The effort split follows that: a lens reconstructs
 # what a projection supports, the composer weighs the readings against the investigation's
-# own account and decides whether a confident close survives.
+# own account and decides whether the close survives.
 _LENS_EFFORT = "medium"
 _COMPOSER_EFFORT = "high"
 
