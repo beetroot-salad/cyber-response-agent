@@ -454,6 +454,27 @@ def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_withheld_
         assert part in three, (part, three)
 
 
+def test_1025_a_non_canonically_spelled_verdict_word_still_blocks_the_measuring_worlds_defender_findings(
+        tmp_path):
+    """The O7 gate the page's disposition rule claims to mirror (`enqueue_report`,
+    `enqueue.py:622`) reads `verdict_word` through `normalized_judge_outcome` — case-folded and
+    trimmed — never a bare `in`; a record whose `verdict_word` is `"Discard"` (mixed case, still
+    a legal value on a record a sibling box can write) blocks the enqueue pass exactly as
+    `"discard"` does. The page must read the SAME gate: a bare-`in` implementation would show
+    the measuring world's defender findings "enqueued" on a record the real pass blocked.
+    """
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    doc["verdict_word"] = "Discard"
+    doc["enqueued_rows"] = 0
+    E.write_judge(ep.dir, doc)
+    page = render(ep)
+    for i in range(4):
+        group = _group_of(page, f"f-{E.GRADED_WORLD}-0-{i}").text()
+        assert "never eligible — verdict Discard" in group, group
+        assert "enqueued" not in group, group
+
+
 def test_1025_withheld_findings_are_grouped_under_their_reason_apart_from_enqueued_rows_and_never_worded_as_rejected(
         tmp_path):
     """The withheld group's heading carries `reachability_unmeasured`, none of its rows share a

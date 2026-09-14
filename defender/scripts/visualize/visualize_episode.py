@@ -19,6 +19,7 @@ from defender._io import read_guarded, read_jsonl_rows_report, write_guarded
 from defender._report import read_report
 from defender._run_id import is_valid_run_id
 from defender._run_paths import PROVENANCE, artifact_dir, artifact_file
+from defender._vocab import normalized_judge_outcome
 from defender.learning.branch import archive, staging
 from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.steps import STEPS, Step
@@ -610,7 +611,12 @@ def _walk_findings(  # noqa: C901, PLR0912, PLR0915
                 if w.row is not None and not w.row.get("ungradable")
                 and w.row.get("withheld_reason") is None}
     verdict_word = getattr(grade, "verdict_word", None)
-    defender_blocked = verdict_word in ("discard", "corpus-contradiction")
+    # THROUGH THE OWNER'S NORMALIZER, not a bare `in` (mirroring `enqueue.py`'s own O7 gate,
+    # enqueue.py:622): a `verdict_word` that reaches this record any other way than the
+    # enqueue pass's own write — case-folded, whitespace differently, a value from an older
+    # writer — would otherwise be missed here while the real enqueue pass still blocks it,
+    # rendering a finding "enqueued" that the record's own pass never queued (#1025).
+    defender_blocked = normalized_judge_outcome(verdict_word) in ("discard", "corpus-contradiction")
 
     unqueueable = _unqueueable_lookup(grade)
     world_findings_by_coord = _world_findings_lookup(grade)

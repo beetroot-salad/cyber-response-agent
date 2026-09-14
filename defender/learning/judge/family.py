@@ -968,7 +968,7 @@ def world_ledger_path(episode_dir: Path, label: str, *, episode_token: str) -> P
 def _read_archived_report(path: Path) -> ReportRead:
     """`report.md` through the world-archive screen (#1025 O8) — a symlink or a FIFO at the
     name reads as a report with no headline, never followed and never raised; `_report.
-    read_report` stays the repo-wide accessor, untouched, for every one of its nine other
+    read_report` stays the repo-wide accessor, untouched, for every one of its eight other
     callers, and is called here once the screen has cleared."""
     if (path.exists() or path.is_symlink()) and not artifact_file(path):
         return ReportRead(
