@@ -533,7 +533,7 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
     assert len(persist.read_pitfalls(paths)) == 2
 
     def probe():
-        return drains._invoke_pitfalls(paths)
+        return drains._invoke_pitfalls(paths, on_curated=lambda _d: None)
 
     with handed_to_nobody(repo, adapters, 0o400):
         verdict = run_as_nobody(probe, expected=LeadAuthorError)

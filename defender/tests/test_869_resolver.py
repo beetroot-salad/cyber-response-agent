@@ -541,7 +541,7 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
     capsys.readouterr()
 
     with pytest.raises(LeadAuthorError):
-        drains._invoke_pitfalls(paths)
+        drains._invoke_pitfalls(paths, on_curated=lambda _d: None)
 
     assert len(persist.read_pitfalls(paths)) == 2
     assert not paths.pitfalls.consumed.exists()
