@@ -296,9 +296,9 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
                 from ..close_tool import _close_investigation_async
 
                 # #923: the HOST's own verdict, not the model's — `unresolved` short-circuits
-                # ahead of the gate exactly as `inconclusive` used to (both are in
-                # `close_tool.NO_REVIEW_DISPOSITIONS`), so no stage and no bound is ever
-                # consumed here; the run's own bounds are threaded anyway rather than
+                # ahead of the gate (the one member of `close_tool.NO_REVIEW_DISPOSITIONS`
+                # since #992 put `inconclusive` through the review), so no stage and no bound
+                # is ever consumed here; the run's own bounds are threaded anyway rather than
                 # re-resolved, so this limb cannot end up acting on a different value from the
                 # one the rest of the run was built with. It also carries no entry price
                 # (`inconclusive` does, and a forced caller has no model left to pay it with).

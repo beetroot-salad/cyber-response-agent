@@ -225,29 +225,36 @@ _COMPOSER_ASK = (
 
 #: M5 — the confident question composer.md carried in its own system prompt before #992 and
 #: now carries in the composer's USER message instead (M2), so the system prompt stays
-#: disposition-neutral. Every confident member (`benign`, `false-positive`, `malicious`) shares
-#: this one sentence — O5 requires a binary confident/inconclusive branch, never a per-member
-#: one.
+#: disposition-neutral. Every confident member shares this one sentence — O5 requires a binary
+#: confident/inconclusive branch, never a per-member one — and the host's own `unresolved`
+#: never reaches a composer at all.
+#:
+#: POLARITY: composer.md's answer contract is fixed once for every question it may be handed —
+#: "yes" is `holds`, "no" is `gap` — so every host question here is phrased so that "yes"
+#: means the close stands. A question phrased the other way round would have the composer
+#: follow the contract into the inverse finding.
 _CONFIDENT_HOST_QUESTION = (
     "This investigation reached a confident disposition. Judge whether the conclusion follows "
     "from the record as written — not whether it is true."
 )
 
 #: M2, §7 FK-6 — the ceiling variant: the run closed `inconclusive` and its `ceiling_test`
-#: receipts (and any `ceiling_rationale`) are its own account of the ceiling, below. The lenses
-#: above read the same record WITHOUT that claim, so a lens naming something measurable the
-#: record neither cited nor tested is exactly the finding this question exists to surface.
+#: receipts (and any `ceiling_rationale`) are its own account of the ceiling. The lenses read
+#: the same record WITHOUT that claim, so a lens naming something measurable the record neither
+#: cited nor tested is exactly the finding this question exists to surface. Both the receipts
+#: and the readings sit BELOW the question in the composer's message (`composer_projection`
+#: puts every host sentence ahead of the framed content), which is what the sentence says.
 #: FK-6: the missed measurement must be named by an id ALREADY RECORDED (`v-`/`e-`/`l-`/`h-`),
 #: agreeing with the `citable_refs` guard the ask's `target` is read through — following this
 #: sentence literally cannot produce the uncitable name that guard refuses.
 _CEILING_HOST_QUESTION = (
     "This investigation closed `inconclusive`, claiming a ceiling — that nothing further "
     "could be measured. Its `ceiling_test` receipts (and any `ceiling_rationale`) are its own "
-    "account of that ceiling, in the record below. The lenses above read the same record "
-    "WITHOUT that claim. Did any of them name something measurable — an entity, edge, lead or "
-    "hypothesis, already recorded under a `v-`, `e-`, `l-` or `h-` id — that the record "
-    "neither cited nor tested? If so, return `gap` with that one ask; if nothing measurable "
-    "was missed, return `holds`."
+    "account of that ceiling, in the record below. The lenses below read the same record "
+    "WITHOUT that claim. Judge whether the ceiling claim holds: does the record cite or test "
+    "everything measurable the lenses name — every entity, edge, lead or hypothesis already "
+    "recorded under a `v-`, `e-`, `l-` or `h-` id? If it does, return `holds`; if a lens named "
+    "something measurable the record neither cited nor tested, return `gap` with that one ask."
 )
 
 

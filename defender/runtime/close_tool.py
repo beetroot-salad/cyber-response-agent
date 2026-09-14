@@ -239,8 +239,8 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     carries nothing the host did not already check.
 
     The free text FOR THE HUMAN ANALYST — a `ceiling_test` receipt's `note`, a baseline's
-    `result` and `reasoning` — gates nothing and rides into the BODY, one line per receipt,
-    never the frontmatter. That keeps it out of the 512-byte FRONTMATTER cap, and out of it
+    `result` and `reasoning` — decides nothing about the verdict and rides into the BODY, one
+    line per receipt, never the frontmatter. That keeps it out of the 512-byte FRONTMATTER cap, and out of it
     alone: `_artifact_schema.validate_report` also caps the WHOLE FILE and refuses a literal
     `</report>` anywhere in it, so body text can strand a run just as a frontmatter cap could —
     on an append-only companion, permanently. Both hazards are therefore charged at the write
@@ -272,8 +272,9 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     body = f"Disposition recorded by the close gate. outcome={outcome}."
     if evidence:
         body += f" {evidence}"
-    # The note is FOR THE HUMAN ANALYST and gates nothing (see this function's docstring) — it
-    # lives here, in the body, never in the frontmatter block above. `receipt.ref or
+    # The note is FOR THE HUMAN ANALYST and decides nothing about the verdict (see this
+    # function's docstring; its SIZE is charged at the price gate) — it lives here, in the
+    # body, never in the frontmatter block above. `receipt.ref or
     # receipt.cap`: exactly one is set (`_check_ceiling_receipt` refuses any other shape), so
     # this names whichever the receipt actually carries.
     for receipt in ceiling_test:
@@ -322,10 +323,19 @@ def _record_dict(verdict: challenge_gate.GateVerdict, disposition: str, deps: Ag
     """The numbered review record. `detail` is here and NOT on report.md by decision: the
     diagnostic may quote a stage's own words, and this is the one artifact no prompt reads
     verbatim. It is framed rather than dropped, so the words survive somewhere a human can
-    read them off the run."""
+    read them off the run.
+
+    `reviewed` is WRITTEN, by the one site that knows, rather than left for a reader to infer.
+    Every reader of this record used to reconstruct "did a review run?" from something beside
+    it — the disposition's membership in the bypass set, then (#992) whether a trace file
+    happened to carry a row for the round — and each reconstruction broke the moment what it
+    keyed on moved (a reviewed and a bypassed `inconclusive` share one disposition string; a run
+    dir written before the traces moved under `wire_logs/` has no row to find). The record is
+    the attempt's own account; it says whether the gate ran."""
     return {
         "verdict": verdict.outcome,
         "reviewed_disposition": disposition,
+        "reviewed": True,
         "detail": wrap_fresh(verdict.detail, "untrusted") if verdict.detail else "",
         "failure_kind": verdict.failure_kind,
     }
@@ -344,13 +354,15 @@ class _CloseFields:
     failure_kind: str | None
     #: #923: the `:T conclude.ceiling_test` RECEIPTS a priced `inconclusive` close just paid
     #: its entry price with — `ref`/`state`/`cap` carried into the committed report's own
-    #: frontmatter, `note` into its body (see `render_report`). Empty for every other close.
+    #: frontmatter, `note` into its body (see `render_report`). Populated on the REVIEWED
+    #: site only (#992), exactly when the verdict that stands is `inconclusive`; empty for
+    #: every other close, the bypass site's `unresolved` included.
     ceiling_test: tuple[CeilingReceipt, ...] = ()
     #: #983: the `:R consultations` BASELINE rows the companion recorded, carried into the
-    #: committed report's BODY. Populated at BOTH construction sites and on every disposition,
-    #: unlike `ceiling_test` above — mechanism A's whole point is visibility on every close,
-    #: and the disposition O3 needs it on (`benign`) is the REVIEWED one, which is the site
-    #: `ceiling_test` never reaches.
+    #: committed report's BODY. Populated on the reviewed site on every disposition that
+    #: reaches it — mechanism A's whole point is visibility on every close, and the
+    #: disposition O3 needs it on (`benign`) is a reviewed one. Never on the bypass site: an
+    #: `unresolved` report carries no companion-derived text at all (see that site).
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = ()
 
 
@@ -532,8 +544,8 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         # would fail the forced close on a MISSING report.md, which is the dead-letter that
         # exemption exists to prevent.
         record = {
-            "verdict": STANDS, "reviewed_disposition": disposition, "detail": "",
-            "failure_kind": None,
+            "verdict": STANDS, "reviewed_disposition": disposition, "reviewed": False,
+            "detail": "", "failure_kind": None,
         }
         fields = _CloseFields(
             outcome=STANDS, cause=CAUSE_NOT_REVIEWED, detail="", material=(),

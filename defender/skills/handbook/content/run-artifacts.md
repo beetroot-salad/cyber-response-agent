@@ -65,12 +65,16 @@ writable scratch space.
   committed with no record of what let it through). One per close *attempt*:
   a challenged close writes its record and commits nothing, so a run that was
   challenged once has `review_record.1.json` and `review_record.2.json`. Fields:
-  `{verdict, reviewed_disposition, detail, failure_kind}`, where `verdict` is
-  `stands` | `challenged` | `forced-inconclusive` and `reviewed_disposition` is
-  the disposition the agent *drafted* — which is not what committed when the
-  verdict is `forced-inconclusive`. `detail` is the diagnostic and is the one
-  field that may quote a review role's own words, so it is written framed and
-  no prompt reads it verbatim.
+  `{verdict, reviewed_disposition, reviewed, detail, failure_kind}`, where
+  `verdict` is `stands` | `challenged` | `forced-inconclusive`,
+  `reviewed_disposition` is the disposition the agent *drafted* — which is not
+  what committed when the verdict is `forced-inconclusive` — and `reviewed`
+  says whether the gate actually ran (`false` only on the `unresolved` bypass).
+  Readers key on `reviewed`, never on the disposition or on whether trace
+  files survived; a record from before the field existed is read by the bypass
+  set of its day. `detail` is the diagnostic and is the one field that may
+  quote a review role's own words, so it is written framed and no prompt reads
+  it verbatim.
 - **`review_{role}_trace.jsonl`** — one per role in `challenge_gate.REVIEW_ROLES`
   (`support`, `ablation`, `composer`): a JSON metadata row per call, plus the
   role's raw framed reply. A round that ended early is marked `incomplete` on

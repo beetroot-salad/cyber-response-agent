@@ -82,10 +82,17 @@ it, on turn count and raised-ask state no review role can see:
 
 | Gate outcome | What happens | `report.md` |
 |---|---|---|
-| `stands` | the drafted disposition commits | `outcome: stands` |
+| `stands` | the drafted disposition commits — a confident close under "the story settled", an `inconclusive` one under "the ceiling claim was examined" | `outcome: stands` |
 | `challenged` | **nothing commits** — the ask comes back as discriminating material and the agent gets another ANALYZE/GATHER turn (`EXTRA_TURN_BOUND = 2`) | not written yet |
-| `forced-inconclusive` | a gap with no measurable ask, a repeat ask that bought nothing, or the turn budget spent | `disposition: inconclusive` |
-| `forced-inconclusive` + `failure_kind` | **fail closed** — a stage raised, timed out, replied unreadably, or no reviewer was bound | `failure_kind: timeout\|error\|unreadable` |
+| `forced-inconclusive` | a gap with no measurable ask, a repeat ask that bought nothing, or the turn budget spent — the host's own verdict replaces the drafted one, whichever it was | `disposition: unresolved` |
+| `forced-inconclusive` + `failure_kind` | **fail closed** — a stage raised, timed out, replied unreadably, or no reviewer was bound | `disposition: unresolved`, `failure_kind: timeout\|error\|unreadable` |
+
+One rule for every reviewed disposition: an unexamined claim never commits as
+the model's claim. `inconclusive` is overridden by the same arms, to the same
+`unresolved`, as a confident close — the review record still names what was
+under review (`reviewed_disposition`) and says whether the review ran
+(`reviewed`). The outcome's *name* is older than #923; what it commits is
+`unresolved`.
 
 A challenged close is a **normal part of the loop, not an error.** A committed
 close is terminal either way: re-closing is refused.

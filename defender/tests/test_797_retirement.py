@@ -259,18 +259,17 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     disposition alone would pass just as well if the gate had decided the case on evidence it
     never looked at.
 
-    An `inconclusive` close reviewed through the same unbound bundle is the positive control:
-    since #992 it fails the gate closed exactly as a confident close does, standing
-    `inconclusive` (there is no confident verdict to override) with the same
-    `CAUSE_REVIEW_INCOMPLETE`/`failure_kind` — which is what shows the override above is the
-    gate acting on the disposition's own account, not the close tool being broken."""
+    An `inconclusive` close reviewed through the same unbound bundle is the twin: since #992
+    it fails the gate closed exactly as a confident close does — the same override to the
+    host's `unresolved`, the same `CAUSE_REVIEW_INCOMPLETE`/`failure_kind` — and the record
+    still names `inconclusive` as what was under review. One rule for every reviewed
+    disposition: an unexamined claim never commits as the model's claim."""
     pytest.importorskip("pydantic_ai")
     from defender._frontmatter import split_frontmatter
     from defender.runtime.close_tool import (
         CAUSE_REVIEW_INCOMPLETE,
         FORCED_INCONCLUSIVE,
         STAGE_ERROR,
-        STANDS,
         close_investigation,
     )
     from defender.runtime.review_roles import ReviewStages
@@ -307,10 +306,10 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
         f"the run gets an anonymous stage error: {record['detail']!r}"
     )
 
-    # Positive control, updated for #992: the gate now reviews `inconclusive` too, so an
-    # UNBOUND bundle fails IT closed the same way — standing `inconclusive` (there is no
-    # confident verdict here to override) with `CAUSE_REVIEW_INCOMPLETE` and a `failure_kind`,
-    # never the un-gated `CAUSE_NOT_REVIEWED` #923 pinned here before #992.
+    # The twin, updated for #992: the gate now reviews `inconclusive` too, so an UNBOUND bundle
+    # fails IT closed the same way — overridden to `unresolved` with `CAUSE_REVIEW_INCOMPLETE`
+    # and a `failure_kind`, never the un-gated `CAUSE_NOT_REVIEWED` #923 pinned here before
+    # #992.
     bypass_deps, bypass_dir = _main_deps(tmp_path / "bypass")
     # `inconclusive` carries its own entry price — a `ceiling_test` row naming a source or
     # capability — collected before the gate is ever reached. The golden fixture's own
@@ -318,7 +317,7 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     # about the GATE (an unbound bundle) rather than about the price.
     (bypass_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     bypass = close_investigation(bypass_deps, "inconclusive", stages=ReviewStages())
-    assert bypass.outcome == STANDS
+    assert bypass.outcome == FORCED_INCONCLUSIVE
     assert bypass.cause == CAUSE_REVIEW_INCOMPLETE
     assert bypass.failure_kind == STAGE_ERROR, (
         "an unbound bundle on an inconclusive close is the machinery failing, exactly as it "
@@ -327,8 +326,12 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     bypass_fm, _r, _b = split_frontmatter(
         (bypass_dir / "report.md").read_text(encoding="utf-8")
     )
-    assert bypass_fm["disposition"] == "inconclusive"
+    assert bypass_fm["disposition"] == "unresolved"
     assert bypass_fm["failure_kind"] == STAGE_ERROR
+    bypass_record = json.loads(
+        (bypass_dir / "review_record.1.json").read_text(encoding="utf-8")
+    )
+    assert bypass_record["reviewed_disposition"] == "inconclusive"
 
 
 #: The two #791 demands whose SUBJECT #797 deletes — the live projection stage, and the spec

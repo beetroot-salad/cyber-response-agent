@@ -572,14 +572,15 @@ carry them — not a more confident write-up. Write `:T resolutions` rows
 that name the edges and resolutions they rest on, and the review has
 something to agree with.
 
-A review that cannot run fails closed: a confident disposition is
-recorded as `unresolved` — the host's own verdict, never something you
-write — with the reason on the report. An `inconclusive` close has no
-confident verdict for the host to override, so it stands `inconclusive`
-instead, with the reason on the report the same way. Draft the
+A review that cannot run fails closed: the disposition under review —
+confident or `inconclusive` alike — is recorded as `unresolved`, the
+host's own verdict, never something you write, with the reason on the
+report. The same override applies when a review finds a gap nothing
+measurable would close, or when the turn budget is spent. Draft the
 disposition your evidence actually supports and close on it — do not
-pre-emptively call `inconclusive` to route around a challenge, and do
-not re-close to try for a different answer. A committed close is
+pre-emptively call `inconclusive` to route around a challenge (it is
+reviewed and overridden by the same rules), and do not re-close to try
+for a different answer. A committed close is
 terminal either way.
 
 **Write discipline.** ANALYZE (the `:R`/`:T resolutions` append to

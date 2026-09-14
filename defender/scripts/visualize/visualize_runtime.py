@@ -333,23 +333,32 @@ _BYPASS_NOTE = (
 )
 
 
-def _was_reviewed(round_no: int, traces: list[tuple[str, list[dict]]]) -> bool:
+#: What the gate skipped BEFORE the record said so. A record with no `reviewed` field was
+#: written when `inconclusive` and `unresolved` were the bypass set, so for that record the
+#: disposition alone still tells the two populations apart. Frozen history, not the live
+#: bypass set — the live set is `close_tool.NO_REVIEW_DISPOSITIONS`, and a record written
+#: under it carries the field.
+_UNREVIEWED_BEFORE_THE_RECORD_SAID = ("inconclusive", "unresolved")
+
+
+def _was_reviewed(record: dict) -> bool:
     """Did a review actually run for this attempt?
 
     Asked in ONE place because two questions on this page turn on it — "is any attempt worth
     counting?" and "does THIS attempt's verdict mean a review agreed?" — and an unreviewed
     attempt rendered as `stands` reads as "a review ran and the disposition held".
 
-    §7 FK-8/FK-14 (#992, human, with the judge): re-keyed on what the attempt LEFT BEHIND — did
-    ANY role's trace carry a row for this round — never on `reviewed_disposition`'s own value.
-    Before #992 that value alone told the two populations apart (`inconclusive` never reached
-    the gate at all); after it, a POST-CHANGE reviewed `inconclusive` and a PRE-#992 bypassed
-    one share the exact same `reviewed_disposition` string, so only what the attempt left on
-    disk — the gate writes every dispatched-or-skipped role's marker before it can fail, and a
-    bypass writes no `wire_logs/` at all — still distinguishes them."""
-    return any(
-        entry["row"].get("round") == round_no for _role, entries in traces for entry in entries
-    )
+    Read off the record's own `reviewed` field, written by the close tool at the one site that
+    knows. This reader used to INFER the answer — first from the disposition's membership in
+    the bypass set, then (#992, briefly) from whether a trace file carried a row for the round —
+    and each inference broke when what it keyed on moved: a reviewed and a bypassed
+    `inconclusive` share one string, and a run dir from before the traces moved under
+    `wire_logs/` has no row to find, so a close that was reviewed rendered as one that was not.
+    The frozen fallback covers records from before the field existed, and nothing else."""
+    reviewed = record.get("reviewed")
+    if isinstance(reviewed, bool):
+        return reviewed
+    return record.get("reviewed_disposition") not in _UNREVIEWED_BEFORE_THE_RECORD_SAID
 
 
 def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
@@ -536,12 +545,11 @@ def render_review_gate(
     failure_kind = fm.get("failure_kind")
 
     # A close that bypasses the gate entirely (only the host's own `unresolved` does, #992)
-    # has the honest "nothing was reviewed" record, not a review that found nothing — and
-    # §7 FK-8 re-keys that split on what the attempt LEFT BEHIND (any trace row for its own
-    # round), never on `reviewed_disposition`'s value, so a pre-#992 `inconclusive` bypass and
-    # a post-change reviewed one — which share that same string — still render apart.
+    # has the honest "nothing was reviewed" record, not a review that found nothing — and the
+    # record itself says which (`_was_reviewed`), so a pre-#992 `inconclusive` bypass and a
+    # post-change reviewed one — which share the same `reviewed_disposition` — render apart.
     traces = _read_role_traces(run_dir)
-    reviewed = [(n, r) for n, r in records if _was_reviewed(n - 1, traces)]
+    reviewed = [(n, r) for n, r in records if _was_reviewed(r)]
     if not reviewed:
         body = (
             '<div class="rv-strip"><span class="rv-badge rv-skip">not reviewed</span>'
@@ -564,19 +572,10 @@ def render_review_gate(
         + _review_cost_html(costs)
     )
     if failure_kind:
-        v = close_vocabulary()
         strip += (
-            (
-                '<div class="rv-failnote">The review did not complete, so this close stands '
-                "on the host's own account — <strong>the machinery broke</strong>, not a "
-                "finding about the case.</div>"
-            )
-            if outcome == v.stands
-            else (
-                '<div class="rv-failnote">The review did not complete, so the close failed '
-                "<strong>closed</strong> — this is the machinery breaking, not a finding "
-                "about the case.</div>"
-            )
+            '<div class="rv-failnote">The review did not complete, so the close failed '
+            "<strong>closed</strong> — this is the machinery breaking, not a finding about "
+            "the case.</div>"
         )
 
     rows: list[str] = []
@@ -588,7 +587,7 @@ def render_review_gate(
         # disposition survived", so it is labelled by what happened to it instead. The guard
         # above only covers a run whose EVERY attempt bypassed; a run challenged once and then
         # closed `inconclusive` reaches here with one of each.
-        bypassed = not _was_reviewed(n - 1, traces)
+        bypassed = not _was_reviewed(rec)
         badge_cls, badge_text = (
             ("rv-skip", "not reviewed") if bypassed else (_verdict_class(verdict), verdict)
         )

@@ -1,16 +1,27 @@
-"""#992 — the routing arms on an `inconclusive` close (O2, O3, M3; the challenge, the four
-standing arms, the machinery-failure sweep, and everything shared across attempts on one run).
+"""#992 — the routing arms on an `inconclusive` close (O2, O3, M3; the challenge, the held
+ceiling, the three override arms, the machinery-failure sweep, and everything shared across
+attempts on one run).
 
 Every test here is one demand of `spec-flow/specs/spec_graph_992.yaml`, named by that demand's
 `discharged_by`. RED against 67d29090 is the expected state: today an `inconclusive` close
-never reaches `_route` or `_fail`, and every forced arm of both still hands back the host's
-`unresolved`.
+never reaches `_route` or `_fail` at all.
 
-THE SWEEP DISCIPLINE (handoff.deviations): a build that silently leaves one `_fail` site or one
-`_route` FORCED arm on `HOST_ONLY_DISPOSITION` for `inconclusive` is caught here only if the
-sweep drives THAT site, so `_arms()` names each `_route` arm and `_faults()` each reachable `_fail`
-site individually (:471 the strict second read, :512 a lens not ok, :517 a lens unreadable, :530
-the composer not ok, :535 the composer unreadable). The sixth site, :474 — a generic projector
+ONE RULE FOR EVERY REVIEWED DISPOSITION (M3 as settled at the merge gate, REVERSING the design
+doc's first cut): an override arm — a gap nothing measurable would settle, a repeated ask, a
+spent pool, or the review machinery breaking — commits the host's own `unresolved` for an
+`inconclusive` close exactly as it does for a confident one, with the same cause and the same
+`failure_kind`. The first cut let `inconclusive` STAND through every override "because there
+is no confident verdict to override"; that recreated, on the override arms alone, the unchecked
+`inconclusive` this issue exists to end — a close the corpus, the held-out scorer and the
+ticket all read as the model's own ceiling claim, committed when the review could not check
+it. So the override arms are pinned as PARITY with the confident close, never as a
+per-disposition literal.
+
+THE SWEEP DISCIPLINE (handoff.deviations): a build that silently special-cases one `_fail` site
+or one `_route` override arm for `inconclusive` is caught here only if the sweep drives THAT
+site, so `_arms()` names each `_route` arm and `_faults()` each reachable `_fail` site
+individually (:471 the strict second read, :512 a lens not ok, :517 a lens unreadable, :530 the
+composer not ok, :535 the composer unreadable). The sixth site, :474 — a generic projector
 exception — is unreachable for an `inconclusive` close within one process: `iter_resolutions`
 and the parser guard every shape the walk reads, and any document the gate cannot parse was
 already refused by the price gate (x6/a4). It is recorded here rather than driven.
@@ -53,6 +64,7 @@ from defender.tests._spec992 import (
     CONFIDENT,
     CONFIDENT_QUESTION,
     GAP,
+    UNRESOLVED,
     SHIPPED_CAUSES,
     bounds,
     ceiling_companion,
@@ -163,11 +175,13 @@ def test_holds_commits_inconclusive_ceiling_examined(tmp_path):
     assert dispute not in report_text(run_dir)
 
 
-def test_null_ask_gap_stands_cannot_discriminate(tmp_path):
+def test_null_ask_gap_overrides_cannot_discriminate(tmp_path):
     """A composer `gap` with `ask: null` — and its rg2 twin, an omitted `ask` key — on an
-    `inconclusive` close commits `disposition: inconclusive`, `outcome: stands`, `cause:
-    CAUSE_EVIDENCE_CANNOT_DISCRIMINATE`, no `failure_kind`, no turn spent, and no `incomplete`
-    row on any role's trace — the composer answered inside its contract."""
+    `inconclusive` close is overridden exactly as on a confident one: `disposition: unresolved`,
+    `outcome: forced-inconclusive`, `cause: CAUSE_EVIDENCE_CANNOT_DISCRIMINATE`, no
+    `failure_kind`, no turn spent, and no `incomplete` row on any role's trace — the composer
+    answered inside its contract, and the answer was that the ceiling claim has a gap nothing
+    measurable would close."""
     for name, composer in (
         ("null", gap(None)),
         ("omitted", json.dumps({"finding": "gap", "review": "nothing measurable"})),
@@ -175,71 +189,76 @@ def test_null_ask_gap_stands_cannot_discriminate(tmp_path):
         deps, run_dir = _fresh(tmp_path, name)
         result = close_with(deps, GAP, recording(composer))
         assert (result.outcome, result.cause, result.failure_kind) == (
-            STANDS, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, None,
+            FORCED_INCONCLUSIVE, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, None,
         ), name
         assert result.turns_used == 0
         assert review_state(deps).turns == 0
         fm = frontmatter(run_dir)
         assert (fm["disposition"], fm["outcome"], fm["cause"]) == (
-            GAP, STANDS, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
+            UNRESOLVED, FORCED_INCONCLUSIVE, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
         )
         assert "failure_kind" not in fm
         for role in _ALL_ROLES:
             assert not any(row.get("incomplete") for row in trace_rows(run_dir, role)), role
 
 
-def test_repeat_ask_stands_nothing_left_to_ask(tmp_path):
+def test_repeat_ask_overrides_nothing_left_to_ask(tmp_path):
     """An `inconclusive` re-close whose composer asks again for a target the record mentions no
-    more than when it was first asked commits `inconclusive` / `stands` /
-    CAUSE_NOTHING_LEFT_TO_ASK without spending a turn — decided by the host's `raised_asks`
+    more than when it was first asked is overridden — `unresolved` / `forced-inconclusive` /
+    CAUSE_NOTHING_LEFT_TO_ASK — without spending a turn, decided by the host's `raised_asks`
     watermark, not the composer's memory (a fresh composer on the second pass is refused the
     same way), and the watermark carries across a confident→inconclusive switch on one run."""
     deps, run_dir = _fresh(tmp_path, "repeat")
     assert close_with(deps, GAP, recording(gap("l-005"))).outcome == CHALLENGED
     repeated = close_with(deps, GAP, recording(gap("l-005")))
     assert (repeated.outcome, repeated.cause, repeated.failure_kind) == (
-        STANDS, CAUSE_NOTHING_LEFT_TO_ASK, None,
+        FORCED_INCONCLUSIVE, CAUSE_NOTHING_LEFT_TO_ASK, None,
     )
     assert repeated.turns_used == 1
     assert review_state(deps).turns == 1
     fm = frontmatter(run_dir)
-    assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CAUSE_NOTHING_LEFT_TO_ASK)
+    assert (fm["disposition"], fm["outcome"], fm["cause"]) == (
+        UNRESOLVED, FORCED_INCONCLUSIVE, CAUSE_NOTHING_LEFT_TO_ASK,
+    )
 
     deps, run_dir = _fresh(tmp_path, "switch")
     assert close_with(deps, CONFIDENT, recording(gap("l-005"))).outcome == CHALLENGED
     switched = close_with(deps, GAP, recording(gap("l-005")))
-    assert (switched.outcome, switched.cause) == (STANDS, CAUSE_NOTHING_LEFT_TO_ASK)
-    assert frontmatter(run_dir)["disposition"] == GAP
+    assert (switched.outcome, switched.cause) == (FORCED_INCONCLUSIVE, CAUSE_NOTHING_LEFT_TO_ASK)
+    assert frontmatter(run_dir)["disposition"] == UNRESOLVED
 
 
-def test_spent_pool_stands_turn_budget_spent(tmp_path):
+def test_spent_pool_overrides_turn_budget_spent(tmp_path):
     """When `ReviewState.turns` has reached `Bounds.extra_turns` — including the shared-pool
     case of a confident close challenged and then re-closed `inconclusive` — a `gap` with a
-    fresh ask commits `inconclusive` / `stands` / CAUSE_TURN_BUDGET_SPENT and no `unresolved` is
-    ever written; manufactured novelty (a new citable target every round) still ends at the
-    bound with the same cause (FK-11: the bound is the safety property)."""
+    fresh ask is overridden: `unresolved` / `forced-inconclusive` / CAUSE_TURN_BUDGET_SPENT;
+    manufactured novelty (a new citable target every round) still ends at the bound with the
+    same cause (FK-11: the bound is the safety property)."""
     one_turn = bounds(extra_turns=1)
     deps, run_dir = _fresh(tmp_path, "spent")
     assert close_with(deps, GAP, recording(gap("l-004")), bounds=one_turn).outcome == CHALLENGED
     spent = close_with(deps, GAP, recording(gap("l-005")), bounds=one_turn)
-    assert (spent.outcome, spent.cause, spent.failure_kind) == (STANDS, CAUSE_TURN_BUDGET_SPENT, None)
+    assert (spent.outcome, spent.cause, spent.failure_kind) == (
+        FORCED_INCONCLUSIVE, CAUSE_TURN_BUDGET_SPENT, None,
+    )
     fm = frontmatter(run_dir)
-    assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CAUSE_TURN_BUDGET_SPENT)
+    assert (fm["disposition"], fm["outcome"], fm["cause"]) == (
+        UNRESOLVED, FORCED_INCONCLUSIVE, CAUSE_TURN_BUDGET_SPENT,
+    )
 
     deps, run_dir = _fresh(tmp_path, "shared-pool")
     assert close_with(deps, CONFIDENT, recording(gap("l-004")), bounds=one_turn).outcome == CHALLENGED
     shared = close_with(deps, GAP, recording(gap("l-005")), bounds=one_turn)
-    assert (shared.outcome, shared.cause) == (STANDS, CAUSE_TURN_BUDGET_SPENT)
-    assert frontmatter(run_dir)["disposition"] == GAP
+    assert (shared.outcome, shared.cause) == (FORCED_INCONCLUSIVE, CAUSE_TURN_BUDGET_SPENT)
+    assert frontmatter(run_dir)["disposition"] == UNRESOLVED
 
     deps, run_dir = _fresh(tmp_path, "novelty")
     two_turns = bounds(extra_turns=2)
     for target in ("l-004", "l-005"):
         assert close_with(deps, GAP, recording(gap(target)), bounds=two_turns).outcome == CHALLENGED
     novel = close_with(deps, GAP, recording(gap("h-001")), bounds=two_turns)
-    assert (novel.outcome, novel.cause) == (STANDS, CAUSE_TURN_BUDGET_SPENT)
-    assert frontmatter(run_dir)["disposition"] == GAP
-    assert "unresolved" not in report_text(run_dir)
+    assert (novel.outcome, novel.cause) == (FORCED_INCONCLUSIVE, CAUSE_TURN_BUDGET_SPENT)
+    assert frontmatter(run_dir)["disposition"] == UNRESOLVED
 
 
 # ---------------------------------------------------------------------------------------
@@ -282,29 +301,34 @@ def _faults() -> list[tuple[str, Any, Any, Any, str]]:
     ]
 
 
-def test_machinery_failure_stands_review_incomplete(tmp_path):
+def test_machinery_failure_overrides_review_incomplete(tmp_path):
     """Each way the review can fail on an `inconclusive` close — an unbound bundle (`None` and
     an empty `ReviewStages()`), a stage that raises, a stage that times out, an empty lens
     reading, an unreadable composer reply (not JSON, a finding outside {holds, gap}, `ask: ""`),
     an investigation.md the gate's own strict second read cannot decode, and a partially bound
-    bundle whose unbound role is dispatched (§7 FK-2) — commits `disposition: inconclusive`,
-    `outcome: stands`, `cause: CAUSE_REVIEW_INCOMPLETE`, the stage's `failure_kind` in both the
-    report frontmatter and the record, and an `incomplete` row on every role's trace; the
-    whole review fails as a unit (a composer fault leaves the lenses' `ok` rows beside the
-    `incomplete` rows; three faults report the first's kind; a skipped ablation's row and its
-    `incomplete` row coexist), and a partially bound bundle whose unbound role is SKIPPED
-    completes."""
+    bundle whose unbound role is dispatched (§7 FK-2) — fails CLOSED exactly as it does on a
+    confident close: `disposition: unresolved`, `outcome: forced-inconclusive`, `cause:
+    CAUSE_REVIEW_INCOMPLETE`, the stage's `failure_kind` in both the report frontmatter and the
+    record, the record still naming `inconclusive` as what was under review, and an
+    `incomplete` row on every role's trace; the whole review fails as a unit (a composer fault
+    leaves the lenses' `ok` rows beside the `incomplete` rows; three faults report the first's
+    kind; a skipped ablation's row and its `incomplete` row coexist), and a partially bound
+    bundle whose unbound role is SKIPPED completes."""
     for name, companion, stages, limits, kind in _faults():
         deps, run_dir = _fresh(tmp_path, name, companion)
         result = close_with(deps, GAP, stages, bounds=limits)
-        assert result.outcome == STANDS, (name, result)
+        assert result.outcome == FORCED_INCONCLUSIVE, (name, result)
         assert result.cause == CAUSE_REVIEW_INCOMPLETE, name
         assert result.failure_kind == kind, (name, result.failure_kind)
         fm = frontmatter(run_dir)
-        assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CAUSE_REVIEW_INCOMPLETE), name
+        assert (fm["disposition"], fm["outcome"], fm["cause"]) == (
+            UNRESOLVED, FORCED_INCONCLUSIVE, CAUSE_REVIEW_INCOMPLETE,
+        ), name
         assert fm["failure_kind"] == kind, name
         rec = record(run_dir, 1)
-        assert (rec["verdict"], rec["reviewed_disposition"], rec["failure_kind"]) == (STANDS, GAP, kind), name
+        assert (rec["verdict"], rec["reviewed_disposition"], rec["failure_kind"]) == (
+            FORCED_INCONCLUSIVE, GAP, kind,
+        ), name
         assert _incomplete_on_every_role(run_dir), (name, {r: trace_rows(run_dir, r) for r in _ALL_ROLES})
 
     # The lenses' `ok` rows survive beside the `incomplete` rows when the composer breaks.
@@ -332,7 +356,8 @@ def test_machinery_failure_stands_review_incomplete(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# O3 — the universal: no arm hands an `inconclusive` back as `unresolved`.
+# O3 — the universal: every override arm treats `inconclusive` exactly as it treats a
+# confident close.
 # ---------------------------------------------------------------------------------------
 
 #: Every `_route` arm and reachable `_fail` site as a scenario over a fresh run:
@@ -368,33 +393,40 @@ def _arms() -> list[tuple[str, Callable[[Any, str], Any]]]:
     return arms
 
 
-def test_inconclusive_never_leaves_as_unresolved(tmp_path):
+def test_override_arms_route_inconclusive_and_confident_alike(tmp_path):
     """Sweeping every composer finding (holds, gap+ask, gap+null) crossed with every host state
-    (fresh, repeated ask, spent pool) and every failure kind at every reachable `_fail` site, no
-    close that entered the gate as `inconclusive` returns `forced-inconclusive` or writes
-    `disposition: unresolved` — every committing arm writes `disposition: inconclusive` and a
-    challenged arm writes nothing; positive control: the same sweep on `malicious` still
-    produces both `forced-inconclusive` and `disposition: unresolved`."""
-    forced_on_confident = 0
+    (fresh, repeated ask, spent pool) and every failure kind at every reachable `_fail` site,
+    the same drive on an `inconclusive` close and on a `malicious` close produces the same
+    outcome, the same cause and the same `failure_kind` — asserted as EQUALITY across the two
+    dispositions, never as a #992-specific literal, so a build that quietly special-cases one
+    arm for `inconclusive` is caught at that arm. The two differ only where the close STANDS
+    (each commits its own disposition, under its own `holds` sentence — the seventh cause is
+    the held ceiling's, s_fk10) — an override commits `unresolved` for both under one cause,
+    and a challenge commits nothing for either. The sweep must actually reach the override
+    arms (at least three of them force) or it cannot see the difference it exists to see."""
+    forced = 0
     for name, drive in _arms():
         deps, run_dir = _fresh(tmp_path, f"gap-{name}")
         result = drive(deps, GAP)
-        assert result.outcome != FORCED_INCONCLUSIVE, (name, result)
-        assert result.outcome in (STANDS, CHALLENGED), (name, result)
-        if result.outcome == STANDS:
-            assert _spec923.committed_verdict(run_dir) == GAP, name
-            assert "unresolved" not in report_text(run_dir), name
-        else:
-            assert not (run_dir / "report.md").exists(), name
-
         twin, twin_dir = _fresh(tmp_path, f"confident-{name}")
         control = drive(twin, CONFIDENT)
-        if control.outcome == FORCED_INCONCLUSIVE:
-            forced_on_confident += 1
-            assert _spec923.committed_verdict(twin_dir) == "unresolved", name
-    assert forced_on_confident >= 3, (
-        f"the confident control forced only {forced_on_confident} arm(s) — the sweep cannot see "
-        "the difference it exists to see"
+        assert (result.outcome, result.failure_kind) == (control.outcome, control.failure_kind), (
+            name, result, control,
+        )
+        if result.outcome == CHALLENGED:
+            assert not (run_dir / "report.md").exists(), name
+            assert not (twin_dir / "report.md").exists(), name
+        elif result.outcome == STANDS:
+            assert _spec923.committed_verdict(run_dir) == GAP, name
+            assert _spec923.committed_verdict(twin_dir) == CONFIDENT, name
+        else:
+            assert result.cause == control.cause, (name, result.cause, control.cause)
+            forced += 1
+            assert result.outcome == FORCED_INCONCLUSIVE, (name, result)
+            assert _spec923.committed_verdict(run_dir) == UNRESOLVED, name
+            assert _spec923.committed_verdict(twin_dir) == UNRESOLVED, name
+    assert forced >= 3, (
+        f"only {forced} arm(s) forced — the sweep cannot see the difference it exists to see"
     )
 
 

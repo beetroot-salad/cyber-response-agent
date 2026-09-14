@@ -21,14 +21,12 @@ from dataclasses import fields
 from defender._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
 from defender.runtime.challenge_gate import GateVerdict
 from defender.runtime.close_tool import (
-    CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_REVIEW_INCOMPLETE,
     CLOSE_RETURNS,
     FAILURE_KINDS,
     REPORT_CAUSES,
     STAGE_ERROR,
     STANDS,
-    UNREADABLE,
     CloseResult,
 )
 from defender.scripts.case_history import case_ticket
@@ -43,6 +41,7 @@ from defender.tests._spec992 import (
     CONFIDENT,
     GAP,
     NOTE_LADDER,
+    UNRESOLVED,
     SHIPPED_CAUSES,
     V2SSHD_RECEIPTS,
     bounds,
@@ -52,7 +51,6 @@ from defender.tests._spec992 import (
     frontmatter,
     gap,
     holds,
-    lenient_text,
     non_utf8_companion,
     note_text,
     noted_companion,
@@ -63,7 +61,6 @@ from defender.tests._spec992 import (
     record_files,
     recording,
     refusal,
-    replies,
     report_parts,
     sparse_companion,
     trace_files,
@@ -73,11 +70,12 @@ from defender.tests._spec992 import (
 _ONE_TURN = "extra_turns"
 
 
-def _standing_arms() -> list[tuple[str, object, dict]]:
-    """Every arm on which an `inconclusive` STANDS after review: `(name, stages, close kwargs)`
-    for the last attempt; a repeat and a spent pool need a challenged attempt first."""
+def _override_arms() -> list[tuple[str, object, dict]]:
+    """Every arm on which an `inconclusive` is OVERRIDDEN to `unresolved` after review — the
+    same four arms that override a confident close (one rule; test_992_routing's docstring):
+    `(name, stages, close kwargs)` for the last attempt; a repeat and a spent pool need a
+    challenged attempt first."""
     return [
-        ("holds", recording(holds()), {}),
         ("null-ask", recording(gap(None)), {}),
         ("repeat", recording(gap("l-004")), {"after": [recording(gap("l-004"))]}),
         ("spent-pool", recording(gap("l-005")), {"after": [recording(gap("l-004"))], _ONE_TURN: 1}),
@@ -85,53 +83,60 @@ def _standing_arms() -> list[tuple[str, object, dict]]:
     ]
 
 
-def _stand(deps, name: str, stages, kw: dict):
+def _drive(deps, name: str, stages, kw: dict):
     limits = bounds(extra_turns=kw[_ONE_TURN]) if _ONE_TURN in kw else None
     for earlier in kw.get("after", []):
         assert close_with(deps, GAP, earlier, bounds=limits).outcome == "challenged", name
-    result = close_with(deps, GAP, stages, bounds=limits)
-    assert result.outcome == STANDS, (name, result)
-    return result
+    return close_with(deps, GAP, stages, bounds=limits)
 
 
 def test_reviewed_inconclusive_carries_receipts(tmp_path):
-    """Every `inconclusive` that stands after review — on holds, null ask, repeat, spent pool
-    and machinery failure alike — carries into report.md the `ceiling_test:` frontmatter block
-    with the exact receipts the entry price gate priced (`state`/`ref`/`cap`, the price gate's
-    own parse, never the gate's second read — pinned on a non-UTF-8 companion the price gate
-    decodes leniently and the gate's strict read refuses, where the commit stands on
-    CAUSE_REVIEW_INCOMPLETE/`error` with the lenient parse's block), one `ceiling_test (...)`
-    note line per receipt in
-    the body, and the `runtime_evidence` block beside it; receipts land identically when the
-    ablation lens was skipped, render identically whatever the review found (the cause alone
-    distinguishes), and two rows citing one ref with different states are not collapsed — the
-    lead-anchored consistency check refuses the inconsistent one at the price gate (rg4)."""
-    golden = ceiling_companion()
-    for name, stages, kw in _standing_arms():
-        deps, run_dir = deps_over(tmp_path / name, golden)
-        _stand(deps, name, stages, kw)
-        head, body = report_parts(run_dir)
-        assert head.endswith(priced_block(golden)), (name, head)
-        assert priced_block(golden).startswith("ceiling_test:\n")
-        notes = receipt_note_lines(body)
-        assert len(notes) == len(V2SSHD_RECEIPTS), (name, notes)
-        for (state, ref), line in zip(V2SSHD_RECEIPTS, notes, strict=True):
-            assert line.startswith(f"ceiling_test ({state}, {ref}): "), (name, line)
+    """An `inconclusive` that STANDS after review — the held ceiling, the one arm that stands —
+    carries into report.md the `ceiling_test:` frontmatter block with the exact receipts the
+    entry price gate priced (`state`/`ref`/`cap`), one `ceiling_test (...)` note line per
+    receipt in the body, and the `runtime_evidence` block beside it; an `inconclusive` the
+    review OVERRIDES — null ask, repeat, spent pool, machinery failure — commits `unresolved`
+    and, like every `unresolved`, carries no block and no note line (the receipts stay in
+    investigation.md); receipts land identically when the ablation lens was skipped, and two
+    rows citing one ref with different states are not collapsed — the lead-anchored
+    consistency check refuses the inconsistent one at the price gate (rg4).
 
-    # The price gate's OWN parse is the source (design M4, C14, G18 — the judge's corrected
-    # value for FK-17/18/19): on the one in-process input where the two reads differ — a
-    # non-UTF-8 byte the price gate decodes leniently and the gate's strict read refuses — the
-    # commit stands on CAUSE_REVIEW_INCOMPLETE/`error` and carries the block the LENIENT parse
-    # of the same bytes renders, which the gate's own read never produced.
+    The one in-process input on which the price gate's lenient parse and the gate's strict
+    second read differ — a non-UTF-8 byte — now fails closed before any block is rendered, so
+    M4's "the block comes from the price gate's parse" has no discriminating input left; it
+    is read off the commit site instead."""
+    golden = ceiling_companion()
+    deps, run_dir = deps_over(tmp_path / "holds", golden)
+    assert close_with(deps, GAP, recording(holds())).outcome == STANDS
+    head, body = report_parts(run_dir)
+    assert head.endswith(priced_block(golden)), head
+    assert priced_block(golden).startswith("ceiling_test:\n")
+    notes = receipt_note_lines(body)
+    assert len(notes) == len(V2SSHD_RECEIPTS), notes
+    for (state, ref), line in zip(V2SSHD_RECEIPTS, notes, strict=True):
+        assert line.startswith(f"ceiling_test ({state}, {ref}): "), line
+
+    for name, stages, kw in _override_arms():
+        deps, run_dir = deps_over(tmp_path / name, golden)
+        result = _drive(deps, name, stages, kw)
+        assert result.outcome == "forced-inconclusive", (name, result)
+        assert frontmatter(run_dir)["disposition"] == UNRESOLVED, name
+        head, body = report_parts(run_dir)
+        assert "ceiling_test" not in head, (name, head)
+        assert receipt_note_lines(body) == [], (name, body)
+        assert "ceiling_test" in (run_dir / "investigation.md").read_text(encoding="utf-8")
+
+    # The non-UTF-8 divergence: the strict second read refuses, the close fails closed, and no
+    # block is rendered from either parse.
     raw = non_utf8_companion()
     deps, run_dir = deps_over(tmp_path / "non-utf8", raw)
     divergent = close_with(deps, GAP, recording(holds()))
     assert (divergent.outcome, divergent.cause, divergent.failure_kind) == (
-        STANDS, CAUSE_REVIEW_INCOMPLETE, STAGE_ERROR,
+        "forced-inconclusive", CAUSE_REVIEW_INCOMPLETE, STAGE_ERROR,
     )
     head, body = report_parts(run_dir)
-    assert head.endswith(priced_block(lenient_text(raw))), head
-    assert len(receipt_note_lines(body)) == len(V2SSHD_RECEIPTS)
+    assert "ceiling_test" not in head, head
+    assert receipt_note_lines(body) == []
 
     # The baseline block rides beside the receipts on the reviewed path too.
     with_baseline = _tacit983.inconclusive_document(
@@ -151,13 +156,6 @@ def test_reviewed_inconclusive_carries_receipts(tmp_path):
     assert close_with(deps, GAP, skipped).outcome == STANDS
     assert skipped.calls == ["support", "composer"]
     assert report_parts(run_dir)[0].endswith(priced_block(sparse))
-
-    # Identical whatever the review found: the note lines are the same on every arm.
-    bodies = {}
-    for name in ("holds", "null-ask", "machinery-failure"):
-        bodies[name] = receipt_note_lines(report_parts(tmp_path / name / "run")[1])
-    assert bodies["holds"] == bodies["null-ask"] == bodies["machinery-failure"]
-    assert frontmatter(tmp_path / "holds" / "run")["cause"] != frontmatter(tmp_path / "null-ask" / "run")["cause"]
 
     # Two rows citing one ref with different states: the inconsistent one is refused at the
     # price gate, before any stage.
@@ -227,30 +225,26 @@ def _near_cap_rows() -> tuple[str, ...]:
 
 
 def test_reviewed_inconclusive_report_frontmatter_stays_under_its_cap_with_the_longest_cause(tmp_path):
-    """A reviewed `inconclusive` with the longest REPORT_CAUSES member, a `failure_kind`, and a
-    `ceiling_test` block at `_MAX_CEILING_FRONTMATTER_BYTES` commits inside the 512-byte
-    frontmatter cap (G13/a5: 457 of 512 B in the worst reachable case; the seventh member is
-    the longest sentence but rides the arm that carries no `failure_kind`); `validate_report`
-    refuses an overflow; and the seventh cause exists (d23, §7 FK-10)."""
+    """A reviewed `inconclusive` that stands — under the seventh cause, the longest sentence in
+    REPORT_CAUSES — with a `ceiling_test` block at `_MAX_CEILING_FRONTMATTER_BYTES` commits
+    inside the 512-byte frontmatter cap; the arithmetic is still checked over EVERY member with
+    the longest `failure_kind` beside a block at the cap, so no arm the vocabulary could grow
+    into overflows; `validate_report` refuses an overflow; and the seventh cause exists (d23,
+    §7 FK-10). (The override arms commit `unresolved`, which carries no block — they are the
+    arithmetic's rows, not a reachable overflow.)"""
     rows = _near_cap_rows()
     at_cap = _spec923.paid(*rows)
     block = priced_block(at_cap)
     assert _MAX_CEILING_FRONTMATTER_BYTES - 64 < len(block.encode("utf-8")) <= _MAX_CEILING_FRONTMATTER_BYTES
 
-    arms = {
-        "longest-cause": (recording(gap(None)), CAUSE_EVIDENCE_CANNOT_DISCRIMINATE, None),
-        "seventh-cause": (recording(holds()), CEILING_EXAMINED, None),
-        "with-failure-kind": (recording(replies("not json")), CAUSE_REVIEW_INCOMPLETE, UNREADABLE),
-    }
-    for name, (stages, cause, kind) in arms.items():
-        deps, run_dir = deps_over(tmp_path / name, at_cap)
-        assert close_with(deps, GAP, stages).outcome == STANDS, name
-        fm = frontmatter(run_dir)
-        assert fm["cause"] == cause, (name, fm)
-        assert fm.get("failure_kind") == kind, (name, fm)
-        head, _body = report_parts(run_dir)
-        assert head.endswith(block)
-        assert len(head.encode("utf-8")) <= REPORT_FRONTMATTER_MAX, (name, len(head.encode("utf-8")))
+    deps, run_dir = deps_over(tmp_path / "seventh-cause", at_cap)
+    assert close_with(deps, GAP, recording(holds())).outcome == STANDS
+    fm = frontmatter(run_dir)
+    assert fm["cause"] == CEILING_EXAMINED, fm
+    assert "failure_kind" not in fm, fm
+    head, _body = report_parts(run_dir)
+    assert head.endswith(block)
+    assert len(head.encode("utf-8")) <= REPORT_FRONTMATTER_MAX, len(head.encode("utf-8"))
 
     # The arithmetic over the REAL tuple: every member, with the longest kind, plus a block at
     # the cap, fits — and the seventh is a member.
@@ -378,9 +372,9 @@ def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_pat
     closing comment carries `disposition: inconclusive`, `outcome: stands` and the SEVENTH cause
     sentence — "the challenge review examined the ceiling claim and found nothing further
     measurable" — verbatim, `case_ticket`'s membership check (which imports REPORT_CAUSES)
-    accepts it, and a machinery-failed `inconclusive` (stands + failure_kind +
-    CAUSE_REVIEW_INCOMPLETE) renders through the same reader without claiming a settled
-    finding."""
+    accepts it, and a machinery-failed `inconclusive` (failed closed to `unresolved` +
+    failure_kind + CAUSE_REVIEW_INCOMPLETE) renders through the same reader as the host's own
+    verdict, never as the ceiling claim the review could not check."""
     deps, run_dir = deps_over(tmp_path / "held", ceiling_companion())
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
     fm = frontmatter(run_dir)
@@ -403,9 +397,9 @@ def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_pat
 
     deps, run_dir = deps_over(tmp_path / "broken", ceiling_companion())
     broken = close_with(deps, GAP, recording(faults={"composer": raises(RuntimeError("down"))}))
-    assert broken.outcome == STANDS
+    assert broken.outcome == "forced-inconclusive"
     assert broken.failure_kind is not None
     rec = case_ticket.read_case_record(run_dir)
-    assert rec.disposition == GAP
+    assert rec.disposition == UNRESOLVED
     assert rec.reason == CAUSE_REVIEW_INCOMPLETE
     assert CEILING_EXAMINED not in case_ticket.case_record_to_close(rec)["resolution"]

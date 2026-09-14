@@ -37,7 +37,7 @@ from defender.tests._spec992 import (
     CEILING_QUESTION_MARKERS,
     CONFIDENT,
     GAP,
-    SHIPPED_CAUSES,
+    UNRESOLVED,
     bounds,
     ceiling_companion,
     close_with,
@@ -61,7 +61,9 @@ from defender.tests._spec992 import (
 #: The causes a STANDING `inconclusive` may commit after §7 FK-10: the five the design named
 #: plus the seventh member for the ceiling-held arm. `CAUSE_NOT_REVIEWED` is `unresolved`'s
 #: alone (d0's resolution).
-STANDING_CAUSES = frozenset(SHIPPED_CAUSES[1:]) | {CEILING_EXAMINED}
+#: The one sentence an `inconclusive` close can STAND under: every other arm overrides it to
+#: `unresolved` (one rule for every reviewed disposition — test_992_routing's docstring).
+STANDING_CAUSES = frozenset({CEILING_EXAMINED})
 
 
 def _tool_lane_return(tmp_path: Path, disposition: str, stages) -> str:
@@ -96,20 +98,19 @@ def _tool_lane_return(tmp_path: Path, disposition: str, stages) -> str:
 
 def test_inconclusive_close_return_contract(tmp_path):
     """Driving the sync host close with `inconclusive` and a bound bundle returns a
-    `CloseResult` whose `outcome` is `stands` or `challenged` and never `forced-inconclusive`;
-    on `stands` report.md carries `disposition: inconclusive`, `outcome: stands`, a `cause`
-    from {the seventh CEILING_EXAMINED member, EVIDENCE_CANNOT_DISCRIMINATE,
-    NOTHING_LEFT_TO_ASK, TURN_BUDGET_SPENT, REVIEW_INCOMPLETE} — never CAUSE_NOT_REVIEWED,
-    which is `unresolved`'s alone (§7 FK-10) — and a `failure_kind` key iff the machinery
-    failed, and the numbered record carries `verdict: stands` / `reviewed_disposition:
-    inconclusive`; on `challenged` no report.md exists, the record says `challenged`, and the
-    message carries the ask inside a fresh untrusted frame; the tool lane returns exactly
-    `result.message`."""
+    `CloseResult` whose `outcome` is one of the same three a confident close returns; on
+    `stands` report.md carries `disposition: inconclusive`, `outcome: stands`, the seventh
+    CEILING_EXAMINED member as `cause` — never CAUSE_NOT_REVIEWED, which is `unresolved`'s
+    alone (§7 FK-10) — no `failure_kind`, and the numbered record carries `verdict: stands` /
+    `reviewed_disposition: inconclusive` / `reviewed: true`; when the machinery breaks the
+    close fails CLOSED like any other — `forced-inconclusive`, `disposition: unresolved`, a
+    `failure_kind` key — with the record still naming `inconclusive` as what was under review;
+    on `challenged` no report.md exists, the record says `challenged`, and the message carries
+    the ask inside a fresh untrusted frame; the tool lane returns exactly `result.message`."""
     # `stands` — the review completed and held the ceiling claim.
     deps, run_dir = deps_over(tmp_path / "stands", ceiling_companion())
     stood = close_investigation(deps, GAP, stages=recording(holds()).bundle())
     assert stood.outcome == STANDS
-    assert stood.outcome != FORCED_INCONCLUSIVE
     fm = frontmatter(run_dir)
     assert fm["disposition"] == GAP
     assert fm["outcome"] == STANDS
@@ -119,19 +120,24 @@ def test_inconclusive_close_return_contract(tmp_path):
     rec = record(run_dir, 1)
     assert rec["verdict"] == STANDS
     assert rec["reviewed_disposition"] == GAP
+    assert rec["reviewed"] is True, "the record does not say the review ran"
 
-    # `stands` with the machinery broken — the `failure_kind` key is the one difference.
+    # The machinery broken — fails closed, exactly as a confident close does.
     deps, run_dir = deps_over(tmp_path / "broken", ceiling_companion())
     broken = close_investigation(
         deps, GAP,
         stages=recording(faults={"composer": raises(RuntimeError("provider dropped"))}).bundle(),
     )
-    assert broken.outcome == STANDS
+    assert broken.outcome == FORCED_INCONCLUSIVE
     fm = frontmatter(run_dir)
-    assert fm["disposition"] == GAP
-    assert fm["cause"] in STANDING_CAUSES
+    assert fm["disposition"] == UNRESOLVED
+    assert fm["cause"] not in STANDING_CAUSES
     assert fm["failure_kind"] == broken.failure_kind
     assert broken.failure_kind is not None
+    rec = record(run_dir, 1)
+    assert (rec["verdict"], rec["reviewed_disposition"], rec["reviewed"]) == (
+        FORCED_INCONCLUSIVE, GAP, True,
+    )
 
     # `challenged` — nothing committed, the ask handed back framed.
     deps, run_dir = deps_over(tmp_path / "challenged", ceiling_companion())
@@ -377,11 +383,12 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
 
 def test_disposition_threaded_seams(tmp_path):
     """`composer_projection` accepts the reviewed disposition and renders a different host
-    sentence for `inconclusive` than for a confident close, and `_route`/`_fail` receive it —
-    the gate never re-derives which disposition it is reviewing from anything but the argument
-    the close handed it: the gate driven with `inconclusive` over a companion that concludes
-    `inconclusive` routes every arm to `disposition: inconclusive`, and driven with a confident
-    keyword over the same companion routes to that keyword."""
+    sentence for `inconclusive` than for a confident close, and `_route` receives it — the gate
+    never re-derives which disposition it is reviewing from anything but the argument the
+    close handed it: the gate driven with `inconclusive` over a companion that concludes
+    `inconclusive` STANDS on `disposition: inconclusive`, and driven with a confident keyword
+    over the same companion stands on that keyword. The override arms take no disposition at
+    all: driven to one, the gate hands back the host's own verdict whichever keyword entered."""
     from defender.runtime import challenge_gate
     from defender.runtime.review.projector import composer_projection, parse_investigation
 
@@ -403,13 +410,17 @@ def test_disposition_threaded_seams(tmp_path):
             deps, disposition, stages=stages.bundle(), bounds=challenge_gate.default_bounds(),
         ))
 
-    routed = _gate("route", GAP, recording(gap(None)))
-    assert routed.disposition == GAP, routed
-    assert routed.outcome == STANDS
-    failed = _gate("fail", GAP, recording(faults={"support": raises(RuntimeError("down"))}))
-    assert failed.disposition == GAP, failed
-    assert failed.outcome == STANDS
-    confident_verdict = _gate("confident", CONFIDENT, recording(gap(None)))
-    assert confident_verdict.disposition == HOST_ONLY_DISPOSITION
-    assert confident_verdict.outcome == FORCED_INCONCLUSIVE
+    held = _gate("held", GAP, recording(holds()))
+    assert (held.disposition, held.outcome) == (GAP, STANDS), held
+    confident_held = _gate("confident-held", CONFIDENT, recording(holds()))
+    assert (confident_held.disposition, confident_held.outcome) == (CONFIDENT, STANDS)
+
+    for name, stages in (
+        ("route", recording(gap(None))),
+        ("fail", recording(faults={"support": raises(RuntimeError("down"))})),
+    ):
+        for keyword in (GAP, CONFIDENT):
+            verdict = _gate(f"{name}-{keyword}", keyword, stages)
+            assert verdict.disposition == HOST_ONLY_DISPOSITION, (name, keyword, verdict)
+            assert verdict.outcome == FORCED_INCONCLUSIVE, (name, keyword, verdict)
 

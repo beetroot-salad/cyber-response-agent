@@ -17,6 +17,7 @@ keyed on the split must give the same answer per population, on old and new dirs
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
 from defender.tests._spec992 import (
     CEILING_EXAMINED,
     DEFENDER,
+    CONFIDENT,
     GAP,
     bounds,
     ceiling_companion,
@@ -148,12 +150,13 @@ def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
     § Review gate as a reviewed attempt with its role traces and counts as reviewed; the bypass
     note names `unresolved` only; and a PRE-#992 `inconclusive` dir (record stands/inconclusive,
     cause CAUSE_NOT_REVIEWED, no trace files) renders 'not reviewed' in BOTH the § Review gate
-    section and the headline badge — `_was_reviewed` keys on what the attempt left behind, never
-    on `NO_REVIEW_DISPOSITIONS` — while a gate-forced `unresolved` still reads 'not reviewed' in
-    the headline too."""
+    section and the headline badge — `_was_reviewed` reads the record's own `reviewed` field,
+    written by the close, never `NO_REVIEW_DISPOSITIONS` — while a gate-forced `unresolved`
+    still reads 'not reviewed' in the headline too."""
     reviewed = reviewed_inconclusive_dir(tmp_path)
     assert frontmatter(reviewed)["cause"] == CEILING_EXAMINED
     assert record(reviewed, 1)["reviewed_disposition"] == GAP
+    assert record(reviewed, 1)["reviewed"] is True
     assert trace_files(reviewed) == list(REVIEW_ROLES)
     html, n = render_review_gate(reviewed, parsed_report(reviewed))
     assert n == 1, "the reviewed inconclusive attempt does not count as reviewed"
@@ -181,21 +184,27 @@ def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
 
 
 def test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap(tmp_path):
-    """A ceiling-held `inconclusive` (the seventh cause) and an unaffordable gap
-    (CAUSE_EVIDENCE_CANNOT_DISCRIMINATE / CAUSE_TURN_BUDGET_SPENT) render the identical
-    `gate: stands` headline badge; the cause text is where a reader learns which (F5)."""
+    """A ceiling-held `inconclusive` (the seventh cause) renders the `gate: stands` headline
+    badge; an unaffordable gap (CAUSE_EVIDENCE_CANNOT_DISCRIMINATE / CAUSE_TURN_BUDGET_SPENT)
+    is overridden to `unresolved` and renders the `gate: forced-inconclusive` badge a confident
+    close's override renders — the badge tells the two apart, and the cause text says which
+    override (F5); neither reads as "not reviewed"."""
     held = reviewed_inconclusive_dir(tmp_path, name="held")
     deps, cannot = deps_over(tmp_path / "cannot", ceiling_companion())
-    assert close_with(deps, GAP, recording(gap(None))).outcome == STANDS
+    assert close_with(deps, GAP, recording(gap(None))).outcome == "forced-inconclusive"
     one_turn = bounds(extra_turns=1)
     deps, spent = deps_over(tmp_path / "spent", ceiling_companion())
     assert close_with(deps, GAP, recording(gap("l-004")), bounds=one_turn).outcome == "challenged"
-    assert close_with(deps, GAP, recording(gap("l-005")), bounds=one_turn).outcome == STANDS
+    assert close_with(deps, GAP, recording(gap("l-005")), bounds=one_turn).outcome == "forced-inconclusive"
+    twin, confident = deps_over(tmp_path / "confident", ceiling_companion())
+    assert close_with(twin, CONFIDENT, recording(gap(None))).outcome == "forced-inconclusive"
 
-    badges = {run.parent.name: _gate_badge_html(parsed_report(run)) for run in (held, cannot, spent)}
-    assert len(badges) == 3, badges
-    assert len(set(badges.values())) == 1, badges
-    assert all("gate: stands" in b and "gate-stands" in b for b in badges.values()), badges
+    badges = {run.parent.name: _gate_badge_html(parsed_report(run)) for run in (held, cannot, spent, confident)}
+    assert "gate: stands" in badges["held"], badges
+    assert "gate-stands" in badges["held"], badges
+    assert badges["cannot"] == badges["spent"] == badges["confident"], badges
+    assert "gate: forced-inconclusive" in badges["cannot"], badges
+    assert "gate-forced" in badges["cannot"], badges
     assert all("not reviewed" not in b for b in badges.values())
     causes = {run.parent.name: frontmatter(run)["cause"] for run in (held, cannot, spent)}
     assert set(causes.values()) == {
@@ -221,15 +230,19 @@ def _split_answers(run_dir: Path) -> dict:
 
 
 def test_every_reader_of_the_reviewed_split_agrees_on_both_populations(tmp_path):
-    """R8's join census for FK-8's re-key — every consumer of `_was_reviewed`'s answer
-    (the § Review gate's reviewed list and its count, the section guard, the per-attempt
-    bypassed flag and its `_BYPASS_NOTE` vs role-trace rendering, and `visualize_run`'s
-    cause-keyed headline): over one run dir of each population (pre-#992 `inconclusive` with no
-    traces; post-change reviewed `inconclusive` with three trace files) every one of those
-    readers resolves the SAME answer — the count, the section guard, the per-attempt roles and
-    bypass note and the headline badge never disagree — and no reader still keys on
-    `NO_REVIEW_DISPOSITIONS` for the split: the two populations share a `reviewed_disposition`
-    and render differently."""
+    """R8's join census for FK-8 — every consumer of `_was_reviewed`'s answer (the § Review
+    gate's reviewed list and its count, the section guard, the per-attempt bypassed flag and
+    its `_BYPASS_NOTE` vs role-trace rendering, and `visualize_run`'s cause-keyed headline):
+    over one run dir of each population (pre-#992 `inconclusive` with no traces; post-change
+    reviewed `inconclusive` with three trace files) every one of those readers resolves the
+    SAME answer — the count, the section guard, the per-attempt roles and bypass note and the
+    headline badge never disagree — and no reader keys on `NO_REVIEW_DISPOSITIONS` for the
+    split: the two populations share a `reviewed_disposition` and render differently.
+
+    The split is READ OFF THE RECORD, not inferred from a side artifact: a reviewed record
+    whose trace files are gone (a run dir from before the traces moved under `wire_logs/`, or
+    one pruned since) still counts as reviewed — the role cards are the one thing it cannot
+    show — where an inference from "did a trace row survive" rendered it as a bypass."""
     reviewed_dir = reviewed_inconclusive_dir(tmp_path)
     historical_dir = pre_change_inconclusive_dir(tmp_path)
     reviewed = _split_answers(reviewed_dir)
@@ -244,7 +257,15 @@ def test_every_reader_of_the_reviewed_split_agrees_on_both_populations(tmp_path)
         "bypass-note": True, "role-cards": False, "headline-not-reviewed": True,
     }, historical
 
-    # The two populations are told apart by what the attempt left behind, not by the
-    # disposition on the record — which is the same string in both.
+    # The two populations are told apart by the record's own word, not by the disposition on
+    # it — which is the same string in both.
     assert record(reviewed_dir, 1)["reviewed_disposition"] == GAP
     assert record(historical_dir, 1)["reviewed_disposition"] == GAP
+    assert record(reviewed_dir, 1)["reviewed"] is True
+    assert "reviewed" not in record(historical_dir, 1)
+
+    traceless_dir = reviewed_inconclusive_dir(tmp_path, name="traceless")
+    shutil.rmtree(traceless_dir / "wire_logs")
+    assert trace_files(traceless_dir) == []
+    traceless = _split_answers(traceless_dir)
+    assert traceless == {**reviewed, "role-cards": False}, traceless

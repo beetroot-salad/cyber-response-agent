@@ -65,6 +65,35 @@ base: 67d29090          # main — the base every line anchor below was re-pinne
 # Every fork, silent branch and residue item carries its `resolved_by` in handoff.forks; the five
 # cells the assembler left unbound are bound or closed by citation; `spec-graph lint/gate/claims/
 # actors` all exit clean against the recorded state.
+#
+# MERGE-GATE AMENDMENTS (2026-09-14, human, at PR #1041's review — the demands below are edited
+# in place; the ledger, gate and handoff sections beneath `structure:` are left as the record of
+# what write-tests decided and are read with these on top):
+#   A1. M3 IS REVERSED. The override arms — null-ask gap, repeated ask, spent pool, and every
+#       `_fail` site — commit the host's `unresolved` for an `inconclusive` close exactly as for
+#       a confident one (same outcome `forced-inconclusive`, same cause, same `failure_kind`).
+#       One rule for every reviewed disposition: an unexamined claim never commits as the
+#       model's claim. The design's "there is no confident verdict to override" let the
+#       override arms recommit the very unchecked `inconclusive` the issue exists to end, and
+#       every reader of the committed report (corpus, held-out scorer, ticket) takes
+#       `inconclusive` as the model's own ceiling claim. `_route`/`_fail` keep their 67d29090
+#       override shape; `_fail` takes no disposition; d16's commit-site assertion has nothing
+#       left to assert and is withdrawn. d11–d15 are re-pinned as PARITY with the confident
+#       close (equality across the two dispositions per arm), never as a literal.
+#   A2. FK-8/FK-14 ARE RE-SETTLED. `_was_reviewed` reads the review record's own `reviewed`
+#       field — written `true` by `_record_dict` on the reviewed site and `false` by the
+#       `unresolved` bypass — never trace-row survival (the §7 reading, which rendered any
+#       reviewed run dir with relocated or pruned traces as a bypass) and never the constant
+#       (G17). A record with no field is read by the bypass set of its day, frozen in the
+#       visualizer. d22 carries a third population (reviewed, traces removed).
+#   A3. THE CEILING HOST SENTENCE IS PHRASED SO THAT "YES" MEANS THE CLOSE STANDS — composer.md's
+#       answer contract fixes yes→`holds` once for every question, and the §7 wording asked
+#       the inverse ("did any lens name something missed? if so, `gap`"), which a composer
+#       following the contract would have inverted on exactly the branch M2 adds. The sentence
+#       also says the lenses are BELOW it, which is where `composer_projection` puts them.
+#   A4. G8 IS FIXED, NOT WORKED AROUND: the six dark modules lose their module-level marker and
+#       run in CI; `gate` now takes the covering code-smells step as its argument and
+#       tests/conftest.py refuses collection otherwise.
 # ===========================================================================================
 
 demands:
@@ -250,10 +279,10 @@ demands:
       record that already settles the case is the same `holds` row: the ceiling review judges the
       ceiling, not the verdict (the honest limit, routed to Measurement).
     assembly_note: "+`read_composer_reply[holds]` — the seed's finding."
-  - id: d11_null_ask_gap_stands_cannot_discriminate
+  - id: d11_null_ask_gap_overrides_cannot_discriminate
     kind: domain-outcome
     form: test
-    discharged_by: test_null_ask_gap_stands_cannot_discriminate
+    discharged_by: test_null_ask_gap_overrides_cannot_discriminate    # A1: overrides to `unresolved`, as a confident close does
     binds:
       - _route
       - "interacts(_close_investigation_async->report_md)"
@@ -261,29 +290,30 @@ demands:
       - "read_composer_reply.domain.distinguished[gap-null-ask]"
       - "read_composer_reply.domain.distinguished[gap-omitted-ask]"
     assembly_note: "+the two readable no-ask spellings rg2 proved identical (`ask: null`, omitted key)."
-  - id: d12_repeat_ask_stands_nothing_left_to_ask
+  - id: d12_repeat_ask_overrides_nothing_left_to_ask
     kind: domain-outcome
     form: test
-    discharged_by: test_repeat_ask_stands_nothing_left_to_ask
+    discharged_by: test_repeat_ask_overrides_nothing_left_to_ask    # A1
     binds: [_route, ReviewState, "interacts(_close_investigation_async->report_md)"]
     premises: [17, 49]
     rows: >-
       #17 — the host's `raised_asks` watermark, not the composer's memory, decides a repeat;
       #49 — the watermark carries across a confident→inconclusive switch on one run (F2).
-  - id: d13_spent_pool_stands_turn_budget_spent
+  - id: d13_spent_pool_overrides_turn_budget_spent
     kind: domain-outcome
     form: test
-    discharged_by: test_spent_pool_stands_turn_budget_spent
+    discharged_by: test_spent_pool_overrides_turn_budget_spent    # A1
     binds: [_route, Bounds, ReviewState, "interacts(_close_investigation_async->report_md)"]
     premises: [48]
     rows: >-
       #48 — the inherited `turns` is the confident attempt's spend; FK-11 (judge: A, non-material)
       — manufactured novelty that defeats the watermark still ends at `Bounds.extra_turns` with
-      CAUSE_TURN_BUDGET_SPENT and never `unresolved`: the bound is the safety property.
-  - id: d14_machinery_failure_stands_review_incomplete
+      CAUSE_TURN_BUDGET_SPENT: the bound is the safety property (A1: it commits `unresolved`,
+      as on a confident close).
+  - id: d14_machinery_failure_overrides_review_incomplete
     kind: behavior
     form: test
-    discharged_by: test_machinery_failure_stands_review_incomplete
+    discharged_by: test_machinery_failure_overrides_review_incomplete    # A1: fails closed to `unresolved`, the record naming `inconclusive` as what was under review
     binds:
       - _fail
       - "interacts(_close_investigation_async->report_md)"
@@ -300,13 +330,13 @@ demands:
     resolution: >-
       §7 FK-2 (human, with the judge): a PARTIALLY bound bundle is a supported shape; when the
       unbound role is dispatched (ablation unbound on a companion WITH a strong move) the review
-      fails uniformly — stands/inconclusive/CAUSE_REVIEW_INCOMPLETE/`error`, incomplete rows on
-      all roles (x12/a1) — one more row of this sweep; when the unbound role is skipped the
-      review completes. The cell is now bound.
+      fails uniformly — forced-inconclusive/unresolved/CAUSE_REVIEW_INCOMPLETE/`error` (A1),
+      incomplete rows on all roles (x12/a1) — one more row of this sweep; when the unbound role
+      is skipped the review completes. The cell is now bound.
     premises: [24, 25, 26, 27, 28, 29, 31, 32, 33, 35]
     rows: >-
-      Every row commits stands/inconclusive/CAUSE_REVIEW_INCOMPLETE with the stage's kind and an
-      `incomplete` row on EVERY role (G21). #24 support raises → `error`, whole review fails as a
+      Every row commits forced-inconclusive/unresolved/CAUSE_REVIEW_INCOMPLETE (A1) with the
+      stage's kind and an `incomplete` row on EVERY role (G21). #24 support raises → `error`, whole review fails as a
       unit; #25 ablation times out → `timeout`; #26 composer fails after both lenses `ok` →
       `error`, incomplete rows beside the lenses' ok rows; #27 all three fail → the first fault's
       kind, indistinguishable in report/record from a single fault; #28 provider unreachable for
@@ -325,10 +355,10 @@ demands:
       (x12, a1) — its cell `ReviewStages.domain.distinguished[partially-bound]` is left UNBOUND so
       the gate names the human's confirmation that partial binding is a supported shape.
     assembly_note: "+eleven per-cell addresses, each a fault the seed enumerates."
-  - id: d15_inconclusive_never_leaves_as_unresolved
-    kind: negative      # positive controls: d17 (the same arms on a confident close do commit unresolved) and d24 (the driver still can)
+  - id: d15_override_arms_route_inconclusive_and_confident_alike
+    kind: behavior      # A1: the universal is PARITY — the sweep drives every arm on both dispositions and asserts equality of outcome/cause/failure_kind, so a per-arm special case for `inconclusive` is caught at that arm; the former negative ("never unresolved") is withdrawn with M3
     form: test
-    discharged_by: test_inconclusive_never_leaves_as_unresolved
+    discharged_by: test_override_arms_route_inconclusive_and_confident_alike
     binds:
       - "interacts(_close_investigation_async->report_md)"
       - "interacts(run_investigation->close_investigation).response"
@@ -336,11 +366,11 @@ demands:
       - HOST_ONLY_DISPOSITION
   - id: d16_routing_miss_fails_loud
     kind: behavior
-    form: clause        # recorded downgrade (20-demands): driving a routing miss needs a fake challenge_gate, a setattr the lint ratchets; d15's arm sweep is the executable face
+    form: clause        # WITHDRAWN (A1): with one override rule there is no per-disposition routing to miss, so the commit-site assertion asserts nothing; d15's parity sweep is the executable face of what this clause guarded
     binds: [_close_investigation_async, GateVerdict]
-    outcome: {nl: "Where the reviewed commit happens, an inconclusive close asserts that the verdict's disposition equals the disposition that entered the gate, so a routing arm that still hands back the host's own verdict raises rather than committing `unresolved`."}
+    outcome: {nl: "Withdrawn with M3 (A1). The gate's override arms take no disposition, so there is no routing miss for a commit-site assertion to catch; d15's parity sweep over every arm on both dispositions is the pin."}
     premises: [78]
-    rows: "#78 — what the driver does with the raise is reality-lane (author probe P1, open); the assertion at the commit site is the pin."
+    rows: "#78 — moot under A1; the sweep (d15) drives every arm rather than asserting after the fact."
 
   # ---- O5 / M5: the confident path --------------------------------------------------------
   - id: d17_confident_path_unchanged
@@ -424,14 +454,18 @@ demands:
       - "interacts(visualize_runtime->review_trace)"
       - "interacts(visualize_runtime->NO_REVIEW_DISPOSITIONS)"
     resolution: >-
-      §7 FK-8 + FK-14 (human, with the judge): RE-KEYED. `_was_reviewed` decides reviewed /
-      unreviewed from WHAT THE ATTEMPT LEFT BEHIND — that round's trace rows and, for the
-      terminal attempt, the report's cause — never from `NO_REVIEW_DISPOSITIONS`; `_BYPASS_NOTE`'s
-      logic follows. The fixture carries TWO populations: a post-change reviewed `inconclusive`
-      (record stands/inconclusive, cause the seventh member, three trace files) that renders
-      as reviewed with its role traces and counts as reviewed; and a PRE-#992 `inconclusive` dir
-      (record stands/inconclusive, cause CAUSE_NOT_REVIEWED, NO trace files) that renders
-      "not reviewed" in BOTH the § Review gate section (guard :544-551, per-attempt :580-600,
+      §7 FK-8 + FK-14, RE-SETTLED AT THE MERGE GATE (A2): `_was_reviewed` reads the record's own
+      `reviewed` field — `true` from `_record_dict` on the reviewed site, `false` from the
+      `unresolved` bypass — never `NO_REVIEW_DISPOSITIONS` (G17) and never whether a trace row
+      for the round survived on disk (the §7 reading, which rendered a reviewed run dir with
+      relocated or pruned traces as a bypass); a record with no field is read by the bypass set
+      of its day, frozen in the visualizer. `_BYPASS_NOTE`'s logic follows. The fixture carries
+      THREE populations: a post-change reviewed `inconclusive` (record stands/inconclusive/
+      reviewed:true, cause the seventh member, three trace files) that renders as reviewed with
+      its role traces and counts as reviewed; the same dir with `wire_logs/` removed, which
+      still counts as reviewed (only the role cards are gone); and a PRE-#992 `inconclusive`
+      dir (record stands/inconclusive, no `reviewed` field, cause CAUSE_NOT_REVIEWED, NO trace
+      files) that renders "not reviewed" in BOTH the § Review gate section (guard, per-attempt,
       the reviewed count) AND the headline badge (`_gate_badge_html`, cause-keyed) — one page,
       one answer, on old and new dirs alike (the five Measurement run dirs are the old ones).
       R8's census of readers keyed on the split is s_fk8's.
@@ -1479,7 +1513,7 @@ gate:
         routinely) before the cell binds a row of d14.
       routed_to: "handoff.forks FK-2 — resolved at §7"
       resolution: "§7 (human, with the judge): partial binding is a supported shape; when the unbound role is dispatched the review fails uniformly (x12/a1). The cell is bound as a row of d14."
-      resolved_to: d14_machinery_failure_stands_review_incomplete
+      resolved_to: d14_machinery_failure_overrides_review_incomplete
     - rule: R4
       element: "citable_refs.domain.distinguished[receipted-lead]"
       witness: >-

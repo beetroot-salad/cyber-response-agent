@@ -43,6 +43,7 @@ from defender.tests._spec992 import (
     CONFIDENT_QUESTION,
     CONFIDENT_QUESTION_PHRASES,
     GAP,
+    UNRESOLVED,
     RECORD_ID_PREFIXES,
     V2SSHD_NOTE,
     V2SSHD_RATIONALE,
@@ -262,7 +263,7 @@ def test_ceiling_claim_reaches_composer_inside_untrusted_frame(tmp_path):
 def test_reply_contract_shared_on_inconclusive(tmp_path):
     """The composer's reply on an `inconclusive` close is read by the same `read_composer_reply`
     under the same `citable_refs` guard: an ask naming an id the investigation never recorded,
-    or a `holds` carrying an ask, is `unreadable` — the close stands `inconclusive` on
+    or a `holds` carrying an ask, is `unreadable` — the close fails closed to `unresolved` on
     CAUSE_REVIEW_INCOMPLETE with `failure_kind: unreadable`, never routed on the bad reply and
     never CAUSE_EVIDENCE_CANNOT_DISCRIMINATE (rg3); unrecognised extra top-level keys on a
     `holds` reply are ignored (rg1) on `inconclusive` exactly as on `malicious`; `ask: null`
@@ -277,11 +278,11 @@ def test_reply_contract_shared_on_inconclusive(tmp_path):
     assert "l-999" not in citable(ceiling_companion())
     for name, composer in (("unrecorded", unrecorded), ("holds-ask", holds_with_ask), ("empty-ask", empty_ask)):
         result, run_dir = _close(name, GAP, composer)
-        assert result.outcome == STANDS, (name, result)
+        assert result.outcome == FORCED_INCONCLUSIVE, (name, result)
         assert result.cause == CAUSE_REVIEW_INCOMPLETE, name
         assert result.failure_kind == UNREADABLE, name
         fm = frontmatter(run_dir)
-        assert fm["disposition"] == GAP, (name, fm)
+        assert fm["disposition"] == UNRESOLVED, (name, fm)
         assert fm["failure_kind"] == UNREADABLE, (name, fm)
         assert fm["cause"] != CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
 
@@ -294,10 +295,10 @@ def test_reply_contract_shared_on_inconclusive(tmp_path):
     null_ask, null_dir = _close("null-ask", GAP, json.dumps({"finding": "gap", "review": "r", "ask": None}))
     omitted, omitted_dir = _close("omitted-ask", GAP, json.dumps({"finding": "gap", "review": "r"}))
     for result, run_dir in ((null_ask, null_dir), (omitted, omitted_dir)):
-        assert result.outcome == STANDS
+        assert result.outcome == FORCED_INCONCLUSIVE
         assert result.failure_kind is None
         assert result.cause == CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
-        assert frontmatter(run_dir)["disposition"] == GAP
+        assert frontmatter(run_dir)["disposition"] == UNRESOLVED
 
 
 def test_review_roster_unchanged(tmp_path):
@@ -408,9 +409,9 @@ def test_the_ceiling_sentence_asks_for_a_recorded_id(tmp_path):
     guard: the sentence and the guard agree, so following the sentence literally cannot produce
     the uncitable name the guard refuses — checked over a companion with no ablation note, so
     the prefixes can only come from the sentence, and absent from a confident close's host
-    text; routing of an uncitable name is unchanged (rg3: `Unreadable` →
-    stands/inconclusive/CAUSE_REVIEW_INCOMPLETE/`unreadable`), and a recorded id of each
-    prefix is a legal target."""
+    text; routing of an uncitable name is unchanged (rg3: `Unreadable` → the close fails
+    closed on CAUSE_REVIEW_INCOMPLETE/`unreadable`), and a recorded id of each prefix is a
+    legal target."""
     # Over the SPARSE companion: no strong move, so no host ablation note naming an `e-` id —
     # the only host-side text left that can carry an id prefix is the ceiling sentence itself
     # (F-7: the golden's ablation note already spells `e-002` in the host text).
@@ -438,7 +439,7 @@ def test_the_ceiling_sentence_asks_for_a_recorded_id(tmp_path):
 
     deps, _run_dir = deps_over(tmp_path / "uncited", ceiling_companion())
     uncited = close_with(deps, GAP, recording(gap("h-999")))
-    assert uncited.outcome == STANDS
+    assert uncited.outcome == FORCED_INCONCLUSIVE
     assert uncited.cause == CAUSE_REVIEW_INCOMPLETE
     assert uncited.failure_kind == UNREADABLE
 

@@ -102,17 +102,19 @@ MEMBER = "unresolved"
 #: The verdict that stays: the investigating model's own "I could not settle this", now priced.
 GAP_MEMBER = "inconclusive"
 
-#: What the no-review bypass does with EVERY member of the vocabulary — `False` for the two
-#: uncertain verdicts it must skip, `True` for the three confident ones that must still spend a
-#: review. Keyed per member and covering the whole enum, never written as the set of members
-#: that skip: a yes-set is identical before and after a sixth member joins `DISPOSITION_ENUM`,
-#: so it fires when the branch SHRINKS and never when the vocabulary GROWS — which is the
-#: direction J4's owed clause ("fails when the branch's verdict list drifts from the enum") was
-#: written for. A new member has to be given a cell here before the suite can go green.
+#: What the no-review bypass does with EVERY member of the vocabulary — `False` for the host's
+#: own verdict it must skip, `True` for every model-authored member that must spend a review:
+#: the three confident ones and, since #992, `inconclusive` (its ceiling claim is what the
+#: review judges). Keyed per member and covering the whole enum, never written as the set of
+#: members that skip: a yes-set is identical before and after a sixth member joins
+#: `DISPOSITION_ENUM`, so it fires when the branch SHRINKS and never when the vocabulary GROWS —
+#: which is the direction J4's owed clause ("fails when the branch's verdict list drifts from
+#: the enum") was written for. A new member has to be given a cell here before the suite can go
+#: green.
 BYPASS_BY_MEMBER: dict[str, bool] = {
     "benign": True,
     "false-positive": True,
-    GAP_MEMBER: False,
+    GAP_MEMBER: True,
     "malicious": True,
     MEMBER: False,
 }

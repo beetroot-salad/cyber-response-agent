@@ -7,10 +7,15 @@ it used to bypass. Every test in the five `test_992_*.py` modules is one demand 
 holds only what more than one of them needs.
 
 RED AGAINST 67d29090 IS THE EXPECTED STATE. No implementation exists: `NO_REVIEW_DISPOSITIONS`
-still carries `inconclusive`, `composer_projection` takes no disposition, `_route`/`_fail`
-still hand every forced arm back as `unresolved`, the reviewed `_CloseFields` site has no
-`ceiling_test`, and `REPORT_CAUSES` has six members. The fixtures below declare the DEMANDED
-shapes, not today's.
+still carries `inconclusive`, `composer_projection` takes no disposition, the reviewed
+`_CloseFields` site has no `ceiling_test`, the review record does not say whether a review
+ran, and `REPORT_CAUSES` has six members. The fixtures below declare the DEMANDED shapes, not
+today's.
+
+ONE DECISION REVERSED AT THE MERGE GATE (test_992_routing's docstring carries the why): the
+design's M3 had every override arm STAND an `inconclusive` close; the shipped rule is that an
+override commits `unresolved` for every reviewed disposition alike. `_route`/`_fail` therefore
+keep their 67d29090 override shape — the change there is only the held ceiling's own cause.
 
 THE §7 DECISIONS ENCODED HERE, AND NOT TO BE LOOSENED (70-resolutions.md):
 
@@ -25,12 +30,14 @@ THE §7 DECISIONS ENCODED HERE, AND NOT TO BE LOOSENED (70-resolutions.md):
   VALUE is the implementer's (the spine's assumption was 2048 B over the accumulated rendered
   notes); the tests assert refusal-before-any-stage at whatever bound the code declares, and
   that the whole-file cap is unreachable by notes alone (`NOTE_LADDER`).
-* **FK-8/FK-14 (human, with the judge): `_was_reviewed` keys on what the attempt LEFT BEHIND**
-  — that round's trace rows and, for the terminal attempt, the report's cause — never on
-  `NO_REVIEW_DISPOSITIONS`. Two populations: `reviewed_inconclusive_dir` (driven through the
-  REAL close, so its record/traces/report are what production writes) and
-  `pre_change_inconclusive_dir` (hand-written to G17's observed shape — the population the
-  five Measurement run dirs belong to, which no post-change code can produce).
+* **FK-8/FK-14 (human, with the judge; re-settled at the merge gate): `_was_reviewed` reads
+  the RECORD'S OWN `reviewed` field**, written by the close at the one site that knows — never
+  `NO_REVIEW_DISPOSITIONS`, and never (the first cut) whether a trace row for the round
+  survived on disk, which rendered any reviewed run dir with relocated or pruned traces as a
+  bypass. Two populations: `reviewed_inconclusive_dir` (driven through the REAL close, so its
+  record/traces/report are what production writes) and `pre_change_inconclusive_dir`
+  (hand-written to G17's observed shape — the population the five Measurement run dirs belong
+  to, which no post-change code can produce, and which carries no `reviewed` field).
 * **FK-6 (human, with the judge): the composer's ceiling sentence requires a RECORDED id**
   (`RECORD_ID_PREFIXES`), agreeing with the `citable_refs` guard it is read through.
 * **FK-2 (human): a partially bound `ReviewStages` is a supported shape** — `RecordingBundle`
@@ -75,9 +82,12 @@ from defender.tests import _review_bundle, _spec923
 DEFENDER = Path(__file__).resolve().parents[1]
 GOLDEN_V2SSHD = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
 
-#: The keyword this change puts through the review, and the confident control beside it.
+#: The keyword this change puts through the review, the confident control beside it, and the
+#: host's own verdict every override arm commits for BOTH of them (one rule — see
+#: test_992_routing's module docstring for why the design's first cut was reversed).
 GAP = _spec923.GAP_MEMBER
 CONFIDENT = "malicious"
+UNRESOLVED = _spec923.MEMBER
 
 #: §7 FK-10 — the SEVENTH `REPORT_CAUSES` member, verbatim: the ceiling-held arm's own sentence.
 CEILING_EXAMINED = (
