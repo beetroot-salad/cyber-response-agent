@@ -66,6 +66,14 @@ What runs now branches a **real** investigation instead of inventing one.
 7. **Enqueue** — a gradable episode's surviving findings are appended to
    `_pending/findings.jsonl`, the same queue the curators have always read.
 
+The episode's own record artifacts — `judge.yaml` (written last, certifying
+the pass) and `timing.json` (the launcher's per-step clock) — sit at the
+episode dir's root beside `family.yaml` and `review.yaml`. `learning.html` is
+the episode's one page (#1025): rendered right after `judge.yaml`, from the
+episode dir alone, it lays out the verdict, every world's card, the findings
+table, the stage timings and each world's leads in one static document — the
+episode's analog of a single run's `runtime.html`.
+
 ## How lessons feed back
 
 Unchanged by the cutover, and it is the joint the whole thing swings on. The

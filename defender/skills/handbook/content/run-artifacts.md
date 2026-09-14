@@ -27,6 +27,12 @@ writable scratch space.
     {lead_id}/{seq}.json  # raw query payloads, by-ref (record_query.py)
 ```
 
+A branched episode (`$DEFENDER_EPISODES_BASE/<episode_id>/`, see the Learning
+loop page) is a different tree with its own artifacts — `judge.yaml`, written
+last, and `timing.json`, the launcher's per-step clock — and its own one-page
+view, `learning.html` (#1025), rendered right after `judge.yaml` from the
+episode dir alone.
+
 ## Who writes what
 
 - **`alert.json`** — verbatim copy of the input, written by run setup;

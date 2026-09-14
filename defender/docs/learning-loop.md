@@ -319,6 +319,7 @@ $DEFENDER_EPISODES_BASE/<episode_id>/
   staged.yaml                 # write-ahead record of every staged name, for teardown
   review.yaml                 # per-world accept/reject + the episode's recorded outcome
   provenance.json             # the family stamp, only when every sibling's agrees
+  timing.json                 # the launcher's own StageClock record, one row per step
   served/base.jsonl           # the capture, primed before staging
   served/<world_token>.jsonl  # every response served that world, with its decision
   worlds/<label>/
@@ -328,6 +329,7 @@ $DEFENDER_EPISODES_BASE/<episode_id>/
     judge/<n>.yaml            # one per judge draw
   runs/                       # the siblings' live run dirs (disposable)
   judge.yaml                  # written last; its presence certifies the pass
+  learning.html                # the episode page (#1025) — rendered after judge.yaml, from the episode dir alone
 
 defender/learning/_pending/{findings,consumed}.jsonl + findings.held_report.log
 defender/lessons/*.md         # committed lessons read at PLAN time
