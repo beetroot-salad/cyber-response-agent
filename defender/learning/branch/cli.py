@@ -460,6 +460,12 @@ def _anchor_of(source_run_dir: Path, *, allow_dirty: bool) -> dict:
     operator waives it, in which case O5's family stamp carries the source's dirt beside the
     waiver so the archive never reads as anchored to a clean sha.
 
+    THE FLAG IS NAMED IN A REFUSAL EXACTLY WHEN PASSING IT WOULD LET THE LAUNCH THROUGH — here
+    and in `_refuse_live_tree_off_anchor`. A refusal the override cannot reach does not mention
+    it, not even to say so: an operator reading `--allow-dirty` in a refusal is being told what
+    to do next, and the one test of these messages is that the never-waivable shapes do not
+    say it.
+
     JUDGED BY THE VERIFY TIER'S OWN PREDICATES, not restated: `_stamp_speaks` and `_clean_stamp`
     are what `_stamp_disagreement` asks of every sibling, and a preflight that spelled its own
     version of "has a commit" or "is clean" would be the second reading that drifts.
@@ -476,14 +482,12 @@ def _anchor_of(source_run_dir: Path, *, allow_dirty: bool) -> dict:
         raise LauncherRefused(
             f"[branch] source run {source_run_dir} carries no usable provenance stamp at "
             f"{name} — a family is anchored to the commit its source ran, and a source with "
-            "no readable stamp cannot anchor one; --allow-dirty waives dirt, not an absent "
-            "record")
+            "no readable stamp cannot anchor one")
     if not _stamp_speaks(stamp):
         raise LauncherRefused(
             f"[branch] source run {source_run_dir}'s provenance stamp names no commit "
             f"(unavailable={stamp.get('unavailable')!r}) — a family is anchored to the commit "
-            "its source ran, and there is none to anchor to; --allow-dirty waives dirt, not a "
-            "silent stamp")
+            "its source ran, and there is none to anchor to")
     if not _clean_stamp(stamp) and not allow_dirty:
         raise LauncherRefused(
             f"[branch] source run {source_run_dir} ran on a tree git did not certify clean "
@@ -518,19 +522,18 @@ def _refuse_live_tree_off_anchor(
             f"[branch] the live tree's commit could not be captured "
             f"(unavailable={live.unavailable!r}) — a family is anchored to the source's commit "
             f"{source.get('commit')!r}, and a launcher that cannot say what it stands on cannot "
-            "be held to it; --allow-dirty waives dirt, not a missing commit")
+            "be held to it")
     if live.commit != source.get("commit"):
         raise LauncherRefused(
             f"[branch] the live tree is at commit {live.commit!r} and the source run ran at "
             f"{source.get('commit')!r} — every sibling would run the live tree's code, so the "
             "family would not be a comparison against its source; check out the source's "
-            "commit (--allow-dirty does not waive a commit mismatch)")
+            "commit")
     if source.get("scope") is not None and live.scope != source.get("scope"):
         raise LauncherRefused(
             f"[branch] the live tree's dirt was measured over scope {live.scope!r} and the "
             f"source's over {source.get('scope')!r} — the two clean bits answer different "
-            "questions, so agreeing on the commit does not make them a match "
-            "(--allow-dirty does not waive a scope mismatch)")
+            "questions, so agreeing on the commit does not make them a match")
     if live.dirty is not False and not allow_dirty:
         raise LauncherRefused(
             f"[branch] the live tree is at the source's commit {live.commit!r} but git did not "
