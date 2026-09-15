@@ -209,8 +209,11 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
     # an assertion that holds whatever ships, and under which `role` and the call id (the
     # two members nothing else in this suite pins) could be dropped and stay green. "Which
     # role was refused" is the policy fact this record exists to carry.
+    # `lead_id` since #860 (M1): the lead the call was refused inside, `None` when there is no
+    # lead context — a fact about WHERE the refusal happened, not a model-controlled value.
     assert set(record) == {
         "event_type", "ts", "seq", "role", "system", "verb", "call_id", "params_digest",
+        "lead_id",
     }, "the record's shape is not the bounded projection §7 R12 names"
     assert record["role"] == "gather", "the record does not say which role was refused"
     assert record["call_id"] == "elastic.ad-hoc", "the record does not identify the call"

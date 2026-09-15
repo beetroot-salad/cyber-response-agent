@@ -22,18 +22,24 @@ from pydantic_ai.messages import (
 from defender._clock import now_iso
 from defender._env import env_int
 from defender._io import guarded_mkdir, open_guarded, write_guarded
-from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG, RunPaths
+from defender._run_paths import (
+    POLICY_DENIAL_EVENT_TYPE as _POLICY_DENIAL_EVENT_TYPE,
+    POLICY_DENIALS as _POLICY_DENIALS,
+    WIRE_LOG,
+    WIRE_LOG_DIR,
+    RunPaths,
+)
 from defender.runtime._wire import wire_digest
 
 from defender.scripts.pricing import usage_cost
 
 WIRE_LOG_ENSURE_ASCII = True
 
-#: The fixed policy-denial stream, ONE per site (§7 R1). Kept SEPARATE from the request stream
-#: (whose append-and-flush-per-record discipline it shares): folded in, "no denial happened"
-#: would be indistinguishable from "this file predates the denial record".
-POLICY_DENIALS = "policy_denials.jsonl"
-POLICY_DENIAL_EVENT_TYPE = "policy_denial"
+#: The fixed policy-denial stream, ONE per site (§7 R1), and its records' `event_type`.
+#: Spelled in `_run_paths` since #860 (the offline readers must not import this module for a
+#: filename) and re-exported here, where the writer and every pre-#860 reader look for them.
+POLICY_DENIALS = _POLICY_DENIALS
+POLICY_DENIAL_EVENT_TYPE = _POLICY_DENIAL_EVENT_TYPE
 
 #: The bounded, normalized projection §7 R12 demands: the policy FACT, never the raw
 #: model-controlled parameter blob.
@@ -177,11 +183,22 @@ class RequestLogger:
 
     def log_policy_denial(
         self, *, role: str, system: str, verb: str, call_id: str, params: Any,
+        lead_id: str | None = None,
     ) -> dict:
         """Append one policy-denial record — the bounded projection §7 R12 demands: role,
         system, verb, call id, and a digest of the parameter VALUES (never the raw blob). A
         failed write is NOT swallowed (§7 R2): it propagates, after the refusal it audits has
-        already taken effect. Deliberately not `log_budget_refusal`'s blanket suppressor."""
+        already taken effect. Deliberately not `log_budget_refusal`'s blanket suppressor.
+
+        `lead_id` (#860 M1) is the lead the call was refused INSIDE — the caller's
+        `deps.lead_id`, copied and never derived — and `None` when there is no lead context.
+        Present on every record, so a reader can tell "no lead" from a record written before
+        the column existed. It is a fact about where the refusal happened, not a
+        model-controlled value, and it is read by nothing in `runtime/`: its one consumer is
+        the offline judge, through `lead_repository.load_denials`, which attaches the record
+        to the lead's chain so a lead whose only activity was a withheld verb is not invisible
+        there. A denial still allocates nothing lead-scoped (§7 R3/R23 — no evidence row, no
+        payload dir, no queries-table seq); `seq` stays this stream's own counter."""
         seq = self._denial_seq
         self._denial_seq += 1
         rec = {
@@ -193,6 +210,7 @@ class RequestLogger:
             "verb": verb,
             "call_id": call_id,
             "params_digest": _params_digest(params),
+            "lead_id": lead_id,
         }
         self._fh.write(json.dumps(rec, ensure_ascii=True) + "\n")
         self._fh.flush()

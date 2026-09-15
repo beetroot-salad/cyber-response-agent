@@ -86,7 +86,7 @@ from defender.learning.branch.archive import (
     WORLDS_DIRNAME,
 )
 from defender.learning.judge._errors import JudgeRefused
-from defender.learning.lead_repository import JoinedLead, joined
+from defender.learning.lead_repository import Denial, JoinedLead, QueryRow, joined
 from defender.run_common import resolve_runs_base
 from defender.runtime.branch._family import (
     BASE_ROLE,
@@ -94,6 +94,13 @@ from defender.runtime.branch._family import (
     episode_token_for,
     is_reserved_world_label,
     world_token_for,
+)
+from defender.runtime.circuit_breaker import INFRA_ERROR_CLASS
+from defender.runtime.verbs import is_system_name
+from defender.scripts.gather_tools.record_query import (
+    ABOVE_GUARD_QUERY_ID,
+    BASH_SHIM_QUERY_ID,
+    REPEAT_TRIP_QUERY_ID,
 )
 from defender.skills.invlang._walkers import iter_resolutions
 from defender.skills.invlang.parser import NO_OPEN_BLOCK, parse_dense_companion, scan_fences
@@ -451,10 +458,86 @@ def leads_by_id(world_dir: Path) -> dict[str, JoinedLead]:
     return {lead.lead_id: lead for lead in joined(world_dir)}
 
 
+#: #860 M4 — the `kind` word VIEW 1 gives each sentinel origin. Keyed on the writer's own
+#: literal, so a `∅.` id no writer here has defined renders as the bare `refused` rather than
+#: as one of these. `∅.above-repeat-guard` is the one origin that splits on `error_class`: its
+#: `infra` rows are the adapter-load fault (the estate's doing, `query_tool._grant_check`),
+#: its `agent-fixable` rows a schema rejection or an undeclared name (the defender's own).
+_SENTINEL_KINDS: dict[str, str] = {
+    REPEAT_TRIP_QUERY_ID: "repeat-refused",
+    BASH_SHIM_QUERY_ID: "reducer-failed",
+}
+_ADAPTER_FAULT_KIND = "adapter-fault"
+_REJECTED_KIND = "rejected-before-dispatch"
+_UNKNOWN_SENTINEL_KIND = "refused"
+_DENIED_KIND = "denied"
+
+
+def _name_or_blank(name: str) -> str:
+    """`name` when it is a well-formed system/verb name, else `""` — the writer's own
+    coarsening (`query_tool._coarsen`) applied at the render, because the rows and records
+    this reads are files in the box's rw bind: the WRITERS put only declared names here (O4's
+    x1), but a line the box appended to `executed_queries.jsonl` or `policy_denials.jsonl`
+    is archived and joined like any other, and its "name" is whatever prose the box chose.
+    Shape only (`is_system_name`, the one alphabet every declared name satisfies): it keeps
+    free text out of the prompt without loading the registry offline; membership is not
+    asked here."""
+    return name if is_system_name(name) else ""
+
+
+def _refused_from_sentinel(row: QueryRow) -> dict[str, Any]:
+    """One `refused` entry off a `∅.` row — NAMED columns only (O4). No `verb`: above the
+    guard it is the model's raw string. `system` is the row's own, already coarsened to `""`
+    by the writer where the name was undeclared (and re-screened here for a row no writer of
+    this repo wrote). `external` is `error_class == "infra"` for EVERY sentinel row, derived
+    separately from `kind` so the two cannot drift."""
+    external = row.error_class == INFRA_ERROR_CLASS
+    if row.query_id == ABOVE_GUARD_QUERY_ID:
+        kind = _ADAPTER_FAULT_KIND if external else _REJECTED_KIND
+    else:
+        kind = _SENTINEL_KINDS.get(row.query_id, _UNKNOWN_SENTINEL_KIND)
+    return {"kind": kind, "system": _name_or_blank(row.system), "external": external}
+
+
+def _refused_from_denial(denial: Denial) -> dict[str, Any]:
+    """One `refused` entry off a withheld-verb denial: both names are declared by construction
+    when the WRITER wrote the record (`decide` returns DENIED only for a system in the grant
+    and a verb the adapter declares) and blanked here when they could not have been; a
+    withheld verb is always the harness's doing, never the defender's."""
+    return {"kind": _DENIED_KIND, "system": _name_or_blank(denial.system),
+            "verb": _name_or_blank(denial.verb), "external": True}
+
+
+def refused_entries(lead: JoinedLead | None) -> list[dict[str, Any]]:  # lint-owns: ok — `verbs.read_roster` owns the ROSTER's `refused` (a verb-disposition column, `runtime/verbs.py`), a different field under the same name; the chain's `refused` link has this one producer
+    """@owns refused — the `refused` link of VIEW 1's per-lead chain (#860 M4): every attempt
+    the lead made that reached no system, as named columns, sentinels first (each by the
+    table's seq) and then denials (each by the denial stream's own seq). The two counters are
+    different streams, which is why they are not merged on the number. `[]` for a lead the
+    surface does not know."""
+    if lead is None:
+        return []
+    return [
+        *(_refused_from_sentinel(row) for row in sorted(lead.sentinels, key=lambda r: r.seq)),
+        *(_refused_from_denial(d) for d in sorted(lead.denials, key=lambda d: d.seq)),
+    ]
+
+
+def has_refusals(lead: JoinedLead) -> bool:
+    """Would `refused_entries(lead)` be non-empty? The lead-id-set builder's question (M4b)."""
+    return bool(lead.sentinels or lead.denials)
+
+
 def lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, list[dict]],
                *, leads: dict[str, JoinedLead]) -> dict[str, Any]:
-    """One lead's chain for VIEW 1: goal -> params -> payload -> summary -> resolutions, with
-    `leads` being `leads_by_id(world_dir)` computed ONCE by the caller.
+    """One lead's chain for VIEW 1: goal -> params -> payload -> refused -> summary ->
+    resolutions, with `leads` being `leads_by_id(world_dir)` computed ONCE by the caller.
+
+    `refused` (#860) is the lead's conduct the OTHER links cannot show: a `∅.` row is not in
+    `queries` by construction, and a withheld-verb denial is not in the table at all — so a
+    lead whose only activity was refused rendered here as a lead that ran nothing, and the
+    judge read "never queried" (`lead-set`) where the truth was "tried and was refused". The
+    entries name `kind`, `system`, `external` (and `verb`, for a denial) and nothing else —
+    see `refused_entries`.
 
     EVERY LINK IS NAMED FROM A `QueryRow` FIELD; no row object is stringified (#1017 D3/O3).
     The chain used to carry the lead's raw rows whole under `document_rows`, which put every
@@ -492,6 +575,7 @@ def lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, lis
         "goal": goal, "params": params, "payload": [q.payload_digest for q in queries],
         "summary": summary,
         "resolutions": resolutions_by_lead.get(lead_id, []),
+        "refused": refused_entries(lead),
     }
 
 

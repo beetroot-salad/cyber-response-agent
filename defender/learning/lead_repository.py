@@ -13,11 +13,14 @@ import yaml
 from defender._io import (
     load_json_artifact,
     read_guarded,
+    read_jsonl_rows,
     read_jsonl_rows_report,
     read_text_utf8,
 )
 from defender._run_paths import (
     LEAD_ID_RE as _LEAD_ID_RE,
+    POLICY_DENIAL_EVENT_TYPE,
+    POLICY_DENIALS,
     RunPaths,
     artifact_dir,
     artifact_file,
@@ -135,6 +138,28 @@ class QueryRow:
 
 
 @dataclass(frozen=True)
+class Denial:
+    """One policy-denial record as the canonical surface reads it (#860 M3): a call the grant
+    check refused because the verb is WITHHELD from the role — the one refusal the queries
+    table cannot carry (§7 R3/R23: a denied call produces its denial record and never an
+    evidence row).
+
+    Typed ONCE, here, off the stored row (`observe.RequestLogger.log_policy_denial`'s
+    projection), and never re-projected from the queries table. Only the four columns a
+    render may name: `seq` is the DENIAL stream's own counter, not the table's; `system` and
+    `verb` are declared by construction (`decide` returns DENIED only for a system in the
+    grant and a verb the adapter declares); `lead_id` is the lead the call was refused inside,
+    `None` for a record with no lead context or one written before the column existed. The
+    record's `call_id`, `params_digest`, `ts` and `role` are deliberately not here — nothing
+    downstream may render them."""
+
+    seq: int
+    system: str
+    verb: str
+    lead_id: str | None
+
+
+@dataclass(frozen=True)
 class JoinedLead:
 
     lead_id: str
@@ -152,6 +177,11 @@ class JoinedLead:
     #: `queries` holding only queries makes the safe reading the default. The rows are kept,
     #: not dropped, because `collect_general_failures` reaches them via `extract_from_joined`.
     sentinels: list = field(default_factory=list)
+    #: The lead's withheld-verb denials (`Denial`), seq-ordered on the denial stream's own
+    #: counter — attached by `lead_id` at join time (#860 M3). A third list rather than a
+    #: third kind of row in `sentinels`: a denial is not in the queries table at all, so it has
+    #: no table seq to order against, and `rows` (the table, remerged) must not grow by it.
+    denials: list = field(default_factory=list)
 
     @property
     def rows(self) -> list:
@@ -278,9 +308,52 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
 
 
 
+def load_denials(run_dir: Path) -> list[Denial]:
+    """The run's policy-denial records, typed, seq-ordered; `[]` when the run wrote none.
+
+    The stream is `observe.POLICY_DENIALS` at the run-dir root, shared with the
+    `budget_refusal` records `log_budget_refusal` writes into the same file — so the filter is
+    on `event_type`, and a record of any other type is not a denial. Tolerant the way every
+    reader of a box-writable stream here is: `read_jsonl_rows` skips a line that is not a row,
+    and `_as_int` reads a `seq` that is not an integer as `0` rather than raising out of every
+    judge render over the world.
+
+    `artifact_file` (an `lstat`) AHEAD of the read, the posture `load_queries_report` takes on
+    the table: `read_jsonl_rows` follows a link, and a link planted at the stream's name in the
+    run dir (the box's rw bind) would read another tree's denials as this run's own. Absent
+    and not-a-regular-file both read as "no denials"; the archive refuses the latter at copy
+    time (`archive._screen`), so an archived world never presents it."""
+    path = Path(run_dir) / POLICY_DENIALS
+    try:
+        if not artifact_file(path):
+            return []
+        raw_rows = read_jsonl_rows(path)
+    except OSError:
+        return []
+    denials = [
+        Denial(
+            seq=_as_int(rec.get("seq", 0)),
+            system=as_str(rec.get("system")),
+            verb=as_str(rec.get("verb")),
+            lead_id=as_str(rec.get("lead_id")) or None,
+        )
+        for rec in raw_rows
+        if rec.get("event_type") == POLICY_DENIAL_EVENT_TYPE
+    ]
+    return sorted(denials, key=lambda d: d.seq)
+
+
 def joined(run_dir: Path) -> list[JoinedLead]:
     leads = load_leads(run_dir)
     queries = load_queries(run_dir)
+    # Attached by `lead_id` to a lead the surface already knows — a lead file or a query row
+    # (#860 N4): a denial with no lead context, or naming nothing, is recorded but is nobody's
+    # conduct, and the judge grades leads. A denial never CREATES a lead, and never widens
+    # `queries` or `sentinels`.
+    denials_by_lead: dict[str, list[Denial]] = {}
+    for d in load_denials(run_dir):
+        if d.lead_id is not None:
+            denials_by_lead.setdefault(d.lead_id, []).append(d)
 
     buckets: dict[str, list[QueryRow]] = {lid: [] for lid in leads}
     first_seen: dict[str, int] = {}
@@ -310,6 +383,7 @@ def joined(run_dir: Path) -> list[JoinedLead]:
                 orphan=lid not in leads,
                 provenance=lead.get("provenance") if lid in leads else None,
                 sentinels=observed,
+                denials=denials_by_lead.get(lid, []),
             )
         )
     for lid in orphans:
@@ -322,6 +396,7 @@ def joined(run_dir: Path) -> list[JoinedLead]:
                 queries=issued,
                 orphan=True,
                 sentinels=observed,
+                denials=denials_by_lead.get(lid, []),
             )
         )
     return out
