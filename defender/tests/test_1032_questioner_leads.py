@@ -509,7 +509,7 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
         [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
         spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=questioner,
         adapters=T.FakeAdapters(), invoke=T.FakeAgent(*["same"] * 24),
-        preflight=T.no_preflight,
+        preflight=T.no_preflight, live_tree=T.source_capture(),
     )
     assert rc == 0, "the episode did not complete cleanly"
     assert questioner.prompts, "the questioner was never called"

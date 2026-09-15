@@ -48,9 +48,7 @@ def _alert_label(alert: Path) -> str:
 
 
 def materialize_run_dir(
-    alert: Path, run_id: str | None, *,
-    provenance: _provenance.RunProvenance | None = None,
-    model: str | None = None,
+    alert: Path, run_id: str | None, *, model: str | None = None,
 ) -> Path:
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
@@ -67,28 +65,27 @@ def materialize_run_dir(
     paths.gather_raw.mkdir(parents=True)
     shutil.copy(alert, paths.alert)
     # STAMPED HERE, at the one place a run the box will EXECUTE is ever materialised, so no
-    # caller can forget — the branch launcher materialises its siblings through this same call
-    # (`learning/branch/cli.materialize_worlds`), which is what makes a family's worlds
-    # comparable on their code rather than merely assumed to be. Captured BEFORE the box exists
-    # and before any agent is alive, because the run dir is the box's rw bind and a stamp
-    # written later is a stamp the run could have moved.
+    # caller can forget — a branched family's siblings are `run.py --resume` PROCESSES, each of
+    # which reaches this call and stamps itself, and `learning/branch/cli.verify_family` is
+    # what compares those per-process stamps against each other and against the source run's
+    # (#976). Captured BEFORE the box exists and before any agent is alive, because the run dir
+    # is the box's rw bind and a stamp written later is a stamp the run could have moved.
     #
-    # NOT every `RunPaths` bundle: the learning loop's ARCHIVED episode under
-    # `LoopPaths.runs_dir` is mkdir'd by `learning/core/persist.py` rather than through here.
-    # It carries the SOURCE run's stamp, copied across with the other shared inputs, because
-    # the stamp of the archive directory itself would name whenever the drain happened to run
-    # rather than what the investigation executed.
+    # NOT every run-dir-shaped bundle: the branch archive (`learning/branch/archive.py`)
+    # copies each sibling's stamp into `worlds/<X>/` rather than materialising through here,
+    # because the stamp of the archive directory itself would name whenever the archive
+    # happened to be taken rather than what the investigation executed. Nothing else copies a
+    # stamp — in particular the learning loop's own `learning/core` writes none.
     #
-    # `provenance` is the caller's when it has one. A sibling family passes ONE capture for all
-    # N worlds: taken per world here, a commit landing mid-launch would give siblings different
-    # records, and the comparison this stamp exists to protect would be the thing it failed to
-    # notice.
-    _stamp(paths.provenance, provenance, model=model)
+    # EVERY RUN CAPTURES ITS OWN, and there is no seam for a caller to hand one in: the branch
+    # launcher does NOT take one capture for all N worlds — a launcher-moment record could only
+    # ever describe the launcher's process, and the family stamp is a conclusion about the
+    # siblings' own per-process records, anchored to the source's.
+    _stamp(paths.provenance, model=model)
     return run_dir
 
 
-def _stamp(path: Path, provenance: _provenance.RunProvenance | None, *,
-           model: str | None = None) -> None:
+def _stamp(path: Path, *, model: str | None = None) -> None:
     """Write the run's stamp, and NEVER take the run down doing it.
 
     `capture_tree` goes to some length never to raise; a write that raised beside it would
@@ -105,7 +102,7 @@ def _stamp(path: Path, provenance: _provenance.RunProvenance | None, *,
     not there, and an operator who needs the guarantee has the announce line saying it is
     missing."""
     try:
-        record = provenance if provenance is not None else _provenance.capture_tree(REPO_ROOT)
+        record = _provenance.capture_tree(REPO_ROOT)
         # THE MODEL RIDES WITH THE COMMIT, and is set here rather than by a second write: the
         # stamp is written once, before the box exists, and a model recorded afterwards would
         # be a model recorded into the box's own rw bind. `None` leaves the field absent, which

@@ -524,37 +524,18 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     def _materialize():
         # `materialize_run_dir` refuses an existing dir, so drive `_stamp` directly — it is the
         # seam that owns the promise, and the arm is about the promise rather than the caller.
-        run_common._stamp(runs / run_id / PROVENANCE, None)
+        run_common._stamp(runs / run_id / PROVENANCE)
 
     _materialize()
     assert "could not stamp" in capsys.readouterr().err
 
 
-def test_a_family_shares_one_capture(tmp_path, monkeypatch):
-    """Hoisted above the loop: taken per world, a commit landing mid-launch gives siblings
-    different records, and the family would differ in its code as well as in the axis the
-    questioner declared — the very thing the stamp exists to make noticeable."""
-    from defender import run_common
-
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
-    alert = tmp_path / "alert.json"
-    alert.write_text(json.dumps({"id": "a1"}))
-    shared = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
-    stamps = []
-    for world in ("a", "b", "c"):
-        run_dir = run_common.materialize_run_dir(
-            alert, f"20260101T000000Z-{world}", provenance=shared
-        )
-        stamps.append(_provenance.read(RunPaths(run_dir).provenance))
-    assert stamps == [shared, shared, shared]
-    assert len({s.commit for s in stamps}) == 1
-
-
-def test_without_a_shared_capture_each_run_takes_its_own(tmp_path, monkeypatch):
-    """The default is unchanged for every other caller — the keyword only lets a launcher that
-    HAS a family answer once for all of it."""
+def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
+    """Every run stamps ITSELF at materialisation, and there is no seam for a caller to hand a
+    record in: a branched family's siblings are `run.py --resume` processes that each reach
+    this call, and the family stamp is a conclusion about their N per-process records (#976)
+    — a capture hoisted above the family would describe the launcher's moment, not any
+    sibling's."""
     from defender import run_common
 
     runs = tmp_path / "runs"
@@ -566,6 +547,13 @@ def test_without_a_shared_capture_each_run_takes_its_own(tmp_path, monkeypatch):
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
+    # "No seam" is a fact about the signature, pinned as one: a `provenance=` keyword is the
+    # hoisted-capture path this change removed, and it is refused rather than accepted and
+    # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
+    handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
+    with pytest.raises(TypeError):
+        run_common.materialize_run_dir(alert, "20260101T000000Z-handed", provenance=handed)
+    assert not (runs / "20260101T000000Z-handed").exists()
 
 
 # The coherence rules as a CONSTRUCTOR invariant, not a parser habit.

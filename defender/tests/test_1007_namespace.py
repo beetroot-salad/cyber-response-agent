@@ -38,6 +38,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests import _triplet_947 as T
 from defender.tests import _world_1007 as W
 
 #: The string an operator would name. Distinctive on purpose: the negative below sweeps every
@@ -63,6 +64,8 @@ def launch(tmp_path: Path, monkeypatch, *, argv_extra=(), **seams):
     seams.setdefault("adapters", W.FakeAdapters())
     seams.setdefault("invoke", W.FakeAgent(*["same"] * 24))
     seams.setdefault("preflight", W.no_preflight)
+    # #976 M2: the live-tree capture is injected to match the fixture source's stamp.
+    seams.setdefault("live_tree", T.source_capture())
     cli = W.mod("learning.branch.cli")
     rc = cli.main([str(src), str(W.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
                    *argv_extra], spawn=W.FakeSpawn(), **seams)
@@ -191,6 +194,7 @@ def test_an_episode_stages_and_is_read_under_one_namespace(tmp_path, monkeypatch
             source_run_dir=ep, branch_message_id=W.BRANCH_MESSAGE_ID,
             episode_id=family.episode_id, episode_dir=ep, door=W.FakeDoor(),
             preflight=W.no_preflight, model=None, continuation_prompt="go",
+            allow_dirty=False, live_tree=T.source_capture(),
             episode_token=OPERATOR_NAMED)
 
 

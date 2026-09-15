@@ -726,21 +726,76 @@ GIT_UNAVAILABLE = "git unavailable: FileNotFoundError('git')"
 
 
 def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = False,
-                      unavailable: str | None = None, model: str = "m-1") -> dict:
+                      unavailable: str | None = None, model: str | None = "m-1",
+                      scope: str | None = "repo") -> dict:
     """One `provenance.json` document, in a shape `capture_tree` can produce.
 
     Four shapes and no others: the clean tree, the dirty tree, the git-status failure (a sha in
     hand and no answer about the tree, with the reason beside it) and the git-unavailable case
-    (no sha at all). `scope` is carried because the record does.
+    (no sha at all). `scope` is carried because the record does; `scope=None` is the shape a
+    stamp written before the field existed reads back as (#976: compared on commit alone), and
+    `model=None` is what `capture_tree` itself produces — the model is the sibling's own
+    per-process fact, never the live tree's.
     """
     doc: dict[str, Any] = {
         "commit": commit, "dirty": dirty, "dirty_paths": [], "dirty_path_count": 0,
-        "unavailable": unavailable, "scope": "repo", "model": model,
+        "unavailable": unavailable, "scope": scope, "model": model,
     }
     if dirty:
         doc["dirty_paths"] = ["defender/runtime/driver/__init__.py"]
         doc["dirty_path_count"] = 1
     return doc
+
+
+def source_stamp(src: Path, **overrides: Any) -> Path:
+    """Rewrite the SOURCE run's `provenance.json` — the anchor #976 reads at preflight.
+
+    `runs_base` stamps the source with `provenance_record()` (commit `deadbee`, clean, scope
+    `repo`); a scenario about the anchor's other shapes rewrites it here with the same builder,
+    so the file on disk is always one `materialize_run_dir` could have written. Absence and
+    aliasing are NOT spelled here: a scenario about a missing or planted stamp unlinks or
+    symlinks the real path itself, because the fault has to be the real one.
+    """
+    path = Path(src) / "provenance.json"
+    path.write_text(json.dumps(provenance_record(**overrides)), encoding="utf-8")
+    return path
+
+
+class FakeCapture:
+    """The launcher's live-tree seam (`live_tree=` on `cli.main`, #976 M2), scripted and counted.
+
+    Production resolves it to `_provenance.capture_tree(REPO_ROOT)`, which asks git about the
+    checkout the launcher is running in — so every end-to-end launcher scenario has to inject
+    one whose answer matches the fixture source's stamp, or the live HEAD of whatever tree the
+    suite runs in is what gets compared and refused. It is a zero-argument callable returning a
+    `RunProvenance`, and it COUNTS: the design says the capture is taken once per launch, and
+    "once" is an observation over `calls`, not a reading of the code.
+    """
+
+    def __init__(self, record: dict) -> None:
+        self.record = dict(record)
+        self.calls = 0
+
+    def __call__(self):
+        from defender._provenance import RunProvenance
+
+        self.calls += 1
+        built = RunProvenance.from_obj(self.record)
+        if built is None:
+            raise AssertionError(f"FakeCapture was scripted with a record no capture produces: "
+                                 f"{self.record}")
+        return built
+
+
+def source_capture(**overrides: Any) -> FakeCapture:
+    """A live-tree capture built from `provenance_record(**overrides)`.
+
+    With no overrides it matches the source `runs_base` stamps (commit `deadbee`, clean, scope
+    `repo`), which is what an accepted launch needs; `source_capture(commit="0ther")`,
+    `(dirty=True)`, `(dirty=None, unavailable=GIT_STATUS_FAILED)` and `(commit=None, dirty=None,
+    unavailable=GIT_UNAVAILABLE)` are the four other shapes a real `capture_tree` answers with.
+    """
+    return FakeCapture(provenance_record(**overrides))
 
 
 def report_text(disposition: str, *, extra: str = "", body: str = "") -> str:
@@ -981,6 +1036,7 @@ __all__ = [
     "report_text",
     "corpus_document",
     "elastic_overlay", "episode", "family_doc", "provenance_record",
+    "FakeCapture", "source_capture", "source_stamp",
     "lesson_row", "mod", "overlay", "refusals", "replace", "review_doc", "runs_base",
     "sibling_run_dir",
     "staged_rows", "sym", "world_doc", "world_token", "write_family",
