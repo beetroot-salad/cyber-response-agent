@@ -436,10 +436,28 @@ def test_the_dangling_tripping_call_is_answered_in_gathers_own_vocabulary(tmp_pa
         "the summary turn carries only the lead's original dispatch prompt — nothing told the "
         f"model to write the summary now: {prompts(salvage)!r}"
     )
+    # Adversary finding 8: a COUNT of >= 2 prompts passes even if every REPLAYED prompt's own
+    # content were dropped and only the salvage turn's own appended prompt survived. The
+    # replayed portion is everything but that last one — assert the lead's own dispatch prompt
+    # (its goal, rendered verbatim by `_gather_prompt`) is actually IN it.
+    replayed_prompts = prompts(salvage)[:-1]
+    assert replayed_prompts, "the summary turn carries no replayed prompt at all — only its own"
+    assert any("measure this lead" in p for p in replayed_prompts), (
+        "the lead's own dispatch prompt (its goal) did not survive into the replayed history — "
+        f"the summary turn ran over ITS OWN prompt, not the lead's: {replayed_prompts!r}"
+    )
     assert INCOMPLETE_IDIOM not in flat(salvage), \
         "main's idiom reached the gather model somewhere in the replayed history"
     assert frame_body(lead.out).endswith("two logins for dev.dana."), \
         "the summary the model wrote from its own answers did not reach main"
+    # Adversary finding 1: the summary text above is what the SCRIPT says, regardless of what
+    # the model was actually shown — a scripted response can't prove content survived. Assert
+    # the payload's OWN retrieved fact ("ssh_login", from `PAYLOAD` in test_query_tool_611, not
+    # authored anywhere in this test) is in what the summary turn was actually handed.
+    assert "ssh_login" in flat(salvage), (
+        "the lead's own retrieved payload content is not in the history the summary turn was "
+        "handed — the salvage turn cannot have written its summary FROM the lead's answers"
+    )
 
 
 def test_every_dangling_sibling_call_is_answered_not_just_the_first(tmp_path):
@@ -673,6 +691,47 @@ def test_a_store_that_refuses_the_salvage_round_loses_the_summary_but_not_the_ru
 
 
 # =========================================================================================
+# Adversary findings (no-spec lane §5) — tests strengthened to close what the pass found.
+# =========================================================================================
+
+
+def test_a_multiline_summary_reaches_main_verbatim(tmp_path):
+    """Adversary finding 4 — M5: "the summary" crosses to main unedited. Every summary text in
+    this suite is one short line, which a truncation (first line only, a length cap) would not
+    disturb — `got_summary == summary` still holds when both sides are the same single line.
+    Driven with a real multi-paragraph response so an edit on the way to main has something to
+    cut, and asserted with full-string equality end to end."""
+    body = (
+        "dev.dana authenticated from two hosts at 00:00 and 00:05.\n\n"
+        "No container workload was reachable from anything this lead covered.\n"
+        "Unanswered: whether the second session originated from the same subnet."
+    )
+    lead = run_lead(tmp_path, [_query(), _query(), _query(), _text(body)])
+    _header, summary = split(lead.out)
+    assert summary == body, f"the multi-line summary was edited on the way to main: {summary!r}"
+    assert lead.persisted == lead.out
+
+
+def test_an_empty_summary_degrades_to_the_failure_sentence_not_a_bare_header(tmp_path):
+    """Adversary finding 5 — O1's failure condition, verbatim: "the lead has exit-0 rows and
+    MAIN's returned text is the fixed notice alone with no 'summary turn failed' sentence." A
+    response the graph accepts as actionable (a `TextPart` whose text is empty, or trims to
+    nothing) must not reach main as the header with nothing informative under it — that is
+    indistinguishable from the defect #987 exists to close. No scripted scenario in this suite
+    produces a successful-but-empty summary turn (`_empty()` has no parts at all, which the
+    graph refuses outright as `UnexpectedModelBehavior` — a different arm of O4); this drives
+    the one the graph does accept."""
+    lead = run_lead(tmp_path, [_query(), _query(), _query(), _text("   ")])
+    header, tail = split(lead.out)
+    assert header.startswith(f"gather for {LEAD} hit a dead end:")
+    assert tail == ("A summary turn was attempted and failed (UnexpectedModelBehavior); "
+                    "no summary is available."), (
+        f"an empty summary reached main as if the turn had succeeded: {tail!r}"
+    )
+    assert lead.persisted == lead.out
+
+
+# =========================================================================================
 # The whole loop — what MAIN receives, what MAIN may not read, what the store records.
 # =========================================================================================
 
@@ -768,6 +827,15 @@ def test_main_receives_the_answers_it_may_not_read_anywhere_else(tmp_path):
     assert "10.0.0.9" in main.seen[-1], (
         "the lead's own retrieved detail did not reach main — this is the defect: the answers "
         "existed and died with the sub-agent's context"
+    )
+    # Adversary finding 1: "10.0.0.9" above is SCRIPTED into the gather model's response, not
+    # retrieved from anywhere — it proves the summary reached main, not that the summary turn
+    # was handed the lead's actual answers to write it FROM. `"ssh_login"` is real payload
+    # content (`PAYLOAD` in `test_query_tool_611`, never authored in this test module) that
+    # only reaches the gather model if the salvage turn ran over the query rounds' own history.
+    assert "ssh_login" in flat(gather.inbound[-1]), (
+        "the lead's own retrieved payload never reached the summary turn's inbound history — "
+        "the model's summary cannot have been written FROM the lead's answers"
     )
 
     deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)

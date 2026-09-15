@@ -66,6 +66,11 @@ from defender.runtime.tools_gather import (  # noqa: E402
     SALVAGE_PROMPT,
     SALVAGE_REQUEST_LIMIT,
 )
+#: Private helper, pinned directly (adversary finding 2 — see the test below): only the
+#: dead-end arm can leave a REAL dangling call in captured history (the other three exceptions'
+#: captured history never ends on an unanswered `ToolCallPart`), so the "no arm's closing
+#: answer carries main's idiom" claim is otherwise unreachable end to end.
+from defender.runtime.tools_gather import _closing_answer  # noqa: E402
 
 LEAD = "l-001"
 
@@ -460,6 +465,105 @@ def test_the_dead_end_header_still_carries_none_of_the_models_own_params(tmp_pat
     assert fragment in summary, (
         "the control cannot see the fragment at all — the assertion above is vacuous. The "
         "model-authored summary is the channel that MAY carry it; only the header may not"
+    )
+
+
+# ----------------------------------------------------------------------------------------
+# Adversary findings (no-spec lane §5) — tests strengthened to close what the pass found.
+# ----------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("arm", sorted(DEGRADING_ARMS))
+def test_the_closing_answer_never_carries_mains_idiom_for_any_arm(arm):
+    """Adversary finding 2 — O7/M3: "for the other arms 'the harness stopped this lead:
+    {cause}' — never the MAIN idiom". The end-to-end suite drives only the dead-end arm,
+    because only it can leave a REAL dangling call in captured history; the other three
+    exceptions' captured history never ends on an unanswered `ToolCallPart` (the request-limit
+    arm's doomed round is already a committed `ModelRequest`; retry-exhausted's malformed
+    response carries no tool call; the store arm can fire before any response exists at all).
+    An exploit that inlines the idiom into the other three arms' branch of `_closing_answer`
+    therefore greens the whole e2e suite by construction — reachability is not an excuse for
+    the vocabulary rule not to hold, so it is pinned directly on the function."""
+    exc, _template, _term = DEGRADING_ARMS[arm]
+    answer = _closing_answer(exc)
+    assert INCOMPLETE_IDIOM not in answer, \
+        f"the {arm} arm's closing answer carries main's own idiom: {answer!r}"
+    assert "Treat this lead as incomplete" not in answer
+    assert SALVAGE_CLOSED_SENTENCE in answer, \
+        f"the {arm} arm's closing answer does not say the query door is shut: {answer!r}"
+
+
+class _ExplodingSequence:
+    """A fault injected through `GatherRequest.what_to_summarize` itself — the entry point's
+    own parameter, not `monkeypatch` — so the failure happens inside `_salvage_prompt`, while
+    the salvage TURN'S OWN HISTORY IS STILL BEING BUILT, before `.override` or `.run` is ever
+    reached.
+
+    Explodes on its THIRD iteration, not its first or second: `_run_gather`'s own claim step
+    (`list(request.what_to_summarize)`) and `_gather_prompt`'s own dispatch-prompt rendering
+    both legitimately consume it once each, ahead of any of the four arms — pre-existing reads
+    unrelated to the salvage path, which is `_salvage_prompt`'s own use, the third."""
+
+    def __init__(self):
+        self._uses = 0
+
+    def __iter__(self):
+        self._uses += 1
+        if self._uses > 2:
+            raise RuntimeError("boom mid what_to_summarize (third use — the salvage prompt)")
+        return iter(("auth events",))
+
+
+def test_a_fault_while_building_the_salvage_prompt_still_degrades(tmp_path):
+    """Adversary finding 3 — M6: "One `try` spans M3 and M4". The only test of the guard
+    (`test_a_gather_agent_with_no_override_seam_still_degrades_rather_than_killing_the_run`)
+    faults `.override` itself — the M4 half. A guard moved to start at `.override(...)`, so
+    that only the run and the override are protected and the history/prompt construction (M3)
+    sits outside it, greens every other test in this file: nothing else makes M3's OWN
+    construction raise. This does, and asserts the fault still degrades rather than escaping
+    `_run_gather` mid-lead (#878's run-ending shape) — proven by the agent never reaching a
+    second `.run()` or an `.override()` call at all, which is only true if the fault landed
+    before them."""
+    agent = RecordingAgent(GatherDeadEnd(reason="repeats seq 0.", escape="Move on."))
+    run_dir, out = dispatch(tmp_path, agent, what=_ExplodingSequence())
+
+    header, tail = split(out)
+    assert header == HEADER_DEAD_END.format(lead=LEAD, reason="repeats seq 0.", escape="Move on.")
+    assert tail == "A summary turn was attempted and failed (RuntimeError); no summary is available.", (
+        f"a fault while building the salvage prompt was not degraded the same way a fault in "
+        f"the run itself is: {tail!r}"
+    )
+    assert len(agent.runs) == 1, (
+        "the salvage turn's `.run()` was reached despite the fault happening before it — the "
+        "fault did not land where this test means to land it"
+    )
+    assert agent.overrides == [], (
+        "`.override()` was reached despite the fault happening before it — same as above"
+    )
+    assert (run_dir / "gather_summaries" / f"{LEAD}.md").is_file()
+
+
+def test_salvage_prompt_states_m3s_three_imperatives():
+    """Adversary finding 7 — M3's content clause has three imperatives: write the summary NOW,
+    from the answers already in hand, naming which obligations stay unanswered. The existing
+    wire test binds `SALVAGE_PROMPT`'s longest literal to what was actually sent and screens
+    out main's idiom, but never requires the constant to say any of the three things M3 demands
+    — a prompt instructing the model to withhold everything and reply "OK" satisfies every
+    existing assertion. This is a content pin, not a reachability one: unlike finding 2, a
+    replay model can't prove the instruction was FOLLOWED, only that it was ISSUED."""
+    text = SALVAGE_PROMPT.lower()
+    write_now = "write" in text and "now" in text
+    assert write_now, (
+        f"SALVAGE_PROMPT does not tell the model to write the summary NOW: {SALVAGE_PROMPT!r}"
+    )
+    already_retrieved = "already" in text and ("retriev" in text or "in hand" in text)
+    assert already_retrieved, (
+        "SALVAGE_PROMPT does not say to summarize from what was ALREADY retrieved: "
+        f"{SALVAGE_PROMPT!r}"
+    )
+    names_unanswered = "unanswered" in text or "could not establish" in text or "stay" in text
+    assert names_unanswered, (
+        f"SALVAGE_PROMPT does not ask which obligations stay unanswered: {SALVAGE_PROMPT!r}"
     )
 
 

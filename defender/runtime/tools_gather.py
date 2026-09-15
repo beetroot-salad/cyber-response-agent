@@ -521,7 +521,14 @@ async def _salvage_summary(
                 None, deps=gdeps, message_history=history,
                 usage_limits=UsageLimits(request_limit=SALVAGE_REQUEST_LIMIT),
             )
-        summary = str(result.output or "")
+        summary = str(result.output or "").strip()
+        if not summary:
+            # A response that GRAPH accepts as actionable (a `TextPart("")`, or one that trims
+            # to nothing) is still no summary — O1's failure condition is "the notice alone,
+            # with no failure sentence", and a blank body under the header reads to main as
+            # exactly that. Routed through the same guard as every other failure rather than
+            # special-cased, so it carries the same fixed sentence and the same class name.
+            raise UnexpectedModelBehavior("the summary turn produced no text")
         return f"{header}\n\n{summary}"
     except Exception as e:  # noqa: BLE001 — M6: every failure degrades, none re-raises
         print(f"[run.py] gather salvage turn failed for {request.lead_id}: {e!r}",
