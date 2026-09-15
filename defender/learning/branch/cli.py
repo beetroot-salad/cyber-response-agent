@@ -75,7 +75,13 @@ from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
 from defender.learning.branch import timing as timing_mod
-from defender.learning.branch.archive import REVIEW_NAME, SAMPLES_NAME, WORLDS_DIRNAME
+from defender.learning.branch.archive import (
+    FAMILY_STAMP_NAME,
+    REVIEW_NAME,
+    RUNS_SUBDIR,
+    SAMPLES_NAME,
+    WORLDS_DIRNAME,
+)
 from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
@@ -101,16 +107,6 @@ from defender.runtime.branch._family import (
 #: reader that re-derives it silently restores both, so with the variable unset the launcher
 #: REFUSES naming it rather than inventing a location.
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
-
-#: Where a sibling's run dir lives, relative to its episode. The child process is handed this as
-#: its own `DEFENDER_RUNS_BASE`, so the run dir it materialises is inside the episode rather than
-#: beside the source run.
-RUNS_SUBDIR = "runs"
-
-#: The family stamp's filename. The archived worlds' directory is `archive.WORLDS_DIRNAME`,
-#: imported — a second constant here for the same segment was the exact second spelling
-#: #1025 O8 names.
-FAMILY_STAMP_NAME = "provenance.json"
 
 #: The three outcomes an episode can end in. `incomplete` is a MODELLED outcome carrying a
 #: reason rather than the absence of a file (§7 FORK-1): every question about a partially good
@@ -1455,8 +1451,14 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     # the judge's entry is on the record before a held hand-back failure is raised. Drawn the
     # other way round, the judge was booked for every delete-and-verify the teardown made, and
     # a held cleanup fault re-raised after a COMPLETED grade erased the judge's entry.
-    with _cluster_released(teardown, episode_id=episode_id), clock.step(Step.JUDGE):
-        _grade(episode_dir, episode_id=episode_id, judge=judge)
+    with _cluster_released(teardown, episode_id=episode_id):
+        with clock.step(Step.JUDGE):
+            _grade(episode_dir, episode_id=episode_id, judge=judge)
+        # #1025 J1: rendered AFTER the JUDGE frame closes (the judge row is on `timing.json`
+        # first) and still inside `_cluster_released`'s body, under its own non-fatal
+        # boundary — a render fault costs the episode nothing, and a held teardown fault is
+        # still raised (unchanged) once this returns.
+        _render_page(episode_dir, episode_id=episode_id)
     # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
     # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
     # launch that did exactly what it was asked and found the results not comparable, which is a
@@ -1514,6 +1516,21 @@ def _cluster_released(teardown: Any, *, episode_id: str) -> Iterator[None]:
             print(f"[branch] episode {episode_id}: teardown also failed ({held!r}); "
                   "the names it could not verify gone are in the review record, and the failure "
                   "that ended the episode is what follows", file=sys.stderr)
+
+
+def _render_page(episode_dir: Path, *, episode_id: str) -> None:
+    """The episode page (#1025), holding every failure it can have — the render's own frame,
+    called AFTER the judge's clock frame closes so the stage table it reads already carries
+    the judge row. Never fatal to the launch: a page that could not be written is printed, not
+    raised, exactly as `_grade`'s own boundary is."""
+    try:
+        from defender.scripts.visualize import visualize_episode
+
+        page = visualize_episode.render_episode(episode_dir)
+        print(f"[branch] episode {episode_id}: page {page}", file=sys.stderr)
+    except Exception as render_failed:  # noqa: BLE001 — see the docstring: a render fault is non-fatal to the launch
+        print(f"[branch] episode {episode_id}: the page could not be rendered "
+              f"({render_failed!r})", file=sys.stderr)
 
 
 def _grade(episode_dir: Path, *, episode_id: str, judge: Any) -> None:

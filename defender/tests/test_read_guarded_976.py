@@ -68,6 +68,26 @@ def test_a_symlink_is_refused_not_followed(tmp_path):
         _io.write_guarded(link, "x")
 
 
+def test_a_looped_parent_keeps_the_os_own_words_and_blames_no_leaf(tmp_path):
+    """`ELOOP` is relabelled "aliased entry" only when the entry AT the name is the link. A
+    loop in a PARENT component (`worlds/b -> worlds/b`) is the OS's own finding about that
+    directory: the reason keeps "symbolic links" and does not call `report.md` an alias it is
+    not (review of PR #1042). Positive control beside it: a link at the leaf still reads as
+    the alias refusal."""
+    looped = tmp_path / "b"
+    looped.symlink_to("b")
+    text, err = _io.read_guarded(looped / "report.md")
+    assert text is None
+    assert "symbolic link" in (err or "").lower(), err
+    assert _io.ALIAS_READ_REFUSAL not in (err or ""), err
+
+    real = _content(tmp_path)
+    leaf = tmp_path / "leaf.txt"
+    leaf.symlink_to(real)
+    _text, err = _io.read_guarded(leaf)
+    assert _io.ALIAS_READ_REFUSAL in (err or ""), err
+
+
 def test_a_hard_link_is_refused(tmp_path):
     """THE SHAPE THAT GOT THROUGH. `O_NOFOLLOW` never fires for a hard link — the open
     SUCCEEDS — so the link count has to be asked of the descriptor rather than inferred from

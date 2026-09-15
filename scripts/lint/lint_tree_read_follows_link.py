@@ -114,6 +114,11 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/judge/enqueue.py",
     "learning/judge/family.py",
     "learning/judge/render.py",
+    # #1025's episode page: renders `learning.html` from the episode tree alone — every record
+    # and archived world leaf it reads goes through a package reader that already screens with
+    # `read_guarded`/`artifact_file`/`artifact_dir`; listed here for the reason every entry
+    # above is.
+    "scripts/visualize/visualize_episode.py",
 })
 
 SUPPRESS_MARKERS = ("lint-tree-read-follows-link: ok",)
