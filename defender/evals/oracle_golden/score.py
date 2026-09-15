@@ -15,6 +15,15 @@ code, and never reach the model:
 3. **Leak check.** For mutation cases, the pre-mutation entities must appear nowhere in
    the projection. Deterministic, whole-value-or-token containment.
 
+The mechanical checks are TEXT containment, so they run over text: the projection, the
+manifest and `expected.yaml` are all read through `defender._yaml.load_text_scalars`, which
+constructs every plain scalar as the string it was written as. `yaml.safe_load` would type
+an unquoted `2026-07-25T07:48:37.065Z` into a `datetime` whose `str()` is
+`2026-07-25 07:48:37.065000+00:00`, and whether a forbidden instant was caught then
+depended on whether the model happened to quote it (#951). The verdict pass's
+`<projection>` block is rendered from the same document, so the judge is shown the value as
+the oracle wrote it (quoting may differ).
+
 Everything downstream is the judge's, in two passes (`judge.py`):
 
 * the **label** pass reads the telemetry alone — never the story, never the projection —
@@ -55,10 +64,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender._yaml import load_text_scalars  # noqa: E402
 from defender.evals.oracle_golden import judge  # noqa: E402
 
 # The closed marker vocabulary. Anything else is malformed model output and must not be
@@ -103,13 +111,6 @@ _TOKEN_TRIM = "\"'`,;:()[]{}<>"
 _PLACEHOLDER = re.compile(r"<[^<>]+>")
 
 
-def _norm(value: object) -> str:
-    """One coercion for both sides of a value comparison (YAML ints/bools vs strings)."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
-
-
 # mechanical checks
 
 def _marker_kind(marker: str) -> str | None:
@@ -150,11 +151,14 @@ def emitted_values(events: Iterable) -> list[str]:
 
     Keys are excluded on purpose: they are schema field names (`user.name`), never the
     mutated entities a mutation case forbids, so scanning them only invents false leaks.
+
+    A value read from a projection file is already text (module docstring); `str()` only
+    keeps this total for a caller handing it a Python literal, and does no normalising.
     """
     out: list[str] = []
     for e in events:
         if isinstance(e, dict):
-            out.extend(_norm(v) for v in e.values())
+            out.extend(str(v) for v in e.values())
         elif isinstance(e, str):
             out.append(e)
     return out
@@ -182,7 +186,8 @@ def leaks(forbidden: list, preds: dict[str, list]) -> list[str]:
     `file.path: /root/.ssh/authorized_keys` (an unrelated path that merely contains the
     token), and case-002 in this very suite emits the latter.
     """
-    return [f for f in forbidden if _norm(f) in _emitted_index(preds)]
+    emitted = _emitted_index(preds)
+    return [f for f in forbidden if f in emitted]
 
 
 def _emitted_index(preds: dict[str, list]) -> set[str]:
@@ -257,8 +262,8 @@ def expectation_failures(expectation: dict, preds: dict[str, list],
                        f"carries a delta the queries surface")
     emitted_index = _emitted_index(preds)
     for value in expectation.get("must_emit") or []:
-        if _norm(value) not in emitted_index:
-            out.append(f"must_emit: {_norm(value)!r} is the story's own value and "
+        if value not in emitted_index:
+            out.append(f"must_emit: {value!r} is the story's own value and "
                        f"appears nowhere in the projection")
     return out
 
@@ -381,8 +386,10 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
     `--dry-run` that reports clean for a projection the real score refuses is worse than no
     dry run, because it is consulted precisely when a model call is expensive.
     """
-    manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
-    proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+    # Both sides of every value comparison below are the TEXT as written — see the module
+    # docstring; a typed read of either file re-spells what the checks compare.
+    manifest = load_text_scalars((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    proj = load_text_scalars(proj_path.read_text(encoding="utf-8")) or {}
     leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
     preds, duplicates = load_predictions(proj)
 
@@ -523,14 +530,16 @@ def _forbidden_values(case_dir: Path, manifest: dict) -> list:
 
     Read from `expected.yaml` where the seed cases keep it, falling back to the manifest —
     `expected.yaml` is the label pass's calibration set now, and a case recruited without
-    hand labels declares its mutation in its manifest instead.
+    hand labels declares its mutation in its manifest instead. Read as text, like the
+    manifest: an author's unquoted `2026-07-25T07:48:37.065Z` is the same literal as the
+    model's.
     """
     expectation = manifest.get("expectation") or {}
     if expectation.get("must_not_emit"):
         return list(expectation["must_not_emit"])
     calibration = case_dir / "expected.yaml"
     if calibration.is_file():
-        doc = yaml.safe_load(calibration.read_text(encoding="utf-8")) or {}
+        doc = load_text_scalars(calibration.read_text(encoding="utf-8")) or {}
         if doc.get("must_not_emit"):
             return list(doc["must_not_emit"])
     return list(manifest.get("must_not_emit") or [])

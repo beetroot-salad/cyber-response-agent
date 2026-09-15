@@ -42,6 +42,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender._yaml import load_text_scalars  # noqa: E402
 from defender.evals.oracle_golden import judge, score  # noqa: E402
 
 GOLDEN_DIR = Path(__file__).resolve().parent
@@ -225,27 +226,33 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
 DEFAULT_ORACLE_TAG = "glm-5.2_effort-none_prompt-711"
 
 
-def verdict_set(case_names: tuple[str, ...],
-                oracle_tag: str) -> list[tuple[Path, str, object, dict]]:
+def verdict_set(case_names: tuple[str, ...], oracle_tag: str, *,
+                cases_dir: Path = CASES_DIR) -> list[tuple[Path, str, object, dict]]:
     """(case_dir, lead_id, events, measurement) for every lead a real score judged.
 
     Deliberately reuses the committed `labels/<judge-tag>.json` rather than re-measuring:
     the question is how stable the VERDICT pass is given a fixed measurement, and letting
     the label pass vary underneath it would fold the two variances into one number that
     names neither.
+
+    The projection and manifest are read exactly as `score._measured` reads them — as text
+    (`score.py`'s module docstring, #951) — so the audit shows the verdict pass the same
+    `<projection>` a real score does, and skips the same defective/derived cases. `cases_dir`
+    is the injection seam for a case tree that is not the committed one.
     """
     out: list[tuple[Path, str, object, dict]] = []
     model, effort = judge.judge_model(), judge.judge_effort()
     for name in case_names:
-        case_dir = CASES_DIR / name
+        case_dir = cases_dir / name
         proj_path = case_dir / "projections" / f"{oracle_tag}.yaml"
         labels_path = score.labels_path(case_dir, model, effort)
         if not (proj_path.is_file() and labels_path.is_file()):
             continue
-        manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+        manifest = load_text_scalars(
+            (case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
         if manifest.get("defective") or score.is_derived(manifest.get("kind")):
             continue
-        proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+        proj = load_text_scalars(proj_path.read_text(encoding="utf-8")) or {}
         preds, _ = score.load_predictions(proj)
         labels = (json.loads(labels_path.read_text(encoding="utf-8")).get("leads") or {})
         for lead_id, label in sorted(labels.items()):

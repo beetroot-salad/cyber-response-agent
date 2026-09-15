@@ -160,6 +160,52 @@ def safe_load(text: str) -> Any:
         raise yaml.YAMLError(f"YAML value could not be constructed: {e}") from e
 
 
+class _TextScalarLoader(yaml.SafeLoader):
+    """`SafeLoader` with every implicit resolver but `null` removed — see `load_text_scalars`.
+
+    `yaml_implicit_resolvers` is a CLASS-LEVEL dict of lists that a subclass inherits by
+    reference, and `add_implicit_resolver` copies it lazily only when a subclass ADDS one.
+    Filtering the inherited lists in place would therefore strip typing from `yaml.SafeLoader`
+    itself — every `yaml.safe_load` in the process would start returning strings for dates
+    (#951 design C14, executed). The table below is a fresh dict of fresh lists, assigned, and
+    never touched again.
+    """
+
+
+_TextScalarLoader.yaml_implicit_resolvers = {
+    first: kept
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    if (kept := [(tag, regexp) for tag, regexp in resolvers
+                 if tag == "tag:yaml.org,2002:null"])
+}
+
+
+def load_text_scalars(text: str) -> Any:
+    """Parse `text` with every plain scalar read as the string it was written as.
+
+    @owns the text form of a case-file value. The oracle-golden mechanical checks are literal
+    containment — is this `must_not_emit` literal a whole value or a token of what the
+    projection emitted — so both sides must be the text the author and the model wrote, not
+    what YAML would have typed it as. `yaml.safe_load` types an unquoted
+    `2026-07-25T07:48:37.065Z` into a `datetime` whose `str()` is
+    `2026-07-25 07:48:37.065000+00:00`, so whether a forbidden instant was caught depended on
+    whether the model happened to quote it (#951); `yes`/`0755`/`12:30`/`1.0` collapse the
+    same way. Here timestamps, dates, ints, floats and booleans all construct as `str`, in
+    their original spelling. Only the `null` resolver survives, so `~`, `null` and an empty
+    value are still `None` — the `or {}` / `or []` idioms the readers depend on.
+
+    Quoted and block scalars, and structure, are exactly what `safe_load` gives. Sits BESIDE
+    `safe_load` rather than inside it: that wrapper is the repo's TYPED reader and stays one.
+    Errors keep its contract — malformed text and too-deep nesting both surface as
+    `yaml.YAMLError`. The `ValueError` fold is not needed: with no timestamp resolver there
+    is no constructor left to reject a shape-valid, calendar-invalid instant.
+    """
+    try:
+        return yaml.load(text, Loader=_TextScalarLoader)
+    except RecursionError as e:
+        raise yaml.YAMLError("YAML is nested too deeply to parse") from e
+
+
 def reject_unread_keys(
     where: str, mapping: Mapping[object, object], known: tuple[str, ...],
     *, error: type[Exception],
