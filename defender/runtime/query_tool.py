@@ -552,9 +552,12 @@ class QueryCapture(AbstractCapability[Any]):
             return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
 
         if decision.outcome == DENIED:
+            # `lead_id` rides the audit record (#860 M1) so the offline judge can put the
+            # refusal on the lead's own chain; it is NOT a queries-table row (N5) — one there
+            # would count toward `repeat_trip` and charge the breaker.
             self._denial_logger_for(deps.run_dir).log_policy_denial(
                 role=self._role, system=system, verb=verb,
-                call_id=f"{system}.{verb}", params=params,
+                call_id=f"{system}.{verb}", params=params, lead_id=deps.lead_id,
             )
             return None, _format_bash_result(
                 DEFAULT_FAULT_EXIT, "", wrap_fresh(decision.refusal or "", "untrusted"), "",
