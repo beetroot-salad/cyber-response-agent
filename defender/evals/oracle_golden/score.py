@@ -15,6 +15,17 @@ code, and never reach the model:
 3. **Leak check.** For mutation cases, the pre-mutation entities must appear nowhere in
    the projection. Deterministic, whole-value-or-token containment.
 
+The containment checks are TEXT containment, so the side the model wrote is read as text:
+`emitted_texts` walks the projection's YAML node tree, where every scalar is still the
+spelling in the file. `yaml.safe_load` would type an unquoted `2026-07-25T07:48:37.065Z`
+into a `datetime` whose `str()` is `2026-07-25 07:48:37.065000+00:00`, and whether a
+forbidden instant was caught then depended on whether the model happened to quote it
+(#951). The author's side — `must_emit` / `must_not_emit` — is text by RULE, not by reader:
+each entry must be a quoted string, and `forbidden_values` / `required_values` refuse a
+list that carries anything else, so the typed read every other reader of a case file makes
+stays the only read. Everything structural (the lead set, `defective:`, `kind:`, the
+`<projection>` block the judge is shown) is the typed document, exactly as before.
+
 Everything downstream is the judge's, in two passes (`judge.py`):
 
 * the **label** pass reads the telemetry alone — never the story, never the projection —
@@ -59,6 +70,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender._yaml import compose, safe_load, value_texts  # noqa: E402
 from defender.evals.oracle_golden import judge  # noqa: E402
 
 # The closed marker vocabulary. Anything else is malformed model output and must not be
@@ -103,13 +115,6 @@ _TOKEN_TRIM = "\"'`,;:()[]{}<>"
 _PLACEHOLDER = re.compile(r"<[^<>]+>")
 
 
-def _norm(value: object) -> str:
-    """One coercion for both sides of a value comparison (YAML ints/bools vs strings)."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
-
-
 # mechanical checks
 
 def _marker_kind(marker: str) -> str | None:
@@ -150,14 +155,50 @@ def emitted_values(events: Iterable) -> list[str]:
 
     Keys are excluded on purpose: they are schema field names (`user.name`), never the
     mutated entities a mutation case forbids, so scanning them only invents false leaks.
+
+    Over the TYPED document, so a value is `str()` of whatever YAML made of it — enough for
+    `has_concrete_value`, which only asks whether a placeholder is present. The containment
+    checks read `emitted_texts` instead, for the reason the module docstring gives.
     """
     out: list[str] = []
     for e in events:
         if isinstance(e, dict):
-            out.extend(_norm(v) for v in e.values())
+            out.extend(str(v) for v in e.values())
         elif isinstance(e, str):
             out.append(e)
     return out
+
+
+def emitted_texts(projection_text: str) -> list[str]:
+    """Every value a projection emits, as the TEXT the file spells it — the containment
+    checks' side of the comparison.
+
+    The same values `emitted_values` reads across every lead, taken from the YAML node tree
+    (`defender._yaml.value_texts`) rather than the loaded document, so an unquoted instant,
+    `0755`, `yes` or `1.50` is matched as the model wrote it and not as `str()` of the
+    `datetime`/`int`/`bool`/`float` YAML typed it into. Only `projections[*].events` is
+    walked: lead ids and any other bookkeeping the file carries are not emissions. An event
+    that is neither a mapping nor a marker is malformed (`grammar_problem`) and its scalars
+    are still scanned — a leak inside a malformed event is a leak.
+    """
+    out: list[str] = []
+    root = compose(projection_text)
+    for row in _sequence(_child(root, "projections")):
+        out.extend(value_texts(_child(row, "events")))
+    return out
+
+
+def _child(node: object, key: str) -> object:
+    """The value node under mapping `node` at plain-scalar `key`, else `None`."""
+    if isinstance(node, yaml.MappingNode):
+        for key_node, value_node in node.value:
+            if isinstance(key_node, yaml.ScalarNode) and key_node.value == key:
+                return value_node
+    return None
+
+
+def _sequence(node: object) -> list:
+    return list(node.value) if isinstance(node, yaml.SequenceNode) else []
 
 
 def _tokens(value: str) -> set[str]:
@@ -173,8 +214,9 @@ def _tokens(value: str) -> set[str]:
     return out
 
 
-def leaks(forbidden: list, preds: dict[str, list]) -> list[str]:
-    """Forbidden pre-mutation values a projection actually emitted.
+def leaks(forbidden: list[str], emitted: Iterable[str]) -> list[str]:
+    """Forbidden pre-mutation values a projection actually emitted (`emitted` is
+    `emitted_texts` of the projection file).
 
     Matches a forbidden value against a whole emitted value or one of its
     whitespace-delimited, punctuation-trimmed tokens — never as a bare substring.
@@ -182,17 +224,17 @@ def leaks(forbidden: list, preds: dict[str, list]) -> list[str]:
     `file.path: /root/.ssh/authorized_keys` (an unrelated path that merely contains the
     token), and case-002 in this very suite emits the latter.
     """
-    return [f for f in forbidden if _norm(f) in _emitted_index(preds)]
+    index = _emitted_index(emitted)
+    return [f for f in forbidden if f in index]
 
 
-def _emitted_index(preds: dict[str, list]) -> set[str]:
+def _emitted_index(emitted: Iterable[str]) -> set[str]:
     """Every emitted value plus its tokens — the surface `must_not_emit` and `must_emit`
     both match against, so the forbidden and required directions cannot drift apart."""
     seen: set[str] = set()
-    for events in preds.values():
-        for value in emitted_values(events):
-            seen.add(value)
-            seen |= _tokens(value)
+    for value in emitted:
+        seen.add(value)
+        seen |= _tokens(value)
     seen.discard("")
     return seen
 
@@ -221,9 +263,12 @@ def _requested(spec: str | list[str] | None, lead_ids: list[str]) -> list[str]:
     return [lead_id for lead_id in (spec or []) if lead_id in lead_ids]
 
 
-def expectation_failures(expectation: dict, preds: dict[str, list],
-                         lead_ids: list[str]) -> list[str]:
+def expectation_failures(expectation: dict, preds: dict[str, list], lead_ids: list[str],
+                         emitted: Iterable[str]) -> list[str]:
     """Rules the story settles by itself, and the projection broke anyway.
+
+    `preds` is the typed projection, for the per-lead clauses; `emitted` is `emitted_texts`
+    of the same file, for `must_emit` (module docstring).
 
     A derived case has no telemetry, so the judge cannot grade it and NOTHING else would: a
     forged `neg-001` projection copying the brute-force burst into every lead — exactly the
@@ -236,13 +281,13 @@ def expectation_failures(expectation: dict, preds: dict[str, list],
     """
     out: list[str] = []
     for lead_id in _requested(expectation.get("empty_leads"), lead_ids):
-        if emitted := preds.get(lead_id):
+        if events := preds.get(lead_id):
             # A marker is a different error from a fabricated event: `+ noise` asserts the
             # activity IS here and merely looks routine, which is a claim of presence, not
             # a quantity. Name it, or the failure reads as "emitted 1 item" and hides that.
-            markers = [e for e in emitted if isinstance(e, str)]
+            markers = [e for e in events if isinstance(e, str)]
             what = (f"the {_marker_kind(markers[0])} {markers[0]!r}" if markers
-                    else f"{len(emitted)} fabricated event(s)")
+                    else f"{len(events)} fabricated event(s)")
             out.append(f"{lead_id}: must be empty — the story's activity never touches "
                        f"this envelope, but it emitted {what}")
     for lead_id in _requested(expectation.get("no_suppression"), lead_ids):
@@ -255,10 +300,10 @@ def expectation_failures(expectation: dict, preds: dict[str, list],
                for e in preds.get(lead_id) or []):
             out.append(f"{lead_id}: must not claim indistinguishability — this envelope "
                        f"carries a delta the queries surface")
-    emitted_index = _emitted_index(preds)
-    for value in expectation.get("must_emit") or []:
-        if _norm(value) not in emitted_index:
-            out.append(f"must_emit: {_norm(value)!r} is the story's own value and "
+    emitted_index = _emitted_index(emitted)
+    for value in required_values(expectation):
+        if value not in emitted_index:
+            out.append(f"must_emit: {value!r} is the story's own value and "
                        f"appears nowhere in the projection")
     return out
 
@@ -381,8 +426,12 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
     `--dry-run` that reports clean for a projection the real score refuses is worse than no
     dry run, because it is consulted precisely when a model call is expensive.
     """
-    manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
-    proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+    manifest = safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    proj_text = proj_path.read_text(encoding="utf-8")
+    proj = safe_load(proj_text) or {}
+    # The one place the projection is read twice: its structure typed, its values as text
+    # (module docstring). `safe_load` first, so malformed text and a refused tag fail there.
+    emitted = emitted_texts(proj_text)
     leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
     preds, duplicates = load_predictions(proj)
 
@@ -399,9 +448,9 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
                 lead_id: problem for lead_id, events in preds.items()
                 if (problem := grammar_problem(events)) is not None
             },
-            "forbidden_emitted": leaks(_forbidden_values(case_dir, manifest), preds),
+            "forbidden_emitted": leaks(forbidden_values(case_dir, manifest), emitted),
             "expectation_failures": expectation_failures(
-                manifest.get("expectation") or {}, preds, list(leads)),
+                manifest.get("expectation") or {}, preds, list(leads), emitted),
             "concrete_value_leads": sorted(
                 lead_id for lead_id, events in preds.items()
                 if isinstance(events, list) and has_concrete_value(events)),
@@ -518,22 +567,54 @@ def measurement(label: dict) -> dict:
     return {k: label[k] for k in ("delta_kind", "heterogeneous", "evidence") if k in label}
 
 
-def _forbidden_values(case_dir: Path, manifest: dict) -> list:
+def forbidden_values(case_dir: Path, manifest: dict) -> list[str]:
     """`must_not_emit` for a mutation case: the pre-mutation entities.
 
     Read from `expected.yaml` where the seed cases keep it, falling back to the manifest —
     `expected.yaml` is the label pass's calibration set now, and a case recruited without
-    hand labels declares its mutation in its manifest instead.
+    hand labels declares its mutation in its manifest instead. Public because
+    `validate_cases` refuses at commit time exactly what this refuses at score time
+    (`_text_clause`), reading the same three places.
     """
     expectation = manifest.get("expectation") or {}
     if expectation.get("must_not_emit"):
-        return list(expectation["must_not_emit"])
+        return _text_clause(expectation, "must_not_emit", where="manifest.yaml expectation")
     calibration = case_dir / "expected.yaml"
     if calibration.is_file():
-        doc = yaml.safe_load(calibration.read_text(encoding="utf-8")) or {}
+        doc = safe_load(calibration.read_text(encoding="utf-8")) or {}
         if doc.get("must_not_emit"):
-            return list(doc["must_not_emit"])
-    return list(manifest.get("must_not_emit") or [])
+            return _text_clause(doc, "must_not_emit", where="expected.yaml")
+    return _text_clause(manifest, "must_not_emit", where="manifest.yaml")
+
+
+def required_values(expectation: dict) -> list[str]:
+    """`must_emit`: the story's own values the projection has to carry."""
+    return _text_clause(expectation, "must_emit", where="manifest.yaml expectation")
+
+
+def _text_clause(doc: dict, key: str, *, where: str) -> list[str]:
+    """`doc[key]` as the list of literals it must be, or `ValueError` saying what it is.
+
+    The containment checks compare the author's literal with the model's spelling, and only a
+    STRING carries a spelling: an unquoted `2026-07-25T07:48:37.065Z` reaches here as a
+    `datetime` whose `str()` no model ever wrote, `0755` as `493`, `yes` as `True` — a clause
+    that could never match, i.e. silently unarmed (#951). A bare scalar instead of a list is
+    the same defect one level up: iterating it would forbid each of its characters. Both are
+    an authoring error, so both are refused rather than coerced — a rule the validator
+    applies at commit time and the scorer applies at score time, from this one function.
+    """
+    entries = doc.get(key)
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        raise ValueError(f"{where}: `{key}` must be a list of quoted strings, not "
+                         f"{type(entries).__name__} {entries!r}")
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise ValueError(
+                f"{where}: `{key}` entry {entry!r} is a YAML {type(entry).__name__}, and the "
+                f"check compares text — quote it as the literal the projection would carry")
+    return list(entries)
 
 
 def _by_system(rows: list[dict]) -> dict[str, str]:

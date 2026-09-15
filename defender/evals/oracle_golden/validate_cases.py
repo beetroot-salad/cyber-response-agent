@@ -59,7 +59,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from defender.evals.oracle_golden import controls as CONTROLS  # noqa: E402
-from defender.evals.oracle_golden.score import DERIVED_KINDS, is_derived  # noqa: E402
+from defender.evals.oracle_golden.score import (  # noqa: E402
+    DERIVED_KINDS, forbidden_values, is_derived, required_values,
+)
 from defender.evals.oracle_golden.story_from_run import eval_tells_in  # noqa: E402
 
 GOLDEN_DIR = Path(__file__).resolve().parent
@@ -112,6 +114,7 @@ def check_case(case_dir: Path, by_id: dict[str, dict],
 
     problems += check_split_and_unit(name, manifest, by_id)
     problems += check_expectation(name, manifest)
+    problems += check_clause_text(case_dir, manifest)
     problems += check_seq_keying(case_dir)
     problems += check_controls(case_dir, known)
     return problems
@@ -421,6 +424,23 @@ def check_expectation(name: str, manifest: dict) -> list[str]:
         return [f"{name}: a {manifest.get('kind')} case declares no `expectation:` — the "
                 f"judge never runs on it, so it would pass no matter what the oracle "
                 f"emitted. Declare what its story settles."]
+    return []
+
+
+def check_clause_text(case_dir: Path, manifest: dict) -> list[str]:
+    """`must_emit` / `must_not_emit` entries are quoted strings, wherever the case keeps them.
+
+    The scorer compares these literals with the projection's text, and an unquoted
+    `2026-07-25T07:48:37.065Z` is a `datetime` to YAML — a clause that can never match and
+    so never fires (#951). The scorer refuses such a clause at score time; this is the same
+    refusal at commit time, from the same reader, so the author sees it before a projection
+    is ever paid for.
+    """
+    try:
+        forbidden_values(case_dir, manifest)
+        required_values(manifest.get("expectation") or {})
+    except ValueError as e:
+        return [f"{case_dir.name}: {e}"]
     return []
 
 

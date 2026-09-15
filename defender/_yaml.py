@@ -28,11 +28,7 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
     permission table) or a warning (a corpus document).
     """
     try:
-        # `SafeLoader` explicitly: `compose` defaults to the full `Loader`, and while composing
-        # constructs nothing, this module's whole contract with its callers is that untrusted
-        # text only ever meets the safe loader — a default that has to be argued about is one
-        # a later edit gets wrong.
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
+        root = compose(text)
     except (yaml.YAMLError, RecursionError):
         # Unparseable is not this function's verdict to give — the caller's own `safe_load`
         # raises on it with the parser's message, which says far more than "duplicates: none".
@@ -106,7 +102,7 @@ def duplicate_top_level_key(text: str) -> bool:
     verdict.
     """
     try:
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
+        root = compose(text)
     except (yaml.YAMLError, RecursionError):
         return False
     if not isinstance(root, yaml.MappingNode):
@@ -158,6 +154,62 @@ def safe_load(text: str) -> Any:
         # implicit timestamp). `yaml.YAMLError` is not a `ValueError`, so this
         # cannot swallow PyYAML's own typed errors.
         raise yaml.YAMLError(f"YAML value could not be constructed: {e}") from e
+
+
+def compose(text: str) -> Any:
+    """`text`'s node tree under the safe loader — the LAST representation in which every
+    scalar is still the text it was written as, and every mapping key is still there.
+
+    `safe_load` is compose-then-construct, and construction is where a plain
+    `2026-07-25T07:48:37.065Z` becomes a `datetime`, `0755` becomes `493`, `yes` becomes
+    `True` and a repeated key collapses to its last value. A reader that needs the document's
+    SPELLING (`value_texts`) or its pre-collapse keys (`duplicate_key_paths`) reads the tree;
+    everything else reads `safe_load`, and nothing re-types a scalar by hand.
+
+    `SafeLoader` explicitly: `yaml.compose` defaults to the full `Loader`, and while composing
+    constructs nothing, this module's whole contract with its callers is that untrusted text
+    only ever meets the safe loader — a default that has to be argued about is one a later
+    edit gets wrong. Raises what `yaml.compose` raises; callers that have already parsed the
+    same text with `safe_load` never see one.
+    """
+    return yaml.compose(text, Loader=yaml.SafeLoader)
+
+
+def value_texts(node: Any) -> list[str]:
+    """Every scalar under `node`, as the TEXT it was written — mapping keys excluded.
+
+    @owns the text form of a document value. The oracle-golden mechanical checks are literal
+    containment — is this `must_not_emit` literal a whole value or a token of what the
+    projection emitted — and they were run over a document `safe_load` had already typed, so
+    whether a forbidden instant was caught depended on whether the model quoted it (#951).
+    A `ScalarNode.value` is the spelling before any constructor touched it: a plain
+    `2026-07-25T07:48:37.065Z`, an explicitly tagged `!!timestamp …`, `0755`, `yes` and `1.50`
+    all come back exactly as they sit in the file, and a quoted scalar comes back unquoted,
+    as `safe_load` would give it. Nothing is constructed, so a `!!python/…` tag is inert here
+    (and refused by the `safe_load` a caller runs on the same text for its structure).
+
+    Keys are excluded because a caller scanning for leaked VALUES must not read schema field
+    names (`user.name`) as leaks. A `<<:` merge is a key too, and its aliased mapping is
+    reached through wherever the anchor is defined. Iterative with an identity-keyed visited
+    set, for `duplicate_key_paths`' reason: an anchor that contains its own alias composes
+    into a cyclic graph. An alias is therefore counted ONCE, where its anchor sits — the
+    text is the same either way.
+    """
+    out: list[str] = []
+    stack: list[Any] = [node]
+    seen_nodes: set[int] = set()
+    while stack:
+        current = stack.pop()
+        if id(current) in seen_nodes:
+            continue
+        seen_nodes.add(id(current))
+        if isinstance(current, yaml.ScalarNode):
+            out.append(current.value)
+        elif isinstance(current, yaml.MappingNode):
+            stack.extend(value_node for _key_node, value_node in reversed(current.value))
+        elif isinstance(current, yaml.SequenceNode):
+            stack.extend(reversed(current.value))
+    return out
 
 
 def reject_unread_keys(
