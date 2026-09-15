@@ -127,12 +127,15 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
     try:
         fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
     except OSError as e:
-        # A symlink is refused BY THE OPEN (`ELOOP`, marked by `open_nofollow_fd`), and it is
-        # the same refusal the hard-link and directory arms below spell — said in the same
-        # words here, so a caller's log names an alias as an alias rather than as "too many
-        # levels of symbolic links", and never has to prefix the sentence itself (which one
-        # caller did, in front of a permission fault as well).
-        if getattr(e, "write_guarded_alias", False):
+        # A symlink AT THE NAME is refused BY THE OPEN (`ELOOP`, marked by `open_nofollow_fd`),
+        # and it is the same refusal the hard-link and directory arms below spell — said in the
+        # same words here, so a caller's log names an alias as an alias rather than as "too
+        # many levels of symbolic links", and never has to prefix the sentence itself (which
+        # one caller did, in front of a permission fault as well). Only when the LEAF is the
+        # link, though: an `ELOOP` raised for a looped component higher up the path is the
+        # OS's own finding about that directory, and relabelling it would blame the leaf for
+        # an alias it is not (review of PR #1042) — that one keeps its own strerror.
+        if getattr(e, "write_guarded_alias", False) and _leaf_is_link(path):
             raise _mark_alias(OSError(errno.ELOOP, ALIAS_READ_REFUSAL, str(path)),
                               is_alias=True) from None
         raise
@@ -154,6 +157,16 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
     finally:
         if fd >= 0:
             os.close(fd)
+
+
+def _leaf_is_link(path: Path) -> bool:
+    """Is the entry AT `path` itself a symlink? `False` when the name cannot even be stat'ed
+    without following a link (`lstat` raising `ELOOP` for a looped parent), which is exactly
+    the case where the leaf is not the alias."""
+    try:
+        return stat.S_ISLNK(os.lstat(path).st_mode)
+    except OSError:
+        return False
 
 
 def use_utf8_stdio() -> None:

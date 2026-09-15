@@ -490,6 +490,35 @@ def test_947_a_teardown_failure_is_recorded_in_the_review_and_not_swallowed(tmp_
     assert INJECT in json.dumps(T.review_doc(ep))
 
 
+def test_947_a_planted_alias_at_the_staging_record_is_refused_by_teardown_and_sweep(tmp_path):
+    """`staged.yaml` is the SOLE record that a cluster write happened. A link planted at its
+    name (a sibling's box has an rw bind on the episode dir) used to read as "no rows" —
+    teardown swept nothing, the launch exited clean, and the live alias stayed under the name
+    meant to account for it. Now `read_staged` refuses a non-plain entry, and BOTH the
+    teardown and the next launch's sweep raise that refusal rather than swallowing it into a
+    clean exit (#1025 O8; review of PR #1042). Positive control: with the real record back,
+    teardown deletes the staged names."""
+    ep = T.episode(tmp_path)
+    door = T.FakeDoor(existing=(VIEW, INJECT))
+    _stage(ep, door=door)
+    record = ep / "staged.yaml"
+    aside = tmp_path / "planted.yaml"
+    record.rename(aside)
+    record.symlink_to(aside)
+    with pytest.raises(_refused(), match="staged.yaml"):
+        _staging().teardown(ep, door=door)
+    with pytest.raises(_refused(), match="staged.yaml"):
+        _staging().sweep(ep, episode_token=T.EPISODE_TOKEN, door=door)
+    assert VIEW in door.names, "a refusal must not delete blind"
+    assert INJECT in door.names, "a refusal must not delete blind"
+
+    record.unlink()
+    aside.rename(record)
+    _staging().teardown(ep, door=door)
+    assert VIEW not in door.names
+    assert INJECT not in door.names
+
+
 def test_947_next_launcher_start_sweeps_leftover_world_view_names(tmp_path):
     """The next launcher start sweeps every leftover name in this episode's own token namespace
     — the ones a killed launcher never tore down — and the cluster no longer holds them."""

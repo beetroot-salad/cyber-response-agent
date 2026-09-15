@@ -66,7 +66,7 @@ from defender.learning.judge.enqueue import (
 )
 from defender.learning.judge.render import episode_alert
 from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
-from defender.runtime.branch._family import episode_token_for
+from defender.runtime.branch._family import BASE_ROLE, episode_token_for
 from defender.scripts import pricing
 from defender.scripts.visualize.visualize_primitives import (
     ASSETS,
@@ -213,10 +213,24 @@ def _sentence(episode_dir: Path, text: str) -> str:
     added later cannot leak the root by accident: the loader, not each render site, owns it."""
     # Both spellings the readers can have formatted: the directory as the caller passed it
     # (every reader joins from it unresolved) and, should one resolve first, its real path.
+    # ANCHORED TO A PATH BOUNDARY, never a bare substring: a relative spelling like `re` or
+    # `ep` is a substring of `report.md`, `read`, `keep`, and an unanchored replace turned a
+    # refusal about `report.md` into "<episode>port.md could not be <episode>ad" (review of
+    # PR #1042). The root counts only where nothing path-like precedes it and a separator,
+    # a quote, whitespace, punctuation or the end follows it.
     for root in dict.fromkeys((str(episode_dir), os.path.realpath(episode_dir))):
         if root and root != ".":
-            text = text.replace(root + os.sep, "").replace(root, "<episode>")
+            text = _root_pattern(root).sub(
+                lambda m: "" if m.group("sep") else "<episode>", text)
     return text
+
+
+def _root_pattern(root: str) -> re.Pattern[str]:
+    """`root` at a path boundary: `root/` followed by the rest of a path (dropped, leaving the
+    relative remainder) or `root` on its own (spelled `<episode>`)."""
+    sep = re.escape(os.sep)
+    return re.compile(
+        rf"(?<![\w.~{sep}-]){re.escape(root)}(?:(?P<sep>{sep})(?=\S)|{sep}?(?![\w.~{sep}-]))")
 
 
 class _Record:
@@ -332,6 +346,9 @@ class _ResultEvent:
         "refused": "no result event (refused)",
         "none": "no result event",
         "unusable": "unusable result event",
+        # A priced run shows its cost, not a sentence; the key is here so `text` can never
+        # raise out of a display helper (d01: only `family.yaml` is fatal).
+        "ok": "",
     }
 
     def __init__(self, cost: float | None, wall_ms: float | None, state: str) -> None:
@@ -360,6 +377,16 @@ class _Timing:
     clock, `None` once there is a real wall to show instead."""
 
     __slots__ = ("error", "rows_by_step", "trusted_by_step", "launcher_wall_ms")
+
+    def step_wall_ms(self, step: str) -> float | None:
+        """ONE step's wall: its first trusted entry's start to its last trusted entry's end
+        (J15) — never a sum, which double-counts a repeated step's own reported span — or
+        `None` with no trusted pair. The stage table's row and the RUNS step's launcher line
+        both read this, so they cannot disagree about one step (review of PR #1042)."""
+        trusted = self.trusted_by_step.get(step, [])
+        if not trusted:
+            return None
+        return _wall_span([r["started_at"] for r in trusted], [r["ended_at"] for r in trusted])
 
     def __init__(self, rec: _Record) -> None:
         self.error = rec.error
@@ -419,7 +446,7 @@ class _WorldArchive:
 class _WorldLeads:
     """One world's leads block, read: the served-ledger note (or `None`), whether the world is
     archived at all, the investigation's refusal (or `None`), whether the hand-off moved, and
-    every lead's chain in roster order — `None` where the lead's own read was refused.
+    every lead's chain in roster order (a refused gather summary is the chain's own sentence).
 
     The ledger and the document are TWO slots (#1025): each is read by its own package reader
     and refuses on its own, so a served ledger that is absent or unreadable costs the block its
@@ -434,7 +461,7 @@ class _WorldLeads:
         self.archived = False
         self.facts_error: str | None = None
         self.moved = False
-        self.chains: list[tuple[str, dict[str, Any] | None]] = []
+        self.chains: list[tuple[str, dict[str, Any]]] = []
 
 
 #: The three shapes a roster item takes — decided ONCE at load (`_build_roster`), so the
@@ -487,18 +514,31 @@ class WorldEntry:
 
 class _Trace:
     """One model call's wire record, by stem (`<agent>_trace`): the plain trace file's state
-    (absent / refused / ok) with its rows and unreadable-line count, and the framed twin —
-    whether one is on disk, and its first row when it could be read."""
+    (absent / refused / ok) with its rows and unreadable-line count, and the framed twin's
+    first row when one is on disk and could be read. An entry exists only because a plain
+    file or a framed twin was seen at load."""
 
-    __slots__ = ("stem", "plain", "rows", "unreadable", "framed_present", "framed")
+    __slots__ = ("stem", "plain", "rows", "unreadable", "framed")
 
     def __init__(self, stem: str) -> None:
         self.stem = stem
         self.plain = "absent"
         self.rows: list[dict[str, Any]] = []
         self.unreadable = 0
-        self.framed_present = False
         self.framed: dict[str, Any] | None = None
+
+
+class _RoleCost:
+    """One role's spend: `cost` (priced rows summed), `wall_ms` (durations summed), `priced`
+    (files with at least one priced response) and `calls` (files, readable or not)."""
+
+    __slots__ = ("cost", "wall_ms", "priced", "calls")
+
+    def __init__(self) -> None:
+        self.cost = 0.0
+        self.wall_ms = 0.0
+        self.priced = 0
+        self.calls = 0
 
 
 class _WireLogs:
@@ -517,8 +557,9 @@ class _WireLogs:
         since a launcher-produced episode writes only the framed one for some roles (#1025
         J13a/b): a stem with no plain trace file still gets a block, built entirely from its
         framed record."""
-        return {s for s, t in self.traces.items()
-                if s.startswith(role_prefix) and (t.plain != "absent" or t.framed_present)}
+        # No plainness test: an entry exists in `traces` only because a plain file or a
+        # framed twin was seen at load, so every stem here already has one of the two.
+        return {s for s in self.traces if s.startswith(role_prefix)}
 
     def plain_stems(self, *, agent_prefix: str) -> list[str]:
         """The stems whose PLAIN trace file is on disk (readable or not), whose agent id starts
@@ -526,19 +567,17 @@ class _WireLogs:
         return sorted(s for s, t in self.traces.items()
                       if t.plain != "absent" and s[: -len("_trace")].startswith(agent_prefix))
 
-    def role_cost(self, role_prefix: str) -> tuple[float, float, int, int]:
-        """`(cost, wall_ms, priced_calls, total_calls)` for every trace file this stage's role
-        owns — one call per FILE. A call is "priced" when its response row carries `usage` and a
-        `model` the pricing table resolves; the wall total sums `duration_ms` only where present,
-        independently of whether the call priced (#1025 J13b)."""
+    def role_cost(self, role_prefix: str) -> _RoleCost:
+        """The cost of every trace file this stage's role owns — one call per FILE. A call is
+        "priced" when its response row carries `usage` and a `model` the pricing table
+        resolves; the wall total sums `duration_ms` only where present, independently of
+        whether the call priced (#1025 J13b). Computed ONCE per role at load (`_cost_totals`)
+        and read off `_Episode.role_costs` by every surface after."""
         agent_prefix = "questioner" if role_prefix == "questioner" else "judge_"
-        total = 0.0
-        wall = 0.0
-        priced_calls = 0
-        total_calls = 0
+        out = _RoleCost()
         for stem in self.plain_stems(agent_prefix=agent_prefix):
             trace = self.traces[stem]
-            total_calls += 1
+            out.calls += 1
             if trace.plain != "ok":
                 continue
             call_priced = False
@@ -547,14 +586,14 @@ class _WireLogs:
                     continue
                 cost = _priced(row.get("model"), row.get("usage"))
                 if cost is not None:
-                    total += cost
+                    out.cost += cost
                     call_priced = True
-                duration = _finite(row.get("duration_ms"))
+                duration = _duration(row.get("duration_ms"))
                 if duration is not None:
-                    wall += duration
+                    out.wall_ms += duration
             if call_priced:
-                priced_calls += 1
-        return total, wall, priced_calls, total_calls
+                out.priced += 1
+        return out
 
     def comparator_cost(self) -> tuple[float, int]:
         """`(cost, priced calls)` — `calls` counts response rows that actually priced, not files:
@@ -674,7 +713,7 @@ class _Episode:
             w for w in _items(manifest.get("worlds")) if isinstance(w, dict)]
         self.control_label: str | None = next(
             (w["world_id"] for w in self.manifest_worlds
-             if w.get("role") == "A" and isinstance(w.get("world_id"), str)), None)
+             if w.get("role") == BASE_ROLE and isinstance(w.get("world_id"), str)), None)
         self.grade_rec = _Record()
         self.review_rec = _Record()
         self.samples_rec = _Record()
@@ -708,6 +747,11 @@ class _Episode:
         self.costed = False
         self.worlds_wall = ""
         self.lower_bound = ""
+        #: Each model role's spend, decided ONCE at load and read by the verdict tile, the
+        #: stages header and the stage table alike — never re-walked at a render site.
+        self.role_costs: dict[str, _RoleCost] = {}
+        self.review_cost = 0.0
+        self.review_calls = 0
 
     @property
     def sectioned(self) -> list[RosterItem]:
@@ -808,6 +852,14 @@ def _entries_of(directory: Path) -> list[Path]:
         return sorted(directory.iterdir())
     except OSError:
         return []
+
+
+def _duration(value: Any) -> float | None:
+    """A `duration_ms` that can be shown: finite AND non-negative — the same gate
+    `_result_event` puts on `total_cost_usd`. A negative wall off a box-writable trace made
+    the worlds' wall range and the lower-bound estimate count backwards (review of PR #1042)."""
+    ms = _finite(value)
+    return ms if ms is not None and ms >= 0 else None
 
 
 def _finite(value: Any) -> float | None:
@@ -925,7 +977,7 @@ def _result_event(run_dir: Path) -> _ResultEvent:
         return _ResultEvent(None, None, "none")
     last = rows[-1]
     cost = _finite(last.get("total_cost_usd"))
-    wall = _finite(last.get("duration_ms"))
+    wall = _duration(last.get("duration_ms"))
     if cost is None or cost < 0:
         return _ResultEvent(None, wall, "unusable")
     return _ResultEvent(cost, wall, "ok")
@@ -1010,14 +1062,10 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
         resolutions_by_lead = {}
 
     for lead_id in sorted(roster):
-        try:
-            # `lead_chain`'s own gather-summary read is `errors="replace"` for a BAD byte but
-            # a bare `read_text` for a permission-denied file (root ignores this; a real
-            # non-root run does not, #1025) — this one lead's row is its own slot, never the
-            # whole page.
-            chain = family.lead_chain(world_dir, lead_id, resolutions_by_lead, leads=all_leads)
-        except OSError:
-            chain = None
+        # `lead_chain` reads the gather summary through `read_guarded` and answers a refusal
+        # as the summary's own sentence; nothing is caught here, so the page and the grading
+        # pass see one and the same reader.
+        chain = family.lead_chain(world_dir, lead_id, resolutions_by_lead, leads=all_leads)
         leads.chains.append((lead_id, chain))
     return leads
 
@@ -1036,7 +1084,6 @@ def _load_wire_logs(wire: Path) -> _WireLogs:
                 continue
             stem = name[: -len("_framed_trace.jsonl")] + "_trace"
             trace = logs.traces.setdefault(stem, _Trace(stem))
-            trace.framed_present = True
             frows, _bad, _refusal = read_jsonl_rows_guarded(path)
             if frows:
                 trace.framed = frows[0]
@@ -1070,13 +1117,17 @@ def _cost_totals(ep: _Episode) -> tuple[float, bool, bool, str, str]:
             total += w.result.cost
         if w.result.wall_ms:
             walls.append(w.result.wall_ms)
-    q_cost, q_wall_ms, _qp, q_calls = ep.wire.role_cost("questioner")
-    j_cost, j_wall_ms, _jp, j_calls = ep.wire.role_cost(Step.JUDGE)
-    total += q_cost + j_cost
-    costed = runs_costed or bool(q_calls) or bool(j_calls)
+    q = ep.role_costs["questioner"] = ep.wire.role_cost("questioner")
+    j = ep.role_costs[str(Step.JUDGE)] = ep.wire.role_cost(Step.JUDGE)
+    ep.review_cost, ep.review_calls = ep.wire.comparator_cost()
+    total += q.cost + j.cost
+    # PRICED calls, not trace files: a role whose only trace is refused, unreadable or priced
+    # by no known model has spent nothing the page can name, and a "$0.0000" grand total over
+    # it is the line the stages table promises not to print (review of PR #1042).
+    costed = runs_costed or bool(q.priced) or bool(j.priced)
     if walls:
         wall_range = f"{fmt_duration(min(walls))}–{fmt_duration(max(walls))}"
-        lower_bound = f"≈ {fmt_duration(q_wall_ms + j_wall_ms + max(walls))} lower bound on wall: model calls + longest world"
+        lower_bound = f"≈ {fmt_duration(q.wall_ms + j.wall_ms + max(walls))} lower bound on wall: model calls + longest world"
     else:
         wall_range = ""
         lower_bound = ""
@@ -1203,9 +1254,14 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
     # add a draw the walk never opened to a split it does not appear in.
     walked_labels = [label for label in roster_labels if _walked(label)]
 
+    # The draw-read reports of EVERY label the loader read, walked or not: the findings
+    # section's "N draw documents unreadable / skipped" totals and each world section's own
+    # line count the same directories (review of PR #1042).
+    for label in roster_labels:
+        out.world_reports[label] = ep.draws[label][1]
+
     for label in walked_labels:
-        docs, report = ep.draws[label]
-        out.world_reports[label] = report
+        docs, _report = ep.draws[label]
         for draw, doc in docs.items():
             dropped = _count(doc.get("dropped_findings"))
             if dropped is not None:
@@ -1465,7 +1521,7 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         return _page_section("sec-verdict", "Verdict", band)
 
     if not ep.grade_rec.ok:
-        band = f'<div class="vd-band">{esc(ep.grade_rec.error)}</div>'
+        band = f'<div class="vd-band">{_uv(ep.grade_rec.error)}</div>'
         return _page_section("sec-verdict", "Verdict", band)
     if grade is None:
         band = '<div class="vd-band">no grade record</div>'
@@ -2003,9 +2059,7 @@ def _render_findings_section(ep: _Episode) -> str:
 def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the stage table, the two clocks and every trace block are one section (#1025 O4)
     timing = ep.timing
     rows_by_step = timing.rows_by_step
-    q_cost, q_wall_ms, q_priced, q_calls = ep.wire.role_cost("questioner")
-    j_cost, j_wall_ms, j_priced, j_calls = ep.wire.role_cost(Step.JUDGE)
-    review_total, review_calls = ep.wire.comparator_cost()
+    review_total, review_calls = ep.review_cost, ep.review_calls
 
     table_rows = []
     for step in STEPS:
@@ -2016,23 +2070,14 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
             # `trusted` (the clock's own non-inverted pairs), not every row — a step whose
             # only rows are inverted read "—" only because `fmt_duration(0)` happens to spell
             # zero as the dash.
-            trusted = timing.trusted_by_step.get(str(step), [])
-            if trusted:
-                # The row's own wall is its FIRST entry's start to its LAST entry's end (J15) —
-                # never a sum, which double-counts a repeated step's own reported span — over
-                # the same trusted pairs the header uses.
-                wall_text = fmt_duration(_wall_span([r["started_at"] for r in trusted],
-                                                    [r["ended_at"] for r in trusted]))
-            else:
-                wall_text = "—"
+            step_wall = timing.step_wall_ms(str(step))
+            wall_text = fmt_duration(step_wall) if step_wall is not None else "—"
             if len(entries_for_step) > 1:
                 wall_text += f" ({len(entries_for_step)} entries)"
         else:
             wall_text = "not on the record"
-        if str(step) == "questioner":
-            cost_text = _role_cost_text(q_cost, q_wall_ms, q_priced, q_calls)
-        elif str(step) == Step.JUDGE:
-            cost_text = _role_cost_text(j_cost, j_wall_ms, j_priced, j_calls)
+        if str(step) in ep.role_costs:
+            cost_text = _role_cost_text(ep.role_costs[str(step)])
         elif str(step) == "review":
             cost_text = f"{_money(review_total)}" if review_calls else "no model calls"
         elif str(step) == "runs":
@@ -2050,7 +2095,7 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
     # there is a real wall — the same `measured` bit the header line and the verdict tile key
     # on, so no surface can call a present record absent while another shows its figure.
     if timing.error:
-        table = f'<div class="st-error">{esc(timing.error)}</div>' + "".join(table_rows)
+        table = f'<div class="st-error">{_uv(timing.error)}</div>' + "".join(table_rows)
     elif timing.caption is not None:
         table = f'<div class="st-caption">{esc(timing.caption)}</div>' + "".join(table_rows)
     else:
@@ -2080,11 +2125,9 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
                             f'<span class="rn-launcher">result event</span></div>')
         else:
             runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} {esc(result.text)}</div>')
-    launcher_runs_row = rows_by_step.get("runs", [])
-    if launcher_runs_row:
-        d = _wall_between(launcher_runs_row[0]["started_at"], launcher_runs_row[0]["ended_at"])
-        if d is not None:
-            runs_rows.insert(0, f'<div class="rn-launcher-wall">{fmt_duration(d)} launcher</div>')
+    runs_wall = timing.step_wall_ms("runs")
+    if runs_wall is not None:
+        runs_rows.insert(0, f'<div class="rn-launcher-wall">{fmt_duration(runs_wall)} launcher</div>')
     if ep.runs_costed:
         runs_rows.append(f'<div class="rn-total">{_money(runs_total)}</div>')
 
@@ -2122,13 +2165,13 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
     return _page_section("sec-stages", f"Stages ({len(STEPS)})", body)
 
 
-def _role_cost_text(cost: float, wall_ms: float, priced: int, calls: int) -> str:
-    if not calls:
+def _role_cost_text(role: _RoleCost) -> str:
+    if not role.calls:
         return "no cost recorded"
-    if priced < calls:
-        return (f"{_money(cost)} · {calls} traces · {fmt_duration(wall_ms)} · "
-                f"partial — {priced} of {calls} calls priced")
-    return f"{_money(cost)} · {calls} traces · {fmt_duration(wall_ms)}"
+    if role.priced < role.calls:
+        return (f"{_money(role.cost)} · {role.calls} traces · {fmt_duration(role.wall_ms)} · "
+                f"partial — {role.priced} of {role.calls} calls priced")
+    return f"{_money(role.cost)} · {role.calls} traces · {fmt_duration(role.wall_ms)}"
 
 
 def _wall_between(start: str, end: str) -> float | None:
@@ -2156,7 +2199,10 @@ def _unattributed_traces(ep: _Episode) -> list[str]:
     uses to route a KNOWN label's own draws — not a `range(N)`-bounded set of literal stems,
     which silently misclassified every draw at or past its bound as unattributed."""
     known_labels = [*ep.entries, _FAMILY_LABEL]
-    return [stem for stem in ep.wire.plain_stems(agent_prefix="judge_")
+    # `stems_for` — plain trace files AND framed-only twins — the census the JUDGE block itself
+    # renders from; walked off the plain files alone, a framed-only trace naming no roster
+    # label was neither rendered nor listed (review of PR #1042).
+    return [stem for stem in sorted(ep.wire.stems_for(Step.JUDGE))
             if not any(_stem_names_label(stem, label) for label in known_labels)]
 
 
@@ -2235,6 +2281,16 @@ def _message_parts(row: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
     return msg, _items(msg.get("parts"))
 
 
+def _no_response_html(trace: _Trace) -> str:
+    """The line a call with no response reads as. A REFUSED plain trace (a link, a FIFO or an
+    unreadable file at its own name, tracked at load) is said as such: "no response recorded"
+    is a benign empty call's sentence, and a planted alias must not read the same as one
+    (review of PR #1042)."""
+    if trace.plain == "refused":
+        return '<div class="tx-refused">trace refused — not a plain readable file at its name</div>'
+    return '<div class="tx-entry">no response recorded</div>'
+
+
 def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call's request/response rendering, every response field independently absent
     rows = trace.rows
     framed = trace.framed
@@ -2283,7 +2339,7 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
             continue
         model = row.get("model")
         usage = row.get("usage")
-        duration = _finite(row.get("duration_ms"))
+        duration = _duration(row.get("duration_ms"))
         _msg, parts = _message_parts(row)
         text = next((p.get("content") for p in parts if isinstance(p, dict)
                     and p.get("part_kind") == "text"), "")
@@ -2306,11 +2362,17 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
         entries_html.append("".join(line_bits))
     framed_has_response = framed is not None and (framed.get("failure") or framed.get("reply"))
     if not framed_has_response and not has_plain_response:
-        entries_html.append('<div class="tx-entry">no response recorded</div>')
+        entries_html.append(_no_response_html(trace))
 
     unreadable_html = (f'<div class="tx-unreadable">{trace.unreadable} unreadable rows</div>'
                        if trace.unreadable else "")
-    return (f'<div id="tx-{esc(trace.stem)}" class="tx-stream">'
+    # The id embeds the wire-log FILENAME's stem: grammar-gated like every other
+    # filename-derived id on the page (`world-`/`leads-`/`f-`), never merely escaped — a stem
+    # outside the run-id alphabet renders as an unnameable entry with no id at all (J5).
+    safe = _safe_id(trace.stem)
+    if safe is None:
+        return _unnameable(trace.stem, what="wire log")
+    return (f'<div id="tx-{esc(safe)}" class="tx-stream">'
           f'<div class="tx-search"></div>'
           f'{"".join(entries_html)}{unreadable_html}</div>')
 
@@ -2330,7 +2392,7 @@ def _render_leads_section(ep: _Episode) -> str:
 def _render_world_leads(label: str, leads: _WorldLeads) -> str:
     bits = []
     if leads.ledger_note is not None:
-        bits.append(f'<div class="ld-served">{esc(leads.ledger_note)}</div>')
+        bits.append(f'<div class="ld-served">{_uv(leads.ledger_note)}</div>')
 
     if not leads.archived:
         return f'<div id="leads-{esc(label)}" class="leads-section">not archived' \
@@ -2338,7 +2400,7 @@ def _render_world_leads(label: str, leads: _WorldLeads) -> str:
 
     if leads.facts_error is not None:
         bits.append(f'<div class="ld-investigation">investigation record unavailable: '
-                   f'{esc(leads.facts_error)}</div>')
+                   f'{_uv(leads.facts_error)}</div>')
     if leads.moved:
         bits.append('<div class="ld-moved">the hand-off was revisited after the branch</div>')
 
@@ -2355,11 +2417,6 @@ def _render_world_leads(label: str, leads: _WorldLeads) -> str:
             bits.append(_unnameable(lead_id, what="lead id"))
             continue
         id_attr = f' id="ld-{esc(label)}-{esc(safe)}"' if safe is not None else ""
-        if chain is None:
-            bits.append(f'<div{id_attr} class="ld-lead">'
-                       f'<span class="ld-id">{_uv(lead_id)}</span>'
-                       f'<span class="ld-summary">lead unreadable</span></div>')
-            continue
         payload = _items(chain.get("payload"))
         resolutions = _items(chain.get("resolutions"))
         resolutions_html = "".join(f'<div class="ld-resolution">{_uv(r)}</div>'
@@ -2398,7 +2455,7 @@ def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episo
             bits.append(f'<div class="rc-world">{_uv(w["world_id"])}</div>')
 
     if samples_rec.error:
-        bits.append(f'<div class="rc-samples">{esc(samples_rec.error)}</div>')
+        bits.append(f'<div class="rc-samples">{_uv(samples_rec.error)}</div>')
     elif not samples_rec.present:
         bits.append('<div class="rc-samples">absent</div>')
     else:
@@ -2406,7 +2463,7 @@ def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episo
             bits.append(f'<div class="rc-pattern">{_uv(pattern)}</div>')
 
     if staged_rec.error:
-        bits.append(f'<div class="rc-staged">{esc(staged_rec.error)}</div>')
+        bits.append(f'<div class="rc-staged">{_uv(staged_rec.error)}</div>')
     elif not staged_rec.present:
         bits.append('<div class="rc-staged">absent</div>')
     else:
@@ -2414,7 +2471,7 @@ def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episo
             bits.append(f'<div class="rc-staged-row">{_uv(_mapping(row).get("name"))}</div>')
 
     if review_rec.error:
-        bits.append(f'<div class="rc-review">{esc(review_rec.error)}</div>')
+        bits.append(f'<div class="rc-review">{_uv(review_rec.error)}</div>')
     elif not review_rec.present:
         bits.append('<div class="rc-review">absent</div>')
     else:
@@ -2445,7 +2502,7 @@ def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episo
                         bits.append(f'<div class="rc-mismatch-key">{_uv(key)}</div>')
 
     if stamp_rec.error:
-        bits.append(f'<div class="rc-provenance">{esc(stamp_rec.error)}</div>')
+        bits.append(f'<div class="rc-provenance">{_uv(stamp_rec.error)}</div>')
     elif not stamp_rec.present:
         bits.append('<div class="rc-provenance">absent</div>')
     else:

@@ -160,7 +160,7 @@
   display: inline-block; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 10.5px;
   color: var(--text-dim); margin: 4px 8px 0 0; white-space: nowrap;
 }
-.episode .tx-note, .episode .tx-unreadable { font-size: 11px; color: var(--warn); font-style: italic; }
+.episode .tx-note, .episode .tx-unreadable, .episode .tx-refused { font-size: 11px; color: var(--warn); font-style: italic; }
 
 /* ----- Leads: one block per roster item ----- */
 .episode .leads-section {

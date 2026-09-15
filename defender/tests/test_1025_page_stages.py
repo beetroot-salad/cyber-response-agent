@@ -571,29 +571,26 @@ def test_1025_six_transcript_streams_and_one_set_of_controls(tmp_path):
 
 
 def test_1025_a_hostile_wire_logs_trace_stem(tmp_path):
-    """A `wire_logs/*_trace.jsonl` stem built to break out of its `id="tx-…"` attribute reaches
-    the page unexploited: `esc()` HTML-escapes the quote, so the whole hostile stem stays
-    contained inside the id's own attribute value — the stream's `<div>` carries no separate
-    `onmouseover` attribute, and the stream still renders its content (J5, adversary finding 2).
-    Unlike a label or a gather-summary stem, a trace stem is not grammar-gated through
-    `_safe_id`; this test pins today's escape-only defense so a regression there is caught even
-    without that gate.
+    """A `wire_logs/*_trace.jsonl` stem built to break out of its `id="tx-…"` attribute never
+    becomes an attribute at all: the stem is grammar-gated through `_safe_id` like every other
+    filename-derived id on the page (`world-`/`leads-`/`f-`), so a stem outside the run-id
+    alphabet renders as an "unnameable entry" line naming the stem as text, with no `tx-` id
+    and no stream — and no element on the page carries an `onmouseover` attribute (J5,
+    adversary finding 2; review of PR #1042). Positive control: a well-formed stem keeps its
+    stream and its id.
     """
     ep = E.sample_episode(tmp_path)
     stem = 'questioner_hostile" onmouseover=alert(1) x="'
     E.write_trace(ep.dir, stem, reply="THE HOSTILE STREAM'S REPLY")
     page = render(ep)
-    expected_id = f"tx-{stem}_trace"
-    node = page.by_id.get(expected_id)
-    assert node is not None, (expected_id, page.ids_with("tx-"))
-    assert "onmouseover" not in node.attrs, node.attrs
-    assert set(node.attrs) == {"id", "class"}, node.attrs
-    assert "THE HOSTILE STREAM'S REPLY" in node.text()
+    assert not [i for i in page.ids_with("tx-") if "hostile" in i], page.ids_with("tx-")
+    assert not [n for n in page.root.descendants() if "onmouseover" in n.attrs]
+    unnameable = [n for n in page.elements(cls="unnameable") if "hostile" in n.text()]
+    assert len(unnameable) == 1, [n.text() for n in page.elements(cls="unnameable")]
+    assert "wire log" in unnameable[0].text()
+    assert "THE HOSTILE STREAM'S REPLY" not in page.text_of("stage-questioner")
+    assert "tx-questioner_b_trace" in page.by_id
 
-
-# ---------------------------------------------------------------------------------------
-# J15 / J17
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_timing_json_lists_the_same_step_twice_or_out_of_launch_order(tmp_path):

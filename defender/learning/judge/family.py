@@ -488,16 +488,32 @@ def lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, lis
         summary = ("(this lead id does not name a file inside this world, so no gather summary "
                    "was read for it)")
     elif artifact_dir(summaries_dir) and artifact_file(summary_path):
-        # `errors="replace"`, not a bare read. This is MODEL-WRITTEN text in a tree the box can
-        # write, so an undecodable byte in it is an ordinary thing to meet; raising here would
-        # be an unreadable summary costing the whole episode its grade, and the substitution
-        # character is exactly what the judge should be shown of a byte nobody can read.
-        summary = summary_path.read_text(encoding="utf-8", errors="replace")
+        # THROUGH `read_guarded`, `errors="replace"`. This is MODEL-WRITTEN text in a tree the
+        # box can write, so an undecodable byte in it is an ordinary thing to meet, and so is
+        # a file the process cannot open (mode 000, or a link swapped in between the screen
+        # above and the read — the window `read_guarded` closes). Either used to cost the
+        # whole episode its grade as a bare `PermissionError` out of `_grade_world` (review of
+        # PR #1042); now the summary IS the refusal, named by the world-relative file so the
+        # judge (and the page, which shows the same chain) sees what could not be read and
+        # never where the operator keeps episodes.
+        text, refusal = read_guarded(summary_path, errors="replace")
+        summary = text if text is not None else (
+            f"(the gather summary {GATHER_SUMMARIES_DIRNAME}/{lead_id}.md could not be read: "
+            f"{_without_path(refusal, summary_path)})")
     return {
         "goal": goal, "params": params, "payload": [q.payload_digest for q in queries],
         "summary": summary,
         "resolutions": resolutions_by_lead.get(lead_id, []),
     }
+
+
+def _without_path(refusal: str | None, path: Path) -> str:
+    """A reader's refusal with the absolute path it quotes taken out — the sentence goes into
+    a judge prompt and onto the episode page, neither of which may name the operator's tree."""
+    text = refusal or "unreadable"
+    for spelling in dict.fromkeys((f"'{path}'", str(path))):
+        text = text.replace(spelling, path.name)
+    return text.strip()
 
 
 def json_mapping(path: Path) -> dict[str, Any] | None:
