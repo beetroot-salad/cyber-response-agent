@@ -677,6 +677,34 @@ def test_an_unquoted_forbidden_instant_is_caught_however_yaml_would_have_typed_i
     assert "LEAKED" not in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(("tagged", "literal"), [
+    ("!!timestamp 2026-07-25T07:48:37.065Z", "2026-07-25T07:48:37.065Z"),
+    ("!!int 0755", "0755"),
+    ("!!bool yes", "yes"),
+    ("!!float 1.50", "1.50"),
+])
+def test_an_explicitly_tagged_forbidden_value_is_caught_as_its_text_too(
+        tmp_path, capsys, tagged, literal):
+    """O1's "however YAML would have typed it" includes the EXPLICIT spelling. Dropping the
+    implicit resolvers alone leaves `!!timestamp 2026-07-25T07:48:37.065Z` constructing a
+    `datetime` — the same fail-open as the unquoted case, one tag away (the adversary's F2
+    against the first cut of this suite)."""
+    d = _case(tmp_path, kind="spec-probe",
+              extra_manifest={"expectation": {"must_not_emit": [literal]}})
+    copied = _projection_text(d, f"'@timestamp': {tagged}")
+    assert not isinstance(_plain(copied, *_EVENT_TIMESTAMP), str), (
+        "fixture bug: the explicit tag did not type the value under yaml.safe_load")
+    assert _score(d, copied, _scripted())["mechanical"]["forbidden_emitted"] == [literal]
+    assert _dry(d, copied) == 1
+    assert "LEAKED" in capsys.readouterr().out
+
+    # positive control: the same tag on a different value is not a leak
+    honest = _projection_text(d, f"'@timestamp': {tagged[:-1]}0", name="b.yaml")
+    assert _score(d, honest, _scripted())["mechanical"]["forbidden_emitted"] == []
+    assert _dry(d, honest) == 0
+    assert "LEAKED" not in capsys.readouterr().out
+
+
 def test_a_required_instant_present_unquoted_is_not_reported_missing(tmp_path):
     """O2, the mirror: `must_emit` is what stops a mutation case passing by saying nothing,
     and it read the same `str(datetime)` — a satisfied requirement read as missing."""

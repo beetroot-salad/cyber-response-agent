@@ -19,6 +19,7 @@ collects — and fails on the missing symbol — until the implementation lands.
 """
 from __future__ import annotations
 
+import threading
 from datetime import UTC, date, datetime
 
 import pytest
@@ -134,6 +135,45 @@ def test_safe_dump_of_the_result_renders_each_scalar_quoted_in_its_original_spel
     assert doc["i"] is None
 
 
+# explicit tags: the other way YAML types a scalar
+
+@pytest.mark.parametrize(("tagged", "literal"), [
+    ("!!timestamp 2026-07-25T07:48:37.065Z", "2026-07-25T07:48:37.065Z"),
+    ("!!timestamp 2026-07-25", "2026-07-25"),
+    ("!!int 0755", "0755"),
+    ("!!int 22", "22"),
+    ("!!float 1.50", "1.50"),
+    ("!!bool yes", "yes"),
+    ("!!bool true", "true"),
+    ("!!str 22", "22"),
+])
+def test_an_explicitly_tagged_scalar_is_its_text_too(tagged, literal):
+    """The resolver decides what an UNTAGGED scalar is; a `!!timestamp` tag skips it and
+    goes straight to the constructor. Both are "how YAML would have typed it" (O1), and a
+    loader that neutralised only the first would re-open the fail-open one tag away."""
+    assert _load(f"a: {tagged}") == {"a": literal}
+
+
+def test_an_explicitly_tagged_calendar_invalid_instant_is_text_not_a_bare_value_error():
+    """Deck #677's shape: a value that makes the CONSTRUCT call raise must not escape as a
+    bare `ValueError` a caller's `except yaml.YAMLError` cannot see. With the timestamp
+    constructor gone there is nothing left to raise — the text is the value."""
+    assert _load("a: !!timestamp 2001-02-30") == {"a": "2001-02-30"}
+
+
+def test_null_keeps_its_explicit_tag_and_python_tags_are_refused():
+    """The loader is a SAFE loader: `!!null` is still `None`, and a `!!python/...` tag —
+    the tag that makes `yaml.UnsafeLoader` execute a projection file — is a `YAMLError`,
+    never a constructed object and never a command run."""
+    assert _load("a: !!null ''") == {"a": None}
+    with pytest.raises(yaml.YAMLError):
+        _load("a: !!python/object/apply:os.system ['true']")
+    with pytest.raises(yaml.YAMLError):
+        _load("a: !!python/name:os.system")
+    with pytest.raises(yaml.YAMLError):
+        _load("a: !!python/tuple [1, 2]")
+
+
 # errors keep the wrapper's contract
 
 def test_malformed_text_raises_a_yaml_error():
@@ -167,6 +207,33 @@ def test_using_the_text_loader_leaves_yaml_safe_load_typed():
     assert yaml.safe_load("a: yes")["a"] is True
     assert yaml.safe_load("a: 1.5")["a"] == 1.5
     assert yaml.safe_load("a: ~")["a"] is None
+
+
+def test_a_concurrent_safe_load_stays_typed_while_the_text_loader_runs():
+    """The hazard is process-wide and so is the pin: a loader that stripped the shared
+    resolver table in place and restored it afterwards passes a before/after check and
+    still mistypes every `yaml.safe_load` that overlaps it — `score.py` parses judge output
+    under a thread pool. The text loader chews a large document in one thread while this
+    one keeps asking the process-wide reader for a date; with a private table the answer
+    never changes."""
+    big = "".join(f"k{i}: 2026-07-25T07:48:37.{i % 1000:03d}Z\n" for i in range(20000))
+    done = threading.Event()
+
+    def chew():
+        try:
+            for _ in range(3):
+                assert _load(big)["k0"] == "2026-07-25T07:48:37.000Z"
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=chew)
+    worker.start()
+    mistyped = 0
+    while not done.is_set():
+        if not isinstance(yaml.safe_load("a: 2026-07-25")["a"], date):
+            mistyped += 1
+    worker.join()
+    assert mistyped == 0
 
 
 def test_the_error_translating_wrapper_still_types_scalars():
