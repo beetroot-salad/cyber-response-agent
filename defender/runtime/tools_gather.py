@@ -7,8 +7,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, capture_run_messages
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.usage import UsageLimits
 
 from defender._io import guarded_mkdir, write_guarded
@@ -428,6 +435,100 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
               file=sys.stderr)
 
 
+#: #987 — the ceiling is never raised: a cut-short lead's query phase runs under
+#: `request_limit - SALVAGE_REQUEST_LIMIT`, and this one reserved request buys the tool-less
+#: summary turn. `1`, not derived, because the query-phase ceiling and the summary turn's own
+#: `UsageLimits` are both built from it by construction (see `_run_gather`) — a value here that
+#: was ever anything but 1 would silently change what `#808 d21/F6`'s number composes to.
+SALVAGE_REQUEST_LIMIT = 1
+
+#: The gather model's own vocabulary — never main's. `{what}` is filled with the lead's
+#: `what_to_summarize`, one bullet per obligation, by `_salvage_prompt`. The longest literal
+#: run here is what `tests/test_987_salvage_seam.py::test_the_summary_prompt_names_this_leads
+#: _obligations_and_closes_the_query_door` binds to the wire — keep it long and keep it first.
+SALVAGE_PROMPT = (
+    "This lead was stopped by the harness before you finished; no further queries can be "
+    "issued on it. Write the summary now, from what you already retrieved. Address:\n"
+    "{what}\n"
+    "Name plainly which of these you could not establish."
+)
+
+#: The fixed half of the closing tool return that answers a dangling call this turn will never
+#: get to retry. On the dead-end arm it follows the trip's own `reason`; on every other arm it
+#: is the whole of what a dangling call (if any) is told. Gather's vocabulary throughout — #807
+#: G19 is what forbids main's "Treat this lead as incomplete" from reaching this string.
+SALVAGE_CLOSED_SENTENCE = "No further queries can be issued on this lead."
+
+#: M6's fallback, exactly one hole: the failed turn's exception CLASS NAME, never its message —
+#: the message is model- or provider-authored text, and the header's own refusal-path clause
+#: (record_query.py:1124-1127, revised by #987 to bind the header alone) has not looked at it.
+SALVAGE_FAILED_SENTENCE = "A summary turn was attempted and failed ({}); no summary is available."
+
+
+def _salvage_prompt(request: GatherRequest) -> str:
+    what = "\n".join(f"- {item}" for item in request.what_to_summarize)
+    return SALVAGE_PROMPT.format(what=what)
+
+
+def _closing_answer(exc: BaseException) -> str:
+    """What a dangling tool call is told, in gather's own vocabulary — never main's idiom.
+
+    The dead-end arm is the one that reaches this in practice (`GatherDeadEnd` is raised out of
+    the tool call itself, leaving it unanswered); the other three arms are handled generically
+    for the same reason M3 states it that way — a captured history ending on tool calls is a
+    property of WHERE a cut lands, not of which exception describes it."""
+    if isinstance(exc, GatherDeadEnd):
+        return f"{exc.reason} {SALVAGE_CLOSED_SENTENCE}"
+    return f"the harness stopped this lead: {exc}. {SALVAGE_CLOSED_SENTENCE}"
+
+
+def _close_dangling_calls(captured: list, exc: BaseException) -> list:
+    """The captured history, with every unanswered `ToolCallPart` on its last message answered.
+
+    `capture_run_messages` may hand back a history ending on a `ModelResponse` carrying one or
+    more dangling calls (the dead-end arm), a `ModelRequest` already carrying the doomed round's
+    tool returns (the request-limit arm — pydantic-ai commits that continuation before checking
+    the limit), or a single `ModelRequest` with nothing answered yet (a lead cut before its
+    first response). Only the first shape needs an answer manufactured here; the other two are
+    left alone; pydantic-ai's own message-history cleanup merges the salvage prompt appended
+    below into whichever of them is already there."""
+    history = list(captured)
+    if history and isinstance(history[-1], ModelResponse):
+        dangling = [p for p in history[-1].parts if isinstance(p, ToolCallPart)]
+        if dangling:
+            answer = _closing_answer(exc)
+            history.append(ModelRequest(parts=[
+                ToolReturnPart(tool_name=p.tool_name, content=answer, tool_call_id=p.tool_call_id)
+                for p in dangling
+            ]))
+    return history
+
+
+async def _salvage_summary(
+    gagent: Any, gdeps: GatherDeps, captured: list, request: GatherRequest,
+    header: str, exc: BaseException,
+) -> str:
+    """M3/M4/M5/M6 — one tool-less turn over the lead's own captured history, guarded end to
+    end: any failure (a non-actionable response, a hallucinated call spending the reserved
+    request, a store that refuses the round, an agent with no `override` seam at all) degrades
+    to `header` plus `SALVAGE_FAILED_SENTENCE`, never re-raises, and never touches `terminator`
+    — the caller has already fixed that to the ORIGINAL cut before this runs."""
+    try:
+        history = _close_dangling_calls(captured, exc)
+        history.append(ModelRequest(parts=[UserPromptPart(content=_salvage_prompt(request))]))
+        with gagent.override(toolsets=[], tools=[], native_tools=[]):
+            result = await gagent.run(
+                None, deps=gdeps, message_history=history,
+                usage_limits=UsageLimits(request_limit=SALVAGE_REQUEST_LIMIT),
+            )
+        summary = str(result.output or "")
+        return f"{header}\n\n{summary}"
+    except Exception as e:  # noqa: BLE001 — M6: every failure degrades, none re-raises
+        print(f"[run.py] gather salvage turn failed for {request.lead_id}: {e!r}",
+              file=sys.stderr)
+        return f"{header}\n\n{SALVAGE_FAILED_SENTENCE.format(type(e).__name__)}"
+
+
 async def _run_gather(  # noqa: C901 — the branch count IS the terminator census (see docstring)
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
@@ -448,7 +549,13 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     The `except` arms below ARE this frame's complexity, one per way a gather session can end:
     four that degrade the lead into a summary main can still reason from, and two that end the
     whole run and only pass through. Folding two together to clear a complexity threshold costs
-    a session ending with nothing said about why."""
+    a session ending with nothing said about why.
+
+    #987: the four degrading arms no longer author that summary themselves. The query phase
+    runs under `request_limit - SALVAGE_REQUEST_LIMIT`, reserving one request; on a cut, the
+    same gather agent gets that one request back as a tool-less turn over its own captured
+    history (`_salvage_summary`), so main receives what the lead actually retrieved rather than
+    a bare notice. `#808 d21/F6`'s ceiling NUMBER is unchanged — only its composition is."""
     lead_id, system = request.lead_id, request.system
     if not _LEAD_ID_RE.match(lead_id):
         raise ModelRetry(
@@ -511,10 +618,12 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     # prefix this dispatch shares with its siblings is the system's, not the lead's. The factory
     # owns that policy — this frame only knows both facts.
     #
-    # `request_limit` is handed over for the same reason: it is the value the `UsageLimits`
-    # below enforces, so a recorder the factory builds to mirror that ceiling cannot be
-    # measuring a different one.
-    gagent = gather_factory(agent_id, system, request_limit)
+    # `query_limit`, not `request_limit`, is handed over — #987 reserves `SALVAGE_REQUEST_LIMIT`
+    # of the lead's own ceiling for the tool-less summary turn below, so the recorder the
+    # factory builds must withhold the doomed round against the SAME number the query phase's
+    # own `UsageLimits` enforces (#880 F-19's contract, preserved through the split).
+    query_limit = request_limit - SALVAGE_REQUEST_LIMIT
+    gagent = gather_factory(agent_id, system, query_limit)
     gbase = bind(
         GATHER_DEF, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
     )
@@ -534,61 +643,76 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     # lead-level one, and the stamp is the only record either leaves on the gather side.
     terminator: str | None = None
     try:
-        result = await gagent.run(
-            prompt, deps=gdeps,
-            usage_limits=UsageLimits(request_limit=request_limit),
-        )
-        output = str(result.output or "")
-    except UsageLimitExceeded as e:
-        terminator = session_store.TRUNCATED_BY_REQUEST_LIMIT
-        output = (
-            f"gather for {lead_id} hit its request limit ({e}) before finishing; "
-            "any queries it ran are in the queries table. Treat this lead as "
-            "incomplete and reason from what was captured."
-        )
-    except GatherDeadEnd as e:
-        terminator = session_store.TRUNCATED_BY_DEAD_END
-        output = (
-            f"gather for {lead_id} hit a dead end: {e.reason} {e.escape} Treat this "
-            "lead as incomplete and reason from what was captured."
-        )
-    except UnexpectedModelBehavior as e:
-        terminator = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
-        output = (
-            f"gather for {lead_id} ended abnormally ({e}); any queries it ran are in "
-            "the queries table. Treat this lead as incomplete and reason from what was "
-            "captured."
-        )
-    except session_store.StoreError as e:
-        # The gather recorder is observational — `_make_gather_recorder` returns the live list
-        # unchanged, so gather never sends a store-sourced history and a recording failure here
-        # cannot put an unrecorded list on the wire. Degrade this lead like the two above rather
-        # than letting the exception unwind through the main agent's tool call and kill the
-        # process; if the store is genuinely broken, main's own next append stops the run
-        # through the handled exit.
-        #
-        # The stamp below goes through the store that just failed, so this arm's record is the
-        # most likely to be lost. It is still attempted (and swallowed by the stamp's own
-        # best-effort arm): a store broken for APPEND may not be broken for this one UPDATE,
-        # and skipping it guarantees the gap for the terminator a reader most needs to see.
-        terminator = session_store.TRUNCATED_BY_STORE
-        output = (
-            f"gather for {lead_id} could not be recorded ({e}); any queries it ran are "
-            "in the queries table. Treat this lead as incomplete and reason from what "
-            "was captured."
-        )
-    except BudgetKill:
-        # NOT degraded into a summary: the budget kill ends the RUN, and converting it into a
-        # measurement string here would hide it from `run_investigation`'s own catch. Named on
-        # the way past so the session it ended stays distinguishable from one that finished.
-        terminator = session_store.TRUNCATED_BY_BUDGET
-        raise
-    except circuit_breaker.RunAborted:
-        # Likewise: the infra breaker's run-level abort passes through to the driver, which
-        # stamps `aborted` on the MAIN session. Its gather session ended at the same instant
-        # and gets the same word.
-        terminator = session_store.TRUNCATED_BY_ABORTED
-        raise
+        # #987: BOTH the query phase and the salvage turn below run inside this ONE
+        # `capture_run_messages` frame. pydantic-ai documents that a second `.run()` inside the
+        # same frame captures into a throwaway list of its own (it flips the frame's `used`
+        # flag on the first call), so `captured` keeps exactly the query phase's messages —
+        # untouched by the salvage turn — for the whole of this `try`.
+        with capture_run_messages() as captured:
+            try:
+                result = await gagent.run(
+                    prompt, deps=gdeps,
+                    usage_limits=UsageLimits(request_limit=query_limit),
+                )
+                output = str(result.output or "")
+            except UsageLimitExceeded as e:
+                terminator = session_store.TRUNCATED_BY_REQUEST_LIMIT
+                header = (
+                    f"gather for {lead_id} hit its request limit ({e}) before finishing; "
+                    "any queries it ran are in the queries table. Treat this lead as "
+                    "incomplete and reason from what was captured."
+                )
+                output = await _salvage_summary(gagent, gdeps, captured, request, header, e)
+            except GatherDeadEnd as e:
+                terminator = session_store.TRUNCATED_BY_DEAD_END
+                header = (
+                    f"gather for {lead_id} hit a dead end: {e.reason} {e.escape} Treat this "
+                    "lead as incomplete and reason from what was captured."
+                )
+                output = await _salvage_summary(gagent, gdeps, captured, request, header, e)
+            except UnexpectedModelBehavior as e:
+                terminator = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
+                header = (
+                    f"gather for {lead_id} ended abnormally ({e}); any queries it ran are in "
+                    "the queries table. Treat this lead as incomplete and reason from what was "
+                    "captured."
+                )
+                output = await _salvage_summary(gagent, gdeps, captured, request, header, e)
+            except session_store.StoreError as e:
+                # The gather recorder is observational — `_make_gather_recorder` returns the
+                # live list unchanged, so gather never sends a store-sourced history and a
+                # recording failure here cannot put an unrecorded list on the wire. Degrade
+                # this lead like the two above rather than letting the exception unwind through
+                # the main agent's tool call and kill the process; if the store is genuinely
+                # broken, main's own next append stops the run through the handled exit. The
+                # lead's own answers were never the store's to lose — they are still sitting in
+                # `captured`, which is what the salvage turn is written from (#987).
+                #
+                # The stamp below goes through the store that just failed, so this arm's record
+                # is the most likely to be lost. It is still attempted (and swallowed by the
+                # stamp's own best-effort arm): a store broken for APPEND may not be broken for
+                # this one UPDATE, and skipping it guarantees the gap for the terminator a
+                # reader most needs to see.
+                terminator = session_store.TRUNCATED_BY_STORE
+                header = (
+                    f"gather for {lead_id} could not be recorded ({e}); any queries it ran are "
+                    "in the queries table. Treat this lead as incomplete and reason from what "
+                    "was captured."
+                )
+                output = await _salvage_summary(gagent, gdeps, captured, request, header, e)
+            except BudgetKill:
+                # NOT degraded into a summary: the budget kill ends the RUN, and converting it
+                # into a measurement string here would hide it from `run_investigation`'s own
+                # catch. Named on the way past so the session it ended stays distinguishable
+                # from one that finished.
+                terminator = session_store.TRUNCATED_BY_BUDGET
+                raise
+            except circuit_breaker.RunAborted:
+                # Likewise: the infra breaker's run-level abort passes through to the driver,
+                # which stamps `aborted` on the MAIN session. Its gather session ended at the
+                # same instant and gets the same word.
+                terminator = session_store.TRUNCATED_BY_ABORTED
+                raise
     finally:
         if terminator is not None and stamp_terminator is not None:
             stamp_terminator(agent_id, terminator)
