@@ -677,14 +677,15 @@ def test_an_unquoted_forbidden_instant_is_caught_however_yaml_would_have_typed_i
     assert "LEAKED" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize(("tagged", "literal"), [
-    ("!!timestamp 2026-07-25T07:48:37.065Z", "2026-07-25T07:48:37.065Z"),
-    ("!!int 0755", "0755"),
-    ("!!bool yes", "yes"),
-    ("!!float 1.50", "1.50"),
+@pytest.mark.parametrize(("tagged", "literal", "other"), [
+    ("!!timestamp 2026-07-25T07:48:37.065Z", "2026-07-25T07:48:37.065Z",
+     "!!timestamp 2026-07-25T07:48:37.066Z"),
+    ("!!int 0755", "0755", "!!int 0644"),
+    ("!!bool yes", "yes", "!!bool no"),
+    ("!!float 1.50", "1.50", "!!float 1.25"),
 ])
 def test_an_explicitly_tagged_forbidden_value_is_caught_as_its_text_too(
-        tmp_path, capsys, tagged, literal):
+        tmp_path, capsys, tagged, literal, other):
     """O1's "however YAML would have typed it" includes the EXPLICIT spelling. Dropping the
     implicit resolvers alone leaves `!!timestamp 2026-07-25T07:48:37.065Z` constructing a
     `datetime` — the same fail-open as the unquoted case, one tag away (the adversary's F2
@@ -699,7 +700,7 @@ def test_an_explicitly_tagged_forbidden_value_is_caught_as_its_text_too(
     assert "LEAKED" in capsys.readouterr().out
 
     # positive control: the same tag on a different value is not a leak
-    honest = _projection_text(d, f"'@timestamp': {tagged[:-1]}0", name="b.yaml")
+    honest = _projection_text(d, f"'@timestamp': {other}", name="b.yaml")
     assert _score(d, honest, _scripted())["mechanical"]["forbidden_emitted"] == []
     assert _dry(d, honest) == 0
     assert "LEAKED" not in capsys.readouterr().out

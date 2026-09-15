@@ -161,14 +161,20 @@ def safe_load(text: str) -> Any:
 
 
 class _TextScalarLoader(yaml.SafeLoader):
-    """`SafeLoader` with every implicit resolver but `null` removed — see `load_text_scalars`.
+    """`SafeLoader` reading every non-null scalar as text — see `load_text_scalars`.
 
-    `yaml_implicit_resolvers` is a CLASS-LEVEL dict of lists that a subclass inherits by
-    reference, and `add_implicit_resolver` copies it lazily only when a subclass ADDS one.
-    Filtering the inherited lists in place would therefore strip typing from `yaml.SafeLoader`
-    itself — every `yaml.safe_load` in the process would start returning strings for dates
-    (#951 design C14, executed). The table below is a fresh dict of fresh lists, assigned, and
-    never touched again.
+    YAML types a scalar two ways and both are neutralised. An UNTAGGED scalar is typed by the
+    implicit resolvers: `yaml_implicit_resolvers` is a CLASS-LEVEL dict of lists that a
+    subclass inherits by reference, and `add_implicit_resolver` copies it lazily only when a
+    subclass ADDS one — filtering the inherited lists in place would strip typing from
+    `yaml.SafeLoader` itself, and every `yaml.safe_load` in the process would start returning
+    strings for dates (#951 design C14, executed). The table below is a fresh dict of fresh
+    lists, assigned once and never touched again. A TAGGED scalar (`!!timestamp …`) skips the
+    resolver and goes straight to the constructor for its tag, so those four constructors are
+    re-bound to the plain-text one (`add_constructor` copies the table onto the subclass); a
+    loader that dropped only the resolvers would re-open the fail-open one tag away. `!!str`
+    and `!!null` are already text and `None`; every other tag keeps `SafeConstructor`'s
+    answer, which for `!!python/...` is a refusal.
     """
 
 
@@ -178,6 +184,9 @@ _TextScalarLoader.yaml_implicit_resolvers = {
     if (kept := [(tag, regexp) for tag, regexp in resolvers
                  if tag == "tag:yaml.org,2002:null"])
 }
+for _typed_tag in ("timestamp", "int", "float", "bool"):
+    _TextScalarLoader.add_constructor(
+        f"tag:yaml.org,2002:{_typed_tag}", yaml.SafeLoader.construct_yaml_str)
 
 
 def load_text_scalars(text: str) -> Any:
@@ -194,16 +203,22 @@ def load_text_scalars(text: str) -> Any:
     their original spelling. Only the `null` resolver survives, so `~`, `null` and an empty
     value are still `None` — the `or {}` / `or []` idioms the readers depend on.
 
-    Quoted and block scalars, and structure, are exactly what `safe_load` gives. Sits BESIDE
-    `safe_load` rather than inside it: that wrapper is the repo's TYPED reader and stays one.
-    Errors keep its contract — malformed text and too-deep nesting both surface as
-    `yaml.YAMLError`. The `ValueError` fold is not needed: with no timestamp resolver there
-    is no constructor left to reject a shape-valid, calendar-invalid instant.
+    An EXPLICIT `!!timestamp`/`!!int`/`!!float`/`!!bool` tag is text too — it is the other
+    way YAML types a scalar, and the check's contract is the spelling either way. Quoted and
+    block scalars, and structure, are exactly what `safe_load` gives; a `!!python/...` tag is
+    refused as it is there. Sits BESIDE `safe_load` rather than inside it: that wrapper is
+    the repo's TYPED reader and stays one. Errors keep its contract — malformed text,
+    too-deep nesting and a constructor's own rejection all surface as `yaml.YAMLError`.
     """
     try:
         return yaml.load(text, Loader=_TextScalarLoader)
     except RecursionError as e:
         raise yaml.YAMLError("YAML is nested too deeply to parse") from e
+    except ValueError as e:
+        # No typed constructor is left to reject a scalar, so this is a backstop for a tag
+        # nobody re-bound (`!!binary` on bad base64 is a `YAMLError` already) — kept for the
+        # same reason `safe_load` keeps it: a caller's `except yaml.YAMLError` must see it.
+        raise yaml.YAMLError(f"YAML value could not be constructed: {e}") from e
 
 
 def reject_unread_keys(
