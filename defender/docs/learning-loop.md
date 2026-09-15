@@ -157,9 +157,16 @@ any other spelling, and the numbers below are this doc's own. Preflight is not
 a `Step`: it refuses before anything is spent or recorded.
 
 **1. Preflight.** Everything that can refuse before anything is spent, in one
-place: branch point in range, source alert a plain file, corpus patterns able to
-carry a view name, write door reaching the cluster, namespace sweep complete,
-every role holding a usable model.
+place: branch point in range, the source's provenance stamp usable as the
+family's anchor and the launcher's own checkout matching it, source alert a
+plain file, corpus patterns able to carry a view name, write door reaching the
+cluster, namespace sweep complete, every role holding a usable model. The
+anchor check is the verify tier's own judgement run early over a one-member
+family (the live tree): the commit must equal the source's, and so must the
+scope unless the source stamped before the field existed; neither is ever
+waived. A tree git did not certify clean — the source's or the live one — is
+refused unless `--allow-dirty`, which waives dirt and only dirt. A source that
+names no commit refuses on its own, before the live tree is asked.
 
 **2. `Step.QUESTIONER`** (`branch/questioner/`) is a **deny-all** role — no tools,
 its whole input inlined by the host, its whole output one YAML manifest. It
@@ -207,7 +214,10 @@ role preflight and its own provenance stamp.
 **6. `Step.VERIFY`** (`branch/archive.py`) copies each world into
 `episodes/<id>/worlds/<label>/` so later readers answer from the episode
 directory alone — sibling run dirs are disposable. Every sibling's scrub verdict
-and provenance stamp is checked; agreeing stamps write the family stamp, and
+and provenance stamp is checked against each other AND against the source run's
+stamp (the anchor the preflight read, threaded here and never re-read): stamps
+that agree at the source's commit write the family stamp, which carries the
+agreed record, the source's whole record and whether `--allow-dirty` was given;
 anything else marks the episode `incomplete` — a modelled outcome with a reason,
 not a missing file. The derived readers (`branch/episode.py`) refuse an
 `incomplete` episode, so "no differences" and "no comparison was possible" stay
@@ -318,7 +328,7 @@ $DEFENDER_EPISODES_BASE/<episode_id>/
   family.yaml                 # the questioner's manifest — every sibling re-parses it
   staged.yaml                 # write-ahead record of every staged name, for teardown
   review.yaml                 # per-world accept/reject + the episode's recorded outcome
-  provenance.json             # the family stamp, only when every sibling's agrees
+  provenance.json             # the family stamp, only when every sibling's agrees with the source's
   served/base.jsonl           # the capture, primed before staging
   served/<world_token>.jsonl  # every response served that world, with its decision
   worlds/<label>/
