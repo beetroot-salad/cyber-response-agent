@@ -159,8 +159,11 @@ def _render_leads(leads: dict[str, dict[str, Any]]) -> str:
         lines.append(f"- goal: {chain.get('goal')}")
         lines.append(f"- params: {chain.get('params')}")
         lines.append(f"- payload: {chain.get('payload')}")
-        lines.append(f"- summary: {chain.get('summary')}")
+        # Directly after `payload:` and printed for EVERY lead, `[]` included (#860 M4): the
+        # line's absence would be one more way for "refused nothing" and "refusals are not
+        # shown here" to read the same.
         lines.append(f"- refused: {chain.get('refused')}")
+        lines.append(f"- summary: {chain.get('summary')}")
         lines.append(f"- resolutions: {chain.get('resolutions')}")
     return "\n".join(lines) + "\n"
 
