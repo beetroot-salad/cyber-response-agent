@@ -91,6 +91,19 @@ base: d01001e642780f4fe2c7c9868a578e013a45e40f
 #     WITHDRAWN (d3, d4, d55, d53). What R23's ordering used to buy — a hostile
 #     model-authored id kept out of the record — is now bought by d66's normalization, and
 #     d53 asserts it there.
+# AMENDED BY #860 (the judge's per-lead view): "a denied call leaves NO evidence row" now
+#   reads "no QUERY row". A denied call writes one `∅.denied` SENTINEL row
+#   (`record_query.DENIED_QUERY_ID`, `circuit_breaker.DENIED_EXIT_CODE` / `DENIED_ERROR_CLASS`)
+#   through the same `_record` its two neighbouring grant-check branches use, AFTER the audit
+#   record (which is unchanged). What R3's absence protected is bought by the sentinel
+#   partition instead: `∅` fails the offline routers' safe-segment match, `joined` files the
+#   row under `.sentinels` and never `.queries`, and the row is outside both repeat guards'
+#   domains (`ABOVE_PLACEMENT_QUERY_IDS`; neither above-guard nor `agent-fixable`) and charges
+#   no breaker. It consumes a seq and an empty sidecar like every sentinel. The reason: the
+#   offline judge grades LEADS, and a lead whose only activity was a withheld verb had no row
+#   to be found by, so it was graded as a lead that ran nothing. Demands d3/d4/d44/d53/d55
+#   and the 807 placement test read "no evidence row" as `_Run.own_evidence == []` plus the
+#   sentinel's presence (`_Run.own_denied_rows`).
 # THE REPAIR PASS — three human fork resolutions on findings that came back from
 # write-code-from-spec (which REFUSED to implement, on two unsatisfiable demands) and from an
 # adversarial implementer (which greened the suite with deliberately dishonest code):

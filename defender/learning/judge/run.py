@@ -584,20 +584,23 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         # system and was turned away by the harness rendered as `params: None`, `payload: []`,
         # and a live draw concluded the defender never queried it — a `lead-set` finding the
         # lessons curator folded into a lesson telling the runtime to run a query the role is
-        # not granted. The polarity (`external: true` -> observability, never lead-set) is the
-        # whole of the rule; the rest names where the evidence pointer may go.
+        # not granted. The polarity (`external=true` -> observability, never lead-set) is the
+        # whole of the rule, spelled the way `family.render_refused` prints it; the rest says
+        # where the evidence pointer goes and keeps VIEW 2's `source: refused` (an estate-seam
+        # refusal of a call that DID reach the system) from being read as this rule's subject.
         "READ A LEAD'S `refused:` LINE BEFORE GRADING ITS COVERAGE. Each entry there is an "
         "attempt that reached NO system — it is not a query, and it is not the absence of "
-        "one. `external: true` means the harness or the estate withheld it (a verb the "
-        "defender's role is not granted, an adapter that could not load): the defender tried "
-        "the right thing and was refused, so for a lead whose refusal is external on the "
-        f"family's holding system the finding is `observability` (subject: {SUBJECT_DEFENDER}) "
-        "and NEVER `lead-set` — do not author a lesson telling the defender to run a query "
-        "it is not granted. `external: false` is the defender's own conduct (a rejected "
-        "call, a repeat the guard refused, a reducer it broke) and grades as such. A refusal "
-        "is recorded in this world's own `executed_queries.jsonl` (the defender's own "
-        "conduct) or `policy_denials.jsonl` (a withheld verb); either is a valid `evidence` "
-        "pointer for a finding about it.\n\n"
+        "one. `external=true` means the harness or the estate withheld it (a verb the "
+        "defender's role is not granted, an adapter that could not load): the defender asked "
+        "and was refused before the call was made, so for a lead whose refusal is external "
+        "on the family's holding system the finding is `observability` (subject: "
+        f"{SUBJECT_DEFENDER}) and NEVER `lead-set` — do not author a lesson telling the "
+        "defender to run a query it is not granted. `external=false` is the defender's own "
+        "conduct (a rejected call, a repeat the guard refused, a reducer it broke) and grades "
+        "as such. Every refused entry is a `∅.`-prefixed row in this world's own "
+        "`executed_queries.jsonl`, which is the `evidence` pointer for a finding about it. "
+        "This is a different thing from a `source: refused` row in VIEW 2: that call REACHED "
+        "the holding system and was refused there, and counts as having queried.\n\n"
         "Before findings, run three passes and report each as its own table:\n"
         "1. CORRELATION — for every fact reachable across two joined rows, name the hand-off.\n"
         "2. SCOPE — for every lead touching the holding system, name the index, window and "

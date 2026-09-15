@@ -42,6 +42,7 @@ from defender.learning.judge.family import (
     lead_chain,
     leads_by_id,
     own_h_rows,
+    render_refused,
     raw_manifest,
     read_review_record,
     read_samples_record,
@@ -162,7 +163,7 @@ def _render_leads(leads: dict[str, dict[str, Any]]) -> str:
         # Directly after `payload:` and printed for EVERY lead, `[]` included (#860 M4): the
         # line's absence would be one more way for "refused nothing" and "refusals are not
         # shown here" to read the same.
-        lines.append(f"- refused: {chain.get('refused')}")
+        lines.append(f"- refused: {render_refused(chain.get('refused') or [])}")
         lines.append(f"- summary: {chain.get('summary')}")
         lines.append(f"- resolutions: {chain.get('resolutions')}")
     return "\n".join(lines) + "\n"

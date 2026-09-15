@@ -449,6 +449,24 @@ class _Run:
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
     @property
+    def own_evidence(self) -> list[dict]:
+        """`.own_rows` less the `∅.` sentinels — the rows a call that REACHED a system wrote,
+        which is what "no evidence row" means since #860 made a denial a `∅.denied` sentinel
+        row of its own. The split is `lead_repository.joined`'s (`.queries` vs `.sentinels`),
+        spelled with the writer's own predicate."""
+        from defender.scripts.gather_tools.record_query import is_reserved_query_id
+        return [r for r in self.own_rows if not is_reserved_query_id(str(r.get("query_id", "")))]
+
+    @property
+    def own_denied_rows(self) -> list[dict]:
+        """The `∅.denied` sentinel rows THIS test's lead wrote — one per call the grant check
+        refused, since #860. Exact-id, not `is_reserved_query_id`: the other sentinels are
+        other refusals, and a test asserting "the denial left its row" must not be satisfied
+        by a repeat trip's."""
+        from defender.scripts.gather_tools.record_query import DENIED_QUERY_ID
+        return [r for r in self.own_rows if r.get("query_id") == DENIED_QUERY_ID]
+
+    @property
     def denials(self) -> list[dict]:
         p = self.run_dir / observe.POLICY_DENIALS
         return read_jsonl_rows(p) if p.is_file() else []
@@ -459,8 +477,8 @@ class _Run:
         there — item 1 issues its own `elastic.alerts` call synchronously before MAIN's
         first turn, so if that call itself lands as a policy denial (the registry declares
         `alerts` but does not grant it), its record is always the FIRST in the stream. A
-        policy-denial record carried no `lead_id` before #860 (M1 added it), so unlike
-        `own_rows` this does not filter by id — it relies on lead-0's fixed position. Only the
+        policy-denial record carries no `lead_id` by design (§7 R12), so unlike `own_rows`
+        this can't filter by id — it can only rely on lead-0's fixed position. Only the
         LEADING entry is ever dropped, and only when it is `alerts`: a test that later
         scripts its own genuine `elastic.alerts` denial (as part of its own turns, after
         lead-0's own attempt) keeps that record."""

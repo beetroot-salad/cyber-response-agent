@@ -15,12 +15,24 @@ RUN_FAIL_KILL_LIMIT = 5
 
 INFRA_EXIT_CODES = frozenset({2, 124})
 
-#: The two values `error_class_for_exit` writes into every queries-table row. Named because
+#: The exit code of a call the GRANT CHECK refused — a verb withheld from the role (§7 R11's
+#: DENIED). sysexits' `EX_NOPERM`, and the one non-zero code that is neither infra nor the
+#: model's to fix: it must stay OUTSIDE `INFRA_EXIT_CODES` (a withheld verb is policy, not an
+#: unreachable estate, so it charges no breaker) and it must not read as `agent-fixable` (a
+#: denial is a policy bug or an injection attempt, and neither is fixable by retrying — #632).
+#: Since #860 a denial is a `∅.denied` sentinel row in the queries table, so the row needs a
+#: class of its own for the same reason `ticket_screen.POLICY_REFUSAL_EXIT` is distinct from
+#: the adapter's generic business code: a reader tells it apart without parsing free text.
+DENIED_EXIT_CODE = 77
+
+#: The three values `error_class_for_exit` writes into every queries-table row. Named because
 #: readers BRANCH on them: the companion repeat guard's counted domain is the `agent-fixable`
-#: half of the above-guard rows, and the `infra` half is this module's own. A reader that
-#: spelled the value itself would be one rename away from silently counting nothing.
+#: half of the above-guard rows, the `infra` half is this module's own, and `denied` is the
+#: grant check's — counted by neither guard and charged to no breaker. A reader that spelled
+#: the value itself would be one rename away from silently counting nothing.
 INFRA_ERROR_CLASS = "infra"
 AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
+DENIED_ERROR_CLASS = "denied"
 
 
 def is_infra_failure(exit_code: int) -> bool:
@@ -30,6 +42,8 @@ def is_infra_failure(exit_code: int) -> bool:
 def error_class_for_exit(exit_code: int) -> str | None:
     if exit_code == 0:
         return None
+    if exit_code == DENIED_EXIT_CODE:
+        return DENIED_ERROR_CLASS
     return INFRA_ERROR_CLASS if exit_code in INFRA_EXIT_CODES else AGENT_FIXABLE_ERROR_CLASS
 
 

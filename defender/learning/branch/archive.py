@@ -4,12 +4,11 @@
 reads — and D3's claim about it is not "the episode dir is where we happened to put things"
 but **self-containment**: after the archive, `delta_o` and `verdicts` answer from
 `episodes/<id>/` alone, with no re-run and no path outside it. That is only true if the copy
-here is complete, which is why the archived world carries SEVEN roles rather than a report and a
+here is complete, which is why the archived world carries SIX roles rather than a report and a
 pointer: the report, the investigation document, the two tables, the run's own provenance
-stamp, the scrub verdict, a text pointer naming the run dir the bytes came from, and — since
-#860 — the run's policy-denial stream, when the run wrote one.
+stamp, the scrub verdict, and a text pointer naming the run dir the bytes came from.
 
-**None of the seven is sourced from another.** The pointer is informational: it is a text file,
+**None of the six is sourced from another.** The pointer is informational: it is a text file,
 never a symlink, and nothing in this design follows it. A reader that resolved it would make
 the episode self-contained only for as long as the runs base happens to still hold the run,
 which is the property the archive exists to stop depending on — the sibling run dirs are
@@ -50,13 +49,7 @@ import sys
 from pathlib import Path
 
 from defender._io import guarded_mkdir, write_guarded
-from defender._run_paths import (
-    POLICY_DENIALS,
-    PROVENANCE,
-    RunPaths,
-    artifact_dir,
-    artifact_file,
-)
+from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file
 from defender.learning.lead_repository import (
     refuse_non_artifacts,
     refusing_copy2,
@@ -113,7 +106,7 @@ ALERT_NAME = "alert.json"
 
 
 def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
-    """The single-file roles, as `(source, archived name)`.
+    """The six single-file roles, as `(source, archived name)`.
 
     Spelled once, in the order the archived-world row declares them, because two readers of
     this list exist — the screen and the copy — and a name in one and not the other is an
@@ -123,12 +116,6 @@ def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
     judge's three new inputs that are single files. `gather_summaries/` is the third and is a
     DIRECTORY, so it takes the per-entry-screened walk beside `stage_tables`' own two tables
     rather than a slot in this tuple — see `_gather_summaries_source`/`archive_episode`.
-
-    #860 (M2) adds the policy-denial stream, `POLICY_DENIALS`: the record of every
-    call the grant check refused, which `lead_repository.load_denials` reads off the archived
-    world so a lead whose only activity was a withheld verb reaches the judge. Absent is the
-    common case (a run that was refused nothing opens no such file) and `_screen` answers
-    `False` for it; a link or non-file at the name is refused like every other role here.
     """
     paths = RunPaths(run_dir)
     return (
@@ -139,7 +126,6 @@ def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
         (verdict_path(run_dir), SCRUB_VERDICT_NAME),
         (run_dir / LESSONS_LOADED_NAME, LESSONS_LOADED_NAME),
         (paths.alert, ALERT_NAME),
-        (run_dir / POLICY_DENIALS, POLICY_DENIALS),
     )
 
 
@@ -175,7 +161,7 @@ def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     """Every source that will be copied for one world, or the refusal — nothing copied yet.
 
     The whole point of running this before the first `copy2`: an archive that refused halfway
-    would leave a world directory holding some of its seven roles, and a MISSING artifact is how
+    would leave a world directory holding some of its six roles, and a MISSING artifact is how
     this design records "the run did not produce one". A half-archive is therefore not a
     partial answer but a wrong one.
     """

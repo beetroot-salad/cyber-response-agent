@@ -76,16 +76,6 @@ WIRE_LOG = "llm_requests.jsonl"
 #: which is the one outcome that suppression exists to prevent.
 PROVENANCE = "provenance.json"
 
-#: The fixed policy-denial stream, ONE per site (§7 R1), and its records' `event_type`. Kept
-#: SEPARATE from the request stream (whose append-and-flush-per-record discipline it shares):
-#: folded in, "no denial happened" would be indistinguishable from "this file predates the
-#: denial record". Spelled HERE for `PROVENANCE`'s reason: the WRITER is
-#: `runtime.observe.RequestLogger` (pydantic-ai, `runtime`-extra-only) and since #860 the
-#: READERS are `learning.lead_repository.load_denials` and `learning.branch.archive`, neither
-#: of which may pull that extra in for a filename. `observe` re-exports both names.
-POLICY_DENIALS = "policy_denials.jsonl"
-POLICY_DENIAL_EVENT_TYPE = "policy_denial"
-
 #: The reserved key on a `tool-return` part's `metadata` that the TOON view gate parks the
 #: tool's ORIGINAL JSON under when it substitutes a smaller view. Spelled HERE for the reason
 #: the wire log's location is: the WRITER is `runtime.toon_gate` (which imports pydantic-ai, a

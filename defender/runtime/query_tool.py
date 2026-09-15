@@ -28,6 +28,7 @@ from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.payload_view import render as _render_payload
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
+    DENIED_QUERY_ID,
     REPEAT_ESCAPE,
     REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
@@ -522,8 +523,9 @@ class QueryCapture(AbstractCapability[Any]):
     ) -> tuple[Any, str | None]:
         """THE GRANT CHECK, ahead of everything else (§7 R3/R23, reversed at phase F — a denied
         call always produces its denial record and never an evidence row, whatever else is
-        wrong with it). Returns `(decision, early_result)`; `early_result` is set when the
-        caller must return without ever reaching execution."""
+        wrong with it; since #860 it also leaves its `∅.denied` sentinel row, which is not
+        evidence). Returns `(decision, early_result)`; `early_result` is set when the caller
+        must return without ever reaching execution."""
         decision, load_error = self._decide_guarded(system, verb)
         if load_error is not None:
             # THE BREAKER CHECK, consulted HERE and not only in `wrap_tool_execute`. These
@@ -552,15 +554,31 @@ class QueryCapture(AbstractCapability[Any]):
             return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
 
         if decision.outcome == DENIED:
-            # `lead_id` rides the audit record (#860 M1) so the offline judge can put the
-            # refusal on the lead's own chain; it is NOT a queries-table row (N5) — one there
-            # would count toward `repeat_trip` and charge the breaker.
+            refusal = decision.refusal or f"denied: {system}.{verb}"
+            # THE AUDIT RECORD FIRST (§7 R2/R3): a denied call always produces it, and a row
+            # write that fails below has already left it behind.
             self._denial_logger_for(deps.run_dir).log_policy_denial(
                 role=self._role, system=system, verb=verb,
-                call_id=f"{system}.{verb}", params=params, lead_id=deps.lead_id,
+                call_id=f"{system}.{verb}", params=params,
             )
+            # THEN THE ROW (#860): a `∅.denied` sentinel, the same shape the two branches
+            # around it write, so the lead's refused attempt is on the one surface the offline
+            # judge reads leads from — inherited by a sibling world with the table, archived
+            # with it, and split onto `JoinedLead.sentinels` by the join. It charges nothing:
+            # `DENIED_EXIT_CODE` is outside `INFRA_EXIT_CODES` (no breaker), its id is outside
+            # `repeat_trip`'s domain (`ABOVE_PLACEMENT_QUERY_IDS`), and its class is neither
+            # guard's. `system_key=""` for the granted path's reason: `decide` returns DENIED
+            # only for a system the grant names, so the row's `system` already identifies the
+            # call.
+            await self._record(
+                deps, system=system, verb=verb, query_id=DENIED_QUERY_ID, params=params,
+                payload=None, exit_code=circuit_breaker.DENIED_EXIT_CODE, detail=refusal,
+                system_key="",
+            )
+            # NOT `_model_view`: that frame prepends the repeat guard's coaching, and a denial
+            # is the one refusal retrying cannot fix (#632). The model sees the refusal alone.
             return None, _format_bash_result(
-                DEFAULT_FAULT_EXIT, "", wrap_fresh(decision.refusal or "", "untrusted"), "",
+                circuit_breaker.DENIED_EXIT_CODE, "", wrap_fresh(refusal, "untrusted"), "",
             )
 
         if decision.outcome != GRANTED:

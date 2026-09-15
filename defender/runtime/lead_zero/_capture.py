@@ -134,8 +134,9 @@ async def _capture_issue(
     self-ticket, confine_index, guard_outbound) run as they do for a model-dispatched query.
 
     Returns `(envelope_or_None, raw_result_text)`. `None` covers both "screened" (breaker trip,
-    repeat trip, grant denial — no row written at all) and "attempted but failed" (a row IS
-    written, with a nonzero exit code)."""
+    repeat trip — no row written at all; a grant denial — a `∅.denied` sentinel row since
+    #860, nonzero exit) and "attempted but failed" (a row IS written, with a nonzero exit
+    code)."""
     before = len(_rows_for(deps.run_dir, deps.lead_id))
     call = SimpleNamespace(tool_name="query")
     args = {"system": ITEM1_SYSTEM, "verb": verb, "params": params}
