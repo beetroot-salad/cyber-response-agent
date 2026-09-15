@@ -727,8 +727,8 @@ class RejectionBudgetTrip:
     lead's above-guard agent-fixable rejections, and the `budget` it reached.
 
     INTEGERS ONLY, and that is half of why the budget stop cannot leak (#1015 S1). The other
-    half is `_run_gather`'s dead-end arm, which composes main's summary from `reason` and
-    `escape` alone. A `str` field here — the ghost's name, its fingerprint, a params fragment —
+    half is `_run_gather`'s dead-end notice, which is composed from `reason` and `escape`
+    alone — the HEADER above the lead's own summary, since #987. A `str` field here — the ghost's name, its fingerprint, a params fragment —
     would put a model-authored, unbounded string one attribute access away from
     `rejection_budget_dead_end_reason`, which is the #855 leak channel. There is no field for
     one to travel in, so no future edit of the sentence can spend it.
@@ -752,9 +752,14 @@ class RejectionBudgetTrip:
 
 class GatherDeadEnd(Exception):
     """A lead-level dead end: the request the guard just refused (`reason`), and a fixed,
-    system-agnostic sentence handing the decision to main (`escape`). Raised out of
-    `QueryCapture.wrap_tool_execute`; caught at `_run_gather` beside `UsageLimitExceeded` so it
-    stays contained to the one lead."""
+    system-agnostic sentence handing the decision to main (`escape`). Raised by the guards
+    inside the query tool and caught by the tool's own hooks (#987): they close the lead's
+    `QueryDoor`, answer the call with `reason` as a failed tool result — the gather model
+    reads `reason`, never `escape` — and the model's next turn is its summary. It reaches
+    `_run_gather` only re-raised, when the model queried again after being told to stop; there
+    it is caught beside `UsageLimitExceeded`, so either way it stays contained to the one
+    lead. `reason` crosses into main's context as the HEADER of the lead's message, which is
+    why it may carry nothing model-authored."""
 
     def __init__(self, reason: str, escape: str):
         # BOTH args go through `super().__init__` so `.args` round-trips through
@@ -1124,7 +1129,9 @@ def dead_end_reason(system: str, verb: str, trip: RepeatTrip, executed: int) -> 
     `executed` is the count of exit-0 rows, NOT the row count: a lead whose prior calls were all
     refused executed zero of them, and counting the refusals would tell main "this lead found
     things" when it never got anywhere. Never the model-authored `params` text — an unbounded
-    fragment must not cross into main's context on a refusal path."""
+    fragment must not cross into main's context in the HARNESS-AUTHORED header of a refusal
+    path. (The lead's own summary follows that header since #987, through the same untrusted
+    channel a finished lead's summary uses; the invariant binds the header.)"""
     plural = "query" if executed == 1 else "queries"
     return (
         f"the request ({system} {verb}) repeats the one already issued at seq {trip.first_seq}; "

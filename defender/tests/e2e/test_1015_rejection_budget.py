@@ -200,11 +200,12 @@ def _summary_header(r: _Res) -> str:
     Before #987 the body WAS the header — `_run_gather`'s dead-end arm composed main's whole
     message from `reason` and `escape` alone and discarded the lead's own output, and O4's
     equality was taken over all of it. #987 keeps that composition and gives it a body: the
-    same gather agent is asked once more, tool-less, to write the summary it never got to
-    write, and that summary follows the notice after a blank line. So the boundary O4 is about
-    moved from "the whole message" to "the header", and the split is asserted rather than
-    assumed — a body with no blank line means the summary turn produced nothing and the
-    fallback sentence is missing too, which is #987's O1 failing, not O4 passing.
+    budget stop is answered to the gather model as a failed tool result that closes the
+    lead's door, the model's next turn is the summary it never got to write, and that summary
+    follows the notice after a blank line. So the boundary O4 is about moved from "the whole
+    message" to "the header", and the split is asserted rather than assumed — a body with no
+    blank line means neither the summary nor the fixed no-summary sentence followed the
+    notice, which is #987 failing, not O4 passing.
 
     What is NOT weakened: the header is still composed by the host from its own two sentences,
     and a model-authored fragment appearing inside IT is still this defect. What moved is that

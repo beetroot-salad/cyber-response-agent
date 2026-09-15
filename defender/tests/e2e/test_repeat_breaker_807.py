@@ -88,20 +88,21 @@ point already declares.
 WHAT #987 REVISED, AND WHAT IT DID NOT
 --------------------------------------
 F-C's pin read "the tripping call returns no tool result, and the gather model is never asked
-again". The FIRST half is untouched and is still what `test_gather_dead_end_type` and
-`test_tripping_call_carries_no_repeat_note` drive: the guard raises out of
-`wrap_tool_execute`, so the tripping call never becomes a tool result and never earns a REPEAT
-annotation. The SECOND half is revised: after the cut the same gather agent is asked exactly
-once more, TOOL-LESS (no `query` offered at all, `request_limit=1`), to write the summary main
-receives under this arm's own notice. So every lead in this file that ends in a dead end now
-spends ONE MORE scripted turn than it used to — `SALVAGE_TURN` below is that turn, spelled
-wherever a script serves two leads and the shift would otherwise be silent.
+again". BOTH halves are revised, and one word of each survives. The tripping call IS answered
+now — with a FAILED tool result carrying the guard's own reason and the sentence that closes
+the lead's door (`query_tool.QUERY_DOOR_CLOSED`), never with a REPEAT annotation, which is
+what `test_tripping_call_carries_no_repeat_note` still drives. And the gather model IS given
+one more turn — not to query (a `query` call against the closed door forfeits the turn and
+ends the run on the stored dead end) but to write the summary main receives under this arm's
+own notice. So every lead in this file that ends in a dead end spends ONE MORE scripted turn
+than it used to — `SUMMARY_TURN` below is that turn, spelled wherever a script serves two
+leads and the shift would otherwise be silent.
 
 G19 is NOT revised and is asserted harder than before: the gather model is never shown main's
-idiom, and it now has three new surfaces it could arrive on (the closing tool return, the
-summary prompt, the replayed history). `test_tripping_call_carries_no_repeat_note`'s
-`INCOMPLETE_IDIOM not in seen` reads the SALVAGE turn's own view here, and the whole-history
-sweep is `tests/e2e/test_987_salvage_turn.py`.
+idiom, and it now has a new surface it could arrive on (the closing tool result).
+`test_tripping_call_carries_no_repeat_note`'s `INCOMPLETE_IDIOM not in seen` reads the
+summary turn's own view here, and the whole-history sweep is
+`tests/e2e/test_987_stopped_lead.py`.
 
 RF-J2, carried from the seam and binding on this file
 -----------------------------------------------------
@@ -185,17 +186,17 @@ CORPUS = DEFENDER / "fixtures-e2e" / "repeat-corpus-807"
 # vocabulary any prompt in the corpus teaches main (defender/SKILL.md:394 — G19).
 INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captured."
 
-#: The scripted turn a lead's SALVAGE TURN consumes (#987). A lead cut by one of
-#: `_run_gather`'s four degrading arms is given one more, tool-less, model request to write the
-#: summary, and a `ReplayFn` script advances by one turn when it does. In a single-lead
-#: scenario that turn is whatever already followed the trip — usually `DONE`, whose text then
-#: becomes the summary body under the arm's notice. In a TWO-LEAD scenario it has to be spelled
-#: out, or the first lead eats the SIBLING's first query and the sibling silently measures
-#: nothing while every assertion about it still reads as if it had.
+#: The scripted turn a stopped lead's SUMMARY consumes (#987). A lead whose door the query
+#: tool closed writes its summary on its next model request, and a `ReplayFn` script advances
+#: by one turn when it does. In a single-lead scenario that turn is whatever already followed
+#: the trip — usually `DONE`, whose text then becomes the summary body under the arm's notice.
+#: In a TWO-LEAD scenario it has to be spelled out, or the first lead eats the SIBLING's first
+#: query and the sibling silently measures nothing while every assertion about it still reads
+#: as if it had.
 #:
 #: Its text deliberately names no system and no verb: two scripts below assert that one lead's
 #: summary does not name the other lead's request.
-SALVAGE_TURN = Turn(text="Before the stop I ran what I could; the answers are above.")
+SUMMARY_TURN = Turn(text="Before the stop I ran what I could; the answers are above.")
 
 
 class _Res:
@@ -711,10 +712,10 @@ def test_gather_dead_end_type(tmp_path):
         DONE,
     ])
     assert r.gather.calls == 4, (
-        "three query turns plus ONE tool-less summary turn is four (#987). Fewer means the "
-        "summary turn did not run; more means the tripping call returned a tool result instead "
-        "of raising and the gather model went on querying. The idiom assertion below is what "
-        "separates those two readings of a count that is no longer 3."
+        "three query turns plus ONE summary turn is four (#987). Fewer means the lead was cut "
+        "before its summary turn; more means the closed door did not end the lead and the "
+        "gather model went on querying. The idiom assertion below is what separates those two "
+        "readings of a count that is no longer 3."
     )
     assert r.main.calls == 2, "the raise was not caught at _run_gather"
     assert INCOMPLETE_IDIOM in r.summary(), "the dead end did not land the idiom's incomplete message"
@@ -996,7 +997,7 @@ def test_trip_row_is_distinguishable_from_a_finished_leads_rows(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         q("elastic", "query", {"native_query": "FROM logs"}),
         q("elastic", "query", {"native_query": "FROM logs"}),
-        SALVAGE_TURN,                                       # the stopped lead's summary (#987)
+        SUMMARY_TURN,                                       # the stopped lead's summary (#987)
         q("elastic", "query", {"native_query": "FROM other"}),
         DONE,
     ])
@@ -1057,7 +1058,7 @@ def test_dead_end_is_contained_to_the_lead(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         q("elastic", "query", {"native_query": "FROM logs"}),
         q("elastic", "query", {"native_query": "FROM logs"}),
-        SALVAGE_TURN,                                       # the stopped lead's summary (#987)
+        SUMMARY_TURN,                                       # the stopped lead's summary (#987)
         q("elastic", "query", {"native_query": "FROM other"}),
         DONE,
     ])
@@ -1281,9 +1282,9 @@ def test_tripping_call_carries_no_repeat_note(tmp_path):
     assert seen.count("[record_query] REPEAT") == 1, \
         "the second occurrence's REPEAT notice is the control; the tripping call must add none"
     assert r.gather.calls == 4, (
-        "the tripping call produced a model view of its own (5+), or the summary turn #987 "
-        "gives the lead after the cut did not run (3). Neither adds a REPEAT annotation, which "
-        "is what the count above this line is for."
+        "the tripping call was answered like an ordinary query and the lead went on (5+), or "
+        "the summary turn #987 gives a stopped lead did not run (3). Neither adds a REPEAT "
+        "annotation, which is what the count above this line is for."
     )
     assert INCOMPLETE_IDIOM not in seen, "the dead end was handed to the GATHER model"
     assert INCOMPLETE_IDIOM in r.summary()
@@ -1558,7 +1559,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     # than in two suites that could drift into contradicting each other.
     assert unresolvable.gather.calls == 4, (
         "the third identical rejection did not end the lead — the companion guard is silent "
-        "(5+), or the lead ended but #987's tool-less summary turn did not run (3)"
+        "(5+), or the lead ended but #987's summary turn did not follow (3)"
     )
     assert INCOMPLETE_IDIOM in unresolvable.summary()
     assert _replay_rejections(grant_rows) == [(LEAD, 2, "repeat")], \
@@ -1677,7 +1678,7 @@ def test_screen_refused_repeats_count_toward_the_trip(tmp_path):
         "the screen must still teach on the first two; only the third is a dead end"
     assert r.gather.calls == 4, (
         "the third refusal was a ModelRetry, not a dead end (5+) — or the dead end fired and "
-        "#987's tool-less summary turn did not follow it (3)"
+        "#987's summary turn did not follow it (3)"
     )
     rows = r.own_rows
     assert len(rows) == 3
@@ -1715,9 +1716,10 @@ def test_concurrent_identical_siblings_still_stop_the_lead(tmp_path):
     ])
     assert len(rec.calls) == 2, "a sibling of the tripping call still reached the backend"
     assert r.gather.calls == 4, (
-        "the concurrent trip did not end the lead (5+), or it ended and the tool-less summary "
-        "turn did not run (3) — which on THIS script needs BOTH dangling siblings answered, "
-        "since pydantic-ai refuses a prompt over a history with any unprocessed tool call"
+        "the concurrent trip did not end the lead (5+), or it ended and the summary turn did "
+        "not follow (3) — which on THIS script needs BOTH siblings answered, each by its own "
+        "execution: the first to trip closes the door, the other is either its own trip or "
+        "`SIBLING_NOT_RUN`"
     )
     assert INCOMPLETE_IDIOM in r.summary()
     assert any(row["exit_code"] == 64 for row in r.own_rows), "no trip row was written at all"
@@ -1759,7 +1761,7 @@ def test_gather_dead_end_payload_binds_reason_and_escape(tmp_path):
             q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
             q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
             q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-            SALVAGE_TURN,                       # the elastic lead's summary turn (#987)
+            SUMMARY_TURN,                       # the elastic lead's summary turn (#987)
             q("cmdb", "host-trust-edges", {"host": "db-1"}),
             q("cmdb", "host-trust-edges", {"host": "db-1"}),
             q("cmdb", "host-trust-edges", {"host": "db-1"}),
@@ -1791,10 +1793,7 @@ def test_dead_end_message_does_not_echo_model_authored_params(tmp_path):
     crossing the same `untrusted`-wrapped channel every CLEAN lead's summary crosses, where a
     model could always have echoed its own params, so a canary appearing there would not be
     this defect. The assertions below stay green because this script's summary turn consumes
-    `DONE`, whose text carries no canary; the guard-plus-positive-control at the header's own
-    address is `tests/test_987_salvage_seam.py::test_the_dead_end_header_still_carries_none_of
-    _the_models_own_params`, which asserts the fragment is absent from the header AND present
-    in the body of the same run."""
+    `DONE`, whose text carries no canary."""
     canary = "CANARY-4f2a-model-authored-filter"
     rec = VerbRecorder()
     r = _run(tmp_path, verbs=named_verbs(rec), run_id="d807-noecho", turns=[

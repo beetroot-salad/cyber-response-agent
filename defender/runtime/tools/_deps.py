@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays lazy
-    pass
+    from defender.scripts.gather_tools.record_query import GatherDeadEnd
 
 from defender._clock import now_iso
 from defender._paths import PATHS
@@ -150,12 +150,57 @@ class AgentDeps:
         )
 
 
+@dataclass
+class QueryDoor:
+    """Whether the harness has told this lead's gather model to stop querying, and why.
+
+    ONE MUTABLE OBJECT PER LEAD, shared by the two frames that must agree about it: the query
+    tool CLOSES it — on a guard's dead end, or on the last query round the ceiling allows —
+    and answers every later call from it; `_run_gather` READS it after the run to stamp the
+    session's terminator and put the right notice above the summary. Mutable inside a frozen
+    `GatherDeps` for the reason `review_state` is: the deps are copied by `replace`, and
+    pydantic-ai's hook signatures give a tool no other way to hand a fact back up.
+
+    `request_limit` is the lead's own ceiling; `None` when the deps were bound outside a
+    dispatch, and a door with no ceiling never closes on the budget. `closed_at` is the run's
+    request count when the door closed: a call on the SAME count is a sibling in the closing
+    round (answered "closed", never executed), a call on a LATER count is the model querying
+    after being told to write the summary — #987's one grace turn, forfeited. `dead_end` is
+    set when a guard closed the door, and stays `None` for a ceiling close."""
+
+    request_limit: int | None = None
+    closed_at: int | None = None
+    dead_end: GatherDeadEnd | None = None
+
+    @property
+    def closed(self) -> bool:
+        return self.closed_at is not None
+
+    def close(self, *, at: int, dead_end: GatherDeadEnd | None = None) -> None:
+        """First close wins, with one exception: a dead end outranks a ceiling close from the
+        SAME round — two siblings, one spending the last permitted query and one tripping a
+        guard — because the guard's sentence names the request being repeated and the
+        ceiling's can only say "spent". (The reason `_rejection_guard` asks repeat first.)"""
+        if self.closed_at is None:
+            self.closed_at, self.dead_end = at, dead_end
+        elif dead_end is not None and self.dead_end is None and at == self.closed_at:
+            self.dead_end = dead_end
+
+    def is_last_query_round(self, requests: int) -> bool:
+        """`requests` is the run's count DURING a round's tool calls (pydantic-ai bumps it when
+        the response arrives), so the round whose calls see `request_limit - 1` is the last
+        whose results the model can be shown before its final request — the one #987 leaves
+        for the summary."""
+        return self.request_limit is not None and requests >= self.request_limit - 1
+
+
 @dataclass(frozen=True)
 class GatherDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.GATHER
 
     lead_id: str | None = None
+    door: QueryDoor = field(kw_only=True, default_factory=QueryDoor, compare=False, repr=False)
 
 
 def _record_lesson_load(

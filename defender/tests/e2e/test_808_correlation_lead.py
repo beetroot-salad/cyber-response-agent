@@ -301,19 +301,12 @@ def test_correlation_lead_is_not_narrowed_to_the_alerts_own_rule_id(tmp_path):
 
 def test_correlation_lead_runs_under_a_request_limit_of_eight(tmp_path):
     """d21/F6 — item 3's dispatch runs under a per-call request limit of EIGHT, so a
-    correlation lead that keeps asking spends exactly eight model requests and no more.
+    correlation lead that keeps asking is stopped at the eighth request.
 
     The number is the demand. "Reduced relative to GATHER_REQUEST_LIMIT = 40" names none, and
     `d21`'s "strictly below 40" is VACUOUS AT 39 — an unnumbered "reduced" is a knob nothing
     constrains. `request_limit` is already a per-CALL parameter of the dispatch (r8/c9), so
-    the reduced budget costs a value, not a new knob.
-
-    #987 CHANGED WHAT THE EIGHTH REQUEST IS, NOT HOW MANY THERE ARE. The lead used to be cut
-    at its eighth QUERY round; it is now cut at the seventh, and the eighth is the tool-less
-    SUMMARY turn `_run_gather` reserves out of the same ceiling (`request_limit - 1` query
-    rounds plus one). `_loop(20)` supplies that turn's content as a tool call, which the
-    summary turn cannot execute and which the count still includes — so the number this demand
-    is about is untouched, and it is the number this demand was always about."""
+    the reduced budget costs a value, not a new knob."""
     res = run(tmp_path, run_id="lz808-budget8", answer=answer_hits(TWO_ACTORS),
               gather_turns=_loop(20))
 
@@ -337,11 +330,7 @@ def test_mains_own_leads_still_run_under_the_full_forty(tmp_path):
     the canonical shape of this bug.
 
     Driven with an alert that resolves NO ancestor documents, so item 3 does not dispatch and
-    the one lead in the run is MAIN's own.
-
-    As above (#987): forty is still forty. The fortieth request is the tool-less summary turn
-    rather than a fortieth query, which is a change in what the ceiling BUYS and not in what it
-    IS."""
+    the one lead in the run is MAIN's own."""
     res = run(tmp_path, run_id="lz808-budget40", alert=alert_doc(ancestors=[]),
               answer=answer_hits([]),
               main_turns=[
@@ -560,27 +549,7 @@ def test_the_cut_off_correlation_session_withholds_its_own_doomed_round(tmp_path
     this defect, and no assertion about the last row alone could have caught it: what the
     phantom round adds is one more ROW, a request for a round that never happened at all. The
     clean arm pins that shape (fewer rows, and yes, a trailing request) so this test cannot be
-    read as claiming the store never ends on one.
-
-    #987 MOVED BOTH NUMBERS AND TOOK THE COUNT'S TEETH WITH THEM; THE LAST ROW'S SHAPE IS THE
-    REPLACEMENT. The query phase now runs `CORRELATION_REQUEST_LIMIT - 1` rounds and the
-    reserved request is spent on a tool-less SUMMARY turn, so the session holds seven
-    request/response pairs plus the summary turn's own request — fifteen rows, ending on a
-    `request` like every other gather session. THE BUG THIS TEST EXISTS FOR NOW PRODUCES
-    FIFTEEN TOO: a recorder measuring this dispatch against 40 commits the doomed continuation
-    itself (fifteen rows, `last_render_len` already past it), and the summary turn then finds
-    nothing new to ingest. The counts coincide, so the discriminator is WHAT the fifteenth row
-    IS — under the fix it is the doomed continuation FUSED with the summary turn's user prompt
-    (pydantic-ai merges two adjacent `ModelRequest`s, so the withheld round and the appended
-    prompt commit as one row); under the bug it is that continuation committed bare, before any
-    prompt joined it, and the prompt reaches the store never. The `user-prompt` assertion below
-    is that difference, and it is the reason the script now spells the summary turn's text
-    instead of letting `_loop`'s next query turn fall into it — a tool call there fails the
-    summary turn and adds a retry round of its own, which is noise this demand is not about.
-
-    The prompt part is read as a substring of the stored payload rather than through `hydrate`,
-    for the reason `sql` is used at all here: the observation channel must not be a reader
-    under test."""
+    read as claiming the store never ends on one."""
     def _kinds(store):
         return [k for (k,) in sql(store, """
             SELECT m.kind FROM message m
@@ -590,9 +559,7 @@ def test_the_cut_off_correlation_session_withholds_its_own_doomed_round(tmp_path
 
     cut_stores: list = []
     run(tmp_path / "cut", run_id="lz808-rows-cut", answer=answer_hits(TWO_ACTORS),
-        gather_turns=_loop(CORRELATION_REQUEST_LIMIT - 1) + [
-            Turn(text="what the lead had reached before its ceiling")],
-        store_factory=store_factory(tmp_path / "cutdb", sink=cut_stores))
+        gather_turns=_loop(20), store_factory=store_factory(tmp_path / "cutdb", sink=cut_stores))
 
     kinds = _kinds(cut_stores[-1])
     stamp = dict(sql(cut_stores[-1], "SELECT agent_id, truncated_by FROM session"))
@@ -601,29 +568,16 @@ def test_the_cut_off_correlation_session_withholds_its_own_doomed_round(tmp_path
         "there is no doomed round here to withhold"
     )
     assert kinds, f"the correlation lead's session stored no rows at all: {stamp!r}"
-    assert len(kinds) == 2 * (CORRELATION_REQUEST_LIMIT - 1) + 1, (
+    assert len(kinds) == 2 * CORRELATION_REQUEST_LIMIT, (
         f"{len(kinds)} rows for {CORRELATION_REQUEST_LIMIT} requests — a session that spent its "
-        f"ceiling holds one request and one response for each of its {CORRELATION_REQUEST_LIMIT - 1} "
-        "query rounds, plus the summary turn's own request; a further row is the doomed "
-        "round's continuation committed on its own, because the recorder measured this "
+        "ceiling holds one request and one response per round it ran, and the extra row is the "
+        "doomed round's own continuation, committed because the recorder measured this "
         f"dispatch against a ceiling that is not its own: {kinds}"
     )
-    assert kinds[-1] == "request", (
-        "the cut-off correlation session no longer ends on the summary turn's own request — "
-        "its response is never flushed (there is no gather-side run-end flush), so this is the "
-        f"same trailing-request parity a lead that FINISHED ends on: {kinds}"
-    )
-    last_payload = sql(cut_stores[-1], """
-        SELECT p.payload FROM message m
-        JOIN session s ON s.session_id = m.session_id
-        JOIN message_payload p ON p.message_id = m.id
-        WHERE s.agent_id = ? ORDER BY m.id DESC LIMIT 1
-    """, (f"gather:{L3}",))[0][0]
-    assert "user-prompt" in str(last_payload), (
-        "the last stored row is the doomed round's continuation committed BARE — the summary "
-        "turn's prompt never fused into it and never reached the store, which is what the "
-        "recorder measuring the wrong ceiling produces at exactly this row count: "
-        f"{str(last_payload)[:200]!r}"
+    assert kinds[-1] == "response", (
+        "the cut-off correlation session ends on a request for a round that was never sent — "
+        "exactly the state `_stamp_gather_terminator`'s docstring rests on being impossible, "
+        f"and nothing on this side flushes it afterwards: {kinds}"
     )
 
     clean_stores: list = []

@@ -61,6 +61,7 @@ from defender.hooks.record_lesson_load import (
 from ._deps import (
     AgentDeps,
     GatherDeps,
+    QueryDoor,
     _BASH_TIMEOUT_S,
     _BASH_VERB,
     _INFRA_EXIT_CODE,
