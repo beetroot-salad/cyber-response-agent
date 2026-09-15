@@ -110,6 +110,7 @@ def _ungradable_episode(tmp_path: Path) -> E.Episode:
     doc["worlds"][0] = E.ungradable_row(E.WITHHELD_WORLD, declared="benign",
                                         reason="a call on 'elastic' faulted <b>x</b>")
     doc["withheld_findings"] = []
+    E.drop_lanes(doc, E.WITHHELD_WORLD)  # the pass never walks an ungradable row's draws
     E.write_judge(ep.dir, doc)
     return ep
 
@@ -603,6 +604,7 @@ def test_1025_leftover_draw_documents_under_a_world_the_record_excludes(tmp_path
     doc["world_findings"] = [r for r in doc["world_findings"]
                              if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
     doc["enqueued_rows"], doc["world_enqueued_rows"] = 0, 4
+    E.drop_lanes(doc, E.GRADED_WORLD)  # no row, so the pass never walked it
     E.write_judge(ep.dir, doc)
     page = render(ep)
     row = f"f-{E.GRADED_WORLD}-0-0"
@@ -635,6 +637,7 @@ def test_1025_phantom_family_draw_on_an_episode_with_no_family_judge_call(tmp_pa
     doc = E.sample_grade()
     doc["world_findings"] = [r for r in doc["world_findings"] if f"/{E.FAMILY}/" not in r["finding_id"]]
     doc["world_enqueued_rows"] = 2
+    E.drop_lanes(doc, E.FAMILY)
     E.write_judge(ep.dir, doc)
     page = render(ep)
     band = page.text_of("sec-verdict")

@@ -328,6 +328,18 @@ demands:
       world's disposition only, and the fixture keeps `withheld_findings` populated as the
       enqueue writes it. This seed's original "every defender finding" was the extraction's
       wording, not the enqueue's (`handoff.refuted`).
+      THE LEDGER (post-review, #1042 fifth pass): "reproduces the enqueue's partition" is
+      discharged by READING it, not re-running it. The enqueue writes its decision per finding
+      to `judge.yaml.dispositions` (`{finding_id, lane, reason}`, `enqueue.disposition_entry`)
+      and the page renders that ledger; the page's earlier copy of the lane rule, and then
+      the borrowed rule fed with inputs rebuilt from the rows, each drifted from the pass on
+      an edge (`test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed`).
+      The fixture's ledger is held to the real pass's output
+      (`test_1025_the_fixture_ledger_is_the_passes_own`); the discard arm is the fixture
+      re-filing the defender entries as the pass does (`block_defender_lane`). A record with
+      no ledger (the two pre-ledger archives) renders one group, "record carries no
+      disposition ledger — not enqueued", and decides nothing
+      (`test_1025_a_record_with_no_ledger_says_so_instead_of_guessing`).
 
   - id: d14_withheld_never_reads_as_rejected
     kind: negative
@@ -2232,6 +2244,13 @@ demands:
       - "interacts(render_episode->sec_findings)"
       - "interacts(render_episode->sec_verdict)"
     discharged_by: test_1025_a_finding_that_is_not_a_mapping
+    note: >-
+      AMENDED with the ledger (#1042 fifth pass): the scalar is a finding the pass dropped and
+      named ("not a mapping", `unqueueable_findings` and the ledger alike), so the page renders
+      it as the ledger has it — a claim-less row under "unqueueable — …", counted on tile 3's
+      total and its unqueueable part — rather than skipping it and reading "0 unqueueable"
+      against a record line that said otherwise. The J9f resolution's "no row" predates the
+      ledger, when the page had no text to key a row from.
   - id: r_a_draw_document_that_is_only_a_failure_reason
     kind: domain-outcome
     form: test

@@ -500,12 +500,87 @@ def family_queue_row(draw: int, index: int, *, topic: str | None = None,
                                    topic=topic)
 
 
+def finding_id(label: str, draw: int | str, index: int) -> str:
+    """`build_finding_row`'s id spelling — the key every record list joins a finding on."""
+    return f"{EPISODE_ID}/{label}/{draw}/{index}"
+
+
+def disposition(label: str, draw: int | str, index: int, lane: str,
+                reason: str | None = None) -> dict[str, Any]:
+    """One `dispositions` ledger entry, in `enqueue.disposition_entry`'s shape."""
+    return {"finding_id": finding_id(label, draw, index), "lane": lane, "reason": reason}
+
+
+def sample_dispositions(*, family: bool = True) -> list[dict[str, Any]]:
+    """The ledger the real pass writes for the sample, IN ITS WALK ORDER: the family draw's
+    three world rows first, then each graded row's draw in row order — the withheld world's
+    four defender findings withheld and its fifth a world row, the graded world's four
+    enqueued and its fifth a world row. `test_1025_the_fixture_ledger_is_the_passes_own`
+    holds this list to the real `enqueue_report`'s output."""
+    ledger = [disposition(FAMILY, 0, i, "world") for i in range(3)] if family else []
+    ledger += [disposition(WITHHELD_WORLD, 0, i, "withheld", SAMPLE.withheld_reason)
+               for i in range(4)]
+    ledger.append(disposition(WITHHELD_WORLD, 0, 4, "world"))
+    ledger += [disposition(GRADED_WORLD, 0, i, "defender") for i in range(4)]
+    ledger.append(disposition(GRADED_WORLD, 0, 4, "world"))
+    return ledger
+
+
+def set_lane(doc: dict[str, Any], label: str, draw: int | str, index: int, lane: str,
+             reason: str | None = None) -> dict[str, Any]:
+    """Re-file one coordinate on the fixture record's ledger the way the writer would have:
+    the entry replaced in place (appended when new) and, for an unqueueable lane, its
+    `unqueueable_findings` line beside it — the writer derives that list off the ledger, so a
+    fixture that changes one without the other is a record the pass never wrote."""
+    entry = disposition(label, draw, index, lane, reason)
+    ledger = doc["dispositions"]
+    for n, existing in enumerate(ledger):
+        if existing["finding_id"] == entry["finding_id"]:
+            ledger[n] = entry
+            break
+    else:
+        ledger.append(entry)
+    doc["unqueueable_findings"] = [
+        line for line in doc["unqueueable_findings"]
+        if not line.startswith(entry["finding_id"] + ": ")]
+    if lane == "unqueueable":
+        doc["unqueueable_findings"].append(f"{entry['finding_id']}: {reason}")
+    return doc
+
+
+def drop_lanes(doc: dict[str, Any], label: str) -> dict[str, Any]:
+    """The record of a pass that never walked `label` (an ungradable row, no row at all, a
+    family call that never ran): its ledger entries gone, as the writer leaves them."""
+    doc["dispositions"] = [e for e in doc["dispositions"]
+                           if _coordinate(e["finding_id"])[0] != label]
+    return doc
+
+
+def block_defender_lane(doc: dict[str, Any], verdict_word: str) -> dict[str, Any]:
+    """The record as the enqueue writes it on a discard / corpus-contradiction episode (O7):
+    the word on `verdict_word`, `enqueued_rows` 0, every defender entry on the ledger
+    re-filed never eligible with that word — and the withheld ones untouched (withheld before
+    blocked, 92-reconciliation F-2)."""
+    doc["verdict_word"] = verdict_word
+    doc["enqueued_rows"] = 0
+    doc["dispositions"] = [
+        {**e, "lane": "never_eligible", "reason": verdict_word} if e["lane"] == "defender"
+        else e for e in doc["dispositions"]]
+    return doc
+
+
+def _coordinate(finding_id: str) -> tuple[str, str, str]:
+    _prefix, label, draw, index = finding_id.rsplit("/", 3)
+    return label, draw, index
+
+
 def sample_grade(*, withheld_findings: list[dict[str, Any]] | None = None,
                  family: bool = True) -> dict[str, Any]:
     """The sample-shaped `judge.yaml` document: two graded rows (one withheld), the control
     absent (no row), `verdict_word: undecidable`, `family_outcome: discard`, four defender rows
     enqueued, five world-author rows (two without the family's three when `family=False` —
-    the record of an episode whose family call never ran), four withheld."""
+    the record of an episode whose family call never ran), four withheld — and the ledger
+    (`dispositions`) that says so per finding."""
     withheld_docs = _world_findings_rows(withheld=True)
     graded_docs = _world_findings_rows(withheld=False)
     prefix = f"{EPISODE_ID}"
@@ -535,8 +610,10 @@ def sample_grade(*, withheld_findings: list[dict[str, Any]] | None = None,
         "family_malformed_replies": 0, "world_enqueued_rows": len(world_rows),
         "world_enqueued_to": WORLD_ENQUEUED_TO, "world_findings": world_rows,
         "withheld_findings": withheld_findings if withheld_findings is not None else [
-            {"finding": row, "world": WITHHELD_WORLD, "reason": SAMPLE.withheld_reason}
-            for row in withheld_docs[:4]],
+            {"finding": row, "world": WITHHELD_WORLD, "reason": SAMPLE.withheld_reason,
+             "finding_id": finding_id(WITHHELD_WORLD, 0, i)}
+            for i, row in enumerate(withheld_docs[:4])],
+        "dispositions": sample_dispositions(family=family),
     }
 
 

@@ -1,11 +1,17 @@
-"""#1025 (PR #1042 review) — the page BORROWS what the judge owns rather than copying it.
+"""#1025 (PR #1042 review) — the page BORROWS what the judge owns rather than copying it, and
+READS what the pass decided rather than deciding again.
 
 Two things the first cut of the page re-implemented, and each copy drifted: reading a file
 safely (an ``lstat`` screen and then the tolerant reader's bare ``read_text``, per call site,
 with the ``except`` forgotten at two of them) and deciding what the enqueue did with a finding
 (a hand-mirrored precedence that read a faulted world's mechanical finding as "never enqueued"
-while the pass had queued it). Both now come from one owner — ``_io.read_jsonl_rows_guarded``
-and ``enqueue.route_finding`` — and these tests pin the places the copies were wrong.
+while the pass had queued it). The reader now comes from one owner
+(``_io.read_jsonl_rows_guarded``). The lane went one step further: borrowing the pass's rule
+(``enqueue.route_finding``) still left the page rebuilding the rule's INPUTS from the record's
+rows, and that rebuild disagreed with the pass on a record naming one world twice — so the
+pass now writes its decision per finding to the record (``judge.yaml.dispositions``, the
+ledger) and the page renders the ledger. These tests pin the places the copies were wrong and
+the ledger's contract at both ends.
 """
 from __future__ import annotations
 
@@ -166,7 +172,7 @@ def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# One lane rule — `route_finding`, asked by the pass and by the page
+# One lane rule — `route_finding`, walked by the pass; its answers are the ledger below
 # ---------------------------------------------------------------------------------------
 
 
@@ -193,6 +199,7 @@ def test_1025_an_ungradable_worlds_mechanical_finding_is_queued_and_the_page_say
     assert coord in [r["finding_id"] for r in report.world_rows], report.world_rows
     doc["world_findings"] = [r for r in report.world_rows if r["finding_id"] == coord]
     doc["withheld_findings"] = []
+    doc["dispositions"] = report.dispositions
     E.write_judge(ep.dir, doc)
 
     page = render(ep)
@@ -258,9 +265,12 @@ def test_1025_route_finding_is_the_rule_enqueue_report_walks(tmp_path):
 
 
 def test_1025_a_withheld_entry_tagged_family_renders_beside_the_family_draws(tmp_path):
-    """A `withheld_findings` entry carrying `world: family` — a stub with no draw — sorts beside
-    the family's int-keyed draws and renders; before, the lede's draw sort compared `None`
-    against `0` and the whole page raised `TypeError` (d01: only `family.yaml` is fatal)."""
+    """A `withheld_findings` entry carrying `world: family` and no ledger entry — a record the
+    pass never writes (family findings are never withheld) — is no row: the ledger names no
+    such finding, so the page shows the family draws as usual and says in the queue
+    accounting that the withheld list and the ledger disagree by one. Before, the entry
+    became a draw-less stub whose `None` draw key the lede's sort compared against `0`, and
+    the whole page raised `TypeError` (d01: only `family.yaml` is fatal)."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["withheld_findings"].append(
@@ -268,8 +278,11 @@ def test_1025_a_withheld_entry_tagged_family_renders_beside_the_family_draws(tmp
          "world": E.FAMILY, "reason": S.withheld_reason})
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    assert f"f-{E.FAMILY}-withheld-0" in page.ids, page.ids_with("f-")
     assert f"f-{E.FAMILY}-0-0" in page.ids
+    assert "a family-tagged withheld claim" not in page.text_of("sec-findings")
+    acct = page.one(cls="vd-acct").text()
+    assert "withheld list: 5 entries · 4 matched" in acct, acct
+    assert "record and page disagree by 1" in acct, acct
 
 
 def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
@@ -358,3 +371,150 @@ def test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a
     queue = tmp_path / "queue"
     for row_file in queue.rglob("*.jsonl"):
         assert "about the world" not in row_file.read_text(encoding="utf-8"), row_file
+
+
+# ---------------------------------------------------------------------------------------
+# The ledger — the pass writes what it decided; the page reads it and decides nothing
+# ---------------------------------------------------------------------------------------
+
+
+def _ledger_of(doc: dict) -> dict[str, tuple[str, str | None]]:
+    return {e["finding_id"]: (e["lane"], e["reason"]) for e in doc["dispositions"]}
+
+
+def test_1025_the_fixture_ledger_is_the_passes_own(tmp_path):
+    """`sample_grade()["dispositions"]` — the ledger every page test renders from — is,
+    entry for entry AND in walk order, what the real `enqueue_report` writes over the sample
+    episode's own draw documents and rows; and the `withheld_findings` it hands the record
+    carry the same `finding_id` the ledger keys them by. A fixture ledger the pass would not
+    write is a fixture bug, and it fails here rather than as a page test that passed against
+    a record no pass produces."""
+    enqueue = E.mod("learning.judge.enqueue")
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    report = enqueue.enqueue_report(ep.dir, doc, queue_dir=tmp_path / "queue")
+    assert report.dispositions == doc["dispositions"]
+    assert [w["finding_id"] for w in report.withheld_findings] == [
+        w["finding_id"] for w in doc["withheld_findings"]]
+    assert report.unqueueable == doc["unqueueable_findings"] == []
+
+    report = enqueue.enqueue_report(ep.dir, dict(doc, verdict_word="discard"),
+                                    queue_dir=tmp_path / "queue-discard")
+    assert report.dispositions == E.block_defender_lane(E.sample_grade(), "discard")["dispositions"]
+
+
+def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
+    """`judge.yaml` carries `dispositions` as `grade_episode` wrote it and `read_grade` hands
+    it back unchanged; a record written before the ledger existed (no key) reads as `None`,
+    distinct from a pass that walked nothing (`[]`); and a planted entry naming no lane, or
+    no finding, is refused with the rest of the record — never a row of the wrong shape."""
+    judge = E.mod("learning.judge")
+    enqueue = E.mod("learning.judge.enqueue")
+    ep = E.sample_episode(tmp_path)
+    grade = judge.read_grade(ep.dir)
+    assert grade.dispositions == E.sample_dispositions()
+    assert grade.dispositions[0] == enqueue.disposition_entry(
+        E.finding_id(E.FAMILY, 0, 0), enqueue.LANE_WORLD)
+
+    doc = E.sample_grade()
+    del doc["dispositions"]
+    E.write_judge(ep.dir, doc)
+    assert judge.read_grade(ep.dir).dispositions is None
+
+    doc = E.sample_grade()
+    doc["dispositions"] = []
+    E.write_judge(ep.dir, doc)
+    assert judge.read_grade(ep.dir).dispositions == []
+
+    for bad in ({"finding_id": E.finding_id(E.GRADED_WORLD, 0, 0), "lane": "teleported"},
+                {"lane": "defender", "reason": None}):
+        doc = E.sample_grade()
+        doc["dispositions"].append(bad)
+        E.write_judge(ep.dir, doc, check=False)
+        with pytest.raises(judge.JudgeRefused, match="ledger entry"):
+            judge.read_grade(ep.dir)
+    render_text = render(ep).text_of("sec-verdict")
+    assert "grade record unreadable" in render_text, render_text
+
+
+def test_1025_the_page_shows_the_ledger_and_never_re_decides_a_lane(tmp_path):
+    """The page's disposition for a finding is the ledger's entry, full stop — the rows, the
+    verdict word and the withheld map are NOT consulted a second time. Pinned by a record no
+    pass writes: the withheld world's row still says `withheld_reason: reachability_
+    unmeasured` while its ledger entries are re-filed `defender`, and the measuring world's
+    say `withheld` under a `verdict_word: discard`. A page that re-ran the lane rule over the
+    rows would show the rows' answer; this one shows the ledger's, and the queue accounting
+    says the withheld list and the ledger disagree."""
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    doc["verdict_word"] = "discard"
+    for i in range(4):
+        E.set_lane(doc, E.WITHHELD_WORLD, 0, i, "defender")
+        E.set_lane(doc, E.GRADED_WORLD, 0, i, "withheld", "a reason the rows never gave")
+    E.write_judge(ep.dir, doc)
+    page = render(ep)
+    for i in range(4):
+        assert "defender: enqueued" in page.group_of(f"f-{E.WITHHELD_WORLD}-0-{i}").text()
+        graded = page.group_of(f"f-{E.GRADED_WORLD}-0-{i}").text()
+        assert "withheld — a reason the rows never gave" in graded, graded
+        assert "never eligible" not in graded, graded
+    acct = page.one(cls="vd-acct").text()
+    assert "withheld list: 4 entries · 4 matched" in acct, acct
+    assert "record and page disagree" not in acct, acct
+    three = page.text_of("vd-tile-3")
+    for part in ("4 defender", "4 withheld"):
+        assert part in three, (part, three)
+    assert "never eligible" not in three, three
+
+
+def test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed(tmp_path):
+    """The #1042 review's case: `judge.yaml` names the withheld world on TWO rows — the first
+    with `withheld_reason` set, the second without. The pass takes every row into its
+    withheld map (the first wins) and files the world's four defender findings withheld; a
+    page that rebuilt that map from one row per label (the last) filed them enqueued, and
+    tile 3 read "8 defender / 4 withheld" against a record of 4 and 8. With the ledger the
+    page cannot disagree: it shows four withheld and four enqueued, exactly the pass's
+    entries, and the accounting matches on both counts."""
+    enqueue = E.mod("learning.judge.enqueue")
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    doc["worlds"].append(E.world_row(E.WITHHELD_WORLD, declared="benign", has_refused=None,
+                                     bucket="lead-set"))
+    report = enqueue.enqueue_report(ep.dir, doc, queue_dir=tmp_path / "queue")
+    doc["dispositions"] = report.dispositions
+    doc["withheld_findings"] = report.withheld_findings
+    doc["enqueued_rows"] = report.appended
+    E.write_judge(ep.dir, doc)
+    page = render(ep)
+    withheld = [e for e in report.dispositions if e["lane"] == enqueue.LANE_WITHHELD]
+    assert len(withheld) == 4, report.dispositions
+    assert report.appended == 4, report
+    for i in range(4):
+        assert "withheld" in page.group_of(f"f-{E.WITHHELD_WORLD}-0-{i}").text()
+        assert "defender: enqueued" in page.group_of(f"f-{E.GRADED_WORLD}-0-{i}").text()
+    three = page.text_of("vd-tile-3")
+    for part in ("4 defender", "4 withheld"):
+        assert part in three, (part, three)
+    acct = page.one(cls="vd-acct").text()
+    assert "record: 4 enqueued · page found: 4" in acct, acct
+    assert "withheld list: 4 entries · 4 matched" in acct, acct
+    assert "disagree" not in acct, acct
+
+
+def test_1025_a_record_with_no_ledger_says_so_instead_of_guessing(tmp_path):
+    """A `judge.yaml` written before the ledger existed (the two real archives the design doc
+    quotes) renders every on-disk finding under one group, "record carries no disposition
+    ledger — not enqueued": the page does not fall back to deciding lanes itself, tile 3
+    counts nothing as queued, and no stub is invented off `world_findings`."""
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    del doc["dispositions"]
+    E.write_judge(ep.dir, doc)
+    (ep.world(E.GRADED_WORLD) / "judge" / "0.yaml").unlink()
+    page = render(ep)
+    for row_id in (f"f-{E.WITHHELD_WORLD}-0-0", f"f-{E.FAMILY}-0-0"):
+        heading = page.group_of(row_id).text()
+        assert "record carries no disposition ledger" in heading, heading
+    assert not [i for i in page.ids if i.startswith(f"f-{E.GRADED_WORLD}-")], page.ids_with("f-")
+    three = page.text_of("vd-tile-3")
+    assert three.startswith("0 of 8"), three

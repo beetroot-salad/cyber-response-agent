@@ -15,6 +15,14 @@ values the loader has already typed cannot take the page down over one stray sca
 file, and no renderer can disagree with another about what a record says, because there is one
 reading of it. The page always reads through the package readers rather than re-parsing any
 record itself.
+
+A READER OF DECISIONS, NEVER A MAKER OF THEM. Where the page shows what a pass DID — which
+lane a finding took, whether a world was walked — it shows what that pass wrote down
+(`judge.yaml.dispositions`, the enqueue's own ledger), not a re-run of the pass's rule over
+the record's rows. Two earlier shapes of this page did the latter (a copied rule, then the
+borrowed rule fed with rebuilt inputs) and each disagreed with the pass at an edge the page
+was built to explain. When the page needs a decision the record does not carry, the fix is to
+the writer.
 """
 from __future__ import annotations
 
@@ -47,21 +55,14 @@ from defender.learning.branch.steps import STEPS, Step
 from defender.learning.judge import JudgeRefused, read_grade
 from defender.learning.judge import family
 from defender.learning.judge.enqueue import (
-    KIND_DRAW,
-    KIND_FAMILY,
     KIND_MECHANICAL,
-    ROUTE_DEFENDER,
-    ROUTE_NEVER_ELIGIBLE,
-    ROUTE_NO_CHANNEL,
-    ROUTE_NO_ROW,
-    ROUTE_UNGRADABLE,
-    ROUTE_WITHHELD,
-    ROUTE_WORLD,
+    LANE_DEFENDER,
+    LANE_NEVER_ELIGIBLE,
+    LANE_UNQUEUEABLE,
+    LANE_WITHHELD,
+    LANE_WORLD,
     DrawsSkipReport,
-    defender_lane_blocked,
     draws_on_disk_report,
-    route_finding,
-    withheld_reasons_of,
 )
 from defender.learning.judge.render import episode_alert
 from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
@@ -645,7 +646,7 @@ class _Findings:
     def __init__(self) -> None:
         self.rows: list[_Finding] = []
         self.counts = {"defender": 0, "world_author": 0, "withheld": 0, "unqueueable": 0,
-                       "dropped": 0, "never_eligible": 0, "mappings": 0}
+                       "dropped": 0, "never_eligible": 0}
         self.world_reports: dict[str, DrawsSkipReport] = {}
         self.draw_failures: list[tuple[str, int, str]] = []
         self.dropped: list[tuple[str, int, int]] = []
@@ -1087,39 +1088,52 @@ def _cost_totals(ep: _Episode) -> tuple[float, bool, bool, str, str]:
 # =========================================================================================
 
 
-def _unqueueable_lookup(grade: Any) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for line in _items(getattr(grade, "unqueueable_findings", None)):
-        if not isinstance(line, str) or ": " not in line:
-            continue
-        coord, reason = line.split(": ", 1)
-        parts = coord.rsplit("/", 3)
-        if len(parts) == 4:
-            _prefix, label, draw, index = parts
-            out[f"{label}/{draw}/{index}"] = reason
+def _coordinate_of(finding_id: Any) -> str | None:
+    """`<label>/<draw>/<index>` off a `build_finding_row` id (`<run_id>/<label>/<draw>/
+    <index>`) — the spelling every record list keys a finding by. `None` for anything else."""
+    if not isinstance(finding_id, str):
+        return None
+    parts = finding_id.rsplit("/", 3)
+    if len(parts) != 4:
+        return None
+    _prefix, label, draw, index = parts
+    return f"{label}/{draw}/{index}"
+
+
+def _ledger_of(grade: Any) -> dict[str, dict[str, Any]] | None:
+    """The record's ledger by coordinate (`EpisodeGrade.dispositions`, validated on read —
+    every entry names its finding and a lane), or `None` for a record that carries none."""
+    if grade is None or grade.dispositions is None:
+        return None
+    out: dict[str, dict[str, Any]] = {}
+    for entry in grade.dispositions:
+        coord = _coordinate_of(entry["finding_id"])
+        if coord is not None:
+            out.setdefault(coord, entry)
     return out
 
 
 def _world_findings_lookup(grade: Any) -> dict[str, dict[str, Any]]:
+    """The questioner rows the pass built (`world_findings`), by coordinate — the J9b stub's
+    text for a world-lane entry whose draw document is gone."""
     out: dict[str, dict[str, Any]] = {}
-    for row in _items(getattr(grade, "world_findings", None)):
-        if not isinstance(row, dict):
-            continue
-        fid = row.get("finding_id")
-        if not isinstance(fid, str):
-            continue
-        parts = fid.rsplit("/", 3)
-        if len(parts) == 4:
-            _prefix, label, draw, index = parts
-            out[f"{label}/{draw}/{index}"] = row
+    for row in _items(grade.world_findings):
+        if isinstance(row, dict):
+            coord = _coordinate_of(row.get("finding_id"))
+            if coord is not None:
+                out.setdefault(coord, row)
     return out
 
 
-def _withheld_by_label(grade: Any) -> dict[str, list[dict[str, Any]]]:
-    out: dict[str, list[dict[str, Any]]] = {}
-    for item in _items(getattr(grade, "withheld_findings", None)):
-        if isinstance(item, dict) and isinstance(item.get("world"), str):
-            out.setdefault(item["world"], []).append(item)
+def _withheld_lookup(grade: Any) -> dict[str, dict[str, Any]]:
+    """The findings the pass withheld, whole (`withheld_findings`), by coordinate — the J9b
+    stub's text for a withheld entry whose draw document is gone."""
+    out: dict[str, dict[str, Any]] = {}
+    for item in _items(grade.withheld_findings):
+        if isinstance(item, dict) and isinstance(item.get("finding"), dict):
+            coord = _coordinate_of(item.get("finding_id"))
+            if coord is not None:
+                out.setdefault(coord, item)
     return out
 
 
@@ -1128,21 +1142,46 @@ def _bump(counts: dict[str, int], disposition: str) -> None:
         counts[disposition] += 1
 
 
-def _finding_fields(finding: dict[str, Any]) -> dict[str, Any]:
-    """The row's own fields off one draw finding, as `_Finding` keyword arguments."""
+def _finding_fields(finding: Any) -> dict[str, Any]:
+    """The row's own fields off one draw finding, as `_Finding` keyword arguments. A finding
+    that is not a mapping (the ledger names those too — dropped, "not a mapping") has none."""
+    if not isinstance(finding, dict):
+        return {"raw": finding}
     return {"claim": finding.get("claim"), "root_cause": finding.get("root_cause"),
             "anchor": finding.get("anchor"), "topic": finding.get("topic"),
             "bucket": finding.get("bucket"), "evidence": finding.get("evidence"),
             "world_field": finding.get("world"), "raw": finding}
 
 
+#: The ledger's lane → the page's disposition word (`_disposition_heading_raw`).
+_LANE_WORD = {LANE_DEFENDER: "defender", LANE_WORLD: "world_author", LANE_WITHHELD: "withheld",
+              LANE_UNQUEUEABLE: "unqueueable", LANE_NEVER_ELIGIBLE: "never_eligible"}
+
+
+def _off_ledger_disposition(ep: _Episode, label: str) -> tuple[str, str | None]:
+    """A finding on disk that the ledger does not name: the pass never walked it, and the
+    record says why without any lane being re-decided here — the world's own row is
+    `ungradable` (its draws are never walked), no row names the world at all, or the pass
+    simply did not see this document (a leftover from an earlier, wider attempt)."""
+    entry = ep.entries.get(label)
+    row = entry.row if entry is not None else None
+    if label != _FAMILY_LABEL and row is None:
+        return "no_grade_row", None
+    if row is not None and not family.is_gradable_row(row):
+        reason = row.get("ungradable_reason")
+        return "world_ungradable", reason if isinstance(reason, str) else None
+    return "never_on_record", None
+
+
 def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
-    """Every finding row the page shows, keyed `(label, draw, index)`. Each row's fate is
-    `enqueue.route_finding`'s answer — THE lane rule the enqueue pass itself walks, asked of
-    the record's own signals (a world's row, its `withheld_reason`, the family's verdict word)
-    — with the record's own `unqueueable_findings` and `world_findings` laid over it (#1025
-    amendment 3: never a re-run of the enqueue pass, and since the mirror drifted, never a
-    copy of its rule either)."""
+    """Every finding row the page shows, keyed `(label, draw, index)`. Each row's fate is READ
+    OFF THE RECORD'S LEDGER (`EpisodeGrade.dispositions` — what the enqueue pass did with
+    that coordinate, written where it was decided) and never re-decided here: the page
+    carried first a copy of the lane rule and then the rule itself fed with inputs rebuilt
+    from the rows, and both drifted from the pass on the edges (#1025 amendment 3, and the
+    #1042 review's duplicate-label case). What the page adds is only what it can see and the
+    record cannot: a document on disk the ledger never named (`_off_ledger_disposition`), and
+    a ledger entry whose document is gone (a J9b stub)."""
     out = _Findings()
     rows = out.rows
     counts = out.counts
@@ -1176,63 +1215,33 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
             elif dropped is not None:
                 out.dropped.append((label, draw, dropped))
 
-    if grade is None:
-        # No grade record at all: every on-disk finding renders under one group, undisposed.
-        for label in walked_labels:
-            docs, _report = ep.draws[label]
-            for draw, doc in docs.items():
-                for index, finding in enumerate(_items(doc.get("findings"))):
-                    if not isinstance(finding, dict):
-                        continue
-                    counts["mappings"] += 1
-                    rows.append(_Finding(
-                        row_id=f"f-{label}-{draw}-{index}", label=label, draw=draw,
-                        index=index, subject=finding.get("subject"),
-                        disposition="no_grade", reason=None, stub=False, recorded_id=None,
-                        **_finding_fields(finding)))
-        out.group_index = _group_numbering(rows)
-        return out
+    ledger = _ledger_of(grade)
 
-    # The enqueue's own inputs, off the record's rows exactly as `enqueue_report` builds them.
-    world_rows = [w.row for w in entries.values() if w.row is not None]
-    withheld_reasons = withheld_reasons_of(world_rows)
-    verdict_word = getattr(grade, "verdict_word", None)
-    defender_blocked = defender_lane_blocked(verdict_word)
-
-    unqueueable = _unqueueable_lookup(grade)
-    world_findings_by_coord = _world_findings_lookup(grade)
-    seen_coords: set[str] = set()
-
-    def _dispose(label: str, finding: dict[str, Any], kind: str, coord: str,
-                 ) -> tuple[str, str | None]:
-        entry = entries.get(label)
-        return _finding_disposition(
-            route_finding(
-                label=label, finding=finding, kind=kind,
-                world_row=entry.row if entry is not None else None,
-                withheld_reasons=withheld_reasons, defender_blocked=defender_blocked),
-            coord=coord, unqueueable=unqueueable, verdict_word=verdict_word,
-            world_findings_by_coord=world_findings_by_coord)
+    def _dispose(label: str, coord: str) -> tuple[str, str | None, Any]:
+        """The row's disposition word, its reason and the record's id for it: the ledger's
+        entry where there is one; otherwise the record's own account of why the pass never
+        reached it — or, with no ledger at all, that fact alone."""
+        if grade is None:
+            return "no_grade", None, None
+        if ledger is None:
+            return "no_ledger", None, None
+        entry = ledger.pop(coord, None)
+        if entry is None:
+            return (*_off_ledger_disposition(ep, label), None)
+        return _LANE_WORD[entry["lane"]], entry.get("reason"), entry["finding_id"]
 
     for label in walked_labels:
         entry = entries.get(label)
-        kind = KIND_FAMILY if label == _FAMILY_LABEL else KIND_DRAW
-
         docs, _report = ep.draws[label]
         for draw, doc in docs.items():
             for index, finding in enumerate(_items(doc.get("findings"))):
-                if not isinstance(finding, dict):
-                    continue
-                counts["mappings"] += 1
                 coord = f"{label}/{draw}/{index}"
-                seen_coords.add(coord)
-                # `route_finding` reads an ABSENT `subject` as the defender's, exactly as the
-                # enqueue pass does; the row shows the same reading.
-                subject = finding.get("subject", SUBJECT_DEFENDER)
-                disposition, reason = _dispose(label, finding, kind, coord)
+                disposition, reason, recorded_id = _dispose(label, coord)
                 _bump(counts, disposition)
-                recorded = world_findings_by_coord.get(coord)
-                recorded_id = recorded.get("finding_id") if isinstance(recorded, dict) else None
+                # `subject` ABSENT reads as the defender's, as the enqueue pass reads it (the
+                # pre-#1007 draw shape); the row shows the same reading.
+                subject = (finding.get("subject", SUBJECT_DEFENDER)
+                           if isinstance(finding, dict) else None)
                 rows.append(_Finding(
                     row_id=f"f-{label}-{draw}-{index}", label=label, draw=draw, index=index,
                     subject=subject, disposition=disposition, reason=reason, stub=False,
@@ -1242,71 +1251,53 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
         for mech_index, finding in enumerate(
                 _items(entry.row.get("mechanical_world_findings")) if entry and entry.row
                 else []):
-            if not isinstance(finding, dict):
-                continue
-            coord = f"{label}/mechanical/{mech_index}"
-            seen_coords.add(coord)
-            counts["mappings"] += 1
-            disposition, reason = _dispose(label, finding, KIND_MECHANICAL, coord)
+            coord = f"{label}/{KIND_MECHANICAL}/{mech_index}"
+            disposition, reason, recorded_id = _dispose(label, coord)
             _bump(counts, disposition)
-            recorded = world_findings_by_coord.get(coord)
             rows.append(_Finding(
-                row_id=f"f-{label}-mechanical-{mech_index}", label=label, draw="mechanical",
-                index=mech_index, subject=SUBJECT_WORLD, disposition=disposition,
-                reason=reason, stub=False,
-                recorded_id=recorded.get("finding_id") if isinstance(recorded, dict) else None,
+                row_id=f"f-{label}-{KIND_MECHANICAL}-{mech_index}", label=label,
+                draw=KIND_MECHANICAL, index=mech_index, subject=SUBJECT_WORLD,
+                disposition=disposition, reason=reason, stub=False, recorded_id=recorded_id,
                 **_finding_fields(finding)))
 
-    # Record-only stubs: a recorded coordinate whose draw DOCUMENT is absent (J9b).
-    present_docs = {label: set(ep.draws[label][0]) for label in roster_labels}
-
-    for coord, row in world_findings_by_coord.items():
-        label, draw_s, index_s = coord.rsplit("/", 2)
-        try:
-            draw_i = int(draw_s)
-        except ValueError:
-            draw_i = None
-        if draw_i is not None and draw_i in present_docs.get(label, set()):
-            continue  # a present document, no stub (the document is the grain, F-5)
-        if coord in seen_coords:
-            continue
-        # A recorded world row IS a world finding: the stub carries the subject the record
-        # gave it, and the coordinate's middle segment says which of the three shapes it took.
-        kind = (KIND_FAMILY if label == _FAMILY_LABEL else
-                KIND_MECHANICAL if draw_s == KIND_MECHANICAL else KIND_DRAW)
-        disposition, reason = _dispose(label, {"subject": SUBJECT_WORLD}, kind, coord)
-        counts["mappings"] += 1
-        _bump(counts, disposition)
-        rows.append(_Finding(
-            row_id=f"f-{label}-{draw_s}-{index_s}", label=label, draw=draw_s, index=index_s,
-            subject=SUBJECT_WORLD, claim=row.get("finding"), disposition=disposition,
-            reason=reason, stub=True, recorded_id=row.get("finding_id")))
-
-    # A recorded withheld entry whose own draw document is present is ALREADY a row above —
-    # the record carries the finding whole (`enqueue_report`'s `withheld_findings`, the same
-    # mapping the draw document holds), so the join is the finding itself. Only an entry no
-    # on-disk withheld row matches gets a record-only stub (J9b's grain is the DOCUMENT): a
-    # world whose surviving documents carry two of its four recorded withheld findings shows
-    # all four, the two without a document flagged as such, rather than the two that survive.
-    on_disk_withheld: dict[str, list[dict[str, Any]]] = {}
-    for f in rows:
-        if f.disposition == "withheld" and not f.stub:
-            on_disk_withheld.setdefault(f.label, []).append(f.raw)
-    for label, wlist in _withheld_by_label(grade).items():
-        unmatched = list(on_disk_withheld.get(label, []))
-        for n, item in enumerate(wlist):
-            finding = item.get("finding")
-            if not isinstance(finding, dict):
+    # Record-only stubs (J9b): a ledger entry whose draw DOCUMENT is absent and whose text the
+    # record itself still carries — the questioner row the pass built for a world-lane entry
+    # (`world_findings`), the finding carried whole for a withheld one (`withheld_findings`).
+    # A defender or dropped entry with no document has no text anywhere on the record (its
+    # row went to the queue file, or nowhere), so it is a line in the queue accounting and
+    # not a row. THE GRAIN IS THE DOCUMENT (F-5): an entry naming a PRESENT document with
+    # fewer findings than the ledger knew renders no stub and no row.
+    if ledger:
+        present_docs = {label: set(ep.draws[label][0]) for label in roster_labels}
+        world_rows_by_coord = _world_findings_lookup(grade)
+        withheld_by_coord = _withheld_lookup(grade)
+        for coord, filed in ledger.items():
+            label, draw_s, index_s = coord.rsplit("/", 2)
+            try:
+                draw_i: int | None = int(draw_s)
+            except ValueError:
+                draw_i = None
+            if draw_i is not None and draw_i in present_docs.get(label, set()):
                 continue
-            if finding in unmatched:
-                unmatched.remove(finding)
+            if draw_s == KIND_MECHANICAL and label in entries and entries[label].row:
+                continue  # its row is on the record; the walk above rendered it
+            world_row = world_rows_by_coord.get(coord)
+            withheld = withheld_by_coord.get(coord)
+            if filed["lane"] == LANE_WORLD and world_row is not None:
+                fields: dict[str, Any] = {"claim": world_row.get("finding")}
+                subject = SUBJECT_WORLD
+            elif filed["lane"] == LANE_WITHHELD and withheld is not None:
+                fields = _finding_fields(withheld["finding"])
+                subject = SUBJECT_DEFENDER
+            else:
                 continue
-            counts["mappings"] += 1
-            counts["withheld"] += 1
+            disposition = _LANE_WORD[filed["lane"]]
+            _bump(counts, disposition)
             rows.append(_Finding(
-                row_id=f"f-{label}-withheld-{n}", label=label, draw=None, index=None,
-                subject=SUBJECT_DEFENDER, disposition="withheld", reason=item.get("reason"),
-                stub=True, recorded_id=finding.get("finding_id"), **_finding_fields(finding)))
+                row_id=f"f-{label}-{draw_s}-{index_s}", label=label, draw=draw_s,
+                index=index_s, subject=subject, disposition=disposition,
+                reason=filed.get("reason"), stub=True, recorded_id=filed["finding_id"],
+                **fields))
 
     out.group_index = _group_numbering(rows)
     return out
@@ -1317,35 +1308,6 @@ def _group_numbering(rows: list[_Finding]) -> dict[str, int]:
     numbering both the findings section and the cards' footers render."""
     return {h: n for n, h in enumerate(dict.fromkeys(_disposition_heading_raw(f) for f in rows),
                                        start=1)}
-
-
-def _finding_disposition(
-    route: tuple[str, str | None], *, coord: str, unqueueable: dict[str, str],
-    verdict_word: Any, world_findings_by_coord: dict[str, dict],
-) -> tuple[str, str | None]:
-    """The page's disposition word for one finding: `route_finding`'s lane, with the record's
-    own `unqueueable_findings` (a validation drop, named by coordinate) and `world_findings`
-    (a world row the pass built) laid over the two lanes that validate. Every other lane is
-    the route's own answer, spelled in the page's vocabulary (`_disposition_heading_raw`)."""
-    lane, reason = route
-    if lane in (ROUTE_WORLD, ROUTE_DEFENDER, ROUTE_NO_CHANNEL) and coord in unqueueable:
-        return "unqueueable", unqueueable[coord]
-    if lane == ROUTE_WORLD:
-        return ("world_author", None) if coord in world_findings_by_coord else (
-            "never_on_record", None)
-    if lane == ROUTE_DEFENDER:
-        return "defender", None
-    if lane == ROUTE_NO_CHANNEL:
-        return "unqueueable", reason
-    if lane == ROUTE_WITHHELD:
-        return "withheld", reason
-    if lane == ROUTE_NEVER_ELIGIBLE:
-        return "never_eligible", str(verdict_word)
-    if lane == ROUTE_UNGRADABLE:
-        return "world_ungradable", reason
-    if lane == ROUTE_NO_ROW:
-        return "no_grade_row", None
-    return "no_grade", None
 
 
 def _disposition_heading_raw(f: _Finding) -> str:
@@ -1371,6 +1333,8 @@ def _disposition_heading_raw(f: _Finding) -> str:
         return "not enqueued — no grade row"
     if f.disposition == "never_on_record":
         return "not on the record — never enqueued"
+    if f.disposition == "no_ledger":
+        return "record carries no disposition ledger — not enqueued"
     return "no grade record — not enqueued"
 
 
@@ -1594,7 +1558,7 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         f'<div class="vd-tile" id="vd-tile-2">{len(measuring)} of {len(graded)}'
         f'<div class="vd-caption">{"; ".join(withheld_captions)}</div></div>')
 
-    findings_total = counts["mappings"]
+    findings_total = len(rows)
     split_parts = [f"{counts['defender']} defender", f"{counts['world_author']} world author",
                   f"{counts['withheld']} withheld", f"{counts['unqueueable']} unqueueable",
                   f"{counts['dropped']} dropped"]

@@ -529,10 +529,13 @@ def enqueue(episode_dir: Path, grade: Any, *, queue_dir: Path | None = None,
 
 
 #: `route_finding`'s answers — where ONE finding goes before any row is built or validated.
-#: The page (`scripts/visualize/visualize_episode.py`) asks the same function of the same
-#: inputs, so "what the enqueue did with this finding" is decided in one place: before this,
-#: the page carried a hand-copied mirror of the lane rule below, and the copy drifted (it
-#: read a faulted world's mechanical finding as "never enqueued" while this pass queued it).
+#: Internal to this pass: what it decided is WRITTEN DOWN, per finding, on the ledger below
+#: (`LANE_*`, `EnqueueReport.dispositions`), and that record is what a reader shows. The page
+#: (`scripts/visualize/visualize_episode.py`) once carried a hand-copied mirror of this rule,
+#: then the rule itself fed with inputs it rebuilt from the record's rows; each drifted from
+#: the pass at an edge (a faulted world's mechanical finding read "never enqueued" while this
+#: pass queued it; a record naming one world on two rows took one row here and every row
+#: there). A decision reconstructed where it is shown is a second decision.
 ROUTE_DEFENDER = "defender"
 """A defender row is built and validated against `_validate_row`."""
 ROUTE_WORLD = "world"
@@ -554,6 +557,54 @@ ROUTE_NO_ROW = "no_row"
 KIND_DRAW = "draw"
 KIND_FAMILY = "family"
 KIND_MECHANICAL = "mechanical"
+
+#: THE LEDGER — what this pass DID with every finding coordinate it touched, one entry each,
+#: written to the record as `EpisodeGrade.dispositions`. A reader of the record (the page)
+#: renders the ledger; it does not ask `route_finding` of inputs it rebuilt from the record's
+#: rows, because rebuilding the inputs is where the two readings drifted (a record naming one
+#: world on two rows: the page took one row per label, this pass took every row). A lane here
+#: is the decision AFTER validation — `ROUTE_DEFENDER` that `_validate_row` then refused is
+#: `LANE_UNQUEUEABLE`, with the refusal as its reason — so the entry answers "did this finding
+#: reach a queue, and if not, why" with nothing left for the reader to work out.
+LANE_DEFENDER = ROUTE_DEFENDER
+"""A defender row was built, validated and handed to the defender appender."""
+LANE_WORLD = ROUTE_WORLD
+"""A world row was built, validated and handed to the questioner appender."""
+LANE_WITHHELD = ROUTE_WITHHELD
+"""O4: recorded whole on `withheld_findings`; `reason` is the world row's `withheld_reason`."""
+LANE_NEVER_ELIGIBLE = ROUTE_NEVER_ELIGIBLE
+"""O7: the defender lane was closed by the family's word; `reason` is that `verdict_word`."""
+LANE_UNQUEUEABLE = "unqueueable"
+"""Never a row: `reason` is the same line `unqueueable_findings` carries, minus the id."""
+LEDGER_LANES = frozenset({LANE_DEFENDER, LANE_WORLD, LANE_WITHHELD, LANE_NEVER_ELIGIBLE,
+                          LANE_UNQUEUEABLE})
+
+
+def disposition_entry(finding_id: str, lane: str, reason: str | None = None) -> dict[str, Any]:
+    """One ledger entry: the finding's id (`build_finding_row`'s `<run_id>/<label>/<draw>/
+    <index>` spelling, whether or not a row was built), its lane, and the lane's reason
+    where the lane is a refusal. Spelled here and checked on read-back through
+    `check_disposition_entry`, so the writer and the record agree on the shape."""
+    return check_disposition_entry({"finding_id": finding_id, "lane": lane, "reason": reason})
+
+
+def check_disposition_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """THE ledger entry's shape, beside its vocabulary: it names its finding and takes one of
+    the lanes above; `reason` is carried as written. `ValueError` otherwise — the writer's
+    own mistake at `disposition_entry`, or a planted record at `judge._grade_from_document`
+    (which folds it into the record's refusal)."""
+    if not isinstance(entry.get("finding_id"), str):
+        raise ValueError(f"a ledger entry does not name its finding: {entry!r}")
+    if entry.get("lane") not in LEDGER_LANES:
+        raise ValueError(f"a ledger entry names no lane ({sorted(LEDGER_LANES)}): {entry!r}")
+    return entry
+
+
+def unqueueable_lines_of(dispositions: list[dict[str, Any]]) -> list[str]:
+    """`unqueueable_findings` — the human-readable line per dropped finding — read OFF the
+    ledger, never kept as a second list beside it."""
+    return [f"{e['finding_id']}: {e['reason']}" for e in dispositions
+            if e["lane"] == LANE_UNQUEUEABLE]
 
 
 def withheld_reasons_of(world_rows: list[dict[str, Any]]) -> dict[str, str]:
@@ -581,8 +632,9 @@ def route_finding(  # noqa: PLR0911, PLR0913 — one decision, one return per la
     withheld_reasons: dict[str, str], defender_blocked: bool,
 ) -> tuple[str, str | None]:
     """Which lane ONE finding takes, and the reason where the lane is a refusal — THE rule
-    `enqueue_report` walks, published so a reader of the record (the page) asks it rather than
-    copies it.
+    `enqueue_report` walks. Its answer for every finding is written to the ledger
+    (`disposition_entry`), which is what a reader of the record shows; nothing outside this
+    pass needs to call it.
 
     Decided from the record's own signals alone: the world's row (`world_row`, `None` when no
     row names the label), the O4 `withheld_reasons` map, the O7 `defender_blocked` word and
@@ -599,7 +651,7 @@ def route_finding(  # noqa: PLR0911, PLR0913 — one decision, one return per la
         # M5's family draws and M3's mechanical findings are the WORLD's lane by construction,
         # whatever `subject` says — and a mechanical finding is walked for EVERY row, the
         # ungradable ones included (the finding IS the record of why the world could not be
-        # graded), which is the one place the page's mirror disagreed with this pass.
+        # graded), which is the one place the page's former mirror disagreed with this pass.
         return ROUTE_WORLD, None
     if world_row is None:
         return ROUTE_NO_ROW, None
@@ -627,7 +679,6 @@ class EnqueueReport:
     make a row of, and the malformed lines already on each queue when it appended."""
 
     appended: int = 0
-    unqueueable: list[str] = field(default_factory=list)
     queue_malformed_rows: int = 0
     world_appended: int = 0
     world_queue_malformed_rows: int = 0
@@ -640,21 +691,32 @@ class EnqueueReport:
     #: than enqueued — the whole finding, the ONLY surviving record of one that never became a
     #: queue row. Distinct from `unqueueable` (could not be made a valid row at all).
     withheld_findings: list[dict[str, Any]] = field(default_factory=list)
+    #: THE LEDGER (`disposition_entry`): every finding coordinate this pass touched and the
+    #: lane it took, in walk order. `unqueueable` is read off it.
+    dispositions: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def unqueueable(self) -> list[str]:
+        """Findings this pass could not make a row of, one line each — the ledger's own
+        `LANE_UNQUEUEABLE` entries, spelled `<finding_id>: <reason>`."""
+        return unqueueable_lines_of(self.dispositions)
 
 
 def _add_row(  # noqa: PLR0913 — the sink dispatch's own inputs
-    row: dict[str, Any], *, validator: Any, sink: list[dict[str, Any]],
-    unqueueable: list[str], episode_dir: Path,
+    row: dict[str, Any], *, validator: Any, sink: list[dict[str, Any]], lane: str,
+    ledger: list[dict[str, Any]], episode_dir: Path,
 ) -> None:
     """Validate one row against its OWN channel's rule and file it — or name the drop. ONE
     dispatcher for both channels, so a finding that cannot become a valid row costs only that
     finding (never the episode): the blast radius `_validate_row`'s docstring has always
-    promised, now shared by the world lane too."""
+    promised, now shared by the world lane too. Either way the ledger gets the entry: `lane`
+    when the row is filed, `LANE_UNQUEUEABLE` with the refusal when it is not."""
     try:
         validator(row, episode_dir=episode_dir)
     except JudgeRefused as refused:
-        unqueueable.append(f"{row['finding_id']}: {refused}")
+        ledger.append(disposition_entry(row["finding_id"], LANE_UNQUEUEABLE, str(refused)))
         return
+    ledger.append(disposition_entry(row["finding_id"], lane))
     sink.append(row)
 
 
@@ -686,7 +748,10 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     world_rows = grade["worlds"] if isinstance(grade, dict) else grade.worlds
     # `family.is_gradable_row`, the ONE predicate — see its docstring: this site and
     # `grade_family`'s own answered the same question two ways.
-    graded_labels = [w["world"] for w in world_rows if is_gradable_row(w)]
+    # ONE WALK PER LABEL: a record naming a world on two gradable rows (a box can write
+    # `judge.yaml`) used to walk that world's draw directory twice and file every finding
+    # twice — eight withheld entries for four findings (#1042 review).
+    graded_labels = list(dict.fromkeys(w["world"] for w in world_rows if is_gradable_row(w)))
     # `str`-keyed, not a set: O4's own reason (one of the four `WITHHELD_*` values on the row)
     # is what F7's resolution asks `withheld_findings` to carry alongside each dropped finding
     # — a bare membership set can say a world was withheld but not why.
@@ -705,7 +770,10 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
 
     defender_rows: list[dict[str, Any]] = []
     world_rows_out: list[dict[str, Any]] = []
-    unqueueable: list[str] = []
+    ledger: list[dict[str, Any]] = []
+
+    def _drop(finding_id: str, reason: str) -> None:
+        ledger.append(disposition_entry(finding_id, LANE_UNQUEUEABLE, reason))
     #: O4/F7: the whole finding, since this row is the ONLY surviving record of a defender
     #: finding that never became a queue row — the draw document it came off is not part of
     #: this design's write set and a later re-grade may not reproduce the same model draw.
@@ -746,9 +814,9 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
         findings = draw_doc.get("findings") or []
         for index, finding in enumerate(findings):
             if not isinstance(finding, dict):
-                unqueueable.append(
-                    f"{run_id}/family/{draw}/{index}: the family draw's finding[{index}] is "
-                    f"{type(finding).__name__}, not a mapping")
+                _drop(f"{run_id}/family/{draw}/{index}",
+                      f"the family draw's finding[{index}] is {type(finding).__name__}, "
+                      "not a mapping")
                 continue
             # NO A1(b) GATE ON THIS LANE, and it needs none: A1(b) refuses a `samples.yaml`
             # citation for a pattern a world's row says was unavailable, and the family call
@@ -770,7 +838,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                 # episode and the holding system's own name never can be.
                 pattern=family_pattern, holding_system=family_holding_system)
             _add_row(row, validator=_validate_world_row, sink=world_rows_out,
-                     unqueueable=unqueueable, episode_dir=episode_dir)
+                     lane=LANE_WORLD, ledger=ledger, episode_dir=episode_dir)
 
     for label in graded_labels:
         # "THE CALLER HANDED NOTHING OVER" IS `drawn is None`, and nothing else. `(drawn or
@@ -790,12 +858,11 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                     # legitimately be a list of scalars — dropped in silence those vanished with
                     # no line on `unqueueable_findings`, whose whole job is that a drop is said
                     # out loud instead of read later as a finding the model never emitted.
-                    unqueueable.append(
-                        f"{run_id}/{label}/{draw}/{index}: the draw's finding[{index}] is "
-                        f"{type(finding).__name__}, not a mapping")
+                    _drop(f"{run_id}/{label}/{draw}/{index}",
+                          f"the draw's finding[{index}] is {type(finding).__name__}, "
+                          "not a mapping")
                     continue
-                # `route_finding`, THE lane rule — the page asks it of the same inputs, so the
-                # two never disagree about what this pass did with a finding. A finding with
+                # `route_finding`, THE lane rule, whose answer goes onto the ledger. A finding with
                 # no `subject` is the defender's (the pre-#1007 draw shape read back off disk
                 # on the bare-re-enqueue path); one whose `subject` is neither literal is a
                 # DROP, said out loud: routed to the defender lane it was re-stamped
@@ -823,9 +890,9 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                         finding,
                         unavailable_patterns=world_row.get("sample_unavailable_patterns"),
                     ):
-                        unqueueable.append(
-                            f"{run_id}/{label}/{draw}/{index}: cites `{SAMPLES_NAME}` for a "
-                            "pattern this world had no sample for (A1(b))")
+                        _drop(f"{run_id}/{label}/{draw}/{index}",
+                              f"cites `{SAMPLES_NAME}` for a pattern this world had no sample "
+                              "for (A1(b))")
                         continue
                     row = build_finding_row(
                         run_id=run_id, label=label, draw=str(draw), index=index,
@@ -834,10 +901,10 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                         pattern=world_row.get("pattern"),
                         holding_system=world_row.get("holding_system"))
                     _add_row(row, validator=_validate_world_row, sink=world_rows_out,
-                             unqueueable=unqueueable, episode_dir=episode_dir)
+                             lane=LANE_WORLD, ledger=ledger, episode_dir=episode_dir)
                     continue
                 if route == ROUTE_NO_CHANNEL:
-                    unqueueable.append(f"{run_id}/{label}/{draw}/{index}: {route_reason}")
+                    _drop(f"{run_id}/{label}/{draw}/{index}", route_reason or "")
                     continue
                 if route == ROUTE_WITHHELD:
                     # O4 (F7): this world's difference was never measured — the finding is
@@ -848,13 +915,20 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                     # here exactly as `unqueueable` already leaves them — two different reasons
                     # a finding never reaches the queue, kept apart rather than merged into one
                     # drop.
+                    finding_id = f"{run_id}/{label}/{draw}/{index}"
                     withheld_findings.append(
-                        {"finding": finding, "world": label, "reason": route_reason})
+                        {"finding": finding, "world": label, "reason": route_reason,
+                         "finding_id": finding_id})
+                    ledger.append(disposition_entry(finding_id, LANE_WITHHELD, route_reason))
                     continue
                 if route == ROUTE_NEVER_ELIGIBLE:
                     # O7 (discard/corpus-contradiction): never a defender row, and never
                     # counted as unqueueable OR withheld — it was never eligible in the first
-                    # place, and the family record's own outcome is the artifact for it.
+                    # place, and the family record's own outcome is the artifact for it. The
+                    # ledger still names it, with the word that closed the lane as its reason.
+                    ledger.append(disposition_entry(
+                        f"{run_id}/{label}/{draw}/{index}", LANE_NEVER_ELIGIBLE,
+                        str(verdict_word)))
                     continue
                 if route != ROUTE_DEFENDER:
                     # EXHAUSTIVE, with the residue said out loud. `graded_labels` is walked
@@ -862,18 +936,17 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                     # a record naming one world twice (once gradable, once not) reaches here
                     # as `ROUTE_UNGRADABLE`; an open `else` filed that finding as a DEFENDER
                     # lesson — the one lane `route_finding` had just said it must not take.
-                    unqueueable.append(
-                        f"{run_id}/{label}/{draw}/{index}: routed `{route}`"
-                        f"{' (' + route_reason + ')' if route_reason else ''} — the label's "
-                        "row is not one this pass queues from; the record names the world "
-                        "on more than one row")
+                    _drop(f"{run_id}/{label}/{draw}/{index}",
+                          f"routed `{route}`{' (' + route_reason + ')' if route_reason else ''}"
+                          " — the label's row is not one this pass queues from; the record "
+                          "names the world on more than one row")
                     continue
                 row = build_finding_row(
                     run_id=run_id, label=label, draw=str(draw), index=index,
                     subject=SUBJECT_DEFENDER, finding=finding, alert_rule_key=alert_rule_key,
                     judge_outcome=verdict_word)
                 _add_row(row, validator=_validate_row, sink=defender_rows,
-                         unqueueable=unqueueable, episode_dir=episode_dir)
+                         lane=LANE_DEFENDER, ledger=ledger, episode_dir=episode_dir)
 
     # M3's mechanical world finding(s) — a FIXED synthetic (draw, index) coordinate per world,
     # so a re-grade is absorbed by the questioner channel's own idempotency
@@ -887,7 +960,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                 subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,
                 judge_outcome=verdict_word, provenance=finding.get("provenance", "mechanical"))
             _add_row(wrow, validator=_validate_world_row, sink=world_rows_out,
-                     unqueueable=unqueueable, episode_dir=episode_dir)
+                     lane=LANE_WORLD, ledger=ledger, episode_dir=episode_dir)
 
     if defender_blocked:
         defender_appended, defender_malformed = 0, 0
@@ -898,17 +971,20 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
         episode_dir, world_rows_out, queue_dir=queue_dir)
     reported_world_rows = [{**row, "judge_outcome": None} for row in world_rows_out]
     return EnqueueReport(
-        appended=defender_appended, unqueueable=unqueueable,
+        appended=defender_appended,
         queue_malformed_rows=defender_malformed, world_appended=world_appended,
         world_queue_malformed_rows=world_malformed, world_rows=reported_world_rows,
-        withheld_findings=withheld_findings)
+        withheld_findings=withheld_findings, dispositions=ledger)
 
 
 __all__ = [
     "DrawsSkipReport", "EnqueueReport", "KIND_DRAW", "KIND_FAMILY", "KIND_MECHANICAL",
-    "ROUTE_DEFENDER", "ROUTE_NEVER_ELIGIBLE", "ROUTE_NO_CHANNEL", "ROUTE_NO_ROW",
+    "LANE_DEFENDER", "LANE_NEVER_ELIGIBLE", "LANE_UNQUEUEABLE", "LANE_WITHHELD", "LANE_WORLD",
+    "LEDGER_LANES", "ROUTE_DEFENDER", "ROUTE_NEVER_ELIGIBLE", "ROUTE_NO_CHANNEL", "ROUTE_NO_ROW",
     "ROUTE_UNGRADABLE", "ROUTE_WITHHELD", "ROUTE_WORLD", "append_rows", "append_rows_report",
     "append_world_rows", "append_world_rows_report", "build_finding_row",
     "defender_lane_blocked", "draws_on_disk", "draws_on_disk_report", "enqueue",
-    "enqueue_report", "route_finding", "withheld_reasons_of",
+    "check_disposition_entry", "disposition_entry", "enqueue_report", "route_finding",
+    "unqueueable_lines_of",
+    "withheld_reasons_of",
 ]

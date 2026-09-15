@@ -187,6 +187,9 @@ def test_1025_the_card_footer_counts_and_links_the_same_defender_rows(tmp_path):
                              if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
     doc["world_findings"].append(E.world_finding_queue_row(
         f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/0", "the world-author claim"))
+    E.set_lane(doc, E.GRADED_WORLD, 0, 0, "world")
+    for i in range(1, 5):
+        E.set_lane(doc, E.GRADED_WORLD, 0, i, "defender")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     href, text = _card_link(_card(page, E.GRADED_WORLD))
@@ -200,7 +203,7 @@ def test_1025_a_discarded_episodes_card_says_never_eligible_not_enqueued(tmp_pat
     """With `verdict_word: discard` the graded world's defender rows are never eligible (O7),
     and its card's footer says so — "4 findings · never eligible" — rather than "enqueued"."""
     ep = E.sample_episode(tmp_path)
-    E.write_judge(ep.dir, {**E.sample_grade(), "verdict_word": "discard"})
+    E.write_judge(ep.dir, E.block_defender_lane(E.sample_grade(), "discard"))
     page = render(ep)
     href, text = _card_link(_card(page, E.GRADED_WORLD))
     assert text == "4 findings · never eligible", text
@@ -222,28 +225,40 @@ def test_1025_the_dropped_count_on_the_tile_and_in_the_accounting_is_the_draw_do
 
 
 def test_1025_a_recorded_withheld_finding_whose_document_is_gone_is_a_stub_beside_the_survivors(tmp_path):
-    """The record lists four withheld findings for the withheld world; its only surviving
-    draw document carries two of them. The page shows all four — the two on disk as rows, the
-    two without a document as "draw document absent" stubs with the record's own claim — and
-    the accounting reads "4 entries · 4 matched" with no disagreement."""
+    """The record lists four withheld findings for the withheld world, on the ledger and on
+    `withheld_findings` (each carrying its `finding_id`, so the join is by coordinate — never
+    by matching the finding's body against what is on disk). THE GRAIN IS THE DOCUMENT (F-5),
+    for the withheld lane exactly as for the world lane: with the world's draw document GONE
+    all four render as "draw document absent" stubs carrying the record's own claim under the
+    withheld group, tile 3 counts four withheld and the accounting reads "4 entries · 4
+    matched"; with the document PRESENT but rewritten to carry two of the four, the page
+    shows the two on disk and no stub, and the accounting says the withheld list and the
+    ledger's rows disagree by two rather than inventing rows the document does not hold."""
     ep = E.sample_episode(tmp_path)
     withheld = E._world_findings_rows(withheld=True)
-    E.draw_document(ep.dir, E.WITHHELD_WORLD, 0, E.draw_doc(findings=withheld[:2]))
+    (ep.world(E.WITHHELD_WORLD) / "judge" / "0.yaml").unlink()
     page = render(ep)
-    withheld_rows = [i for i in page.ids if i.startswith(f"f-{E.WITHHELD_WORLD}-")]
-    assert len(withheld_rows) == 4, withheld_rows
-    stubs = [i for i in withheld_rows if "-withheld-" in i]
-    assert len(stubs) == 2, withheld_rows
-    for row_id in stubs:
-        text = page.text_of(row_id)
+    stubs = {i for i in page.ids if i.startswith(f"f-{E.WITHHELD_WORLD}-")}
+    assert stubs == {f"f-{E.WITHHELD_WORLD}-0-{i}" for i in range(5)}, stubs
+    for i in range(4):
+        text = page.text_of(f"f-{E.WITHHELD_WORLD}-0-{i}")
         assert "draw document absent" in text, text
-        assert "withheld" in _heading_of(page, row_id)
-    for i in (2, 3):
-        assert withheld[i]["claim"] in page.text_of("sec-findings")
+        assert withheld[i]["claim"] in text, text
+        assert "withheld" in _heading_of(page, f"f-{E.WITHHELD_WORLD}-0-{i}")
     acct = page.one(cls="vd-acct").text()
     assert "withheld list: 4 entries · 4 matched" in acct, acct
     assert "record and page disagree" not in acct, acct
     assert f"{S.defender_withheld} withheld" in _tile(page, 2), _tile(page, 2)
+
+    E.draw_document(ep.dir, E.WITHHELD_WORLD, 0, E.draw_doc(findings=withheld[:2]))
+    page = render(ep)
+    rows = [i for i in page.ids if i.startswith(f"f-{E.WITHHELD_WORLD}-")]
+    assert rows == [f"f-{E.WITHHELD_WORLD}-0-0", f"f-{E.WITHHELD_WORLD}-0-1"], rows
+    assert "draw document absent" not in page.text_of("sec-findings")
+    acct = page.one(cls="vd-acct").text()
+    assert "withheld list: 4 entries · 2 matched" in acct, acct
+    assert "record and page disagree by 2" in acct, acct
+    assert "2 withheld" in _tile(page, 2), _tile(page, 2)
 
 
 # ---------------------------------------------------------------------------------------

@@ -137,7 +137,8 @@ def _live996(tmp_path: Path, **kw) -> E.Episode:
     doc["world_findings"] = [E.world_finding_queue_row(
         f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/4", "the world finding")]
     for key in ("family_outcome", "family_failed_reason", "family_malformed_replies",
-                "world_enqueued_rows", "world_enqueued_to", "withheld_findings"):
+                "world_enqueued_rows", "world_enqueued_to", "withheld_findings",
+                "dispositions"):
         del doc[key]
     E.write_judge(ep.dir, doc)
     return ep
@@ -169,6 +170,7 @@ def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_op
     two_draws = E.sample_grade()
     two_draws["world_findings"].append(E.family_queue_row(1, 0, topic="second-draw topic",
                                                           claim="second-draw claim"))
+    E.set_lane(two_draws, E.FAMILY, 1, 0, "world")
     E.write_judge(ep.dir, two_draws)
     band = render(ep).text_of("sec-verdict")
     assert band.index("family topic 2") < band.index("second-draw topic: second-draw claim")
@@ -388,21 +390,23 @@ def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_withheld_
     """Sample: `no_remote_session`'s 4 defender findings read "withheld —
     reachability_unmeasured", `prior_fake_key_precedent`'s 4 read enqueued (the episode has
     `family_outcome: discard` and `verdict_word: undecidable`, and the rows still read
-    enqueued), the 5 world-author rows read enqueued; a synthetic `unqueueable_findings:
-    ["<id>: reason"]` entry marks that id unqueueable with the reason; a synthetic
-    `verdict_word: discard` marks the MEASURING world's defender findings "never eligible —
-    verdict discard", neither enqueued nor withheld, while the withheld world's four stay
-    "withheld — reachability_unmeasured" exactly as the record's `withheld_findings` carries
-    them; counts equal `enqueued_rows`, `len(withheld_findings)`, `world_enqueued_rows`; on
-    that discard episode tile 3's split reads 0 defender / 5 world author / 4 withheld /
-    0 unqueueable and gains a fifth part, "4 never eligible" — the measuring world's count.
+    enqueued), the 5 world-author rows read enqueued; a ledger entry re-filed unqueueable
+    marks that id unqueueable with its reason; the record of a discard episode marks the
+    MEASURING world's defender findings "never eligible — verdict discard", neither enqueued
+    nor withheld, while the withheld world's four stay "withheld — reachability_unmeasured"
+    exactly as the record's `withheld_findings` carries them; counts equal `enqueued_rows`,
+    `len(withheld_findings)`, `world_enqueued_rows`; on that discard episode tile 3's split
+    reads 0 defender / 5 world author / 4 withheld / 0 unqueueable and gains a fifth part,
+    "4 never eligible" — the measuring world's count.
 
-    The page's disposition rule is the enqueue's (amendment 3), and the enqueue's precedence for
-    a defender finding is subject → withheld → blocked → enqueued (`enqueue.py:731-748`, g13):
-    a withheld world's findings are appended to `withheld_findings` BEFORE the
-    `if defender_blocked: continue` arm is reached, so on a `discard` / `corpus-contradiction`
-    episode "never eligible" is only ever the measuring worlds' disposition (92-reconciliation
-    F-2).
+    EVERY DISPOSITION IS THE RECORD'S LEDGER (`judge.yaml.dispositions`, what the enqueue pass
+    wrote down as it filed each finding), never a rule the page runs over the rows: the page
+    used to carry a copy of the enqueue's lane rule, then the rule itself fed with inputs it
+    rebuilt from the record, and both drifted from the pass at the edges. The enqueue's
+    precedence — subject → withheld → blocked → enqueued — is therefore visible here only as
+    the ledger the fixture writes in the pass's shape (`block_defender_lane` re-files the
+    defender entries and leaves the withheld ones; 92-reconciliation F-2), and
+    `test_1025_the_fixture_ledger_is_the_passes_own` holds that fixture to the real pass.
     """
     ep = E.sample_episode(tmp_path)
     page = render(ep)
@@ -416,19 +420,18 @@ def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_withheld_
     for row in (f"f-{E.WITHHELD_WORLD}-0-4", f"f-{E.GRADED_WORLD}-0-4", f"f-{E.FAMILY}-0-0"):
         assert "enqueued" in _group_of(page, row).text(), row
 
-    doc = E.sample_grade()
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/1: the citation names no file"]
+    doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable",
+                     "the citation names no file")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     group = _group_of(page, f"f-{E.GRADED_WORLD}-0-1").text()
     assert "unqueueable" in group, group
     assert "the citation names no file" in group, group
 
-    # the record as the enqueue writes it on a discard episode: `enqueued_rows` 0, and the
-    # withheld world's four findings STILL on `withheld_findings` (withheld before blocked)
-    doc = E.sample_grade()
-    doc["verdict_word"] = "discard"
-    doc["enqueued_rows"] = 0
+    # the record as the enqueue writes it on a discard episode: `enqueued_rows` 0, the
+    # defender entries re-filed never eligible, and the withheld world's four findings STILL
+    # on `withheld_findings` and the ledger (withheld before blocked)
+    doc = E.block_defender_lane(E.sample_grade(), "discard")
     assert len(doc["withheld_findings"]) == S.defender_withheld, "fixture: the withheld list"
     E.write_judge(ep.dir, doc)
     page = render(ep)
@@ -456,17 +459,15 @@ def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_withheld_
 
 def test_1025_a_non_canonically_spelled_verdict_word_still_blocks_the_measuring_worlds_defender_findings(
         tmp_path):
-    """The O7 gate the page's disposition rule claims to mirror (`enqueue_report`,
-    `enqueue.py:622`) reads `verdict_word` through `normalized_judge_outcome` — case-folded and
-    trimmed — never a bare `in`; a record whose `verdict_word` is `"Discard"` (mixed case, still
-    a legal value on a record a sibling box can write) blocks the enqueue pass exactly as
-    `"discard"` does. The page must read the SAME gate: a bare-`in` implementation would show
-    the measuring world's defender findings "enqueued" on a record the real pass blocked.
+    """The O7 gate reads `verdict_word` through `normalized_judge_outcome` — case-folded and
+    trimmed — so a record whose `verdict_word` is `"Discard"` blocks the enqueue pass exactly
+    as `"discard"` does, and the pass writes the word AS SPELLED onto every never-eligible
+    ledger entry. The page shows that ledger word verbatim — "never eligible — verdict
+    Discard" — and runs no gate of its own over the record's word: with the ledger there is
+    no second reading of `verdict_word` left to drift from the pass's.
     """
     ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["verdict_word"] = "Discard"
-    doc["enqueued_rows"] = 0
+    doc = E.block_defender_lane(E.sample_grade(), "Discard")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     for i in range(4):
@@ -786,8 +787,8 @@ def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
     id — never the recorded prefix — composes the links and run-dir names.
     """
     ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    for row in doc["world_findings"]:
+    doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable", "a reason")
+    for row in doc["world_findings"] + doc["dispositions"]:
         row["finding_id"] = row["finding_id"].replace(E.EPISODE_ID, "old-name-before-repair")
     doc["unqueueable_findings"] = [f"old-name-before-repair/{E.GRADED_WORLD}/0/1: a reason"]
     E.write_judge(ep.dir, doc)
@@ -855,8 +856,8 @@ def test_1025_subject_field_holds_a_value_outside_defender_and_world(tmp_path):
     findings = _draw_findings(ep, E.GRADED_WORLD)
     findings.append(E.finding(subject="oracle", claim="ORACLE CLAIM"))
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings))
-    doc = E.sample_grade()
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/5: subject 'oracle' is not an addressee"]
+    doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 5, "unqueueable",
+                     "subject 'oracle' is not an addressee")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     row = f"f-{E.GRADED_WORLD}-0-5"
@@ -870,20 +871,29 @@ def test_1025_subject_field_holds_a_value_outside_defender_and_world(tmp_path):
 
 
 def test_1025_a_finding_that_is_not_a_mapping(tmp_path):
-    """A scalar where a finding mapping belongs renders no row (there is no text to key a row
-    from), stays in the queue accounting through the record's own unqueueable line, and tile 3's
-    total counts mappings only.
+    """A scalar where a finding mapping belongs is a finding the pass DROPPED and said so
+    (`enqueue_report` files it unqueueable, "not a mapping"), so the page renders it as the
+    ledger has it: a row with no claim under the "unqueueable — not a mapping" group, counted
+    on tile 3's total and its unqueueable part, and in the queue accounting through the
+    record's own line. Before the ledger the page skipped it in silence and tile 3 read
+    "0 unqueueable" over a record line that said otherwise (#1042 review).
     """
     ep = E.sample_episode(tmp_path)
     findings: list = _draw_findings(ep, E.GRADED_WORLD)
     findings.append("just a bare string, not a finding")
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings))
-    doc = E.sample_grade()
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/5: not a mapping"]
+    doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 5, "unqueueable",
+                     "the draw's finding[5] is str, not a mapping")
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    assert f"f-{E.GRADED_WORLD}-0-5" not in _rows(page)
-    assert f"of {S.findings}" in _tile(page, 2).text()
+    row = f"f-{E.GRADED_WORLD}-0-5"
+    assert row in _rows(page)
+    assert "just a bare string" not in page.raw
+    heading = _heading(_group_of(page, row))
+    assert "unqueueable" in heading, heading
+    assert "not a mapping" in heading, heading
+    assert f"of {S.findings + 1}" in _tile(page, 2).text()
+    assert "1 unqueueable" in _tile(page, 2).text()
     assert "not a mapping" in page.one(cls="vd-acct").text()
 
 
@@ -918,7 +928,7 @@ def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path)
     doc["world_findings"] = [r for r in doc["world_findings"]
                              if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
     reason = "cites logs-system.auth-*, whose sample was unavailable"
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/4: {reason}"]
+    E.set_lane(doc, E.GRADED_WORLD, 0, 4, "unqueueable", reason)
     doc["world_enqueued_rows"] = 4
     E.write_judge(ep.dir, doc)
     page = render(ep)
@@ -983,6 +993,7 @@ def test_1025_family_drawn_several_times_with_a_dissenting_draw(tmp_path):
         episode_outcome="gradable"))
     doc = E.sample_grade()
     doc["world_findings"].append(E.family_queue_row(1, 0, topic="dissent topic", claim="dissent claim"))
+    E.set_lane(doc, E.FAMILY, 1, 0, "world")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     band = page.text_of("sec-verdict")
@@ -1029,8 +1040,9 @@ def test_1025_withheld_reason_outside_the_four_known_values(tmp_path):
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"][0]["withheld_reason"] = "weird<reason>"
-    for entry in doc["withheld_findings"]:
-        entry["reason"] = "weird<reason>"
+    for entry in doc["withheld_findings"] + doc["dispositions"]:
+        if entry.get("reason") == S.withheld_reason:
+            entry["reason"] = "weird<reason>"
     E.write_judge(ep.dir, doc)
     page = render(ep)
     heading = _heading(_group_of(page, f"f-{E.WITHHELD_WORLD}-0-0"))
@@ -1238,11 +1250,9 @@ def test_1025_unqueueable_reason_text_contains_the_page_join_delimiter(tmp_path)
     and joins no row.
     """
     ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["unqueueable_findings"] = [
-        f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/1: reason part one: part two <x>",
-        "no separator in this line at all",
-    ]
+    doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable",
+                     "reason part one: part two <x>")
+    doc["unqueueable_findings"].append("no separator in this line at all")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     group = _group_of(page, f"f-{E.GRADED_WORLD}-0-1").text()
