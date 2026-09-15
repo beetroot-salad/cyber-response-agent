@@ -22,6 +22,7 @@ Every judge call goes through an injected `call` seam; nothing here reaches a mo
 from __future__ import annotations
 
 import json
+from datetime import UTC, date, datetime
 
 import pytest
 import yaml
@@ -558,3 +559,353 @@ def test_a_clause_naming_a_lead_the_case_lacks_asserts_nothing_loudly(tmp_path):
         {"empty_leads": ["l-999"]}, {"l-001": [{"a": 1}]}, ["l-001"]) == []
     assert score.expectation_failures(
         {"empty_leads": "all"}, {"l-001": [{"a": 1}]}, ["l-001"]) != []
+
+
+# the mechanical checks read TEXT (#951)
+#
+# `yaml.safe_load` types an unquoted ISO instant as a `datetime`, and `str()` of that is
+# `2026-07-25 07:48:37.065000+00:00` — space-separated, microseconds, `+00:00` — which can
+# never equal the `T…Z` literal an author quoted in `must_not_emit`. Whether probe-006's
+# forbidden window bound was caught therefore depended on how the oracle QUOTED its YAML;
+# unquoted (the ordinary spelling, and the one a copying model produces) it scored clean and
+# exited 0. `yes`, `0755`, `12:30` and `1.50` collapse the same way (`True`, `493`, `750`,
+# `1.5`). The design dissolves the cause: the projection, the manifest and `expected.yaml`
+# are read by a loader whose only implicit resolver is `null`, so both sides of every
+# comparison are the text as written.
+#
+# Every fixture below that must carry an UNQUOTED scalar is written as literal YAML text,
+# never through `_projection` / `_case`: `yaml.safe_dump` QUOTES any string that would
+# resolve as a timestamp, which is exactly why no earlier test exercised this path. Each
+# such fixture asserts that plain `yaml.safe_load` really does type the value — a fixture
+# that accidentally quoted it would be exercising nothing.
+
+_INSTANT = "2026-07-25T07:48:37.065Z"
+#: A different instant, for every positive control: a check that reports a leak against
+#: THIS value is not reading the text, it is reporting everything.
+_OTHER_INSTANT = "2026-07-25T09:00:00.000Z"
+
+#: probe-006's three spellings (`.000Z`, `Z`, `.065Z`) plus the `+00:00` forms a copying
+#: model re-spells to (case-005's committed projection carries both). An isoformat-based
+#: fix passes only the bare `+00:00` member: `.isoformat()` renders `.000Z` as `+00:00`,
+#: `Z` as `+00:00` and `.065` as `.065000`, so a partial fix is visible member by member.
+_INSTANT_SPELLINGS = (
+    "2026-07-24T07:45:35.000Z",
+    "2026-07-25T07:40:00Z",
+    "2026-07-25T07:48:37.065Z",
+    "2026-07-25T07:48:37+00:00",
+    "2026-07-25T07:48:37.065+00:00",
+)
+
+
+def _write_text(case_dir, rel: str, text: str):
+    p = case_dir / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def _projection_text(case_dir, event_lines: str, *, lead_id="l-001",
+                     name="glm-5.2_effort-none.yaml"):
+    """A one-lead, one-event projection written as the LITERAL YAML the oracle would have
+    produced. `event_lines` are the event's `key: value` lines, verbatim — nothing here is
+    re-serialised, so an unquoted scalar stays unquoted."""
+    lines = event_lines.strip("\n").splitlines()
+    event = "      - " + lines[0] + "".join("\n        " + line for line in lines[1:])
+    return _write_text(case_dir, f"projections/{name}",
+                       f"projections:\n  - lead_id: {lead_id}\n    events:\n{event}\n")
+
+
+def _manifest_text(case_dir, *, kind: str, body: str):
+    """Overwrite the manifest `_case` dumped with literal text carrying `body` verbatim."""
+    return _write_text(case_dir, "manifest.yaml", (
+        f"case_id: {case_dir.name}\nkind: {kind}\nsplit: dev\n"
+        f"unit:\n  activity_family: f\n  host_pair: a->b\ncapture_environment: e\n{body}"))
+
+
+def _plain(path, *keys):
+    """What PLAIN `yaml.safe_load` reads at `keys` in the file — the typed reading."""
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for key in keys:
+        value = value[key]
+    return value
+
+
+def _assert_typed_by_plain_yaml(path, keys: tuple, type_: type) -> None:
+    """The fixture self-check: the raw text really does resolve to a YAML type under plain
+    `safe_load`, so the test is exercising the typed path and not a quoted string."""
+    value = _plain(path, *keys)
+    assert isinstance(value, type_), (
+        f"fixture bug: {path.name} at {keys} reads as {value!r} under yaml.safe_load, not "
+        f"as {type_.__name__} — the raw text is not carrying an unquoted scalar")
+
+
+_EVENT_TIMESTAMP = ("projections", 0, "events", 0, "@timestamp")
+
+
+def _projection_block(user_prompt: str) -> str:
+    return user_prompt.split("<projection>")[1].split("</projection>")[0]
+
+
+def _dry(case_dir, proj) -> int:
+    return score.main([str(case_dir), str(proj), "--dry-run"])
+
+
+@pytest.mark.parametrize("instant", _INSTANT_SPELLINGS)
+def test_an_unquoted_forbidden_instant_is_caught_however_yaml_would_have_typed_it(
+        tmp_path, capsys, instant):
+    """O1, today's repro. probe-006 forbids the six window bounds sitting in case-001's own
+    query parameters; a projection copying one UNQUOTED scored clean and exited 0, the same
+    value quoted was a reported leak. For a spec-probe the judge never runs, so this check
+    is the whole verdict — and the quoting is the model's choice, not the author's."""
+    d = _case(tmp_path, kind="spec-probe",
+              extra_manifest={"expectation": {"must_not_emit": [instant],
+                                              "no_suppression": "all"}})
+    copied = _projection_text(d, f"'@timestamp': {instant}\nevent.outcome: failure")
+    _assert_typed_by_plain_yaml(copied, _EVENT_TIMESTAMP, datetime)
+    assert _score(d, copied, _scripted())["mechanical"]["forbidden_emitted"] == [instant]
+    assert _dry(d, copied) == 1
+    out = capsys.readouterr().out
+    assert "LEAKED" in out
+    assert instant in out, "the leak line names the literal as the author spelled it"
+
+    # positive control: a different instant, equally unquoted, is not a leak
+    honest = _projection_text(d, f"'@timestamp': {_OTHER_INSTANT}\nevent.outcome: failure",
+                              name="b.yaml")
+    _assert_typed_by_plain_yaml(honest, _EVENT_TIMESTAMP, datetime)
+    assert _score(d, honest, _scripted())["mechanical"]["forbidden_emitted"] == []
+    assert _dry(d, honest) == 0
+    assert "LEAKED" not in capsys.readouterr().out
+
+
+def test_a_required_instant_present_unquoted_is_not_reported_missing(tmp_path):
+    """O2, the mirror: `must_emit` is what stops a mutation case passing by saying nothing,
+    and it read the same `str(datetime)` — a satisfied requirement read as missing."""
+    d = _case(tmp_path, kind="mutation",
+              extra_manifest={"expectation": {"must_emit": [_INSTANT]}})
+    landed = _projection_text(d, f"'@timestamp': {_INSTANT}")
+    _assert_typed_by_plain_yaml(landed, _EVENT_TIMESTAMP, datetime)
+    assert _score(d, landed, _scripted())["mechanical"]["expectation_failures"] == []
+    assert _dry(d, landed) == 0
+
+    # positive control: a different instant is exactly one failure, naming the literal
+    elsewhere = _projection_text(d, f"'@timestamp': {_OTHER_INSTANT}", name="b.yaml")
+    _assert_typed_by_plain_yaml(elsewhere, _EVENT_TIMESTAMP, datetime)
+    failures = _score(d, elsewhere, _scripted())["mechanical"]["expectation_failures"]
+    assert len(failures) == 1
+    assert _INSTANT in failures[0]
+    assert _dry(d, elsewhere) == 1
+
+
+def test_a_bare_date_is_matched_as_text_in_both_directions(tmp_path):
+    """`2026-07-25` types as a `date`, whose `str()` happens to spell the literal back —
+    so this passes today by accident of `str(date)`. It is pinned anyway: the contract is
+    that the loader constructs the TEXT, and a loader that kept the timestamp resolver for
+    dates alone, or a fix that special-cased `datetime` and forgot `date`, is caught here."""
+    day, other = "2026-07-25", "2026-07-26"
+    event_date = ("projections", 0, "events", 0, "event.date")
+    d = _case(tmp_path, kind="mutation",
+              extra_manifest={"expectation": {"must_not_emit": [day]}})
+    leaked = _projection_text(d, f"event.date: {day}")
+    _assert_typed_by_plain_yaml(leaked, event_date, date)
+    assert _score(d, leaked, _scripted())["mechanical"]["forbidden_emitted"] == [day]
+    assert _dry(d, leaked) == 1
+    honest = _projection_text(d, f"event.date: {other}", name="b.yaml")
+    _assert_typed_by_plain_yaml(honest, event_date, date)
+    assert _score(d, honest, _scripted())["mechanical"]["forbidden_emitted"] == []
+    assert _dry(d, honest) == 0
+
+    m = _case(tmp_path / "mirror", kind="mutation",
+              extra_manifest={"expectation": {"must_emit": [day]}})
+    landed = _projection_text(m, f"event.date: {day}")
+    assert _score(m, landed, _scripted())["mechanical"]["expectation_failures"] == []
+    assert _dry(m, landed) == 0
+    missing = _projection_text(m, f"event.date: {other}", name="b.yaml")
+    failures = _score(m, missing, _scripted())["mechanical"]["expectation_failures"]
+    assert len(failures) == 1
+    assert day in failures[0]
+    assert _dry(m, missing) == 1
+
+
+@pytest.mark.parametrize("where", ["manifest expectation", "manifest top-level",
+                                   "expected.yaml"])
+def test_an_unquoted_author_literal_still_catches_a_quoted_projection_value(tmp_path, where):
+    """O1's "either side". The author may leave the literal unquoted too — in the manifest's
+    `expectation:`, in a recruited case's top-level `must_not_emit:`, or in a seed case's
+    `expected.yaml` — and all three are `_forbidden_values`' branches. Each reads through
+    the same text loader, so the reported value is the literal as the author spelled it."""
+    d = _case(tmp_path, kind="mutation")
+    if where == "manifest expectation":
+        path = _manifest_text(d, kind="mutation",
+                              body=f"expectation:\n  must_not_emit: [{_INSTANT}]\n")
+        keys: tuple = ("expectation", "must_not_emit", 0)
+    elif where == "manifest top-level":
+        path = _manifest_text(d, kind="mutation", body=f"must_not_emit:\n  - {_INSTANT}\n")
+        keys = ("must_not_emit", 0)
+    else:
+        path = _write_text(d, "expected.yaml",
+                           f"case_id: {d.name}\nkind: mutation\nmust_not_emit: [{_INSTANT}]\n")
+        keys = ("must_not_emit", 0)
+    _assert_typed_by_plain_yaml(path, keys, datetime)
+
+    copied = _projection(d, {"l-001": [{"@timestamp": _INSTANT}]})
+    assert f"'{_INSTANT}'" in copied.read_text(encoding="utf-8"), (
+        "safe_dump quotes a timestamp-shaped string — that is the projection side of this test")
+    assert _score(d, copied, _scripted())["mechanical"]["forbidden_emitted"] == [_INSTANT]
+    assert _dry(d, copied) == 1
+
+    # positive control: the same unquoted author literal, absent from the projection
+    honest = _projection(d, {"l-001": [{"@timestamp": _OTHER_INSTANT}]}, name="b.yaml")
+    assert _score(d, honest, _scripted())["mechanical"]["forbidden_emitted"] == []
+    assert _dry(d, honest) == 0
+
+
+def test_the_verdict_pass_is_shown_the_instant_as_the_oracle_wrote_it(tmp_path):
+    """O3. The `<projection>` block is `safe_dump` of the parsed document, so a typed
+    instant reached the judge re-spelled as `2026-07-25 07:48:37.065000+00:00` — a reading
+    the judge could fault, or excuse, for a spelling the oracle never produced. Quoting in
+    the rendered block may differ (`'…'`); the text may not."""
+    seen: dict[str, str] = {}
+
+    def call(instructions, user, model, effort):
+        if "<measurement>" in user:
+            seen["user"] = user
+            return judge.CallResult(VERDICT_OK, model, effort, 0.01)
+        return judge.CallResult(LABEL_OK, model, effort, 0.01)
+
+    d = _case(tmp_path)
+    proj = _projection_text(d, f"'@timestamp': {_INSTANT}\nevent.outcome: failure")
+    _assert_typed_by_plain_yaml(proj, _EVENT_TIMESTAMP, datetime)
+    summary = _score(d, proj, call)
+    assert summary["judged"] is True, "the verdict pass must actually have been reached"
+    block = _projection_block(seen["user"])
+    assert _INSTANT in block
+    assert "07:48:37.065000+00:00" not in block
+    assert "2026-07-25 07:48:37" not in block
+    assert "event.outcome: failure" in block, "the rest of the event is rendered as before"
+
+
+def test_the_verdict_audit_shows_the_judge_the_same_text_the_scorer_does(tmp_path):
+    """M2. `audit_judge.verdict_set` is the one other reader that renders projection values
+    for the judge; read through plain `safe_load` it would brief the audit's judge with a
+    re-spelled instant while the scorer's judge saw the text, and the audit's stability
+    figure would not be the scorer's.
+
+    Seam decision: `verdict_set` resolves cases under the module constant `CASES_DIR`, and
+    the committed tree carries no typed instant (O4 forbids one), so the test needs a
+    root of its own. It asks for `cases_dir: Path = CASES_DIR` as a keyword — the
+    profile's injection idiom — rather than `monkeypatch.setattr` on the module, which the
+    monkeypatch lint ratchets. The entries it returns are exactly what
+    `run_verdict_audit` hands `judge.verdict_lead`, so the prompt is built the same way."""
+    from defender.evals.oracle_golden import audit_judge
+
+    d = _case(tmp_path)
+    proj = _projection_text(d, f"'@timestamp': {_INSTANT}\nevent.outcome: failure",
+                            name="tag-a.yaml")
+    _assert_typed_by_plain_yaml(proj, _EVENT_TIMESTAMP, datetime)
+    labels = score.labels_path(d, judge.judge_model(), judge.judge_effort())
+    labels.parent.mkdir(parents=True, exist_ok=True)
+    labels.write_text(json.dumps({
+        "judge": {"model": judge.judge_model(), "effort": judge.judge_effort(),
+                  "prompts_sha8": judge.prompts_sha8()},
+        "leads": {"l-001": {"delta_kind": "present", "heterogeneous": False,
+                            "evidence": "four failed auths", "judge_model": "m",
+                            "judge_effort": "high", "cost_usd": 0.01}},
+    }), encoding="utf-8")
+
+    entries = audit_judge.verdict_set(("case-x",), "tag-a", cases_dir=tmp_path)
+    assert [(c.name, lead) for c, lead, _, _ in entries] == [("case-x", "l-001")]
+    (case_dir, lead_id, events, measurement), = entries
+    prompt = judge.verdict_user_prompt(judge.load_lead_inputs(case_dir, lead_id),
+                                       events, measurement)
+    block = _projection_block(prompt)
+    assert _INSTANT in block
+    assert "07:48:37.065000+00:00" not in block
+    assert "2026-07-25 07:48:37" not in block
+
+
+def test_scoring_through_the_text_loader_leaves_yaml_safe_load_typed(tmp_path):
+    """M1's hazard. `yaml_implicit_resolvers` is a class-level dict of lists SHARED with
+    `yaml.SafeLoader`; a subclass that edits it in place strips typing from every
+    `yaml.safe_load` in the process (executed: `2026-07-25` read as `str` afterwards).
+    The loader is exercised through the real entry point first, in this process, and the
+    process-wide reader is then asked to type a date, an int and a boolean."""
+    d = _case(tmp_path, kind="mutation",
+              extra_manifest={"expectation": {"must_not_emit": [_INSTANT]}})
+    proj = _projection_text(d, f"'@timestamp': {_INSTANT}")
+    assert _dry(d, proj) == 1, "the loader ran over a typed-looking document"
+    assert yaml.safe_load("a: 2026-07-25")["a"] == date(2026, 7, 25)
+    assert yaml.safe_load(f"a: {_INSTANT}")["a"] == datetime(2026, 7, 25, 7, 48, 37, 65000,
+                                                            tzinfo=UTC)
+    assert yaml.safe_load("a: 1")["a"] == 1
+    assert yaml.safe_load("a: 1")["a"] is not True
+    assert yaml.safe_load("a: yes")["a"] is True
+
+
+def test_the_cousins_of_a_timestamp_are_caught_as_the_text_they_were_written_as(tmp_path):
+    """O1 widened. `yes` → `True` → "true", `0755` → `493`, `12:30` → `750` (sexagesimal),
+    `1.50` → `1.5`: each collapses the author's literal the same way an instant did, and
+    each is owed the same catch. The control carries the same fields with other values."""
+    forbidden = ["yes", "0755", "12:30", "1.50"]
+    d = _case(tmp_path, kind="spec-probe",
+              extra_manifest={"expectation": {"must_not_emit": forbidden}})
+    copied = _projection_text(d, "flag: yes\nmode: 0755\nwhen: 12:30\nversion: 1.50")
+    event = _plain(copied, "projections", 0, "events", 0)
+    assert event == {"flag": True, "mode": 493, "when": 750, "version": 1.5}, (
+        "fixture bug: plain yaml.safe_load must type all four, or the test exercises nothing")
+    assert _score(d, copied, _scripted())["mechanical"]["forbidden_emitted"] == forbidden
+    assert _dry(d, copied) == 1
+
+    honest = _projection_text(d, "flag: no\nmode: 0644\nwhen: 12:31\nversion: 1.25",
+                              name="b.yaml")
+    assert _score(d, honest, _scripted())["mechanical"]["forbidden_emitted"] == []
+    assert _dry(d, honest) == 0
+
+
+def test_an_int_on_one_side_and_a_quoted_digit_string_on_the_other_still_match(tmp_path):
+    """Regression for what `_norm` used to guarantee. An author writes `must_emit: [22]`
+    and the oracle `destination.port: '22'` — or the reverse — and the two must match.
+    They did through `str()`; they now do because both sides are text."""
+    d = _case(tmp_path, kind="mutation",
+              extra_manifest={"expectation": {"must_emit": [22]}})
+    assert _plain(d / "manifest.yaml", "expectation", "must_emit", 0) == 22
+    quoted = _projection(d, {"l-001": [{"destination.port": "22"}]})
+    assert _score(d, quoted, _scripted())["mechanical"]["expectation_failures"] == []
+    assert _dry(d, quoted) == 0
+
+    r = _case(tmp_path / "reverse", kind="mutation",
+              extra_manifest={"expectation": {"must_emit": ["22"]}})
+    assert "'22'" in (r / "manifest.yaml").read_text(encoding="utf-8")
+    bare = _projection_text(r, "destination.port: 22")
+    assert _plain(bare, "projections", 0, "events", 0, "destination.port") == 22
+    assert _score(r, bare, _scripted())["mechanical"]["expectation_failures"] == []
+    assert _dry(r, bare) == 0
+
+    # positive control: a port the projection does not carry is one failure
+    c = _case(tmp_path / "control", kind="mutation",
+              extra_manifest={"expectation": {"must_emit": [23]}})
+    failures = _score(c, _projection(c, {"l-001": [{"destination.port": "22"}]}),
+                      _scripted())["mechanical"]["expectation_failures"]
+    assert len(failures) == 1
+    assert "23" in failures[0]
+
+
+def test_an_int_on_one_side_and_a_quoted_digit_string_on_the_other_still_leak(tmp_path):
+    """The `must_not_emit` analog of the regression above, both ways round. The reported
+    value is the TEXT the author wrote — `"22"`, where the typed loader reported the `int`
+    it had made of the manifest entry (no committed manifest carries one; design C13)."""
+    d = _case(tmp_path, kind="mutation",
+              extra_manifest={"expectation": {"must_not_emit": [22]}})
+    quoted = _projection(d, {"l-001": [{"destination.port": "22"}]})
+    assert _score(d, quoted, _scripted())["mechanical"]["forbidden_emitted"] == ["22"]
+
+    r = _case(tmp_path / "reverse", kind="mutation",
+              extra_manifest={"expectation": {"must_not_emit": ["22"]}})
+    bare = _projection_text(r, "destination.port: 22")
+    assert _plain(bare, "projections", 0, "events", 0, "destination.port") == 22
+    assert _score(r, bare, _scripted())["mechanical"]["forbidden_emitted"] == ["22"]
+
+    # positive control: a different port leaks nothing, either way round
+    other = _projection(d, {"l-001": [{"destination.port": "23"}]}, name="b.yaml")
+    assert _score(d, other, _scripted())["mechanical"]["forbidden_emitted"] == []
+    other_bare = _projection_text(r, "destination.port: 23", name="b.yaml")
+    assert _score(r, other_bare, _scripted())["mechanical"]["forbidden_emitted"] == []

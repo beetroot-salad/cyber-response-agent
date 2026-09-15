@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -195,3 +196,66 @@ def test_every_checked_in_projection_has_a_score(case_dir, proj_path):
             for p in (case_dir / "scores").glob("*.json")}
     assert proj_path.name in tags, (
         f"{case_dir.name}/{proj_path.name} has no scores/ artifact — run score.py")
+
+
+# no case file carries a YAML-typed instant (#951, O4)
+#
+# The mechanical checks compare the TEXT a projection carries against the text an author
+# wrote, and the design rests on the projection file carrying the model's own YAML. A
+# producer that parsed-then-dumped would write `2026-07-25 07:48:37.065000+00:00` — a
+# spelling no text-level check can match — and an author leaving a manifest literal
+# unquoted is the same latent defect on the other side. Plain `yaml.safe_load` is the point:
+# it is the reading that TYPES, so it is the reading that sees the hazard.
+
+CASE_YAML_FILES = sorted(CASES_DIR.rglob("*.yaml"))
+
+
+def _typed_instants(doc, path: str = "") -> list[str]:
+    """Every place in a loaded document — keys included — that is a `date`/`datetime`."""
+    if isinstance(doc, date | datetime):
+        return [path or "<root>"]
+    found: list[str] = []
+    if isinstance(doc, dict):
+        for key, value in doc.items():
+            found += _typed_instants(key, f"{path}/<key {key!r}>")
+            found += _typed_instants(value, f"{path}/{key}")
+    elif isinstance(doc, list):
+        for i, value in enumerate(doc):
+            found += _typed_instants(value, f"{path}[{i}]")
+    return found
+
+
+def test_there_are_case_yaml_files_to_scan():
+    """The sweep below would pass vacuously over an empty glob — and it must cover every
+    file family the loader reads, not just projections."""
+    names = {p.name for p in CASE_YAML_FILES}
+    assert {"manifest.yaml", "environment.yaml", "expected.yaml"} <= names
+    assert any(p.parent.name == "projections" for p in CASE_YAML_FILES)
+
+
+@pytest.mark.parametrize(("typed", "where"), [
+    ({"a": date(2026, 7, 25)}, "/a"),
+    ({"projections": [{"events": [{"@timestamp": datetime(2026, 7, 25, 7, 48)}]}]},
+     "/projections[0]/events[0]/@timestamp"),
+    ({datetime(2026, 7, 25, 7, 48): "x"}, "/<key datetime.datetime(2026, 7, 25, 7, 48)>"),
+    ([[date(2026, 7, 25)]], "[0][0]"),
+])
+def test_the_typed_instant_walker_fires_on_a_synthetic_document(typed, where):
+    """The tree sweep is green today (design C9: 0 typed values in 101 projections), so
+    this proves its detector can fire — on a value, a nested value, a key, and inside a
+    bare list — and that a quoted instant does not trip it."""
+    assert _typed_instants(typed) == [where]
+    assert _typed_instants(yaml.safe_load("a: '2026-07-25T07:48:37.065Z'\nb: 2026-07-25")) == ["/b"]
+    assert _typed_instants(yaml.safe_load("a: '2026-07-25'\nb: [x, 22, ~]")) == []
+
+
+@pytest.mark.parametrize("path", CASE_YAML_FILES,
+                         ids=lambda p: str(p.relative_to(CASES_DIR)))
+def test_no_case_file_carries_a_yaml_typed_instant(path):
+    """Under plain `yaml.safe_load`, no value (or key) anywhere in `cases/**/*.yaml` is a
+    `date`/`datetime`. A re-dumping projection producer or an unquoted author literal
+    lands here at commit time, before it lands as a silently-unarmed case."""
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert _typed_instants(doc) == [], (
+        f"{path.relative_to(CASES_DIR)} carries YAML-typed instant(s) — quote them: the "
+        f"mechanical checks compare text, and `str(datetime)` is a spelling no author wrote")
