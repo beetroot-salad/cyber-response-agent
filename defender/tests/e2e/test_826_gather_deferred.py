@@ -213,6 +213,7 @@ def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(t
     gather = ReplayFn([
         q("elastic", "query", PARAMS), q("elastic", "query", PARAMS),
         q("elastic", "query", PARAMS),          # the third trips the guard: dead end
+        Turn(text="what I had before the stop"),  # ...and #987 asks for its summary (one turn)
         q("elastic", "query", {"native_query": "FROM other"}), DONE,   # the second lead
     ])
     stores: list = []
@@ -371,8 +372,13 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
     rows = res.own_rows
     assert len(rows) == REPEAT_THRESHOLD, "the rejection rows stopped being written"
     assert [row["exit_code"] for row in rows] == [64] * REPEAT_THRESHOLD
-    assert res.gather.calls == REPEAT_THRESHOLD, \
-        "the loop ran past the threshold — it is still bounded only by the retry count"
+    assert res.gather.calls == REPEAT_THRESHOLD + 1, (
+        "the loop ran past the threshold — it is still bounded only by the retry count "
+        f"(> {REPEAT_THRESHOLD + 1}) — or the lead stopped at the threshold and #987's "
+        f"tool-less summary turn did not follow it ({REPEAT_THRESHOLD}). The `+ 1` is that "
+        "turn: a lead cut by a degrading arm is asked once more, with no tool offered, to "
+        "write the summary main receives under this stop's own notice."
+    )
     assert rec.calls == [], "a rejected call reached the backend"
 
     trip_row = rows[-1]
@@ -381,7 +387,13 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
     summary = res.summary()
     assert "repeats the one already turned back at seq 0" in summary
     assert "Treat this lead as incomplete" in summary, "the shipped idiom was dropped"
-    assert PARAMS["native_query"] not in summary, \
+    # SCOPE since #987: the refusal-path invariant binds the HARNESS-AUTHORED HEADER — the
+    # notice above — not the whole message. The summary turn's own text follows it after a
+    # blank line, through the same `untrusted` channel a clean lead's summary uses, where the
+    # model could always echo its own arguments. Here that text is `DONE`'s fixed string, so
+    # the assertion is scoped to the header and still says exactly what it always said.
+    header = summary.split("\n\n", 1)[0]
+    assert PARAMS["native_query"] not in header, \
         "model-authored params crossed into main's context on a refusal path"
 
     # The session terminator (item 1) covers this new stop too — a fourth terminator with the

@@ -315,7 +315,16 @@ def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp
     `_run_gather` now hands the factory the value it is ABOUT TO ENFORCE through
     `UsageLimits(request_limit=...)`, so the two cannot be different numbers. Asserted as
     identity against the argument this call passes, and driven at two different ceilings so a
-    factory that ignored its parameter and returned a constant could not pass both."""
+    factory that ignored its parameter and returned a constant could not pass both.
+
+    THE NUMBER IS ONE BELOW THE LEAD'S OWN CEILING SINCE #987, and this demand is unchanged by
+    that: the value handed down is still THE VALUE THIS DISPATCH ENFORCES, and #987 lowers both
+    ends of that identity together (`request_limit - 1` to the factory AND to `UsageLimits`)
+    because the lead's last request is reserved for the tool-less summary turn. #808 d21/F6's
+    number — what a lead may spend in total — is unmoved; only its composition is. The pairing
+    itself is pinned at its own address, `tests/test_987_salvage_seam.py::test_the_query_phase
+    _ceiling_is_one_below_the_leads_own_and_the_salvage_turn_spends_it`, which asserts the two
+    numbers are equal AND that they sum with the reserved request back to the ceiling."""
     from defender.runtime import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
@@ -332,11 +341,13 @@ def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp
             GATHER_DEF.verb_grant, catalog=None,
         ))
 
-    assert handed == [40, 8], (
+    assert handed == [39, 7], (
         f"the factory was handed {handed} for dispatches ceilinged at [40, 8] — it is reading "
         "a ceiling of its own rather than this run's, which is the shape of #880 F-19: the "
         "recorder it builds then withholds the doomed round against a number no dispatch here "
-        "will enforce"
+        "will enforce. Since #987 the query phase's own ceiling is one below the lead's, so "
+        "the expected pair is [39, 7]; a bare [40, 8] means the reserved summary request was "
+        "taken out of nothing and the lead can now spend one more than #808 allows"
     )
 
 
