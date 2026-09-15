@@ -477,15 +477,18 @@ def test_1025_an_unreadable_regular_file_at_a_record_name(tmp_path):
     names = ("judge.yaml", "timing.json", "review.yaml", "samples.yaml", "staged.yaml",
              "provenance.json")
     E.write_timing(ep.dir, E.six_steps())
-    for name in names:
-        (ep.dir / name).chmod(0)
-    (ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl").chmod(0)
-    (ep.world(E.GRADED_WORLD) / "gather_summaries" / "l-001.md").chmod(0)
+    # Every path denied is restored — the ledger and the summary included, or they stay
+    # mode 000 for the rest of the tmp tree's life.
+    denied = [ep.dir / name for name in names] + [
+        ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl",
+        ep.world(E.GRADED_WORLD) / "gather_summaries" / "l-001.md"]
+    for path in denied:
+        path.chmod(0)
     try:
         page = render(ep)
     finally:
-        for name in names:
-            (ep.dir / name).chmod(0o644)
+        for path in denied:
+            path.chmod(0o644)
     assert "grade record unreadable" in page.text_of("sec-verdict")
     assert "timing record unreadable" in page.text_of("sec-stages")
     records = _records(page)

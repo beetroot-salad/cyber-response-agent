@@ -66,7 +66,7 @@ from typing import Any
 from defender._artifact_schema import INVESTIGATION_NAME, REPORT_NAME
 from defender._io import entry_present, read_guarded, read_jsonl_rows_guarded
 from defender._run_paths import artifact_dir, artifact_file
-from defender._report import ReportRead, parse_report_text, read_report
+from defender._report import ReportRead, parse_report_text
 from defender._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
 from defender.learning.branch.ledger import (
@@ -985,19 +985,22 @@ def read_archived_report(path: Path) -> ReportRead:
     Screened with `read_guarded` (open `O_NOFOLLOW` + `fstat`) rather than an `artifact_file`
     `lstat` taken ahead of `read_report`'s own bare `is_file()` + read: the lstat-then-open
     form leaves the exact TOCTOU window `read_guarded` exists to close between the screen and
-    the open — a plant landing in that window would still be followed. What a headline IS is
-    still `_report`'s one decision: the screened bytes go through `parse_report_text`, the
-    same interpretation `read_report` applies for its eight other callers."""
-    if not entry_present(path):
-        return read_report(path)  # absent: `read_report`'s own "not found" branch, verbatim
+    the open — a plant landing in that window would still be followed. ON EVERY BRANCH: the
+    absent case is decided AFTER the guarded read has refused, never by handing the path to
+    `read_report`, whose `is_file()` + read follows a link planted between the two. What a
+    headline IS is still `_report`'s one decision: the screened bytes go through
+    `parse_report_text`, the same interpretation `read_report` applies for its eight other
+    callers, and an absent report reads with `read_report`'s own "not found" sentence."""
     text, refusal = read_guarded(path)
     if text is None:
-        # `refusal` is `read_guarded`'s own sentence — the alias refusal, or the errno of a
-        # permission fault — so nothing is prefixed that would read an unreadable file as an
-        # aliased one.
-        return ReportRead(
-            disposition=None, reason=f"{REPORT_NAME} could not be read: {refusal}",
-            frontmatter={}, body="", text="")
+        if not entry_present(path):
+            reason = f"{REPORT_NAME} not found: {path}"
+        else:
+            # `refusal` is `read_guarded`'s own sentence — the alias refusal, or the errno of
+            # a permission fault — so nothing is prefixed that would read an unreadable file
+            # as an aliased one.
+            reason = f"{REPORT_NAME} could not be read: {refusal}"
+        return ReportRead(disposition=None, reason=reason, frontmatter={}, body="", text="")
     return parse_report_text(text)
 
 
@@ -1513,7 +1516,8 @@ __all__ = [
     "declares_difference", "discriminator_of", "episode_id_of", "grade_family",
     "is_gradable_row", "json_mapping", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "own_h_rows", "raw_manifest", "read_review_record",
-    "read_investigation_facts", "read_samples_record", "read_world_facts", "read_world_ledger", "sample_patterns", "scope_params",
+    "read_archived_report", "read_investigation_facts", "read_samples_record",
+    "read_world_facts", "read_world_ledger", "sample_patterns", "scope_params",
     "screened_yaml_mapping", "staged_patterns", "world_label_names_directory", "world_pattern",
     "world_review_block",
 ]

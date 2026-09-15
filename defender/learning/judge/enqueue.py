@@ -905,9 +905,10 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
 
 
 __all__ = [
-    "EnqueueReport", "KIND_DRAW", "KIND_FAMILY", "KIND_MECHANICAL", "ROUTE_DEFENDER",
-    "ROUTE_NEVER_ELIGIBLE", "ROUTE_NO_CHANNEL", "ROUTE_NO_ROW", "ROUTE_UNGRADABLE",
-    "ROUTE_WITHHELD", "ROUTE_WORLD", "append_rows", "append_rows_report", "append_world_rows",
-    "append_world_rows_report", "build_finding_row", "defender_lane_blocked", "draws_on_disk",
-    "enqueue", "enqueue_report", "route_finding", "withheld_reasons_of",
+    "DrawsSkipReport", "EnqueueReport", "KIND_DRAW", "KIND_FAMILY", "KIND_MECHANICAL",
+    "ROUTE_DEFENDER", "ROUTE_NEVER_ELIGIBLE", "ROUTE_NO_CHANNEL", "ROUTE_NO_ROW",
+    "ROUTE_UNGRADABLE", "ROUTE_WITHHELD", "ROUTE_WORLD", "append_rows", "append_rows_report",
+    "append_world_rows", "append_world_rows_report", "build_finding_row",
+    "defender_lane_blocked", "draws_on_disk", "draws_on_disk_report", "enqueue",
+    "enqueue_report", "route_finding", "withheld_reasons_of",
 ]

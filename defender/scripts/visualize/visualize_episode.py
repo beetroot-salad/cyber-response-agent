@@ -130,19 +130,13 @@ def _safe_id(raw: str) -> str | None:
     return raw if isinstance(raw, str) and is_valid_run_id(raw) else None
 
 
-def _v(x: Any) -> str:
-    """A scalar rendered as text. ALIASED TO THE UNTRUSTED ESCAPE (#1025 O9): almost nothing
-    on this page is a structural literal this module wrote itself — every string is a record
-    field, and a record lives in a tree a box can reach. Treating `_v` as `esc()` alone would
-    have made every call site a silent decision that ITS value is exempt from the event-handler
-    split, which is exactly the kind of per-site judgment call this design's `esc_untrusted`
-    exists to remove."""
-    return _uv(x)
-
-
 def _uv(x: Any) -> str:
-    """`_v`, through the untrusted escape — for a value whose source is a model-authored
-    record.
+    """A scalar rendered as text, through the untrusted escape — THE ONE spelling (#1025 O9):
+    almost nothing on this page is a structural literal this module wrote itself — every
+    string is a record field, and a record lives in a tree a box can reach. A second, plainer
+    alias would make every call site a silent decision that ITS value is exempt from the
+    event-handler split, which is exactly the kind of per-site judgment call this design's
+    `esc_untrusted` exists to remove; `esc()` alone is for the page's own literals and ids.
 
     The SAME event-handler predicate `visualize_primitives.esc_untrusted` splits on, imported
     rather than respelled: this page splits it across an ELEMENT boundary (`<wbr>`, a void tag
@@ -162,7 +156,7 @@ def _uv(x: Any) -> str:
 
 def _raw(x: Any) -> str:
     """`x` as plain text with no markup escaping — for building a string another function will
-    escape exactly once. `None` reads as the same em dash `_v`/`_uv` show."""
+    escape exactly once. `None` reads as the same em dash `_uv` shows."""
     if x is None:
         return "—"
     if isinstance(x, bool):
@@ -325,10 +319,86 @@ class _ResultEvent:
 
     __slots__ = ("cost", "wall_ms", "state")
 
+    #: The ONE sentence each non-`ok` state reads as, wherever a run's cost is shown — the
+    #: world section and the stages table both take it from here, so the same trace cannot
+    #: read "no result event" in one and "unusable result event" in the other.
+    TEXT = {
+        # No `tool_trace.jsonl` at all — a launcher-produced run that never wrote one, not a
+        # sibling whose trace simply lacks a terminal result row (#1025). "no result event"
+        # implies a trace WAS read; here nothing was there to read, so it reads the same
+        # words the questioner/judge steps use for the same absence.
+        "absent": "no cost recorded",
+        "refused": "no result event (refused)",
+        "none": "no result event",
+        "unusable": "unusable result event",
+    }
+
     def __init__(self, cost: float | None, wall_ms: float | None, state: str) -> None:
         self.cost = cost
         self.wall_ms = wall_ms
         self.state = state
+
+    @property
+    def costed(self) -> bool:
+        return self.state == "ok" and self.cost is not None
+
+    @property
+    def text(self) -> str:
+        return self.TEXT[self.state]
+
+
+class _Timing:
+    """The stage clock, DECIDED ONCE for every surface that shows it: the stages header, the
+    stage table's caption and the verdict tile's fallback all read the same answer here, so
+    they cannot disagree about whether the episode has a measured wall.
+
+    `error` is the reader's refusal (present but unreadable — the table's own distinct line);
+    `rows_by_step` the readable rows; `trusted_by_step` those whose pair is not inverted;
+    `launcher_wall_ms` the span over every trusted pair, or `None` when there is none — the
+    ONE bit `measured` turns on. `caption` is the table's fallback line for an unmeasured
+    clock, `None` once there is a real wall to show instead."""
+
+    __slots__ = ("error", "rows_by_step", "trusted_by_step", "launcher_wall_ms")
+
+    def __init__(self, rec: _Record) -> None:
+        self.error = rec.error
+        self.rows_by_step: dict[str, list[dict[str, Any]]] = {}
+        self.trusted_by_step: dict[str, list[dict[str, Any]]] = {}
+        if rec.ok:
+            for row in rec.value or []:
+                self.rows_by_step.setdefault(row["step"], []).append(row)
+        # Only a NON-INVERTED pair feeds a span: an inverted row (`d < 0`, `_wall_between`'s
+        # own sentinel) shows "—" in its own cell rather than a number, and letting its
+        # untrustworthy pair still widen or narrow min(start)/max(end) would silently corrupt
+        # the one aggregate the row's own display just refused to state (#1025 p5). A
+        # ZERO-length pair is not inverted: the clock stamps whole seconds (`now_iso()`), so a
+        # step that starts and ends within one is a real step whose endpoints belong in the
+        # span.
+        for step, rows in self.rows_by_step.items():
+            self.trusted_by_step[step] = [
+                r for r in rows
+                if (d := _wall_between(r["started_at"], r["ended_at"])) is not None and d >= 0]
+        trusted = [r for rows in self.trusted_by_step.values() for r in rows]
+        self.launcher_wall_ms: float | None = (
+            _wall_span([r["started_at"] for r in trusted], [r["ended_at"] for r in trusted])
+            if trusted else None)
+
+    @property
+    def measured(self) -> bool:
+        return self.launcher_wall_ms is not None
+
+    @property
+    def caption(self) -> str | None:
+        if self.measured:
+            return None
+        if self.error is not None:
+            return None  # the table renders the refusal itself, as its own `st-error` line
+        if not self.rows_by_step:
+            # ABSENT, or a record with no completed step — the reader folds the two (an abort
+            # before the first step finished leaves `{"steps": []}`, a legitimate record it
+            # answers with the same `[]`), so neither can be told from the other here.
+            return "model-call time — no timing record"
+        return "model-call time — the timing record has no usable span (every row inverted)"
 
 
 class _WorldArchive:
@@ -555,6 +625,11 @@ class _Finding:
     raw: Any
 
     def __init__(self, **kw: Any) -> None:
+        # REFUSED, not dropped: a misspelled keyword at any construction site would otherwise
+        # become a silent `None` field on every row.
+        unknown = set(kw) - set(self.__slots__)
+        if unknown:
+            raise TypeError(f"_Finding: unknown field(s) {sorted(unknown)}")
         for slot in self.__slots__:
             setattr(self, slot, kw.get(slot))
 
@@ -584,10 +659,14 @@ class _Episode:
         self.dir = episode_dir
         self.manifest = manifest
         self.episode_id = family.episode_id_of(manifest)
+        # BUILT OR ABSENT, never the raw id in its place: the token is joined into
+        # `served/<token>.<label>.jsonl`, and an id the builder refuses (`../../x`) joined raw
+        # would name a file OUTSIDE the episode dir this page promises to read from alone.
+        # With no token there is no ledger to read, and the leads block says so.
         try:
-            self.episode_token = episode_token_for(self.episode_id)
-        except Exception:  # noqa: BLE001 — a token that cannot be built names no world's ledger; every read below degrades on its own
-            self.episode_token = self.episode_id
+            self.episode_token: str | None = episode_token_for(self.episode_id)
+        except Exception:  # noqa: BLE001 — a token that cannot be built names no world's ledger
+            self.episode_token = None
         # The manifest's world entries, as MAPPINGS: a scalar where the list belongs, or a
         # scalar among the entries, is nothing to render a section for.
         self.manifest_worlds: list[dict[str, Any]] = [
@@ -606,6 +685,9 @@ class _Episode:
         #: render, and what their headings count.
         self.roster: list[RosterItem] = []
         self.off_roster = 0
+        #: `runs/` directories whose full name is already a roster label — not sectioned a
+        #: second time under the same ids; named on the off-roster line.
+        self.shadowed_run_dirs: list[str] = []
         self.archived_world_dirs: list[str] = []
         self.alert: Any = None
         self.draws: dict[str, tuple[dict[int, dict[str, Any]], DrawsSkipReport]] = {}
@@ -614,7 +696,15 @@ class _Episode:
         self.leads: dict[str, _WorldLeads] = {}
         self.wire = _WireLogs()
         self.findings = _Findings()
+        self.timing = _Timing(_Record())
         self.total_cost = 0.0
+        #: Did ANY run's result event price the run — the runs sub-total's own gate.
+        self.runs_costed = False
+        #: Did anything at all price this episode (a run, a questioner call, a judge call) —
+        #: the grand total's gate. A flag, not `total_cost`'s truthiness: an episode whose
+        #: every run cost $0.0000 is priced, and owes its total line, exactly as the runs
+        #: sub-total below it does.
+        self.costed = False
         self.worlds_wall = ""
         self.lower_bound = ""
 
@@ -661,6 +751,7 @@ def load_episode(episode_dir: Path) -> _Episode:
     ep.staged_rec = _read_staged(episode_dir)
     ep.stamp_rec = _read_family_stamp(episode_dir)
     ep.timing_rec = _read_timing(episode_dir)
+    ep.timing = _Timing(ep.timing_rec)
 
     grade = ep.grade
     grade_rows = [r for r in (_items(grade.worlds) if grade is not None else [])
@@ -701,7 +792,7 @@ def load_episode(episode_dir: Path) -> _Episode:
 
     ep.wire = _load_wire_logs(episode_dir / WIRE_LOG_DIR)
     ep.findings = _walk_findings(ep)
-    ep.total_cost, ep.worlds_wall, ep.lower_bound = _cost_totals(ep)
+    ep.total_cost, ep.runs_costed, ep.costed, ep.worlds_wall, ep.lower_bound = _cost_totals(ep)
     return ep
 
 
@@ -799,7 +890,16 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — o
             continue
         entry(label).run_dir_name = child
 
+    # ONE ITEM PER LABEL. A stray directory's roster label is its full name, and a name that is
+    # already a world's label (`runs/<label>/` beside `runs/<ep>-<label>/`) would be a second
+    # item with the same `world-<label>`/`leads-<label>` ids, silently overwriting the world's
+    # leads block. It is reported on the off-roster line instead, beside the `worlds/` entries
+    # the roster does not carry.
+    shadowed = [name for name in stray_run_dirs if name in entries]
+    stray_run_dirs = [name for name in stray_run_dirs if name not in entries]
+
     off_roster = sum(1 for name in ep.archived_world_dirs if name not in entries)
+    ep.shadowed_run_dirs = shadowed
 
     def classify(label: str, kind: str) -> RosterItem:
         return RosterItem(label, kind if _safe_id(label) is not None else ROSTER_UNNAMEABLE)
@@ -860,8 +960,10 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
     # read here through the bare tolerant reader counted only the torn lines and disagreed with
     # the record. ITS OWN SLOT: the ledger's refusal is the ledger note, and never reaches the
     # investigation read below.
-    ledger_path = family.world_ledger_path(ep.dir, label, episode_token=ep.episode_token)
-    if not entry_present(ledger_path):
+    if ep.episode_token is None:
+        leads.ledger_note = "served ledger: not readable — the episode id names no token"
+    elif not entry_present(
+            family.world_ledger_path(ep.dir, label, episode_token=ep.episode_token)):
         leads.ledger_note = "served ledger: absent"
     else:
         try:
@@ -955,26 +1057,29 @@ def _load_wire_logs(wire: Path) -> _WireLogs:
     return logs
 
 
-def _cost_totals(ep: _Episode) -> tuple[float, str, str]:
+def _cost_totals(ep: _Episode) -> tuple[float, bool, bool, str, str]:
     total = 0.0
+    runs_costed = False
     walls = []
     for w in ep.entries.values():
         if w.result is None:
             continue
-        if w.result.cost is not None:
+        if w.result.cost is not None and w.result.costed:
+            runs_costed = True
             total += w.result.cost
         if w.result.wall_ms:
             walls.append(w.result.wall_ms)
-    q_cost, q_wall_ms, _qp, _qt = ep.wire.role_cost("questioner")
-    j_cost, j_wall_ms, _jp, _jt = ep.wire.role_cost(Step.JUDGE)
+    q_cost, q_wall_ms, _qp, q_calls = ep.wire.role_cost("questioner")
+    j_cost, j_wall_ms, _jp, j_calls = ep.wire.role_cost(Step.JUDGE)
     total += q_cost + j_cost
+    costed = runs_costed or bool(q_calls) or bool(j_calls)
     if walls:
         wall_range = f"{fmt_duration(min(walls))}–{fmt_duration(max(walls))}"
         lower_bound = f"≈ {fmt_duration(q_wall_ms + j_wall_ms + max(walls))} lower bound on wall: model calls + longest world"
     else:
         wall_range = ""
         lower_bound = ""
-    return total, wall_range, lower_bound
+    return total, runs_costed, costed, wall_range, lower_bound
 
 
 # =========================================================================================
@@ -1045,7 +1150,21 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
     entries = ep.entries
     roster_labels = [*entries, _FAMILY_LABEL]
 
-    for label in roster_labels:
+    def _walked(label: str) -> bool:
+        """Does the page walk this label's draws at all? With no grade record, every roster
+        label; otherwise the family lane always, and a world once a grade row or a manifest
+        entry names it (a bare `runs/` directory is a section with no findings)."""
+        if grade is None or label == _FAMILY_LABEL:
+            return True
+        entry = entries.get(label)
+        return entry is not None and (entry.row is not None or entry.in_manifest)
+
+    # ONE population for every count tile 3 shows: the dropped/failed draws are read off the
+    # same labels the findings below are walked from, so "queued of N · M dropped" cannot
+    # add a draw the walk never opened to a split it does not appear in.
+    walked_labels = [label for label in roster_labels if _walked(label)]
+
+    for label in walked_labels:
         docs, report = ep.draws[label]
         out.world_reports[label] = report
         for draw, doc in docs.items():
@@ -1059,7 +1178,7 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
 
     if grade is None:
         # No grade record at all: every on-disk finding renders under one group, undisposed.
-        for label in roster_labels:
+        for label in walked_labels:
             docs, _report = ep.draws[label]
             for draw, doc in docs.items():
                 for index, finding in enumerate(_items(doc.get("findings"))):
@@ -1084,14 +1203,6 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
     world_findings_by_coord = _world_findings_lookup(grade)
     seen_coords: set[str] = set()
 
-    def _walked(label: str) -> bool:
-        """Does the page walk this label's draws at all? The family lane always; a world once
-        a grade row or a manifest entry names it (a bare `runs/` directory is a section with
-        no findings)."""
-        entry = entries.get(label)
-        return label == _FAMILY_LABEL or (
-            entry is not None and (entry.row is not None or entry.in_manifest))
-
     def _dispose(label: str, finding: dict[str, Any], kind: str, coord: str,
                  ) -> tuple[str, str | None]:
         entry = entries.get(label)
@@ -1103,10 +1214,8 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
             coord=coord, unqueueable=unqueueable, verdict_word=verdict_word,
             world_findings_by_coord=world_findings_by_coord)
 
-    for label in roster_labels:
+    for label in walked_labels:
         entry = entries.get(label)
-        if not _walked(label):
-            continue
         kind = KIND_FAMILY if label == _FAMILY_LABEL else KIND_DRAW
 
         docs, _report = ep.draws[label]
@@ -1351,9 +1460,9 @@ def _render_header(ep: _Episode) -> str:
     branch_message_id = manifest.get("branch_message_id")
     meta_bits = list(alert_bits)
     if isinstance(source_run_id, str):
-        meta_bits.append(f'<span class="hd-source">source {_v(source_run_id)}</span>')
+        meta_bits.append(f'<span class="hd-source">source {_uv(source_run_id)}</span>')
     if branch_message_id is not None:
-        meta_bits.append(f'<span class="hd-branch">branch message {_v(branch_message_id)}</span>')
+        meta_bits.append(f'<span class="hd-branch">branch message {_uv(branch_message_id)}</span>')
 
     if grade is not None:
         knobs = _mapping(grade.knobs)
@@ -1363,16 +1472,16 @@ def _render_header(ep: _Episode) -> str:
         cap = knobs.get("payload_cap", "?")
         configured = draws.get("configured", "?")
         completed = draws.get("completed", "?")
-        knob_line = (f"{_v(model)} / {_v(effort)} / cap {_v(cap)} / "
-                    f"draws {_v(configured)}/{_v(completed)}")
+        knob_line = (f"{_uv(model)} / {_uv(effort)} / cap {_uv(cap)} / "
+                    f"draws {_uv(configured)}/{_uv(completed)}")
         meta_bits.append(f'<span class="hd-knobs">{knob_line}</span>')
         if grade.lessons_commit:
-            meta_bits.append(f'<span class="hd-commit">{_v(str(grade.lessons_commit)[:8])}</span>')
+            meta_bits.append(f'<span class="hd-commit">{_uv(str(grade.lessons_commit)[:8])}</span>')
 
     meta = '<span class="hd-sep"> · </span>'.join(meta_bits)
     return f"""
 <header class="top" id="sec-case">
-  <h1>episode {_v(ep.episode_id)}</h1>
+  <h1>episode {_uv(ep.episode_id)}</h1>
   <div class="byline">{meta}</div>
 </header>
 """
@@ -1478,9 +1587,9 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         if w.row is None:
             continue
         if w.row.get("ungradable"):
-            withheld_captions.append(f"{_v(w.label)} — ungradable")
+            withheld_captions.append(f"{_uv(w.label)} — ungradable")
         elif w.row.get("withheld_reason") is not None:
-            withheld_captions.append(f"{_v(w.label)} — {_v(w.row['withheld_reason'])}")
+            withheld_captions.append(f"{_uv(w.label)} — {_uv(w.row['withheld_reason'])}")
     tile2 = (
         f'<div class="vd-tile" id="vd-tile-2">{len(measuring)} of {len(graded)}'
         f'<div class="vd-caption">{"; ".join(withheld_captions)}</div></div>')
@@ -1499,14 +1608,13 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         f'{findings_total} <div class="vd-caption">{" / ".join(split_parts)}</div></div>')
 
     # The lower-bound label is the STAGES header's own fallback caption — owed whenever there is
-    # no REAL wall to compute from: absent (`present=False`) and present-but-unreadable
-    # (`ok=False`, the STAGES table's own distinct "timing record unreadable" refusal) both
-    # leave this tile with nothing better than the estimate, so both read the same here even
-    # though the stage table itself tells the two apart (spec resolution, PR body). With a
-    # genuinely readable, non-empty record the header carries the real figure instead, and this
-    # tile must not repeat the fallback beside it.
-    timing_rec = ep.timing_rec
-    bound_html = f'<br>{ep.lower_bound}' if not (timing_rec.ok and timing_rec.value) else ""
+    # no REAL wall to compute from: absent, present-but-unreadable (the STAGES table's own
+    # distinct "timing record unreadable" refusal) and readable-but-every-row-inverted all
+    # leave this tile with nothing better than the estimate, so all read the same here even
+    # though the stage table itself tells them apart (spec resolution, PR body). `measured` is
+    # the header's OWN decision, taken once at load, so the two cannot disagree: with a real
+    # wall the header carries the figure and this tile must not repeat the fallback beside it.
+    bound_html = f'<br>{ep.lower_bound}' if not ep.timing.measured else ""
     tile4 = (
         f'<div class="vd-tile" id="vd-tile-4">{_money(ep.total_cost)}'
         f'<div class="vd-caption">{ep.worlds_wall}{bound_html}</div></div>')
@@ -1516,10 +1624,10 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         if w.label == ep.control_label or w.row is None or w.row.get("ungradable"):
             continue
         row = w.row
-        header = f"{_v(row.get('declared'))} → {_v(row.get('verdict'))}"
-        heading = (_v(row.get("withheld_reason")) if row.get("withheld_reason") is not None
-                  else _v(row.get("bucket")))
-        chip_bits = "".join(f'<span class="vd-chip">{_v(k)}={_v(row.get(k))}</span>'
+        header = f"{_uv(row.get('declared'))} → {_uv(row.get('verdict'))}"
+        heading = (_uv(row.get("withheld_reason")) if row.get("withheld_reason") is not None
+                  else _uv(row.get("bucket")))
+        chip_bits = "".join(f'<span class="vd-chip">{_uv(k)}={_uv(row.get(k))}</span>'
                            for k in _CHIP_FIELDS if k in row)
         reach = ep.review_block(w.label)
         envelope_note = ""
@@ -1582,7 +1690,7 @@ def _render_queue_accounting(grade: Any, counts: dict[str, int], rows: list[_Fin
     lines = [
         f'defender: {grade.enqueued_rows} enqueued to {_uv(grade.enqueued_to)}',
         f'questioner: {grade.world_enqueued_rows} enqueued to {_uv(grade.world_enqueued_to)}',
-        f'withheld {counts["withheld"]} ({_v(_first_withheld_reason(rows))})',
+        f'withheld {counts["withheld"]} ({_uv(_first_withheld_reason(rows))})',
         f'unqueueable {counts["unqueueable"]}',
         f'malformed {grade.queue_malformed_rows} / {grade.world_queue_malformed_rows}',
         f'dropped {counts["dropped"]}',
@@ -1638,13 +1746,13 @@ def _render_worlds(ep: _Episode) -> str:
         declared = _declared_for(label, w, ep.entries)
         if label == ep.control_label:
             guide_rows.append(f'<div class="vd-guide-row">{esc(label)} — '
-                             f'the branch point untouched, not graded · {_v(declared)}</div>')
+                             f'the branch point untouched, not graded · {_uv(declared)}</div>')
             continue
         axis = w.get("axis")
         axis_html = (f'<q class="verbatim">{_uv(axis)}</q>' if isinstance(axis, str)
                     else "<em>null</em>")
         guide_rows.append(f'<div class="vd-guide-row">{esc(label)} '
-                         f'({esc(str(w.get("role")))}) {_v(declared)} {axis_html}</div>')
+                         f'({esc(str(w.get("role")))}) {_uv(declared)} {axis_html}</div>')
 
     # The roster AS LOADED: each item already classified, so the heading counts the very list
     # the sections below are rendered from — the sectioned items — and an unnameable label
@@ -1673,7 +1781,7 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
         # name rather than the normal record-driven rendering.
         link = f"{RUNS_SUBDIR}/{item.label}/runtime.html"
         return (f'<div id="world-{esc(item.label)}" class="w-section">'
-               f'<span class="w-name">{_v(item.label)}</span>'
+               f'<span class="w-name">{_uv(item.label)}</span>'
                f'<div class="w-state">not declared in the manifest</div>'
                f'<a href="{esc(link)}">runtime</a></div>')
     return _render_one_world(ep, item.label)
@@ -1703,16 +1811,16 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
         bits.append('<div class="w-state">not graded</div>')
         if manifest_world is not None:
             declared = _declared_for(label, manifest_world, ep.entries)
-            bits.append(f'<div class="w-declared">{_v(declared)}</div>')
+            bits.append(f'<div class="w-declared">{_uv(declared)}</div>')
     elif row.get("ungradable"):
         bits.append('<div class="w-state">ungradable</div>')
         bits.append(f'<div class="w-reason">{_uv(row.get("ungradable_reason"))}</div>')
     elif row.get("withheld_reason") is not None:
         bits.append('<div class="w-state">withheld</div>')
-        bits.append(f'<div class="w-reason">{_v(row["withheld_reason"])}</div>')
+        bits.append(f'<div class="w-reason">{_uv(row["withheld_reason"])}</div>')
         bits.append(_ladder_html(row))
     else:
-        bits.append(f'<div class="w-verdict">{_v(row.get("verdict"))}</div>')
+        bits.append(f'<div class="w-verdict">{_uv(row.get("verdict"))}</div>')
         bits.append(_ladder_html(row))
 
     bits.append(_chip_html(row, ep.review_block(label)))
@@ -1726,14 +1834,12 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
     if result is not None:
         link = f"{RUNS_SUBDIR}/{entry.run_dir_name}/runtime.html"
         bits.append(f'<a href="{esc(link)}">runtime</a>')
-        if result.state == "ok" and result.cost is not None:
+        if result.cost is not None and result.costed:
             bits.append(f'<span class="w-cost">{_money(result.cost)}</span>')
             if result.wall_ms:
                 bits.append(f'<span class="w-wall">{fmt_duration(result.wall_ms)}</span>')
-        elif result.state == "refused":
-            bits.append('<span class="w-cost">no result event (refused)</span>')
         else:
-            bits.append('<span class="w-cost">no result event</span>')
+            bits.append(f'<span class="w-cost">{esc(result.text)}</span>')
     else:
         bits.append('<div class="w-archive">run directory absent</div>')
 
@@ -1753,17 +1859,17 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
                 # frontmatter that did not parse, a disposition outside the vocabulary) is the
                 # slot's answer, beside the placeholder.
                 headline += f" — {archived.report.reason}"
-            bits.append(f'<div class="w-report">{_v(headline)}</div>')
+            bits.append(f'<div class="w-report">{_uv(headline)}</div>')
         if not archived.investigation_present:
             bits.append(f'<div class="w-archive">{esc(INVESTIGATION_NAME)}: not archived</div>')
         if archived.provenance is not None:
-            bits.append(f'<div class="w-prov">{_v(archived.provenance.get("commit"))}</div>')
+            bits.append(f'<div class="w-prov">{_uv(archived.provenance.get("commit"))}</div>')
         else:
             bits.append('<div class="w-prov">absent</div>')
         if archived.scrub is None:
             bits.append('<div class="w-scrub">not recorded</div>')
         else:
-            bits.append(f'<div class="w-scrub">{_v(archived.scrub)}</div>')
+            bits.append(f'<div class="w-scrub">{_uv(archived.scrub)}</div>')
 
     review_rec = ep.review_rec
     review_worlds = review_rec.value.get("worlds") if review_rec.ok and isinstance(
@@ -1782,12 +1888,12 @@ def _ladder_html(row: dict[str, Any]) -> str:
     for field in _LADDER_FIELDS:
         if field == "verdict":
             bits.append(f'<span class="w-ladder">verdict = declared: '
-                       f'{_v(row.get("verdict"))} == {_v(row.get("declared"))}</span>')
+                       f'{_uv(row.get("verdict"))} == {_uv(row.get("declared"))}</span>')
             continue
         if field not in row:
             continue
         val = row.get(field)
-        bits.append(f'<span class="w-ladder">{esc(field)} = {_v(val)}</span>')
+        bits.append(f'<span class="w-ladder">{esc(field)} = {_uv(val)}</span>')
         if field == "doctored_answer_served" and row.get("holding_queried"):
             # `has_refused` is asked only where a world actually got a HOLDING answer (#1025
             # J16) — a withheld world never reaches this arm. The CAVEAT ("unrecorded") is the
@@ -1795,7 +1901,7 @@ def _ladder_html(row: dict[str, Any]) -> str:
             # doctored branch the flag is not applicable and the row's own silence is never
             # invented into that caveat's wording.
             if "has_refused" in row:
-                bits.append(f'<span class="w-ladder">has_refused = {_v(row["has_refused"])}</span>')
+                bits.append(f'<span class="w-ladder">has_refused = {_uv(row["has_refused"])}</span>')
             elif val is False:
                 bits.append('<span class="w-ladder">has_refused unrecorded</span>')
             else:
@@ -1803,7 +1909,7 @@ def _ladder_html(row: dict[str, Any]) -> str:
     bucket = row.get("bucket")
     if bucket:
         cls = _BUCKET_CLASS.get(bucket, "bucket-other")
-        bits.append(f'<span class="w-bucket {cls}">{_v(bucket)}</span>')
+        bits.append(f'<span class="w-bucket {cls}">{_uv(bucket)}</span>')
     return "".join(bits)
 
 
@@ -1811,7 +1917,7 @@ def _chip_html(row: dict[str, Any] | None, reach: dict[str, Any] | None) -> str:
     bits = []
     for field in _CHIP_FIELDS:
         if row is not None and field in row:
-            bits.append(f'<span class="w-chip">{esc(field)}: {_v(row[field])}</span>')
+            bits.append(f'<span class="w-chip">{esc(field)}: {_uv(row[field])}</span>')
         elif (field in _REACH_ONLY_CHIP_FIELDS or row is None) \
                 and isinstance(reach, dict) and field in reach:
             # `envelope_ran` is NEVER a row field at all, on any row shape — it is always
@@ -1820,7 +1926,7 @@ def _chip_html(row: dict[str, Any] | None, reach: dict[str, Any] | None) -> str:
             # ungraded world): a row that EXISTS but omits one of THEM (a pre-#1007 shape, an
             # ungradable row's bound slots) reads "unrecorded" rather than silently falling
             # back to a different record's value (#1025 J16 d).
-            bits.append(f'<span class="w-chip">{esc(field)}: {_v(reach[field])}</span>')
+            bits.append(f'<span class="w-chip">{esc(field)}: {_uv(reach[field])}</span>')
         elif row is None and field in _ROW_ONLY_CHIP_FIELDS:
             # No row and no review-derived source for this field either (it is never on a
             # reachability block) — there is nothing to say "unrecorded" ABOUT, so the chip is
@@ -1867,7 +1973,7 @@ def _finding_row_html(f: _Finding) -> str:  # noqa: C901 — one row's worth of 
         bits.append(f'<span class="fr-recorded-id">{_uv(f.recorded_id)}</span>')
     if f.outcome is not None:
         # J10: the draw's own `episode_outcome` word, bound beside its findings.
-        bits.append(f'<span class="fr-outcome">{_v(f.outcome)}</span>')
+        bits.append(f'<span class="fr-outcome">{_uv(f.outcome)}</span>')
     # The row's own id embeds its world LABEL verbatim (`f-<label>-<draw>-<index>`); a label
     # that fails the id grammar must never reach an attribute, so such a row renders with no
     # id at all rather than the raw label smuggled into one (#1025 J5).
@@ -1894,10 +2000,10 @@ def _render_findings_body(findings: _Findings) -> str:
 
     dropped_bits = []
     for label, draw, dropped in findings.dropped:
-        dropped_bits.append(f'<div class="fr-dropped">draw {_v(draw)} of {_v(label)}: '
-                           f'{_v(dropped)} dropped</div>')
+        dropped_bits.append(f'<div class="fr-dropped">draw {_uv(draw)} of {_uv(label)}: '
+                           f'{_uv(dropped)} dropped</div>')
     for label, draw, failure_reason in findings.draw_failures:
-        dropped_bits.append(f'<div class="fr-dropped">draw {_v(draw)} of {_v(label)}: '
+        dropped_bits.append(f'<div class="fr-dropped">draw {_uv(draw)} of {_uv(label)}: '
                            f'{_uv(failure_reason)} —</div>')
     body += "".join(dropped_bits)
 
@@ -1917,6 +2023,10 @@ def _render_findings_section(ep: _Episode) -> str:
     if ep.off_roster:
         body += (f'<div class="fr-off-roster">{ep.off_roster} entries under worlds/ are not on '
                 f'the record</div>')
+    if ep.shadowed_run_dirs:
+        body += (f'<div class="fr-shadowed-runs">{len(ep.shadowed_run_dirs)} entries under '
+                f'{esc(RUNS_SUBDIR)}/ wear a world\'s own label and are not sectioned twice: '
+                f'{", ".join(_uv(n) for n in ep.shadowed_run_dirs)}</div>')
     n = len(ep.findings.rows)
     return _page_section("sec-findings", f"Findings ({n})", body)
 
@@ -1927,35 +2037,22 @@ def _render_findings_section(ep: _Episode) -> str:
 
 
 def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the stage table, the two clocks and every trace block are one section (#1025 O4)
-    timing_rec = ep.timing_rec
-    rows_by_step: dict[str, list[dict[str, Any]]] = {}
-    if timing_rec.ok:
-        for row in timing_rec.value or []:
-            rows_by_step.setdefault(row["step"], []).append(row)
+    timing = ep.timing
+    rows_by_step = timing.rows_by_step
     q_cost, q_wall_ms, q_priced, q_calls = ep.wire.role_cost("questioner")
     j_cost, j_wall_ms, j_priced, j_calls = ep.wire.role_cost(Step.JUDGE)
     review_total, review_calls = ep.wire.comparator_cost()
 
     table_rows = []
-    header_walls: list[tuple[str, str]] = []
     for step in STEPS:
         entries_for_step = rows_by_step.get(str(step), [])
-        if timing_rec.error:
+        if timing.error:
             wall_text = ""
         elif entries_for_step:
-            walls = [(r, _wall_between(r["started_at"], r["ended_at"])) for r in entries_for_step]
-            # Only a NON-INVERTED pair feeds either span: an inverted row (`d < 0`,
-            # `_wall_between`'s own sentinel) already shows "—" in its own cell rather than a
-            # number, and letting its untrustworthy pair still widen or narrow min(start)/
-            # max(end) would silently corrupt the one aggregate the row's own display just
-            # refused to state (#1025 p5). A ZERO-length pair is not inverted: the clock stamps
-            # whole seconds (`now_iso()`), so a step that starts and ends within one is a real
-            # step whose endpoints belong in the span.
-            trusted = [r for r, d in walls if d is not None and d >= 0]
-            header_walls.extend((r["started_at"], r["ended_at"]) for r in trusted)
-            # `trusted`, not `durations` — the latter still holds the inverted sentinel, and
-            # a step whose only rows are inverted read "—" only because `fmt_duration(0)`
-            # happens to spell zero as the dash.
+            # `trusted` (the clock's own non-inverted pairs), not every row — a step whose
+            # only rows are inverted read "—" only because `fmt_duration(0)` happens to spell
+            # zero as the dash.
+            trusted = timing.trusted_by_step.get(str(step), [])
             if trusted:
                 # The row's own wall is its FIRST entry's start to its LAST entry's end (J15) —
                 # never a sum, which double-counts a repeated step's own reported span — over
@@ -1984,62 +2081,47 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
         table_rows.append(f'<div class="st-row">{esc(str(step))} {esc(wall_text)} '
                          f'{esc(cost_text)}</div>')
 
-    if timing_rec.error:
-        table = (f'<div class="st-error">{esc(timing_rec.error)}</div>'
-               + "".join(table_rows))
-        header_wall_text = ""
-    elif header_walls:
-        starts = [s for s, _ in header_walls]
-        ends = [e for _, e in header_walls]
-        header_wall_text = fmt_duration(_wall_span(starts, ends))
-        table = "".join(table_rows)
+    # The table's own caption is the clock's decision (`_Timing.caption`): the refusal line
+    # for an unreadable record, the fallback sentence for an unmeasured one, nothing once
+    # there is a real wall — the same `measured` bit the header line and the verdict tile key
+    # on, so no surface can call a present record absent while another shows its figure.
+    if timing.error:
+        table = f'<div class="st-error">{esc(timing.error)}</div>' + "".join(table_rows)
+    elif timing.caption is not None:
+        table = f'<div class="st-caption">{esc(timing.caption)}</div>' + "".join(table_rows)
     else:
-        header_wall_text = ep.lower_bound
-        table = '<div class="st-caption">model-call time — no timing record</div>' + "".join(table_rows)
+        table = "".join(table_rows)
 
     # `ep.total_cost` already sums the worlds' results PLUS questioner and judge traces —
     # adding `q_cost`/`j_cost` again here would double them.
     grand_total = ep.total_cost + review_total
     # No line at all — not "$0.0000" — when nothing anywhere priced: a launcher-produced
-    # episode with no trace files owes no total any more than its own rows owe one (#1025,
-    # matching the runs section's own `any_costed` guard just below).
-    if q_calls or j_calls or review_calls or ep.total_cost:
+    # episode with no trace files owes no total any more than its own rows owe one (#1025).
+    # `ep.costed`, the model's own flag, not the float's truthiness: an episode whose every
+    # run cost $0.0000 is priced, and the runs sub-total below already says so.
+    if ep.costed or review_calls:
         table += (f'<div class="st-total">{_money(grand_total)} — excludes gather subagents and '
                 f'the review gate</div>')
 
     runs_rows = []
     runs_total = 0.0
-    any_costed = False
     for w in ep.entries.values():
         result = w.result
         if result is None:
             continue
-        if result.state == "ok" and result.cost is not None:
-            any_costed = True
+        if result.cost is not None and result.costed:
             runs_total += result.cost
             runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} {_money(result.cost)} '
                             f'{fmt_duration(result.wall_ms) if result.wall_ms else ""} '
                             f'<span class="rn-launcher">result event</span></div>')
-        elif result.state == "refused":
-            runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} '
-                            f'no result event (refused)</div>')
-        elif result.state == "unusable":
-            runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} '
-                            f'unusable result event</div>')
-        elif result.state == "absent":
-            # No `tool_trace.jsonl` at all — a launcher-produced run that never wrote one, not
-            # a sibling whose trace simply lacks a terminal result row (#1025). "no result
-            # event" implies a trace WAS read; here nothing was there to read at all, so the
-            # row reads the same words the questioner/judge steps use for the same absence.
-            runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} no cost recorded</div>')
         else:
-            runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} no result event</div>')
+            runs_rows.append(f'<div class="rn-row">{esc(str(w.label))} {esc(result.text)}</div>')
     launcher_runs_row = rows_by_step.get("runs", [])
     if launcher_runs_row:
         d = _wall_between(launcher_runs_row[0]["started_at"], launcher_runs_row[0]["ended_at"])
         if d is not None:
             runs_rows.insert(0, f'<div class="rn-launcher-wall">{fmt_duration(d)} launcher</div>')
-    if any_costed:
+    if ep.runs_costed:
         runs_rows.append(f'<div class="rn-total">{_money(runs_total)}</div>')
 
     # Only these four steps carry their own id (`stage-timing` covers the whole table already,
@@ -2064,9 +2146,10 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
         unattributed_html = (f'<div class="st-unattributed">unattributed traces: '
                             f'{", ".join(esc(n) for n in unattributed)}</div>')
 
-    if timing_rec.error or not header_walls:
+    if not timing.measured:
         header_line = f'<div class="hd-lower-bound">{esc(ep.lower_bound)}</div>'
     else:
+        header_wall_text = fmt_duration(timing.launcher_wall_ms or 0.0)
         header_line = (f'<div class="hd-wall">{esc(header_wall_text)} — the launcher\'s wall '
                       f'from the first step\'s start to the last step\'s end; excludes '
                       f'preflight and the prime, includes the gaps between steps</div>')
@@ -2200,7 +2283,7 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
             if isinstance(row.get("agent_id"), str):
                 agent_id = row["agent_id"]
                 break
-    entries_html = [f'<div class="tx-label">{_v(agent_id)}</div>'] if agent_id else []
+    entries_html = [f'<div class="tx-label">{_uv(agent_id)}</div>'] if agent_id else []
     has_plain_response = any(r.get("kind") == "response" for r in rows)
     # THE REQUEST HALF — the framed prompt, or (no framed twin) the plain trace's own request
     # row — is its own element, never counted among the `tx-entry` response entries below.
@@ -2243,7 +2326,7 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
         priced = _priced(model, usage)
         line_bits = [f'<div class="tx-entry">{_uv(text)}']
         if model:
-            line_bits.append(f'<span class="tx-model">{_v(model)}</span>')
+            line_bits.append(f'<span class="tx-model">{_uv(model)}</span>')
         input_tokens = _count(usage.get("input_tokens", 0)) if isinstance(usage, dict) else None
         if input_tokens is not None:
             line_bits.append(f'<span class="tx-usage">{input_tokens:,}</span>')
@@ -2405,12 +2488,12 @@ def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episo
         stamp = _mapping(stamp_rec.value)
         agreed = stamp.get("agreed")
         if isinstance(agreed, dict):
-            bits.append(f'<div class="rc-commit">{_v(agreed.get("commit"))}</div>')
-            bits.append(f'<div class="rc-model">{_v(agreed.get("model"))}</div>')
+            bits.append(f'<div class="rc-commit">{_uv(agreed.get("commit"))}</div>')
+            bits.append(f'<div class="rc-model">{_uv(agreed.get("model"))}</div>')
             for path_ in _items(agreed.get("dirty_paths")):
                 bits.append(f'<div class="rc-dirty">{_uv(path_)}</div>')
         bits.append(f'<div class="rc-allow-dirty">allow_dirty: '
-                   f'{_v(stamp.get("allow_dirty"))}</div>')
+                   f'{_uv(stamp.get("allow_dirty"))}</div>')
 
     return _page_section("sec-records", "Records", "".join(bits))
 
