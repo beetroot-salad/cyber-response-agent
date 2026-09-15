@@ -200,7 +200,7 @@ def test_976_a_dirty_source_is_refused_without_the_override_and_proceeds_with_it
     launch = _prepare(tmp_path)
     T.source_stamp(launch.src, dirty=True)
     message = _refused_before_spending(launch)
-    _waivable(message, "source", "did not certify clean", "dirty=True")
+    _waivable(message, "source", "not certified clean", "dirty=True")
 
     waived = _prepare(tmp_path)
     T.source_stamp(waived.src, dirty=True)
@@ -217,7 +217,7 @@ def test_976_a_source_whose_tree_state_is_unknown_is_refused_without_the_overrid
     launch = _prepare(tmp_path)
     T.source_stamp(launch.src, dirty=None, unavailable=T.GIT_STATUS_FAILED)
     message = _refused_before_spending(launch)
-    _waivable(message, "source", "did not certify clean", "dirty=None", T.GIT_STATUS_FAILED)
+    _waivable(message, "source", "not certified clean", "dirty=None", T.GIT_STATUS_FAILED)
 
     waived = _prepare(tmp_path)
     T.source_stamp(waived.src, dirty=None, unavailable=T.GIT_STATUS_FAILED)
@@ -268,7 +268,7 @@ def test_976_a_live_tree_git_cannot_answer_for_is_refused_and_never_waived(tmp_p
         launch = _prepare(tmp_path, capture=T.source_capture(
             commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE))
         message = _refused_before_spending(launch, *argv)
-        _never_waivable(message, "live tree's commit could not be captured", T.GIT_UNAVAILABLE)
+        _never_waivable(message, "live tree names no commit", T.GIT_UNAVAILABLE)
         assert launch.capture.calls == 1
 
 
@@ -280,7 +280,7 @@ def test_976_a_dirty_live_tree_is_refused_without_the_override_and_proceeds_with
     for."""
     launch = _prepare(tmp_path, capture=T.source_capture(dirty=True))
     message = _refused_before_spending(launch)
-    _waivable(message, "live tree", "did not certify it clean", "dirty=True")
+    _waivable(message, "live tree", "not certified clean", "dirty=True")
 
     waived = _prepare(tmp_path, capture=T.source_capture(dirty=True))
     stamp = _accepted(waived, "--allow-dirty")
@@ -295,7 +295,7 @@ def test_976_a_live_tree_of_unknown_state_is_refused_without_the_override(tmp_pa
     launch = _prepare(tmp_path, capture=T.source_capture(
         dirty=None, unavailable=T.GIT_STATUS_FAILED))
     message = _refused_before_spending(launch)
-    _waivable(message, "live tree", "did not certify it clean", "dirty=None",
+    _waivable(message, "live tree", "not certified clean", "dirty=None",
               T.GIT_STATUS_FAILED)
 
     waived = _prepare(tmp_path, capture=T.source_capture(
@@ -493,6 +493,91 @@ def test_976_the_override_waives_dirt_on_both_sides_and_the_family_is_accepted(t
     assert stamp["source"]["dirty_path_count"] == 1
     assert stamp["allow_dirty"] is True
     assert stamp["agreed"]["commit"] == stamp["source"]["commit"] == "deadbee"
+
+
+# ---------------------------------------------------------------------------------------
+# ONE JUDGEMENT AT BOTH TIERS — the properties the shape guarantees, not the sites remember
+# ---------------------------------------------------------------------------------------
+
+
+def test_976_the_authority_judges_the_sources_own_dirt_not_only_the_siblings(tmp_path):
+    """The verify tier is the authority, so it asks everything the preflight asks — including
+    whether the SOURCE's tree was certified clean. A dirty source without `--allow-dirty` is
+    `incomplete` at verify with the source named in the reason, and no family stamp is
+    written; under the override the same family is accepted and the stamp records the dirt
+    beside the waiver. Without this a caller that reaches `verify_family` around the preflight
+    (or a future second launcher) archives `source.dirty: true` beside `allow_dirty: false` —
+    the exact record O5 says must never exist."""
+    base, _src = T.runs_base(tmp_path)
+    dirs = [T.sibling_run_dir(base, w) for w in T.WORLDS]
+
+    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-source-unwaived")
+    report = _cli().verify_family(ep, dirs, source=T.provenance_record(dirty=True))
+    assert report["outcome"] == "incomplete"
+    assert "source" in report["reason"], report["reason"]
+    assert "dirty=True" in report["reason"], report["reason"]
+    assert not (ep / "provenance.json").exists()
+
+    ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-source-waived")
+    report = _cli().verify_family(ok, dirs, source=T.provenance_record(dirty=True),
+                                  allow_dirty=True)
+    assert report["outcome"] == "accepted"
+    stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
+    assert stamp["source"]["dirty"] is True
+    assert stamp["allow_dirty"] is True
+
+
+def test_976_two_problems_are_reported_at_once_never_waivable_first_and_without_the_flag(
+        tmp_path):
+    """§7 FORK-8 at the anchor: a dirty source AND a live tree at another commit are one
+    refusal naming both, the commit mismatch first — and the flag is NOT offered, because
+    passing it would not let the launch through. The live tree was still captured (once), so
+    the second problem is known on the first launch. Without this the waivable fault fired
+    first, named `--allow-dirty`, and the operator met the never-waivable one only after
+    passing a flag that could not help."""
+    launch = _prepare(tmp_path, capture=T.source_capture(commit="0ther"))
+    T.source_stamp(launch.src, dirty=True)
+    message = _refused_before_spending(launch)
+    _never_waivable(message, "live tree is at commit '0ther'", "not certified clean",
+                    "dirty=True")
+    assert message.index("is at commit") < message.index("not certified clean"), message
+    assert launch.capture.calls == 1
+    # Under the override the dirt is waived and the commit alone remains — still refused.
+    waived = _prepare(tmp_path, capture=T.source_capture(commit="0ther"))
+    T.source_stamp(waived.src, dirty=True)
+    message = _refused_before_spending(waived, "--allow-dirty")
+    _never_waivable(message, "live tree is at commit '0ther'")
+    assert "not certified clean" not in message, message
+
+
+def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_path):
+    """The recorded `episode.reason` holds to the same message rule as a preflight refusal:
+    `--allow-dirty` appears exactly when passing it would let the family through. A dirty
+    sibling beside a commit mismatch, a silent sibling, and siblings off the source's commit
+    are each never-waivable families, and none of their archived reasons names the flag; a
+    family whose only fault is dirt does. Without this `review.yaml` sends the operator at a
+    knob that does not turn (adversary H1, surviving at the tier whose messages are archived)."""
+    base, _src = T.runs_base(tmp_path)
+    never = {
+        "dirty-and-drifted": [T.sibling_run_dir(base / "dd", w, commit="cafe1", dirty=(w == "b"))
+                              for w in T.WORLDS],
+        "silent": [T.sibling_run_dir(base / "s", w, **({"commit": None, "dirty": None,
+                                                        "unavailable": T.GIT_UNAVAILABLE}
+                                                       if w == "b" else {}))
+                   for w in T.WORLDS],
+        "drifted": [T.sibling_run_dir(base / "d", w, commit="cafe1") for w in T.WORLDS],
+    }
+    for name, dirs in never.items():
+        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
+        report = _cli().verify_family(ep, dirs, source=T.provenance_record())
+        assert report["outcome"] == "incomplete", name
+        reason = T.review_doc(ep)["episode"]["reason"]
+        assert "allow-dirty" not in reason, (name, reason)
+    only_dirt = [T.sibling_run_dir(base / "od", w, dirty=(w == "b")) for w in T.WORLDS]
+    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-only-dirt")
+    report = _cli().verify_family(ep, only_dirt, source=T.provenance_record())
+    assert report["outcome"] == "incomplete"
+    assert "allow-dirty" in T.review_doc(ep)["episode"]["reason"]
 
 
 # ---------------------------------------------------------------------------------------

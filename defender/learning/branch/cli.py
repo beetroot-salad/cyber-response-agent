@@ -53,7 +53,7 @@ import threading
 import traceback
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 # This file is a path-based launcher, just like `run.py` and `learning/loop.py`. Python puts
 # only `learning/branch/` on `sys.path` for `python3 defender/learning/branch/cli.py`, so both
@@ -407,13 +407,21 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     _check_branch_point(source_run_dir, branch_message_id,
                         continuation_prompt=continuation_prompt)
     # THE ANCHOR IS READ AND JUDGED BEFORE THE PAID ROLE PREFLIGHT, beside the other reads of
-    # the source dir (#976 M1). A source that cannot anchor a family — no stamp, no commit, or
-    # a tree git could not certify — is refused while nothing has been sourced or spent; the
-    # override reaches only the last of those shapes. Then the LIVE tree is held to the same
-    # anchor (M2): a commit mismatch or a scope mismatch is never waived, dirt is waived by the
-    # same override and only dirt.
-    source_stamp = _anchor_of(source_run_dir, allow_dirty=allow_dirty)
-    _refuse_live_tree_off_anchor(capture(), source_stamp, allow_dirty=allow_dirty)
+    # the source dir (#976 M1, M2). The live tree is a sibling that has not run yet — it is the
+    # checkout every sibling will run — so the preflight is `verify_family`'s own judgement over
+    # a one-member family: the same faults, the same order, the same rule about which of them
+    # `--allow-dirty` reaches. Nothing has been sourced or spent when it refuses.
+    source_stamp = _stamp_of(source_run_dir)
+    if source_stamp is None:
+        raise LauncherRefused(
+            f"[branch] source run {source_run_dir} carries no usable provenance stamp — a "
+            "family is anchored to the commit its source ran, and a source with no readable "
+            "stamp cannot anchor one")
+    refusal = _family_refusal(
+        source_stamp, {"the live tree": _as_stamp(capture())},
+        source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty)
+    if refusal is not None:
+        raise LauncherRefused(f"[branch] {refusal}")
     # THE SOURCE ALERT IS SCREENED BEFORE THE QUESTIONER READS IT, and this is the third reader
     # of that surface — beside `run.py --resume`'s own seed read and the questioner's frontier
     # read. The source run dir is a prior box's rw bind, so `alert.json` there is model-writable
@@ -447,99 +455,6 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     # world's view would read the dead attempt's documents.
     staging_mod.sweep(episode_dir, episode_token=token, door=door)
     return token, patterns, source_stamp
-
-
-def _anchor_of(source_run_dir: Path, *, allow_dirty: bool) -> dict:
-    """The source run's stamp, judged fit to anchor a family — or the operator's refusal (#976 M1).
-
-    THREE REFUSALS, IN STRENGTH ORDER, and the override reaches only the weakest. No usable
-    stamp at all (absent, aliased, forged, unreadable — `_stamp_of` folds every one of those
-    into `None`) and a stamp that names no commit are refused outright: there is nothing to
-    hold the siblings to, and `--allow-dirty` waives dirt, not silence. A stamp that names a
-    commit but whose tree git did not certify clean — dirty, or unknown — is refused unless the
-    operator waives it, in which case O5's family stamp carries the source's dirt beside the
-    waiver so the archive never reads as anchored to a clean sha.
-
-    THE FLAG IS NAMED IN A REFUSAL EXACTLY WHEN PASSING IT WOULD LET THE LAUNCH THROUGH — here
-    and in `_refuse_live_tree_off_anchor`. A refusal the override cannot reach does not mention
-    it, not even to say so: an operator reading `--allow-dirty` in a refusal is being told what
-    to do next, and the one test of these messages is that the never-waivable shapes do not
-    say it.
-
-    JUDGED BY THE VERIFY TIER'S OWN PREDICATES, not restated: `_stamp_speaks` and `_clean_stamp`
-    are what `_stamp_disagreement` asks of every sibling, and a preflight that spelled its own
-    version of "has a commit" or "is clean" would be the second reading that drifts.
-
-    THE SILENT SHAPE NAMES ITS OWN REASON. A source with no commit would ALSO fail M2's
-    comparison one line later — the live commit cannot equal a commit that is not there — and
-    that refusal would blame the live tree, sending the operator at the wrong knob. Refused
-    here first, the message carries the stamp's `unavailable` text, which says why git could
-    not be asked when the source ran.
-    """
-    stamp = _stamp_of(source_run_dir)
-    name = Path(source_run_dir) / FAMILY_STAMP_NAME
-    if stamp is None:
-        raise LauncherRefused(
-            f"[branch] source run {source_run_dir} carries no usable provenance stamp at "
-            f"{name} — a family is anchored to the commit its source ran, and a source with "
-            "no readable stamp cannot anchor one")
-    if not _stamp_speaks(stamp):
-        raise LauncherRefused(
-            f"[branch] source run {source_run_dir}'s provenance stamp names no commit "
-            f"(unavailable={stamp.get('unavailable')!r}) — a family is anchored to the commit "
-            "its source ran, and there is none to anchor to")
-    if not _clean_stamp(stamp) and not allow_dirty:
-        raise LauncherRefused(
-            f"[branch] source run {source_run_dir} ran on a tree git did not certify clean "
-            f"(dirty={stamp.get('dirty')!r}, commit={stamp.get('commit')!r}, "
-            f"unavailable={stamp.get('unavailable')!r}) — its commit does not name the bytes "
-            "that ran, so a family anchored to it is anchored to a sha that lies; pass "
-            "--allow-dirty to anchor the family to it anyway, recorded as such")
-    return stamp
-
-
-def _refuse_live_tree_off_anchor(
-    live: _provenance.RunProvenance, source: dict, *, allow_dirty: bool,
-) -> None:
-    """Refuse a launcher standing on a tree that is not the source's (#976 M2).
-
-    A sibling is a `run.py` process of THIS checkout — it takes its code dir from its own file
-    location — so the tree the launcher stands on is the tree every sibling will run. Held to
-    the source's commit here, a family that would end `incomplete` at verify ends before its N
-    investigations are paid for. NEVER WAIVED: a live commit that is absent or is not the
-    source's, or a live `dirty` measured over a different pathspec than the source's, is a code
-    confound and not dirt. Dirt on the live tree (`dirty` True, or unknown) is refused unless
-    the operator waives it — the same override, waiving the same one thing.
-
-    A source stamped before `scope` existed is compared on commit alone (a non-obligation the
-    design settles HERE so it cannot surface as a paid `incomplete`).
-
-    Compared as strings and nothing else (C13): the source's commit came out of a prior box's
-    rw bind and is never spent in argv or shown to a model.
-    """
-    if live.commit is None:
-        raise LauncherRefused(
-            f"[branch] the live tree's commit could not be captured "
-            f"(unavailable={live.unavailable!r}) — a family is anchored to the source's commit "
-            f"{source.get('commit')!r}, and a launcher that cannot say what it stands on cannot "
-            "be held to it")
-    if live.commit != source.get("commit"):
-        raise LauncherRefused(
-            f"[branch] the live tree is at commit {live.commit!r} and the source run ran at "
-            f"{source.get('commit')!r} — every sibling would run the live tree's code, so the "
-            "family would not be a comparison against its source; check out the source's "
-            "commit")
-    if source.get("scope") is not None and live.scope != source.get("scope"):
-        raise LauncherRefused(
-            f"[branch] the live tree's dirt was measured over scope {live.scope!r} and the "
-            f"source's over {source.get('scope')!r} — the two clean bits answer different "
-            "questions, so agreeing on the commit does not make them a match")
-    if live.dirty is not False and not allow_dirty:
-        raise LauncherRefused(
-            f"[branch] the live tree is at the source's commit {live.commit!r} but git did not "
-            f"certify it clean (dirty={live.dirty!r}, unavailable={live.unavailable!r}) — the "
-            "siblings would run bytes the commit does not name; pass --allow-dirty to launch "
-            "anyway, recorded as such")
 
 
 def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
@@ -744,7 +659,7 @@ def sibling_argv(episode_dir: Path, world_label: str, *, model: str | None = Non
     `--model` at family level (`preflight_episode`), and dropped from the child's argv that
     check certified a model no sibling then ran: every arm resolved `$DEFENDER_MODEL` or the
     built-in default instead. The failure is invisible without this line, because all N arms
-    resolve the SAME wrong model — so `_stamp_disagreement`'s `model` comparison finds perfect
+    resolve the SAME wrong model — so `_family_faults`'s `model` agreement finds perfect
     agreement and the family is archived as comparable on a model nobody asked for.
     """
     argv = [sys.executable, str(PATHS.defender_dir / "run.py"),
@@ -875,105 +790,150 @@ def _stamp_of(run_dir: Path) -> dict | None:
     sibling's own, or the prior box that produced the source — so the bytes at that name are
     whatever that box last wrote there. Read raw, a forged
     `"commit": ["x"]` was truthy to `_clean_stamp`, `_stamp_speaks` admitted the arm, and
-    `_stamp_disagreement`'s set build then raised `TypeError: unhashable type: 'list'` out of
+    `_family_faults`'s set build then raised `TypeError: unhashable type: 'list'` out of
     `verify_family` — before a single world was archived, destroying the expensive half of the
     episode over one arm's file. `from_obj` refuses a non-`str` commit and a non-`bool` dirty,
     and `read_guarded` is the alias-refusing read this frame was spelling by hand.
 
     Re-serialised back to the record's own wire shape so every reader below keeps asking a
-    mapping — `_agreed_record` publishes it verbatim, and a field the class gains reaches the
-    family stamp without a second census here.
+    mapping — `_write_family_stamp` publishes it verbatim, and a field the class gains reaches
+    the family stamp without a second census here.
     """
-    record = _provenance.read(Path(run_dir) / FAMILY_STAMP_NAME)
-    if record is None:
-        return None
+    record = _provenance.read(RunPaths(Path(run_dir)).provenance)
+    return None if record is None else _as_stamp(record)
+
+
+def _as_stamp(record: _provenance.RunProvenance) -> dict:
+    """A typed provenance record as the mapping every comparison below asks.
+
+    ONE ROUND-TRIP for the two records that enter this frame typed — a run dir's stamp read
+    back through `_provenance.read`, and the live tree's capture at preflight — so the source,
+    the siblings and the launcher's own checkout are judged in one shape.
+    """
     # lint-parse: ok — `as_json` is the class's OWN wire shape, narrowed field by field by
     # `RunProvenance.as_json`; this is a round-trip of a typed record, not a read of untyped input.
     return json.loads(record.as_json())
 
 
-def _stamp_disagreement(
-    stamps: dict[str, dict | None], *, source: dict, allow_dirty: bool,
-) -> str | None:
-    """Why these siblings are not provably one family continuing `source`, or `None`.
+#: One reason a family cannot be archived as a comparison against its source. `waivable`
+#: is the WHOLE of what `--allow-dirty` knows: the override drops every waivable fault and
+#: reaches no other, so which shapes it waives is a property of the fault, never of the site
+#: that reports it.
+class _Fault(NamedTuple):
+    waivable: bool
+    text: str
 
-    THREE FIELDS, and the third is #947's addition. The commit says which code ran and the scope
-    says what `dirty` was measured over; the MODEL says which engine answered, and the role
-    preflight resolves it PER PROCESS — so three siblings launched into a changed environment
-    are a comparison across two models with a perfectly agreeing commit, and nothing anywhere
-    saying so.
 
-    AND THEN THE SOURCE (#976 M3). Siblings that agree among themselves at a commit the source
-    did not run are a family that is a controlled comparison of NOTHING the archive claims: the
-    difference is against a source that ran other code. So after the agreement, every speaking
-    sibling's commit is held to the source's, and its scope too unless the source stamped
-    before the field existed. A mismatch is an `incomplete` reason the override never reaches
-    — dirt is what `--allow-dirty` waives, and a commit mismatch is a code confound, not dirt.
+def _family_faults(
+    source: dict, members: dict[str, dict | None], *, source_who: str,
+) -> list[_Fault]:
+    """Every reason `members` are not provably one family continuing `source`.
 
-    EVERY NON-CLEAN STAMP REFUSES ABSENT THE OVERRIDE, and there are three shapes a capture can
-    produce: a dirty tree, a git that could not be asked at all (no sha, a reason), and a git
-    that named the sha and could not answer for the tree. An unknown is not a clean bill of
-    health, so all three are refused by the same rule rather than by a taxonomy that would have
-    to decide which unknowns are comfortable. THE OVERRIDE REACHES ONLY THE FIRST AND THIRD
-    (M3b): a sibling with no commit at all is a silence, and a silence cannot be compared to
-    anything — waived, its arm dropped out of the agreement and `_agreed_record` published a
-    sibling's commit as the family's with one arm never having said what it ran.
+    ONE JUDGEMENT FOR BOTH TIERS (#976). At preflight the family is the launcher's live tree
+    alone — the checkout every sibling will run; at verify it is the N siblings' own stamps.
+    Spelled once, the two tiers cannot disagree about what "anchored" means, and a shape one
+    of them forgot to ask cannot exist — the authority judges the SOURCE's own fitness exactly
+    as the preflight does, rather than trusting that the preflight ran.
+
+    THE SOURCE FIRST, and a silent source ends the anchoring there: a stamp that names no
+    commit can equal nobody's, and reported through the member comparison the fault would
+    blame the member and send the operator at the wrong knob. Then each member is held to the
+    anchor — commit equal; scope equal unless the source stamped before the field existed —
+    and every non-clean tree on either side is a fault: dirty, git could not be asked at all,
+    or git named the sha and could not answer for the tree. An unknown is not a clean bill of
+    health. Then the members are held to EACH OTHER on the model too, which is not anchored —
+    `--model` on the launcher is the operator's deliberate choice — but is held constant among
+    siblings, because a family across two engines is a comparison of nothing the archive
+    claims.
+
+    ONLY DIRT IS WAIVABLE. A commit that is absent or is not the source's, or a `dirty` measured
+    over a different pathspec, is a code confound and not dirt; and a silent member is a
+    silence, which waived would drop out of the agreement and let another arm's commit be
+    published as the family's (M3b).
     """
-    missing = sorted(label for label, stamp in stamps.items() if stamp is None)
-    if missing:
-        return (f"sibling(s) {missing} carry no readable provenance stamp — an absent or "
-                "unreadable stamp is not an agreeing one")
-    silent = sorted(label for label, stamp in stamps.items() if not _stamp_speaks(stamp))
-    if silent:
-        stamp = stamps[silent[0]] or {}
-        return (f"sibling(s) {silent} report no commit at all "
-                f"(unavailable={stamp.get('unavailable')!r}) — a silent stamp cannot agree "
-                "with anything, and --allow-dirty waives dirt, not silence")
-    unclean = {label for label, stamp in stamps.items() if not _clean_stamp(stamp)}
-    if unclean and not allow_dirty:
-        label = sorted(unclean)[0]
-        stamp = stamps[label] or {}
-        return (f"sibling {label!r} reports a tree this family cannot be compared across "
-                f"(dirty={stamp.get('dirty')!r}, commit={stamp.get('commit')!r}, "
-                f"unavailable={stamp.get('unavailable')!r}) — pass --allow-dirty to record the "
-                "family anyway")
+    faults: list[_Fault] = []
+    anchored = _stamp_speaks(source)
+    if not anchored:
+        faults.append(_Fault(False, (
+            f"{source_who} names no commit (unavailable={source.get('unavailable')!r}) — a "
+            "family is anchored to the commit its source ran, and there is none to anchor to")))
+    elif not _clean_stamp(source):
+        faults.append(_Fault(True, _not_certified_clean(source_who, source)))
+    for who, stamp in members.items():
+        faults.extend(_member_faults(who, stamp, anchor=source if anchored else None))
     # THE AGREEMENT IS TAKEN OVER THE STAMPS THAT SAY SOMETHING, and a DIRTY tree says
-    # something. `_clean_stamp` answers one question for three shapes, and only one of them —
-    # git could not be asked, so there is no commit, no scope and no model to compare — is a
-    # silence. Dropping every non-clean arm made `--allow-dirty` waive the whole agreement:
-    # the three siblings run from ONE checkout, so a dirty tree makes all three unclean at once,
-    # `comparable` was empty, the loop below compared nothing, and a family that ran across two
-    # commits or two MODELS was archived as comparable — which is the exact fact `_provenance`
-    # grew its `model` field to catch. Kept here, a dirty arm is compared on the fields it does
-    # carry; the tree's dirtiness itself is what the override waives, and only that.
-    comparable = {label: stamp for label, stamp in stamps.items() if _stamp_speaks(stamp)}
+    # something: a dirty arm is compared on the fields it does carry, and the tree's dirtiness
+    # itself is the one thing the override waives. Dropping every non-clean arm instead made
+    # `--allow-dirty` waive the whole agreement — the siblings run from ONE checkout, so a
+    # dirty tree made all three unclean at once and a family across two commits or two MODELS
+    # was archived as comparable.
+    comparable = {who: stamp for who, stamp in members.items()
+                  if stamp is not None and _stamp_speaks(stamp)}
     for field in ("commit", "scope", "model"):
-        # NO `or {}`: `comparable` is built from `_stamp_speaks`, which is False for `None`,
-        # and the `missing` arm above already returned for every absent stamp. Re-coalescing
-        # here made the dead case answer `None` for every field, which compares EQUAL across
-        # siblings — so a relaxed boundary would silently archive a split family as comparable.
-        values = {label: stamp.get(field) for label, stamp in comparable.items() if stamp}
-        if len({v for v in values.values()}) > 1:
-            return (f"siblings disagree on {field}: {values} — the family is held constant on "
-                    "it, so a comparison across two values is never archived as comparable")
-    # THE ANCHOR, after the agreement. Every comparable stamp carries a commit (the silent arm
-    # returned above), so a source with none can equal nobody's — which is the right answer for
-    # a caller that reached this frame around `preflight_episode`'s refusal. `scope` is held only
-    # when the source has one: a stamp written before the field existed is a real record of a
-    # real run, compared on the commit it does carry. Model is NOT anchored — `--model` on the
-    # launcher is the operator's deliberate choice, held constant among siblings above.
-    for field in ("commit", "scope"):
-        anchor = source.get(field)
-        if field == "scope" and anchor is None:
-            continue
-        off = {label: stamp.get(field) for label, stamp in comparable.items()
-               if stamp and stamp.get(field) != anchor}
-        if off:
-            return (f"sibling(s) {sorted(off)} ran at {field} {off} while the source run they "
-                    f"continue ran at {anchor!r} — a family is anchored to its source's "
-                    f"{field}, and a comparison against other code is never archived as "
-                    "comparable (--allow-dirty waives dirt, not this)")
-    return None
+        values = {who: stamp.get(field) for who, stamp in comparable.items()}
+        if len(set(values.values())) > 1:
+            faults.append(_Fault(False, (
+                f"siblings disagree on {field}: {values} — the family is held constant on it, "
+                "so a comparison across two values is never archived as comparable")))
+    return faults
+
+
+def _member_faults(who: str, stamp: dict | None, *, anchor: dict | None) -> list[_Fault]:
+    """One tree's faults against the anchor — `None` when the source itself could not anchor,
+    in which case the tree is judged on its own stamp alone and the source's fault, already
+    reported, is the one the operator is sent to."""
+    if stamp is None:
+        return [_Fault(False, (
+            f"{who} carries no readable provenance stamp — an absent or unreadable stamp is "
+            "not an agreeing one"))]
+    if not _stamp_speaks(stamp):
+        return [_Fault(False, (
+            f"{who} names no commit (unavailable={stamp.get('unavailable')!r}) — a silent "
+            "stamp cannot be held to anything"))]
+    faults: list[_Fault] = []
+    if anchor is not None and stamp.get("commit") != anchor.get("commit"):
+        faults.append(_Fault(False, (
+            f"{who} is at commit {stamp.get('commit')!r} while the source run it continues "
+            f"ran at {anchor.get('commit')!r} — a family is anchored to its source's commit, "
+            "and a comparison against other code is never archived as comparable")))
+    scope = None if anchor is None else anchor.get("scope")
+    if scope is not None and stamp.get("scope") != scope:
+        faults.append(_Fault(False, (
+            f"{who}'s dirt was measured over scope {stamp.get('scope')!r} and the source's "
+            f"over {scope!r} — the two clean bits answer different questions, so agreeing on "
+            "the commit does not make them a match")))
+    if not _clean_stamp(stamp):
+        faults.append(_Fault(True, _not_certified_clean(who, stamp)))
+    return faults
+
+
+def _not_certified_clean(who: str, stamp: dict) -> str:
+    return (f"{who} was not certified clean by git (dirty={stamp.get('dirty')!r}, "
+            f"commit={stamp.get('commit')!r}, unavailable={stamp.get('unavailable')!r}) — its "
+            "commit does not name the bytes that ran")
+
+
+def _family_refusal(
+    source: dict, members: dict[str, dict | None], *, source_who: str, allow_dirty: bool,
+) -> str | None:
+    """The faults `--allow-dirty` did not waive, as one refusal — or `None`.
+
+    NEVER-WAIVABLE FAULTS FIRST, and the flag is named EXACTLY WHEN PASSING IT WOULD LET THE
+    FAMILY THROUGH. Both are properties of the list, not of any message: an operator with a
+    dirty source and a launcher at the wrong commit reads the commit first, and is not told to
+    pass a flag that would not help (§7 FORK-8); a refusal the override cannot reach does not
+    mention it, not even to say so, because an operator reading `--allow-dirty` in a refusal
+    is being told what to do next. Every message in `_family_faults` is therefore written
+    without the flag, and only this frame appends it.
+    """
+    faults = [fault for fault in _family_faults(source, members, source_who=source_who)
+              if not (fault.waivable and allow_dirty)]
+    if not faults:
+        return None
+    text = "; ".join(fault.text for fault in sorted(faults, key=lambda fault: fault.waivable))
+    if all(fault.waivable for fault in faults):
+        text += " — pass --allow-dirty to waive the dirt, recorded in the family stamp as such"
+    return text
 
 
 def _clean_stamp(stamp: dict | None) -> bool:
@@ -995,30 +955,10 @@ def _stamp_speaks(stamp: dict | None) -> bool:
 
     The weaker half of `_clean_stamp`, and the one the AGREEMENT is taken over. A stamp with a
     commit names a commit, a scope and a model that can agree or disagree with a sibling's; a
-    stamp without one is a silence, and reading a silence as disagreement would make
-    `--allow-dirty` unable to do the one thing it exists for.
+    stamp without one is a silence, held to nothing and never waived (#976 M3b) — the override
+    waives dirt, and a dirty stamp still speaks.
     """
     return stamp is not None and bool(stamp.get("commit"))
-
-
-def _agreed_record(stamps: dict[str, dict | None]) -> dict:
-    """The provenance every sibling reported, as one record.
-
-    Taken from the siblings rather than captured again here: the launcher no longer hoists ONE
-    capture above the family (that record could only ever describe the moment the launcher ran,
-    which is not the moment any sibling did), so the family stamp is a CONCLUSION about N
-    per-process stamps and never a reading of its own.
-
-    READ OFF A STAMP THAT SPOKE, and only after `_stamp_disagreement` has found the speakers to
-    agree. Taken from an arbitrary entry of the whole mapping it could publish the commit and
-    the model of an arm that was excluded from the very comparison this record stands for.
-    """
-    speaking = [stamp for stamp in stamps.values() if stamp and _stamp_speaks(stamp)]
-    if speaking:
-        any_stamp: dict = speaking[0]
-    else:
-        any_stamp = next((stamp for stamp in stamps.values() if stamp), {})
-    return {k: v for k, v in any_stamp.items() if k != "allow_dirty"}
 
 
 def verify_family(
@@ -1058,11 +998,11 @@ def verify_family(
         reasons.append(
             f"sibling(s) {unverified} have no scrub verdict recording a completed walk — an "
             "unwalked tree is one nothing has certified as free of what the box left behind")
-    disagreement = _stamp_disagreement(
-        {label: stamps[label] for label in scrub_verified}, source=source,
-        allow_dirty=allow_dirty)
-    if disagreement:
-        reasons.append(disagreement)
+    refusal = _family_refusal(
+        source, {f"sibling {label!r}": stamps[label] for label in scrub_verified},
+        source_who="the source run", allow_dirty=allow_dirty)
+    if refusal is not None:
+        reasons.append(refusal)
 
     outcome = INCOMPLETE if reasons else ACCEPTED
     reason = "; ".join(reasons)
@@ -1119,10 +1059,13 @@ def _write_family_stamp(
     archive reader — a family that was clean and one that was waved through would read
     identically — which is the whole reason the override is named.
     """
+    # ANY sibling's stamp is the agreed record: this frame is reached only when
+    # `_family_refusal` found none absent, none silent and every speaker agreeing, so the
+    # first is every other.
+    agreed = next(stamp for stamp in stamps.values() if stamp is not None)
     write_guarded(
         Path(episode_dir) / FAMILY_STAMP_NAME,
-        json.dumps({"agreed": _agreed_record(stamps), "allow_dirty": bool(allow_dirty),
-                    "source": dict(source)},
+        json.dumps({"agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source)},
                    indent=2, sort_keys=True) + "\n")
 
 

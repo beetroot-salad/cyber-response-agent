@@ -48,9 +48,7 @@ def _alert_label(alert: Path) -> str:
 
 
 def materialize_run_dir(
-    alert: Path, run_id: str | None, *,
-    provenance: _provenance.RunProvenance | None = None,
-    model: str | None = None,
+    alert: Path, run_id: str | None, *, model: str | None = None,
 ) -> Path:
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
@@ -79,16 +77,15 @@ def materialize_run_dir(
     # happened to be taken rather than what the investigation executed. Nothing else copies a
     # stamp — in particular the learning loop's own `learning/core` writes none.
     #
-    # `provenance` is the caller's when it has one; nothing in the tree passes one today. The
-    # branch launcher does NOT take one capture for all N worlds — a launcher-moment record
-    # could only ever describe the launcher's process, and the family stamp is a conclusion
-    # about the siblings' own per-process records, anchored to the source's.
-    _stamp(paths.provenance, provenance, model=model)
+    # EVERY RUN CAPTURES ITS OWN, and there is no seam for a caller to hand one in: the branch
+    # launcher does NOT take one capture for all N worlds — a launcher-moment record could only
+    # ever describe the launcher's process, and the family stamp is a conclusion about the
+    # siblings' own per-process records, anchored to the source's.
+    _stamp(paths.provenance, model=model)
     return run_dir
 
 
-def _stamp(path: Path, provenance: _provenance.RunProvenance | None, *,
-           model: str | None = None) -> None:
+def _stamp(path: Path, *, model: str | None = None) -> None:
     """Write the run's stamp, and NEVER take the run down doing it.
 
     `capture_tree` goes to some length never to raise; a write that raised beside it would
@@ -105,7 +102,7 @@ def _stamp(path: Path, provenance: _provenance.RunProvenance | None, *,
     not there, and an operator who needs the guarantee has the announce line saying it is
     missing."""
     try:
-        record = provenance if provenance is not None else _provenance.capture_tree(REPO_ROOT)
+        record = _provenance.capture_tree(REPO_ROOT)
         # THE MODEL RIDES WITH THE COMMIT, and is set here rather than by a second write: the
         # stamp is written once, before the box exists, and a model recorded afterwards would
         # be a model recorded into the box's own rw bind. `None` leaves the field absent, which
