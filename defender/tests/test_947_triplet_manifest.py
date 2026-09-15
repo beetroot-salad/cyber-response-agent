@@ -333,12 +333,17 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_staging(t
         # directory an earlier abort left behind rather than the identity gate.
         monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / f"episodes-root-{i}"))
         door = T.FakeDoor()
+        questioner = T.FakeAgent(T.family_doc(worlds=worlds), *worlds[1:])
+        # The live-tree seam is injected to match the fixture source (#976 M2): without it the
+        # anchor preflight refuses on the suite's own HEAD before the questioner is asked, and
+        # the two assertions below are satisfied by the wrong refusal.
         with pytest.raises(T.refusals()):
             T.mod("learning.branch.cli").main(
                 [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
                 spawn=T.FakeSpawn(), door=door, adapters=T.FakeAdapters(),
                 invoke=T.FakeAgent(*["same"] * 24), preflight=T.no_preflight,
-                questioner=T.FakeAgent(T.family_doc(worlds=worlds), *worlds[1:]))
+                questioner=questioner, live_tree=T.source_capture())
+        assert questioner.calls > 0, "the launch was refused before the identity gate ran"
         assert door.created() == [], "a name was staged before the identity gate ran"
 
 

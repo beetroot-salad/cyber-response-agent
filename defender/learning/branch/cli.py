@@ -377,7 +377,7 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     *, source_run_dir: Path, branch_message_id: int, episode_id: str, episode_dir: Path,
     door: Any, preflight: Callable[[str | None], int], model: str | None,
     continuation_prompt: str, allow_dirty: bool,
-    capture: Callable[[], _provenance.RunProvenance],
+    live_tree: Callable[[], _provenance.RunProvenance],
 ) -> tuple[str, tuple[str, ...], dict]:
     """Everything that can refuse BEFORE the questioner is paid for, in one block.
 
@@ -394,13 +394,15 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     that was judged is the one that is compared, never a second read of a file in a prior box's
     rw bind that could have changed in between.
 
-    `capture` is the live tree's own stamp, taken ONCE (#976 M2). It is a seam rather than a
-    call to `_provenance.capture_tree` because every end-to-end launch of this frame would
-    otherwise compare the fixture source against whatever HEAD the suite happens to run under.
-    It is NOT the authority on what the siblings ran — each sibling process stamps itself, and
-    `verify_family` compares those — it is the cheap early exit: a launcher standing on a tree
-    that is not the source's commit is about to spend N investigations on a family whose
-    verify tier will refuse them.
+    `live_tree` is the live tree's own stamp, taken AT MOST ONCE (#976 M2). It is a seam
+    rather than a call to `_provenance.capture_tree` because every end-to-end launch of this
+    frame would otherwise compare the fixture source against whatever HEAD the suite happens
+    to run under. It is NOT the authority on what the siblings ran — each sibling process
+    stamps itself, and `verify_family` compares those — it is the cheap early exit: a launcher
+    standing on a tree that is not the source's commit is about to spend N investigations on
+    a family whose verify tier will refuse them. Named for what it captures, not for the act:
+    `capture` in this module is the source's served-response capture (`branch/capture.py`),
+    and a seam by that name reads as a way to seed it.
     """
     token = _episode_token(episode_id)
     patterns = staging_mod.check_configured_patterns(configured_patterns())
@@ -417,8 +419,15 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
             f"[branch] source run {source_run_dir} carries no usable provenance stamp — a "
             "family is anchored to the commit its source ran, and a source with no readable "
             "stamp cannot anchor one")
+    # THE LIVE TREE IS ASKED ONLY WHEN THE SOURCE CAN ANCHOR IT. The capture is two git
+    # subprocesses over the checkout, each on a 60 s timeout; against a source that names no
+    # commit the comparison has no anchor and the refusal is the source's own, so its answer
+    # could not matter — and an operator on a stalled index would wait two minutes to be told
+    # about a file that was readable in a millisecond.
+    members: dict[str, dict | None] = (
+        {"the live tree": _as_stamp(live_tree())} if _stamp_speaks(source_stamp) else {})
     refusal = _family_refusal(
-        source_stamp, {"the live tree": _as_stamp(capture())},
+        source_stamp, members,
         source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty)
     if refusal is not None:
         raise LauncherRefused(f"[branch] {refusal}")
@@ -869,7 +878,19 @@ def _family_faults(
     # was archived as comparable.
     comparable = {who: stamp for who, stamp in members.items()
                   if stamp is not None and _stamp_speaks(stamp)}
+    # NOT OVER THE FIELDS THE ANCHOR ALREADY PINNED. A member held to the source's commit
+    # (and scope, when the source has one) that disagrees with a sibling on it has ALREADY
+    # been named against the source above — two siblings at two commits are two anchor faults,
+    # and a third sentence saying they also differ from each other is the same fact told a
+    # third time in the archived reason. The agreement covers what the anchor does not.
+    pinned: set[str] = set()
+    if anchored:
+        pinned.add("commit")
+        if source.get("scope") is not None:
+            pinned.add("scope")
     for field in ("commit", "scope", "model"):
+        if field in pinned:
+            continue
         values = {who: stamp.get(field) for who, stamp in comparable.items()}
         if len(set(values.values())) > 1:
             faults.append(_Fault(False, (
@@ -899,9 +920,9 @@ def _member_faults(who: str, stamp: dict | None, *, anchor: dict | None) -> list
     scope = None if anchor is None else anchor.get("scope")
     if scope is not None and stamp.get("scope") != scope:
         faults.append(_Fault(False, (
-            f"{who}'s dirt was measured over scope {stamp.get('scope')!r} and the source's "
-            f"over {scope!r} — the two clean bits answer different questions, so agreeing on "
-            "the commit does not make them a match")))
+            f"the dirt of {who} was measured over scope {stamp.get('scope')!r} and the "
+            f"source's over {scope!r} — the two clean bits answer different questions, so "
+            "agreeing on the commit does not make them a match")))
     if not _clean_stamp(stamp):
         faults.append(_Fault(True, _not_certified_clean(who, stamp)))
     return faults
@@ -994,6 +1015,15 @@ def verify_family(
     stamps = {label: _stamp_of(path) for label, path in dirs.items()}
 
     reasons: list[str] = []
+    # NO SIBLING IS NOT A FAMILY. Over an empty `run_dirs` every check below passes vacuously
+    # — nothing unwalked, nothing off the anchor, nothing disagreeing — and the family stamp
+    # would then publish an agreed record of nobody (or, taken from an empty mapping, raise
+    # out of this frame after the archive was written and before the outcome was recorded or
+    # the door torn down). The launcher never reaches here with none (a manifest always has a
+    # base world), so this is the public entry's own answer.
+    if not dirs:
+        reasons.append("the family has no sibling — a comparison over no arm is not one, so "
+                       "there is nothing to hold to the source's commit or to archive")
     if unverified:
         reasons.append(
             f"sibling(s) {unverified} have no scrub verdict recording a completed walk — an "
@@ -1059,9 +1089,18 @@ def _write_family_stamp(
     archive reader — a family that was clean and one that was waved through would read
     identically — which is the whole reason the override is named.
     """
-    # ANY sibling's stamp is the agreed record: this frame is reached only when
-    # `_family_refusal` found none absent, none silent and every speaker agreeing, so the
-    # first is every other.
+    # ANY sibling's stamp is the agreed record ON THE FIELDS THE FAMILY IS HELD CONSTANT ON —
+    # commit, scope and model: this frame is reached only when `_family_refusal` found none
+    # absent, none silent and every speaker agreeing on those, so on them the first is every
+    # other. The dirt fields (`dirty`, `dirty_paths`, `dirty_path_count`, `unavailable`) are
+    # NOT held constant — under `--allow-dirty` one sibling can be clean and the next dirty —
+    # and here they are the first sibling's; each sibling's own reading is in its archived
+    # `worlds/<label>/provenance.json`, which is where a reader asking which arm needed the
+    # override finds it.
+    #
+    # AND THE FAMILY IS NOT EMPTY: `verify_family` refuses a family of no siblings before this
+    # frame, so the `next` below has a stamp to take — over an empty mapping it would raise
+    # `StopIteration` after the archive was written and before the outcome was recorded.
     agreed = next(stamp for stamp in stamps.values() if stamp is not None)
     write_guarded(
         Path(episode_dir) / FAMILY_STAMP_NAME,
@@ -1130,7 +1169,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its eight injection se
     preflight: Callable[[str | None], int] | None = None,
     judge: Any = None,
     lessons_dir: Path | None = None,
-    capture: Callable[[], _provenance.RunProvenance] | None = None,
+    live_tree: Callable[[], _provenance.RunProvenance] | None = None,
 ) -> int:
     """Launch one episode, reporting a refusal as a REFUSAL rather than as a crash.
 
@@ -1161,7 +1200,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its eight injection se
     try:
         return _launch(argv, spawn=spawn, door=door, questioner=questioner,
                        adapters=adapters, invoke=invoke, preflight=preflight, judge=judge,
-                       lessons_dir=lessons_dir, capture=capture)
+                       lessons_dir=lessons_dir, live_tree=live_tree)
     except (branch.BranchError, LedgerError, EstateError, FamilyError,
             staging_mod.StagingRefused, ReviewError,
             session_store.StoreError, sqlite3.Error) as refusal:
@@ -1172,7 +1211,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     argv: list[str], *, spawn: Any, door: Any, questioner: Any, adapters: Any, invoke: Any,
     preflight: Callable[[str | None], int] | None, judge: Any = None,
     lessons_dir: Path | None = None,
-    capture: Callable[[], _provenance.RunProvenance] | None = None,
+    live_tree: Callable[[], _provenance.RunProvenance] | None = None,
 ) -> int:
     from defender.run import preflight_role_models
 
@@ -1192,7 +1231,8 @@ def _launch(  # noqa: PLR0913 — see `main`
     # checkout this launcher runs in, resolved here so the preflight is handed a callable and
     # never asks git itself — every end-to-end launch of `main` would otherwise be compared
     # against the HEAD of whatever tree the suite ran under.
-    live_capture = (lambda: _provenance.capture_tree(REPO_ROOT)) if capture is None else capture
+    live_capture = ((lambda: _provenance.capture_tree(REPO_ROOT)) if live_tree is None
+                    else live_tree)
     source = Path(ns.source_run_dir).resolve()
     episode_id = episode_id_for(source.name, ns.branch_message_id)
     episode_dir = episode_dir_for(episode_id)
@@ -1200,7 +1240,7 @@ def _launch(  # noqa: PLR0913 — see `main`
         source_run_dir=source, branch_message_id=ns.branch_message_id, episode_id=episode_id,
         episode_dir=episode_dir, door=write_door, preflight=role_preflight,
         model=ns.model, continuation_prompt=ns.continuation_prompt,
-        allow_dirty=ns.allow_dirty, capture=live_capture)
+        allow_dirty=ns.allow_dirty, live_tree=live_capture)
 
     # THE REMAINING SEAMS ARE ANSWERED FOR HERE, at the same boundary `door` and `preflight`
     # are resolved at, and threaded inward non-`None`. Left to their `None` defaults they

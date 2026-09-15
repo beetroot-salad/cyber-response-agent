@@ -12,7 +12,7 @@ Two tiers, both pinned here from the design's obligations (`design-976.md`):
 * **Preflight** (`cli.main` → `preflight_episode`; M1, M2): the source's stamp is read through
   the one guarded reader; a source that cannot anchor (no stamp, no commit) refuses before the
   questioner is paid, never waivably; a dirty or unknown source refuses unless `--allow-dirty`.
-  The LIVE tree is captured once through an injected seam (`capture=`) and refused, never
+  The LIVE tree is captured once through an injected seam (`live_tree=`) and refused, never
   waivably, when its commit or scope differs from the source's.
 * **Verify** (`verify_family(..., source=)`; M3, M3b, M4): the siblings' own per-process stamps
   are the authority — agreeing with each other AND with the source's commit (and scope, when
@@ -25,7 +25,7 @@ would compare the suite's own HEAD against the fixture's `deadbee` and refuse ev
 Every negative is paired with a positive control on the same address; every fault is the real
 one (an unlinked file, a real symlink, real forged JSON).
 
-RED against ed890678: `main` has no `capture=` seam, `preflight_episode` reads no source
+RED against ed890678: `main` has no `live_tree=` seam, `preflight_episode` reads no source
 stamp, `verify_family` takes no `source=`, and the family stamp has no `source` key.
 """
 from __future__ import annotations
@@ -68,7 +68,7 @@ class Launch:
     spawn: Any
     door: Any
     questioner: Any
-    capture: Any
+    live_tree: Any
     invoke: Any = field(default_factory=lambda: T.FakeAgent(*["same"] * 24))
     #: The judge's model seam, scripted: an ACCEPTED family is graded at the tail of the
     #: launch, and left to its production value that grade is a real model call.
@@ -82,7 +82,7 @@ class Launch:
              *argv_extra],
             spawn=self.spawn, door=self.door, questioner=self.questioner,
             adapters=T.FakeAdapters(), invoke=self.invoke, judge=self.judge,
-            preflight=lambda model: self.roles.append(model) or 0, capture=self.capture)
+            preflight=lambda model: self.roles.append(model) or 0, live_tree=self.live_tree)
         return self.rc
 
     @property
@@ -90,7 +90,7 @@ class Launch:
         return json.loads((self.episode_dir / "provenance.json").read_text(encoding="utf-8"))
 
 
-def _prepare(tmp_path, *, capture=None, siblings_at: str | None = "deadbee",
+def _prepare(tmp_path, *, live_tree=None, siblings_at: str | None = "deadbee",
              spawn=None) -> Launch:
     """A source run under the configured runs base plus every fake a launch needs.
 
@@ -106,7 +106,7 @@ def _prepare(tmp_path, *, capture=None, siblings_at: str | None = "deadbee",
         spawn=J.FakeSibling(episode_dir, commit=siblings_at) if spawn is None else spawn,
         door=T.FakeDoor(),
         questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")),
-        capture=T.source_capture() if capture is None else capture)
+        live_tree=T.source_capture() if live_tree is None else live_tree)
 
 
 def _refused_before_spending(launch: Launch, *argv_extra: str) -> str:
@@ -189,6 +189,11 @@ def test_976_a_source_whose_git_could_not_be_asked_is_refused_and_never_waived(t
         T.source_stamp(launch.src, commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE)
         message = _refused_before_spending(launch, *argv)
         _never_waivable(message, "source", "names no commit", T.GIT_UNAVAILABLE)
+        # AND THE LIVE TREE WAS NOT ASKED: the capture is two git subprocesses on a 60 s
+        # timeout each, and against a source with no commit its answer cannot change the
+        # refusal — a launcher on a stalled index would otherwise wait two minutes to be told
+        # about a file it read in a millisecond.
+        assert launch.live_tree.calls == 0, "the live tree was captured for a source with no anchor"
 
 
 def test_976_a_dirty_source_is_refused_without_the_override_and_proceeds_with_it(tmp_path):
@@ -233,7 +238,7 @@ def test_976_a_clean_matching_source_and_live_tree_launch_and_archive(tmp_path):
     exactly once. Every refusal above is only meaningful beside this."""
     launch = _prepare(tmp_path)
     stamp = _accepted(launch)
-    assert launch.capture.calls == 1
+    assert launch.live_tree.calls == 1
     assert stamp["source"]["commit"] == "deadbee"
     assert stamp["agreed"]["commit"] == "deadbee"
 
@@ -253,11 +258,11 @@ def test_976_a_live_tree_at_another_commit_is_refused_and_never_waived(tmp_path)
                        ((), "deadbe")):
         # `deadbee0` and `deadbe` are the abbreviated-sha shapes: a prefix comparison in either
         # direction reads them as the source's `deadbee` (adversary H2). Equality is the rule.
-        launch = _prepare(tmp_path, capture=T.source_capture(commit=live))
+        launch = _prepare(tmp_path, live_tree=T.source_capture(commit=live))
         message = _refused_before_spending(launch, *argv)
         _never_waivable(message, "live tree is at commit", repr(live), "'deadbee'")
         assert "scope" not in message, ("a commit mismatch is not a scope mismatch", message)
-        assert launch.capture.calls == 1, "the live tree was captured other than once"
+        assert launch.live_tree.calls == 1, "the live tree was captured other than once"
 
 
 def test_976_a_live_tree_git_cannot_answer_for_is_refused_and_never_waived(tmp_path):
@@ -265,11 +270,11 @@ def test_976_a_live_tree_git_cannot_answer_for_is_refused_and_never_waived(tmp_p
     be shown to match the source, so it refuses — an unknown is not a match — and the override
     does not reach it. Without this a launcher on a git-less host would anchor by assumption."""
     for argv in ((), ("--allow-dirty",)):
-        launch = _prepare(tmp_path, capture=T.source_capture(
+        launch = _prepare(tmp_path, live_tree=T.source_capture(
             commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE))
         message = _refused_before_spending(launch, *argv)
         _never_waivable(message, "live tree names no commit", T.GIT_UNAVAILABLE)
-        assert launch.capture.calls == 1
+        assert launch.live_tree.calls == 1
 
 
 def test_976_a_dirty_live_tree_is_refused_without_the_override_and_proceeds_with_it(tmp_path):
@@ -278,13 +283,13 @@ def test_976_a_dirty_live_tree_is_refused_without_the_override_and_proceeds_with
     Without the negative, uncommitted edits to the code the siblings will mount pass as the
     source's commit; without the positive, `--allow-dirty` would refuse the case it exists
     for."""
-    launch = _prepare(tmp_path, capture=T.source_capture(dirty=True))
+    launch = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
     message = _refused_before_spending(launch)
     _waivable(message, "live tree", "not certified clean", "dirty=True")
 
-    waived = _prepare(tmp_path, capture=T.source_capture(dirty=True))
+    waived = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
     stamp = _accepted(waived, "--allow-dirty")
-    assert waived.capture.calls == 1
+    assert waived.live_tree.calls == 1
     assert stamp["allow_dirty"] is True
 
 
@@ -292,16 +297,16 @@ def test_976_a_live_tree_of_unknown_state_is_refused_without_the_override(tmp_pa
     """O3/O4/M2: the live capture names the source's commit but could not answer for the tree
     (`dirty: None`, git status failed): refused without the override, proceeds with it.
     Without this the launcher would treat "git did not say" as "clean"."""
-    launch = _prepare(tmp_path, capture=T.source_capture(
+    launch = _prepare(tmp_path, live_tree=T.source_capture(
         dirty=None, unavailable=T.GIT_STATUS_FAILED))
     message = _refused_before_spending(launch)
     _waivable(message, "live tree", "not certified clean", "dirty=None",
               T.GIT_STATUS_FAILED)
 
-    waived = _prepare(tmp_path, capture=T.source_capture(
+    waived = _prepare(tmp_path, live_tree=T.source_capture(
         dirty=None, unavailable=T.GIT_STATUS_FAILED))
     _accepted(waived, "--allow-dirty")
-    assert waived.capture.calls == 1
+    assert waived.live_tree.calls == 1
 
 
 def test_976_a_live_scope_differing_from_the_sources_is_refused_and_never_waived(tmp_path):
@@ -310,9 +315,10 @@ def test_976_a_live_scope_differing_from_the_sources_is_refused_and_never_waived
     not make it a match — refused, and the override does not waive it. Without this two
     stamps whose `dirty` bits are not about the same subtree compare as one."""
     for argv in ((), ("--allow-dirty",)):
-        launch = _prepare(tmp_path, capture=T.source_capture(scope="defender"))
+        launch = _prepare(tmp_path, live_tree=T.source_capture(scope="defender"))
         message = _refused_before_spending(launch, *argv)
         _never_waivable(message, "measured over scope", "'defender'", "'repo'")
+        assert "''" not in message, ("a possessive on a quoted label doubles the quote", message)
 
 
 def test_976_a_source_stamped_before_scope_existed_is_compared_on_commit_alone(tmp_path):
@@ -386,6 +392,9 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
                                       allow_dirty=allow_dirty)
         assert report["outcome"] == "incomplete", allow_dirty
         assert "scope" in report["reason"], report["reason"]
+        # The sibling label is quoted (`sibling 'b'`), so a possessive built onto it renders
+        # `'b''s` in the archived reason.
+        assert "''" not in report["reason"], report["reason"]
         assert not (ep / "provenance.json").exists()
 
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-unscoped")
@@ -485,7 +494,7 @@ def test_976_the_override_waives_dirt_on_both_sides_and_the_family_is_accepted(t
     stamped — and the stamp says the source was dirty and the override was given, so the
     archive never reads as anchored to a clean sha. Without this the override could be made
     a no-op and every O4 negative would still pass."""
-    launch = _prepare(tmp_path, capture=T.source_capture(dirty=True))
+    launch = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
     T.source_stamp(launch.src, dirty=True)
     stamp = _accepted(launch, "--allow-dirty")
     assert stamp["source"]["dirty"] is True
@@ -535,15 +544,15 @@ def test_976_two_problems_are_reported_at_once_never_waivable_first_and_without_
     the second problem is known on the first launch. Without this the waivable fault fired
     first, named `--allow-dirty`, and the operator met the never-waivable one only after
     passing a flag that could not help."""
-    launch = _prepare(tmp_path, capture=T.source_capture(commit="0ther"))
+    launch = _prepare(tmp_path, live_tree=T.source_capture(commit="0ther"))
     T.source_stamp(launch.src, dirty=True)
     message = _refused_before_spending(launch)
     _never_waivable(message, "live tree is at commit '0ther'", "not certified clean",
                     "dirty=True")
     assert message.index("is at commit") < message.index("not certified clean"), message
-    assert launch.capture.calls == 1
+    assert launch.live_tree.calls == 1
     # Under the override the dirt is waived and the commit alone remains — still refused.
-    waived = _prepare(tmp_path, capture=T.source_capture(commit="0ther"))
+    waived = _prepare(tmp_path, live_tree=T.source_capture(commit="0ther"))
     T.source_stamp(waived.src, dirty=True)
     message = _refused_before_spending(waived, "--allow-dirty")
     _never_waivable(message, "live tree is at commit '0ther'")
@@ -580,6 +589,67 @@ def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_
     assert "allow-dirty" in T.review_doc(ep)["episode"]["reason"]
 
 
+def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_path):
+    """An archived reason tells each fact once. Two siblings at two commits, neither the
+    source's, are two anchor faults — each named against the source — and NOT also a third
+    sentence that the siblings disagree with each other, which the two already said. The
+    sibling-to-sibling agreement covers only what the anchor does not pin: the model always,
+    and the scope when the source stamped none. Without this `review.yaml` carries the same
+    drift two or three times and an operator reads three problems where there is one."""
+    base, _src = T.runs_base(tmp_path)
+    two_commits = [T.sibling_run_dir(base / "tc", w, commit=f"c-{w}") for w in T.WORLDS]
+    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-commits")
+    report = _cli().verify_family(ep, two_commits, source=T.provenance_record(commit="s"))
+    assert report["outcome"] == "incomplete"
+    reason = report["reason"]
+    assert reason.count("while the source run it continues ran at") == len(T.WORLDS), reason
+    assert "siblings disagree on commit" not in reason, reason
+    assert "siblings disagree on scope" not in reason, reason
+
+    # The scope is pinned by the anchor only when the source has one: against a pre-scope
+    # source, two siblings measured over two scopes are still a disagreement — the one place
+    # the sibling-to-sibling loop is the sole reader of the field.
+    two_scopes = [T.sibling_run_dir(base / "ts", w) for w in T.WORLDS]
+    T.source_stamp(two_scopes[1], scope="defender")
+    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-scopes")
+    report = _cli().verify_family(ep, two_scopes, source=T.provenance_record(scope=None))
+    assert report["outcome"] == "incomplete"
+    assert "siblings disagree on scope" in report["reason"], report["reason"]
+    assert "measured over scope" not in report["reason"], report["reason"]
+
+    # And a model split is the agreement loop's own fact, never the anchor's — told once.
+    two_models = [T.sibling_run_dir(base / "tm", w, model=("m-2" if w == "b" else "m-1"))
+                  for w in T.WORLDS]
+    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-models")
+    report = _cli().verify_family(ep, two_models, source=T.provenance_record())
+    assert report["outcome"] == "incomplete"
+    assert report["reason"].count("siblings disagree on model") == 1, report["reason"]
+
+
+def test_976_a_family_of_no_siblings_is_incomplete_not_a_crash(tmp_path):
+    """`verify_family` over NO run dirs, against a clean source, is `incomplete` with a reason
+    — not `accepted` with an agreed record of nobody, and not a `StopIteration` out of the
+    family-stamp writer after the archive directory was made and before the outcome was
+    recorded or the door torn down. The launcher never gets here (a manifest always has a
+    base world), so this is the public entry's own answer; the door pin is what a caller
+    holding staged names needs from it."""
+    staged = f"wv-{T.world_token('b')}-logs-"
+    door = T.FakeDoor(existing=(staged,))
+    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-nobody")
+    (ep / "staged.yaml").write_text(
+        json.dumps([{"world": T.world_token("b"), "name": staged, "kind": "alias",
+                     "derived_from": T.EVENTS_PATTERN, "created_at": T.AS_OF}]),
+        encoding="utf-8")
+    report = _cli().verify_family(ep, [], source=T.provenance_record(), door=door)
+    assert report["outcome"] == "incomplete"
+    assert "no sibling" in report["reason"], report["reason"]
+    assert report["worlds"] == []
+    assert not (ep / "provenance.json").exists()
+    assert (ep / "worlds").is_dir()
+    assert T.review_doc(ep)["episode"]["outcome"] == "incomplete"
+    assert door.deleted() == [staged], "the staged name outlived the empty family"
+
+
 # ---------------------------------------------------------------------------------------
 # O5 — the archive says what it was anchored to
 # ---------------------------------------------------------------------------------------
@@ -591,7 +661,7 @@ def test_976_the_accepted_family_stamp_carries_the_sources_whole_record(tmp_path
     never does) and not the siblings' agreement. Paired with the clean reading: `source.dirty`
     is False and `allow_dirty` is False. Without this a reader of the archive could not tell
     which code the family was anchored to, or would read the launcher's own capture as it."""
-    launch = _prepare(tmp_path, capture=T.source_capture(model=None))
+    launch = _prepare(tmp_path, live_tree=T.source_capture(model=None))
     stamp = _accepted(launch)
     expected = T.provenance_record()
     for name in ("commit", "dirty", "scope", "model", "dirty_paths", "dirty_path_count",
@@ -668,7 +738,7 @@ def test_976_the_source_commit_reaches_only_comparisons_and_the_family_stamp(tmp
     siblings makes the launch accepted (the positive half: the stamp carries it), and the sweep
     over every outbound payload is the negative. Without this a forged source commit would be
     a string an operator's shell or a model gets to see."""
-    launch = _prepare(tmp_path, capture=T.source_capture(commit=ANCHOR), siblings_at=ANCHOR)
+    launch = _prepare(tmp_path, live_tree=T.source_capture(commit=ANCHOR), siblings_at=ANCHOR)
     T.source_stamp(launch.src, commit=ANCHOR)
     stamp = _accepted(launch)
     assert stamp["source"]["commit"] == ANCHOR

@@ -762,7 +762,7 @@ def source_stamp(src: Path, **overrides: Any) -> Path:
 
 
 class FakeCapture:
-    """The launcher's live-tree seam (`capture=` on `cli.main`, #976 M2), scripted and counted.
+    """The launcher's live-tree seam (`live_tree=` on `cli.main`, #976 M2), scripted and counted.
 
     Production resolves it to `_provenance.capture_tree(REPO_ROOT)`, which asks git about the
     checkout the launcher is running in — so every end-to-end launcher scenario has to inject

@@ -547,6 +547,13 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
+    # "No seam" is a fact about the signature, pinned as one: a `provenance=` keyword is the
+    # hoisted-capture path this change removed, and it is refused rather than accepted and
+    # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
+    handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
+    with pytest.raises(TypeError):
+        run_common.materialize_run_dir(alert, "20260101T000000Z-handed", provenance=handed)
+    assert not (runs / "20260101T000000Z-handed").exists()
 
 
 # The coherence rules as a CONSTRUCTOR invariant, not a parser habit.

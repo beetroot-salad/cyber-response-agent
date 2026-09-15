@@ -129,7 +129,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, rows=(), **seams) -> Launch:
 
     `rows` lands rows in the SOURCE run's queries table before the launch — the only way to
     give the review something to replay, since the launcher primes the episode from the source.
-    `capture` (defaulted below) is #976's live-tree seam, injected to match the fixture source.
+    `live_tree` (defaulted below) is #976's live-tree seam, injected to match the fixture source.
     """
     base, src = T.runs_base(tmp_path)
     for row in rows:
@@ -145,7 +145,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, rows=(), **seams) -> Launch:
     seams.setdefault("adapters", T.FakeAdapters())
     seams.setdefault("invoke", T.FakeAgent(*["same"] * 24))
     seams.setdefault("preflight", T.no_preflight)
-    seams.setdefault("capture", T.source_capture())
+    seams.setdefault("live_tree", T.source_capture())
     before = now_iso()
     rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
                      spawn=spawn, judge=judge, **seams)

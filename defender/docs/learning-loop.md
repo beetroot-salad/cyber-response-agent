@@ -162,9 +162,11 @@ family's anchor and the launcher's own checkout matching it, source alert a
 plain file, corpus patterns able to carry a view name, write door reaching the
 cluster, namespace sweep complete, every role holding a usable model. The
 anchor check is the verify tier's own judgement run early over a one-member
-family (the live tree): commit and scope must equal the source's and are never
-waived; a tree git did not certify clean — the source's or the live one — is
-refused unless `--allow-dirty`, which waives dirt and only dirt.
+family (the live tree): the commit must equal the source's, and so must the
+scope unless the source stamped before the field existed; neither is ever
+waived. A tree git did not certify clean — the source's or the live one — is
+refused unless `--allow-dirty`, which waives dirt and only dirt. A source that
+names no commit refuses on its own, before the live tree is asked.
 
 **2. `Step.QUESTIONER`** (`branch/questioner/`) is a **deny-all** role — no tools,
 its whole input inlined by the host, its whole output one YAML manifest. It

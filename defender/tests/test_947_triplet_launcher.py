@@ -55,7 +55,7 @@ def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), rows=(), **seams)
     way to give an episode a primed base: the launcher primes from the source, so a scenario
     that needs the review to have something to replay has to put it there.
 
-    `capture` (a seam, defaulted below) is #976's live-tree capture: production asks git about
+    `live_tree` (a seam, defaulted below) is #976's live-tree capture: production asks git about
     the checkout the launcher runs in, so every scenario here injects one that matches the
     fixture source's stamp — otherwise the suite's own HEAD is what the preflight compares.
     """
@@ -76,7 +76,7 @@ def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), rows=(), **seams)
     # `test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling` injects its
     # own recording seam and is what discharges the demand.
     seams.setdefault("preflight", T.no_preflight)
-    seams.setdefault("capture", T.source_capture())
+    seams.setdefault("live_tree", T.source_capture())
     rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
                       *argv_extra],
                      spawn=spawn, door=door, **seams)
@@ -107,7 +107,7 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     with pytest.raises(SystemExit):
         _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
                     spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=agent,
-                    preflight=T.no_preflight, capture=T.source_capture())
+                    preflight=T.no_preflight, live_tree=T.source_capture())
     assert agent.calls == 0
 
 
@@ -163,7 +163,7 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
             # the preflight's own refusal before the check under test was ever reached.
             _cli().main([str(src), *argv_extra, "--continuation-prompt", "go"],
                         spawn=T.FakeSpawn(), door=door, questioner=agent,
-                        preflight=T.no_preflight, capture=T.source_capture())
+                        preflight=T.no_preflight, live_tree=T.source_capture())
         assert agent.calls == 0, "the questioner was paid for before the preflight refused"
 
     for out_of_range in ("-1", str(10 ** 9)):
@@ -195,7 +195,7 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     with pytest.raises(T.refusals()) as refusal:
         _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
                     spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=agent,
-                    preflight=T.no_preflight, capture=T.source_capture())
+                    preflight=T.no_preflight, live_tree=T.source_capture())
     assert "alert" in str(refusal.value)
     assert agent.prompts == [], "the planted link reached the questioner's prompt"
     assert "ROOT-PRIVATE-KEY" not in str(refusal.value)
@@ -685,7 +685,7 @@ def test_947_the_dirty_override_is_named_in_the_family_stamp(tmp_path):
 def test_947_launcher_no_longer_hoists_one_capture_above_the_family(tmp_path):
     """The launcher does not hoist its own capture of the tree ABOVE the family as the family's
     provenance. Since #976 it does take one (M2: the live-tree check at preflight, through the
-    injected `capture=` seam), but that record describes the launcher's moment and is not the
+    injected `live_tree=` seam), but that record describes the launcher's moment and is not the
     authority (#976 non-obligation): the family stamp's `agreed` record is a conclusion about
     the N per-process sibling stamps, and the workflow a hoisted record once served — knowing
     what the family was made against — completes from those. (The name is kept: the committed
@@ -703,7 +703,7 @@ def test_947_launcher_no_longer_hoists_one_capture_above_the_family(tmp_path):
     launcher_moment = T.source_capture(dirty=True, model=None)
     # The judge seam is scripted because an ACCEPTED family is graded at the tail of the
     # launch, and its production value is a real model call.
-    rc, spawn, ep = _launch(tmp_path, spawn=J.FakeSibling(ep), capture=launcher_moment,
+    rc, spawn, ep = _launch(tmp_path, spawn=J.FakeSibling(ep), live_tree=launcher_moment,
                             judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
                             argv_extra=("--allow-dirty",))
     assert rc == 0
