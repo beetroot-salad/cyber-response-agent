@@ -28,11 +28,7 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
     permission table) or a warning (a corpus document).
     """
     try:
-        # `SafeLoader` explicitly: `compose` defaults to the full `Loader`, and while composing
-        # constructs nothing, this module's whole contract with its callers is that untrusted
-        # text only ever meets the safe loader — a default that has to be argued about is one
-        # a later edit gets wrong.
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
+        root = compose(text)
     except (yaml.YAMLError, RecursionError):
         # Unparseable is not this function's verdict to give — the caller's own `safe_load`
         # raises on it with the parser's message, which says far more than "duplicates: none".
@@ -106,7 +102,7 @@ def duplicate_top_level_key(text: str) -> bool:
     verdict.
     """
     try:
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
+        root = compose(text)
     except (yaml.YAMLError, RecursionError):
         return False
     if not isinstance(root, yaml.MappingNode):
@@ -160,65 +156,60 @@ def safe_load(text: str) -> Any:
         raise yaml.YAMLError(f"YAML value could not be constructed: {e}") from e
 
 
-class _TextScalarLoader(yaml.SafeLoader):
-    """`SafeLoader` reading every non-null scalar as text — see `load_text_scalars`.
+def compose(text: str) -> Any:
+    """`text`'s node tree under the safe loader — the LAST representation in which every
+    scalar is still the text it was written as, and every mapping key is still there.
 
-    YAML types a scalar two ways and both are neutralised. An UNTAGGED scalar is typed by the
-    implicit resolvers: `yaml_implicit_resolvers` is a CLASS-LEVEL dict of lists that a
-    subclass inherits by reference, and `add_implicit_resolver` copies it lazily only when a
-    subclass ADDS one — filtering the inherited lists in place would strip typing from
-    `yaml.SafeLoader` itself, and every `yaml.safe_load` in the process would start returning
-    strings for dates (#951 design C14, executed). The table below is a fresh dict of fresh
-    lists, assigned once and never touched again. A TAGGED scalar (`!!timestamp …`) skips the
-    resolver and goes straight to the constructor for its tag, so those four constructors are
-    re-bound to the plain-text one (`add_constructor` copies the table onto the subclass); a
-    loader that dropped only the resolvers would re-open the fail-open one tag away. `!!str`
-    and `!!null` are already text and `None`; every other tag keeps `SafeConstructor`'s
-    answer, which for `!!python/...` is a refusal.
+    `safe_load` is compose-then-construct, and construction is where a plain
+    `2026-07-25T07:48:37.065Z` becomes a `datetime`, `0755` becomes `493`, `yes` becomes
+    `True` and a repeated key collapses to its last value. A reader that needs the document's
+    SPELLING (`value_texts`) or its pre-collapse keys (`duplicate_key_paths`) reads the tree;
+    everything else reads `safe_load`, and nothing re-types a scalar by hand.
+
+    `SafeLoader` explicitly: `yaml.compose` defaults to the full `Loader`, and while composing
+    constructs nothing, this module's whole contract with its callers is that untrusted text
+    only ever meets the safe loader — a default that has to be argued about is one a later
+    edit gets wrong. Raises what `yaml.compose` raises; callers that have already parsed the
+    same text with `safe_load` never see one.
     """
+    return yaml.compose(text, Loader=yaml.SafeLoader)
 
 
-_TextScalarLoader.yaml_implicit_resolvers = {
-    first: kept
-    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
-    if (kept := [(tag, regexp) for tag, regexp in resolvers
-                 if tag == "tag:yaml.org,2002:null"])
-}
-for _typed_tag in ("timestamp", "int", "float", "bool"):
-    _TextScalarLoader.add_constructor(
-        f"tag:yaml.org,2002:{_typed_tag}", yaml.SafeLoader.construct_yaml_str)
+def value_texts(node: Any) -> list[str]:
+    """Every scalar under `node`, as the TEXT it was written — mapping keys excluded.
 
-
-def load_text_scalars(text: str) -> Any:
-    """Parse `text` with every plain scalar read as the string it was written as.
-
-    @owns the text form of a case-file value. The oracle-golden mechanical checks are literal
+    @owns the text form of a document value. The oracle-golden mechanical checks are literal
     containment — is this `must_not_emit` literal a whole value or a token of what the
-    projection emitted — so both sides must be the text the author and the model wrote, not
-    what YAML would have typed it as. `yaml.safe_load` types an unquoted
-    `2026-07-25T07:48:37.065Z` into a `datetime` whose `str()` is
-    `2026-07-25 07:48:37.065000+00:00`, so whether a forbidden instant was caught depended on
-    whether the model happened to quote it (#951); `yes`/`0755`/`12:30`/`1.0` collapse the
-    same way. Here timestamps, dates, ints, floats and booleans all construct as `str`, in
-    their original spelling. Only the `null` resolver survives, so `~`, `null` and an empty
-    value are still `None` — the `or {}` / `or []` idioms the readers depend on.
+    projection emitted — and they were run over a document `safe_load` had already typed, so
+    whether a forbidden instant was caught depended on whether the model quoted it (#951).
+    A `ScalarNode.value` is the spelling before any constructor touched it: a plain
+    `2026-07-25T07:48:37.065Z`, an explicitly tagged `!!timestamp …`, `0755`, `yes` and `1.50`
+    all come back exactly as they sit in the file, and a quoted scalar comes back unquoted,
+    as `safe_load` would give it. Nothing is constructed, so a `!!python/…` tag is inert here
+    (and refused by the `safe_load` a caller runs on the same text for its structure).
 
-    An EXPLICIT `!!timestamp`/`!!int`/`!!float`/`!!bool` tag is text too — it is the other
-    way YAML types a scalar, and the check's contract is the spelling either way. Quoted and
-    block scalars, and structure, are exactly what `safe_load` gives; a `!!python/...` tag is
-    refused as it is there. Sits BESIDE `safe_load` rather than inside it: that wrapper is
-    the repo's TYPED reader and stays one. Errors keep its contract — malformed text,
-    too-deep nesting and a constructor's own rejection all surface as `yaml.YAMLError`.
+    Keys are excluded because a caller scanning for leaked VALUES must not read schema field
+    names (`user.name`) as leaks. A `<<:` merge is a key too, and its aliased mapping is
+    reached through wherever the anchor is defined. Iterative with an identity-keyed visited
+    set, for `duplicate_key_paths`' reason: an anchor that contains its own alias composes
+    into a cyclic graph. An alias is therefore counted ONCE, where its anchor sits — the
+    text is the same either way.
     """
-    try:
-        return yaml.load(text, Loader=_TextScalarLoader)
-    except RecursionError as e:
-        raise yaml.YAMLError("YAML is nested too deeply to parse") from e
-    except ValueError as e:
-        # No typed constructor is left to reject a scalar, so this is a backstop for a tag
-        # nobody re-bound (`!!binary` on bad base64 is a `YAMLError` already) — kept for the
-        # same reason `safe_load` keeps it: a caller's `except yaml.YAMLError` must see it.
-        raise yaml.YAMLError(f"YAML value could not be constructed: {e}") from e
+    out: list[str] = []
+    stack: list[Any] = [node]
+    seen_nodes: set[int] = set()
+    while stack:
+        current = stack.pop()
+        if id(current) in seen_nodes:
+            continue
+        seen_nodes.add(id(current))
+        if isinstance(current, yaml.ScalarNode):
+            out.append(current.value)
+        elif isinstance(current, yaml.MappingNode):
+            stack.extend(value_node for _key_node, value_node in reversed(current.value))
+        elif isinstance(current, yaml.SequenceNode):
+            stack.extend(reversed(current.value))
+    return out
 
 
 def reject_unread_keys(
