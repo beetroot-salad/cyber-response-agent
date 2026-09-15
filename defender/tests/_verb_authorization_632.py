@@ -459,8 +459,8 @@ class _Run:
         there — item 1 issues its own `elastic.alerts` call synchronously before MAIN's
         first turn, so if that call itself lands as a policy denial (the registry declares
         `alerts` but does not grant it), its record is always the FIRST in the stream. A
-        policy-denial record carries no `lead_id` by design (§7 R12), so unlike `own_rows`
-        this can't filter by id — it can only rely on lead-0's fixed position. Only the
+        policy-denial record carried no `lead_id` before #860 (M1 added it), so unlike
+        `own_rows` this does not filter by id — it relies on lead-0's fixed position. Only the
         LEADING entry is ever dropped, and only when it is `alerts`: a test that later
         scripts its own genuine `elastic.alerts` denial (as part of its own turns, after
         lead-0's own attempt) keeps that record."""

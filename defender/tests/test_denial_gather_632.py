@@ -293,8 +293,12 @@ def test_a_denial_outside_a_dispatched_lead_runs_no_lead_scoped_allocation(tmp_p
     r = run_gather(tmp_path, verbs=reg, turns=[q(*DENIED_PAIR), DONE], run_id="d44")
     assert not (r.run_dir / "gather_raw" / LEAD).exists()
     assert len(r.own_denials) == 1, "the denial was not audited at all"
-    assert "lead_id" not in r.own_denials[0], \
-        "the denial record carries lead-scoped state a denial must never allocate"
+    # Since #860 (M1) the record NAMES the dispatching lead — a column on the audit record,
+    # read only by the offline judge (N4/O3) — and still allocates nothing lead-scoped: no
+    # payload directory, no sequence number in the queries table, no row.
+    assert r.own_denials[0]["lead_id"] == LEAD, \
+        "the denial record does not name the lead it was refused inside"
+    assert r.own_rows == [], "the denial allocated a queries-table row"
 
 
 

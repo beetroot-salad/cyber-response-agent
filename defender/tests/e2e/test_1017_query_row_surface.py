@@ -311,7 +311,10 @@ def test_the_judges_leads_view_carries_no_column_it_cannot_act_on(tmp_path, judg
     every query's payload digest DO appear — VIEW 1's semantic content (N5) is intact, so the
     negatives are not satisfied by an empty section.
 
-    The chain itself keeps `goal/params/payload/summary/resolutions` and drops `document_rows`.
+    The chain itself keeps `goal/params/payload/summary/resolutions`, drops `document_rows`,
+    and since #860 carries `refused` — the lead's refused attempts as NAMED columns
+    (`tests/e2e/test_860_refused_on_judge_view.py` pins each entry's key set); a world with no
+    refusal renders it `[]`.
 
     Observed failing by: any marker or key name in the leads section — today the whole row is
     stringified under `- document_rows:`."""
@@ -323,8 +326,10 @@ def test_the_judges_leads_view_carries_no_column_it_cannot_act_on(tmp_path, judg
     leads, text = _leads_view(ep, base)
 
     chain = leads["l-001"]
-    assert set(chain) == {"goal", "params", "payload", "summary", "resolutions"}, \
-        f"the per-lead chain carries {sorted(set(chain) - {'goal', 'params', 'payload', 'summary', 'resolutions'})}"
+    chain_keys = {"goal", "params", "payload", "summary", "resolutions", "refused"}
+    assert set(chain) == chain_keys, \
+        f"the per-lead chain carries {sorted(set(chain) ^ chain_keys)} beyond/short of the pin"
+    assert chain["refused"] == [], "a lead with no refusal carries a refused entry"
     assert chain["goal"] == "GOAL_MARKER"
     assert chain["params"] == {"native_query": "PARAMS_MARKER_0"}
     assert chain["payload"] == ["DIGEST_MARKER_0", "DIGEST_MARKER_1"]

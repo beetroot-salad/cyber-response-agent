@@ -69,17 +69,30 @@ def _archived(tmp_path, worlds=T.WORLDS, **kw):
 
 def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
     """Each archived world carries every artifact the archived-world row declares: the report,
-    the investigation document, the two tables, the stamp, the scrub verdict and the run-dir
-    pointer — six roles, none sourced from another."""
+    the investigation document, the two tables, the stamp, the scrub verdict, the run-dir
+    pointer — and, since #860 (M2), the run's policy-denial stream when the run wrote one —
+    seven roles, none sourced from another. The stream is written here by the REAL denial
+    writer, one record per world, and the archived copy must be that record byte for byte."""
+    from defender.runtime import observe
+
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
+    for w, run_dir in dirs.items():
+        logger = observe.RequestLogger(run_dir / observe.POLICY_DENIALS)
+        logger.log_policy_denial(role="gather", system="ticket", verb="get-ticket",
+                                 call_id="ticket.get-ticket", params={"world": w})
+        logger.close()
     _archive().archive_episode(ep, dirs)
     for w in T.WORLDS:
         world = ep / "worlds" / w
         for name in ("report.md", "investigation.md", "executed_queries.jsonl", "gather_raw",
-                     "provenance.json", "scrub_verdict.json", "run_dir"):
+                     "provenance.json", "scrub_verdict.json", "run_dir",
+                     observe.POLICY_DENIALS):
             assert (world / name).exists(), f"{w} is missing {name}"
+        assert (world / observe.POLICY_DENIALS).read_bytes() \
+            == (dirs[w] / observe.POLICY_DENIALS).read_bytes(), \
+            f"{w}: the archived denial stream is not the run's own"
 
 
 def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_path):
