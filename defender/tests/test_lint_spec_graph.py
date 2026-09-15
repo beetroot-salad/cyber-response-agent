@@ -81,7 +81,7 @@ def test_a_gate_that_cannot_look_exits_2(lint, tmp_path):
     assert lint.main([], scan=_blind, baseline_path=_baseline(tmp_path, {})) == 2
 
 
-@pytest.mark.gate  # covered by code-smells' "spec_graph gate (checkers over the committed corpus)"
+@pytest.mark.gate
 def test_the_committed_corpus_is_at_or_under_its_recorded_ceilings(lint):
     """The real corpus against the real baseline — the assertion CI makes on every push.
 

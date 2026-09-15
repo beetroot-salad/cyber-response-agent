@@ -312,11 +312,14 @@ def committed_investigation_reason(text: str) -> str | None:
     write gate above. There, failing closed is free — nothing is written and the model
     re-sends. Here the same choice makes a validator BUG an unclosable run: no repair exists
     for it, so the model retries until the framework force-closes `unresolved` and the
-    disposition the run reached is discarded. `runtime.tools.committed_document_refusal`, the
-    only caller, already fails open when the document cannot be READ, for exactly that reason
-    (#836's H7) — a gate that failed open on unreadable bytes and closed on an unreadable
-    validator would be answering one question two ways. The condition is logged, because a
-    validator that raises is a defect to chase and silence is how it would go unchased.
+    disposition the run reached is discarded. A document that cannot be READ never reaches
+    this gate at all (#992): the close decides that case once, ahead of every gate — the
+    model's close is overruled to `unresolved` as a review that cannot run, or refused to
+    retry on an I/O fault, and the host's forced close proceeds off the empty document (see
+    `runtime.tools.CompanionRead`) — so the one question left here is the validator's own
+    fault, and it is answered open for the wedge reason above. The condition is logged,
+    because a validator that raises is a defect to chase and silence is how it would go
+    unchased.
 
     WHY THE CLOSE NEEDS ITS OWN READING AT ALL. Every other write verb reaches this module
     through `permission.decide_write`, so "a committed investigation parses" held by

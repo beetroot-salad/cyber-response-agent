@@ -56,7 +56,6 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
     worktree_package_guard,
 )
 
-pytestmark = pytest.mark.gate
 
 #: Every module in the shipping tree that reaches the disposition vocabulary's OWNER, with what
 #: each one is. The census is how the subjects below are PICKED; what is asserted about them is
@@ -98,6 +97,19 @@ _VOCABULARY_READERS = {
     # back as the member it is, which is what keeps one gate overrule from making a whole
     # episode unreadable.
     "learning/branch/episode.py",               # the archived worlds' headlines
+    # READER: the run page's review-gate panel answers "did a review run?" for a record
+    # written before the close said so (no `reviewed` field) by asking the owner whether the
+    # record's disposition is in the vocabulary and then whether it was in the bypass set of
+    # its day. It writes nothing; a value outside the vocabulary renders as NOT reviewed — the
+    # one direction that page must never err in — and is never coerced.
+    "scripts/visualize/visualize_runtime.py",   # the review-gate panel's pre-record fallback
+    # READER: the episode page's verdict tile counts how many measuring worlds' declared
+    # dispositions contrast with the control's, and how many verdicts agree with their
+    # declaration, through the owner's normalizer — so a case or whitespace variant of one
+    # member cannot agree on one figure and differ on the other. It writes nothing; a value
+    # outside the vocabulary is compared as the raw string it is, never coerced into the
+    # member it resembles (`test_923_readers.py`'s `visualize_episode` edge).
+    "scripts/visualize/visualize_episode.py",   # the verdict tile's contrast/agree counts
 }
 _VOCABULARY_OWNER_NAMES = frozenset({
     "DISPOSITION_ENUM", "DISPOSITION_VALUES", "DISPOSITION", "normalized_disposition",

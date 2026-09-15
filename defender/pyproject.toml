@@ -71,12 +71,15 @@ markers = [
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
     "box: drives a REAL container to pin the #540 execution boundary (needs a native docker daemon + the gVisor runtime; self-skips under docker-outside-of-Docker)",
-    # NOT a way to skip a check — a `gate`-marked test asserts EXACTLY what a blocking
-    # step in CI's `code-smells` job already asserts (`lint_<name>.main([]) == 0` over the
-    # real tree, the same entry point the step runs). The marker exists so the `test` job
-    # can stop paying for the second copy; the check itself stays hard-gated, in the job
-    # that owns it. A test carrying this marker MUST name the step that covers it.
-    "gate: re-runs a repo-wide lint gate that CI's code-smells job already runs as a blocking step",
+    # NOT a way to skip a check — a `gate`-marked test re-runs a repo-wide lint gate over
+    # the real tree (`lint_<name>.main([]) == 0`, ~5s each, and CI's code-smells job already
+    # blocks on the same command). CI runs the marker's two halves as COMPLEMENTARY
+    # selections over the same `tests/` root: the `lint` job runs `-m gate`, the `test` job
+    # runs `-m "not gate"`. So a marked test always runs exactly once in CI, wherever the
+    # marker sits — on a function, a class, or a whole module — and the only thing the
+    # marker decides is which job pays for it. (Six spec modules once carried a bare
+    # module-level marker while nothing ran `-m gate`; 92 tests ran nowhere.)
+    "gate: re-runs a repo-wide lint gate over the real tree; CI's `lint` job runs these, the `test` job deselects them",
 ]
 
 [tool.uv]

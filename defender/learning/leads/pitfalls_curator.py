@@ -5,6 +5,7 @@ import difflib
 import re
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -661,7 +662,9 @@ HELD_CEILING_REASON = "reducer-offered-never-taught"
 OFFERS_DECLINED_KEY = "offers_declined"
 
 
-def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
+def _retire_exhausted_holds(
+    paths, held_ids: list[str], *, timeout_seconds: int | None = None,
+) -> int:
     """Bump every held row once, and retire the ones that have now been offered too often.
 
     FK-7 makes a no-edit reducer tick a first-class outcome — `lead_pitfalls.md`'s "skip that
@@ -700,6 +703,7 @@ def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
         reason=HELD_CEILING_REASON,
         max_attempts=_loop_config.author_max_attempts(),
         counter_key=OFFERS_DECLINED_KEY,
+        timeout_seconds=timeout_seconds,
     )
     if outcome.retired:
         _log(
@@ -710,12 +714,73 @@ def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
     return len(outcome.retired)
 
 
+@dataclass(frozen=True)
+class PitfallsDisposition:
+    """What one curation tick consumes from the pitfalls queue ONCE its commit has landed —
+    the rows the corpus edit taught (`committed_ids`, rotated to `consumed_committed` under
+    `sha`) and the rows the curator was offered and declined (`held_ids`, whose
+    `offers_declined` counter is bumped and, at the ceiling, retired).
+
+    Derived per tick, never persisted. The curator's OTHER dispositions — the
+    `consumed_unattributable` rotation with its graveyard entry, the `AuthorError` on a
+    failing spawn — are not here: they are facts about the batch that no scrub can change, so
+    `run_pitfalls` applies them at once (#952 O4). These two are facts about a commit, and the
+    party that knows whether the commit is sound — the batch's tree passed the scrub — is
+    the drain, not the curator (#952 M1).
+
+    `apply` is the ONE place the lane consumes on success. `run_pitfalls` calls it itself when
+    no `on_curated` is given (the by-hand contract, O5); the drain receives the disposition
+    through `on_curated` and calls it once the batch's tree has passed the scrub.
+
+    @owns consumed_committed
+    @owns offers_declined
+    """
+
+    committed_ids: tuple[str, ...]
+    sha: str | None
+    held_ids: tuple[str, ...]
+
+    def apply(self, paths: _loop_config.LoopPaths, *, timeout_seconds: int | None) -> int:
+        """Rotate the committed rows out, then bump the held ones. Returns how many held rows
+        were retired at the offer ceiling.
+
+        The rotation FIRST, and the same `timeout_seconds` on BOTH steps — the bump's own
+        locked rotation inside `drain.retire` waits on the same append lock. The drain runs
+        this holding the tick's locks, so it passes its configured wait and neither step may
+        wait forever on a wedged appender; a by-hand run passes `None` and waits as it always
+        has. A partial apply that rotated nothing but bumped the declines would spend a held
+        row's offer budget on a tick that taught nothing."""
+        if self.committed_ids:
+            _loop_persist.rotate_pitfalls(
+                list(self.committed_ids), self.sha, paths=paths,
+                category="consumed_committed", timeout_seconds=timeout_seconds,
+            )
+        return _retire_exhausted_holds(
+            paths, list(self.held_ids), timeout_seconds=timeout_seconds,
+        )
+
+
 def run_pitfalls(
     *,
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
     invoke: Callable[..., int] | None = None,
     box=None,
+    on_curated: Callable[[PitfallsDisposition], None] | None = None,
+    lock_wait_seconds: int | None = None,
 ) -> int:
+    """One curation tick over the pitfalls queue.
+
+    `on_curated` is the consumption switch (#952 M4). Left `None`, the tick consumes what it
+    taught the moment its commit exists — today's contract, and the by-hand one. Given, the
+    tick still commits, but hands the `PitfallsDisposition` to the callable instead of applying
+    it, so the caller can wait for the batch's tree to pass the scrub before the queue forgets
+    the rows. Only the success-path consumption is switchable; see the dataclass for what is
+    not.
+
+    `lock_wait_seconds` bounds every wait on the queue's append lock this tick makes — the
+    immediate `consumed_unattributable` rotations and, by hand, the disposition's own apply.
+    The drain passes its configured wait (it holds the tick's locks while it waits, so a
+    wedged appender must not hold it open indefinitely); by hand it is `None`, unbounded."""
     rows = _loop_persist.read_pitfalls(paths)
     # The gate counts DISTINCT MISTAKES, not rows. The queue keeps one row per failure, so a
     # looping lead would otherwise clear a threshold of 3 on a single lesson — the threshold
@@ -778,6 +843,7 @@ def run_pitfalls(
         _graveyard_dropped_rows(paths, rows, dropped_ids)
         _loop_persist.rotate_pitfalls(
             dropped_ids, None, paths=paths, category="consumed_unattributable",
+            timeout_seconds=lock_wait_seconds,
         )
         return 0
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
@@ -816,20 +882,35 @@ def run_pitfalls(
     committed_ids, dropped_ids, held_ids = _split_batch_by_membership(
         rows, batch_ids, kept, reducer_offered=reducer_offered, changed=changed,
     )
-    if committed_ids:
-        _loop_persist.rotate_pitfalls(
-            committed_ids, sha, paths=paths, category="consumed_committed",
-        )
+    # The unattributable rows leave NOW, whatever `on_curated` is: nothing about a scrub can
+    # make an undeclared system teachable, so deferring this would only re-graveyard the same
+    # rows on the retry (#952 O4).
     if dropped_ids:
         _graveyard_dropped_rows(paths, rows, dropped_ids)
         _loop_persist.rotate_pitfalls(
             dropped_ids, None, paths=paths, category="consumed_unattributable",
+            timeout_seconds=lock_wait_seconds,
         )
+    disposition = PitfallsDisposition(
+        committed_ids=tuple(committed_ids), sha=sha, held_ids=tuple(held_ids),
+    )
+    if on_curated is not None:
+        on_curated(disposition)
+        # Said as what this tick DID, not what it will consume: the rotation and the decline
+        # bump belong to whoever judges the commit sound.
+        _log(
+            f"pitfalls curation done; commit={(sha or 'none')[:12]}, "
+            f"taught {len(changed)} surface(s): {changed}, "
+            f"{len(set(dropped_ids))} unattributable row(s) rotated out; "
+            f"{len(set(committed_ids))} committed and {len(held_ids)} held row(s) handed "
+            "to the drain to consume once the batch passes the scrub"
+        )
+        return 0
+    retired = disposition.apply(paths, timeout_seconds=lock_wait_seconds)
     # Every count off the same DISTINCT id sets: `batch_ids` is read from the queue file and
     # a repeated `pitfall_id` there would otherwise make the counts a difference between a row
     # count and two id counts, i.e. report rows held that are not.
     rotated = set(committed_ids) | set(dropped_ids)
-    retired = _retire_exhausted_holds(paths, held_ids)
     # The retired rows LEFT on this tick, so they are not also "held for a later tick" — the
     # two numbers partition the held set rather than overlapping it.
     _log(

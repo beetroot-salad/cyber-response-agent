@@ -61,7 +61,6 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
     worktree_package_guard,
 )
 
-pytestmark = pytest.mark.gate
 
 
 def _refusal(tmp_path, companion: str, disposition: str = GAP_MEMBER, **kw) -> str:

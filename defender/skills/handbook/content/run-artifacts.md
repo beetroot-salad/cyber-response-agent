@@ -61,7 +61,7 @@ episode dir alone.
   | `malicious` | `unresolved`); schema lives in `defender/SKILL.md` §REPORT.
   `unresolved` (#923) is the HOST's own verdict — recorded when a run is cut
   short without a settled finding (a gate overrule, a review that could not
-  complete, or the framework's own retry-exhaustion close) — never written by
+  complete, or the framework's own close of a run cut short) — never written by
   the investigating model. It also carries
   the gate's `outcome` (`stands` | `forced-inconclusive`), a `cause` sentence
   drawn from `close_tool.REPORT_CAUSES`, and — only when the review itself
@@ -71,18 +71,23 @@ episode dir alone.
   committed with no record of what let it through). One per close *attempt*:
   a challenged close writes its record and commits nothing, so a run that was
   challenged once has `review_record.1.json` and `review_record.2.json`. Fields:
-  `{verdict, reviewed_disposition, detail, failure_kind}`, where `verdict` is
-  `stands` | `challenged` | `forced-inconclusive` and `reviewed_disposition` is
-  the disposition the agent *drafted* — which is not what committed when the
-  verdict is `forced-inconclusive`. `detail` is the diagnostic and is the one
-  field that may quote a review role's own words, so it is written framed and
-  no prompt reads it verbatim.
+  `{verdict, reviewed_disposition, reviewed, detail, failure_kind}`, where
+  `verdict` is `stands` | `challenged` | `forced-inconclusive`,
+  `reviewed_disposition` is the disposition the agent *drafted* — which is not
+  what committed when the verdict is `forced-inconclusive` — and `reviewed`
+  says whether the gate actually ran (`false` only on the `unresolved` bypass).
+  Readers key on `reviewed`, never on the disposition or on whether trace
+  files survived; a record from before the field existed is read by the bypass
+  set of its day. `detail` is the diagnostic and is the one field that may
+  quote a review role's own words, so it is written framed and no prompt reads
+  it verbatim.
 - **`review_{role}_trace.jsonl`** — one per role in `challenge_gate.REVIEW_ROLES`
   (`support`, `ablation`, `composer`): a JSON metadata row per call, plus the
   role's raw framed reply. A round that ended early is marked `incomplete` on
-  every role's trace rather than left reading as if it had completed. An
-  `inconclusive` or `unresolved` close is never reviewed, so it leaves
-  neither these nor a meaningful record.
+  every role's trace rather than left reading as if it had completed. Only an
+  `unresolved` close is never reviewed (#992), so it alone leaves neither
+  these nor a meaningful record; an `inconclusive` close is reviewed exactly
+  like a confident one, against its ceiling claim rather than a verdict.
 - **`executed_queries.jsonl`** (the queries table) + **`gather_raw/{lead_id}.lead.json`**
   (the leads table) — the two canonical tables, each written **live** during the
   run by its own generator (`scripts/gather_tools/record_query.py` and

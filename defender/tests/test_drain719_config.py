@@ -251,7 +251,7 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
         "it would fall through uncaught and the channel would stay stuck"
     )
 
-    def leg(_paths, box=None):
+    def leg(_paths, box=None, **_kw):
         return pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7)
 
     drains._drain_pitfalls(paths, leg)
@@ -279,7 +279,7 @@ def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
     paths = h.make_paths(tmp_path)
     h.seed(paths.pitfalls, _pitfalls_rows(2))
 
-    def leg(_paths, box=None):
+    def leg(_paths, box=None, **_kw):
         raise author_shared.AuthorError("pitfalls curation failed")
 
     for expected in (1, 2):
@@ -319,11 +319,11 @@ def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Pat
     h.seed(paths.pitfalls, _pitfalls_rows(2))
     late = h.row_for("pitfalls", "r:l-999:0")
 
-    def leg(_paths, box=None):
+    def leg(_paths, box=None, **_kw):
         rc = pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7)
         return rc
 
-    def failing_then_append(_paths, box=None):
+    def failing_then_append(_paths, box=None, **_kw):
         persist.append_pitfalls([late], paths=_paths)
         return leg(_paths, box=box)
 

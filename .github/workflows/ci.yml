@@ -154,10 +154,13 @@ jobs:
         # module-scoped fixtures and the per-file tmp git repos behave as they did serially.
         #
         # Two deselections, neither of which drops a check from CI:
-        #   -m "not gate"  — five tests that re-run a repo-wide lint gate over the real tree
-        #                    via the same `main([])` entry point the code-smells job already
-        #                    runs as a BLOCKING step. See the `gate` marker in
-        #                    defender/pyproject.toml; each marked test names its step.
+        #   -m "not gate"  — nine tests that re-run a repo-wide lint gate over the real tree
+        #                    (~50s of CPU between them). They run in the `lint` job instead,
+        #                    as `-m gate` over this same tests/ root — the two selections are
+        #                    complementary, so every `gate`-marked test runs exactly once in
+        #                    CI wherever the marker sits. (Six spec modules once carried a
+        #                    bare module-level marker while nothing ran `-m gate`; 92 tests
+        #                    ran nowhere.) See the marker in defender/pyproject.toml.
         #   --ignore …540… — the boundary suite drives real containers (61s, the largest
         #                    file here). It now runs in `box-native` below, natively, and in
         #                    `box-dood` under the split-namespace topology — twice, as
@@ -514,6 +517,21 @@ jobs:
       # every entry the author wrote.
       - name: Tacit-knowledge registry (hard gate — the commit is the sign-off)
         run: defender/.venv/bin/python -m defender.scripts.tacit_cli check
+
+      # The other half of the `gate` marker (defender/pyproject.toml): the nine tests that
+      # re-run a repo-wide lint gate over the real tree, which the `test` job deselects with
+      # `-m "not gate"` to keep ~50s of duplicate CPU off its critical path. Complementary
+      # `-m` expressions over the SAME tests/ root are what make the marker safe — a marked
+      # test cannot go dark, whichever scope it is marked at — so this step must collect the
+      # whole root, never a file list. It lives here rather than in `code-smells` for the
+      # golden-case step's reason: collecting tests/ imports the runtime tree, and only this
+      # job syncs `--extra runtime`. Same enforcing posture as every CI pytest over tests/
+      # (#631 D11; test_budget_seams_631's workflow gate reads this block).
+      - name: Gate-marked tests (the `test` job's `-m "not gate"` complement)
+        working-directory: defender
+        env:
+          DEFENDER_BUDGET_ENFORCE: "1"
+        run: uv run pytest tests/ -m gate -n auto --dist loadfile
 
   code-smells:
     runs-on: ubuntu-latest

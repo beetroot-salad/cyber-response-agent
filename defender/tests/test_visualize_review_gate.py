@@ -187,9 +187,12 @@ def test_skipped_ablation_is_not_reported_as_ok(tmp_path):
     assert "no strong belief movement" in html
 
 
-def test_inconclusive_close_says_it_was_never_reviewed(tmp_path):
-    """An `inconclusive` close bypasses the gate. Its record is `stands` — which must not
-    render as "a review ran and the disposition survived"."""
+def test_pre_change_inconclusive_close_says_it_was_never_reviewed(tmp_path):
+    """A PRE-#992 `inconclusive` close bypassed the gate, and its record predates the `reviewed`
+    field. Its record is `stands` — which must not render as "a review ran and the disposition
+    survived" — so for a record with no `reviewed` field the split falls back to the bypass set
+    of its day, where `inconclusive` was a member. A post-change reviewed `inconclusive` shares
+    the `reviewed_disposition` value but carries `reviewed: true`, and renders apart."""
     run = tmp_path / "run"
     run.mkdir()
     _write_report(run, disposition="inconclusive", outcome="stands",
@@ -202,7 +205,30 @@ def test_inconclusive_close_says_it_was_never_reviewed(tmp_path):
     html, n = render_review_gate(run, parse_report(run))
     assert n == 0
     assert "not reviewed" in html
-    assert "confident closes only" in html
+    assert "predates the close saying whether a review ran" in html, (
+        "a pre-record row must not be annotated with today's bypass set — that note says "
+        "`inconclusive` is reviewed, beside a row that says it was not"
+    )
+    assert "unresolved" not in html
+
+
+def test_a_pre_record_row_outside_the_vocabulary_is_not_reported_as_reviewed(tmp_path):
+    """A record with no `reviewed` field falls back to the bypass set of its day, spelled from
+    the vocabulary's own names and answered through its normalizer — so a value the vocabulary
+    does not recognise (a laced or re-spelled disposition) is no evidence a review ran, and
+    renders as one that did not. A bare `not in` on the raw string read every such value as
+    REVIEWED, which is the one direction this page must never err in."""
+    from defender.scripts.visualize.visualize_runtime import _was_reviewed
+
+    assert _was_reviewed({"reviewed_disposition": "malicious"}) is True
+    assert _was_reviewed({"reviewed_disposition": "inconclusive"}) is False
+    assert _was_reviewed({"reviewed_disposition": "unresolved"}) is False
+    assert _was_reviewed({"reviewed_disposition": "incon\u200bclusive"}) is False
+    assert _was_reviewed({"reviewed_disposition": "Malicious"}) is False
+    assert _was_reviewed({}) is False
+    # The field, when present, is the answer — whatever the disposition string says.
+    assert _was_reviewed({"reviewed_disposition": "inconclusive", "reviewed": True}) is True
+    assert _was_reviewed({"reviewed_disposition": "malicious", "reviewed": False}) is False
 
 
 def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_path):
@@ -229,6 +255,14 @@ def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_
     second = html.split("attempt 2", 1)[1]
     assert "not reviewed" in second
     assert "rv-stands" not in second, "the bypassed attempt must not claim a review held"
+    # The per-attempt row chooses its note the way the run-level strip does: neither record
+    # says whether a review ran, so the bypassed row is a PRE-record row, and today's bypass
+    # set — "every disposition but unresolved" — must not sit beside an `inconclusive` that
+    # bypassed by the set of its day.
+    assert "predates the close saying whether a review ran" in second
+    assert "which commits immediately" not in second, (
+        "a pre-record row was annotated with today's bypass set"
+    )
 
 
 def test_the_headline_badge_does_not_claim_a_review_that_never_ran(tmp_path):

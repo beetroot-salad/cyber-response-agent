@@ -379,12 +379,12 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
     residue = "residue that lane 1 left behind\n"
     lane1_calls: list[Path] = []
 
-    def lane1(_paths, _run_dir, *, box=None):
+    def lane1(_paths, _run_dir, *, box=None, **_kw):
         lane1_calls.append(_run_dir)
         skill_md(repo, "elastic").write_text(residue, encoding="utf-8")
         raise LeadAuthorError("lane 1 refuses this marker")
 
-    def lane2(_paths, *, box=None):
+    def lane2(_paths, *, box=None, **_kw):
         return pitfalls_curator.run_pitfalls(
             paths=_paths, invoke=Spawn(
                 lambda root: write(marker_file(root, "elastic"), "# e\n## Common pitfalls\n- x\n")

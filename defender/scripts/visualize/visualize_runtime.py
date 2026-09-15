@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from defender import _git
 from defender._report import ReportRead
+from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
 from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
@@ -313,8 +314,6 @@ class _CloseVocabulary(NamedTuple):
     challenged: str
     forced: str
     not_reviewed_cause: str
-    #: The verdicts the gate is never spent on — `close_tool.NO_REVIEW_DISPOSITIONS`.
-    unreviewed_dispositions: tuple[str, ...]
 
 
 @functools.cache
@@ -324,39 +323,65 @@ def close_vocabulary() -> _CloseVocabulary:
     Imported lazily and cached: `close_tool` pulls the whole in-process runtime (pydantic-ai
     included) and `learning/frontend/build.py` imports this package at module scope, so the
     edge must not be paid by anything that only wants the page CSS."""
-    from defender.runtime.close_tool import (
-        CAUSE_NOT_REVIEWED,
-        CHALLENGED,
-        FORCED_INCONCLUSIVE,
-        NO_REVIEW_DISPOSITIONS,
-        STANDS,
-    )
+    from defender.runtime.close_tool import CAUSE_NOT_REVIEWED, CHALLENGED, FORCED_INCONCLUSIVE, STANDS
 
-    return _CloseVocabulary(
-        STANDS, CHALLENGED, FORCED_INCONCLUSIVE, CAUSE_NOT_REVIEWED, NO_REVIEW_DISPOSITIONS,
-    )
+    return _CloseVocabulary(STANDS, CHALLENGED, FORCED_INCONCLUSIVE, CAUSE_NOT_REVIEWED)
 
 
 _BYPASS_NOTE = (
-    '<div class="empty">the gate reviews confident closes only — an '
-    "<code>inconclusive</code> or <code>unresolved</code> disposition commits "
-    "immediately</div>"
+    '<div class="empty">the gate reviews every disposition but the host\'s own '
+    "<code>unresolved</code>, which commits immediately</div>"
+)
+
+#: The same strip for a record from before the close wrote `reviewed` — the note must not
+#: describe today's bypass set beside a row that predates it (an `inconclusive` from when
+#: that disposition was not reviewed, badged "not reviewed" next to a note saying it is).
+_PRE_RECORD_NOTE = (
+    '<div class="empty">this record predates the close saying whether a review ran; by the '
+    "bypass set of its day, none did</div>"
 )
 
 
-def _was_reviewed(rec: dict) -> bool:
+def _bypass_note(record: dict) -> str:
+    """The note beside an attempt that bypassed the gate — ONE chooser for the run-level strip
+    (every attempt bypassed) and the per-attempt row (this one did), so a mixed pre-#992 run —
+    one attempt challenged, the next an `inconclusive` that bypassed by the set of its day —
+    cannot show today's bypass set beside the row that predates it."""
+    return _BYPASS_NOTE if isinstance(record.get("reviewed"), bool) else _PRE_RECORD_NOTE
+
+
+#: What the gate skipped BEFORE the record said so. A record with no `reviewed` field was
+#: written when the ceiling disposition and the host's own were the bypass set, so for that
+#: record the disposition alone still tells the two populations apart. Frozen history, not
+#: the live bypass set — the live set is `close_tool.NO_REVIEW_DISPOSITIONS`, and a record
+#: written under it carries the field. Spelled from the vocabulary's own names rather than as
+#: literals, so a member renamed at its home cannot leave this reader answering for a string
+#: nothing writes any more.
+_UNREVIEWED_BEFORE_THE_RECORD_SAID = frozenset({CEILING_DISPOSITION, HOST_ONLY_DISPOSITION})
+
+
+def _was_reviewed(record: dict) -> bool:
     """Did a review actually run for this attempt?
 
     Asked in ONE place because two questions on this page turn on it — "is any attempt worth
     counting?" and "does THIS attempt's verdict mean a review agreed?" — and an unreviewed
     attempt rendered as `stands` reads as "a review ran and the disposition held".
 
-    #923: the set is READ FROM the close tool (`NO_REVIEW_DISPOSITIONS`, through the same
-    cached `close_vocabulary` this module already pays the lazy import for) rather than
-    respelled here — both the model's own `inconclusive` and the host's own `unresolved` skip
-    the gate, and a page that knew only the first would render a gate-forced run (which now
-    commits `unresolved`, never `inconclusive`) as REVIEWED."""
-    return rec.get("reviewed_disposition") not in close_vocabulary().unreviewed_dispositions
+    Read off the record's own `reviewed` field, written by the close tool at the one site that
+    knows. This reader used to INFER the answer — first from the disposition's membership in
+    the bypass set, then (#992, briefly) from whether a trace file carried a row for the round —
+    and each inference broke when what it keyed on moved: a reviewed and a bypassed
+    `inconclusive` share one string, and a run dir from before the traces moved under
+    `wire_logs/` has no row to find, so a close that was reviewed rendered as one that was not.
+    The frozen fallback covers records from before the field existed, and nothing else."""
+    reviewed = record.get("reviewed")
+    if isinstance(reviewed, bool):
+        return reviewed
+    # Membership through the vocabulary's own normalizer, not a bare `in` on the raw value: a
+    # value outside the vocabulary is no evidence a review ran, and rendering it as one is the
+    # failure this function exists to prevent — so it answers False, the same as a bypass.
+    disposition = normalized_disposition(record.get("reviewed_disposition"))
+    return disposition is not None and disposition not in _UNREVIEWED_BEFORE_THE_RECORD_SAID
 
 
 def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
@@ -516,7 +541,8 @@ def _review_cost_html(costs: dict[str, float] | None) -> str:
 def render_review_gate(
     run_dir: Path, report: ReportRead, costs: dict[str, float] | None = None,
 ) -> tuple[str, int]:
-    """§ Review gate — the write-time review every CONFIDENT close passes.
+    """§ Review gate — the write-time review every close but the host's own `unresolved`
+    passes (#992 added `inconclusive` beside every confident member).
 
     Rendered as a gate and deliberately NOT as a phase: it has no `##` header in
     `investigation.md`, the investigator never occupies it, and it is kept out of
@@ -527,7 +553,7 @@ def render_review_gate(
     `costs` is the gate's spend per LENS (`visualize_messages.review_cost_by_lens`), rendered
     here and nowhere in the phase machinery for the same reason: the money is real, but the
     gate is not a place the investigator was."""
-    subtitle = "— the write-time gate on a confident close (not a phase)"
+    subtitle = "— the write-time gate on a close (not a phase)"
     records = _review_records(run_dir)
     if not records:
         body = (
@@ -541,18 +567,21 @@ def render_review_gate(
     cause = str(fm.get("cause", ""))
     failure_kind = fm.get("failure_kind")
 
-    # An `inconclusive` close bypasses the gate entirely, so its record is the honest
-    # "nothing was reviewed" and not a review that found nothing.
+    # A close that bypassed the gate has the honest "nothing was reviewed" record, not a review
+    # that found nothing — and the record itself says which (`_was_reviewed`), so a pre-#992
+    # `inconclusive` bypass and a reviewed one — which share the same `reviewed_disposition` —
+    # render apart.
     reviewed = [(n, r) for n, r in records if _was_reviewed(r)]
     if not reviewed:
         body = (
             '<div class="rv-strip"><span class="rv-badge rv-skip">not reviewed</span>'
-            f'<span class="rv-cause">{esc(cause)}</span></div>' + _BYPASS_NOTE
+            f'<span class="rv-cause">{esc(cause)}</span></div>'
+            + _bypass_note(records[-1][1])
         )
         return (section("sec-review", "review", "Review gate", subtitle, body), 0)
+    traces = _read_role_traces(run_dir)
 
     committed = report.disposition_or_unknown
-    traces = _read_role_traces(run_dir)
     kind_html = (
         f'<span class="rv-badge rv-fault">failure_kind: {esc(str(failure_kind))}</span>'
         if failure_kind
@@ -597,7 +626,7 @@ def render_review_gate(
         detail_html = (
             f'<div class="rv-detail">{pre_text_untrusted(detail)}</div>' if detail.strip() else ""
         )
-        roles_html = _BYPASS_NOTE if bypassed else _review_role_html(traces, n)
+        roles_html = _bypass_note(rec) if bypassed else _review_role_html(traces, n)
         rows.append(
             f'<div class="rv-attempt">'
             f'<div class="rv-head"><span class="rv-n">attempt {n}</span>'

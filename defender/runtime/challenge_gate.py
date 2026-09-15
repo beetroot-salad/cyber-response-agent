@@ -1,31 +1,47 @@
 """The live write-time review gate's HARNESS: bounds, per-run review state, the numbered
 review record, stage invocation with a real wall-clock deadline, and the trace rows.
 
-`challenge_gate(deps, disposition, *, stages, bounds) -> GateVerdict` is the seam the close
-tool drives for a CONFIDENT disposition. It never writes report.md or the review record
-itself — the close tool (`close_tool.py`) owns both writes, in record-first order, and is the
-one place a fault is held until both are attempted.
+`challenge_gate(deps, disposition, companion, *, stages, bounds) -> GateVerdict` is the seam the close
+tool drives for every disposition but the host's own `unresolved` (#923) — a CONFIDENT
+disposition against its conclusion, and since #992, `inconclusive` against its ceiling claim.
+It never writes report.md or the review record itself — the close tool (`close_tool.py`) owns
+both writes, in record-first order, and is the one place a fault is held until both are
+attempted.
 
 The reviewer is BLIND LENSES plus a COMPOSER. Each lens reads a projection of the
 investigation that withholds the belief movement it is asked to reconstruct, and they run
 concurrently because none reads another's output. The composer runs last and is the only role
 that sees both the readings and the investigation's own account — it may be anchored by that
-account precisely because the independent work is already banked.
+account precisely because the independent work is already banked. The composer's own user
+message carries the question it is being asked, keyed on the disposition the close was called
+with (`composer_projection`'s `disposition` argument) — a confident close asks whether the
+conclusion follows, `inconclusive` asks whether the ceiling holds — and both are phrased so
+that "yes" means the close stands, because the system prompt's answer contract fixes that
+polarity once for every question.
 
 The lens set is SUPPORT and its ABLATION: one reading of what the observed evidence carries,
 and the same reading again with one load-bearing edge withheld — a soundness check plus a
 sensitivity check, which is what the two-member `holds`/`gap` finding can carry.
 
-FAIL CLOSED: a stage raising, timing out, or otherwise not completing overrides the confident
-finding to the host's own `unresolved` (#923) — never a silently-committed close. It commits the SAME outcome as an
-override the evidence produced; what separates the two is the typed `failure_kind`, set only
-when the machinery is what failed.
+FAIL CLOSED: a stage raising, timing out, or otherwise not completing overrides the finding
+under review to the host's own `unresolved` (#923) — never a silently-committed close. ONE RULE
+FOR EVERY REVIEWED DISPOSITION: an unexamined model claim never commits as the model's claim.
+`inconclusive` is a claim like any other — "nothing further could be measured" is what #992
+sends it here to have checked — so a review that could not check it overrides it the same way
+it overrides a confident verdict; letting it stand would recreate, on the override arms alone,
+the unreviewed `inconclusive` this whole gate was extended to end — and every reader of the
+committed report (the case corpus, the held-out scorer, the ticket) takes `inconclusive` as the
+model's own "nothing further could be measured", where `unresolved` says only that the run
+ended without a settled finding. The override commits the SAME outcome as one the evidence
+produced; what separates the two is the typed `failure_kind`, set only when the machinery is
+what failed.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -33,7 +49,8 @@ from typing import Any
 
 from defender._env import env_int
 from defender._untrusted import wrap_fresh
-from defender._vocab import HOST_ONLY_DISPOSITION
+from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION
+from defender.skills.invlang.schema import CompanionBody
 
 EXTRA_TURN_BOUND = 2
 
@@ -315,6 +332,9 @@ def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
     timeout and a raise stay apart without a branch here to keep in step with the one in
     `_call_stage`.
 
+    Deliberately does NOT take the disposition under review: the override is the same for every
+    one of them (module docstring, FAIL CLOSED), so there is nothing here for it to key on.
+
     `turns_used` is the run's OWN count, passed in rather than written as zero: a challenged
     close comes back and reviews again, so a hardcoded zero reports a second-pass fault as a run
     that had spent no forced turn."""
@@ -325,6 +345,38 @@ def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
         cause=CAUSE_REVIEW_INCOMPLETE, detail=f"{role}: {outcome.detail}",
         material=(), turns_used=turns_used, failure_kind=outcome.failure_kind,
     )
+
+
+def review_cannot_run(deps: Any, reason: str) -> GateVerdict:
+    """The verdict for a close whose companion could not be read at all (`tools.CompanionRead`
+    with no text: an I/O fault, a planted non-plain entry at the name, bytes that are not
+    UTF-8). Decided by the close BEFORE any gate or stage, and reported exactly as the
+    projector arm reports a body it cannot project from — the host's `unresolved`,
+    `CAUSE_REVIEW_INCOMPLETE`, failure kind `error`, the reason on the record — because it is
+    the same fact: a review that cannot run. The gate used to reach this on its own strict
+    second read of the file; now the close's one read is what says the document cannot be
+    judged, and this is where that answer becomes a verdict.
+
+    The round's traces get their incomplete rows, as every other early end of a round does, so
+    a review that never started is not left reading as if no round had been attempted. That
+    write is CONTAINED here, unlike the gate's own marker calls: those are reached on a fault
+    of the REVIEW (a stage, a projection), while this arm is reached on a fault of the RUN DIR's
+    own contents, which is the one place a write beside the unreadable file is likeliest to
+    fail too. A trace row that cannot be written is logged and the verdict still returns; the
+    verdict, not the row, is what the close commits, and an `OSError` escaping a tool body
+    ends the run with no report.md at all."""
+    from .close_tool import STAGE_ERROR
+
+    state = ReviewState.of(deps)
+    try:
+        _mark_traces_incomplete(deps, state.turns, reason)
+    except OSError as exc:
+        print(
+            f"[gate] the review-cannot-run marker could not be written ({exc!r}); the verdict "
+            f"stands without its trace rows",
+            file=sys.stderr,
+        )
+    return _fail("companion", StageOutcome(None, STAGE_ERROR, reason), turns_used=state.turns)
 
 
 async def _dispatch(
@@ -369,10 +421,18 @@ def _route(
 ) -> GateVerdict:
     """The composer's finding, plus host state no review role can see, into one arm.
 
-    The reviewer never picks the outcome. Whether a gap becomes `challenged` or
-    `forced-inconclusive` turns on the turn count, the raised-ask state and the cap — none of
-    which a review role is shown, and all of which decide what the run can still afford."""
+    The reviewer never picks the outcome. Whether a gap becomes `challenged` or an override
+    turns on the turn count, the raised-ask state and the cap — none of which a review role is
+    shown, and all of which decide what the run can still afford.
+
+    `disposition` decides two things only: what a STANDS or CHALLENGED verdict carries, and
+    which sentence a `holds` earns (#992: a held ceiling claim is a different finding from a
+    settled story). It never decides whether an override happens or what it commits — the
+    override arms are the same for every reviewed disposition (module docstring, FAIL CLOSED),
+    which is what keeps this function free of a per-disposition branch to keep in step with
+    `_fail`'s."""
     from .close_tool import (
+        CAUSE_CEILING_EXAMINED,
         CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
         CAUSE_NOTHING_LEFT_TO_ASK,
         CAUSE_STORY_SETTLED,
@@ -390,7 +450,8 @@ def _route(
         )
 
     if review.holds:
-        return _verdict(STANDS, disposition, CAUSE_STORY_SETTLED, review.review)
+        cause = CAUSE_CEILING_EXAMINED if disposition == CEILING_DISPOSITION else CAUSE_STORY_SETTLED
+        return _verdict(STANDS, disposition, cause, review.review)
 
     if review.ask is None:
         # A gap with nothing measurable behind it. Forcing the host verdict costs the run
@@ -426,21 +487,36 @@ def _route(
     )
 
 
-async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bounds) -> GateVerdict:
-    """Review one CONFIDENT disposition: the blind lenses, then the composer, then routing.
+async def challenge_gate(
+    deps: Any, disposition: str, companion: CompanionBody, *, stages: Any, bounds: Bounds,
+) -> GateVerdict:
+    """Review one disposition — confident, or (#992) `inconclusive` — never `unresolved`: the
+    blind lenses, then the composer, then routing.
 
     Each lens reads a projection of the investigation that withholds the belief movement it
     is asked to reconstruct, and they run CONCURRENTLY because none of them reads another's
     output. The composer runs after all of them and is the only role that sees both the
-    readings and the investigation's own account."""
-    from defender._io import TEXT_READ_ERRORS, read_text_utf8
+    readings and the investigation's own account. `disposition` is the close's own argument —
+    the gate never re-derives which question it is asking from anything else, including what
+    the companion itself concludes — and it threads through to `composer_projection` (which
+    question) and to `_route` (what a stands or a challenge carries). It does NOT reach `_fail`
+    or `_route`'s override arms: an override commits the same thing whatever was under
+    review.
 
+    `companion` is the close's ONE parse of `investigation.md` — the body the entry-price gate
+    just priced, handed in rather than re-read. The gate used to take its own strict read of
+    the file the price gate had decoded leniently, so one document got two answers: the price
+    collected, then the review failed over the byte the price gate had read past. Every reader
+    on the close now judges the same object, and the receipts the report carries are the rows
+    the review saw. What is left for this gate to refuse is a body with nothing in it
+    (`EmptyInvestigation`) — unreachable for a priced keyword, which the price gate refused
+    first, reachable for a confident close over an empty or unparseable document."""
     from .close_tool import STAGE_ERROR, UNREADABLE
     from .review.projector import (
         EmptyInvestigation,
         ablation_target,
         composer_projection,
-        parse_investigation,
+        require_investigation,
         support_projection,
     )
     from .review.reply import Unreadable, citable_refs, read_composer_reply, read_lens_reading
@@ -451,22 +527,16 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     # otherwise be indistinguishable from the first's on disk.
     round_no = state.turns
 
-    # A read AND a parse under one `try`, so the guard is the composed tuple `_io` publishes —
-    # a `UnicodeDecodeError` is a `ValueError`, NOT an `OSError`, and an `except OSError` here
-    # would let an undecodable investigation.md raise past the gate, past the close tool and
-    # into a driver that classifies five exception kinds and not that one.
-    unreadable_document: tuple[type[BaseException], ...] = (EmptyInvestigation, *TEXT_READ_ERRORS)
-    # The ablation target is chosen under the SAME guard: another walk over the same
-    # model-authored document, so another step that can raise past all three frames.
+    # The ablation target is chosen under the SAME guard as the emptiness check: a walk over a
+    # model-authored document, so a step that can raise past all three frames.
     #
     # The ablation is the SUPPORT lens again under one withheld edge — same role, same model,
     # same effort, same prompt — so its reading is a difference against the support reading
     # and not a difference between two configurations. A record with no strong belief movement
     # has nothing load-bearing to withhold; that is recorded rather than passed over.
     try:
-        companion = parse_investigation(read_text_utf8(deps.run_dir / "investigation.md"))
-        ablated = ablation_target(companion)
-    except unreadable_document as e:
+        ablated = ablation_target(require_investigation(companion))
+    except EmptyInvestigation as e:
         _mark_traces_incomplete(deps, round_no, str(e))
         return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)), turns_used=state.turns)
     except Exception as e:  # noqa: BLE001 — a projector fault is a review that cannot run
@@ -518,7 +588,9 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
 
     composer = await _dispatch(
         "composer", stages,
-        lambda salt: composer_projection(companion, readings, salt, ablated=ablated).text,
+        lambda salt: composer_projection(
+            companion, readings, salt, ablated=ablated, disposition=disposition,
+        ).text,
         bounds,
     )
     _write_trace_row(

@@ -402,7 +402,7 @@ def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
     ):
         h.seed(paths.pitfalls, rows)
 
-        def leg(_paths, box=None, _exc=exc):
+        def leg(_paths, box=None, _exc=exc, **_kw):
             raise _exc
 
         with pytest.raises(type(exc)):
@@ -412,7 +412,7 @@ def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
 
     h.seed(paths.pitfalls, rows)
 
-    def failing_author(_paths, box=None):
+    def failing_author(_paths, box=None, **_kw):
         raise author_shared.AuthorError("converted pitfalls rc")
 
     drains._drain_pitfalls(paths, failing_author)

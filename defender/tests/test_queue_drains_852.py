@@ -262,8 +262,12 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     _queued_run(tmp_path, "case-1", "run-1", paths)
     _queued_run(tmp_path, "case-2", "run-2", paths)
 
-    lead_author.QUEUE_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    holder = lead_author.QUEUE_LOCK_FILE.open("a+")
+    # The lock file is resolved off `paths` (#952 M5: `paths.lead_pending_dir / ".lock"`),
+    # so the drain and a by-hand `run(run_dir, paths=p)` contend on the SAME file for the
+    # same `paths` — `lead_author.QUEUE_LOCK_FILE` is that path's DEFAULT_PATHS spelling.
+    queue_lock = paths.lead_pending_dir / ".lock"
+    queue_lock.parent.mkdir(parents=True, exist_ok=True)
+    holder = queue_lock.open("a+")
     try:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         rc = _drain(paths, tmp_path)
@@ -295,12 +299,17 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     it sees an integer and nothing else."""
     run_dir = tmp_path / "runs" / "run-1"
     run_dir.mkdir(parents=True)
+    paths = loop_paths(tmp_path)
 
-    lead_author.QUEUE_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    holder = lead_author.QUEUE_LOCK_FILE.open("a+")
+    # Held at the file `run(run_dir, paths=paths)` locks — `paths.lead_pending_dir / ".lock"`
+    # (#952 M5) — not at the DEFAULT_PATHS constant, which is a different file for a
+    # `LoopPaths` rooted under `tmp_path`.
+    queue_lock = paths.lead_pending_dir / ".lock"
+    queue_lock.parent.mkdir(parents=True, exist_ok=True)
+    holder = queue_lock.open("a+")
     try:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        rc = lead_author.run(run_dir, paths=loop_paths(tmp_path))
+        rc = lead_author.run(run_dir, paths=paths)
     finally:
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
         holder.close()
@@ -334,7 +343,7 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
 
     served: list[Path] = []
 
-    def serve(_paths, run_dir, *, box=None):
+    def serve(_paths, run_dir, *, box=None, **_kw):
         served.append(run_dir)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it...

@@ -32,8 +32,6 @@ import io
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-import pytest
-
 from defender.scripts import tacit_cli
 from defender.scripts.adapters import tacit_knowledge_adapter as tk
 
@@ -42,7 +40,6 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
     worktree_package_guard,
 )
 
-pytestmark = pytest.mark.gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SHIPPED_REGISTRY = REPO_ROOT / "defender" / "skills" / "tacit-knowledge" / "registry.yaml"

@@ -92,7 +92,9 @@ class AuthorBranch:
             str(r.get("headRefName", "")).startswith(self.branch_prefix) for r in rows
         )
 
-    def _open_revert_pr_ref(self, head: str) -> str | None:
+    def _open_pr_ref(self, head: str) -> str | None:
+        """The open PR whose head is `head`, as its url (or the head itself when the forge
+        gives no url) — `None` when there is none."""
         try:
             rows = self._forge.list_prs_for_head(head)
         except ForgeError as e:
@@ -120,17 +122,50 @@ class AuthorBranch:
         return wt
 
     def finish_batch(self, batch_id: str, wt: Path) -> str | None:
+        """Push the batch's branch and open its PR; `None` for a batch with no commits.
+
+        A `BranchError` here — the push rejected, the PR refused — leaves the commit on the
+        local branch, which `cleanup` never deletes: the batch is DONE, and only its delivery
+        is outstanding. `deliver` is the retry, from the branch alone, with no worktree."""
         if self.commits_ahead(wt) == 0:
             return None
         branch = self.branch_name(batch_id)
         try:
             _git.git_push(wt, branch)
-            ref = self._forge.open_pr(
-                base=_PR_BASE, head=branch,
-                title=self.pr_title(batch_id), body=self.pr_body(branch),
-            )
+            return self._open_pr(batch_id, branch)
         except (GitError, ForgeError) as e:
             raise BranchError(str(e)) from e
+
+    def deliver(self, batch_id: str) -> str | None:
+        """Deliver a batch whose `finish_batch` failed: push its local branch and open its PR
+        from the checkout itself, no worktree needed. Idempotent — a push that already landed
+        is a no-op, and a PR already open for the branch is returned rather than duplicated.
+
+        `None` when there is nothing to deliver: the branch is gone, or has nothing ahead of
+        `origin/main` (merged some other way). Either way the caller may forget it."""
+        branch = self.branch_name(batch_id)
+        if not _git.git_ok(
+            ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo_root
+        ):
+            return None
+        try:
+            _git.git_fetch(self.repo_root)
+            if _git.git_rev_list_count(
+                self.repo_root, rev_range=f"{_BRANCH_BASE}..{branch}"
+            ) == 0:
+                return None
+            _git.git_push(self.repo_root, branch)
+            if (existing := self._open_pr_ref(branch)) is not None:
+                return existing
+            return self._open_pr(batch_id, branch)
+        except (GitError, ForgeError) as e:
+            raise BranchError(str(e)) from e
+
+    def _open_pr(self, batch_id: str, branch: str) -> str:
+        ref = self._forge.open_pr(
+            base=_PR_BASE, head=branch,
+            title=self.pr_title(batch_id), body=self.pr_body(branch),
+        )
         return ref or branch
 
     def cleanup(self, wt: Path) -> None:
@@ -153,7 +188,7 @@ class AuthorBranch:
     def revert_lesson_pr(self, lesson_rel_path: str, lesson_name: str) -> str | None:
         branch = f"{LESSONS_BRANCH_PREFIX}revert-{lesson_name}"
         wt = self._worktree_base / branch.replace("/", "-")
-        if (existing := self._open_revert_pr_ref(branch)) is not None:
+        if (existing := self._open_pr_ref(branch)) is not None:
             return existing
         self.cleanup(wt)
         with contextlib.suppress(OSError):

@@ -59,7 +59,6 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
     worktree_package_guard,
 )
 
-pytestmark = pytest.mark.gate
 
 
 def _overrule(deps, *, ask=None, bounds=None):
