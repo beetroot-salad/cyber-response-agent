@@ -18,9 +18,11 @@ What is checked, per `*.md` file in the frontiers directory:
   either side (in the contract's smoke runs the break was a producer misdeclaring,
   caught by the consumer's computed echo);
 * the `## Digest` section exists and holds ≤15 lines (the leaf's inline return, verbatim);
-* the dispositions sum rule: an inventory carrying `consensus`/`forks`/`silent_branches`/
-  `drops` must sum to the `premises` count it echoed — every premise leaves with a
-  recorded disposition.
+* the dispositions sum rule: an inventory carrying `settled`/`forks`/`silent_branches`/
+  `drops` (`consensus` is the pre-escalation spelling of `settled`) must sum to the source
+  `premises` count it echoed — every premise leaves with a recorded disposition. The
+  source count is the LARGEST `premises` echo, not their sum: an escalation sidecar echoes
+  a subset of the same premises (phases/answer.md, (b)), never new ones.
 
 `--resume` prints the chain's state (file, phase, status, staleness against its inputs)
 and where to re-enter: the first frontier that is blocked, unparseable, or older than an
@@ -44,7 +46,10 @@ import _config
 
 _STATUS = {"complete", "design-refuted", "blocked"}
 _DIGEST_CAP = 15
-_DISPOSITIONS = {"consensus", "forks", "silent_branches", "drops"}
+_DISPOSITIONS = {"settled", "forks", "silent_branches", "drops"}
+# The pre-escalation contract spelled the single-reading category `consensus`; either
+# spelling fills the slot, never both.
+_SETTLED_SPELLINGS = ("settled", "consensus")
 
 
 class Frontier:
@@ -179,7 +184,10 @@ def _lint_input_echoes(
             findings.append(f"{name}: input `{ref}` carries no `inventory_echo` mapping.")
             continue
         if isinstance(echo.get("premises"), int):
-            echoed_premises = (echoed_premises or 0) + echo["premises"]
+            # Escalation copies re-consume a SUBSET of the answerer's premises, so the
+            # source count is the largest echo, not the sum (summing counted a 42-premise
+            # copy as 42 new premises and demanded a disposition for each twice).
+            echoed_premises = max(echoed_premises or 0, echo["premises"])
         if echo != producer.inventory:
             findings.append(_echo_mismatch(name, ref, echo, producer.inventory))
     return echoed_premises
@@ -216,16 +224,23 @@ def _echo_mismatch(name: str, ref: str, echo: dict, actual: dict) -> str:
 def _lint_dispositions(
     name: str, f: Frontier, echoed_premises: int | None, findings: list[str]
 ) -> None:
-    """The sum rule: consensus + forks + silent_branches + drops == premises in.
+    """The sum rule: settled + forks + silent_branches + drops == premises in.
 
     ANY present disposition key engages the rule (phases/answer.md mandates all four):
     requiring the full set let a partial inventory (`drops` omitted) skip the sum
     entirely — exactly the shape a silent drop hides in.
     """
-    present = _DISPOSITIONS & set(f.inventory)
+    spelled = [k for k in _SETTLED_SPELLINGS if k in f.inventory]
+    present = (_DISPOSITIONS & set(f.inventory)) | set(spelled)
     if not (present and echoed_premises is not None):
         return
-    for missing in sorted(_DISPOSITIONS - present):
+    if len(spelled) > 1:
+        findings.append(
+            f"{name}: inventory carries both `settled` and `consensus` — one spelling "
+            f"fills the single-reading slot, never both."
+        )
+    required = _DISPOSITIONS - {"settled"} | ({"settled"} if not spelled else set())
+    for missing in sorted(required - present):
         findings.append(
             f"{name}: inventory carries dispositions but omits `{missing}` — all four "
             f"disposition categories are mandated, and a missing one is an unrecorded "

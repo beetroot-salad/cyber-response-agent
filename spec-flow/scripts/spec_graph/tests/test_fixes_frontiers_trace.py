@@ -81,6 +81,39 @@ def test_frontiers_string_count_is_a_finding_not_a_crash(tmp_path):
     assert "[check_frontiers]" in p.stdout        # the report survived to its summary line
 
 
+def test_frontiers_settled_spelling_and_escalation_subset_echo(tmp_path):
+    # phases/answer.md spells the single-reading category `settled`, and the judge echoes
+    # the escalation copies — each a re-consumed SUBSET of the answerer's premises. The
+    # checker used to demand `consensus` and sum the echoes (82 + 42 + 42 = 166), so a
+    # conserved judge frontier exited 1 at the phase boundary.
+    d = tmp_path / "frontiers"
+    d.mkdir()
+    _frontier(d, "40-premises.md", "phase: C\nstatus: complete\ninventory: {premises: 82}\n")
+    _frontier(d, "42-answers-copy1.md",
+              "phase: C\nstatus: complete\ninventory: {premises: 42}\n")
+    _frontier(d, "45-dispositions.md",
+              "phase: C\nstatus: complete\n"
+              "inventory: {settled: 38, forks: 16, silent_branches: 27, drops: 1}\n"
+              "inputs: [{path: 40-premises.md, inventory_echo: {premises: 82}}, "
+              "{path: 42-answers-copy1.md, inventory_echo: {premises: 42}}]\n")
+    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
+    assert p.returncode == 0, p.stdout + p.stderr
+
+
+def test_frontiers_both_settled_spellings_is_a_finding(tmp_path):
+    # One spelling fills the slot; carrying both double-counts the single-reading premises.
+    d = tmp_path / "frontiers"
+    d.mkdir()
+    _frontier(d, "40-premises.md", "phase: C\nstatus: complete\ninventory: {premises: 10}\n")
+    _frontier(d, "45-dispositions.md",
+              "phase: C\nstatus: complete\n"
+              "inventory: {settled: 5, consensus: 5, forks: 0, silent_branches: 0, drops: 0}\n"
+              "inputs: [{path: 40-premises.md, inventory_echo: {premises: 10}}]\n")
+    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "consensus" in p.stdout and "settled" in p.stdout
+
+
 # trace
 
 def test_trace_drivers_bad_base_ref_exits_2(make_repo):
