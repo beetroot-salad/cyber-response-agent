@@ -881,7 +881,7 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
 
 
 # ---------------------------------------------------------------------------------------
-# The mechanical record agrees with the prompt (finalize, review finding 4)
+# The mechanical record agrees with the prompt — through the ledger, not a second surface
 # ---------------------------------------------------------------------------------------
 
 
@@ -891,74 +891,93 @@ def _grade(ep: Path, base: Path):
     return J.mod("learning.judge").grade_episode(ep, judge=judge, runs_base=base)
 
 
-def test_the_mechanical_bucket_reads_an_external_refusal_on_h_as_asked_not_never_queried(
+def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_path):
+    """The rule the prompt states (`external=true` on the holding system -> not `lead-set`)
+    is the RECORD's too, and by one mechanism: the mechanical pass decides `lead-set` from the
+    world's served ledger, and a call the grant withholds used to be absent from that ledger
+    by construction. Now the sibling's own registry files it there (`WorldRegistry.
+    decide_call`, `source: refused`, the params as asked, the world's id) at the grant
+    decision — the same row the seam's isolation refusal leaves, one frame earlier — so the
+    ledger's F-1 rule covers it and the pass reads no second surface and stores no second
+    flag. A REAL gather run, a REAL `WorldRegistry` over a fake estate, the REAL query tool
+    between them: the denied call also leaves its `∅.denied` row on the queries table (VIEW
+    1's per-lead line, which the ledger cannot carry), and the adapter body never runs.
+
+    Observed failing by: no `refused` row in the sibling's ledger, or one with the wrong
+    params/world, or the queries-table row gone."""
+    from defender.learning.branch.ledger import REFUSED
+    from defender.tests.test_920_estate_seam import (
+        FAKE_GRANT, World, fake_estate, served_rows, world_registry,
+    )
+
+    ledger_path = tmp_path / "served.jsonl"
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
+    asked = {"host": "web-01"}
+    # `elastic.get-host` is declared by the fake estate and withheld by FAKE_GRANT.
+    r = run_gather(tmp_path, verbs=reg, turns=[q("elastic", "get-host", asked), DONE],
+                   run_id="d860-ledger")
+
+    rows = served_rows(ledger_path)
+    assert [row["source"] for row in rows] == [REFUSED], \
+        f"the sibling's ledger holds {[row['source'] for row in rows]}, not the denial"
+    assert (rows[0]["system"], rows[0]["verb"], rows[0]["params"]) == ("elastic", "get-host", asked)
+    assert rows[0]["world_id"] == "w1"
+    assert r.own_evidence == [], "a denied call wrote an evidence row"
+    (own,) = r.own_denied_rows
+    assert (own["lead_id"], own["system"], own["verb"]) == (LEAD, "elastic", "get-host")
+
+
+def test_the_mechanical_bucket_reads_the_ledgers_refused_row_and_not_the_queries_table(
     tmp_path, judge_roots,
 ):
-    """The rule the prompt states (`external=true` on the holding system -> not `lead-set`)
-    is ALSO the record's: the mechanical pass decides `lead-set` from the estate's ledger,
-    and a refusal before dispatch is absent from that ledger by construction — so without
-    this the `judge.yaml` row and the episode page said `lead-set` for the very world the
-    prompt told the model to grade as `observability`. An external `∅.` row on H is F-1's
-    refusal one step earlier: the world is excluded from the failure buckets (`bucket: None`)
-    and the row says why (`refused_before_dispatch: True`). `holding_queried` stays the
-    ledger's own fact (#921) — the world reached nothing — and `has_refused` stays the
-    ledger's `refused` word (#1025 O3); the new flag is a THIRD stored fact, not a widening
-    of either.
+    """What the pass reads a refusal FROM. The ledger's `refused` row on H — the row the
+    sibling's registry writes for a denial — is F-1: the world asked and was turned away, so
+    it is excluded from the failure buckets (`bucket: None`, `has_refused: True`). The
+    queries table's `∅.` rows are NOT a grading surface: a world whose only trace of H is a
+    `∅.denied` row there and an EMPTY ledger buckets `lead-set`, because that table is
+    inherited from the source run (a pre-branch denial reaches every sibling, `test_m2_*`),
+    carries the harness's own reserved leads, and holds every kind of "did not happen" —
+    and a pass reading it would excuse every sibling of a family for one lead's wander. No
+    world row carries a `refused_before_dispatch` key: there is no second flag.
 
-    Four non-control worlds, each with an EMPTY served ledger and one `∅.` row:
-    * `b` — `∅.denied` on H              -> `None`, refused_before_dispatch True;
-    * `c` — `∅.denied` on another system -> `lead-set`, False (the refusal is not H's);
-    * `d` — an `agent-fixable` above-guard row on H -> `lead-set`, False (the defender's own
-      rejection is not an external refusal — it never asked H anything H could answer);
-    * `e` — an `infra` above-guard row on H (adapter could not load) -> `None`, True.
+    Four non-control worlds:
+    * `b` — ledger `refused` on H, no table row     -> `None`, has_refused True;
+    * `c` — empty ledger, `∅.denied` on H in the table -> `lead-set`, has_refused False;
+    * `d` — empty ledger, an `infra` above-guard row on H -> `lead-set`, has_refused False;
+    * `e` — ledger `refused` on ANOTHER system      -> `lead-set`, has_refused False.
 
-    Observed failing by: `b` or `e` bucketed `lead-set`, or `c`/`d` excused."""
+    Observed failing by: `c`/`d` excused, `b` bucketed, or the retired flag on a row."""
     labels = ("a", "b", "c", "d", "e")
+    refused = J.ledger_row(source="refused", world_label="b", params={"host": "web-01"})
+    elsewhere = J.ledger_row(source="refused", world_label="e", system="ticket",
+                             verb="get-ticket", params={"id": "T-1"})
     ep = J.accepted_episode(
         tmp_path, labels=labels,
         dispositions={label: "malicious" for label in labels} | {"a": "benign"},
-        ledgers={label: [] for label in labels if label != "a"},
+        ledgers={"b": [refused], "c": [], "d": [], "e": [elsewhere]},
     )
     base, _src = J.runs_base(tmp_path)
     worlds = ep / "worlds"
-    _table(worlds / "b", [_denied(0, system=J.HOLDING_SYSTEM, verb="esql")])
-    _table(worlds / "c", [_denied(0, system="ticket", verb="get-ticket")])
-    _table(worlds / "d", [_sentinel(0, ABOVE_GUARD_QUERY_ID, system=J.HOLDING_SYSTEM)])
-    _table(worlds / "e", [_sentinel(0, ABOVE_GUARD_QUERY_ID, system=J.HOLDING_SYSTEM,
+    _table(worlds / "c", [_denied(0, system=J.HOLDING_SYSTEM, verb="esql")])
+    _table(worlds / "d", [_sentinel(0, ABOVE_GUARD_QUERY_ID, system=J.HOLDING_SYSTEM,
                                     error_class=INFRA_ERROR_CLASS)])
-    for label in labels[1:]:
+    for label in ("c", "d"):
         _lead_file(worlds / label, "REFUSED_GOAL", lead_id=DENIED_LEAD)
 
     rows = J.rows(_grade(ep, base))
 
     for label in labels[1:]:
         assert rows[label].get("ungradable") is not True, rows[label]
-        assert rows[label]["holding_queried"] is False, \
-            f"{label}: `holding_queried` is the LEDGER's fact and the ledger is empty"
-        assert rows[label]["has_refused"] is False, \
-            f"{label}: `has_refused` is the ledger's `refused` word, and there is none"
-    assert (rows["b"]["refused_before_dispatch"], rows["b"]["bucket"]) == (True, None), \
-        f"a denial on H: {rows['b']}"
-    assert (rows["e"]["refused_before_dispatch"], rows["e"]["bucket"]) == (True, None), \
-        f"an adapter fault on H: {rows['e']}"
-    assert (rows["c"]["refused_before_dispatch"], rows["c"]["bucket"]) == (False, "lead-set"), \
-        f"a denial elsewhere: {rows['c']}"
-    assert (rows["d"]["refused_before_dispatch"], rows["d"]["bucket"]) == (False, "lead-set"), \
-        f"the defender's own rejection on H: {rows['d']}"
-
-
-def test_the_stored_flag_round_trips_and_is_absent_from_an_older_record(tmp_path, judge_roots):
-    """`refused_before_dispatch` is on every row that carries the other ladder flags, survives
-    the read-back (`read_grade`, the one tolerant reader), and is NOT invented on a record
-    written before it existed — #1025 O3's rule for `has_refused`, applied to its sibling."""
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
-    first = _grade(ep, base)
-    for label in ("b", "c"):
-        assert J.rows(first)[label]["refused_before_dispatch"] is False
-    again = J.mod("learning.judge").read_grade(ep)
-    assert J.rows(again)["b"]["refused_before_dispatch"] is False
-    assert J.rows(again)["c"]["refused_before_dispatch"] is False
+        assert "refused_before_dispatch" not in rows[label], \
+            f"{label}: the retired second flag is on the row"
+    assert (rows["b"]["has_refused"], rows["b"]["holding_queried"], rows["b"]["bucket"]) \
+        == (True, True, None), f"the ledger's refusal on H: {rows['b']}"
+    assert (rows["c"]["has_refused"], rows["c"]["bucket"]) == (False, "lead-set"), \
+        f"a `∅.denied` table row is not the pass's surface: {rows['c']}"
+    assert (rows["d"]["has_refused"], rows["d"]["bucket"]) == (False, "lead-set"), \
+        f"an above-guard table row is not the pass's surface: {rows['d']}"
+    assert (rows["e"]["has_refused"], rows["e"]["bucket"]) == (False, "lead-set"), \
+        f"a refusal elsewhere is not H's: {rows['e']}"
 
 
 # ---------------------------------------------------------------------------------------

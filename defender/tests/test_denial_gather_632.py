@@ -114,6 +114,56 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
     assert "esql" in r.gather_saw
 
 
+def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path: Path):
+    """§7 R2, held at the row: a denial is a BUSINESS outcome the model must see and continue
+    past, and the `∅.denied` row (#860) is written after the audit record and before the
+    refusal is returned — so a row write that faults (the table replaced by a directory here;
+    a planted link or a full disk in the box) must not turn "not granted" into an `OSError`
+    that escapes the capability and ends the lead. Reported to stderr and dropped, the way
+    the estate seam drops a failed `refused` row: the refusal is what propagates.
+
+    The table is broken from INSIDE the gather leg's first model turn, so lead-0's own rows
+    and the dispatch have already landed and only the denied call's write meets the fault.
+
+    Observed failing by: the gather loop stopping at one call (the exception ended the lead),
+    or the refusal text absent from what the model saw."""
+    from defender._run_paths import RunPaths
+    from defender.tests._verb_authorization_632 import _Run
+    from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, drive, materialize
+
+    class BreakingReplay(ReplayFn):
+        def __init__(self, turns, run_dir):
+            super().__init__(turns)
+            self.run_dir = run_dir
+
+        def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
+            if self.calls == 0:
+                table = RunPaths(self.run_dir).executed_queries
+                table.unlink()
+                table.mkdir()
+            return super().__call__(messages, info)
+
+    rec = VerbRecorder()
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    main = ReplayFn([
+        Turn(tool_calls=[("gather", {
+            "lead_id": LEAD, "system": "elastic", "goal": "measure this lead",
+            "what_to_summarize": ["auth events"],
+        })]),
+        Turn(text="Investigation complete."),
+    ])
+    gather = BreakingReplay([q(*DENIED_PAIR), DONE], run_dir)
+    drive(run_dir, run_id="d0-broken-table", main=main, gather=gather, verbs=_registry(rec))
+    r = _Run(run_dir, main, gather)
+
+    assert rec.calls == [], "the denied verb body ran"
+    assert r.gather.calls >= 2, \
+        "the row-write fault ended the lead: the refusal never came back as a result"
+    assert "not granted" in r.gather_saw, "the model did not see the refusal"
+    assert "esql" in r.gather_saw, "the refusal the model saw does not name the verb"
+    assert len(r.own_denials) == 1, "the audit record — written FIRST — is missing"
+
+
 def test_a_denied_verb_is_not_the_unknown_verb_path(tmp_path: Path):
     """A denied verb is refused WITHOUT the evidence row, the `agent-fixable` class or the
     retry coaching that an undeclared verb still gets. Absence shapes the catalog; a

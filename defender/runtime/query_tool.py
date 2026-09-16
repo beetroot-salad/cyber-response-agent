@@ -244,12 +244,15 @@ class QueryCapture(AbstractCapability[Any]):
 
         return observe.denial_logger(run_dir)
 
-    def _decide_guarded(self, system: str, verb: str) -> tuple[Any, str | None]:
+    def _decide_guarded(
+        self, system: str, verb: str, params: dict,
+    ) -> tuple[Any, str | None]:
         """THE grant decision, guarded against a broken adapter import: the agreement check is
         deferred to first resolution, not policy compile, so a broken sibling adapter must not
-        unwind the stage (§7 R2)."""
+        unwind the stage (§7 R2). `decide_call`, not `decide`: this is a call being MADE, and
+        a registry that keeps a served record (a sibling world's) records what it decided."""
         try:
-            return self._registry.decide(system, verb), None
+            return self._registry.decide_call(system, verb, params), None
         except CONTROL_FLOW_EXCEPTIONS:
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
@@ -538,7 +541,7 @@ class QueryCapture(AbstractCapability[Any]):
         wrong with it; since #860 it also leaves its `∅.denied` sentinel row, which is not
         evidence). Returns `(decision, early_result)`; `early_result` is set when the caller
         must return without ever reaching execution."""
-        decision, load_error = self._decide_guarded(system, verb)
+        decision, load_error = self._decide_guarded(system, verb, params)
         if load_error is not None:
             # THE BREAKER CHECK, consulted HERE and not only in `wrap_tool_execute`. These
             # `infra` rows are excluded from `rejection_trip` on the promise that
@@ -582,11 +585,27 @@ class QueryCapture(AbstractCapability[Any]):
             # guard's. `system_key=""` for the granted path's reason: `decide` returns DENIED
             # only for a system the grant names, so the row's `system` already identifies the
             # call.
-            await self._record(
-                deps, system=system, verb=verb, query_id=DENIED_QUERY_ID, params=params,
-                payload=None, exit_code=circuit_breaker.DENIED_EXIT_CODE, detail=refusal,
-                system_key="",
-            )
+            #
+            # A ROW WRITE THAT FAILS DOES NOT DISPLACE THE REFUSAL (`estate._record_beside`'s
+            # posture, for its reason): the denial is a business outcome the model must see
+            # and continue past (#632), the audit record above already holds it, and a planted
+            # link or a full disk under `executed_queries.jsonl` would otherwise turn "not
+            # granted" into an `OSError` that ends the lead. Reported, dropped. The neighbouring
+            # branches keep their raise — their rows ARE the outcome.
+            try:
+                await self._record(
+                    deps, system=system, verb=verb, query_id=DENIED_QUERY_ID, params=params,
+                    payload=None, exit_code=circuit_breaker.DENIED_EXIT_CODE, detail=refusal,
+                    system_key="",
+                )
+            except CONTROL_FLOW_EXCEPTIONS:
+                raise
+            except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+                raise
+            except Exception as write_failed:  # noqa: BLE001 — see the comment above
+                print(f"[query_tool] could not record the denied row for {system}.{verb} "
+                      f"({write_failed!r}); the refusal itself is what the model sees",
+                      file=sys.stderr)
             # NOT `_model_view`: that frame prepends the repeat guard's coaching, and a denial
             # is the one refusal retrying cannot fix (#632). The model sees the refusal alone.
             return None, _format_bash_result(
@@ -689,7 +708,8 @@ class QueryCapture(AbstractCapability[Any]):
             # partition this table on `query_id`, and the model's id sends the trip row to the
             # wrong two — a coined id is minted as a `_draft/` template proposing the refused
             # query, a catalog id is handed to the lead-author as a failure of that template.
-            # The guard's own counted domain keys on ABOVE_GUARD_QUERY_ID alone, so untouched.
+            # The guard's own counted domain excludes `ABOVE_PLACEMENT_QUERY_IDS`, not this
+            # id, so the trip row is counted by neither scan (its docstring says why not).
             await self._record(
                 deps, system=system, verb=verb, query_id=REPEAT_TRIP_QUERY_ID, params=params,
                 payload=None, exit_code=USAGE_EXIT_CODE, detail=repeat_trip_detail(trip),

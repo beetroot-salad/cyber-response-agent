@@ -586,8 +586,10 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         # lessons curator folded into a lesson telling the runtime to run a query the role is
         # not granted. The polarity (`external=true` -> observability, never lead-set) is the
         # whole of the rule, spelled the way `family.render_refused` prints it; the rest says
-        # where the evidence pointer goes and keeps VIEW 2's `source: refused` (an estate-seam
-        # refusal of a call that DID reach the system) from being read as this rule's subject.
+        # where the evidence pointer goes and ties VIEW 2's `source: refused` to it: the
+        # sibling's registry files a denial there too (`WorldRegistry.decide_call`), beside
+        # the seam's own refusal, and both count as having queried — the model must not read
+        # that row as a query that ran, nor as a second refusal.
         "READ A LEAD'S `refused:` LINE BEFORE GRADING ITS COVERAGE. Each entry there is an "
         "attempt that reached NO system — it is not a query, and it is not the absence of "
         "one. `external=true` means the harness or the estate withheld it (a verb the "
@@ -599,8 +601,10 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         "conduct (a rejected call, a repeat the guard refused, a reducer it broke) and grades "
         "as such. Every refused entry is a `∅.`-prefixed row in this world's own "
         "`executed_queries.jsonl`, which is the `evidence` pointer for a finding about it. "
-        "This is a different thing from a `source: refused` row in VIEW 2: that call REACHED "
-        "the holding system and was refused there, and counts as having queried.\n\n"
+        "A `source: refused` row in VIEW 2 is the served ledger's word for the same event "
+        "(a denied call), or for a call the estate seam itself turned away; either way the "
+        "world asked and was not answered — it counts as having queried, not as a query "
+        "that ran, and it is not a second refusal to grade.\n\n"
         "Before findings, run three passes and report each as its own table:\n"
         "1. CORRELATION — for every fact reachable across two joined rows, name the hand-off.\n"
         "2. SCOPE — for every lead touching the holding system, name the index, window and "

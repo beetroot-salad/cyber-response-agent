@@ -667,8 +667,11 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
             continue
         for i, q in enumerate(qs):
             params = json.dumps(q.params, ensure_ascii=False) if q.params else "—"
+            # One entry per member of `error_class_for_exit`'s vocabulary, so a policy denial
+            # (#860, `denied`) reads differently from a broken adapter without parsing text.
             exit_cls = {
                 None: "lq-ok", "infra": "lq-infra", "agent-fixable": "lq-agent",
+                "denied": "lq-denied",
             }.get(q.error_class, "lq-bad")
             payload = esc(q.payload_status or "")
             if q.raw_ref is not None:

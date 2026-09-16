@@ -678,6 +678,16 @@ class VerbRegistry:
             )
         return VerbDecision(GRANTED, fn, None)
 
+    def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """`decide`, for a call the model is actually MAKING — the dispatch path's one entry
+        (`query_tool._decide_guarded`), as distinct from the discovery tool asking `decide`
+        about every verb a system declares (`_list_verbs_line`). The split exists so a
+        registry that keeps a served record (`estate.registry.WorldRegistry`) can record what
+        happened to a call without recording a listing: a withheld verb the model merely read
+        about was refused nothing. `params` is the call as asked, for that record; the
+        decision itself is `decide`'s and reads only the grant and the declaration."""
+        return self.decide(system, verb)
+
 
 class ModuleVerbRegistry(VerbRegistry):
 

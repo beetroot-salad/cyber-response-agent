@@ -679,6 +679,10 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .lq-exit { text-align: center; font-weight: 600; }
 .lq-exit.lq-ok { color: var(--good); }
 .lq-exit.lq-bad { color: var(--bad); }
+.lq-exit.lq-infra { color: var(--bad); }
+.lq-exit.lq-agent { color: var(--warn); }
+/* Withheld by policy (exit 77): the harness's answer, not a fault — muted, not red. */
+.lq-exit.lq-denied { color: var(--text-dim); text-decoration: line-through; }
 .lq-payload { color: var(--text-dim); }
 .lq-deadend .lq-empty { color: var(--warn); font-style: italic; }
 
