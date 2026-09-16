@@ -217,6 +217,19 @@ def _screen_ticket_payload(
     return payload, 0, ""
 
 
+def _dispatched_lead(deps: Any) -> str:
+    """The lead this call was dispatched inside. Every production `GatherDeps` carries one
+    (`tools_gather`, `lead_zero._capture`, `tools._bash` all bind it), and every frame of the
+    capture that touches the queries table is lead-scoped — so a call reaching any of them
+    without a lead is an internal error, said ONCE and the same way at each frame. The
+    rejection guard used to answer `None` here instead, a tolerance for a lead-less denial
+    that #860 retired (a denial is the dispatching lead's own row); left in place, the guard
+    tolerated what the row write two lines later raised on."""
+    if deps.lead_id is None:
+        raise RuntimeError("internal: query reached capture without a dispatched lead_id")
+    return deps.lead_id
+
+
 class QueryCapture(AbstractCapability[Any]):
 
     def __init__(self, registry: Any, role: str = "gather"):
@@ -446,16 +459,15 @@ class QueryCapture(AbstractCapability[Any]):
         The budget is IDENTITY-BLIND, so it is asked with neither `system_key` nor the request
         triple — which is exactly why it catches the family the guard above cannot: an
         undeclared name per turn, whitespace drift, assigned-but-font-blank codepoints."""
-        if deps.lead_id is None:
-            return None
-        rows = lead_rows(deps.run_dir, deps.lead_id)
+        lead_id = _dispatched_lead(deps)
+        rows = lead_rows(deps.run_dir, lead_id)
         trip = rejection_trip(
-            rows, deps.lead_id,
+            rows, lead_id,
             system=system, verb=verb, params=params, system_key=system_key,
         )
         if trip is not None:
             return trip
-        return rejection_budget_trip(rows, deps.lead_id)
+        return rejection_budget_trip(rows, lead_id)
 
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
@@ -735,8 +747,7 @@ class QueryCapture(AbstractCapability[Any]):
         `_grant_check`'s unresolvable branch) are the ones a reader has to check, and a
         required keyword is what puts each of the four in front of that reader rather than
         letting a writer that OUGHT to fingerprint pass for one that has nothing to."""
-        if deps.lead_id is None:
-            raise RuntimeError("internal: query reached capture without a dispatched lead_id")
+        lead_id = _dispatched_lead(deps)
 
         text = "" if exit_code != 0 else json.dumps(payload, default=str)
         run_dir = deps.run_dir
@@ -747,7 +758,7 @@ class QueryCapture(AbstractCapability[Any]):
             # nothing will ever add an `await` here.
             row = append_query_row(
                 run_dir,
-                lead_id=deps.lead_id,
+                lead_id=lead_id,
                 system=system,
                 verb=verb,
                 query_id=query_id,

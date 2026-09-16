@@ -31,7 +31,8 @@ validated holding system):
 
 | condition | bucket |
 |---|---|
-| no row on H at all | `lead-set` |
+| no row on H at all, and no external `∅.` row on H | `lead-set` |
+| no row on H, an external `∅.` row on H (a denial, an adapter fault) | no bucket (F-1, one step earlier) |
 | rows on H exist, none `staged`/`patched` (and no `refused` row on H) | `lead-quality` |
 | a `refused` or `fault`-adjacent H interaction, no doctored answer served | no bucket (F-1) |
 | a doctored answer was served, verdict == declared | no bucket |
@@ -95,7 +96,7 @@ from defender.runtime.branch._family import (
     is_reserved_world_label,
     world_token_for,
 )
-from defender.runtime.circuit_breaker import INFRA_ERROR_CLASS
+from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS, INFRA_ERROR_CLASS
 from defender.runtime.verbs import is_system_name
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
@@ -461,9 +462,10 @@ def leads_by_id(world_dir: Path) -> dict[str, JoinedLead]:
 
 #: #860 M4 — the `kind` word VIEW 1 gives each sentinel origin. Keyed on the writer's own
 #: literal, so a `∅.` id no writer here has defined renders as the bare `refused` rather than
-#: as one of these. `∅.above-repeat-guard` is the one origin that splits on `error_class`: its
-#: `infra` rows are the adapter-load fault (the estate's doing, `query_tool._grant_check`),
-#: its `agent-fixable` rows a schema rejection or an undeclared name (the defender's own).
+#: as one of these. `∅.above-repeat-guard` is the one origin whose KIND splits on
+#: `error_class`: its `infra` rows are the adapter-load fault (`query_tool._grant_check`), its
+#: `agent-fixable` rows a schema rejection or an undeclared name. `external` is a different
+#: question, answered for every origin alike — see `is_external_refusal`.
 _SENTINEL_KINDS: dict[str, str] = {
     REPEAT_TRIP_QUERY_ID: "repeat-refused",
     BASH_SHIM_QUERY_ID: "reducer-failed",
@@ -473,6 +475,22 @@ _ADAPTER_FAULT_KIND = "adapter-fault"
 _REJECTED_KIND = "rejected-before-dispatch"
 _UNKNOWN_SENTINEL_KIND = "refused"
 _DENIED_KIND = _SENTINEL_KINDS[DENIED_QUERY_ID]
+
+#: The error classes of a refusal that was the harness's or the estate's doing rather than the
+#: defender's: an adapter that could not load, or a shim killed by the box (`infra`), and a
+#: verb the role is not granted (`denied`). `agent-fixable` is the defender's own — a schema
+#: rejection, an undeclared name, a repeat the guard refused, a reducer fed bad input. ONE
+#: column, every origin: the writer of each row already answered whose fault it was when it
+#: chose the exit code (`error_class_for_exit`, `_bash._shim_exit_code`), so a second table
+#: here keyed on the origin would be the same fact spelled twice, one rename from disagreeing.
+_EXTERNAL_ERROR_CLASSES = frozenset({INFRA_ERROR_CLASS, DENIED_ERROR_CLASS})
+
+
+def is_external_refusal(row: QueryRow) -> bool:
+    """Was this `∅.` row's refusal the harness's or the estate's doing rather than the
+    defender's? Read off the row's own `error_class` and nothing else — the same answer VIEW 1
+    prints as `external=` and the mechanical pass reads as `refused_before_dispatch`."""
+    return row.error_class in _EXTERNAL_ERROR_CLASSES
 
 
 def _name_or_blank(name: str) -> str:
@@ -494,16 +512,14 @@ def _refused_from_sentinel(row: QueryRow) -> dict[str, Any]:
     for a verb the adapter declares, so on that one row it is a name the defender could have
     read off the catalog — screened here all the same.
 
-    `external` — was the refusal the harness's or the estate's doing rather than the
-    defender's — is `error_class == "infra"` (an adapter that could not load) or the row being
-    a denial (a verb the role is not granted). Derived from the row's own columns, separately
-    from `kind`, so the two cannot drift."""
-    external = row.error_class == INFRA_ERROR_CLASS or row.query_id == DENIED_QUERY_ID
+    `external` is `is_external_refusal` — the row's own `error_class`, separately from
+    `kind`, so the two cannot drift."""
+    external = is_external_refusal(row)
     if row.query_id == ABOVE_GUARD_QUERY_ID:
         kind = _ADAPTER_FAULT_KIND if external else _REJECTED_KIND
     else:
         kind = _SENTINEL_KINDS.get(row.query_id, _UNKNOWN_SENTINEL_KIND)
-    entry = {"kind": kind, "system": _name_or_blank(row.system)}
+    entry: dict[str, Any] = {"kind": kind, "system": _name_or_blank(row.system)}
     if kind == _DENIED_KIND:
         entry["verb"] = _name_or_blank(row.verb)
     entry["external"] = external
@@ -1028,6 +1044,11 @@ class WorldFacts:
     ledger_rows: list[dict[str, Any]]
     malformed_rows: int
     investigation_text: str
+    #: The world's leads off its OWN queries table and lead files (`leads_by_id`), read here
+    #: for the same reason the three files above are: the mechanical pass reads it for the
+    #: refusals that never reached the ledger (`refused_before_dispatch`) and the render for
+    #: VIEW 1's chain, and each used to open the table for itself.
+    leads: dict[str, JoinedLead]
     #: The report AS `_report.read_report` READ IT — its headline, its reason when there is
     #: none, and its bytes. The bytes alone would make every consumer re-decide what the
     #: headline is, which is the duplication this field exists to stop.
@@ -1063,6 +1084,7 @@ def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> Wo
     moved, by_lead, unlanded = _resolution_facts(text, world=label)
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed, investigation_text=text,
+        leads=leads_by_id(world_dir),
         report=read_report(world_dir / "report.md"),
         resolution_moved=moved, resolutions_by_lead=by_lead,
         unlanded_document_rows=unlanded,
@@ -1120,8 +1142,9 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     review_block: dict[str, Any] | None = None, episode_incomplete: bool = False,
     withholding_applies: bool = True, samples: dict[str, Any],
 ) -> tuple[dict[str, Any], WorldFacts | None]:
-    """@owns has_refused, @owns sample_unavailable, @owns sample_unavailable_patterns — the
-    SOLE producer of these three world-row fields; the comments beside each say why. In the
+    """@owns has_refused, @owns refused_before_dispatch, @owns sample_unavailable,
+    @owns sample_unavailable_patterns — the SOLE producer of these four world-row fields; the
+    comments beside each say why. In the
     DOCSTRING, not a comment, because that is where `lint_unowned_field` reads the claim from:
     a second producer anywhere fails the duplicate-owner gate only if this one is registered."""
     label = world["world_id"]
@@ -1214,6 +1237,18 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     holding_queried = bool(h_rows)
     scope_discriminated = any(_scope_discriminated_row(r) for r in h_rows)
     has_refused = any(r.get("source") == REFUSED for r in h_rows)
+    # #860: the refusal the LEDGER cannot show. A verb withheld from the role, or an adapter
+    # that could not load, turns the call away before it is made, so the served ledger — the
+    # one surface every fact above is read from — holds no row for it by construction, and
+    # "no row on H" read as "never asked" for a world whose lead asked and was refused. The
+    # queries table has the row (a `∅.` sentinel on the lead, `is_external_refusal`), and it is
+    # F-1's refusal one step earlier: the same exclusion from the failure buckets, said on the
+    # record as its OWN flag rather than by widening `holding_queried` (the ledger's fact,
+    # #921) or `has_refused` (the ledger's `refused` word, #1025 O3). Compared the way
+    # `own_h_rows` compares: `holding_system` is already the folded spelling.
+    refused_before_dispatch = any(
+        is_external_refusal(r) and r.system.strip().casefold() == holding_system
+        for lead in facts.leads.values() for r in lead.sentinels)
 
     # M2's witness (O3): `differs_from_base` is written ONLY on `staged` rows, and its domain
     # is `bool | null` — `null` when the witness read itself faulted. NOT FALSE is the rule for
@@ -1285,6 +1320,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
         # from one that queried nothing worth grading. The SAME local the ladder branches on,
         # never re-derived.
         has_refused=has_refused,
+        refused_before_dispatch=refused_before_dispatch,
         verdict=verdict, malformed_rows=facts.malformed_rows,
         # SAID SEPARATELY from `holding_queried: false`, because the two are different failures
         # and the lesson each deserves is different. A world with no rows on the holding system
@@ -1340,17 +1376,19 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
 
     bucket: str | None
     agreed_without_difference = False
-    if not holding_queried:
+    if not holding_queried and not refused_before_dispatch:
         bucket = "lead-set"
     elif not doctored:
         # F-1: a refused H interaction counts as having queried, and is excluded from the
-        # failure buckets rather than defaulted into `lead-quality`. The OLD "agreed-without-
+        # failure buckets rather than defaulted into `lead-quality` — whether the estate
+        # refused it (`has_refused`) or the harness did before the call was made
+        # (`refused_before_dispatch`). The OLD "agreed-without-
         # evidence" special case (verdict == declared while every H row is passthrough) is
         # REMOVED (N8): O4's withholding ladder above now carries that distinction — a world
         # that agreed having been shown nothing still buckets `lead-quality`, and whether its
         # finding is actually enqueued turns on `withheld_reason` (reachable_by_capture), not
         # on a bucket-level flag.
-        bucket = None if has_refused else "lead-quality"
+        bucket = None if has_refused or refused_before_dispatch else "lead-quality"
     elif difference_shown:
         # Ladder row 3 — UNCHANGED.
         if verdict == declared:
@@ -1523,6 +1561,7 @@ __all__ = [
     "declares_difference", "discriminator_of", "episode_id_of", "grade_family",
     "is_gradable_row", "json_mapping", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "own_h_rows", "raw_manifest", "read_review_record",
+    "refused_entries", "has_refusals", "render_refused", "is_external_refusal",
     "read_samples_record", "read_world_facts", "sample_patterns", "scope_params",
     "screened_yaml_mapping", "staged_patterns", "world_pattern", "world_review_block",
 ]

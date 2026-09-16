@@ -178,11 +178,12 @@ defender's ANALYZE. Check the query's **exit code first**, then the content:
 
 - **exit 0, result sane** — `STATS` columns resolved to real values, volume
   plausible, `row_count` < 1000 → summarize.
-- **anything else** — a non-zero exit (2 / 64 / 1), or an empty / all-zero /
+- **anything else** — a non-zero exit (2 / 77 / 64 / 1), or an empty / all-zero /
   null / garbage / `row_count == 1000` result you can't immediately explain →
   **STOP and Read `{defender_dir}/skills/gather/failure-modes.md`** before your
   next query, then follow the matching branch. It carries the exit-code branch
-  (including: an exit 2 is an outage you must NOT probe / cred-hunt / re-run), the
+  (including the two you must NOT re-run: an exit 2 outage — no probing, no
+  cred-hunting — and an exit 77 withheld verb — no routing around it), the
   positive-control tool-fault test, the entity-binding probe, and field-drift
   recovery.
 

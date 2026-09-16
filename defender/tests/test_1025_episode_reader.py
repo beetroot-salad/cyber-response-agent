@@ -338,10 +338,12 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
     Observably true: `family` exposes `world_review_block`, `staged_patterns`, `world_pattern`,
     `own_h_rows`, `raw_manifest`, `leads_by_id`, `lead_chain` and `json_mapping` as
     callables; neither `family` nor `render` carries the underscore spelling of any of them;
-    the input builder IMPORTS the lead-chain trio — `render.lead_chain`, `render.leads_by_id`
-    and `render.json_mapping` are `family`'s own objects — and no constant in `render.py` OR
-    `family.py` names `executed_queries.jsonl` or `gather_raw`, the two reads that belong to
-    `lead_repository`, the canonical surface `leads_by_id` indexes (#1017).
+    the input builder IMPORTS the lead-chain pair — `render.lead_chain` and
+    `render.json_mapping` are `family`'s own objects (since #860's finalize the leads
+    themselves reach the render on `WorldFacts.leads`, the pass's one read, so `render`
+    calls `leads_by_id` nowhere) — and no constant in `render.py` OR `family.py` names
+    `executed_queries.jsonl` or `gather_raw`, the two reads that belong to `lead_repository`,
+    the canonical surface `leads_by_id` indexes (#1017).
 
     This is a name census over the seven accessors the design named (`render.py`'s other
     readers — `episode_alert`, `_read_provenance` — and `enqueue.draws_on_disk` stay where they
@@ -361,7 +363,7 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
                 f"line and O8 wants one public home, family.{public}")
     assert callable(getattr(family, "json_mapping", None)), (
         "family.json_mapping is absent — the JSON tolerance policy has no home in the reader")
-    for name in ("lead_chain", "leads_by_id", "json_mapping"):
+    for name in ("lead_chain", "json_mapping"):
         assert getattr(render, name, None) is getattr(family, name), (
             f"render.{name} is not family.{name} — the input builder does not import the "
             "accessor it renders the per-lead chain with; that IS the one-home observable")

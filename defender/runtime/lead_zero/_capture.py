@@ -133,10 +133,10 @@ async def _capture_issue(
     routing, so all eight screens (grant, breaker, repeat-guard, traversal, param validation,
     self-ticket, confine_index, guard_outbound) run as they do for a model-dispatched query.
 
-    Returns `(envelope_or_None, raw_result_text)`. `None` covers both "screened" (breaker trip,
-    repeat trip — no row written at all; a grant denial — a `∅.denied` sentinel row since
-    #860, nonzero exit) and "attempted but failed" (a row IS written, with a nonzero exit
-    code)."""
+    Returns `(envelope_or_None, raw_result_text)`. `None` covers "screened" — a breaker trip
+    (no row written at all), or a repeat trip or a grant denial (a `∅.` sentinel row, nonzero
+    exit; the denial's since #860) — and "attempted but failed" (a row IS written, with a
+    nonzero exit code)."""
     before = len(_rows_for(deps.run_dir, deps.lead_id))
     call = SimpleNamespace(tool_name="query")
     args = {"system": ITEM1_SYSTEM, "verb": verb, "params": params}

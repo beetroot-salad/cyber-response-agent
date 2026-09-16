@@ -40,7 +40,6 @@ from defender.learning.judge.family import (
     json_mapping,
     has_refusals,
     lead_chain,
-    leads_by_id,
     own_h_rows,
     render_refused,
     raw_manifest,
@@ -580,8 +579,11 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     # nor a summary — the harness writes a summary for a dead-ended lead, not for one the
     # grant check turned away — and VIEW 1 built from those two sources alone left it out
     # entirely. Every lead the surface knows to have a refusal is added; a lead with a file
-    # and nothing else is NOT (the judge grades what the lead did, and it did nothing).
-    by_id = leads_by_id(world_dir)
+    # and nothing else is NOT (the judge grades what the lead did, and it did nothing). Off
+    # the same read the mechanical pass made (`WorldFacts.leads`), which is also where the
+    # lead id was screened: the table is in the box's rw bind, and a `lead_id` that is not a
+    # lead id is an unreadable row at the loader, never a heading here.
+    by_id = record.leads
     lead_ids |= {lid for lid, lead in by_id.items() if has_refusals(lead)}
 
     # The report's BYTES for the prompt, off the same read the mechanical pass made.

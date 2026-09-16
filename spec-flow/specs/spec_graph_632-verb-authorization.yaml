@@ -496,7 +496,7 @@ demands:
     binds: ["interacts(query_tool->executed_queries)", "interacts(query_tool->gather_raw)",
             "gather_raw.identity"]
     cites: [g27]   # dispatch-state vs query-state disjointness by path is what makes both halves assertable at once
-    discharged_by: test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file
+    discharged_by: test_a_denied_gather_verb_leaves_only_its_sentinel_row_and_an_empty_sidecar
 
   - id: d31_granted_gather_call_positive_control
     kind: behavior
@@ -788,8 +788,11 @@ demands:
     # Consensus. The allocation machinery a denial must not touch is LEAD-SCOPED; a denial
     # arriving outside a dispatched lead must still be decided and audited without it. Pins that
     # the early return is genuinely early rather than merely conditional.
+    # AMENDED BY #860: the DECISION and the audit record still need no lead; the denial's ROW
+    # is the dispatching lead's own, and a call reaching the capture with no lead is the
+    # internal error it already was on every other branch (`query_tool._dispatched_lead`).
     binds: ["interacts(query_tool->executed_queries)", "interacts(query_tool->gather_raw)"]
-    discharged_by: test_a_denial_outside_a_dispatched_lead_runs_no_lead_scoped_allocation
+    discharged_by: test_a_denial_is_the_dispatched_leads_own_row_and_the_audit_record_is_the_runs
 
   - id: d45_no_model_read_surface_names_a_withheld_verb
     kind: negative      # positive control: d18 (the roster DOES name every granted verb)

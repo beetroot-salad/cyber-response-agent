@@ -625,10 +625,12 @@ REPEAT_ESCAPE = (
 # lead, is a decision for whoever owns the correlation section of ORIENT — recorded here
 # because the number cannot be re-derived from the census alone.
 #
-# NOR IS IT THE ONLY WAY A LEAD SPENDS ITS REQUESTS ON REFUSALS: `_grant_check`'s DENIED branch
-# and both `_tripped_message` returns answer ABOVE this guard with a plain tool RESULT and no
-# queries-table row at all, so they are invisible to both predicates AND reset the framework's
-# per-tool counter. A lead looping on a policy-denied verb is bounded only by
+# NOR IS IT THE ONLY WAY A LEAD SPENDS ITS REQUESTS ON REFUSALS: both `_tripped_message`
+# returns answer ABOVE this guard with a plain tool RESULT and no queries-table row at all, so
+# they are invisible to both predicates AND reset the framework's per-tool counter; and
+# `_grant_check`'s DENIED branch writes a `∅.denied` row (#860) that both predicates EXCLUDE
+# by id (`ABOVE_PLACEMENT_QUERY_IDS`; neither above-guard nor `agent-fixable`), so it is
+# counted by neither either. A lead looping on a policy-denied verb is bounded only by
 # `GATHER_REQUEST_LIMIT`. Also not #1015's, and also not closed by this constant.
 
 REJECTION_BUDGET = 6

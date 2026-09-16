@@ -333,6 +333,32 @@ def test_a_denial_is_the_dispatched_leads_own_row_and_the_audit_record_is_the_ru
 
 
 
+def test_a_lead_less_call_is_the_same_internal_error_at_every_capture_frame(tmp_path: Path):
+    """The premise d44 retired: a denial is the dispatching lead's own row, so the capture has
+    NO lead-less path any more — and the two frames that touch the queries table say so the
+    same way. The rejection guard used to answer `None` for deps with no `lead_id` while the
+    row write two lines later raised on the same deps; a denial routed through both turned a
+    policy refusal into an internal error at the second frame after the first had let it
+    through. Observably: the guard raises the row write's own `RuntimeError`, before reading
+    the table (positive control: the same guard, with a lead, reads it and answers `None`)."""
+    from defender._paths import PATHS
+    from defender.runtime import tools
+    from defender.runtime.agent_definition import compile_policy_for
+    from defender.runtime.query_tool import QueryCapture
+
+    policy = compile_policy_for(GATHER_DEF, run_dir=tmp_path, defender_dir=PATHS.defender_dir)
+    ident = dict(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id=tmp_path.name,
+                 cwd_anchor=tmp_path, policy=policy)
+    capture = QueryCapture(_registry(VerbRecorder()))
+
+    with pytest.raises(RuntimeError, match="without a dispatched lead_id"):
+        capture._rejection_guard(
+            tools.GatherDeps(**ident), "elastic", "esql", {}, system_key="")
+    assert capture._rejection_guard(
+        tools.GatherDeps(**ident, lead_id=LEAD), "elastic", "esql", {}, system_key="",
+    ) is None, "positive control: with a lead, an empty table trips nothing"
+
+
 def test_a_malformed_call_keeps_todays_queries_row(tmp_path: Path):
     """A malformed call on a GRANTED verb — the model mis-forming a query it is entitled to
     make — still writes its queries row, because gather can learn from that; being denied is
