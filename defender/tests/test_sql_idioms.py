@@ -67,7 +67,7 @@ def _sql(payload: str, query: str) -> subprocess.CompletedProcess:
     """
     return subprocess.run(
         [sys.executable, str(_SQL_PY), query],
-        input=payload, capture_output=True, text=True, timeout=60,
+        input=payload, capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
 
 
@@ -75,6 +75,14 @@ def _rows(payload: str, query: str) -> list:
     proc = _sql(payload, query)
     assert proc.returncode == EXIT_OK, f"defender-sql failed: {proc.stderr}"
     return json.loads(proc.stdout)
+
+
+def _fill(template: str, subs: dict[str, str]) -> str:
+    """Substitute every `placeholder -> value` pair into `template`, in one place instead of
+    a bespoke `.replace()` chain per call site — order follows `subs`'s own insertion order."""
+    for placeholder, value in subs.items():
+        template = template.replace(placeholder, value)
+    return template
 
 
 _HITS = json.dumps({
@@ -222,7 +230,7 @@ def test_query_error_on_esql_shape_hint_gives_the_positional_map():
 
     form = "v[2]->>'$' = '<value>'"
     assert form in proc.stderr
-    runnable = form.replace("<value>", doc["values"][0][1])
+    runnable = _fill(form, {"<value>": str(doc["values"][0][1])})
     assert _rows(
         payload,
         f"SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) WHERE {runnable}",
@@ -328,12 +336,18 @@ def test_the_hits_hint_column_list_is_derived_from_each_payloads_own_keys():
 def test_hits_hint_hands_back_a_runnable_query_not_a_description(query):
     """A hint that describes the struct without showing the FROM form that binds it leaves a
     lead to guess the same wrong spelling again. Every error class therefore carries the
-    copyable skeleton — and the skeleton is then executed here, so it cannot rot into a form
-    that no longer runs."""
+    copyable skeleton, unconditionally — that the skeleton itself is runnable is pinned once,
+    below, rather than re-spawned per parametrize case here."""
     proc = _sql(_TS_HITS, query)
     assert proc.returncode == EXIT_QUERY_ERROR
     assert _SKELETON in proc.stderr
     assert 'h."@timestamp"' in proc.stderr
+
+
+def test_the_skeleton_every_hint_hands_back_is_runnable_on_its_own():
+    """The fixed control for the parametrized check above: the copyable skeleton is the same
+    string regardless of which wrong query produced the hint, so it is executed once here
+    rather than once per error class, and it cannot rot into a form that no longer runs."""
     assert _rows('{"hits":[{"@timestamp":"t","message":"m"}]}', _SKELETON) \
         == [{"@timestamp": "t", "message": "m"}]
 
@@ -346,7 +360,7 @@ def test_the_hits_hint_form_runs_with_its_placeholders_filled():
     form = ('SELECT h."@timestamp", h.message FROM (SELECT unnest(hits) h FROM data) '
             "WHERE h.<field> = '<value>'")
     assert form in proc.stderr
-    runnable = form.replace("h.<field>", "h.user").replace("<value>", "alice")
+    runnable = _fill(form, {"h.<field>": "h.user", "<value>": "alice"})
     assert _rows(_TS_HITS, runnable) == [
         {"@timestamp": "2026-08-07 11:32:52", "message": "Failed password"},
     ]
@@ -600,8 +614,19 @@ _LEAD_SURFACES = (
 #: Every spelling of reaching THROUGH a `result` wrapper to `hits`: the dotted form, the
 #: bracket-subscript form a doc reaches for when the key has a dot in it, and either with the
 #: whitespace a reflowed sentence or a formatter leaves behind. A literal `"result.hits"`
-#: census is defeated by `result['hits']`, which teaches the identical dead recipe.
-_DEAD_ENVELOPE = re.compile(r"result\s*[.\[]\s*['\"]?hits")
+#: census is defeated by `result['hits']`, which teaches the identical dead recipe. The
+#: leading `(?<!...)` keeps an unrelated identifier that merely ENDS in "result" (a future
+#: `queryresult.hits`-shaped local) from counting as a resurrection of the dead envelope.
+_DEAD_ENVELOPE = re.compile(r"(?<![A-Za-z0-9_])result\s*[.\[]\s*['\"]?hits")
+
+
+def _assert_no_dead_recipe(text: str, label: str) -> None:
+    """The one census both the source-file surfaces and `--help`'s live output must pass."""
+    assert "result.hits" not in text, f"{label} re-teaches the dead recipe"
+    found = _DEAD_ENVELOPE.search(text)
+    assert found is None, (
+        f"{label} re-teaches the dead recipe under another spelling: {found.group(0)!r}"
+    )
 
 
 @pytest.mark.parametrize("surface", _LEAD_SURFACES, ids=lambda p: p.name)
@@ -612,11 +637,7 @@ def test_no_lead_facing_surface_resurrects_the_result_envelope(surface):
     on teaching it long after the module docstring stopped, and `defender-sql --help` is
     inside the lead's bash lane, one `--help` away from being copied back into a query."""
     text = surface.read_text()
-    assert "result.hits" not in text, f"{surface.name} re-teaches the dead recipe"
-    found = _DEAD_ENVELOPE.search(text)
-    assert found is None, (
-        f"{surface.name} re-teaches the dead recipe under another spelling: {found.group(0)!r}"
-    )
+    _assert_no_dead_recipe(text, surface.name)
     # Paired control: the census is over a file that really does discuss the hits shape, so a
     # zero here cannot come from reading the wrong (or an empty) file.
     assert "hits" in text, f"{surface.name} no longer mentions the hits shape at all"
@@ -633,18 +654,14 @@ def test_the_help_epilog_the_lead_actually_prints_is_clean_too():
     says nothing."""
     proc = subprocess.run(
         [sys.executable, str(_SQL_PY), "--help"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     assert proc.returncode == EXIT_OK
     # Unwrapped as well as raw: argparse breaks the epilog at the terminal width, so a recipe
     # can be present in what the lead reads while no single line of it contains the spelling.
     unwrapped = " ".join((proc.stdout + proc.stderr).split())
     for printed in ((proc.stdout + proc.stderr), unwrapped):
-        assert "result.hits" not in printed, "`--help` re-teaches the dead recipe"
-        found = _DEAD_ENVELOPE.search(printed)
-        assert found is None, (
-            f"`--help` re-teaches the dead recipe under another spelling: {found.group(0)!r}"
-        )
+        _assert_no_dead_recipe(printed, "`--help`")
     # The control: this really is the surface that teaches the hits binding.
     assert "unnest(hits) h FROM data" in unwrapped
     assert "no wrapper envelope to reach" in unwrapped
@@ -679,8 +696,13 @@ _CAST_RETRACTIONS = (
 
 
 def _sql_fences(text: str) -> list[str]:
-    """The doc's ```sql blocks — what a lead copies, as opposed to what the prose discusses."""
-    return re.findall(r"```sql\n(.*?)```", text, re.S)
+    """The doc's ```sql blocks — what a lead copies, as opposed to what the prose discusses.
+
+    `\\r?` tolerates a CRLF checkout: a bare `\\n` after the fence marker would otherwise
+    match nothing at all on Windows-normalized line endings, and a silently empty fence list
+    reads as "the doc lost its examples" rather than as the line-ending mismatch it is.
+    """
+    return re.findall(r"```sql\r?\n(.*?)```", text, re.S)
 
 
 def test_the_docs_esql_example_is_literal_and_runs():
@@ -762,7 +784,8 @@ def test_the_docs_bigint_cast_rule_is_literal_and_runs():
 
 def test_the_docs_hits_idiom_is_literal_and_runs():
     """The doc's search-hits binding, same treatment: present as a literal, then executed
-    with only its `<field>`/`<other>`/`<value>` placeholders filled."""
+    with only its `<field>`/`<other>`/`<value>` placeholders filled — no alias added that
+    the doc's own template does not carry."""
     idiom = ("SELECT h.<field> FROM (SELECT unnest(hits) h FROM data) "
              "WHERE h.<other> = '<value>'")
     doc = _DOC.read_text()
@@ -790,7 +813,7 @@ def test_the_docs_hits_idiom_is_literal_and_runs():
     # The AS-less lateral spelling has never been in this doc; keep it that way.
     assert "FROM data, unnest(hits) h" not in doc, "the doc now teaches a lateral form that misbinds"
 
-    runnable = (idiom.replace("h.<field>", "h.user AS user")
-                     .replace("h.<other>", "h.host")
-                     .replace("<value>", "web-1"))
+    runnable = _fill(idiom, {
+        "h.<field>": "h.user", "h.<other>": "h.host", "<value>": "web-1",
+    })
     assert _rows(_HITS, runnable) == [{"user": "alice"}, {"user": "bob"}]
