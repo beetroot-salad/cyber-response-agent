@@ -88,6 +88,7 @@ from defender.runtime import driver, observe  # noqa: E402
 from defender.runtime.tools import GatherDeps  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
+    DENIED,
     GRANTED,
     ModuleVerbRegistry,
     VerbContext,
@@ -700,6 +701,72 @@ def test_prepare_files_a_capability_refusal_apart_from_an_environment_outage(
         reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
 
     assert [r["source"] for r in served_rows(ledger_path)] == [expected]
+
+
+def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tmp_path):
+    """    #860 — a verb the grant WITHHOLDS is turned away at the grant decision, one frame
+    before the seam; of every call the defender makes it was the one that left no row here, so
+    every reader of this ledger (the judge's "no row on H" above all) saw a sibling that never
+    asked. `decide_call` — the dispatch path's decision — files it as `refused`, against the
+    params as ASKED, under the world's own id, exactly as the prepare-time isolation refusal
+    one test up is filed; and the adapter body is never reached.
+
+    The NEGATIVE arms are what make the split earn its name. `decide` — the same question,
+    asked by the discovery tool about every verb a system declares — records nothing: a
+    withheld verb the model merely READ ABOUT was refused nothing. And a granted call's
+    decision records nothing either: its row is the served one, written when the call runs.
+
+    Observed failing by: no row, a row with the wrong source/params/world, a row for the
+    listing, or a row for the granted decision."""
+    ledger_path = tmp_path / "served.jsonl"
+    ctx = run_ctx(tmp_path)
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
+    asked = {"host": "web-01"}
+
+    # `elastic.get-host` is DECLARED by the fake estate and absent from FAKE_GRANT: a denial.
+    listing = reg.decide("elastic", "get-host")
+    assert listing.outcome == DENIED
+    assert served_rows(ledger_path) == [], "a LISTING of a withheld verb left a row"
+
+    granted = reg.decide_call("elastic", "esql", {"query": "FROM logs\n| LIMIT 1"})
+    assert granted.outcome == GRANTED
+    assert served_rows(ledger_path) == [], "a granted DECISION left a row (its row is the served one)"
+
+    decision = reg.decide_call("elastic", "get-host", asked)
+    assert decision.outcome == DENIED
+    rows = served_rows(ledger_path)
+    assert [r["source"] for r in rows] == [REFUSED], (
+        f"a denied call left {[r['source'] for r in rows]} behind; a refusal that writes no "
+        "row is a served response with no row")
+    assert (rows[0]["system"], rows[0]["verb"], rows[0]["params"]) == ("elastic", "get-host", asked)
+    assert rows[0]["world_id"] == "w1"
+    assert rows[0]["payload_text"] == decision.refusal, "the row's text is the refusal the model sees"
+    assert adapter_calls(ctx) == [], "the estate was called for a call the grant withheld"
+
+
+def test_an_adapter_that_cannot_load_at_the_decision_is_a_fault_row_and_still_raises(tmp_path):
+    """    The other refusal the grant decision makes before the seam: an adapter whose module
+    cannot be imported raises out of `decide`. Filed `fault`, for the reason the prepare-time
+    handler files an environment outage that way — the base world takes the identical failure
+    out of the adapter body and records `fault`, and a different word here would split one
+    outage along the base/sibling axis. Re-raised untouched: what the query tool makes of
+    that exception (§7 R2, the load-error row it writes) is the query tool's own.
+
+    Observed failing by: no row, a `refused` row, or the exception swallowed."""
+    adapters = fake_estate(tmp_path)
+    (adapters / "elastic_adapter.py").write_text(
+        _RECORDING_ADAPTER + "\nraise ImportError('the elastic client is not installed')\n",
+        encoding="utf-8")
+    ledger_path = tmp_path / "served.jsonl"
+    reg = world_registry(adapters, FAKE_GRANT, ledger_path, world=World("w1"))
+
+    with pytest.raises(ImportError, match="not installed"):
+        reg.decide_call("elastic", "esql", {"query": "FROM logs"})
+
+    rows = served_rows(ledger_path)
+    assert [r["source"] for r in rows] == [FAULT], f"an adapter that could not load left {rows}"
+    assert "not installed" in rows[0]["payload_text"]
+    assert rows[0]["world_id"] == "w1"
 
 
 def test_the_verb_table_handed_back_is_the_callers_to_edit(tmp_path):

@@ -26,7 +26,7 @@ from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
-from defender.runtime.verbs import ModuleVerbRegistry
+from defender.runtime.verbs import DENIED, ModuleVerbRegistry, VerbDecision
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.adapters.confinement import (
     VIEW_NAMESPACE,
@@ -377,6 +377,48 @@ class WorldRegistry(ModuleVerbRegistry):
                     "from its corpus rather than patched, so the overlay would be silently "
                     "dropped while every row still read honestly")
         self._wrapped: dict[str, dict[str, Any]] = {}
+
+    def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """The grant decision for a call this world's defender is making, RECORDED where it
+        turns the call away (#860).
+
+        A withheld verb is refused by the grant, before the seam is reached — so of every call
+        the defender makes, it was the one that left no row here, and every reader of this
+        ledger (the mechanical grader above all: "no row on H" is its `lead-set`) saw a
+        sibling that never asked. The same silence `refused` already exists to name, one
+        frame earlier: `_served`'s handler below files the isolation refusal as `refused`
+        because "a refusal that writes no row is a served response with no row", and a denial
+        is a refusal of exactly that kind — the harness's, before the call was made, against
+        the params as ASKED. So it is filed the same way, and the grader's F-1 rule for a
+        `refused` row on H (asked, not answered; excluded from the failure buckets) covers it
+        with no second surface to read and no second flag to store. The query tool's own
+        `∅.denied` row still says which LEAD asked, which this table cannot.
+
+        An adapter that cannot load raises out of `decide` and is filed `fault`, for the
+        reason the handler below files a prepare-time environment fault that way: the base
+        world takes the identical failure and records `fault`, and a different word here
+        would split one outage along the base/sibling axis. Re-raised untouched — the query
+        tool's own classification of that exception is not this frame's.
+
+        `_record_beside`, both times: the decision (or the exception) is what must reach the
+        model, and a row write that fails is reported and dropped rather than replacing it.
+        """
+        try:
+            decision = super().decide_call(system, verb, params)
+        except Exception as failure:
+            _record_beside(self.ledger, ServedCall(
+                system=system, verb=verb, params=dict(params),
+                payload_text=f"{type(failure).__name__}: {failure}", source=FAULT,
+                world_id=self.world.world_id,
+            ))
+            raise
+        if decision.outcome == DENIED:
+            _record_beside(self.ledger, ServedCall(
+                system=system, verb=verb, params=dict(params),
+                payload_text=decision.refusal or f"denied: {system}.{verb}", source=REFUSED,
+                world_id=self.world.world_id,
+            ))
+        return decision
 
     def verbs(self, system: str):
         """Every verb this system declares, wrapped so no body reaches the caller unwrapped.

@@ -846,7 +846,8 @@ def test_repeat_trip_never_reaches_the_backend(tmp_path):
 def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
     """repeat_trip_sits_after_grant_and_infra_breaker — M2's placement, stated as its two
     observable consequences. (a) A DENIED repeat still produces its record in `denial_log` and
-    never an evidence row in `executed_queries` — the guard never sees it, so it never trips.
+    never an evidence row in `executed_queries` — since #860 a `∅.denied` sentinel row, which
+    sits outside the guard's counted domain — so the guard never sees it and it never trips.
     (b) A repeat on an already-tripped system still answers the `circuit_breaker`'s
     down-message: the key-flow ordering `_grant_check -> _tripped_message -> repeat check` is
     checked on every call regardless of what the repeat count would also conclude."""
@@ -859,8 +860,9 @@ def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
             DONE,
         ])
     assert denied_rec.calls == []
-    assert denied.own_rows == [], "a DENIED call wrote an evidence row"
-    assert len(denied.denials) == 3, "the denial record is the DENIED path's only artifact"
+    assert [row["query_id"] for row in denied.own_rows] == [record_query.DENIED_QUERY_ID] * 3, \
+        "a DENIED call wrote an evidence row, or not its sentinel"
+    assert len(denied.denials) == 3, "the denial record is the DENIED path's audit artifact"
     assert denied.gather.calls == 4, "a denied repeat tripped the guard — it is answered above M2"
     assert INCOMPLETE_IDIOM not in denied.summary()
 

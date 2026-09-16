@@ -476,9 +476,10 @@ def repeat_note(  # noqa: PLR0913 — one parameter per ROW FIELD the comparison
     repeat_seq: int | None = None
     same_payload: int | None = None
     for rec in lead_rows(run_dir, lead):
-        # Excludes ABOVE_GUARD_QUERY_ID rows so this scans the SAME counted domain `repeat_trip`
-        # does — such a row never reached the backend, and its digest is an error, not a payload.
-        if rec.get("query_id") == ABOVE_GUARD_QUERY_ID:
+        # Excludes the above-placement sentinels so this scans the SAME counted domain
+        # `repeat_trip` does — such a row never reached the backend, and its digest is an
+        # error, not a payload.
+        if rec.get("query_id") in ABOVE_PLACEMENT_QUERY_IDS:
             continue
         prior = rec.get("seq")
         if not isinstance(prior, int) or prior >= seq:
@@ -624,10 +625,12 @@ REPEAT_ESCAPE = (
 # lead, is a decision for whoever owns the correlation section of ORIENT — recorded here
 # because the number cannot be re-derived from the census alone.
 #
-# NOR IS IT THE ONLY WAY A LEAD SPENDS ITS REQUESTS ON REFUSALS: `_grant_check`'s DENIED branch
-# and both `_tripped_message` returns answer ABOVE this guard with a plain tool RESULT and no
-# queries-table row at all, so they are invisible to both predicates AND reset the framework's
-# per-tool counter. A lead looping on a policy-denied verb is bounded only by
+# NOR IS IT THE ONLY WAY A LEAD SPENDS ITS REQUESTS ON REFUSALS: both `_tripped_message`
+# returns answer ABOVE this guard with a plain tool RESULT and no queries-table row at all, so
+# they are invisible to both predicates AND reset the framework's per-tool counter; and
+# `_grant_check`'s DENIED branch writes a `∅.denied` row (#860) that both predicates EXCLUDE
+# by id (`ABOVE_PLACEMENT_QUERY_IDS`; neither above-guard nor `agent-fixable`), so it is
+# counted by neither either. A lead looping on a policy-denied verb is bounded only by
 # `GATHER_REQUEST_LIMIT`. Also not #1015's, and also not closed by this constant.
 
 REJECTION_BUDGET = 6
@@ -687,6 +690,29 @@ The routing is BY CONSTRUCTION, not a learned case. A descriptive id would be th
 `{system}.defender-sql-unnest` passes the safe-segment match, so every failed reduce would be
 minted as a candidate catalog template."""
 
+DENIED_QUERY_ID = "∅.denied"
+"""The sentinel `query_id` for a call the GRANT CHECK refused — a verb withheld from the role
+(§7 R11's DENIED), written by `_grant_check`'s DENIED branch since #860.
+
+Before #860 a denial left no row at all: the denial audit record (`policy_denials.jsonl`, a
+fact about the RUN, still written first) was its only artifact, and §7 R3's "no evidence row"
+was how a denial stayed out of the learning loop's input. The row exists now because the
+offline judge grades LEADS, and a lead whose only activity was a withheld verb had no row to
+be found by — it rendered as a lead that ran nothing, and was graded as one. What R3 was
+protecting is bought the way it is for every other sentinel: `∅` fails
+`draft_synthesis._SAFE_ID_SEGMENT`, `lead_repository.joined` splits the row onto
+`JoinedLead.sentinels` and never `.queries`, and each learning-loop router partitions on
+`is_sentinel` — so the row is the judge's to read and nobody else's, by construction.
+
+A DISTINCT literal from `ABOVE_GUARD_QUERY_ID` because the judge names its origin (VIEW 1's
+`kind=denied`) and because the row's `error_class` is its own (`DENIED_ERROR_CLASS`, neither
+guard's domain). Like `ABOVE_GUARD_QUERY_ID` it is written ABOVE the guard's placement, so it
+is excluded from `repeat_trip`'s counted domain (`ABOVE_PLACEMENT_QUERY_IDS`) for the reason
+that constant gives: no denied call reaches the guard, so counting the row toward a later trip
+would let the replay oracle report a trip no live run can produce. `rejection_trip`'s domain
+(`in_rejection_domain`) is untouched — it keys on `ABOVE_GUARD_QUERY_ID` AND `agent-fixable`,
+and a denial is neither."""
+
 REPEAT_TRIP_QUERY_ID = "∅.repeat-trip"
 """The sentinel `query_id` for the repeat guard's own trip row.
 
@@ -700,6 +726,12 @@ Naming the row with the model's coined id instead misroutes it in both direction
 is minted as a `_draft/` template proposing the very query the guard just refused, and a
 catalog id reaches the lead-author as a failure of that template. Neither reaches the curator,
 the one reader that could act on it."""
+
+#: The sentinel ids of rows written ABOVE `wrap_tool_execute`'s guard placement — the rows
+#: `repeat_trip` and `repeat_note` must not count, spelled once so the two scans stay the same
+#: domain. `REPEAT_TRIP_QUERY_ID` is deliberately NOT here (its docstring says why), nor is
+#: `BASH_SHIM_QUERY_ID` (the bash lane has no guard placement to be above).
+ABOVE_PLACEMENT_QUERY_IDS = frozenset({ABOVE_GUARD_QUERY_ID, DENIED_QUERY_ID})
 
 SHIM_COMMAND_MAX_CHARS = 2000
 """The bound on a shim row's recorded command.
@@ -831,7 +863,7 @@ def repeat_trip(
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
         system_key=system_key,
-        in_domain=lambda r: r.get("query_id") != ABOVE_GUARD_QUERY_ID,
+        in_domain=lambda r: r.get("query_id") not in ABOVE_PLACEMENT_QUERY_IDS,
     )
 
 

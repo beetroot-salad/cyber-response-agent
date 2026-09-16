@@ -17,6 +17,10 @@ report a raw unchecked zero or a null.
   the connection or the harness (no `netstat`/`ss`/`docker`/`/dev/tcp`), do **not**
   hunt `.env`/credentials, do **not** re-run "to confirm" — a `2` is a data-source
   outage for a human to resolve, not something you can fix.
+- **exit 77 — withheld by policy:** the verb is not granted to your role. Not an
+  outage, not your mistake: do **not** re-run it, try another verb or spelling to
+  reach the same data, or escalate it as a fault. Move on with what this lead has
+  and name the refused system+verb in your summary.
 - **exit 64 — usage error:** *you* called the verb wrong — an unknown system or verb,
   an unknown or missing param, or a param of the wrong type (a quoted number, a quoted
   boolean). The rejection names the verb's declared params; bind those, by name, with
