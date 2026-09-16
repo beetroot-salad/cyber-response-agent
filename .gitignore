@@ -135,3 +135,7 @@ seam-harness/
 # Ignored rather than trusted to discipline, for the reason seam-harness/ above is.
 experiments/*/runs/
 experiments/*/sessions/
+
+# Local Lean toolchain + mathlib4 checkout (elan install, .olean build output): an
+# 8GB local dependency tree, not source.
+lean-tooling/
