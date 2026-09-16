@@ -250,7 +250,11 @@ def test_the_esql_positional_map_is_derived_from_each_payloads_own_columns():
     assert "Positions: 1=host.name, 2=bytes, 3=user" in proc.stderr, (
         "the positional map did not follow this payload's own `columns`"
     )
-    assert "failed" not in proc.stderr and "source.ip" not in proc.stderr, (
+    assert "failed" not in proc.stderr, (
+        "the hint carried the tracked fixture's columns into an unrelated payload — it is a "
+        "memorized constant, not a map of the payload in hand"
+    )
+    assert "source.ip" not in proc.stderr, (
         "the hint carried the tracked fixture's columns into an unrelated payload — it is a "
         "memorized constant, not a map of the payload in hand"
     )
@@ -303,7 +307,8 @@ def test_the_hits_hint_column_list_is_derived_from_each_payloads_own_keys():
     assert "columns [index, total, returned, truncated, hits]" not in proc.stderr, (
         "the hint printed the canonical envelope's columns for a payload that has none of them"
     )
-    assert "index" not in proc.stderr and "truncated" not in proc.stderr
+    assert "index" not in proc.stderr
+    assert "truncated" not in proc.stderr
     # Same branch, same copyable form — so the difference above is the derivation, not a
     # different shape being detected.
     assert _SKELETON in proc.stderr
@@ -767,7 +772,10 @@ def test_the_docs_hits_idiom_is_literal_and_runs():
     # ONLY as the named trap, never as something a lead copies: no fence carries it, and every
     # occurrence sits inside the sentence that rules it out.
     for fence in _sql_fences(doc):
-        assert "unnest(hits) AS" not in fence and ", unnest(hits)" not in fence, (
+        assert "unnest(hits) AS" not in fence, (
+            f"a copyable fence hands back the lateral form, which does not bind: {fence!r}"
+        )
+        assert ", unnest(hits)" not in fence, (
             f"a copyable fence hands back the lateral form, which does not bind: {fence!r}"
         )
     assert idiom.strip() in [f.strip() for f in _sql_fences(doc)], (
