@@ -435,10 +435,12 @@ INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captu
 
 #: The body under a notice when the lead wrote no summary. Two causes, two fixed sentences —
 #: no hole, because the only text that could fill one is model- or provider-authored.
-#: FORFEITED (#987): the query tool told the model to stop and write the summary, and its next
-#: turn was another query — the one grace turn is spent, the run ended on the stored stop.
-NO_SUMMARY_FORFEITED = (
-    "No summary: the lead was told to stop querying and issued another query instead."
+#: SPENT (#987): `RequestCeiling` told the model, on its final request, that the summary was
+#: what that request was for, and the model answered with tool calls instead — the framework
+#: refused the request after it, and there is no text to pass on.
+NO_SUMMARY_SPENT = (
+    "No summary: the lead was told its final request had to be the summary, and did not "
+    "write one."
 )
 #: FAILED: the run ended in a fault (a model that produced nothing actionable, a store that
 #: refused a round) before any turn could be a summary.
@@ -463,9 +465,10 @@ def _request_limit_notice(lead_id: str, request_limit: int) -> str:
 
 
 def _stop_notice(lead_id: str, door: QueryDoor, request_limit: int) -> tuple[str, str]:
-    """`(terminator, notice)` for a closed door. A dead end outranks the ceiling when both
-    closed the door in one round — the guard's sentence names the request being repeated; the
-    ceiling's can only say "spent" (`QueryDoor.close` keeps the dead end for that reason)."""
+    """`(terminator, notice)` for a lead the harness stopped: a guard's dead end if the door
+    holds one, else the ceiling. A dead end outranks the ceiling when a lead met both — the
+    guard's sentence names the request that stopped it; the ceiling's can only say how many
+    requests it was allowed."""
     if door.dead_end is not None:
         return session_store.TRUNCATED_BY_DEAD_END, _dead_end_notice(lead_id, door.dead_end)
     return session_store.TRUNCATED_BY_REQUEST_LIMIT, _request_limit_notice(lead_id, request_limit)
@@ -489,20 +492,24 @@ async def _run_gather(  # noqa: C901, PLR0912 — the branch count IS the termin
     call — not inside a tool the model is mid-run on. `None` is a run with no index to show.
 
     The `except` arms below ARE this frame's complexity, one per way a gather session can end:
-    four that degrade the lead into a notice main can still reason from, two that end the
+    three that degrade the lead into a notice main can still reason from, two that end the
     whole run and only pass through — and, since #987, the arm that is not an `except` at
-    all: a run that ended cleanly on a closed door. Folding two together to clear a
-    complexity threshold costs a session ending with nothing said about why.
+    all: a run that ended cleanly on a lead the harness had stopped. Folding two together to
+    clear a complexity threshold costs a session ending with nothing said about why.
 
-    #987: a lead the harness STOPS — a guard's dead end, or the last query round its ceiling
-    allows — is no longer cut by an exception. The query tool closes the lead's `QueryDoor`
-    and tells the model so in the tool result itself, and the model's next turn is the summary
-    it would have written anyway; the run ends the ordinary way, and this frame reads the door
-    afterwards to stamp the terminator and put the arm's notice ABOVE that summary. So main
-    receives what the lead actually retrieved, under the same header it always did. The two
-    stop arms still exist, for the model that queries again after being told to stop (the one
-    grace turn is forfeited, and the stored stop ends the run — notice, no summary); the two
-    fault arms are untouched. `#808 d21/F6`'s ceiling is one number enforced in one place."""
+    #987: a lead the harness STOPS is no longer cut by an exception. A GUARD's stop is a tool
+    result: the query tool closes the lead's `QueryDoor`, tells the model so in the tool's own
+    answer, and refuses every later `query` the same way. The CEILING is a round: the
+    `RequestCeiling` capability on every gather agent adds one sentence to the last request
+    the ceiling allows — whatever tools that round used — saying the summary is what that
+    request is for. Either way the model's next turn is the summary it would have written,
+    the run ends the ordinary way, and this frame reads the door and the run's request count
+    afterwards to stamp the terminator and put the notice ABOVE that summary. So main receives
+    what the lead actually retrieved, under the same header it always did. The framework's
+    request-limit exception is reached only when the model answered its marked final request
+    with tool calls: the same notice, and a fixed no-summary sentence. There is no dead-end
+    arm: a guard's dead end never leaves the tool on deps that carry a door. `#808 d21/F6`'s
+    ceiling is one number, handed to the factory, the deps and `UsageLimits` alike."""
     lead_id, system = request.lead_id, request.system
     if not _LEAD_ID_RE.match(lead_id):
         raise ModelRetry(
@@ -565,21 +572,22 @@ async def _run_gather(  # noqa: C901, PLR0912 — the branch count IS the termin
     # prefix this dispatch shares with its siblings is the system's, not the lead's. The factory
     # owns that policy — this frame only knows both facts.
     #
-    # `request_limit` is handed to the factory, the door AND `UsageLimits` below — one number:
+    # `request_limit` is handed to the factory, the deps AND `UsageLimits` below — one number:
     # the recorder the factory builds withholds the doomed round against it (#880 F-19), and
-    # the query tool reads the door's copy to know which round is the last it may answer with a
-    # result before the model's final request (#987).
+    # `RequestCeiling` reads the deps' copy to know which request is the last it may mark
+    # (#987).
     gagent = gather_factory(agent_id, system, request_limit)
     gbase = bind(
         GATHER_DEF, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
     )
     assert isinstance(gbase, GatherDeps)
-    door = QueryDoor(request_limit)
+    door = QueryDoor()
     gdeps = replace(
         gbase,
         run_id=deps.run_id,
         lead_id=lead_id,
         budget_started_monotonic=deps.budget_started_monotonic,
+        request_limit=request_limit,
         door=door,
     )
     prompt = _gather_prompt(deps, request, catalog, verb_grant)
@@ -595,24 +603,18 @@ async def _run_gather(  # noqa: C901, PLR0912 — the branch count IS the termin
             prompt, deps=gdeps, usage_limits=UsageLimits(request_limit=request_limit),
         )
         output = str(result.output or "")
-        # A run that ENDED CLEANLY on a lead the harness stopped: the model was told, in a
-        # tool result, that no further query would be answered, and wrote its summary. The
-        # door says which stop it was; the notice goes above the summary.
-        if door.closed:
+        # A run that ENDED CLEANLY. If the harness stopped the lead — a guard closed the door,
+        # or the request that produced this text was the last the ceiling allowed — the
+        # notice goes above the summary. Otherwise the text is the lead's alone.
+        if door.closed or result.usage.requests >= request_limit:
             terminator, notice = _stop_notice(lead_id, door, request_limit)
             output = f"{notice}\n\n{output}"
     except UsageLimitExceeded:
-        # Reached only past a closed door: the model spent the request the ceiling reserved
-        # for its summary on a further query (answered "closed", never executed), and the
-        # next request tripped the limit.
-        terminator = session_store.TRUNCATED_BY_REQUEST_LIMIT
-        output = f"{_request_limit_notice(lead_id, request_limit)}\n\n{NO_SUMMARY_FORFEITED}"
-    except GatherDeadEnd as e:
-        # Likewise: the query tool answers the tripping call itself and closes the door;
-        # the exception reaches this frame only when a LATER round queried again, re-raised
-        # by the tool from the door it stored it in.
-        terminator = session_store.TRUNCATED_BY_DEAD_END
-        output = f"{_dead_end_notice(lead_id, e)}\n\n{NO_SUMMARY_FORFEITED}"
+        # The model answered its marked final request with tool calls (not run: the budget
+        # was spent), and the framework refused the request after it. Which notice depends on
+        # the door: a guard's dead end outranks the ceiling.
+        terminator, notice = _stop_notice(lead_id, door, request_limit)
+        output = f"{notice}\n\n{NO_SUMMARY_SPENT}"
     except UnexpectedModelBehavior as e:
         terminator = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
         output = (

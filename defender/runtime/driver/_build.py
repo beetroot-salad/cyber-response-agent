@@ -22,6 +22,7 @@ from .. import observe
 from .. import permission
 from .. import providers
 from .. import selection
+from ..request_ceiling import RequestCeiling, requests_so_far
 from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, ToolSet
 from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
@@ -277,7 +278,10 @@ def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as bui
         instructions=_gather_instructions(defender_dir),
         logger=logger,
         agent_id=agent_id,
-        extra_capabilities=extra_capabilities,
+        # The ceiling's round marker (#987) on EVERY gather agent, whatever else the caller
+        # hands in — and AHEAD of it, so a recorder among the extras commits the final request
+        # with the sentence the model was actually sent. A no-op on deps with no ceiling.
+        extra_capabilities=[RequestCeiling(), *extra_capabilities],
         make_model=make_model,
         verbs=verbs,
         limits=limits,
@@ -373,8 +377,7 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
         # base, this mirror withheld the extra rounds the raise exists to buy — rounds that
         # genuinely execute — so they skipped history compaction and the model was handed raw,
         # unrendered history for them.
-        usage = getattr(ctx, "usage", None)
-        requests = int(getattr(usage, "requests", 0) or 0)
+        requests = requests_so_far(ctx)
         if requests >= request_limit:
             selection.ingest(store, session_id, messages[:-1], agent_id="main")
             return messages
@@ -409,8 +412,7 @@ def _make_gather_recorder(store: Any, session_id: str, agent_id: str, *, request
         # `messages` already ends with a request that will never be sent. Committing it would
         # leave a phantom round in this gather's session — and unlike main there is no run-end
         # flush on this side to reconcile it afterwards.
-        usage = getattr(ctx, "usage", None)
-        requests = int(getattr(usage, "requests", 0) or 0)
+        requests = requests_so_far(ctx)
         if requests >= request_limit:
             selection.ingest(store, session_id, messages[:-1], agent_id=agent_id)
             return messages

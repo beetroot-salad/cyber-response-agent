@@ -755,11 +755,11 @@ class GatherDeadEnd(Exception):
     system-agnostic sentence handing the decision to main (`escape`). Raised by the guards
     inside the query tool and caught by the tool's own hooks (#987): they close the lead's
     `QueryDoor`, answer the call with `reason` as a failed tool result — the gather model
-    reads `reason`, never `escape` — and the model's next turn is its summary. It reaches
-    `_run_gather` only re-raised, when the model queried again after being told to stop; there
-    it is caught beside `UsageLimitExceeded`, so either way it stays contained to the one
-    lead. `reason` crosses into main's context as the HEADER of the lead's message, which is
-    why it may carry nothing model-authored."""
+    reads `reason`, never `escape` — and the model's next turn is its summary. It never
+    leaves the tool on deps that carry a door: `_run_gather` reads it OFF the door after the
+    run, so it stays contained to the one lead. Only deps bound outside a dispatch (no door)
+    see it raised. `reason` crosses into main's context as the HEADER of the lead's message,
+    which is why it may carry nothing model-authored."""
 
     def __init__(self, reason: str, escape: str):
         # BOTH args go through `super().__init__` so `.args` round-trips through

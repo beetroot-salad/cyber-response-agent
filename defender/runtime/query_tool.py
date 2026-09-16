@@ -27,6 +27,7 @@ from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.payload_view import render as _render_payload
+from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
     REPEAT_ESCAPE,
@@ -91,55 +92,34 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 DEFAULT_FAULT_EXIT = 2
 
 # ---------------------------------------------------------------------------------------------
-# #987 — THE DOOR. A lead the harness stops is told so IN THE TOOL RESULT, in gather's own
+# #987 — THE DOOR. A lead a GUARD stops is told so IN THE TOOL RESULT, in gather's own
 # vocabulary, and writes its summary on the next turn like any lead that finished; nothing is
 # raised out of the run and nothing is replayed. These sentences are what the gather model
-# reads. MAIN's idiom ("Treat this lead as incomplete…") is never among them (#807 G19).
+# reads. MAIN's idiom ("Treat this lead as incomplete…") is never among them (#807 G19). The
+# request CEILING is not a door: it is a fact about the round, and `request_ceiling` tells the
+# model at the round.
 # ---------------------------------------------------------------------------------------------
 
-#: What every closing sentence ends on: the summary is owed NOW, and it must name its gaps.
-WRITE_SUMMARY_NOW = (
-    "Write the summary now, from what you already retrieved: address each item you were asked "
-    "to summarize, and name plainly which of them you could not establish."
-)
 #: After a guard's dead end (`GatherDeadEnd.reason` precedes it): a FAILED tool result.
 QUERY_DOOR_CLOSED = "No further queries can be issued on this lead. " + WRITE_SUMMARY_NOW
-#: Appended to the LAST query round's results the ceiling allows: this round's queries ran,
-#: and the request that follows is the summary — the ceiling is spent, not raised.
-BUDGET_SPENT = (
-    "This was the last query round this lead's request budget allows; no further queries can "
-    "be issued on it. " + WRITE_SUMMARY_NOW
+#: Any `query` after the door closed — a sibling in the closing round, or a later turn's call:
+#: not run, and said so, rather than answered with a reason that belongs to another call. The
+#: reason itself is in the tool result of the call that closed the door.
+QUERY_NOT_RUN = (
+    "This call was not executed: the lead was stopped by an earlier query. " + QUERY_DOOR_CLOSED
 )
-#: A sibling of the call that closed the door, in the same round: not run, and said so, rather
-#: than answered with a reason that belongs to another call.
-SIBLING_NOT_RUN = (
-    "This call was not executed: the lead was stopped by another call in the same turn. "
-    + QUERY_DOOR_CLOSED
-)
-
-
-def _requests(ctx: Any) -> int:
-    """The run's request count, as `_make_gather_recorder` reads it — `0` for a context with no
-    usage at all (lead zero drives `wrap_tool_execute` with a bare namespace)."""
-    return int(getattr(getattr(ctx, "usage", None), "requests", 0) or 0)
 
 
 def _refuse_if_closed(ctx: Any) -> None:
-    """A `query` call against a closed door never runs; what it raises depends on WHEN it came.
-    Same round as the close: a sibling of the closing call, answered so. A LATER round: the
-    model was handed the closing sentence and queried again, and the grace turn is forfeited —
-    a guard's stop ends the run as the stored exception (`_run_gather`'s dead-end arm: notice,
-    no summary); a ceiling's needs nothing raised, because this request was the last the
-    ceiling allows and the framework refuses the next one (the request-limit arm, likewise).
-    A deps with no door (lead zero's harness-driven calls) has nothing to refuse."""
+    """A `query` call against a closed door never runs, whenever it came — a sibling of the
+    closing call in the same round, or the model querying again after being handed the closing
+    sentence. Either is answered `QUERY_NOT_RUN` and costs the model nothing but the turn; the
+    ceiling bounds a model that keeps trying, and `request_ceiling` still puts the summary
+    request in front of it. A deps with no door (lead zero's harness-driven calls) has nothing
+    to refuse."""
     door = getattr(ctx.deps, "door", None)
-    if door is None or not door.closed:
-        return
-    if door.closed_at == _requests(ctx):
-        raise ToolFailed(SIBLING_NOT_RUN)
-    if door.dead_end is not None:
-        raise door.dead_end
-    raise ToolFailed(QUERY_DOOR_CLOSED)
+    if door is not None and door.closed:
+        raise ToolFailed(QUERY_NOT_RUN)
 
 #: How the host names a system it withheld — ONE spelling, spent by `_undeclared_target` on the
 #: sentence MAIN reads and by `UNDECLARED_SYSTEM_DETAIL` on the row. Not a shared PREDICATE (see
@@ -568,24 +548,7 @@ class QueryCapture(AbstractCapability[Any]):
                     target=self._undeclared_target(recorded=system, raw=raw_system),
                     verb=verb,
                 )) from e
-            spent = self._spent(ctx, rejection)
-            if spent is not None:
-                raise spent from e
             raise
-
-    @staticmethod
-    def _spent(ctx, detail: str) -> ToolFailed | None:
-        """A correction the model has no round left to apply: on the last query round the
-        ceiling allows, a rejection closes the door the way a result does — the rejection's
-        own detail, then `BUDGET_SPENT`, as a failed result and not a retry (the framework's
-        "try again" would contradict the sentence that follows it). Any other round: `None`,
-        and the rejection goes out as the retry it is."""
-        door = getattr(ctx.deps, "door", None)
-        requests = _requests(ctx)
-        if door is None or not door.is_last_query_round(requests):
-            return None
-        door.close(at=requests)
-        return ToolFailed(f"{detail} {BUDGET_SPENT}")
 
     async def _grant_check(
         self, deps, system: str, verb: str, params: dict,
@@ -706,32 +669,19 @@ class QueryCapture(AbstractCapability[Any]):
         door = getattr(ctx.deps, "door", None)
         if door is None:
             return dead_end
-        door.close(at=_requests(ctx), dead_end=dead_end)
+        door.close(dead_end)
         return ToolFailed(f"{dead_end.reason} {QUERY_DOOR_CLOSED}")
 
     async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
-        door = getattr(ctx.deps, "door", None)
-        if door is None:
-            return await self._execute(ctx, args, handler)
         # Checked here as well as at validation: the calls of one round run concurrently, and
         # a sibling can close the door between this call's two hooks.
         _refuse_if_closed(ctx)
-        requests = _requests(ctx)
         try:
-            result = await self._execute(ctx, args, handler)
+            return await self._execute(ctx, args, handler)
         except GatherDeadEnd as e:
             raise self._stop(ctx, e) from e
-        except ModelRetry as e:
-            spent = self._spent(ctx, str(e))
-            if spent is not None:
-                raise spent from e
-            raise
-        if door.is_last_query_round(requests):
-            door.close(at=requests)
-            return f"{result}\n\n{BUDGET_SPENT}"
-        return result
 
     async def _execute(self, ctx, args, handler):  # noqa: ANN001
         """The call itself — the grant, the breaker, the repeat guard, the screens, the verb,

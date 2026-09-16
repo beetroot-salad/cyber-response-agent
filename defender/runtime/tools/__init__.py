@@ -293,6 +293,7 @@ __all__ = [
     "ClassVar",
     "FatalConfigError",
     "GatherDeps",
+    "QueryDoor",
     "Iterable",
     "Iterator",
     "ModelRetry",

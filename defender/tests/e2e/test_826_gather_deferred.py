@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -120,7 +121,8 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     `GatherDeadEnd` made a fourth terminator with the same gap.
 
     Driven at the seam so all four arms are reachable without manufacturing a 40-request
-    overrun: each raises out of the gather agent, and each must name a DISTINCT reason — a
+    overrun: three raise out of the gather agent; the dead end (since #987 a tool result, not
+    an exception) closes the lead's door and returns. Each must name a DISTINCT reason — a
     single "truncated" flag would answer "was this cut off" and lose "by what", which is the
     question a reader comparing leads is actually asking."""
     stamped: list[tuple[str, str]] = []
@@ -132,20 +134,34 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
 
         return lambda agent_id, system, request_limit: _Agent()
 
+    def _factory_dead_end():
+        class _Agent:
+            async def run(self, *a, deps, **kw):
+                deps.door.close(GatherDeadEnd("repeats seq 0", "move on"))
+
+                class _Result:
+                    output = "what I had"
+                    usage = SimpleNamespace(requests=2)  # well inside the ceiling
+
+                return _Result()
+
+        return lambda agent_id, system, request_limit: _Agent()
+
     arms = {
-        UsageLimitExceeded("limit"): session_store.TRUNCATED_BY_REQUEST_LIMIT,
-        GatherDeadEnd("repeats seq 0", "move on"): session_store.TRUNCATED_BY_DEAD_END,
-        UnexpectedModelBehavior("retries"): session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
-        session_store.StoreError("disk full"): session_store.TRUNCATED_BY_STORE,
+        _factory_raising(UsageLimitExceeded("limit")): session_store.TRUNCATED_BY_REQUEST_LIMIT,
+        _factory_dead_end(): session_store.TRUNCATED_BY_DEAD_END,
+        _factory_raising(UnexpectedModelBehavior("retries")):
+            session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
+        _factory_raising(session_store.StoreError("disk full")): session_store.TRUNCATED_BY_STORE,
     }
     assert len(set(arms.values())) == len(arms), "two terminators share a reason string"
 
-    for i, (exc, expected) in enumerate(arms.items()):
+    for i, (factory, expected) in enumerate(arms.items()):
         run_dir = materialize(tmp_path / f"arm{i}", GOLDEN_AB3)
         deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
         lead = f"l-00{i}"
         out = asyncio.run(tools_gather._run_gather(
-            deps, _factory_raising(exc), 40,
+            deps, factory, 40,
             GatherRequest(lead, "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
             lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
         ))
@@ -183,6 +199,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         async def run(self, *a, **kw):
             class R:
                 output = "measured."
+                usage = SimpleNamespace(requests=2)  # well inside the ceiling
             return R()
 
     run_dir = materialize(tmp_path / "clean", GOLDEN_AB3)

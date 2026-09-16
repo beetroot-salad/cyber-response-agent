@@ -7,22 +7,30 @@ unwound with the run. Main may not read `gather_raw/` (policy, not accident) and
 table carries digests, not answers, so a lead that answered six queries and then repeated one
 read to main as empty.
 
-THE CHANGE. The lead is not cut. The query tool CLOSES THE LEAD'S DOOR (`QueryDoor`, on the
-deps) and says so in the tool result itself — the guard's own reason, or "this was the last
-query round the budget allows" — followed by the instruction to write the summary now. The
-model's next turn is that summary, the run ends the way a finished lead's does, and
-`_run_gather` reads the door afterwards to stamp the terminator and put the arm's notice
-ABOVE the summary. Nothing is replayed, no second run is made, the tools stay on the wire for
-every request, and the ceiling is one number enforced in one place.
+THE CHANGE. The lead is not cut. Two stops, two seams, because they are facts about two
+different things. A GUARD's stop is a fact about one tool call: the query tool CLOSES THE
+LEAD'S DOOR (`QueryDoor`, on the deps) and says so in that call's own result — the guard's
+reason, then the instruction to write the summary now — and refuses every later `query` the
+same way. The CEILING is a fact about the round: `RequestCeiling`, on every gather agent,
+adds one sentence to the last request the ceiling allows — whatever tools that round used,
+or none — saying the summary is what this request is for, and refuses the tool calls of a
+round whose results could never be shown. Either way the model's next turn is its summary,
+the run ends the way a finished lead's does, and `_run_gather` reads the door and the run's
+request count afterwards to stamp the terminator and put the notice ABOVE the summary.
+Nothing is replayed, no second run is made, the tools stay on the wire for every request,
+and the ceiling is one number enforced in one place.
 
-The model that queries AGAIN after being told to stop forfeits the one grace turn: the run
-ends on the stored stop and main receives the notice with a fixed no-summary sentence.
+There is no grace turn to forfeit. A model that queries again after a dead end is refused
+and keeps its turns; the ceiling bounds it and still marks its final request. A model that
+answers its MARKED final request with tool calls has written nothing: main receives the
+notice with a fixed no-summary sentence.
 
 WHAT LIVES HERE. Everything that needs the real graph: the failed tool result the guard
 produces (from the execute hook AND the validate hook), the sibling of a tripping call, the
-last query round's suffix, the forfeited grace turn on both stops, the roster on the summary
-turn, the session store's rows, and the sweep for main's idiom over everything the gather model
-was ever shown. `tests/test_987_query_door.py` holds what is decidable without a model.
+final request's sentence on every round shape (a query round, a non-query round, a rejected
+call, two siblings), the dead end met on the way to the ceiling, the roster on the summary
+turn, the session store's rows, and the sweep for main's idiom over everything the gather
+model was ever shown. `tests/test_987_query_door.py` holds what is decidable without a model.
 
 No `monkeypatch.setattr`: the model enters through `make_model`, the verb registry through
 `verbs=`, the store through `extra_capabilities`, the agent through `gather_factory`.
@@ -43,6 +51,7 @@ from pydantic_ai.messages import (  # noqa: E402
     TextPart,
     ToolCallPart,
     ToolReturnPart,
+    UserPromptPart,
 )
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
@@ -57,12 +66,12 @@ from defender.runtime import driver, observe, session_store, tools_gather  # noq
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.query_tool import (  # noqa: E402
-    BUDGET_SPENT,
     QUERY_DOOR_CLOSED,
-    SIBLING_NOT_RUN,
+    QUERY_NOT_RUN,
 )
+from defender.runtime.request_ceiling import FINAL_REQUEST  # noqa: E402
 from defender.runtime.tools_gather import (  # noqa: E402
-    NO_SUMMARY_FORFEITED,
+    NO_SUMMARY_SPENT,
     GatherRequest,
 )
 from defender.tests._session_store_705 import runs_base, sql  # noqa: E402
@@ -111,6 +120,12 @@ def _bad_args() -> ModelResponse:
     dead end is raised from the validate hook, not the execute hook."""
     return ModelResponse(parts=[ToolCallPart(
         tool_name="query", args={"system": "elastic", "verb": "query", "params": "not-a-dict"})])
+
+
+def _list_verbs() -> ModelResponse:
+    """A round spent on a tool that is NOT `query` — the round shape a door closed from inside
+    `query` could never see."""
+    return ModelResponse(parts=[ToolCallPart(tool_name="list_verbs", args={"system": "elastic"})])
 
 
 def _text(body: str) -> ModelResponse:
@@ -219,6 +234,16 @@ def flat(messages: list) -> str:
 
 def failed(part: ToolReturnPart) -> bool:
     return part.outcome == "failed"
+
+
+def user_parts(request: ModelRequest) -> list[str]:
+    return [str(p.content) for p in request.parts if isinstance(p, UserPromptPart)]
+
+
+def marked(messages: list) -> list[int]:
+    """Indexes of the requests that carry the final-request sentence."""
+    return [i for i, m in enumerate(messages)
+            if isinstance(m, ModelRequest) and FINAL_REQUEST in user_parts(m)]
 
 
 # =========================================================================================
@@ -331,23 +356,48 @@ def test_a_sibling_of_the_tripping_call_is_never_told_it_was_a_repeat(tmp_path):
         assert not failed(by_id[sibling.tool_call_id])
         assert sibling_answer.startswith("exit=0")
     else:
-        assert sibling_answer == SIBLING_NOT_RUN
+        assert sibling_answer == QUERY_NOT_RUN
         assert not any("i:99" in str(c) for c in lead.rec.calls), \
             "a call answered 'not executed' reached the backend"
 
 
+def test_a_sibling_listed_after_a_schema_refused_trip_is_refused_not_told_it_repeated(tmp_path):
+    """The DETERMINISTIC placement of the sibling case: the trip is a schema-refused repeat, so
+    it closes the door in the VALIDATE phase — before any call of the round executes — and
+    the good sibling is refused at its own validation, whichever order they were listed in.
+    Refused with `QUERY_NOT_RUN`, never with the repeat's reason; no row, no backend call."""
+    lead = run_lead(tmp_path, [
+        _bad_args(), _bad_args(),
+        ModelResponse(parts=[_query(99).parts[0], _bad_args().parts[0]]),
+        _text(SUMMARY),
+    ])
+    assert lead.model.calls == 4
+    header, body = split(lead.out)
+    assert "repeats the one already turned back at seq 0" in header
+    assert body == SUMMARY
+    returns = tool_returns(lead.model.last_inbound[-1:])
+    assert len(returns) == 2
+    calls = [p for p in lead.model.inbound[-1][-2].parts if isinstance(p, ToolCallPart)]
+    sibling = next(c for c in calls if "i:99" in str(c.args))
+    answer = next(p for p in returns if p.tool_call_id == sibling.tool_call_id)
+    assert failed(answer)
+    assert str(answer.content) == QUERY_NOT_RUN
+    assert lead.rec.calls == [], "the refused sibling reached the backend"
+    assert [r["exit_code"] for r in lead.rows] == [64, 64, 64]
+
+
 # =========================================================================================
-# The ceiling — the last query round is announced, the final request is the summary.
+# The ceiling — the final request is marked, whatever the round before it did.
 # =========================================================================================
 
 
-def test_the_last_query_round_is_announced_and_the_final_request_is_the_summary(tmp_path):
-    """Ceiling 3. Two distinct queries, then the summary. The SECOND round is the last the
-    ceiling allows a result for: its return carries the query's result AND the budget
-    sentence, so the model's third (final) request is the summary. Main receives the
-    request-limit notice — naming the lead's OWN ceiling, not the framework's — with the
-    summary under it. #808 d21/F6: three requests, no more, and the ceiling was never
-    lowered to buy the turn."""
+def test_the_final_request_is_marked_and_is_the_summary(tmp_path):
+    """Ceiling 3. Two distinct queries, then the summary. Both queries RUN and their results
+    are reported as results (not failures, nothing appended to them). The THIRD request — the
+    last the ceiling allows — carries the final-request sentence as a user part after the
+    second query's return, and nothing before it does. Main receives the request-limit notice
+    — naming the lead's OWN ceiling, not the framework's — with the summary under it. #808
+    d21/F6: three requests, no more, and the ceiling was never lowered to buy the turn."""
     stamps: list = []
     lead = run_lead(tmp_path, [_query(0), _query(1), _text(SUMMARY)], ceiling=3, stamps=stamps)
 
@@ -358,13 +408,45 @@ def test_the_last_query_round_is_announced_and_the_final_request_is_the_summary(
     assert [r["exit_code"] for r in lead.rows] == [0, 0], "the second query did not run"
     assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_REQUEST_LIMIT)]
 
-    returns = tool_returns(lead.model.last_inbound)
+    last = lead.model.last_inbound
+    returns = tool_returns(last)
     assert not failed(returns[-1]), "the last permitted query's result was reported as a failure"
     assert str(returns[-1].content).startswith("exit=0"), "the result itself was withheld"
-    assert str(returns[-1].content).endswith(BUDGET_SPENT)
-    earlier = tool_returns(lead.model.inbound[1])
-    assert BUDGET_SPENT not in str(earlier[-1].content), "the budget sentence came a round early"
-    assert INCOMPLETE_IDIOM not in flat(lead.model.last_inbound)
+    assert FINAL_REQUEST not in str(returns[-1].content), \
+        "the sentence was pasted onto a tool result instead of being the round's own"
+    assert marked(last) == [len(last) - 1], "the sentence is on a request other than the last"
+    assert isinstance(last[-1].parts[-1], UserPromptPart)
+    assert marked(lead.model.inbound[1]) == [], "the sentence came a round early"
+    assert INCOMPLETE_IDIOM not in flat(last)
+
+
+def test_a_round_with_no_query_in_it_is_told_all_the_same(tmp_path):
+    """THE ROUND SHAPE A DOOR COULD NOT SEE. Ceiling 3: the model spends its first two rounds
+    on `list_verbs` — no `query` call anywhere before the final request — and its third on
+    a query. The final request is marked regardless of which tools the round before it used;
+    a lead told nothing here was the defect a `query`-only stop re-created."""
+    lead = run_lead(tmp_path, [_list_verbs(), _list_verbs(), _text(SUMMARY)], ceiling=3)
+    assert lead.model.calls == 3
+    assert split(lead.out) == (HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=3), SUMMARY)
+    assert marked(lead.model.last_inbound) == [len(lead.model.last_inbound) - 1]
+
+
+def test_a_query_on_the_final_request_is_refused_and_its_answers_are_not_lost(tmp_path):
+    """Ceiling 3: `list_verbs`, then a query, then the model IGNORES the sentence and queries
+    on its final request. That call is not run (no row, no backend call: its result could
+    never be shown), the framework refuses a fourth request, and main receives the
+    request-limit notice with the fixed no-summary sentence — TRUE here, because the model
+    was told on that very request. The one query that ran is in the table."""
+    stamps: list = []
+    lead = run_lead(tmp_path, [_list_verbs(), _query(0), _query(1), _text("too late")],
+                    ceiling=3, stamps=stamps)
+    assert lead.model.calls == 3
+    assert split(lead.out) == (HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=3), NO_SUMMARY_SPENT)
+    assert "too late" not in lead.out
+    assert [r["exit_code"] for r in lead.rows] == [0], "the final request's query ran"
+    assert len(lead.rec.calls) == 1
+    assert marked(lead.model.last_inbound) == [len(lead.model.last_inbound) - 1]
+    assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_REQUEST_LIMIT)]
 
 
 def _unknown_verb() -> ModelResponse:
@@ -377,23 +459,61 @@ def _unknown_verb() -> ModelResponse:
 @pytest.mark.parametrize(("placement", "rejected"), [
     ("validate", _bad_args()), ("execute", _unknown_verb()),
 ])
-def test_a_rejection_on_the_last_query_round_closes_the_door_instead_of_asking_for_a_retry(
+def test_a_rejection_before_the_final_request_is_a_correction_and_the_round_is_still_marked(
         tmp_path, placement, rejected):
-    """Ceiling 3; the second round's call is REJECTED. A correction has no round left to be
-    applied in, so at either placement the rejection goes out as a failed result that ends
-    on the budget sentence — not as a retry prompt, whose "try again" would contradict it —
-    and the third request is the summary, under the request-limit notice."""
+    """Ceiling 3; the second round's call is REJECTED. The rejection goes out as the retry
+    prompt it is at either placement — the tool's answer is about the call — and the request
+    that carries it is the final one, so it ALSO carries the final-request sentence, after the
+    retry. The model's third request is the summary, under the request-limit notice. The
+    ceiling neither swallows the correction nor forgets to mark the round."""
     lead = run_lead(tmp_path, [_query(0), rejected, _text(SUMMARY)], ceiling=3)
     assert lead.model.calls == 3
-    header, body = split(lead.out)
-    assert header == HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=3)
-    assert body == SUMMARY
+    assert split(lead.out) == (HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=3), SUMMARY)
     last = lead.model.last_inbound
-    assert retry_prompts(last) == [], f"the {placement} rejection went out as a retry"
-    closing = tool_returns(last)[-1]
-    assert failed(closing)
-    assert str(closing.content).endswith(BUDGET_SPENT)
+    assert len(retry_prompts(last)) == 1, f"the {placement} rejection was not a correction"
+    assert marked(last) == [len(last) - 1]
+    assert isinstance(last[-1].parts[-1], UserPromptPart), \
+        "the sentence does not come after the correction"
     assert len(lead.rec.calls) == 1, "the rejected call reached the backend"
+
+
+def test_two_queries_on_the_last_permitted_round_both_run_though_one_is_refused(tmp_path):
+    """Ceiling 3. The second round lists a good query and a schema-refused one. The
+    schema refusal is a correction; the good query RUNS and its result is shown — nothing in
+    the ceiling closes a door on siblings, because the ceiling is not a door. Main receives
+    the summary under the request-limit notice, and the table holds both calls."""
+    lead = run_lead(tmp_path, [
+        _query(0), ModelResponse(parts=[_query(1).parts[0], _bad_args().parts[0]]),
+        _text(SUMMARY),
+    ], ceiling=3)
+    assert lead.model.calls == 3
+    assert split(lead.out) == (HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=3), SUMMARY)
+    assert sorted(r["exit_code"] for r in lead.rows) == [0, 0, 64]
+    assert len(lead.rec.calls) == 2, "the good sibling did not reach the backend"
+    last = lead.model.last_inbound
+    ok = [p for p in tool_returns(last[-1:]) if not failed(p)]
+    assert len(ok) == 1
+    assert str(ok[0].content).startswith("exit=0")
+    assert marked(last) == [len(last) - 1]
+
+
+def test_a_dead_end_met_before_the_ceiling_is_what_main_is_told(tmp_path):
+    """Ceiling 4. Three identical queries: the third trips the guard on round 3 and the
+    fourth request is BOTH the closing tool result and the marked final request. The model
+    writes its summary there; main receives it under the DEAD-END notice — the guard's
+    sentence names the request that stopped the lead, the ceiling's could only count — with
+    the dead-end terminator. The dead end is never lost to the ceiling."""
+    stamps: list = []
+    lead = run_lead(tmp_path, [_query(), _query(), _query(), _text(SUMMARY)],
+                    ceiling=4, stamps=stamps)
+    assert lead.model.calls == 4
+    header, body = split(lead.out)
+    assert "repeats the one already issued at seq 0" in header
+    assert body == SUMMARY
+    assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
+    last = lead.model.last_inbound
+    assert str(tool_returns(last)[-1].content).endswith(QUERY_DOOR_CLOSED)
+    assert marked(last) == [len(last) - 1]
 
 
 def test_a_lead_that_finishes_inside_its_ceiling_is_not_relabelled(tmp_path):
@@ -407,47 +527,65 @@ def test_a_lead_that_finishes_inside_its_ceiling_is_not_relabelled(tmp_path):
     from defender.tests.test_987_query_door import frame_body
     assert frame_body(lead.out) == SUMMARY
     assert INCOMPLETE_IDIOM not in lead.out
-    assert BUDGET_SPENT not in flat(lead.model.last_inbound)
+    assert all(marked(m) == [] for m in lead.model.inbound)
     assert QUERY_DOOR_CLOSED not in flat(lead.model.last_inbound)
 
 
 # =========================================================================================
-# The forfeited grace turn — a model that queries after being told to stop gets no summary.
+# After a dead end — the door stays closed, the model keeps its turns, the ceiling bounds it.
 # =========================================================================================
 
 
-def test_querying_again_after_a_dead_end_forfeits_the_summary(tmp_path):
-    """Three repeats trip the guard; the fourth turn is ANOTHER query. That query is never
-    executed (no row, no backend call) and the run ends on the stored dead end: main receives
-    the notice and the fixed no-summary sentence, never a fifth turn's text."""
+def test_querying_again_after_a_dead_end_is_refused_and_the_summary_still_arrives(tmp_path):
+    """Three repeats trip the guard; the fourth turn is ANOTHER query. It is never executed
+    (no row, no backend call), answered `QUERY_NOT_RUN`, and the FIFTH turn's text is the
+    summary main receives under the dead-end notice. No grace turn is forfeited: the summary
+    is the point, and refusing a call costs nothing."""
     stamps: list = []
-    lead = run_lead(tmp_path, [_query(), _query(), _query(), _query(7), _text("too late")],
+    lead = run_lead(tmp_path, [_query(), _query(), _query(), _query(7), _text(SUMMARY)],
                     stamps=stamps)
-    assert lead.model.calls == 4, "the model was given a second grace turn"
+    assert lead.model.calls == 5
     header, body = split(lead.out)
     assert "repeats the one already issued at seq 0" in header
-    assert body == NO_SUMMARY_FORFEITED
-    assert "too late" not in lead.out
-    assert len(lead.rows) == 3, "the forfeiting query wrote a row"
-    assert not any("i:7" in str(c) for c in lead.rec.calls), "the forfeiting query ran"
+    assert body == SUMMARY
+    assert len(lead.rows) == 3, "the refused query wrote a row"
+    assert not any("i:7" in str(c) for c in lead.rec.calls), "the refused query ran"
+    closing = tool_returns(lead.model.last_inbound)[-1]
+    assert failed(closing)
+    assert str(closing.content) == QUERY_NOT_RUN
     assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
 
 
-def test_querying_on_the_reserved_request_forfeits_the_summary(tmp_path):
-    """Ceiling 3, three queries. The second round carried the budget sentence; the third
-    request is a query anyway. It is answered "closed" without executing, the framework
-    refuses a fourth request, and main receives the request-limit notice with the no-summary
-    sentence. Three requests: the ceiling holds."""
-    stamps: list = []
-    lead = run_lead(tmp_path, [_query(0), _query(1), _query(2), _text("too late")],
-                    ceiling=3, stamps=stamps)
-    assert lead.model.calls == 3
+def test_a_summary_written_alongside_a_stray_query_is_not_thrown_away(tmp_path):
+    """Tool-happy gather models emit text and a tool call in one response. After a dead end,
+    the response carrying BOTH the summary and one more `query` is not the end of anything:
+    the query is refused, and the model's next turn — the text alone — is what main receives.
+    A design that ended the run on the stray call discarded the summary in that very
+    response."""
+    both = ModelResponse(parts=[TextPart(content=SUMMARY), _query(7).parts[0]])
+    lead = run_lead(tmp_path, [_query(), _query(), _query(), both, _text(SUMMARY)])
+    assert lead.model.calls == 5
     header, body = split(lead.out)
-    assert header == HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=3)
-    assert body == NO_SUMMARY_FORFEITED
-    assert [r["exit_code"] for r in lead.rows] == [0, 0], "the third query ran"
+    assert "repeats the one already issued at seq 0" in header
+    assert body == SUMMARY
+    assert not any("i:7" in str(c) for c in lead.rec.calls)
+
+
+def test_a_model_that_never_stops_querying_after_a_dead_end_is_bounded_by_the_ceiling(tmp_path):
+    """Ceiling 5: the guard trips on round 3, the model queries on rounds 4 AND 5. Every
+    later call is refused (three rows in the table, two backend calls); the fifth request is
+    the marked final request; its query is refused too; the framework ends the run; main
+    receives the DEAD-END notice (it outranks the ceiling) and the no-summary sentence."""
+    stamps: list = []
+    lead = run_lead(tmp_path, [_query(), _query(), _query(), _query(7), _query(8), _text("x")],
+                    ceiling=5, stamps=stamps)
+    assert lead.model.calls == 5
+    header, body = split(lead.out)
+    assert "repeats the one already issued at seq 0" in header
+    assert body == NO_SUMMARY_SPENT
+    assert len(lead.rows) == 3
     assert len(lead.rec.calls) == 2
-    assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_REQUEST_LIMIT)]
+    assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
 
 
 # =========================================================================================
@@ -484,17 +622,45 @@ def test_the_stopped_leads_session_is_recorded_like_a_finished_ones(tmp_path):
         "the summary turn's request — the one carrying the closing answer — was not recorded"
 
 
+def test_the_marked_final_request_is_recorded_as_it_was_sent(tmp_path):
+    """The ceiling's sentence is added to the request BEFORE the recorder commits it — the
+    ceiling hook sits ahead of every extra capability on a gather agent — so the session
+    holds the request the model actually read, sentence included, and not a shorter one."""
+    base = runs_base(tmp_path / "db")
+    store = session_store.open_store(case_id="case-987c", runs_base=base)
+    session_id = store.new_session(agent_id=f"gather:{LEAD}")
+    caps = driver._gather_extra_capabilities(store, session_id, f"gather:{LEAD}", request_limit=3)
+
+    lead = run_lead(tmp_path, [_query(0), _query(1), _text(SUMMARY)], ceiling=3,
+                    extra=caps, session_id=session_id)
+    assert split(lead.out)[1] == SUMMARY
+    kinds = [k for (k,) in sql(store, """
+        SELECT m.kind FROM message m JOIN session s ON s.session_id = m.session_id
+        WHERE s.agent_id = ? ORDER BY m.id
+    """, (f"gather:{LEAD}",))]
+    assert kinds == ["request", "response"] * 2 + ["request"], kinds
+    last_payload = sql(store, """
+        SELECT p.payload FROM message m
+        JOIN session s ON s.session_id = m.session_id
+        JOIN message_payload p ON p.message_id = m.id
+        WHERE s.agent_id = ? ORDER BY m.id DESC LIMIT 1
+    """, (f"gather:{LEAD}",))[0][0]
+    assert FINAL_REQUEST in str(last_payload), \
+        "the final request was committed without the sentence the model was sent"
+
+
 # =========================================================================================
 # G19 — the gather model never sees main's idiom; main always does.
 # =========================================================================================
 
 
-@pytest.mark.parametrize("scenario", ["dead-end", "ceiling", "forfeited"])
+@pytest.mark.parametrize("scenario", ["dead-end", "ceiling", "spent", "both"])
 def test_the_gather_model_never_sees_mains_idiom_but_main_always_does(tmp_path, scenario):
     script, ceiling = {
         "dead-end": ([_query(), _query(), _query(), _text(SUMMARY)], 6),
         "ceiling": ([_query(0), _query(1), _text(SUMMARY)], 3),
-        "forfeited": ([_query(), _query(), _query(), _query(7)], 6),
+        "spent": ([_query(0), _query(1), _query(2)], 3),
+        "both": ([_query(), _query(), _query(), _query(7), _query(8)], 5),
     }[scenario]
     lead = run_lead(tmp_path, script, ceiling=ceiling)
     everything_gather_saw = "\n".join(flat(m) for m in lead.model.inbound)

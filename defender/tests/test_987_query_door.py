@@ -4,13 +4,15 @@ THE DEFECT. A gather lead the harness stopped — a guard's dead end, or its req
 was cut by an exception, and main received a stand-in notice in place of everything the lead
 had retrieved (see `tests/e2e/test_987_stopped_lead.py` for the whole story).
 
-THE CHANGE. The stop is a TOOL RESULT, not an exception. The query tool closes the lead's
-`QueryDoor` and tells the model so in the tool's own answer; the model's next turn is the
-summary; `_run_gather` reads the door after the run and puts the arm's notice above it. This
-module drives `_run_gather` with FAKE gather agents through the `gather_factory` seam the
-entry point already declares — the notice bytes, the terminator, the composition, the arm
-census, the ceiling handed down — and the door's own semantics with no agent at all.
-Everything that needs the REAL query tool and the real graph is next door.
+THE CHANGE. The stop is a TOOL RESULT, not an exception. A guard's stop closes the lead's
+`QueryDoor` and is told to the model in the tool's own answer; the ceiling is a ROUND, and
+`RequestCeiling` tells the model on the last request itself; the model's next turn is the
+summary; `_run_gather` reads the door and the run's request count afterwards and puts the
+notice above it. This module drives `_run_gather` with FAKE gather agents through the
+`gather_factory` seam the entry point already declares — the notice bytes, the terminator,
+the composition, the arm census, the ceiling handed down — and the door's and the ceiling
+hook's own semantics with no agent at all. Everything that needs the REAL query tool and the
+real graph is next door.
 
 No `monkeypatch.setattr`: every fake enters through `gather_factory`.
 """
@@ -19,23 +21,32 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded  # noqa: E402
+from pydantic_ai.exceptions import ToolFailed, UnexpectedModelBehavior, UsageLimitExceeded  # noqa: E402
+from pydantic_ai.messages import ModelRequest, ToolReturnPart, UserPromptPart  # noqa: E402
 
 # `driver` FIRST: entering the `tools_gather` <-> `tools` cycle at `tools_gather` raises on a
 # partially initialized module.
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
-from defender.runtime import circuit_breaker, query_tool, session_store, tools_gather  # noqa: E402
+from defender.runtime import (  # noqa: E402
+    circuit_breaker,
+    query_tool,
+    request_ceiling,
+    session_store,
+    tools_gather,
+)
 from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.runtime.request_ceiling import FINAL_REQUEST, RequestCeiling  # noqa: E402
 from defender.runtime.tools import QueryDoor  # noqa: E402
 from defender.runtime.tools_gather import (  # noqa: E402
     NO_SUMMARY_FAILED,
-    NO_SUMMARY_FORFEITED,
+    NO_SUMMARY_SPENT,
     GatherRequest,
 )
 from defender.scripts.gather_tools.record_query import GatherDeadEnd  # noqa: E402
@@ -96,25 +107,28 @@ def split(returned: str) -> tuple[str, str]:
 
 
 class Agent:
-    """A gather agent that records its one `.run`, and either returns `output` after doing
-    `to_door` to the deps' door (the query tool's part, played here), or raises `exc`."""
+    """A gather agent that records its one `.run`, does `to_door` to the deps' door (the
+    query tool's part, played here), and either returns `output` with a usage that counts
+    `requests`, or raises `exc`."""
 
     def __init__(self, output: str = "measured: two logins from dev.dana.",
-                 *, exc: BaseException | None = None, to_door=None):
+                 *, exc: BaseException | None = None, to_door=None, requests: int = 2):
         self._output, self._exc, self._to_door = output, exc, to_door
+        self._requests = requests
         self.runs: list[dict] = []
-        self.doors: list[QueryDoor] = []
+        self.deps: list = []
 
     async def run(self, prompt=None, **kwargs):
         self.runs.append({"prompt": prompt, **kwargs})
-        self.doors.append(kwargs["deps"].door)
-        if self._exc is not None:
-            raise self._exc
+        self.deps.append(kwargs["deps"])
         if self._to_door is not None:
             self._to_door(kwargs["deps"].door)
+        if self._exc is not None:
+            raise self._exc
 
         class _Result:
             output = self._output
+            usage = SimpleNamespace(requests=self._requests)
 
         return _Result()
 
@@ -143,40 +157,95 @@ def dispatch(root: Path, agent, *, ceiling: int = 40, stamps: list | None = None
 # ----------------------------------------------------------------------------------------
 
 
-def test_the_door_closes_once_and_a_dead_end_outranks_a_ceiling_close_in_the_same_round():
-    door = QueryDoor(8)
+def test_the_door_closes_once_on_a_dead_end_and_holds_nothing_else():
+    """Two siblings tripping in one round keep the FIRST's reason: the notice main reads names
+    the request that actually stopped the lead. The door knows nothing of the ceiling."""
+    door = QueryDoor()
     assert not door.closed
-    door.close(at=7)
+    door.close(DEAD_END)
     assert door.closed
-    assert (door.closed_at, door.dead_end) == (7, None)
-    door.close(at=7, dead_end=DEAD_END)
-    assert door.dead_end is DEAD_END, \
-        "a sibling's dead end in the closing round did not outrank the ceiling's 'spent'"
-    other = GatherDeadEnd(reason="later", escape="x")
-    door.close(at=8, dead_end=other)
-    assert (door.dead_end, door.closed_at) == (DEAD_END, 7), "a later close overwrote the first"
-
-    first = QueryDoor(8)
-    first.close(at=3, dead_end=DEAD_END)
-    first.close(at=3)
-    assert first.dead_end is DEAD_END, "a ceiling close erased a dead end"
+    assert door.dead_end is DEAD_END
+    door.close(GatherDeadEnd(reason="later", escape="x"))
+    assert door.dead_end is DEAD_END, "a later close overwrote the first"
+    assert not hasattr(door, "request_limit"), \
+        "the ceiling is a fact about the round (`RequestCeiling`), not a door state"
 
 
-def test_the_last_query_round_is_one_below_the_ceiling_and_a_door_without_one_never_closes():
-    """`requests` is the count DURING a round's tool calls; the round that sees `ceiling - 1`
-    is the last whose results the model can be shown before its final request."""
-    door = QueryDoor(8)
-    assert [door.is_last_query_round(n) for n in (6, 7, 8)] == [False, True, True]
-    assert not QueryDoor().is_last_query_round(10 ** 6)
-    assert not QueryDoor(None).closed
-
-
-def test_a_bound_gather_deps_carries_an_open_door_with_no_ceiling(tmp_path):
+def test_a_bound_gather_deps_carries_no_door_and_no_ceiling(tmp_path):
+    """Outside a dispatch nobody would read a door, so there is none: a guard's dead end on
+    such deps unwinds as the exception it always was, and the ceiling hook has nothing to
+    mark. `_run_gather` is the one place that makes both."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     deps = bind(GATHER_DEF, run_dir, defender_dir=DEFENDER)
-    assert isinstance(deps.door, QueryDoor)
-    assert not deps.door.closed
-    assert deps.door.request_limit is None
+    assert deps.door is None
+    assert deps.request_limit is None
+
+
+# ----------------------------------------------------------------------------------------
+# The ceiling hook — one number, read at the round.
+# ----------------------------------------------------------------------------------------
+
+
+def _ctx(requests: int, request_limit: int | None = 8) -> SimpleNamespace:
+    return SimpleNamespace(
+        usage=SimpleNamespace(requests=requests),
+        deps=SimpleNamespace(request_limit=request_limit),
+    )
+
+
+def _marked(requests: int, request_limit: int | None = 8) -> list:
+    """The parts of a one-tool-return request after the hook saw it at `requests`."""
+    req = ModelRequest(parts=[
+        ToolReturnPart(tool_name="query", content="exit=0", tool_call_id="c1")])
+    rc = SimpleNamespace(messages=[req])
+    asyncio.run(RequestCeiling().before_model_request(_ctx(requests, request_limit), rc))
+    return rc.messages[-1].parts
+
+
+def test_the_final_request_alone_is_marked_and_after_the_rounds_tool_results():
+    """`requests` reads N-1 while request N is prepared, so the request prepared at
+    `ceiling - 1` is the last the ceiling allows. One sentence, as a USER part, after the
+    round's tool returns — the order the framework itself canonicalizes a request to — and
+    nothing on any other request."""
+    assert [len(_marked(n)) for n in (5, 6, 7, 8)] == [1, 1, 2, 1]
+    parts = _marked(7)
+    assert isinstance(parts[0], ToolReturnPart)
+    assert isinstance(parts[1], UserPromptPart)
+    assert parts[1].content == FINAL_REQUEST
+    assert len(_marked(0, request_limit=1)) == 2, "a ceiling of one marks the very first request"
+    assert len(_marked(7, request_limit=None)) == 1, "deps with no ceiling were marked"
+
+
+def test_a_tool_call_on_the_final_request_is_refused_and_earlier_ones_run():
+    """Round N's tool calls run with `requests == N`; on round `ceiling` their results would
+    go into a request the framework refuses, so nothing runs — whatever the tool."""
+    ran: list = []
+
+    async def handler(args):
+        ran.append(args)
+        return "ok"
+
+    hook = RequestCeiling()
+    for n in (1, 7):
+        assert asyncio.run(hook.wrap_tool_execute(
+            _ctx(n), call=SimpleNamespace(tool_name="bash"), args={"n": n}, handler=handler,
+        )) == "ok"
+    with pytest.raises(ToolFailed) as ei:
+        asyncio.run(hook.wrap_tool_execute(
+            _ctx(8), call=SimpleNamespace(tool_name="query"), args={"n": 8}, handler=handler,
+        ))
+    assert request_ceiling.TOOL_NOT_RUN_BUDGET_SPENT in str(ei.value)
+    assert [a["n"] for a in ran] == [1, 7]
+    assert asyncio.run(hook.wrap_tool_execute(
+        _ctx(8, request_limit=None), call=SimpleNamespace(tool_name="query"), args={"n": 9},
+        handler=handler,
+    )) == "ok", "deps with no ceiling were refused"
+
+
+def test_the_request_count_reads_zero_for_a_context_with_no_usage():
+    assert request_ceiling.requests_so_far(SimpleNamespace()) == 0
+    assert request_ceiling.requests_so_far(SimpleNamespace(usage=None)) == 0
+    assert request_ceiling.requests_so_far(SimpleNamespace(usage=SimpleNamespace(requests=3))) == 3
 
 
 # ----------------------------------------------------------------------------------------
@@ -184,10 +253,11 @@ def test_a_bound_gather_deps_carries_an_open_door_with_no_ceiling(tmp_path):
 # ----------------------------------------------------------------------------------------
 
 
-def test_the_factory_the_door_and_the_usage_limit_are_handed_one_number(tmp_path):
-    """#880 F-19 and #808 d21/F6 in one assertion: the recorder the factory builds, the door
-    the query tool reads, and the `UsageLimits` the run enforces are the SAME ceiling — not
-    the ceiling and a derived neighbour. Driven at two ceilings so a constant cannot pass."""
+def test_the_factory_the_deps_and_the_usage_limit_are_handed_one_number(tmp_path):
+    """#880 F-19 and #808 d21/F6 in one assertion: the recorder the factory builds, the
+    ceiling hook reading the deps, and the `UsageLimits` the run enforces are the SAME
+    ceiling — not the ceiling and a derived neighbour. Driven at two ceilings so a constant
+    cannot pass. The deps carry a fresh, open door: `_run_gather` is where doors are made."""
     for i, ceiling in enumerate((40, 8)):
         handed: list[int] = []
         agent = Agent()
@@ -195,12 +265,14 @@ def test_the_factory_the_door_and_the_usage_limit_are_handed_one_number(tmp_path
         assert len(agent.runs) == 1, "a lead makes ONE run"
         assert handed == [ceiling]
         assert agent.runs[0]["usage_limits"].request_limit == ceiling
-        assert agent.doors[0].request_limit == ceiling
+        assert agent.deps[0].request_limit == ceiling
+        assert isinstance(agent.deps[0].door, QueryDoor)
+        assert not agent.deps[0].door.closed
 
 
 def test_a_lead_that_finished_is_untouched(tmp_path):
     stamps: list = []
-    out = dispatch(tmp_path, Agent("measured: two logins."), stamps=stamps)
+    out = dispatch(tmp_path, Agent("measured: two logins.", requests=2), ceiling=8, stamps=stamps)
     assert frame_body(out) == "measured: two logins."
     assert stamps == []
     assert INCOMPLETE_IDIOM not in out
@@ -208,7 +280,7 @@ def test_a_lead_that_finished_is_untouched(tmp_path):
 
 def test_a_door_closed_on_a_dead_end_puts_the_dead_end_notice_above_the_summary(tmp_path):
     stamps: list = []
-    agent = Agent("what I had.", to_door=lambda d: d.close(at=3, dead_end=DEAD_END))
+    agent = Agent("what I had.", to_door=lambda d: d.close(DEAD_END))
     out = dispatch(tmp_path, agent, stamps=stamps)
     header, body = split(out)
     assert header == HEADER_DEAD_END.format(lead=LEAD, reason=DEAD_END.reason,
@@ -217,10 +289,11 @@ def test_a_door_closed_on_a_dead_end_puts_the_dead_end_notice_above_the_summary(
     assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
 
 
-def test_a_door_closed_on_the_ceiling_puts_the_request_limit_notice_above_the_summary(tmp_path):
+def test_a_summary_written_on_the_final_request_gets_the_request_limit_notice_above_it(tmp_path):
+    """The run ended cleanly and its request count IS the ceiling: the text came from the
+    request `RequestCeiling` marked. Nothing on the door; the count alone says so."""
     stamps: list = []
-    agent = Agent("what I had.", to_door=lambda d: d.close(at=7))
-    out = dispatch(tmp_path, agent, ceiling=8, stamps=stamps)
+    out = dispatch(tmp_path, Agent("what I had.", requests=8), ceiling=8, stamps=stamps)
     header, body = split(out)
     assert header == HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=8)
     assert "request_limit of" not in header, \
@@ -229,37 +302,33 @@ def test_a_door_closed_on_the_ceiling_puts_the_request_limit_notice_above_the_su
     assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_REQUEST_LIMIT)]
 
 
-def test_a_dead_end_outranks_the_ceiling_when_both_closed_the_door(tmp_path):
-    def both(d: QueryDoor) -> None:
-        d.close(at=7)
-        d.close(at=7, dead_end=DEAD_END)
-
+def test_a_dead_end_outranks_the_ceiling_when_the_lead_met_both(tmp_path):
     stamps: list = []
-    out = dispatch(tmp_path, Agent("s.", to_door=both), ceiling=8, stamps=stamps)
+    out = dispatch(tmp_path, Agent("s.", to_door=lambda d: d.close(DEAD_END), requests=8),
+                   ceiling=8, stamps=stamps)
     assert split(out)[0].startswith(f"gather for {LEAD} hit a dead end: ")
     assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
 
 
-@pytest.mark.parametrize("arm", ["request-limit", "dead-end"])
-def test_a_stop_that_reaches_the_frame_as_an_exception_is_a_forfeited_grace_turn(tmp_path, arm):
-    """The two STOP exceptions reach `_run_gather` only when the model queried again after
-    being told to stop (the query tool re-raises a stored dead end; the framework refuses the
-    request after a closed-door round). Notice, blank line, the fixed no-summary sentence."""
-    exc, header, terminator = {
-        "request-limit": (
-            UsageLimitExceeded("The next request would exceed the request_limit of 8"),
-            HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=8),
-            session_store.TRUNCATED_BY_REQUEST_LIMIT,
-        ),
-        "dead-end": (
-            DEAD_END,
-            HEADER_DEAD_END.format(lead=LEAD, reason=DEAD_END.reason, escape=DEAD_END.escape),
-            session_store.TRUNCATED_BY_DEAD_END,
-        ),
-    }[arm]
+@pytest.mark.parametrize("door_state", ["open", "dead-end"])
+def test_the_request_limit_exception_is_a_final_request_spent_on_tool_calls(tmp_path, door_state):
+    """The framework's exception reaches `_run_gather` only when the model answered its
+    marked final request with tool calls (refused, not run) and the request after it was
+    refused. Notice — the dead end's if a guard had closed the door, else the ceiling's — a
+    blank line, the fixed no-summary sentence. No dead-end ARM exists: on deps with a door a
+    guard's stop never leaves the tool."""
+    to_door, header, terminator = {
+        "open": (None, HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=8),
+                 session_store.TRUNCATED_BY_REQUEST_LIMIT),
+        "dead-end": (lambda d: d.close(DEAD_END),
+                     HEADER_DEAD_END.format(lead=LEAD, reason=DEAD_END.reason,
+                                            escape=DEAD_END.escape),
+                     session_store.TRUNCATED_BY_DEAD_END),
+    }[door_state]
     stamps: list = []
-    out = dispatch(tmp_path, Agent(exc=exc), ceiling=8, stamps=stamps)
-    assert split(out) == (header, NO_SUMMARY_FORFEITED)
+    exc = UsageLimitExceeded("The next request would exceed the request_limit of 8")
+    out = dispatch(tmp_path, Agent(exc=exc, to_door=to_door), ceiling=8, stamps=stamps)
+    assert split(out) == (header, NO_SUMMARY_SPENT)
     assert stamps == [(f"gather:{LEAD}", terminator)]
 
 
@@ -304,11 +373,15 @@ def test_the_two_run_level_arms_still_pass_through(tmp_path, arm):
 
 
 def test_no_closing_sentence_carries_mains_idiom_and_every_notice_does():
-    for name in ("WRITE_SUMMARY_NOW", "QUERY_DOOR_CLOSED", "BUDGET_SPENT", "SIBLING_NOT_RUN"):
-        text = getattr(query_tool, name)
+    for module, name in (
+        (request_ceiling, "WRITE_SUMMARY_NOW"), (request_ceiling, "FINAL_REQUEST"),
+        (query_tool, "QUERY_DOOR_CLOSED"), (query_tool, "QUERY_NOT_RUN"),
+    ):
+        text = getattr(module, name)
         assert "Treat this lead" not in text, name
         assert "summary" in text, f"{name} does not ask for the summary"
-    for name in ("NO_SUMMARY_FORFEITED", "NO_SUMMARY_FAILED"):
+    assert "Treat this lead" not in request_ceiling.TOOL_NOT_RUN_BUDGET_SPENT
+    for name in ("NO_SUMMARY_SPENT", "NO_SUMMARY_FAILED"):
         text = getattr(tools_gather, name)
         assert "{" not in text, f"{name} has a hole — the only text to fill it is not the host's"
     assert tools_gather.INCOMPLETE_IDIOM == INCOMPLETE_IDIOM

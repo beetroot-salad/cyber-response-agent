@@ -91,10 +91,10 @@ F-C's pin read "the tripping call returns no tool result, and the gather model i
 again". BOTH halves are revised, and one word of each survives. The tripping call IS answered
 now — with a FAILED tool result carrying the guard's own reason and the sentence that closes
 the lead's door (`query_tool.QUERY_DOOR_CLOSED`), never with a REPEAT annotation, which is
-what `test_tripping_call_carries_no_repeat_note` still drives. And the gather model IS given
-one more turn — not to query (a `query` call against the closed door forfeits the turn and
-ends the run on the stored dead end) but to write the summary main receives under this arm's
-own notice. So every lead in this file that ends in a dead end spends ONE MORE scripted turn
+what `test_tripping_call_carries_no_repeat_note` still drives. And the gather model IS asked
+again — not to query (a `query` call against the closed door is refused, `QUERY_NOT_RUN`)
+but to write the summary main receives under this arm's own notice. So every lead in this
+file that ends in a dead end and then writes its summary spends ONE MORE scripted turn
 than it used to — `SUMMARY_TURN` below is that turn, spelled wherever a script serves two
 leads and the shift would otherwise be silent.
 
@@ -1719,7 +1719,7 @@ def test_concurrent_identical_siblings_still_stop_the_lead(tmp_path):
         "the concurrent trip did not end the lead (5+), or it ended and the summary turn did "
         "not follow (3) — which on THIS script needs BOTH siblings answered, each by its own "
         "execution: the first to trip closes the door, the other is either its own trip or "
-        "`SIBLING_NOT_RUN`"
+        "`QUERY_NOT_RUN`"
     )
     assert INCOMPLETE_IDIOM in r.summary()
     assert any(row["exit_code"] == 64 for row in r.own_rows), "no trip row was written at all"
