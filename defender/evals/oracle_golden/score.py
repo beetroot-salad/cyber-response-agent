@@ -23,10 +23,12 @@ whether the model happened to quote it (#951). The projection is therefore read 
 `defender._yaml.safe_load_typed_and_spelled`: ONE parse of the file, constructed twice from
 that one node tree. The `typed` reading is what every reader had before #951 — the
 lead→events structure the integrity and grammar checks walk, the per-lead expectation
-clauses inspect, and the judge is shown, unchanged — and the `spelled` reading is the same
-structure with every scalar as the text in the file, which is the ONLY thing the two
-containment checks (`must_not_emit`, `must_emit`) compare against. Both come from one tree,
-so the values the checks scan are, by construction, the values of the events the judge is
+clauses inspect, and the judge is shown, unchanged. The `spelled` reading has the same
+shape exactly, with every VALUE scalar as the text in the file, and it is what every
+question about the TEXT of the projection is asked of: the two containment checks
+(`must_not_emit`, `must_emit`) and the concrete-value check. One walker (`emitted_values`)
+serves those, and it walks the spelled reading only. Both readings come from one tree, so
+the values the checks scan are, by construction, the values of the events the judge is
 shown. The author's side — `must_emit` / `must_not_emit` — is text by RULE, not by reader:
 each entry must be a quoted string, and `forbidden_values` / `required_values` refuse a
 clause that carries anything else, so the manifest and `expected.yaml` stay the typed
@@ -160,23 +162,29 @@ def emitted_values(events: object) -> list[str]:
 
     Keys are excluded on purpose: they are schema field names (`user.name`), never the
     mutated entities a mutation case forbids, so scanning them only invents false leaks.
-    Nested collections are walked because an event carrying one is malformed to the grammar
-    (`grammar_problem`) and still scanned — a leak inside a malformed event is a leak. And
-    `events` that is not a list at all (a bare scalar, a mapping) is walked as it is, for the
-    same reason.
+    Nested collections are walked because their content is content — the grammar admits an
+    event whose value is a list (a threat-intel row's `tags: []` is a committed example), and
+    a leak inside one is a leak. `events` that is not a list at all (a bare scalar, a
+    mapping) is walked as it is, for the same reason. Order is not preserved: both readers
+    (`emitted_index`, a set; `has_concrete_value`, an `any`) are order-blind.
 
-    Fed the SPELLED reading of the projection (`_measured`), so every scalar here is already
-    the model's text; `str()` is for a caller (a test) that hands in a document it built in
-    memory.
+    Walks the SPELLED reading (`_measured`), so every scalar here is already the model's
+    text. `str()` is for the scalars that reading leaves typed (the safe loader's own
+    `!!omap`/`!!pairs`/`!!set` members) and for a caller (a test) that hands in a document
+    it built in memory. Identity-keyed `seen`: an anchor that contains its own alias
+    (`&e [{self: *e}]`) loads as a cyclic object, in both readings, and a walk without it
+    never ends.
     """
     out: list[str] = []
     stack: list[object] = [events]
+    seen: set[int] = set()
     while stack:
         current = stack.pop()
-        if isinstance(current, dict):
-            stack.extend(reversed(list(current.values())))
-        elif isinstance(current, list):
-            stack.extend(reversed(current))
+        if isinstance(current, (dict, list)):
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            stack.extend(current.values() if isinstance(current, dict) else current)
         elif current is not None:
             out.append(str(current))
     return out
@@ -227,6 +235,9 @@ def has_concrete_value(events: object) -> bool:
     `prompt.md` mandates `<angle-placeholder>` for anything the story does not state, so
     a wholly-placeholdered event is an abstention, not a claim. Reported for the derived
     cases, where it is the only thing distinguishing "declined to invent" from "invented".
+
+    A question about the projection's TEXT, so it is asked of the spelled reading like the
+    containment checks — a null is the `~` or `""` the model wrote, and counts as it did.
     """
     return any(not _PLACEHOLDER.search(v) for v in emitted_values(events))
 
@@ -303,11 +314,15 @@ def system_of(lead: dict) -> str:
     return "+".join(systems) if systems else "?"
 
 
-def load_predictions(proj: dict) -> tuple[dict[str, list], list[str]]:
-    """Projection rows as {lead_id: events}, plus any lead_id repeated in the doc."""
+def load_predictions(proj: object) -> tuple[dict[str, list], list[str]]:
+    """Projection rows as {lead_id: events}, plus any lead_id repeated in the doc.
+
+    A document that is not a mapping (empty, a bare `null`, a scalar) has no rows: every
+    lead is then MISSING, which is the integrity check's verdict to give, not a crash's."""
     preds: dict[str, list] = {}
     duplicates: list[str] = []
-    for row in proj.get("projections") or []:
+    rows = proj.get("projections") if isinstance(proj, dict) else None
+    for row in rows or []:
         lead_id = row["lead_id"]
         if lead_id in preds:
             duplicates.append(lead_id)
@@ -409,12 +424,13 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
     """
     manifest = safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
     # One parse of the projection, two readings of it (module docstring): the typed one is
-    # the structure every check walks and the judge is shown; the spelled one exists for
-    # `emitted_index` alone, so the containment checks compare the model's own text.
+    # the structure every check walks and the judge is shown; the spelled one — same shape,
+    # so the same navigation finds the same rows — is what every question about the
+    # projection's TEXT is asked of.
     readings = safe_load_typed_and_spelled(proj_path.read_text(encoding="utf-8"))
     leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
-    preds, duplicates = load_predictions(readings.typed or {})
-    spelled_preds, _ = load_predictions(readings.spelled or {})
+    preds, duplicates = load_predictions(readings.typed)
+    spelled_preds, _ = load_predictions(readings.spelled)
     emitted = emitted_index(spelled_preds)
 
     summary: dict = {
@@ -434,7 +450,7 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
             "expectation_failures": expectation_failures(
                 manifest.get("expectation") or {}, preds, list(leads), emitted),
             "concrete_value_leads": sorted(
-                lead_id for lead_id, events in preds.items()
+                lead_id for lead_id, events in spelled_preds.items()
                 if isinstance(events, list) and has_concrete_value(events)),
         },
     }

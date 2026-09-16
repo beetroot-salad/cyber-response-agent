@@ -1093,10 +1093,67 @@ def test_events_arriving_through_a_merge_key_are_scanned(tmp_path):
     assert _score(d, proj, _scripted())["mechanical"]["forbidden_emitted"] == ["root"]
 
 
+def test_a_self_containing_anchor_in_the_events_is_scanned_and_terminates(tmp_path):
+    """`events: &e [{self: *e}]` is legal YAML and loads as a cyclic object in both
+    readings. The fourth cut's walker had no visited set and never returned — `--dry-run`
+    hung before printing a line (the review's finding). The leak beside the cycle is
+    still found."""
+    d = _case(tmp_path, kind="mutation",
+              extra_manifest={"expectation": {"must_not_emit": ["root"]}})
+    proj = _write_text(d, "projections/a.yaml", (
+        "projections:\n  - lead_id: l-001\n    events: &e\n"
+        "      - user.name: root\n        self: *e\n"))
+    assert _mechanical(d, proj)["mechanical"]["forbidden_emitted"] == ["root"]
+
+
+@pytest.mark.parametrize("text", ["null\n", "~\n", "0\n", "false\n", "just words\n"])
+def test_a_projection_file_that_is_not_a_mapping_has_no_rows(tmp_path, text):
+    """A bare scalar where the document should be. Every lead is MISSING — the integrity
+    check's verdict, exit 1 — not a traceback out of `.get` (the fourth cut, for the falsy
+    spellings, whose spelled reading was the truthy text `"null"`; main, for a string)."""
+    d = _case(tmp_path)
+    proj = _write_text(d, "projections/a.yaml", text)
+    mech = _mechanical(d, proj)["mechanical"]
+    assert mech["missing_leads"] == ["l-001"]
+    assert _dry(d, proj) == 1
+
+
+def test_a_typed_key_and_its_quoted_twin_both_keep_their_values(tmp_path):
+    """`1: root` and `'1': x` are two pairs to `safe_load`, so the judge is shown both. A
+    spelled reading that made keys text merged them and kept only `x` — `root` was in the
+    judge's block and absent from the containment index (the review's finding against the
+    fourth cut). Keys stay typed; the two readings have the same pairs."""
+    d = _case(tmp_path, kind="mutation",
+              extra_manifest={"expectation": {"must_not_emit": ["root"]}})
+    proj = _projection_text(d, "user.name: admin\n1: root\n'1': x")
+    assert _mechanical(d, proj)["mechanical"]["forbidden_emitted"] == ["root"]
+
+
+@pytest.mark.parametrize(("event_lines", "concrete"), [
+    ("user.name: <account>\nmessage: ~", True),      # a null the model wrote is a value
+    ("user.name: <account>\nmessage:", True),        # an empty one too
+    ("user.name: <account>\ntags: []", False),       # an empty list holds no value
+    ("user.name: <account>\nmeta: {}", False),
+    ("user.name: <account>", False),
+])
+def test_what_counts_as_a_concrete_value_is_decided_on_the_spelled_reading(
+        tmp_path, event_lines, concrete):
+    """`has_concrete_value` is a question about the projection's TEXT and is asked of the
+    same reading as the containment checks. The fourth cut asked it of the typed reading
+    through the rewritten walker, so a null stopped counting (`None` is skipped) while the
+    containment index still carried its `~` — the two text questions disagreed on what a
+    value is (the review's finding). Pinned so the semantics are a decision, not drift."""
+    d = _case(tmp_path, kind="spec-probe", extra_manifest={"kind": "spec-probe"})
+    proj = _projection_text(d, event_lines)
+    leads = _mechanical(d, proj)["mechanical"]["concrete_value_leads"]
+    assert (leads == ["l-001"]) is concrete
+
+
 def test_a_nested_value_inside_an_event_is_scanned_not_crashed(tmp_path):
-    """An event carrying a mapping value is malformed to the grammar and still scanned:
-    the leak inside it is reported and nothing raises (the first cut raised
-    `TypeError: unhashable` on a non-scalar it met in a set membership)."""
+    """An event carrying a mapping value is admitted by the grammar (a mapping is a
+    mapping) and its content is scanned: the leak inside it is reported and nothing raises
+    (the first cut raised `TypeError: unhashable` on a non-scalar it met in a set
+    membership)."""
     d = _case(tmp_path, kind="mutation",
               extra_manifest={"expectation": {"must_not_emit": ["root"]}})
     proj = _projection_text(d, "user: {name: root}\nsource.ip: 10.0.0.1")

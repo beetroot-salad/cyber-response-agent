@@ -146,14 +146,14 @@ def _resolved_key(key_node: Any, constructor: Any) -> Any:
 
 def safe_load(text: str) -> Any:
     with _construction_errors_as_yaml_errors():
-        return yaml.load(text, Loader=yaml.SafeLoader)  # noqa: S506 — the safe loader
+        return yaml.safe_load(text)
 
 
 class Readings(NamedTuple):
     """One document, read twice from ONE node tree — see `safe_load_typed_and_spelled`."""
 
     typed: Any    #: what `safe_load` gives
-    spelled: Any  #: the same structure, every scalar the text it was written as
+    spelled: Any  #: the same shape exactly; every VALUE scalar the text it was written as
 
 
 def safe_load_typed_and_spelled(text: str) -> Readings:
@@ -168,22 +168,28 @@ def safe_load_typed_and_spelled(text: str) -> Readings:
     a token of what the projection emitted — ran over a document already typed that way, so
     whether a forbidden instant was caught depended on whether the model quoted it (#951).
 
-    `spelled` is that same document with scalar construction alone overridden: a `<<:` merge
-    still merges, an alias still resolves, a repeated key still collapses to its last value.
-    Mapping keys are text too (`1:` and `"1":` are one key here, two in `typed`), and a null
-    is its spelling — `~` is `"~"`, an empty value is `""`. And because the typed half is
-    built first, whatever `safe_load` refuses (a `!!python/…` tag anywhere, an impossible
-    calendar date) is refused here too — the pair never hands back a spelling of a document
-    `safe_load` would not have accepted.
+    `spelled` has the SAME SHAPE as `typed` — the same containers, the same keys, the same
+    number of pairs, the same root type, the same aliases and cycles — and differs only at
+    the leaves: a scalar that is a VALUE (a mapping's value, a sequence's item) is its text.
+    Mapping keys stay typed, because a text key would merge `1:` with `'1':` and drop one of
+    two pairs the typed document keeps — a value the judge is shown that the checks never
+    scanned. A bare scalar document stays typed for the same reason: it is nobody's value,
+    and a caller asking "is this a mapping" must get one answer for both readings. Every
+    null is its spelling (`~` is `"~"`, an empty value is `""`).
 
-    Both halves are built from the SAME node tree, composed once, so a reader that wants the
-    structure typed (which lead has which events, is `events` a list) and the values spelled
-    (what text did the model emit) cannot be handed two documents that disagree about which
-    nodes those are — the only way the two can differ is in what a scalar became. That is
-    why this is a pair and not a second loader beside `safe_load`: the caller who needs the
-    spelling always needs the structure too, and taking both from one parse is what makes
-    "the values the checks scan are the values of the events the judge is shown" true by
-    construction rather than by the two loaders happening to agree.
+    Both halves come from one tree, so a reader that wants the structure typed (which lead
+    has which events, is `events` a list) and the values spelled (what text did the model
+    emit) is handed two documents that can differ ONLY in what a value scalar became. That
+    is why this is a pair and not a second loader beside `safe_load`: the caller who needs
+    the spelling always needs the structure too, and one parse is what makes "the values
+    the checks scan are the values of the events the judge is shown" true by construction
+    rather than by two loaders happening to agree. And because the typed half is built
+    first, whatever `safe_load` refuses (a `!!python/…` tag anywhere, an impossible calendar
+    date) is refused here too.
+
+    Two edges, both outside the projection grammar: the safe loader's other collection tags
+    (`!!omap`, `!!pairs`, `!!set`) construct their members themselves and stay typed; and a
+    scalar aliased from a mapping key is constructed once, as the key.
     """
     with _construction_errors_as_yaml_errors():
         # `compose` and not `yaml.compose`: the module's one safe-loader-only tree builder.
@@ -192,18 +198,37 @@ def safe_load_typed_and_spelled(text: str) -> Readings:
             return Readings(None, None)
         return Readings(
             yaml.constructor.SafeConstructor().construct_document(root),
-            _TextScalarConstructor().construct_document(root),
+            _SpelledValuesConstructor().construct_document(root),
         )
 
 
-class _TextScalarConstructor(yaml.constructor.SafeConstructor):
-    """`SafeConstructor` whose scalars construct to their own text. Only a method is
+class _SpelledValuesConstructor(yaml.constructor.SafeConstructor):
+    """`SafeConstructor` whose VALUE scalars construct to their own text.
+
+    A value is a node reached as a mapping's value or a sequence's item, and those are the
+    two places PyYAML hands children to `construct_object` — so each is noted as it goes by,
+    and a scalar arriving at `construct_object` unnoted (a key, the root) is typed as usual.
+    `flatten_mapping` runs first so a `<<:` merge's values are noted too. Only methods are
     overridden — no class-level table (the resolver's in particular is the loader's, and
-    shared until first write), so nothing here can leak into `yaml.safe_load` for the rest
-    of the process."""
+    shared until first write) — so nothing here can leak into `yaml.safe_load` for the rest
+    of the process.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._value_nodes: set[int] = set()
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> Any:
+        self.flatten_mapping(node)
+        self._value_nodes.update(id(value) for _, value in node.value)
+        return super().construct_mapping(node, deep)
+
+    def construct_sequence(self, node: Any, deep: bool = False) -> Any:
+        self._value_nodes.update(id(item) for item in node.value)
+        return super().construct_sequence(node, deep)
 
     def construct_object(self, node: Any, deep: bool = False) -> Any:
-        if isinstance(node, yaml.ScalarNode):
+        if isinstance(node, yaml.ScalarNode) and id(node) in self._value_nodes:
             return node.value
         return super().construct_object(node, deep)
 

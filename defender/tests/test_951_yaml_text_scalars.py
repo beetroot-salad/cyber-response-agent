@@ -5,15 +5,17 @@ a token of what the projection emitted" — and they were run over a document `y
 had already TYPED: an unquoted `2026-07-25T07:48:37.065Z` became a `datetime` whose `str()`
 is `2026-07-25 07:48:37.065000+00:00`, `yes` became `True`, `0755` became `493`. The fix
 parses the projection ONCE and constructs two readings from that one node tree: `typed`,
-which is `safe_load`'s document, and `spelled`, which is the same structure with every
-scalar as its text. What is pinned is the contract of the spelled half — every scalar is
-its text (implicit type, explicit tag, quoted, block, null), and everything else — merges,
-aliases, last-key-wins, the safe loader's refusals, the error translation — is exactly what
-`safe_load` does to the same text; that the typed half IS `safe_load`; and that the
-constructor is a subclass with no class-level table of its own touched, so `yaml.safe_load`
-elsewhere still types.
+which is `safe_load`'s document, and `spelled`, which has the same shape exactly with every
+VALUE scalar as its text. What is pinned is the contract of the spelled half — every value
+scalar is its text (implicit type, explicit tag, quoted, block, null), and everything else —
+the shape, keys included, merges, aliases, last-key-wins, the safe loader's refusals, the
+error translation — is exactly what `safe_load` does to the same text; that the typed half
+IS `safe_load`; and that the constructor is a subclass with no class-level table of its own
+touched, so `yaml.safe_load` elsewhere still types.
 """
 from __future__ import annotations
+
+from datetime import date
 
 import pytest
 import yaml
@@ -120,11 +122,23 @@ def test_a_null_is_whatever_was_written(text):
     assert spelled(text) == {"a": text.partition(":")[2].strip()}
 
 
-def test_mapping_keys_are_text_too():
-    """`1:` and `"1":` are two keys to `safe_load` and one here. No document read this way
-    has typed keys; what matters is that the collapse is `safe_load`'s own last-wins."""
-    assert spelled("1: x\n'1': y") == {"1": "y"}
-    assert safe_load("1: x\n'1': y") == {1: "x", "1": "y"}
+def test_mapping_keys_stay_typed_so_both_readings_keep_the_same_pairs():
+    """`1:` and `'1':` are two keys to `safe_load`, so they are two keys here. A text key
+    would merge them and drop one of the two VALUES — a value the judge is shown (typed)
+    that the containment index (spelled) never saw (the review's finding against the fourth
+    cut). The reading spells values; the shape, keys included, is the typed one."""
+    assert spelled("1: x\n'1': y") == {1: "x", "1": "y"} == safe_load("1: x\n'1': y")
+    # a typed key with a spelled value: the key is the `date` safe_load makes of it
+    assert spelled("2026-07-25: 22") == {date(2026, 7, 25): "22"}
+
+
+@pytest.mark.parametrize("text", ["null", "~", "22", "false", "2026-07-25"])
+def test_a_bare_scalar_document_is_typed_in_both_readings(text):
+    """Nobody's value. A caller asking "is this document a mapping" must get one answer for
+    both readings — the fourth cut's `readings.spelled or {}` guard let the truthy text
+    `"null"` through to `.get` (the review's finding)."""
+    readings = safe_load_typed_and_spelled(text)
+    assert readings.spelled == readings.typed == safe_load(text)
 
 
 # the typed half is `safe_load`, and both halves come from one tree
@@ -142,13 +156,40 @@ def test_the_typed_half_is_exactly_safe_load(text):
     assert safe_load_typed_and_spelled(text).typed == safe_load(text)
 
 
-def test_both_halves_share_one_structure():
-    """One parse: the two readings can differ only in what a scalar became, never in which
-    nodes are which. A repeated `events:` key collapses to the same LAST list in both."""
-    text = "projections:\n  - lead_id: l-001\n    events: [{n: 1}]\n    events: [{n: 2}]\n"
+def _shape(value, seen=None):
+    """A document's shape with the leaves erased: containers, keys, lengths, and where an
+    alias points back. Two readings of one tree must have the same one."""
+    seen = {} if seen is None else seen
+    if isinstance(value, dict):
+        if id(value) in seen:
+            return ("cycle", seen[id(value)])
+        seen[id(value)] = len(seen)
+        return ("map", tuple((k, _shape(v, seen)) for k, v in value.items()))
+    if isinstance(value, list):
+        if id(value) in seen:
+            return ("cycle", seen[id(value)])
+        seen[id(value)] = len(seen)
+        return ("seq", tuple(_shape(v, seen) for v in value))
+    return "leaf"
+
+
+@pytest.mark.parametrize("text", [
+    "a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes\nd:\n",
+    "1: x\n'1': y\n2026-07-25: z\ntrue: w",
+    "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n",
+    "a: &c [root]\nb: *c",
+    "a: &x {b: *x, c: leaf}",
+    "events: &e\n  - user.name: root\n    self: *e\n",
+    "projections:\n  - lead_id: l-001\n    events: [{n: 1}]\n    events: [{n: 2}]\n",
+    "a: [1, [2, {3: 4}], {}, []]",
+])
+def test_both_readings_have_exactly_one_shape(text):
+    """One parse: the two readings can differ only in what a VALUE scalar became — never in
+    which containers hold which keys, how many pairs survive, or where an alias points. A
+    repeated `events:` collapses to the same LAST list in both; a self-containing anchor is
+    the same cycle in both."""
     readings = safe_load_typed_and_spelled(text)
-    assert readings.typed["projections"][0]["events"] == [{"n": 2}]
-    assert readings.spelled["projections"][0]["events"] == [{"n": "2"}]
+    assert _shape(readings.spelled) == _shape(readings.typed) == _shape(safe_load(text))
 
 
 # everything else in the spelled half is `safe_load`'s structure
