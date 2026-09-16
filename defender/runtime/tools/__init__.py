@@ -60,8 +60,9 @@ from defender.hooks.record_lesson_load import (
 )
 from ._deps import (
     AgentDeps,
+    DeadEnd,
     GatherDeps,
-    QueryDoor,
+    LeadStop,
     _BASH_TIMEOUT_S,
     _BASH_VERB,
     _INFRA_EXIT_CODE,
@@ -292,8 +293,9 @@ __all__ = [
     "Any",
     "ClassVar",
     "FatalConfigError",
+    "DeadEnd",
     "GatherDeps",
-    "QueryDoor",
+    "LeadStop",
     "Iterable",
     "Iterator",
     "ModelRetry",

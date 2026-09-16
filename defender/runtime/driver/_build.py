@@ -280,7 +280,7 @@ def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as bui
         agent_id=agent_id,
         # The ceiling's round marker (#987) on EVERY gather agent, whatever else the caller
         # hands in — and AHEAD of it, so a recorder among the extras commits the final request
-        # with the sentence the model was actually sent. A no-op on deps with no ceiling.
+        # with the sentence the model was actually sent. A no-op on a run with no ceiling.
         extra_capabilities=[RequestCeiling(), *extra_capabilities],
         make_model=make_model,
         verbs=verbs,

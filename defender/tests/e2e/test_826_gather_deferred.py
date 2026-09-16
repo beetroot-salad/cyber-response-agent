@@ -27,10 +27,8 @@ from defender.runtime import circuit_breaker, session_store, tools_gather  # noq
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.tools_gather import GatherRequest  # noqa: E402
 from defender.scripts.adapters.faults import UpstreamFault  # noqa: E402
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
-    REPEAT_THRESHOLD,
-    GatherDeadEnd,
-)
+from defender.runtime.tools import DeadEnd  # noqa: E402
+from defender.scripts.gather_tools.record_query import REPEAT_THRESHOLD  # noqa: E402
 from defender.tests._session_store_705 import sql, store_factory  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -137,13 +135,8 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     def _factory_dead_end():
         class _Agent:
             async def run(self, *a, deps, **kw):
-                deps.door.close(GatherDeadEnd("repeats seq 0", "move on"))
-
-                class _Result:
-                    output = "what I had"
-                    usage = SimpleNamespace(requests=2)  # well inside the ceiling
-
-                return _Result()
+                deps.stop.close_door(DeadEnd("repeats seq 0", "move on"))
+                return SimpleNamespace(output="what I had")
 
         return lambda agent_id, system, request_limit: _Agent()
 
@@ -197,10 +190,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     # The CLEAN end stamps nothing: `truncated_by` unset must keep meaning "this finished".
     class _Clean:
         async def run(self, *a, **kw):
-            class R:
-                output = "measured."
-                usage = SimpleNamespace(requests=2)  # well inside the ceiling
-            return R()
+            return SimpleNamespace(output="measured.")
 
     run_dir = materialize(tmp_path / "clean", GOLDEN_AB3)
     deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)

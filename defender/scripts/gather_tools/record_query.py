@@ -552,9 +552,9 @@ REPEAT_ESCAPE = (
     "Sending this exact request again will not produce a different answer. Move on with "
     "what this lead has already captured, or change what you are asking for."
 )
-# Deliberately avoids the word "complete": `_run_gather`'s `except GatherDeadEnd` branch appends
-# the fixed `INCOMPLETE_IDIOM` right after this string in the message handed to main, and the two
-# must not read as opposed dispositions.
+# Deliberately avoids the word "complete": `tools_gather._dead_end_notice` appends the fixed
+# `INCOMPLETE_IDIOM` right after this string in the header handed to main, and the two must not
+# read as opposed dispositions.
 
 # The per-lead rejection budget (#1015).
 #
@@ -636,9 +636,9 @@ REJECTION_BUDGET_ESCAPE = (
     "Further requests of that shape will be turned back the same way. Move on with what "
     "this lead has already captured."
 )
-# Avoids the word "complete" for the reason `REPEAT_ESCAPE` does: `_run_gather`'s dead-end
-# branch appends the fixed `INCOMPLETE_IDIOM` right after this string, and the two must not
-# read as opposed dispositions. DISTINCT from `REPEAT_ESCAPE` — the escape is the only part of
+# Avoids the word "complete" for the reason `REPEAT_ESCAPE` does: `_dead_end_notice` appends
+# the fixed `INCOMPLETE_IDIOM` right after this string, and the two must not read as opposed
+# dispositions. DISTINCT from `REPEAT_ESCAPE` — the escape is the only part of
 # the dead-end message that says what kind of stop this was, and one shared sentence would
 # leave main unable to tell "you are repeating yourself" from "you have spent the allowance".
 
@@ -753,13 +753,14 @@ class RejectionBudgetTrip:
 class GatherDeadEnd(Exception):
     """A lead-level dead end: the request the guard just refused (`reason`), and a fixed,
     system-agnostic sentence handing the decision to main (`escape`). Raised by the guards
-    inside the query tool and caught by the tool's own hooks (#987): they close the lead's
-    `QueryDoor`, answer the call with `reason` as a failed tool result — the gather model
-    reads `reason`, never `escape` — and the model's next turn is its summary. It never
-    leaves the tool on deps that carry a door: `_run_gather` reads it OFF the door after the
-    run, so it stays contained to the one lead. Only deps bound outside a dispatch (no door)
-    see it raised. `reason` crosses into main's context as the HEADER of the lead's message,
-    which is why it may carry nothing model-authored."""
+    inside the query tool and caught by the tool's own hooks (#987): they record the two
+    strings on the lead's `LeadStop` (closing its query door), answer the call with `reason`
+    as a failed tool result — the gather model reads `reason`, never `escape` — and the
+    model's next turn is its summary. It never leaves the tool on deps that carry a stop
+    record: `_run_gather` reads the record after the run, so it stays contained to the one
+    lead. Only deps bound outside a dispatch (no record) see it raised. `reason` crosses into
+    main's context as the HEADER of the lead's message, which is why it may carry nothing
+    model-authored."""
 
     def __init__(self, reason: str, escape: str):
         # BOTH args go through `super().__init__` so `.args` round-trips through
