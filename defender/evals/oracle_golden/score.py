@@ -15,21 +15,22 @@ code, and never reach the model:
 3. **Leak check.** For mutation cases, the pre-mutation entities must appear nowhere in
    the projection. Deterministic, whole-value-or-token containment.
 
-The containment checks are TEXT containment, so the projection — the side the model wrote
-— is read ONCE, as text: `defender._yaml.safe_load_text_scalars`, which is `safe_load` in
-every structural respect (merges, aliases, a repeated key collapsing to its last value)
-except that every scalar stays the spelling in the file. `yaml.safe_load` would type an
-unquoted `2026-07-25T07:48:37.065Z` into a `datetime` whose `str()` is
-`2026-07-25 07:48:37.065000+00:00`, and whether a forbidden instant was caught then
-depended on whether the model happened to quote it (#951). One reading, so the events the
-leak check scans, the events `must_emit` searches and the events the judge is shown are the
-same objects — there is no second walk of the file to disagree with the first about which
-nodes are `projections[*].events`. The projection's grammar is mappings of strings or a
-marker string, so no reader of it ever wanted a typed value. The author's side —
-`must_emit` / `must_not_emit` — is text by RULE, not by reader: each entry must be a quoted
-string, and `forbidden_values` / `required_values` refuse a clause that carries anything
-else, so the manifest and `expected.yaml` stay the typed documents every other reader
-makes of them (`defective: false` is a boolean).
+The containment checks are TEXT containment, and the projection — the side the model wrote
+— is a YAML document whose scalars `yaml.safe_load` TYPES: an unquoted
+`2026-07-25T07:48:37.065Z` becomes a `datetime` whose `str()` is
+`2026-07-25 07:48:37.065000+00:00`, so whether a forbidden instant was caught depended on
+whether the model happened to quote it (#951). The projection is therefore read through
+`defender._yaml.safe_load_typed_and_spelled`: ONE parse of the file, constructed twice from
+that one node tree. The `typed` reading is what every reader had before #951 — the
+lead→events structure the integrity and grammar checks walk, the per-lead expectation
+clauses inspect, and the judge is shown, unchanged — and the `spelled` reading is the same
+structure with every scalar as the text in the file, which is the ONLY thing the two
+containment checks (`must_not_emit`, `must_emit`) compare against. Both come from one tree,
+so the values the checks scan are, by construction, the values of the events the judge is
+shown. The author's side — `must_emit` / `must_not_emit` — is text by RULE, not by reader:
+each entry must be a quoted string, and `forbidden_values` / `required_values` refuse a
+clause that carries anything else, so the manifest and `expected.yaml` stay the typed
+documents every other reader makes of them (`defective: false` is a boolean).
 
 Everything downstream is the judge's, in two passes (`judge.py`):
 
@@ -73,7 +74,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from defender._yaml import safe_load, safe_load_text_scalars  # noqa: E402
+from defender._yaml import safe_load, safe_load_typed_and_spelled  # noqa: E402
 from defender.evals.oracle_golden import judge  # noqa: E402
 
 # The closed marker vocabulary. Anything else is malformed model output and must not be
@@ -164,9 +165,9 @@ def emitted_values(events: object) -> list[str]:
     `events` that is not a list at all (a bare scalar, a mapping) is walked as it is, for the
     same reason.
 
-    The projection is loaded by `safe_load_text_scalars`, so every scalar here is already
-    the model's spelling; `str()` is for a caller (a test) that hands in a document it
-    built in memory.
+    Fed the SPELLED reading of the projection (`_measured`), so every scalar here is already
+    the model's text; `str()` is for a caller (a test) that hands in a document it built in
+    memory.
     """
     out: list[str] = []
     stack: list[object] = [events]
@@ -407,12 +408,14 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
     dry run, because it is consulted precisely when a model call is expensive.
     """
     manifest = safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
-    # The projection is the one document read as text (module docstring): the events the
-    # checks scan below and the events the judge is later shown are these same objects.
-    proj = safe_load_text_scalars(proj_path.read_text(encoding="utf-8")) or {}
+    # One parse of the projection, two readings of it (module docstring): the typed one is
+    # the structure every check walks and the judge is shown; the spelled one exists for
+    # `emitted_index` alone, so the containment checks compare the model's own text.
+    readings = safe_load_typed_and_spelled(proj_path.read_text(encoding="utf-8"))
     leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
-    preds, duplicates = load_predictions(proj)
-    emitted = emitted_index(preds)
+    preds, duplicates = load_predictions(readings.typed or {})
+    spelled_preds, _ = load_predictions(readings.spelled or {})
+    emitted = emitted_index(spelled_preds)
 
     summary: dict = {
         "tag": score_tag(proj_path.stem, model, effort),

@@ -1,22 +1,28 @@
-"""Pins for `defender._yaml.safe_load_text_scalars` (#951).
+"""Pins for `defender._yaml.safe_load_typed_and_spelled` (#951).
 
 The oracle-golden mechanical checks are text containment — "is this literal a whole value or
 a token of what the projection emitted" — and they were run over a document `yaml.safe_load`
 had already TYPED: an unquoted `2026-07-25T07:48:37.065Z` became a `datetime` whose `str()`
 is `2026-07-25 07:48:37.065000+00:00`, `yes` became `True`, `0755` became `493`. The fix
-reads the projection ONCE, with a loader that is `safe_load` in every structural respect and
-hands every scalar back as its spelling. What is pinned is the two halves of that contract:
-every scalar is its text (implicit type, explicit tag, quoted, block, null), and everything
-else — merges, aliases, last-key-wins, the safe loader's refusals, the error translation —
-is exactly what `safe_load` does to the same text. And that the loader is a subclass with
-no class-level table of its own touched, so `yaml.safe_load` elsewhere still types.
+parses the projection ONCE and constructs two readings from that one node tree: `typed`,
+which is `safe_load`'s document, and `spelled`, which is the same structure with every
+scalar as its text. What is pinned is the contract of the spelled half — every scalar is
+its text (implicit type, explicit tag, quoted, block, null), and everything else — merges,
+aliases, last-key-wins, the safe loader's refusals, the error translation — is exactly what
+`safe_load` does to the same text; that the typed half IS `safe_load`; and that the
+constructor is a subclass with no class-level table of its own touched, so `yaml.safe_load`
+elsewhere still types.
 """
 from __future__ import annotations
 
 import pytest
 import yaml
 
-from defender._yaml import safe_load, safe_load_text_scalars
+from defender._yaml import safe_load, safe_load_typed_and_spelled
+
+
+def spelled(text: str):
+    return safe_load_typed_and_spelled(text).spelled
 
 
 # every scalar comes back as the text it was written as
@@ -48,18 +54,19 @@ from defender._yaml import safe_load, safe_load_text_scalars
 def test_a_plain_scalar_is_the_exact_string_it_was_written_as(spelling):
     """Equality with the `str` is the whole assertion — and the fixture self-check that
     plain `safe_load` does NOT give the string is what makes it exercise anything."""
-    assert safe_load_text_scalars(f"a: {spelling}") == {"a": spelling}
+    assert spelled(f"a: {spelling}") == {"a": spelling}
     assert not isinstance(yaml.safe_load(f"a: {spelling}")["a"], str), spelling
 
 
-def test_a_shape_valid_but_calendar_invalid_instant_is_text_not_an_error():
+def test_a_shape_valid_but_calendar_invalid_instant_is_refused_as_safe_load_refuses_it():
     """PyYAML's timestamp resolver matches on SHAPE and hands the fields to `datetime`,
-    which raises a bare `ValueError` on `2001-02-30` — at construction, which this loader
-    skips for a scalar. (`safe_load` of the same text is a `YAMLError`, translated.)"""
-    assert safe_load_text_scalars("a: 2001-02-30") == {"a": "2001-02-30"}
-    assert safe_load_text_scalars("a: 2001-12-14t25:59:43.10-05:00") == {
-        "a": "2001-12-14t25:59:43.10-05:00"}
-    with pytest.raises(yaml.YAMLError):
+    which raises a bare `ValueError` on `2001-02-30`. The spelled half alone would carry it
+    as text, but the pair is one reading of one document and its typed half is `safe_load`
+    — so the document is refused, translated, exactly as `safe_load` refuses it. (A
+    projection carrying an impossible date is malformed, and was before #951.)"""
+    with pytest.raises(yaml.YAMLError, match="could not be constructed"):
+        safe_load_typed_and_spelled("a: 2001-02-30")
+    with pytest.raises(yaml.YAMLError, match="could not be constructed"):
         safe_load("a: 2001-02-30")
 
 
@@ -75,31 +82,34 @@ def test_an_explicitly_tagged_scalar_is_its_text_too(tagged, literal):
     construction is the one step overridden, so it is the spelling either way (the
     adversary's F2 against the first cut of this fix, which only dropped the implicit
     resolvers)."""
-    assert safe_load_text_scalars(f"a: {tagged}") == {"a": literal}
+    assert spelled(f"a: {tagged}") == {"a": literal}
 
 
-def test_a_python_tag_on_a_scalar_is_inert_and_on_a_collection_is_refused():
-    """A `!!python/name:…` scalar constructs nothing — its text comes back and nothing
-    runs. A `!!python/object/apply` node is a SEQUENCE, so it reaches the safe constructor,
-    which refuses it exactly as `safe_load` does."""
-    assert safe_load_text_scalars("a: !!python/name:os.system") == {"a": ""}
-    text = "a: !!python/object/apply:os.system ['echo pwned']\n"
+@pytest.mark.parametrize("text", [
+    "a: !!python/name:os.system",                       # a scalar
+    "a: !!python/object/apply:os.system ['echo pwned']\n",  # a sequence
+])
+def test_a_python_tag_is_refused_wherever_it_sits_as_safe_load_refuses_it(text):
+    """The typed half is the safe constructor, which has no constructor for a `!!python/…`
+    tag on a scalar OR a collection, so the pair refuses the document before anything is
+    constructed from it — the same refusal `safe_load` gives. (A scalar's spelled half alone
+    would have been inert text; it is never produced without the typed half.)"""
     with pytest.raises(yaml.YAMLError):
-        safe_load_text_scalars(text)
+        safe_load_typed_and_spelled(text)
     with pytest.raises(yaml.YAMLError):
         safe_load(text)
 
 
 def test_quoted_scalars_come_back_unquoted_as_safe_load_gives_them():
-    assert safe_load_text_scalars(
+    assert spelled(
         "a: '22'\nb: \"yes\"\nc: '2026-07-25T07:48:37.065Z'\nd: ''") == {
         "a": "22", "b": "yes", "c": "2026-07-25T07:48:37.065Z", "d": ""}
 
 
 def test_block_scalars_are_their_folded_text():
-    assert safe_load_text_scalars("d: >-\n  the leads investigate\n  the wrong host\n") == {
+    assert spelled("d: >-\n  the leads investigate\n  the wrong host\n") == {
         "d": "the leads investigate the wrong host"}
-    assert safe_load_text_scalars("d: |\n  2026-07-25T07:48:37.065Z\n") == {
+    assert spelled("d: |\n  2026-07-25T07:48:37.065Z\n") == {
         "d": "2026-07-25T07:48:37.065Z\n"}
 
 
@@ -107,24 +117,48 @@ def test_block_scalars_are_their_folded_text():
 def test_a_null_is_whatever_was_written(text):
     """No special case: `~` is the text `~` and an empty value is `""`. The scorer's index
     drops `""`, and no author forbids `~`."""
-    assert safe_load_text_scalars(text) == {"a": text.partition(":")[2].strip()}
+    assert spelled(text) == {"a": text.partition(":")[2].strip()}
 
 
 def test_mapping_keys_are_text_too():
     """`1:` and `"1":` are two keys to `safe_load` and one here. No document read this way
     has typed keys; what matters is that the collapse is `safe_load`'s own last-wins."""
-    assert safe_load_text_scalars("1: x\n'1': y") == {"1": "y"}
+    assert spelled("1: x\n'1': y") == {"1": "y"}
     assert safe_load("1: x\n'1': y") == {1: "x", "1": "y"}
 
 
-# everything else is `safe_load`: one reading, with `safe_load`'s structure
+# the typed half is `safe_load`, and both halves come from one tree
+
+@pytest.mark.parametrize("text", [
+    "a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes\nd:\n",
+    "1: x\n'1': y",
+    "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n",
+    "",
+])
+def test_the_typed_half_is_exactly_safe_load(text):
+    """The readers that never wanted a spelling — the integrity and grammar checks, the
+    judge's rendering — are handed `typed`, and it must be what they were handed before
+    #951 to the byte, or the judge's input moves under an unchanged prompt tag."""
+    assert safe_load_typed_and_spelled(text).typed == safe_load(text)
+
+
+def test_both_halves_share_one_structure():
+    """One parse: the two readings can differ only in what a scalar became, never in which
+    nodes are which. A repeated `events:` key collapses to the same LAST list in both."""
+    text = "projections:\n  - lead_id: l-001\n    events: [{n: 1}]\n    events: [{n: 2}]\n"
+    readings = safe_load_typed_and_spelled(text)
+    assert readings.typed["projections"][0]["events"] == [{"n": 2}]
+    assert readings.spelled["projections"][0]["events"] == [{"n": "2"}]
+
+
+# everything else in the spelled half is `safe_load`'s structure
 
 def test_a_repeated_key_collapses_to_its_last_value_as_safe_load_does():
     """The point of ONE reading. A second walk of the node tree that took the FIRST
     `events:` scanned a different list from the one the typed document (and the judge)
     carried — a leak in the honoured list was missed."""
     text = "events: [{user.name: admin}]\nevents: [{user.name: root}]\n"
-    assert safe_load_text_scalars(text) == safe_load(text) == {
+    assert spelled(text) == safe_load(text) == {
         "events": [{"user.name": "root"}]}
 
 
@@ -133,12 +167,12 @@ def test_a_merge_key_merges_as_safe_load_does():
     keys land in the row — the first cut dropped the resolvers and left a literal `<<` key;
     the second cut's tree walk looked the key up by name and never saw merged events."""
     text = "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n"
-    assert safe_load_text_scalars(text)["projections"] == safe_load(text)["projections"] == [
+    assert spelled(text)["projections"] == safe_load(text)["projections"] == [
         {"lead_id": "l-001", "events": [{"user.name": "root"}]}]
 
 
 def test_an_alias_resolves_to_the_same_object_as_safe_load_gives():
-    doc = safe_load_text_scalars("a: &c [root]\nb: *c")
+    doc = spelled("a: &c [root]\nb: *c")
     assert doc == {"a": ["root"], "b": ["root"]}
     assert doc["a"] is doc["b"]
 
@@ -146,34 +180,34 @@ def test_an_alias_resolves_to_the_same_object_as_safe_load_gives():
 def test_a_self_containing_anchor_loads_as_safe_load_does():
     """`a: &x {b: *x}` composes into a cyclic graph; `safe_load` builds the recursive
     structure and so does this."""
-    doc = safe_load_text_scalars("a: &x {b: *x, c: leaf}")
+    doc = spelled("a: &x {b: *x, c: leaf}")
     assert doc["a"]["c"] == "leaf"
     assert doc["a"]["b"] is doc["a"]
 
 
 def test_an_empty_document_is_none():
-    assert safe_load_text_scalars("") is None
-    assert safe_load_text_scalars("# nothing but a comment\n") is None
+    assert spelled("") is None
+    assert spelled("# nothing but a comment\n") is None
 
 
 def test_malformed_text_raises_a_yaml_error():
     with pytest.raises(yaml.YAMLError):
-        safe_load_text_scalars("a: [unclosed")
+        spelled("a: [unclosed")
 
 
 def test_a_document_too_deep_to_parse_is_a_yaml_error_not_a_recursion_error():
     """The same translation `safe_load` makes, from the same function: a caller that
     catches `YAMLError` for malformed input must not get an interpreter error instead."""
     with pytest.raises(yaml.YAMLError, match="nested too deeply"):
-        safe_load_text_scalars("a: " + "[" * 20000)
+        spelled("a: " + "[" * 20000)
 
 
-def test_the_loader_leaks_nothing_into_safe_load():
+def test_the_spelled_constructor_leaks_nothing_into_safe_load():
     """The first cut's process-wide hazard: a subclass that WROTE a class-level resolver
     table shared with `SafeLoader`. This one overrides a method only. After any number of
-    text loads, `yaml.safe_load` in the same process still types."""
+    spelled reads, `yaml.safe_load` in the same process still types."""
     for _ in range(3):
-        safe_load_text_scalars("a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes")
+        spelled("a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes")
     typed = yaml.safe_load("a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes")
     assert not isinstance(typed["a"], str)
     assert typed["b"] == 22

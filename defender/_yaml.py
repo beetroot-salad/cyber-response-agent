@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 
@@ -145,40 +145,62 @@ def _resolved_key(key_node: Any, constructor: Any) -> Any:
 
 
 def safe_load(text: str) -> Any:
-    return _load_with(text, yaml.SafeLoader)
+    with _construction_errors_as_yaml_errors():
+        return yaml.load(text, Loader=yaml.SafeLoader)  # noqa: S506 — the safe loader
 
 
-def safe_load_text_scalars(text: str) -> Any:
-    """`safe_load`, except that every scalar is the TEXT it was written as.
+class Readings(NamedTuple):
+    """One document, read twice from ONE node tree — see `safe_load_typed_and_spelled`."""
 
-    @owns the spelled reading of a document. `safe_load` is compose-then-construct, and
-    construction is the one step that re-spells a scalar: a plain `2026-07-25T07:48:37.065Z`
-    becomes a `datetime` whose `str()` is `2026-07-25 07:48:37.065000+00:00`, `0755` becomes
-    `493`, `yes` becomes `True`, and an explicitly tagged `!!timestamp …` goes the same way.
+    typed: Any    #: what `safe_load` gives
+    spelled: Any  #: the same structure, every scalar the text it was written as
+
+
+def safe_load_typed_and_spelled(text: str) -> Readings:
+    """`safe_load`'s document AND its spelling, constructed from one composed tree.
+
+    @owns spelled — the text reading of a YAML document, produced here and nowhere else.
+    `safe_load` is compose-then-construct, and construction is the one step that re-spells a
+    scalar: a plain `2026-07-25T07:48:37.065Z` becomes a `datetime` whose `str()` is
+    `2026-07-25 07:48:37.065000+00:00`, `0755` becomes `493`, `yes` becomes `True`, and an
+    explicitly tagged `!!timestamp …` goes the same way.
     The oracle-golden containment checks — is this `must_not_emit` literal a whole value or
     a token of what the projection emitted — ran over a document already typed that way, so
     whether a forbidden instant was caught depended on whether the model quoted it (#951).
 
-    Everything ELSE is `safe_load`, from the same loader with only scalar construction
-    overridden: a `<<:` merge still merges, an alias still resolves, a repeated key still
-    collapses to its last value, and a tag the safe loader refuses on a collection is still
-    refused. That is the point of it being one reading rather than a second walk beside the
-    typed one — a document has exactly one set of values here, and there is no second
-    navigation to disagree with about which nodes those are. A `!!python/…` tag on a scalar
-    is inert: nothing is constructed from it, and the scalar's text is what comes back.
+    `spelled` is that same document with scalar construction alone overridden: a `<<:` merge
+    still merges, an alias still resolves, a repeated key still collapses to its last value.
+    Mapping keys are text too (`1:` and `"1":` are one key here, two in `typed`), and a null
+    is its spelling — `~` is `"~"`, an empty value is `""`. And because the typed half is
+    built first, whatever `safe_load` refuses (a `!!python/…` tag anywhere, an impossible
+    calendar date) is refused here too — the pair never hands back a spelling of a document
+    `safe_load` would not have accepted.
 
-    Mapping keys are text too (`1:` and `"1":` are one key here, two under `safe_load`), and
-    a null is its spelling — `~` is `"~"`, an empty value is `""`. Only a document whose
-    readers want structure and strings and never a typed value should be read this way; the
-    manifests and calibration files are not (a `defective: false` must stay a boolean).
+    Both halves are built from the SAME node tree, composed once, so a reader that wants the
+    structure typed (which lead has which events, is `events` a list) and the values spelled
+    (what text did the model emit) cannot be handed two documents that disagree about which
+    nodes those are — the only way the two can differ is in what a scalar became. That is
+    why this is a pair and not a second loader beside `safe_load`: the caller who needs the
+    spelling always needs the structure too, and taking both from one parse is what makes
+    "the values the checks scan are the values of the events the judge is shown" true by
+    construction rather than by the two loaders happening to agree.
     """
-    return _load_with(text, _TextScalarLoader)
+    with _construction_errors_as_yaml_errors():
+        # `compose` and not `yaml.compose`: the module's one safe-loader-only tree builder.
+        root = compose(text)
+        if root is None:
+            return Readings(None, None)
+        return Readings(
+            yaml.constructor.SafeConstructor().construct_document(root),
+            _TextScalarConstructor().construct_document(root),
+        )
 
 
-class _TextScalarLoader(yaml.SafeLoader):
-    """`SafeLoader` whose scalars construct to their own text. No class-level table is
-    touched (the resolver table in particular — it is shared with `SafeLoader` until first
-    write), so nothing here can leak into `yaml.safe_load` for the rest of the process."""
+class _TextScalarConstructor(yaml.constructor.SafeConstructor):
+    """`SafeConstructor` whose scalars construct to their own text. Only a method is
+    overridden — no class-level table (the resolver's in particular is the loader's, and
+    shared until first write), so nothing here can leak into `yaml.safe_load` for the rest
+    of the process."""
 
     def construct_object(self, node: Any, deep: bool = False) -> Any:
         if isinstance(node, yaml.ScalarNode):
@@ -186,9 +208,12 @@ class _TextScalarLoader(yaml.SafeLoader):
         return super().construct_object(node, deep)
 
 
-def _load_with(text: str, loader: type[yaml.SafeLoader]) -> Any:
+@contextlib.contextmanager
+def _construction_errors_as_yaml_errors() -> Iterator[None]:
+    """The two non-`YAMLError`s a load can raise, translated so a caller that catches
+    `YAMLError` for malformed input never gets an interpreter error instead."""
     try:
-        return yaml.load(text, Loader=loader)  # noqa: S506 — a SafeLoader, or a subclass of it
+        yield
     except RecursionError as e:
         raise yaml.YAMLError("YAML is nested too deeply to parse") from e
     except ValueError as e:
@@ -202,15 +227,14 @@ def compose(text: str) -> Any:
     """`text`'s node tree under the safe loader — the LAST representation in which every
     mapping key is still there, which is what `duplicate_key_paths` and
     `duplicate_top_level_key` read: construction is where a repeated key collapses to its
-    last value. (A reader that wants the document's SPELLING does not need the tree —
-    `safe_load_text_scalars` is a full load that keeps it.)
+    last value — and what `safe_load_typed_and_spelled` constructs its two readings from.
 
     `SafeLoader` explicitly: `yaml.compose` defaults to the full `Loader`, and while composing
     constructs nothing, this module's whole contract with its callers is that untrusted text
     only ever meets the safe loader — a default that has to be argued about is one a later
-    edit gets wrong. Raises what `yaml.compose` raises, `RecursionError` included; both
-    callers here catch that themselves, because neither is the reader whose verdict a parse
-    failure is.
+    edit gets wrong. Raises what `yaml.compose` raises, `RecursionError` included; the
+    key scans catch that themselves, because neither is the reader whose verdict a parse
+    failure is, and the loads translate it into the `YAMLError` they promise.
     """
     return yaml.compose(text, Loader=yaml.SafeLoader)
 

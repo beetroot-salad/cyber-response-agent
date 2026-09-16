@@ -28,7 +28,7 @@ from datetime import date, datetime
 import pytest
 import yaml
 
-from defender._yaml import safe_load_text_scalars
+from defender._yaml import safe_load_typed_and_spelled
 from defender.evals.oracle_golden import judge, score
 
 # fixtures
@@ -101,10 +101,9 @@ def _score(case_dir, proj, call, **kw):
 
 def _emitted(rows: dict) -> frozenset[str]:
     """What `_measured` hands the containment checks for these rows: `emitted_index` of
-    the projection file `_projection` would write for them, read the way `_measured` reads
-    it (every scalar as its text)."""
-    preds, _ = score.load_predictions(safe_load_text_scalars(yaml.safe_dump(
-        {"projections": [{"lead_id": k, "events": v} for k, v in rows.items()]})))
+    the SPELLED reading of the projection file `_projection` would write for them."""
+    preds, _ = score.load_predictions(safe_load_typed_and_spelled(yaml.safe_dump(
+        {"projections": [{"lead_id": k, "events": v} for k, v in rows.items()]})).spelled)
     return score.emitted_index(preds)
 
 
@@ -516,6 +515,21 @@ def test_the_noise_marker_is_not_a_way_to_be_empty(tmp_path):
     assert score.main([str(d), str(proj)]) == 1
 
 
+@pytest.mark.parametrize("null", ["null", "~", ""])
+def test_a_null_events_value_is_malformed_not_a_fabricated_marker(tmp_path, null):
+    """`events: null` under `empty_leads`. The per-lead clauses walk the TYPED reading, so a
+    null is `None` — absent, and reported by the grammar check as not-a-list, exactly as
+    before #951. A reader that handed these clauses the spelled document made it the truthy
+    string `"null"`, and `empty_leads` then walked its characters and reported that the lead
+    "emitted the None 'n'" (the review's finding against the third cut)."""
+    d = _case(tmp_path, kind="negative-control", extra_manifest=_DERIVED)
+    proj = _write_text(d, "projections/a.yaml",
+                       f"projections:\n  - lead_id: l-001\n    events: {null}\n")
+    mech = _mechanical(d, proj)["mechanical"]
+    assert mech["expectation_failures"] == []
+    assert "not a list" in mech["malformed_leads"]["l-001"]
+
+
 def test_suppression_is_refused_where_the_story_blinds_nothing(tmp_path):
     d = _case(tmp_path, kind="spec-probe",
               extra_manifest={"kind": "spec-probe",
@@ -587,9 +601,10 @@ def test_a_clause_naming_a_lead_the_case_lacks_asserts_nothing_loudly(tmp_path):
 # forbidden window bound was caught therefore depended on how the oracle QUOTED its YAML;
 # unquoted (the ordinary spelling, and the one a copying model produces) it scored clean and
 # exited 0. `yes`, `0755`, `12:30` and `1.50` collapse the same way (`True`, `493`, `750`,
-# `1.5`). The fix reads the projection ONCE, with `safe_load_text_scalars` — `safe_load`'s
-# structure, every scalar its spelling — so the events the checks scan and the events the
-# judge is shown are the same objects. The manifest and `expected.yaml` are the typed
+# `1.5`). The fix parses the projection ONCE and constructs it twice from that one tree
+# (`safe_load_typed_and_spelled`): the typed reading is what every check and the judge had
+# before, and the spelled reading — same structure, every scalar its text — is what the two
+# containment checks compare against. The manifest and `expected.yaml` are the typed
 # documents they always were, and the author's side is text by rule — a `must_emit` /
 # `must_not_emit` entry that is not a string is refused.
 #
@@ -1013,12 +1028,14 @@ def test_defective_false_is_a_live_case(tmp_path):
     assert "verdict" in call.calls
 
 
-def test_the_verdict_pass_is_shown_the_projection_as_the_oracle_spelled_it(tmp_path):
-    """The judge's `<projection>` block renders the same events the checks scanned, in the
-    oracle's own spelling: `destination.port: 22`, `success: false` and an unquoted instant
-    all bare, as written — not `'22'` / `'false'` (what `safe_dump` makes of a string that
-    would resolve to another type — the first cut's regression) and not
-    `2026-07-25 07:48:37.065000+00:00` (what the typed read used to re-spell it into)."""
+def test_the_verdict_pass_is_shown_the_typed_projection_it_always_was(tmp_path):
+    """The judge's input is NOT part of this fix. Its `<projection>` block is the typed
+    reading re-rendered by `safe_dump`, byte-for-byte what it was before #951 — the unquoted
+    instant as `2026-07-25 07:48:37.065000+00:00`, `22` and `false` bare — while, in the
+    SAME score, the leak check catches that instant by its spelling. The judge's prompt tag
+    promises a re-score whenever its input changes; a reader that had re-spelled the block
+    (the third cut of this fix) changed the input under an unchanged tag, and did so only
+    on the scorer's path, so the verdict audit was showing the judge a different prompt."""
     seen: dict[str, str] = {}
 
     def call(instructions, user, model, effort):
@@ -1027,23 +1044,20 @@ def test_the_verdict_pass_is_shown_the_projection_as_the_oracle_spelled_it(tmp_p
             return judge.CallResult(VERDICT_OK, model, effort, 0.01)
         return judge.CallResult(LABEL_OK, model, effort, 0.01)
 
-    d = _case(tmp_path)
+    d = _case(tmp_path, extra_manifest={"expectation": {"must_not_emit": [_INSTANT]}})
     proj = _projection_text(
         d, f"'@timestamp': {_INSTANT}\ndestination.port: 22\nsuccess: false\n"
            f"event.outcome: failure\nmessage: 'a: b'")
     _assert_typed_by_plain_yaml(proj, _EVENT_TIMESTAMP, datetime)
     summary = _score(d, proj, call)
+    assert summary["mechanical"]["forbidden_emitted"] == [_INSTANT]
     assert summary["judged"] is True, "the verdict pass must actually have been reached"
     block = _projection_block(seen["user"])
-    assert f"'@timestamp': {_INSTANT}\n" in block
+    assert "'@timestamp': 2026-07-25 07:48:37.065000+00:00\n" in block
     assert "destination.port: 22\n" in block
     assert "success: false\n" in block
-    assert "'22'" not in block
-    assert "'false'" not in block
-    assert "07:48:37.065000" not in block
-    # quoting for SYNTAX is the emitter's own and untouched: `a: b` inside a value must
-    # still be quoted or it would read back as a mapping
     assert "message: 'a: b'\n" in block
+    assert _INSTANT not in block
 
 
 def test_a_repeated_events_key_is_scanned_where_the_judge_reads_it(tmp_path):

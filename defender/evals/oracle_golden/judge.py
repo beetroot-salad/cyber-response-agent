@@ -263,30 +263,11 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
     )
 
 
-def _block(name: str, body: Any, *, dumper: type[yaml.SafeDumper] = yaml.SafeDumper) -> str:
-    rendered = body if isinstance(body, str) else yaml.dump(
-        body, Dumper=dumper, sort_keys=False, allow_unicode=True, default_flow_style=False
+def _block(name: str, body: Any) -> str:
+    rendered = body if isinstance(body, str) else yaml.safe_dump(
+        body, sort_keys=False, allow_unicode=True, default_flow_style=False
     )
     return f"<{name}>\n{rendered.rstrip()}\n</{name}>"
-
-
-class _SpelledDumper(yaml.SafeDumper):
-    """`SafeDumper` that never quotes a string for what it would RESOLVE to.
-
-    The projection is loaded with every scalar as its text (`score.py`), so the judge is
-    shown the oracle's own spelling: `destination.port: 22`, `success: false`, an unquoted
-    `2026-07-25T07:48:37.065Z` all render bare, as the model wrote them. `safe_dump` would
-    quote each of those (`'22'`, `'false'`), because its resolver says a bare one reads back
-    as an int, a bool, a timestamp — a round-trip guarantee the judge has no use for, and
-    a change to what it sees. Quoting a string for its SYNTAX (`: ` inside it, a leading
-    `-`) is the emitter's own analysis and is untouched.
-
-    An emptied resolver table on the subclass only: `yaml_implicit_resolvers` is a
-    class attribute `SafeDumper` shares until a subclass writes its own, so this shadows
-    it and changes nothing for `safe_dump` elsewhere in the process.
-    """
-
-    yaml_implicit_resolvers: dict = {}
 
 
 def label_user_prompt(inputs: LeadInputs) -> str:
@@ -312,7 +293,7 @@ def verdict_user_prompt(inputs: LeadInputs, projection: Any, measurement: dict) 
         _block("baseline", inputs.baseline),
         _block("environment_notes", inputs.environment_notes),
         _block("measurement", measurement),
-        _block("projection", projection, dumper=_SpelledDumper),
+        _block("projection", projection),
     ])
 
 
