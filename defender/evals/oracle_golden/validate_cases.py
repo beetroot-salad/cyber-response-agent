@@ -433,15 +433,21 @@ def check_clause_text(case_dir: Path, manifest: dict) -> list[str]:
     The scorer compares these literals with the projection's text, and an unquoted
     `2026-07-25T07:48:37.065Z` is a `datetime` to YAML — a clause that can never match and
     so never fires (#951). The scorer refuses such a clause at score time; this is the same
-    refusal at commit time, from the same reader, so the author sees it before a projection
-    is ever paid for.
+    refusal at commit time, from the same readers, so the author sees it before a projection
+    is ever paid for. `forbidden_values` reads every location a `must_not_emit` may sit in —
+    the manifest's `expectation:`, `expected.yaml`, the manifest top level — not just the one
+    that wins, so a shadowed clause is refused too rather than lying dead until the winning
+    one is removed. Each clause is reported on its own: an author with both mis-typed learns
+    both at once.
     """
-    try:
-        forbidden_values(case_dir, manifest)
-        required_values(manifest.get("expectation") or {})
-    except ValueError as e:
-        return [f"{case_dir.name}: {e}"]
-    return []
+    problems: list[str] = []
+    for read in (lambda: forbidden_values(case_dir, manifest),
+                 lambda: required_values(manifest.get("expectation") or {})):
+        try:
+            read()
+        except ValueError as e:
+            problems.append(f"{case_dir.name}: {e}")
+    return problems
 
 
 def check_identity(case_dir: Path, manifest: dict) -> list[str]:
