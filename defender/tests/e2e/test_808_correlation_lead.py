@@ -37,6 +37,7 @@ pytest.importorskip("pydantic_ai")
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.driver import GATHER_REQUEST_LIMIT  # noqa: E402
+from defender.runtime.request_ceiling import FINAL_REQUEST  # noqa: E402
 from defender.tests._session_store_705 import sql, store_factory  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     CORRELATION_REQUEST_LIMIT,
@@ -519,43 +520,48 @@ def test_the_correlation_lead_ends_with_the_same_bookkeeping_every_lead_gets(tmp
     )
 
 
-def test_the_cut_off_correlation_session_withholds_its_own_doomed_round(tmp_path):
-    """#880 F-19 — the gather recorder withholds the doomed round against THE CEILING THIS
-    DISPATCH WAS HANDED, not against the module constant MAIN's own leads happen to get.
+def test_the_cut_off_correlation_session_ends_on_its_own_marked_final_request(tmp_path):
+    """#880 F-19 — a correlation session cut off at its ceiling holds exactly the rounds it
+    ran, measured against THE CEILING THIS DISPATCH WAS HANDED (`CORRELATION_REQUEST_LIMIT`,
+    8), not against the module constant MAIN's own leads happen to get (40).
 
-    pydantic_ai appends a round's continuation to history before it checks the request limit,
-    so on the final round the processor is handed a request that will never be sent; the
-    recorder's whole job is to not commit it. It compared against `driver.GATHER_REQUEST_LIMIT`
-    (40) while `dispatch_correlation` hands `_run_gather` `CORRELATION_REQUEST_LIMIT` (8) — so
-    the check read `8 >= 40`, was never true, and the phantom round was committed after all.
-    This is the RS7 fix applied to MAIN's processor thirty lines earlier and left off the twin.
+    The original defect: pydantic_ai appended a round's continuation to history before it
+    checked the request limit, the gather recorder was meant to withhold that doomed
+    continuation, and it compared against the wrong ceiling (`8 >= 40`, never true) — so a
+    phantom request for a round that never happened was committed, permanently, since there
+    is no run-end flush on this side. Since #987 the ceiling is enforced at the ROUND: the
+    last request the ceiling allows is marked (`FINAL_REQUEST`, added by the hook that sits
+    AHEAD of this recorder, so it is committed as sent) and goes out with no tool callable, so
+    the model's answer to it is text and the run ends there — the framework never prepares a
+    request past the ceiling on a gather agent, and the recorder's withholding is the
+    backstop for one that does (an agent with output retries). The shape a cut-off session
+    has is therefore the shape a FINISHED one has: one request and one response per round
+    whose successor was prepared, then the final request alone — and that trailing request
+    is THE MARKED ONE. A phantom round is one more request row, after it, unmarked.
 
-    THE STATE IT PRODUCES IS THE ONE `_stamp_gather_terminator`'s DOCSTRING SAYS CANNOT EXIST:
-    "gather's recorder commits every round as it goes and deliberately withholds the doomed
-    round's own continuation, so there is nothing left to reconcile at the end" — and there is
-    no run-end flush on this side, so an unpaired trailing request is permanent.
-
-    Asserted as a pairing property rather than a magic count: a session stamped `request-limit`
-    holds one request and one response per round it actually ran, so its rows are twice its own
-    ceiling and the last of them is a `response`. `truncated_by` is asserted here too, because
-    the stamp is written on both sides of this bug — the test that pins only the stamp
+    `truncated_by` is asserted here too, because the stamp is written on both sides of the
+    original bug — the test that pins only the stamp
     (`test_the_correlation_lead_ends_with_the_same_bookkeeping_every_lead_gets`) passes either
-    way, which is why nothing caught it.
+    way.
 
-    THE CLEAN ARM IS WHY THE COUNT IS LOAD-BEARING RATHER THAN DECORATIVE. This recorder
-    commits a round at the START of the next one, and there is no gather-side run-end flush, so
-    EVERY gather session — cut off or finished — normally ends on a `request` whose response
-    was never stored. A trailing unpaired request is therefore not by itself the signature of
-    this defect, and no assertion about the last row alone could have caught it: what the
-    phantom round adds is one more ROW, a request for a round that never happened at all. The
-    clean arm pins that shape (fewer rows, and yes, a trailing request) so this test cannot be
-    read as claiming the store never ends on one."""
+    THE CLEAN ARM is the complementary condition: a lead that finished inside its ceiling
+    ends on an unmarked trailing request, with fewer rows. This recorder commits a round at
+    the START of the next one, so EVERY gather session ends on a request whose response was
+    never stored; the count and the mark are what tell the two apart."""
     def _kinds(store):
         return [k for (k,) in sql(store, """
             SELECT m.kind FROM message m
             JOIN session s ON s.session_id = m.session_id
             WHERE s.agent_id = ? ORDER BY m.rowid
         """, (f"gather:{L3}",))]
+
+    def _last_payload(store) -> str:
+        return str(sql(store, """
+            SELECT p.payload FROM message m
+            JOIN session s ON s.session_id = m.session_id
+            JOIN message_payload p ON p.message_id = m.id
+            WHERE s.agent_id = ? ORDER BY m.id DESC LIMIT 1
+        """, (f"gather:{L3}",))[0][0])
 
     cut_stores: list = []
     run(tmp_path / "cut", run_id="lz808-rows-cut", answer=answer_hits(TWO_ACTORS),
@@ -564,20 +570,20 @@ def test_the_cut_off_correlation_session_withholds_its_own_doomed_round(tmp_path
     kinds = _kinds(cut_stores[-1])
     stamp = dict(sql(cut_stores[-1], "SELECT agent_id, truncated_by FROM session"))
     assert stamp.get(f"gather:{L3}") == session_store.TRUNCATED_BY_REQUEST_LIMIT, (
-        f"the scenario did not cut the correlation lead off at its ceiling ({stamp!r}) — "
-        "there is no doomed round here to withhold"
+        f"the scenario did not cut the correlation lead off at its ceiling ({stamp!r})"
     )
     assert kinds, f"the correlation lead's session stored no rows at all: {stamp!r}"
-    assert len(kinds) == 2 * CORRELATION_REQUEST_LIMIT, (
+    assert len(kinds) == 2 * CORRELATION_REQUEST_LIMIT - 1, (
         f"{len(kinds)} rows for {CORRELATION_REQUEST_LIMIT} requests — a session that spent its "
-        "ceiling holds one request and one response per round it ran, and the extra row is the "
-        "doomed round's own continuation, committed because the recorder measured this "
-        f"dispatch against a ceiling that is not its own: {kinds}"
+        "ceiling holds one request and one response per round whose successor was prepared, "
+        "then the marked final request alone; one more row is a request for a round that never "
+        f"happened, committed because the recorder measured this dispatch against a ceiling "
+        f"that is not its own: {kinds}"
     )
-    assert kinds[-1] == "response", (
-        "the cut-off correlation session ends on a request for a round that was never sent — "
-        "exactly the state `_stamp_gather_terminator`'s docstring rests on being impossible, "
-        f"and nothing on this side flushes it afterwards: {kinds}"
+    assert kinds[-1] == "request", kinds
+    assert FINAL_REQUEST in _last_payload(cut_stores[-1]), (
+        "the cut-off correlation session's trailing request is not the marked final one — "
+        "a request past the ceiling was committed after it"
     )
 
     clean_stores: list = []
@@ -595,6 +601,8 @@ def test_the_cut_off_correlation_session_withholds_its_own_doomed_round(tmp_path
         "flush was added, the cut arm above should be reconciled with it rather than left "
         f"asserting a count that now means something else: {clean_kinds}"
     )
+    assert FINAL_REQUEST not in _last_payload(clean_stores[-1]), \
+        "a lead that finished inside its ceiling was told its final request had come"
 
 
 def test_lead_zeros_calls_and_item_threes_dispatch_move_the_runs_own_counters(tmp_path):

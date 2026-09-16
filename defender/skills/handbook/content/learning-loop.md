@@ -63,8 +63,19 @@ What runs now branches a **real** investigation instead of inventing one.
    (`lead-quality`), got the changed answer and concluded the same anyway
    (`analyze-discipline`), or moved a resolution on it and still concluded the
    same (`decision-discipline`).
-7. **Enqueue** — a gradable episode's surviving findings are appended to
-   `_pending/findings.jsonl`, the same queue the curators have always read.
+7. **Enqueue** — a gradable episode's surviving findings are appended to one
+   of two queues, partitioned by what a finding is *about* (#1007): a finding
+   about the defender's conduct to `_pending/findings.jsonl`, a finding about
+   the world — an invented field shape, a story the overlay never backed, a
+   family that failed to discriminate — to `_pending/questioner_findings.jsonl`.
+
+The episode's own record artifacts — `judge.yaml` (written last, certifying
+the pass) and `timing.json` (the launcher's per-step clock) — sit at the
+episode dir's root beside `family.yaml` and `review.yaml`. `learning.html` is
+the episode's one page (#1025): rendered right after `judge.yaml`, from the
+episode dir alone, it lays out the verdict, every world's card, the findings
+table, the stage timings and each world's leads in one static document — the
+episode's analog of a single run's `runtime.html`.
 
 ## How lessons feed back
 
@@ -87,6 +98,13 @@ at PLAN — would *still* reach that disposition. `GOOD` keeps the edit; `BAD`
 reverts it. The gate needs a ground truth, so `inconclusive` source cases are
 held rather than authored.
 
+The same drain tick runs a second curator. The **questioner curator**
+(`author/questioner/`) folds the world findings into
+`defender/lessons-questioner/`, which the questioner reads back when it authors
+the next family. That corpus has no forward check — there is no defender
+behaviour a lesson about a world could regress — only an idempotency gate.
+Both curators share one worktree, one commit and one PR per batch.
+
 At **PLAN** time the runtime agent enumerates `defender/lessons/*.md`, reads
 each file's frontmatter `description:`, and reads the body of any lesson that
 looks relevant to the current alert shape — before writing its `:H`/`:L`
@@ -96,13 +114,16 @@ That is the loop closing. See `content/knowledge-and-skills.md` §Lessons.
 `--lead-author-drain` is the sibling stage on the same shape: it curates the
 gather query catalog and the per-system skills, and opens its own PR.
 
-## One corpus, one queue
+## Two corpora, two queues
 
 The old loop ran two directions and fed three corpora — defender findings
-into `lessons/`, plus actor and environment observations into their own. Only
-the first has a producer after the cutover, so the other two are frozen (see
-above). There is now **one** authored corpus, `defender/lessons/`, fed by
-**one** queue, drained by **one** curator.
+into `lessons/`, plus actor and environment observations into their own.
+Those two lost their producers at the cutover and are frozen (see above).
+What is live since #1007 is partitioned by *subject*, not by direction:
+`defender/lessons/`, fed by `_pending/findings.jsonl` and read by the runtime
+agent, and `defender/lessons-questioner/`, fed by
+`_pending/questioner_findings.jsonl` and read by the questioner. One drain
+tick serves both.
 
 The canonical enumeration of the queues and their thresholds is
 `defender/learning/core/config.py` and `core/drains.py`.

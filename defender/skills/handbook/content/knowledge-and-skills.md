@@ -18,7 +18,7 @@ description looks relevant to the alert. Per-system SKILLs use the
 |---|---|---|
 | `skills/invlang/` | The invlang block surface (grammar) + the author-side CLI (`enum`, `advisory`, `hypothesis-shape`, `hypothesis-vocabulary`) | Main loop, when authoring `investigation.md` |
 | `skills/gather/` | The gather subagent body + per-system query templates under `queries/{system}/` and the raw-payload contract | The gather subagent itself, on dispatch — the main loop does **not** load it |
-| `skills/{system}/` | Per-system reference: what data the system holds *in this deployment*, what it cannot answer, how to read its output, how its verbs are dispatched | Main loop at ORIENT (to scope reachability) and the gather subagent (injected by the system-skill hook) |
+| `skills/{system}/` | Per-system reference: what data the system holds *in this deployment*, what it cannot answer, how to read its output, how its verbs are dispatched | Main loop at ORIENT (to scope reachability) and the gather subagent (handed the system's `description:` on dispatch, then Reads the body itself) |
 | `skills/connect/` | Maintainer onboarding skill: interview → route (MCP or generated CLI adapter) → scaffold per-system knowledge → test → review branch, one system per run | A maintainer, out-of-band — **not** loaded during an alert run (see §Adding a new system) |
 
 The per-system set is environment-dependent — enumerate
@@ -34,11 +34,12 @@ rationale (the visibility-surface / execution split) is in
 `defender/docs/system-skill-shape.md`.
 
 The gather subagent never has the per-system SKILL body inlined into its
-prompt. Instead `inject_system_skill_description.py` (a PreToolUse hook on
-`Task`) appends the target system's frontmatter `description:` to the
-dispatch; gather confirms relevance from that line, then Reads the full body
-itself. The single source of truth stays the file on disk
-(`content/runtime-loop.md` §Hooks).
+prompt. Instead the driver reads every system's frontmatter `description:`
+once at run start (`inject_system_skill_description.descriptor_catalog`) and
+the `gather` tool hands the target system's line to the subagent; gather
+confirms relevance from that line, then Reads the full body itself. The
+single source of truth stays the file on disk
+(`content/runtime-loop.md` §Reliability gates).
 
 ## Adding a new system
 
@@ -55,8 +56,7 @@ verb-disposition table (`knowledge/environment/verb-grants.yaml`). An
 MCP-reached system declares no verbs to the registry and takes no rows, so
 for it the claim still holds outright. Nothing else either way — no loop
 change, no gather-subagent change, no signature catalog,
-permissions-per-signature, or archetype directory to fill in (those are
-`soc-agent/` concepts; see `content/design.md`).
+permissions-per-signature, or archetype directory to fill in.
 
 That one edit is deliberate and is not bookkeeping. The table is the
 authored answer to which verbs a role may call, and it is authored
@@ -82,7 +82,13 @@ runtime agent reads** — the two ends of the feedback loop.
   `learning/author/lessons/prompt.md`, but the corpus is meant to be
   loop-authored.
 
-Two companion corpora — `defender/lessons-actor/` and
+A second live corpus, `defender/lessons-questioner/`, is the **questioner's**,
+not the runtime agent's: the same drain tick folds findings about the
+instrument — an invented field shape, a family that failed to discriminate —
+into it, and the questioner reads it back when it authors the next family.
+The runtime agent never loads it.
+
+Two older corpora — `defender/lessons-actor/` and
 `defender/lessons-environment/` — still sit in the tree, but they are **frozen
 archives**: their producers were the actor-side curators #922 deleted, nothing
 authors them and nothing reads them. Their index/retrieve CLIs went with the

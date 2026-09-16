@@ -12,6 +12,8 @@ writable scratch space.
 ```
 {run_id}/
   alert.json              # input — copied by run.py, read-only for the agent
+  provenance.json         # the commit the run was made against + whether the tree was dirty —
+                          #   stamped by the host at run-dir creation, before any agent exists
   investigation.md        # ORIENT/PLAN/GATHER/ANALYZE/REPORT log, dense invlang
                           #   (:V/:E/:H/:L/:R/:T blocks)
   report.md               # frontmatter (disposition, outcome, cause, failure_kind?) + one line
@@ -19,13 +21,21 @@ writable scratch space.
   review_record.{turn}.json  # the REVIEW GATE's verdict, one per close attempt
   review_{role}_trace.jsonl  # one per review role: support, ablation, composer
   executed_queries.jsonl  # the QUERIES table — one row per executed query (FK lead_id)
-  tool_trace.jsonl        # stream-json events captured by run.py
+  tool_trace.jsonl        # the driver's projection of the run's tool calls (names, timing — never payloads)
   runtime.html            # the run's one page — alert, report card, phases, metrics,
                           # § Review gate, transcript (run.py post-step)
+  wire_logs/
+    llm_requests.jsonl    # the run's ONE wire log: main, every gather:{lead_id}, every review:{lens}
   gather_raw/
     {lead_id}.lead.json   # the LEADS table — dispatch goal + dimensions (record_lead.py)
     {lead_id}/{seq}.json  # raw query payloads, by-ref (record_query.py)
 ```
+
+A branched episode (`$DEFENDER_EPISODES_BASE/<episode_id>/`, see the Learning
+loop page) is a different tree with its own artifacts — `judge.yaml`, written
+last, and `timing.json`, the launcher's per-step clock — and its own one-page
+view, `learning.html` (#1025), rendered right after `judge.yaml` from the
+episode dir alone.
 
 ## Who writes what
 
@@ -37,10 +47,10 @@ writable scratch space.
   (`defender/fixtures/held-out/{slug}/ground_truth.yaml`) and are read there by
   `evals/held_out.py`. The eval walks fixtures and locates runs by run-id
   convention; the run dir carries no pointer back to a fixture and no label.
-  Contamination is stopped upstream instead: the learning-queue write
-  refuses to hand a held-out fixture run to the learning loop at all, and the
-  direct LEARN entrypoint refuses one whose `alert.json` is byte-identical to a
-  held-out fixture's.
+  Contamination is stopped upstream instead: the one automatic lane, the
+  catalog-curation enqueue, refuses a held-out fixture run at the investigation
+  boundary — by path containment and by content digest, so a copy of a fixture
+  taken elsewhere is caught too (`run_common.learning_refusal_gate`).
 - **`investigation.md`** — the agent's audit trail, written across the loop.
   The human + machine debug surface where the agent shows its work. See
   `content/invlang.md` for the block grammar.
@@ -95,11 +105,22 @@ writable scratch space.
   without forcing payload inspection. The agent works from gather's summary and
   Reads raw only on demand (and the main loop is blocked from doing so casually
   — see `content/runtime-loop.md`).
-- **`tool_trace.jsonl` / `runtime.html`** — written by `run.py` from the
-  stream-json events; `runtime.html` is the post-run inspection surface, carrying
-  the run's alert, its report card, the phase and cost breakdown, § Review gate,
-  the leads/queries join and the full transcript. There is no judge view — #1025
-  tracks the one the branched-episode judge needs.
+- **`provenance.json`** — the commit the run was made against and whether that
+  tree was dirty, stamped by the host at run-dir creation before any agent
+  exists. The one file here that is a fact *about* the run rather than content
+  it produced; deliberately absent from the model-facing workspace map.
+- **`wire_logs/llm_requests.jsonl`** — the run's one wire log. The main agent,
+  every gather subagent (`gather:{lead_id}`) and every review stage
+  (`review:{lens}`) write through the same `RequestLogger`, which is what makes
+  all three priceable. It sits under `wire_logs/` rather than at the run root so
+  that no role's run-dir read shape can reach a log holding gather's raw
+  payloads and MAIN's transcript.
+- **`tool_trace.jsonl`** — the driver's projection of the run's tool calls
+  (`observe.write_trace`, at run end): tool names and timing, never payloads.
+- **`runtime.html`** — the post-run inspection surface (`run.py` post-step),
+  carrying the run's alert, its report card, the phase and cost breakdown,
+  § Review gate, the leads/queries join and the full transcript. There is no
+  judge view — #1025 tracks the one the branched-episode judge needs.
 
 ## Two-table schema
 

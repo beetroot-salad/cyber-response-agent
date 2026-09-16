@@ -102,6 +102,14 @@ class NotGradedStamp:
     reason: str
 
 
+def _ledger_entries_name_a_lane(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What the record asks of a ledger entry is what its writer asks
+    (`enqueue.check_disposition_entry`): it names its finding and takes one of the lanes."""
+    for entry in entries:
+        enqueue_mod.check_disposition_entry(entry)
+    return entries
+
+
 def _rows_name_their_world(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The one thing the record asks of a world row beyond being a mapping: it names its world.
     Every other key belongs to the row's declared owners and is carried as written."""
@@ -172,6 +180,14 @@ class EpisodeGrade:
     #: already says that), but WHICH finding and why, since the draw document it came off is
     #: not part of this design's write set.
     withheld_findings: list[dict[str, Any]] = field(default_factory=list)
+    #: THE LEDGER (`enqueue.EnqueueReport.dispositions`): what the pass DID with every finding
+    #: coordinate it touched — `{finding_id, lane, reason}`, one per finding, in walk order.
+    #: The page renders THIS, rather than re-deciding each finding's lane from the rows and
+    #: the verdict word: a decision is written down where it is taken, never reconstructed
+    #: where it is shown. `None` is a record that predates the ledger (or a `not_graded`
+    #: stamp) — distinct from a pass that walked nothing, which writes `[]`.
+    dispositions: Annotated[list[dict[str, Any]],
+                            AfterValidator(_ledger_entries_name_a_lane)] | None = None
 
 
 #: The record's fields that are not the file's: the path it was read from, and the three sets
@@ -737,7 +753,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
         family_malformed_replies=family_malformed, world_enqueued_rows=world_enqueued_rows,
         world_enqueued_to=world_enqueued_to, withheld_worlds=grade.withheld_worlds,
         measuring_worlds=grade.measuring_worlds, world_findings=report.world_rows,
-        withheld_findings=withheld_findings,
+        withheld_findings=withheld_findings, dispositions=report.dispositions,
     )
     _write_judge_yaml(episode_dir, record)
     return record

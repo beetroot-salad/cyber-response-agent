@@ -2,14 +2,14 @@
 
 This repository centers on `defender/`, an alert-triage agent, built around a learning loop.
 
-The idea is to provide the agent with a structured way to identify its runtime mistakes and learn from them. That way, the system improves over time, just from running by itself. Depending on the disposition, a counterfactual actor is launched — an adversary for `benign` verdicts, a benign ops person for `malicious` ones — writing a story aimed to undermine the defender's investigation: bypass or disprove it. The actor is gray-box: it sees which queries the defender ran, but never the defender's goals or the raw payloads. A judge reviews the story and its generated telemetry against the investigation, and identifies gaps in both, creating seeds for an author to turn into validated lessons.
+The idea is to give the agent a structured way to identify its runtime mistakes and learn from them, so the system improves over time from the cases it actually works. A finished investigation is forked at a chosen turn and re-run as a family of sibling worlds: one continues against the evidence exactly as it was (the control), and each of the others continues against a world that differs by one deliberately authored fact — the host really is a jump box, the account really was rotated. Every sibling shares the same alert, history and partial reasoning up to the branch point; from there they diverge only in what the evidence says, and every answer a sibling receives is served by a real system and recorded. A judge grades each counterfactual sibling against its own record — what it queried, what it was served, what it concluded — and localizes where a verdict lost the deciding fact: never queried the system holding it, queried at the wrong scope, received the changed answer and reasoned past it, or established it and did not let it move the verdict. Those findings queue for a curator that turns them into validated lessons, each gated by a forward-check before it lands.
 
 > **Status: experimental / PoC.** The learning loop is the headlining experiment. It has proven its value end-to-end on real cases, so the earlier "runtime reliability gates are out of scope" stance is lifted: the permission/validation gates now run in-process inside the PydanticAI runtime driver (see `defender/CLAUDE.md`).
 
 ## What This Project Contains
 
 - `defender/`: the runtime triage agent, its skills/adapters, and the offline learning loop
-- `defender/learning/`: actor / oracle / judge / forward-check / author pipeline + eval harness + read-only frontend
+- `defender/learning/`: the branched-episode loop (questioner / staged estate / review by replay / family judge), the curators and their forward-check, and the read-only frontend
 - `defender/lessons/`: checked-in pitfall lessons authored by the loop, read by the agent at plan time
 - `defender/fixtures/`: alert inputs used to drive runs
 - `playground-v2/`: the SOC lab the defender runs against — a Docker Compose stack (Elastic/Fleet, Keycloak, Zeek, Falco, role hosts with baseline-activity generators, attack runner) on a Hetzner VPS
@@ -130,8 +130,8 @@ python3 defender/run.py <alert.json>
 Notes:
 
 - run dirs are created under `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`), outside the repo
-- pass `--no-learn` to skip enqueuing the learning step while iterating on the runtime loop only
-- the learning loop runs off-process — a worker drains the queue with `python3 defender/learning/loop.py --learn-drain`; run one dir directly with `python3 defender/learning/loop.py <run_dir>`
+- pass `--no-learn` to skip the catalog-curation enqueue, the one automatic post-step, while iterating on the runtime loop only
+- the learning loop runs off-process and is operator-initiated: fork a finished run with `python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>`, then fold the queued findings with `python3 defender/learning/loop.py --author-drain` (`--lead-author-drain` serves the catalog-curation queue)
 
 Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `executed_queries.jsonl`, `tool_trace.jsonl`, `runtime.html`, an `wire_logs/` directory holding the run's wire log (`llm_requests.jsonl`), and a `gather_raw/` directory of lead sidecars + per-query payloads.
 

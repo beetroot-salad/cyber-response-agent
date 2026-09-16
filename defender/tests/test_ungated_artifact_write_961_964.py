@@ -358,6 +358,7 @@ def test_the_write_verbs_build_on_the_reading_they_judged(tmp_path):
     untouched. Undecodable bytes: refused, with the same reading's reason, and nothing
     written. Both refusals are the reading's own, so a reworded refusal in `_io` cannot make
     a planted entry read as a passing fault (`retryable` keys on the errno, not the text)."""
+    from defender._io import ALIAS_READ_REFUSAL
     from defender.runtime.tools import _tool_append_block, _tool_fix_row
     from pydantic_ai.exceptions import ModelRetry
 
@@ -369,10 +370,11 @@ def test_the_write_verbs_build_on_the_reading_they_judged(tmp_path):
     with pytest.raises(ModelRetry) as refused:
         _tool_append_block(deps, "+ a row the link's target must never receive\n")
     # The symlink is refused at the `O_NOFOLLOW` open itself (the OS's ELOOP), ahead of the
-    # primitive's own alias screen — so the reason is the OS's, and the classification keys
-    # on the errno rather than on either message.
+    # primitive's own alias screen — and spelled as the alias refusal, the same words the
+    # hard-link and directory arms use, so a log names an alias as an alias; the
+    # classification keys on the errno rather than on the message either way.
     assert "cannot be read" in str(refused.value), str(refused.value)
-    assert "symbolic link" in str(refused.value), str(refused.value)
+    assert ALIAS_READ_REFUSAL in str(refused.value), str(refused.value)
     assert "retry" not in str(refused.value).lower(), "a planted entry is not a passing fault"
     assert elsewhere.read_text(encoding="utf-8") == _CLEAN_DOC, "the append followed the link"
     with pytest.raises(ModelRetry) as refused:

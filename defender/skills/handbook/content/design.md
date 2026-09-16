@@ -13,19 +13,17 @@ paragraph). It is **PoC-stage, learning-loop
 first** — the point is to iterate fast on the learning loop, not to harden a
 runtime.
 
-The defender runs *alongside* the production plugin in `soc-agent/`. It
-shares some framings (the invlang on-disk shape, the `++/+/-/--` assessment
-vocabulary) and some tools (the SIEM/host adapters), but it has its own
-runtime loop and is **not loaded as a Claude Code plugin** — it is driven by
-`defender/run.py`, which runs the in-process PydanticAI driver (`runtime/driver/`)
-against `defender/SKILL.md`.
+The defender is **not a Claude Code plugin**. It is driven by
+`defender/run.py`, which runs the in-process PydanticAI driver
+(`runtime/driver/`) against `defender/SKILL.md`, with a gather subagent
+dispatched per lead on a cheaper model.
 
 ## The two loops
 
 The defender is really two loops stacked:
 
 1. **Runtime loop** — the online investigation. ORIENT → PLAN → GATHER →
-   ANALYZE → REPORT, dispatching a Haiku gather subagent per query. Its job
+   ANALYZE → REPORT, dispatching a gather subagent per lead. Its job
    is to be honest about what it knows and escalate when the data runs out.
    A **confident** close then passes a write-time review gate before it
    commits — not a sixth phase, a gate the investigator never occupies.
@@ -63,10 +61,11 @@ gate?" is now an ordinary design question. What runs today, and why:
   deny-by-default gate over bash and file reads/writes, per agent. Not a
   reliability gate: it is what makes it safe for a model to hold a shell at
   all. See `defender/docs/runtime-gates.md`.
-- **Plumbing hooks that materialize harness contracts** — extraction shims
-  that replace prompt instructions the model would otherwise have to
-  remember, plus the discipline gate that forces all data-source queries
-  through the gather subagent. These are not safety gates. See
+- **Plumbing gates that materialize harness contracts** — the lead-table
+  claim on every gather dispatch, the per-system descriptor catalog, and the
+  permission gate's refusal of the main loop reading `gather_raw/`. They run
+  as library calls inside the driver (the `hooks/` modules are no longer
+  Claude Code hooks) and are not safety gates. See
   `content/runtime-loop.md` §Reliability gates.
 - **The write-time review gate** on every confident close
   (`runtime/challenge_gate.py`) — the one semantic gate. A confident
@@ -84,37 +83,26 @@ gate?" is now an ordinary design question. What runs today, and why:
 There is still **no phase state machine**: the loop's phases are prompt
 discipline, not enforced transitions.
 
-## Relationship to soc-agent
-
-| | `soc-agent/` | `defender/` |
-|---|---|---|
-| Status | Production plugin (v3) | Experimental PoC |
-| Loaded as | Claude Code plugin | in-process PydanticAI driver via `run.py` |
-| Loop | CONTEXTUALIZE → [SCREEN] → PREDICT → GATHER → ANALYZE → REPORT | ORIENT → PLAN → GATHER → ANALYZE → REPORT, then the review gate on a confident close |
-| Safety | Three-layer report validation, state machine, invlang validator, budget enforcer | Gates added one at a time after the loop proved out: the deny-by-default permission gate, the fail-closed review gate on every confident close, and the artifact schema on every model write. Still no phase state machine |
-| Learning | Post-mortem leads pipeline (slice-1) | The headlining experiment — the branched-episode loop (questioner → family → judge → lessons) |
-| Archetypes / precedents / permissions / act-mode | Yes | No |
-
-If a question is about archetype catalogs, precedent snapshots,
-`permissions.yaml`, budget enforcement, act-mode, the `/investigate` plugin
-command, or `soc-agent`'s environment knowledge — that's the wrong tree.
-Those live in `soc-agent/`.
-
 ## What ships in the tree
 
 - **`SKILL.md`** — the runtime agent's spec (the loop).
-- **`run.py`** — the canonical entrypoint: materialize the run dir, spawn
-  the agent (which writes the two tables live), render the transcript, hand
-  off to the learning loop.
+- **`run.py`** — the canonical entrypoint: materialize the run dir, run
+  the agent (which writes the two tables live), render the run page, enqueue
+  catalog curation. It does not feed the learning loop; an operator does.
 - **`skills/`** — on-disk skills loaded on demand: `invlang` (block surface
-  + author CLI), `gather` (the Haiku subagent + query templates), and
-  per-system references (`siem`, `host-state`, and others).
-- **`learning/`** — the offline loop: `loop.py` orchestrator plus the
-  paired `*.md` prompt / `*.py` driver for each stage.
+  + author CLI), `gather` (the subagent's own contract + query templates), and
+  one per-system reference for each system this deployment declares.
+- **`learning/`** — the offline loop: `branch/` (the episode), `judge/`,
+  `author/` (the two curators and the forward-check), `leads/` (the
+  lead-author), `core/` (queues and drains), with `loop.py` as the drains'
+  entry point and a role prompt beside each stage's driver.
 - **`lessons/`** — checked-in pitfall lessons, authored by the loop, read
   by the runtime agent at PLAN time.
-- **`hooks/`** — the three plumbing hooks (lead-metadata extraction,
-  system-skill injection, raw-access block).
+- **`lessons-questioner/`** — the questioner's own corpus, authored by the
+  second curator and read by the questioner, never by the runtime agent.
+- **`hooks/`** — gate logic the driver imports as libraries (lead claim,
+  system-skill descriptors, budget, lesson-load recording); the name is
+  historical, nothing here is a Claude Code hook.
 - **`docs/`** — design rationale (start with `docs/learning-loop.md`).
 - **`tests/`** — learning-loop invariants. The runtime agent has no unit
   tests; it's evaluated by running real alerts and reviewing the run dir.

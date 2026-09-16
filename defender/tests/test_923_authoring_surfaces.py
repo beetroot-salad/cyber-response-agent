@@ -103,6 +103,13 @@ _VOCABULARY_READERS = {
     # its day. It writes nothing; a value outside the vocabulary renders as NOT reviewed — the
     # one direction that page must never err in — and is never coerced.
     "scripts/visualize/visualize_runtime.py",   # the review-gate panel's pre-record fallback
+    # READER: the episode page's verdict tile counts how many measuring worlds' declared
+    # dispositions contrast with the control's, and how many verdicts agree with their
+    # declaration, through the owner's normalizer — so a case or whitespace variant of one
+    # member cannot agree on one figure and differ on the other. It writes nothing; a value
+    # outside the vocabulary is compared as the raw string it is, never coerced into the
+    # member it resembles (`test_923_readers.py`'s `visualize_episode` edge).
+    "scripts/visualize/visualize_episode.py",   # the verdict tile's contrast/agree counts
 }
 _VOCABULARY_OWNER_NAMES = frozenset({
     "DISPOSITION_ENUM", "DISPOSITION_VALUES", "DISPOSITION", "normalized_disposition",

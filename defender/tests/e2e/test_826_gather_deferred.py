@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,10 +27,8 @@ from defender.runtime import circuit_breaker, session_store, tools_gather  # noq
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.tools_gather import GatherRequest  # noqa: E402
 from defender.scripts.adapters.faults import UpstreamFault  # noqa: E402
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
-    REPEAT_THRESHOLD,
-    GatherDeadEnd,
-)
+from defender.runtime.tools import DeadEnd  # noqa: E402
+from defender.scripts.gather_tools.record_query import REPEAT_THRESHOLD  # noqa: E402
 from defender.tests._session_store_705 import sql, store_factory  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -120,7 +119,8 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     `GatherDeadEnd` made a fourth terminator with the same gap.
 
     Driven at the seam so all four arms are reachable without manufacturing a 40-request
-    overrun: each raises out of the gather agent, and each must name a DISTINCT reason — a
+    overrun: three raise out of the gather agent; the dead end (since #987 a tool result, not
+    an exception) closes the lead's door and returns. Each must name a DISTINCT reason — a
     single "truncated" flag would answer "was this cut off" and lose "by what", which is the
     question a reader comparing leads is actually asking."""
     stamped: list[tuple[str, str]] = []
@@ -132,20 +132,29 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
 
         return lambda agent_id, system, request_limit: _Agent()
 
+    def _factory_dead_end():
+        class _Agent:
+            async def run(self, *a, deps, **kw):
+                deps.stop.close_door(DeadEnd("repeats seq 0", "move on"))
+                return SimpleNamespace(output="what I had")
+
+        return lambda agent_id, system, request_limit: _Agent()
+
     arms = {
-        UsageLimitExceeded("limit"): session_store.TRUNCATED_BY_REQUEST_LIMIT,
-        GatherDeadEnd("repeats seq 0", "move on"): session_store.TRUNCATED_BY_DEAD_END,
-        UnexpectedModelBehavior("retries"): session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
-        session_store.StoreError("disk full"): session_store.TRUNCATED_BY_STORE,
+        _factory_raising(UsageLimitExceeded("limit")): session_store.TRUNCATED_BY_REQUEST_LIMIT,
+        _factory_dead_end(): session_store.TRUNCATED_BY_DEAD_END,
+        _factory_raising(UnexpectedModelBehavior("retries")):
+            session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
+        _factory_raising(session_store.StoreError("disk full")): session_store.TRUNCATED_BY_STORE,
     }
     assert len(set(arms.values())) == len(arms), "two terminators share a reason string"
 
-    for i, (exc, expected) in enumerate(arms.items()):
+    for i, (factory, expected) in enumerate(arms.items()):
         run_dir = materialize(tmp_path / f"arm{i}", GOLDEN_AB3)
         deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
         lead = f"l-00{i}"
         out = asyncio.run(tools_gather._run_gather(
-            deps, _factory_raising(exc), 40,
+            deps, factory, 40,
             GatherRequest(lead, "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
             lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
         ))
@@ -181,9 +190,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     # The CLEAN end stamps nothing: `truncated_by` unset must keep meaning "this finished".
     class _Clean:
         async def run(self, *a, **kw):
-            class R:
-                output = "measured."
-            return R()
+            return SimpleNamespace(output="measured.")
 
     run_dir = materialize(tmp_path / "clean", GOLDEN_AB3)
     deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
@@ -213,6 +220,7 @@ def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(t
     gather = ReplayFn([
         q("elastic", "query", PARAMS), q("elastic", "query", PARAMS),
         q("elastic", "query", PARAMS),          # the third trips the guard: dead end
+        Turn(text="what I had before the stop"),  # ...and #987 lets it write its summary
         q("elastic", "query", {"native_query": "FROM other"}), DONE,   # the second lead
     ])
     stores: list = []
@@ -371,8 +379,13 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
     rows = res.own_rows
     assert len(rows) == REPEAT_THRESHOLD, "the rejection rows stopped being written"
     assert [row["exit_code"] for row in rows] == [64] * REPEAT_THRESHOLD
-    assert res.gather.calls == REPEAT_THRESHOLD, \
-        "the loop ran past the threshold — it is still bounded only by the retry count"
+    assert res.gather.calls == REPEAT_THRESHOLD + 1, (
+        "the loop ran past the threshold — it is still bounded only by the retry count "
+        f"(> {REPEAT_THRESHOLD + 1}) — or the lead stopped at the threshold and #987's "
+        f"summary turn did not follow it ({REPEAT_THRESHOLD}). The `+ 1` is that turn: the "
+        "third rejection is answered as a failed tool result that closes the lead's door, "
+        "and the model's next turn is the summary main receives under this stop's own notice."
+    )
     assert rec.calls == [], "a rejected call reached the backend"
 
     trip_row = rows[-1]
@@ -381,7 +394,13 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
     summary = res.summary()
     assert "repeats the one already turned back at seq 0" in summary
     assert "Treat this lead as incomplete" in summary, "the shipped idiom was dropped"
-    assert PARAMS["native_query"] not in summary, \
+    # SCOPE since #987: the refusal-path invariant binds the HARNESS-AUTHORED HEADER — the
+    # notice above — not the whole message. The lead's own summary follows it after a blank
+    # line, through the same `untrusted` channel a clean lead's summary uses, where the model
+    # could always echo its own arguments. Here that text is `DONE`'s fixed string, so the
+    # assertion is scoped to the header and still says exactly what it always said.
+    header = summary.split("\n\n", 1)[0]
+    assert PARAMS["native_query"] not in header, \
         "model-authored params crossed into main's context on a refusal path"
 
     # The session terminator (item 1) covers this new stop too — a fourth terminator with the

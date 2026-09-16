@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 from pathlib import Path
 
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+#: The one stylesheet every rendered page inlines, read once at import — `visualize_run` and
+#: `visualize_episode` both take it from here rather than each reading the assets dir.
+ASSETS = Path(__file__).resolve().parent / "assets"
+CSS = (ASSETS / "styles.css").read_text(encoding="utf-8")
 
 from defender._report import ReportRead, read_report  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
@@ -26,7 +32,7 @@ def esc(s) -> str:
 #:
 #: IGNORECASE is load-bearing: HTML attribute names are case-insensitive, so `ONERROR=` and
 #: `OnError=` ARE the attribute this covers.
-_EVENT_HANDLER_RE = re.compile(r"\bon(?=[a-zA-Z]\w*\s*=)", re.IGNORECASE)
+EVENT_HANDLER_RE = re.compile(r"\bon(?=[a-zA-Z]\w*\s*=)", re.IGNORECASE)
 
 
 def esc_untrusted(s) -> str:
@@ -36,7 +42,7 @@ def esc_untrusted(s) -> str:
     # The replacement is a CALLABLE, not the literal `"on\u200b"`: under IGNORECASE that
     # literal rewrites `ONERROR=` to `on\u200bERROR=`, silently case-folding text this page
     # exists to show verbatim. `m.group(0)` splits the match, casing preserved.
-    return _EVENT_HANDLER_RE.sub(lambda m: m.group(0) + "\u200b", esc(s))
+    return EVENT_HANDLER_RE.sub(lambda m: m.group(0) + "\u200b", esc(s))
 
 
 def block(kind: str, title: str, body: str, *, open_: bool = False, anchor: str | None = None) -> str:
@@ -104,7 +110,9 @@ def slugify(s: str) -> str:
 
 
 def fmt_duration(ms: float | int) -> str:
-    if not ms or ms <= 0:
+    # A non-finite span — the sum of finite per-row walls can overflow — is the dash, not
+    # `int(inf)`'s raise.
+    if not ms or ms <= 0 or not math.isfinite(ms):
         return "—"
     s = int(ms // 1000)
     if s < 60:

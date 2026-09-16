@@ -21,7 +21,7 @@
 | **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
 | **lessons** | `defender/lessons/` — authored by the loop, retrieved by two pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, and the `append_block`/`fix_row` block keyed on the invlang frontier (`scripts/lessons/lessons_frontier.py`, #919). Grep, no index |
 | **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
-| **the frontend** / **the visualizations** | rendered HTML, not a web app: `scripts/visualize/` emits `runtime.html` (the run's one page — alert, report card, phases, metrics, review gate, leads and transcript) per run; `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
+| **the frontend** / **the visualizations** | rendered HTML, not a web app: `scripts/visualize/` emits `runtime.html` (the run's one page — alert, report card, phases, metrics, review gate, leads and transcript) per run and `learning.html` (the branch episode's one page — verdict, worlds, findings, stages and leads, rendered from the episode dir alone after `judge.yaml`); `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
 | **evals** | `defender/evals/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric (the frozen-actor replay and the judge A/B are retired); see `evals/README.md` |
 
 ## Layout (one line each)

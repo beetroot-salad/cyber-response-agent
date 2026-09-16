@@ -978,7 +978,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
     ])
     drive(run_dir, run_id="limit", main=main,
           gather=ReplayFn(distinct_query_turns), verbs=verbs, limits=caps())
-    assert "hit its request limit" in "\n".join(main.seen)
+    assert "reached its request limit" in "\n".join(main.seen)
     assert "Treat this lead as incomplete" in "\n".join(main.seen)
 
     other = materialize(tmp_path / "refused", GOLDEN)
@@ -999,7 +999,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
     assert gather_b.calls >= 2, "the subagent did not keep working past the refusal"
     history = "\n".join(main_b.seen)
     assert "PARTIAL SUMMARY: refused" in history
-    assert "hit its request limit" not in history, (
+    assert "reached its request limit" not in history, (
         "a budget refusal was converted into the measurement string — the wrong path"
     )
 

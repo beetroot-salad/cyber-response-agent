@@ -293,6 +293,19 @@ def _no_roster_states_a_stale_price_count(_tmp_path: Path) -> None:
     )
 
 
+def _visualize_episode_counts_the_member_and_coerces_nothing(_tmp_path: Path) -> None:
+    """The episode page's verdict tile compares declared and verdict dispositions through the
+    owner's normalizer: a member is that member (the new one included, so it counts on the
+    tile like any other), and a value outside the vocabulary stays the raw string it is —
+    compared as itself, never read as the member it resembles."""
+    from defender.scripts.visualize import visualize_episode
+
+    assert visualize_episode._normalized_disposition(MEMBER) == MEMBER
+    assert visualize_episode._normalized_disposition(GAP_MEMBER) == GAP_MEMBER
+    assert visualize_episode._normalized_disposition(" Malicious ") == " Malicious "
+    assert visualize_episode._normalized_disposition(None) is None
+
+
 _READERS = {
     # the vocabulary's unmoved consumers
     "lessons_run": _lessons_run_has_no_confident_ground_truth,
@@ -310,6 +323,7 @@ _READERS = {
     "run_paths->review_record": _the_review_record_has_no_consumer_outside_the_runtime_view,
     # newly in scope
     "visualize_runtime": _visualize_runtime_calls_it_unreviewed,
+    "visualize_episode": _visualize_episode_counts_the_member_and_coerces_nothing,
     "decide_report_write": _report_frontmatter_gate_admits_it,
     "run_investigation->prompt_rosters": _no_roster_enumerates_a_stale_vocabulary,
     "decide_write->prompt_rosters": _no_roster_states_a_stale_price_count,

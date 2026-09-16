@@ -56,7 +56,7 @@ uncertain.
    Compare actual observations to that prediction; ungrounded post-hoc
    analysis is the failure mode.
 5. **Save context — delegate the query, then reason from the return.**
-   Every data-source query goes through a `Task`→gather dispatch; that
+   Every data-source query goes through a `gather` dispatch; that
    dispatch is the only way to reach a system of record. Gather returns
    a summary of what its queries found, addressing each obligation you
    named in `what_to_summarize`. **That return is the authoritative
