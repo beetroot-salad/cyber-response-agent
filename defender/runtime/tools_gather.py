@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import NamedTuple
 from pathlib import Path
 from typing import Any
 
@@ -20,15 +21,16 @@ from . import session_store
 from . import tools
 from .agent_role import GATHER_AGENT_ID_PREFIX
 from .tools import (
+    DeadEnd,
     GatherDeps,
     AgentDeps,
+    LeadStop,
 )
 
 from defender._corpus import QueryTemplate, is_established, iter_query_templates
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh
-from defender.scripts.gather_tools.record_query import GatherDeadEnd
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
 from .verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.runtime.verb_grant import VerbGrant
@@ -428,6 +430,82 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
               file=sys.stderr)
 
 
+#: The tail every cut-short lead's notice ends on — MAIN's vocabulary (#807 G19: the gather
+#: model is never shown it; the query tool's own closing sentences live in `query_tool`).
+INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captured."
+
+#: The body under a notice when the run FAULTED — a model that produced nothing actionable
+#: (which, on a marked final request, is a model that wrote no text where its summary was
+#: due), a store that refused a round, the framework asking once more than the ceiling
+#: allows. One fixed sentence with no hole, because the only text that could fill one is
+#: model- or provider-authored; WHY the lead was stopped, if it was, is the header's to say.
+NO_SUMMARY_FAILED = "No summary: the lead ended before one could be written."
+
+
+def _dead_end_notice(lead_id: str, e: DeadEnd) -> str:
+    """Composed from `reason` and `escape` ALONE — the refusal-path invariant #807/#1015 pin
+    (`record_query.dead_end_reason`) binds this notice, and it is the HEADER of what main
+    receives: the lead's own summary, model-authored, follows it after a blank line."""
+    return f"gather for {lead_id} hit a dead end: {e.reason} {e.escape} {INCOMPLETE_IDIOM}"
+
+
+def _request_limit_notice(lead_id: str, request_limit: int) -> str:
+    """The lead's OWN ceiling, never the framework's exception text: `UsageLimitExceeded`
+    names the number it was constructed with, which is the ceiling's composition and not the
+    ceiling (#808 d21/F6's 40 and 8 are what a reader reconciles this against). "Reached"
+    and "told to stop", not "before finishing": a lead that wrote its summary on the marked
+    request finished — what it could not do is query further, and that is what main is
+    told to allow for."""
+    return (
+        f"gather for {lead_id} reached its request limit ({request_limit} requests) and was "
+        f"told to stop; any queries it ran are in the queries table. {INCOMPLETE_IDIOM}"
+    )
+
+
+class _Ending(NamedTuple):
+    """How a gather session ended, for the stamp and the notice: the session terminator and
+    the sentence main reads. A STOP's ending (the harness told the lead to stop and it
+    summarized) and a FAULT's ending (the run raised) are the same shape."""
+
+    terminator: str
+    notice: str
+
+
+def _stop_ending(lead_id: str, stop: LeadStop) -> _Ending | None:
+    """The harness's stop, if it made one. A dead end outranks the ceiling when a lead met
+    both — the guard's sentence names the request that stopped it; the ceiling's can only say
+    how many requests it was allowed."""
+    if stop.dead_end is not None:
+        return _Ending(session_store.TRUNCATED_BY_DEAD_END, _dead_end_notice(lead_id, stop.dead_end))
+    if stop.ceiling is not None:
+        return _Ending(
+            session_store.TRUNCATED_BY_REQUEST_LIMIT, _request_limit_notice(lead_id, stop.ceiling),
+        )
+    return None
+
+
+def _compose(
+    lead_id: str, stop: LeadStop, summary: str | None, fault: _Ending | None,
+) -> tuple[str | None, str]:
+    """`(terminator, output)` for main, from two facts that are decided independently and
+    read once here: whether the harness STOPPED the lead (the record whichever stop wrote),
+    and how the run ENDED (its summary text, or a fault).
+
+    The STOP outranks the fault, in the header and in the stamp alike. It is the fact main
+    reasons from — which request stopped the lead, and what to do about it — and it is what
+    cut the lead off: a model that wrote nothing on its marked, tool-less final request ends
+    in the framework's empty-response fault, and that session was truncated by its request
+    limit, not by a retry count. A fault on a lead the harness never stopped is reported as
+    itself. The BODY is the lead's summary when the run produced one, else the fixed
+    no-summary sentence. A lead the harness never stopped and that never faulted is the
+    clean end — its text alone, no stamp."""
+    ending = _stop_ending(lead_id, stop) or fault
+    body = NO_SUMMARY_FAILED if fault is not None else (summary or "")
+    if ending is None:
+        return None, body
+    return ending.terminator, f"{ending.notice}\n\n{body}"
+
+
 async def _run_gather(  # noqa: C901 — the branch count IS the terminator census (see docstring)
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
@@ -445,10 +523,24 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     and that fault belongs at run start — `run_investigation` reads it once, before any model
     call — not inside a tool the model is mid-run on. `None` is a run with no index to show.
 
-    The `except` arms below ARE this frame's complexity, one per way a gather session can end:
-    four that degrade the lead into a summary main can still reason from, and two that end the
-    whole run and only pass through. Folding two together to clear a complexity threshold costs
-    a session ending with nothing said about why."""
+    The `except` arms below ARE this frame's complexity, one per way a gather RUN can end:
+    three faults that degrade the lead into a notice main can still reason from, and two
+    run-level ends that only pass through. Folding two together to clear a complexity
+    threshold costs a session ending with nothing said about why.
+
+    #987: a lead the harness STOPS is not cut by an exception, and the stop is not an arm
+    here. A GUARD's stop is a tool result: the query tool closes the lead's door, tells the
+    model so in the tool's own answer, and refuses every later `query` the same way. The
+    CEILING is a round: the `RequestCeiling` capability on every gather agent adds one
+    sentence to the last request the ceiling allows — whatever tools that round used — saying
+    the summary is what that request is for, and withholds the tools on it. Whichever stop
+    it was writes itself on the lead's `LeadStop` at the moment it happens. The model's next
+    turn is the summary it would have written, the run ends the ordinary way, and `_compose`
+    reads the record afterwards to put the stop's notice ABOVE that summary and stamp the
+    terminator. So main receives what the lead actually retrieved, under the same header it
+    always did — and a fault after a stop still shows main the stop. The ceiling is one
+    number, `UsageLimits(request_limit=…)`, read by every hook from the run context; the
+    factory's copy is the recorder's (#880 F-19)."""
     lead_id, system = request.lead_id, request.system
     if not _LEAD_ID_RE.match(lead_id):
         raise ModelRetry(
@@ -511,88 +603,90 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     # prefix this dispatch shares with its siblings is the system's, not the lead's. The factory
     # owns that policy — this frame only knows both facts.
     #
-    # `request_limit` is handed over for the same reason: it is the value the `UsageLimits`
-    # below enforces, so a recorder the factory builds to mirror that ceiling cannot be
-    # measuring a different one.
+    # `request_limit` is handed to the factory as well as to `UsageLimits` below — one
+    # number: the recorder the factory builds withholds the doomed round against it (#880
+    # F-19). The hooks that mark the ceiling read it off the run context the framework
+    # builds from that same `UsageLimits`.
     gagent = gather_factory(agent_id, system, request_limit)
     gbase = bind(
         GATHER_DEF, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
     )
     assert isinstance(gbase, GatherDeps)
+    stop = LeadStop()
     gdeps = replace(
         gbase,
         run_id=deps.run_id,
         lead_id=lead_id,
         budget_started_monotonic=deps.budget_started_monotonic,
+        stop=stop,
     )
     prompt = _gather_prompt(deps, request, catalog, verb_grant)
-    # `None` is the CLEAN end. Every arm below sets one, and the stamp happens once in the
-    # try's `finally` — so a terminator arm added later without a stamp is a visibly missing
-    # assignment rather than a silently unstamped session, which leaves no reader able to tell
-    # a lead that was CUT OFF from one that finished. `finally` and not "after the try" because
-    # the last two arms RE-RAISE: a run-level kill ends this session just as surely as a
-    # lead-level one, and the stamp is the only record either leaves on the gather side.
-    terminator: str | None = None
+
+    def stamp(terminator: str | None) -> None:
+        if terminator is not None and stamp_terminator is not None:
+            stamp_terminator(agent_id, terminator)
+
+    # Two facts, decided here, composed once below: the run's summary if it produced one,
+    # and its fault if it raised one. The harness's own stop is the third fact and is not
+    # decided here at all — it is on `stop`, written by the frame that made it.
+    summary: str | None = None
+    fault: _Ending | None = None
     try:
         result = await gagent.run(
-            prompt, deps=gdeps,
-            usage_limits=UsageLimits(request_limit=request_limit),
+            prompt, deps=gdeps, usage_limits=UsageLimits(request_limit=request_limit),
         )
-        output = str(result.output or "")
-    except UsageLimitExceeded as e:
-        terminator = session_store.TRUNCATED_BY_REQUEST_LIMIT
-        output = (
-            f"gather for {lead_id} hit its request limit ({e}) before finishing; "
-            "any queries it ran are in the queries table. Treat this lead as "
-            "incomplete and reason from what was captured."
-        )
-    except GatherDeadEnd as e:
-        terminator = session_store.TRUNCATED_BY_DEAD_END
-        output = (
-            f"gather for {lead_id} hit a dead end: {e.reason} {e.escape} Treat this "
-            "lead as incomplete and reason from what was captured."
+        summary = str(result.output or "")
+    except UsageLimitExceeded:
+        # The framework asked for the request after the last the ceiling allows. The
+        # final request is marked and tool-less, so a model that answers it with text ends
+        # the run there; this is reached only when it wrote none and the agent's retry
+        # policy let the framework ask again (a gather agent with no output retries ends
+        # in the arm below instead).
+        fault = _Ending(
+            session_store.TRUNCATED_BY_REQUEST_LIMIT,
+            _request_limit_notice(lead_id, request_limit),
         )
     except UnexpectedModelBehavior as e:
-        terminator = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
-        output = (
+        fault = _Ending(
+            session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
             f"gather for {lead_id} ended abnormally ({e}); any queries it ran are in "
-            "the queries table. Treat this lead as incomplete and reason from what was "
-            "captured."
+            f"the queries table. {INCOMPLETE_IDIOM}",
         )
     except session_store.StoreError as e:
-        # The gather recorder is observational — `_make_gather_recorder` returns the live list
-        # unchanged, so gather never sends a store-sourced history and a recording failure here
-        # cannot put an unrecorded list on the wire. Degrade this lead like the two above rather
+        # The gather recorder is observational — `_make_gather_recorder` returns the live
+        # list unchanged, so gather never sends a store-sourced history and a recording
+        # failure here cannot put an unrecorded list on the wire. Degrade this lead rather
         # than letting the exception unwind through the main agent's tool call and kill the
         # process; if the store is genuinely broken, main's own next append stops the run
         # through the handled exit.
         #
-        # The stamp below goes through the store that just failed, so this arm's record is the
-        # most likely to be lost. It is still attempted (and swallowed by the stamp's own
-        # best-effort arm): a store broken for APPEND may not be broken for this one UPDATE,
-        # and skipping it guarantees the gap for the terminator a reader most needs to see.
-        terminator = session_store.TRUNCATED_BY_STORE
-        output = (
+        # The stamp below goes through the store that just failed, so this arm's record is
+        # the most likely to be lost. It is still attempted (and swallowed by the stamp's
+        # own best-effort arm): a store broken for APPEND may not be broken for this one
+        # UPDATE, and skipping it guarantees the gap for the terminator a reader most needs
+        # to see.
+        fault = _Ending(
+            session_store.TRUNCATED_BY_STORE,
             f"gather for {lead_id} could not be recorded ({e}); any queries it ran are "
-            "in the queries table. Treat this lead as incomplete and reason from what "
-            "was captured."
+            f"in the queries table. {INCOMPLETE_IDIOM}",
         )
     except BudgetKill:
-        # NOT degraded into a summary: the budget kill ends the RUN, and converting it into a
-        # measurement string here would hide it from `run_investigation`'s own catch. Named on
-        # the way past so the session it ended stays distinguishable from one that finished.
-        terminator = session_store.TRUNCATED_BY_BUDGET
+        # NOT degraded into a summary: the budget kill ends the RUN, and converting it
+        # into a measurement string here would hide it from `run_investigation`'s own
+        # catch. Stamped on the way past so the session it ended stays distinguishable
+        # from one that finished: a run-level kill ends this session just as surely as a
+        # lead-level one, and the stamp is the only record it leaves on the gather side.
+        stamp(session_store.TRUNCATED_BY_BUDGET)
         raise
     except circuit_breaker.RunAborted:
-        # Likewise: the infra breaker's run-level abort passes through to the driver, which
-        # stamps `aborted` on the MAIN session. Its gather session ended at the same instant
-        # and gets the same word.
-        terminator = session_store.TRUNCATED_BY_ABORTED
+        # Likewise: the infra breaker's run-level abort passes through to the driver,
+        # which stamps `aborted` on the MAIN session. Its gather session ended at the
+        # same instant and gets the same word.
+        stamp(session_store.TRUNCATED_BY_ABORTED)
         raise
-    finally:
-        if terminator is not None and stamp_terminator is not None:
-            stamp_terminator(agent_id, terminator)
 
+    terminator, output = _compose(lead_id, stop, summary, fault)
+    stamp(terminator)
     wrapped = wrap_fresh(output, "untrusted")
     _persist_gather_summary(deps.run_dir, lead_id, wrapped)
     return wrapped

@@ -151,11 +151,65 @@ class AgentDeps:
 
 
 @dataclass(frozen=True)
+class DeadEnd:
+    """A guard's stop, as the two strings main is shown: the request the guard refused
+    (`reason`) and the fixed sentence handing the decision to main (`escape`). Strings and
+    not the `GatherDeadEnd` that carried them: an exception object pins its traceback — the
+    tripping call's whole frame chain, `lead_rows`' list included — for as long as it is
+    held, and this record is held for the rest of the lead's run."""
+
+    reason: str
+    escape: str
+
+
+@dataclass
+class LeadStop:
+    """Whether the HARNESS stopped this lead's querying, and by which of its two stops.
+
+    ONE MUTABLE OBJECT PER LEAD, written by whichever frame stops the lead and read once,
+    by `_run_gather`, after the run: a GUARD closes the query door (`dead_end`) from inside
+    the query tool when a repeat or a rejection budget trips, and answers every later `query`
+    call from it; the request CEILING marks itself (`ceiling`) from `RequestCeiling`'s round
+    hook, at the moment it tells the model its final request is the summary. Mutable inside
+    a frozen `GatherDeps` for the reason `review_state` is: the deps are copied by
+    `replace`, and pydantic-ai's hook signatures give a tool no other way to hand a fact
+    back up.
+
+    Both stops are recorded HERE, at the moment they happen, so nothing downstream has to
+    infer afterwards whether a lead that ended cleanly was told to stop — the frame that
+    told it wrote it down."""
+
+    dead_end: DeadEnd | None = None
+    ceiling: int | None = None
+
+    @property
+    def door_closed(self) -> bool:
+        """The query tool's question: does a `query` call still run on this lead?"""
+        return self.dead_end is not None
+
+    def close_door(self, dead_end: DeadEnd) -> None:
+        """First close wins: two siblings tripping in one round keep the first's reason, and
+        the notice main reads names the request that actually stopped the lead."""
+        if self.dead_end is None:
+            self.dead_end = dead_end
+
+    def mark_ceiling(self, request_limit: int) -> None:
+        if self.ceiling is None:
+            self.ceiling = request_limit
+
+
+@dataclass(frozen=True)
 class GatherDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.GATHER
 
     lead_id: str | None = None
+    #: `None` outside a dispatch (deps bound by hand, lead zero's harness-driven calls): a
+    #: guard's dead end then unwinds as the exception it always was, because no frame would
+    #: read the record. `_run_gather` is the one place that makes one, and the one that reads
+    #: it. The request ceiling itself is not here: it is `ctx.usage_limits.request_limit`,
+    #: the number the run was handed, and every hook reads it there.
+    stop: LeadStop | None = field(kw_only=True, default=None, compare=False, repr=False)
 
 
 def _record_lesson_load(

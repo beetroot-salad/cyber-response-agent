@@ -181,7 +181,9 @@ def _summary_body(r: _Res) -> str:
     Recovered so the assertion below can be an EQUALITY. A substring check on the reason is
     satisfied by a summary that ALSO carries something else — which is exactly the shape O4
     forbids, and the only thing standing between a model-authored fragment and main's context
-    is that nothing but the host's own two sentences is in this file."""
+    is that nothing but the host's own two sentences is in the part of this file the HOST
+    writes. Since #987 that part is the HEADER — everything up to the first blank line — and
+    `_summary_header` below is what the equality is taken over."""
     summary = _summary(r)
     m = FRAME_RE.fullmatch(summary)
     assert m is not None, \
@@ -189,6 +191,35 @@ def _summary_body(r: _Res) -> str:
     assert m.group("tag") == "untrusted", \
         f"the summary's one frame is not the untrusted one: {m.group('tag')!r}"
     return m.group("body")
+
+
+def _summary_header(r: _Res) -> str:
+    """The HARNESS-AUTHORED half of what main receives: the frame's body up to the first blank
+    line.
+
+    Before #987 the body WAS the header — `_run_gather`'s dead-end arm composed main's whole
+    message from `reason` and `escape` alone and discarded the lead's own output, and O4's
+    equality was taken over all of it. #987 keeps that composition and gives it a body: the
+    budget stop is answered to the gather model as a failed tool result that closes the
+    lead's door, the model's next turn is the summary it never got to write, and that summary
+    follows the notice after a blank line. So the boundary O4 is about moved from "the whole
+    message" to "the header", and the split is asserted rather than assumed — a body with no
+    blank line means neither the summary nor the fixed no-summary sentence followed the
+    notice, which is #987 failing, not O4 passing.
+
+    What is NOT weakened: the header is still composed by the host from its own two sentences,
+    and a model-authored fragment appearing inside IT is still this defect. What moved is that
+    a fragment after the blank line is now the ordinary `untrusted`-wrapped channel every
+    clean lead's summary uses — a channel where the model could always echo its own arguments,
+    and one main's own read policy has no other door onto."""
+    body = _summary_body(r)
+    header, sep, tail = body.partition("\n\n")
+    assert sep, (
+        "main's message carries no summary under the notice at all — #987 requires either the "
+        f"summary the gather agent wrote or the fixed sentence saying it could not: {body!r}"
+    )
+    assert tail.strip(), "the summary under the notice is empty"
+    return header
 
 
 def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
@@ -223,13 +254,15 @@ def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
         "a budget stop handed main the repeat guard's escape"
 
     # EQUALITY, not `reason in summary`. S1 discharges O4 with TWO facts, and the second is
-    # that `_run_gather`'s dead-end arm composes this file from `reason` and `escape` ALONE,
-    # discarding the lead's own output. A substring check tests only the first: it stays green
-    # while a placement appends (or prepends) a model-authored fragment of its own around the
-    # dispatcher's sentences — a truncated ghost name, a params key, a hash prefix — none of
-    # which is a substring of any canary a negative could name. Stated whole, there is nowhere
-    # in this file for a byte the model authored to be.
-    assert _summary_body(r) == (
+    # that `_run_gather`'s dead-end arm composes this NOTICE from `reason` and `escape` ALONE.
+    # A substring check tests only the first: it stays green while a placement appends (or
+    # prepends) a model-authored fragment of its own around the dispatcher's sentences — a
+    # truncated ghost name, a params key, a hash prefix — none of which is a substring of any
+    # canary a negative could name. Stated whole, there is nowhere in the header for a byte
+    # the model authored to be.
+    #
+    # Taken over the HEADER since #987, which gave the notice a body: see `_summary_header`.
+    assert _summary_header(r) == (
         f"gather for {LEAD} hit a dead end: {reason} {REJECTION_BUDGET_ESCAPE} "
         f"{INCOMPLETE_IDIOM}"
     ), "main's context carries something besides the host's own two sentences — O4"

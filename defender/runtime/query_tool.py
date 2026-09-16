@@ -17,6 +17,7 @@ from pydantic_ai.exceptions import (
     CallDeferred,
     ModelRetry,
     SkipToolExecution,
+    ToolFailed,
     ToolRetryError,
 )
 
@@ -26,6 +27,8 @@ from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.payload_view import render as _render_payload
+from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
+from defender.runtime.tools import DeadEnd
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
     REPEAT_ESCAPE,
@@ -88,6 +91,31 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 DEFAULT_FAULT_EXIT = 2
+
+# ---------------------------------------------------------------------------------------------
+# #987 — THE DOOR. A lead a GUARD stops is told so IN THE TOOL RESULT, in gather's own
+# vocabulary, and writes its summary on the next turn like any lead that finished; nothing is
+# raised out of the run and nothing is replayed. These sentences are what the gather model
+# reads. MAIN's idiom ("Treat this lead as incomplete…") is never among them (#807 G19). The
+# request CEILING is not a door: it is a fact about the round, and `request_ceiling` tells the
+# model at the round — and withholds the tools on it, so no `query` call ever arrives here on
+# a final request.
+# ---------------------------------------------------------------------------------------------
+
+#: After a guard's dead end (`GatherDeadEnd.reason` precedes it): a FAILED tool result.
+QUERY_DOOR_CLOSED = "No further queries can be issued on this lead. " + WRITE_SUMMARY_NOW
+#: Any `query` after the door closed — a sibling in the closing round, or a later turn's call:
+#: not run, and said so, rather than answered with a reason that belongs to another call. The
+#: reason itself is in the tool result of the call that closed the door.
+QUERY_NOT_RUN = (
+    "This call was not executed: the lead was stopped by an earlier query. " + QUERY_DOOR_CLOSED
+)
+
+
+def _door_closed(deps: Any) -> bool:
+    """A deps with no stop record (lead zero's harness-driven calls) has no door to close."""
+    stop = getattr(deps, "stop", None)
+    return stop is not None and stop.door_closed
 
 #: How the host names a system it withheld — ONE spelling, spent by `_undeclared_target` on the
 #: sentence MAIN reads and by `UNDECLARED_SYSTEM_DETAIL` on the row. Not a shared PREDICATE (see
@@ -462,6 +490,12 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             return await handler(args)
         except (ValidationError, ModelRetry) as e:
+            # A schema-refused call after the door closed is not corrected — a correction is
+            # "try again", charged to the tool's retry budget, on a lead that was told to
+            # stop — and not rowed: it was never a call. A call the schema ACCEPTS goes on to
+            # the execute hook, where the grant check sees it before the door does.
+            if _door_closed(ctx.deps):
+                raise ToolFailed(QUERY_NOT_RUN) from e
             raw = _raw_args(args)
             # THE SECOND IDENTITY EXTRACTION. These are the RAW arguments: this frame runs
             # precisely because the schema refused to produce validated ones. A non-dict
@@ -510,11 +544,11 @@ class QueryCapture(AbstractCapability[Any]):
                 detail=detail,
             )
             if trip is not None:
-                raise rejection_dead_end(
+                raise self._stop(ctx, rejection_dead_end(
                     trip,
                     target=self._undeclared_target(recorded=system, raw=raw_system),
                     verb=verb,
-                ) from e
+                )) from e
             raise
 
     async def _grant_check(
@@ -525,6 +559,28 @@ class QueryCapture(AbstractCapability[Any]):
         wrong with it). Returns `(decision, early_result)`; `early_result` is set when the
         caller must return without ever reaching execution."""
         decision, load_error = self._decide_guarded(system, verb)
+        if load_error is None and decision.outcome == DENIED:
+            self._denial_logger_for(deps.run_dir).log_policy_denial(
+                role=self._role, system=system, verb=verb,
+                call_id=f"{system}.{verb}", params=params,
+            )
+            return None, _format_bash_result(
+                DEFAULT_FAULT_EXIT, "", wrap_fresh(decision.refusal or "", "untrusted"), "",
+            )
+
+        # THE DOOR (#987) sits BELOW the grant decision and ABOVE every row. Below the
+        # decision because a denied call always produces its denial record, whatever else is
+        # wrong with it — a lead told to stop does not get a quieter audit trail. Above every
+        # row because a call against a closed door never runs, whenever it came, and is not
+        # an attempt the tables should count: a sibling of the closing call in the same round
+        # (the round's calls are all validated, then all executed, so a trip at validation is
+        # seen by every sibling's execution), or the model querying again after being handed
+        # the closing sentence. Either is answered `QUERY_NOT_RUN` and costs the model nothing
+        # but the turn; the ceiling bounds a model that keeps trying, and `request_ceiling`
+        # still puts the summary request in front of it.
+        if _door_closed(deps):
+            raise ToolFailed(QUERY_NOT_RUN)
+
         if load_error is not None:
             # THE BREAKER CHECK, consulted HERE and not only in `wrap_tool_execute`. These
             # `infra` rows are excluded from `rejection_trip` on the promise that
@@ -550,15 +606,6 @@ class QueryCapture(AbstractCapability[Any]):
                 system_key="",
             )
             return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
-
-        if decision.outcome == DENIED:
-            self._denial_logger_for(deps.run_dir).log_policy_denial(
-                role=self._role, system=system, verb=verb,
-                call_id=f"{system}.{verb}", params=params,
-            )
-            return None, _format_bash_result(
-                DEFAULT_FAULT_EXIT, "", wrap_fresh(decision.refusal or "", "untrusted"), "",
-            )
 
         if decision.outcome != GRANTED:
             # The unresolvable-verb repeat class — the schema class's shape at a different
@@ -624,10 +671,36 @@ class QueryCapture(AbstractCapability[Any]):
             )
             raise ModelRetry(reason)
 
+    @staticmethod
+    def _stop(ctx, dead_end: GatherDeadEnd) -> BaseException:
+        """Close the lead's door on `dead_end` and return what THIS call raises in its place: a
+        failed tool result carrying the guard's own reason and the closing sentence, so the
+        model's next turn is the summary. `ToolFailed` and not `ModelRetry` because the
+        framework appends "try again" to a retry and charges the tool's retry budget for it;
+        a failed result does neither, from the validate hook as well as this one. Outside a
+        dispatch (deps with no stop record — lead zero's harness-driven calls) the dead end
+        itself, to unwind as it always has."""
+        stop = getattr(ctx.deps, "stop", None)
+        if stop is None:
+            return dead_end
+        stop.close_door(DeadEnd(dead_end.reason, dead_end.escape))
+        return ToolFailed(f"{dead_end.reason} {QUERY_DOOR_CLOSED}")
+
     async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
+        try:
+            return await self._execute(ctx, args, handler)
+        except GatherDeadEnd as e:
+            failed = self._stop(ctx, e)
+            if failed is e:
+                raise
+            raise failed from e
 
+    async def _execute(self, ctx, args, handler):  # noqa: ANN001
+        """The call itself — the grant, the door, the breaker, the repeat guard, the screens,
+        the verb, the row. Raises `GatherDeadEnd` for a guard's stop; `wrap_tool_execute`
+        owns the door."""
         deps = ctx.deps
         system = as_str(args.get("system"))
         verb = as_str(args.get("verb"))
