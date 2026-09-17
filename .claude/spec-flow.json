@@ -282,7 +282,11 @@
           "defender/learning/branch/archive.py::read_family_stamp",
           "defender/learning/branch/timing.py::read_stage_timings",
           "defender/learning/branch/episode.py::_recorded_outcome",
-          "defender/scripts/visualize/visualize_episode.py::load_episode"
+          "defender/scripts/visualize/visualize_episode.py::load_episode",
+          "defender/_io.py::bind",
+          "defender/_io.py::Bound.read",
+          "defender/_io.py::Bound.read_jsonl",
+          "defender/_io.py::Bound.under"
         ],
         "grep": [
           "episodes/",

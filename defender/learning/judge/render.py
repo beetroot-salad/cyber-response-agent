@@ -19,11 +19,11 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from defender._io import read_jsonl_rows
+from defender._io import bind, read_jsonl_rows
 from defender._run_paths import PROVENANCE, artifact_dir, artifact_file
 from defender.learning.branch.archive import (
     ALERT_NAME,
@@ -40,6 +40,7 @@ from defender.learning.judge.family import (
     json_mapping,
     has_refusals,
     lead_chain,
+    leads_by_id,
     own_h_rows,
     render_refused,
     raw_manifest,
@@ -566,8 +567,10 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     world_dir = episode_dir / WORLDS_DIRNAME / world_label
     world_entry = _world_entry(doc, world_label)  # validates the graded world is actually declared
     show = git_show if git_show is not None else _git_show_default
-    record = facts if facts is not None else read_world_facts(
-        episode_dir, world_label, episode_token=episode_token)
+    bound = bind(episode_dir)
+    record = facts if facts is not None else replace(
+        read_world_facts(bound, world_label, episode_token=episode_token),
+        leads=leads_by_id(world_dir))
 
     text = record.investigation_text
     resolutions_by_lead = record.resolutions_by_lead
@@ -618,9 +621,9 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     # agreeing"). `render` runs once per graded world, so reading these here made 2N further
     # parses of two box-reachable files the pass had already read, and let the mechanical row
     # and the prompt section that claims to render it come off different documents.
-    samples_doc = read_samples_record(episode_dir) if samples is None else samples
+    samples_doc = (read_samples_record(bound) or {}) if samples is None else samples
     sample_text = _render_samples(world_staged_patterns, samples_doc)
-    review_doc = read_review_record(episode_dir) if review is None else review
+    review_doc = (read_review_record(bound) or {}) if review is None else review
     review_block = world_review_block(review_doc, world_label)
     review_text = _render_review_block(review_block)
     coverage = []
@@ -689,7 +692,8 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
         for k, v in sorted(spread.items(), key=lambda kv: (kv[0] is None, str(kv[0])))
     ] if siblings else []
 
-    leads = {lid: lead_chain(world_dir, lid, resolutions_by_lead, leads=by_id)
+    world = bound.under(f"{WORLDS_DIRNAME}/{world_label}")
+    leads = {lid: lead_chain(world, lid, resolutions_by_lead, leads=by_id)
              for lid in sorted(lead_ids)}
 
     manifest_text = _manifest_text(doc, world_label)

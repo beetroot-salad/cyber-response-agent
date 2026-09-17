@@ -44,7 +44,7 @@ import yaml
 
 from defender import _yaml
 from defender._clock import now_iso
-from defender._io import entry_present, guarded_mkdir, open_guarded, read_guarded, write_guarded
+from defender._io import bind, guarded_mkdir, open_guarded, write_guarded
 from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
@@ -357,49 +357,39 @@ def staged_path(episode_dir: Path) -> Path:
     return Path(episode_dir) / STAGED_FILENAME
 
 
-def read_staged(episode_dir: Path) -> list[dict]:
-    """Every row the staging record holds, in written order — or a refusal.
+def read_staged(bound: Any) -> list[dict] | None:
+    """Every row the staging record holds, in written order; `None` when nothing is at the
+    name (#1049 D-J7 — the typed absent answer, coalesced `or []` at every read site) and `[]`
+    for a present, empty (or comment-only) document.
 
     A record that does not PARSE is refused rather than guessed at, and the asymmetry is why:
     acting on half a record means deleting a name this code did not write, or leaving one it
     did. Both are worse than stopping and saying so, because the second leaves a live alias
     under a token the next episode is about to reuse.
+
+    Through the bound reader's own screen (#1049), not `read_guarded` ahead of an `lstat`:
+    `staged.yaml` is the SOLE record that a cluster write happened and it lives in the episode
+    dir, whose lower components a sibling's box can write, and PRESENT-but-not-a-plain-file (a
+    link planted at the name) is refused rather than read as empty, which would have teardown
+    sweep nothing while a live alias sits right there under the name meant to account for it.
     """
-    path = staged_path(episode_dir)
-    # `read_guarded` (open `O_NOFOLLOW` + `fstat`), not `artifact_file` (`lstat`) then a bare
-    # `read_text`: `staged.yaml` is the SOLE record that a cluster write happened and it lives
-    # in the episode dir, whose lower components a sibling's box can write. An `lstat`-then-
-    # `read_text` pair answers about whatever the name meant a moment ago, and the window
-    # between the two calls is exactly where a plant belongs — the same TOCTOU `read_guarded`
-    # exists to close for every other reader of this tree (`archive.read_family_stamp`,
-    # `family._read_archived_text`).
-    # ABSENT (#1025 O8) is the ordinary case — no cluster write has happened yet — and answers
-    # as no rows; PRESENT and not a plain file (a link planted at the name) is refused rather
-    # than read as empty, which would have teardown sweep nothing while a live alias sits
-    # right there under the name meant to account for it.
-    # `entry_present` (one `lstat`), not `exists() or is_symlink()`: `Path.exists()` follows the
-    # link and on 3.11 re-raises a permission fault from the directory above, so a link planted
-    # into a mode-000 directory escaped as a bare `PermissionError` instead of the typed refusal
-    # every caller handles (#1025).
-    if not entry_present(path):
-        return []
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise StagingRefused(
-            f"{STAGED_FILENAME} at {path} is refused: {refusal}")
+    rec = bound.read(STAGED_FILENAME)
+    if rec.absent:
+        return None
+    if rec.refusal is not None:
+        raise StagingRefused(f"{STAGED_FILENAME} is refused: {rec.refusal}")
     try:
-        rows = _yaml.safe_load(text)
+        rows = _yaml.safe_load(rec.text)
     except yaml.YAMLError as bad:
         raise StagingRefused(
-            f"{STAGED_FILENAME} at {path} does not parse ({bad}) — acting on a staging record "
-            "this code cannot read means deleting a name it did not write, or leaving one it "
-            "did") from bad
+            f"{STAGED_FILENAME} does not parse ({bad}) — acting on a staging record this code "
+            "cannot read means deleting a name it did not write, or leaving one it did") from bad
     if rows is None:
         return []
     if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
         raise StagingRefused(
-            f"{STAGED_FILENAME} at {path} is not a list of rows — the record is append-only "
-            "and every row names one created thing")
+            f"{STAGED_FILENAME} is not a list of rows — the record is append-only and every "
+            "row names one created thing")
     return list(rows)
 
 
@@ -554,7 +544,7 @@ def teardown(episode_dir: Path, *, door: Any, review_path: Path | None = None) -
     written into the review record, and then RAISED — a teardown failure swallowed into a clean
     exit is the same lie one step later.
     """
-    rows = read_staged(episode_dir)
+    rows = read_staged(bind(Path(episode_dir))) or []
     failures: list[dict] = []
     for row in reversed(rows):
         name = str(row.get("name") or "")
@@ -667,7 +657,7 @@ def sweep(episode_dir: Path, *, episode_token: str, door: Any) -> list[str]:
     glob = sweep_glob(episode_token)
     door.count(glob)
     found = list(door.list_names(glob))
-    rows = read_staged(episode_dir)
+    rows = read_staged(bind(Path(episode_dir))) or []
     recorded = {str(r.get("name")) for r in rows}
     unrecorded = sorted(n for n in found if n not in recorded)
     if unrecorded:

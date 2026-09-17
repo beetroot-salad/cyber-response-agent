@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._clock import now_iso, parse_iso_utc
-from defender._io import entry_present, read_guarded, write_guarded
+from defender._io import write_guarded
 from defender.learning.branch.steps import STEPS, Step
 
 #: The record's name at the episode root — sibling of `provenance.json`, the family stamp.
@@ -135,32 +135,25 @@ def _record_text(rows: list[dict[str, Any]]) -> str:
     return json.dumps({"steps": rows}, indent=2, sort_keys=True) + "\n"
 
 
-def read_stage_timings(episode_dir: Path) -> list[dict[str, Any]]:
-    """The recorded steps, in the order they completed; `[]` for an episode that recorded
-    none — an abort before the first step finished is a legitimate archived state.
+def read_stage_timings(bound: Any) -> list[dict[str, Any]] | None:
+    """The recorded steps, in the order they completed; `None` when nothing is at the name
+    (#1049 D-J7 — an abort before the first step finished, coalesced `or []` at the read site).
 
-    ABSENT IS THE ONLY EMPTY ANSWER. Everything else at the name RAISES `ValueError` naming
-    the file: through `read_guarded`, the posture every other reader of the episode tree takes
+    Everything else at the name RAISES `ValueError` naming the file: through the bound
+    reader's own screen, the posture every other reader of the episode tree takes
     (`judge/family.py`'s readers split the two the same way), an entry that is not a plain file
     — a planted link, a squatting directory, bytes that are not text — is a refusal; and a
     document that IS there but is not the record's shape — not JSON, not `{"steps": [...]}`,
     an entry with the wrong keys, a step outside `Step`, a moment `parse_iso_utc` cannot read
     — is not something this writer left, because it replaces the whole document atomically.
-    Folded into `[]`, any of those would make tampering, or a foreign file, look like an
-    episode that aborted before its first step.
     """
-    path = timing_path(episode_dir)
-    # `entry_present` (one `lstat`), not `exists() or is_symlink()`: `Path.exists()` follows the
-    # link and on 3.11 re-raises a permission fault from the directory above, so a link planted
-    # into a mode-000 directory escaped as a bare `PermissionError` instead of the typed refusal
-    # every caller handles (#1025).
-    if not entry_present(path):
-        return []
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise ValueError(f"{TIMING_NAME} could not be read: {refusal}")
+    rec = bound.read(TIMING_NAME)
+    if rec.absent:
+        return None
+    if rec.refusal is not None:
+        raise ValueError(f"{TIMING_NAME} could not be read: {rec.refusal}")
     try:
-        document = json.loads(text)
+        document = json.loads(rec.text)
     # `RecursionError` too: the record sits in a tree a sibling's box can write into, and a
     # deeply nested planted document leaves `json.loads` through that class, not `ValueError`.
     except (ValueError, RecursionError) as malformed:

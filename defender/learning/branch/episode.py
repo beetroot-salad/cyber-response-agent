@@ -42,7 +42,7 @@ import yaml
 
 from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
-from defender._io import read_guarded, read_jsonl_rows
+from defender._io import bind, read_guarded, read_jsonl_rows
 from defender._run_paths import artifact_dir, artifact_file
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.learning.branch.archive import REVIEW_NAME, WORLDS_DIRNAME
@@ -197,27 +197,29 @@ def verdicts(episode_dir: Path) -> dict[str, str]:
     """
     episode_dir = Path(episode_dir)
     _refuse_incomplete(episode_dir)
+    bound = bind(episode_dir)
     out: dict[str, str] = {}
     for label in _archived_labels(episode_dir):
-        report = episode_dir / WORLDS_DIRNAME / label / "report.md"
+        name = f"{WORLDS_DIRNAME}/{label}/report.md"
         # ABSENT AND UNREADABLE ARE DIFFERENT ANSWERS, and `archive.py` is what forces the
         # split: "a path that is simply not there is skipped and reported (a sibling that died
         # before writing its report has no report)". A world archived without one is therefore
         # a state the archive DELIBERATELY produces, and it reaches here on an ACCEPTED episode
         # too — `verify_family` gates on the scrub verdict and the stamps, not on the report —
         # so refusing it took every other world's readable headline down with it. Skipped, this
-        # reader answers for the worlds that concluded something; a report that EXISTS and
-        # cannot be read is still the refusal it was, because that is the archive's own line
-        # between "not there" and "something is wrong with the tree".
-        if not report.exists() and not report.is_symlink():
+        # reader answers for the worlds that concluded something; a report that is PRESENT and
+        # cannot be read is still the refusal it was — decided by the bound reader's own open
+        # (#1049), never by an `exists()`/`is_symlink()` pair ahead of it.
+        rec = bound.read(name)
+        if rec.absent:
             continue
-        text, refusal = read_guarded(report)
-        if text is None:
+        if rec.refusal is not None:
             raise EpisodeError(
-                f"world {label!r} is archived without a readable report ({report}): {refusal}"
-                " — the archived report is the only place this reader may learn what that "
-                "sibling concluded")
-        raw = _declared_disposition(text)
+                f"world {label!r} is archived without a readable report "
+                f"({episode_dir / name}): {rec.refusal} — the archived report is the only "
+                "place this reader may learn what that sibling concluded")
+        assert rec.text is not None, "present per the state check above"
+        raw = _declared_disposition(rec.text)
         disposition = normalized_disposition(raw)
         if disposition is None:
             raise EpisodeError(

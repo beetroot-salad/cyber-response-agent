@@ -62,12 +62,12 @@ and the world's leads and queries come off `lead_repository.joined`, the canonic
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from defender._artifact_schema import INVESTIGATION_NAME, REPORT_NAME
-from defender._io import entry_present, read_guarded, read_jsonl_rows_guarded
+from defender._io import bind, read_guarded
 from defender._run_paths import artifact_dir, artifact_file
 from defender._report import ReportRead, parse_report_text
 from defender._run_id import is_valid_run_id
@@ -122,73 +122,81 @@ WITHHELD_REACHABILITY_UNMEASURED = "reachability_unmeasured"
 WITHHELD_EPISODE_INCOMPLETE = "episode_incomplete"
 
 
-def screened_yaml_mapping(path: Path, *, what: str) -> dict[str, Any] | None:
-    """A YAML mapping at `path` through THE SCREENED READ, or `None` only when NOTHING is at
-    the name.
+def screened_yaml_mapping(
+    bound: Any, name: str, *, what: str, empty_ok: bool = False,
+) -> dict[str, Any] | None:
+    """A YAML mapping at `name` (relative to `bound`) through THE SCREENED READ, or `None`
+    only when NOTHING is at the name.
 
     ONE HOME for the read every episode-level record makes: the file sits in the episode dir,
     a tree a sibling box's rw bind reaches, so an entry at its name may be a link the model
-    planted — and `is_file()`/`read_text` follow the link the write side refuses. `read_guarded`
-    asks the plainness question of the open descriptor itself. It folds ABSENT in with the
-    alias refusal, and here they must stay apart: nothing at the name is an ordinary absence
-    (an ungraded episode, an unwritten record) the caller decides about, while SOMETHING that
-    is not the record — a link, an unreadable entry, a torn document, a non-mapping — is
-    `JudgeRefused`. `_yaml.safe_load` is the hardened loader: a `RecursionError` out of a
-    deeply nested document is neither a `YAMLError` nor a `ValueError`, and it converts it.
-    Spelled twice (the manifest and the idempotency record), the two reads had already drifted
-    on their exception sets."""
+    planted. `bound.read` asks the plainness question of the open descriptor itself and never
+    formats a root — its answer is one of exactly three states, so ABSENT and REFUSED stay
+    apart here as they must: nothing at the name is an ordinary absence (an ungraded episode,
+    an unwritten record) the caller decides about, while SOMETHING that is not the record — a
+    link, an unreadable entry, a torn document, a non-mapping — is `JudgeRefused`, naming the
+    relative name and never the operator's tree (#1049). `_yaml.safe_load` is the hardened
+    loader: a `RecursionError` out of a deeply nested document is neither a `YAMLError` nor a
+    `ValueError`, and it converts it.
+
+    `empty_ok` (default `False`, the manifest's and the grade record's own strictness,
+    untouched): a PRESENT document that YAML reads as `None` — zero bytes, or the literal
+    `null` — is `{}` rather than a shape refusal when `True`. Only the page's strict samples
+    reader opts in (#1049 D-J7): "nothing recorded yet" and "present but empty" are the same
+    fact for a sample, never a reason to call the whole record unreadable."""
     import yaml
 
     from defender._yaml import safe_load
 
-    # `entry_present` (one `lstat`), not `exists() or is_symlink()`: `Path.exists()` follows
-    # the link and on 3.11 re-raises a permission fault from the directory above, so a link
-    # planted into a mode-000 directory crashed the read with a bare `PermissionError` instead
-    # of landing in the refusal below (#1025).
-    if not entry_present(path):
+    rec = bound.read(name)
+    if rec.absent:
         return None
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise JudgeRefused(f"{what} at {path} could not be read: {refusal}")
+    if rec.refusal is not None:
+        raise JudgeRefused(f"{what}: {rec.refusal}")
     try:
-        doc = safe_load(text)
+        doc = safe_load(rec.text)
     except yaml.YAMLError as bad:
-        raise JudgeRefused(f"{what} at {path} could not be read: {bad}") from bad
+        raise JudgeRefused(f"{what}: {name} could not be read: {bad}") from bad
+    if doc is None and empty_ok:
+        return {}
     if not isinstance(doc, dict):
-        raise JudgeRefused(f"{what} at {path} is not a mapping")
+        raise JudgeRefused(f"{what}: {name} is not a mapping")
     return doc
 
 
-def _default_review_reader(path: Path) -> dict[str, Any]:
-    """`review.yaml`, through the same guarded read every other episode-dir read in this pass
-    makes. ABSENT reads as `{}` (there is nothing to read); an ALIASED entry is this design's
-    refusal, because something is there and it is not the record."""
+def _default_review_reader(bound: Any, name: str) -> dict[str, Any] | None:
+    """`review.yaml`, through the same screened read every other episode-dir read in this pass
+    makes. ABSENT reads as `None` — the parsing reader's typed absent answer (RF-R1), coalesced
+    `or {}` at the read site rather than here; an ALIASED entry is this design's refusal,
+    because something is there and it is not the record."""
     import yaml
 
     from defender._yaml import safe_load
 
-    if not entry_present(path):
-        return {}
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise JudgeRefused(f"{path} could not be read: {refusal}")
+    rec = bound.read(name)
+    if rec.absent:
+        return None
+    if rec.refusal is not None:
+        raise JudgeRefused(rec.refusal)
     try:
-        doc = safe_load(text) or {}
+        doc = safe_load(rec.text) or {}
     except yaml.YAMLError as bad:
-        raise JudgeRefused(f"{path} could not be read: {bad}") from bad
+        raise JudgeRefused(f"{name} could not be read: {bad}") from bad
     return doc if isinstance(doc, dict) else {}
 
 
-def read_review_record(episode_dir: Path, *, reader: Any = None) -> dict[str, Any]:
+def read_review_record(bound: Any, *, reader: Any = None) -> dict[str, Any] | None:
     """`review.yaml`, parsed ONCE per caller. The ONE home for this read: `judge/__init__.py`'s
     own orchestration and `family.grade_family` both want it, and the episode dir is a tree a
     box can reach — two independent parses had no guarantee of agreeing (#1007,
-    `test_grade_family_reads_the_review_record_once_through_the_guarded_reader`)."""
+    `test_grade_family_reads_the_review_record_once_through_the_guarded_reader`). `None` on
+    absence, or when the injected `reader` says so (#1049 D-J7); every caller coalesces `or {}`
+    at its own read site."""
     read = reader if reader is not None else _default_review_reader
-    return read(Path(episode_dir) / REVIEW_NAME)
+    return read(bound, REVIEW_NAME)
 
 
-def _default_samples_reader(path: Path) -> dict[str, Any]:
+def _default_samples_reader(bound: Any, name: str) -> dict[str, Any]:
     """`samples.yaml`, read PERMISSIVELY: absent, unreadable or unparseable all read as `{}`,
     never a `JudgeRefused`. Unlike `_default_review_reader`, this is deliberate (#1007 M4,
     `test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern`): the
@@ -199,24 +207,22 @@ def _default_samples_reader(path: Path) -> dict[str, Any]:
 
     from defender._yaml import safe_load
 
-    if not entry_present(path):
-        return {}
-    text, _refusal = read_guarded(path)
-    if text is None:
+    rec = bound.read(name)
+    if rec.text is None:
         return {}
     try:
-        doc = safe_load(text) or {}
+        doc = safe_load(rec.text) or {}
     except yaml.YAMLError:
         return {}
     return doc if isinstance(doc, dict) else {}
 
 
-def read_samples_record(episode_dir: Path, *, reader: Any = None) -> dict[str, Any]:
+def read_samples_record(bound: Any, *, reader: Any = None) -> dict[str, Any]:
     """`samples.yaml`, parsed once per caller — the questioner's own reference document per
     staged pattern, moved into the episode archive at `Step.QUESTIONER` (`branch/steps.py`) so
     it survives a pruned source run (#1007 O5/M4)."""
     read = reader if reader is not None else _default_samples_reader
-    return read(Path(episode_dir) / SAMPLES_NAME)
+    return read(bound, SAMPLES_NAME)
 
 
 def world_review_block(review: dict[str, Any], label: str) -> dict[str, Any] | None:
@@ -431,10 +437,10 @@ def raw_manifest(episode_dir: Path) -> dict[str, Any]:
     are, what H is and what each world's ground truth is, so a link the launcher refuses must
     not be one the grader honours. ABSENT is a refusal here too: an episode with no manifest
     has nothing to grade."""
-    path = Path(episode_dir) / MANIFEST_NAME
-    doc = screened_yaml_mapping(path, what="the manifest")
+    doc = screened_yaml_mapping(bind(Path(episode_dir)), MANIFEST_NAME, what="the manifest")
     if doc is None:
-        raise JudgeRefused(f"the manifest at {path} could not be read: nothing is at that name")
+        raise JudgeRefused(
+            f"the manifest ({MANIFEST_NAME}) could not be read: nothing is at that name")
     return doc
 
 
@@ -568,10 +574,11 @@ def render_refused(entries: list[dict[str, Any]]) -> str:
     ) + "]"
 
 
-def lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, list[dict]],
+def lead_chain(world: Any, lead_id: str, resolutions_by_lead: dict[str, list[dict]],
                *, leads: dict[str, JoinedLead]) -> dict[str, Any]:
     """One lead's chain for VIEW 1: goal -> params -> payload -> refused -> summary ->
-    resolutions, with `leads` being `leads_by_id(world_dir)` computed ONCE by the caller.
+    resolutions, with `leads` being `leads_by_id(world_dir)` computed ONCE by the caller and
+    `world` the world's own DERIVED sub-bind (`bound.under('worlds/<label>')`, #1049 D-V2).
 
     `refused` (#860) is the lead's conduct the OTHER links cannot show: a `∅.` row is not in
     `queries` by construction — and before #860 a withheld-verb denial was not in the table at
@@ -596,44 +603,34 @@ def lead_chain(world_dir: Path, lead_id: str, resolutions_by_lead: dict[str, lis
     goal = lead.goal if lead is not None else None
     queries = lead.queries if lead is not None else []
     params = queries[0].params if queries else None
-    # THE DIRECTORY IS SCREENED AS WELL AS THE LEAF. `artifact_file` lstats the entry it is
-    # given, so a link planted at `gather_summaries/` itself would put another tree's regular
-    # files through a leaf check that passes — the same `artifact_dir` posture `load_leads`
-    # takes on `gather_raw/`.
-    summaries_dir = world_dir / GATHER_SUMMARIES_DIRNAME
-    summary_path = summaries_dir / f"{lead_id}.md"
+    # THE SUMMARY, THROUGH THE WORLD'S DERIVED SUB-BIND — no `artifact_dir`/`artifact_file`
+    # lstat ahead of it (#1049 D-J3): `world.read` walks `gather_summaries/<lead_id>.md`
+    # no-follow from the world's own handle, so a symlinked `gather_summaries/` itself, or a
+    # symlinked/hard-linked/directory leaf, is the walk's OWN refusal — never followed, never a
+    # second screen that could disagree with the read.
     summary = None
     if not safe:
         summary = ("(this lead id does not name a file inside this world, so no gather summary "
                    "was read for it)")
-    elif artifact_dir(summaries_dir) and artifact_file(summary_path):
-        # THROUGH `read_guarded`, `errors="replace"`. This is MODEL-WRITTEN text in a tree the
-        # box can write, so an undecodable byte in it is an ordinary thing to meet, and so is
-        # a file the process cannot open (mode 000, or a link swapped in between the screen
-        # above and the read — the window `read_guarded` closes). Either used to cost the
-        # whole episode its grade as a bare `PermissionError` out of `_grade_world` (review of
-        # PR #1042); now the summary IS the refusal, named by the world-relative file so the
-        # judge (and the page, which shows the same chain) sees what could not be read and
-        # never where the operator keeps episodes.
-        text, refusal = read_guarded(summary_path, errors="replace")
-        summary = text if text is not None else (
-            f"(the gather summary {GATHER_SUMMARIES_DIRNAME}/{lead_id}.md could not be read: "
-            f"{_without_path(refusal, summary_path)})")
+    else:
+        # `errors="replace"`. This is MODEL-WRITTEN text in a tree the box can write, so an
+        # undecodable byte in it is an ordinary thing to meet, not a refusal — either used to
+        # cost the whole episode its grade as a bare `PermissionError` out of `_grade_world`
+        # (review of PR #1042); now the summary IS the refusal, named by the world-relative
+        # file so the judge (and the page, which shows the same chain) sees what could not be
+        # read and never where the operator keeps episodes.
+        name = f"{GATHER_SUMMARIES_DIRNAME}/{lead_id}.md"
+        rec = world.read(name, errors="replace")
+        if rec.text is not None:
+            summary = rec.text
+        elif not rec.absent:
+            summary = f"(the gather summary could not be read: {rec.refusal})"
     return {
         "goal": goal, "params": params, "payload": [q.payload_digest for q in queries],
         "summary": summary,
         "resolutions": resolutions_by_lead.get(lead_id, []),
         "refused": refused_entries(lead),
     }
-
-
-def _without_path(refusal: str | None, path: Path) -> str:
-    """A reader's refusal with the absolute path it quotes taken out — the sentence goes into
-    a judge prompt and onto the episode page, neither of which may name the operator's tree."""
-    text = refusal or "unreadable"
-    for spelling in dict.fromkeys((f"'{path}'", str(path))):
-        text = text.replace(spelling, path.name)
-    return text.strip()
 
 
 def json_mapping(path: Path) -> dict[str, Any] | None:
@@ -865,8 +862,10 @@ def names_one_file(lead_id: object) -> bool:
     read as a fact about the graded world, which is the one thing O5/J14's withholding exists to
     stop. The world LABEL is screened for exactly this reason (`_check_world_labels`); this is
     the same hazard one directory down. The row itself is still carried (it is evidence); what
-    is refused is building a path out of it."""
-    return (isinstance(lead_id, str) and bool(lead_id)
+    is refused is building a path out of it. A NUL byte is barred too (#1049 D-V4): the bound
+    primitive's own name grammar raises on one rather than construct a component that carries
+    it, so a lead id that would reach that grammar must already be refused here."""
+    return (isinstance(lead_id, str) and bool(lead_id) and "\x00" not in lead_id
             and lead_id not in (".", "..") and lead_id == Path(lead_id).name)
 
 
@@ -881,32 +880,31 @@ def scope_params(row: dict[str, Any]) -> dict[str, Any]:
     return params if isinstance(params, dict) else {}
 
 
-def _read_world_ledger(path: Path, world_token: str) -> tuple[list[dict[str, Any]], int]:
+def _read_world_ledger(
+    bound: Any, name: str, world_token: str,
+) -> tuple[list[dict[str, Any]], int, Any]:
     """J3: this world's own decision rows, first-row-wins on a duplicate pair-key, a malformed
     line skipped and counted rather than failing the world.
 
-    The rows-plus-count split is `_io.read_jsonl_rows_guarded`'s own contract, so the physical
-    read is ITS loop and not a second one here: it decodes with `errors="replace"`, which is
-    what turns a served ledger carrying one undecodable byte into a counted malformed row
-    instead of a `UnicodeDecodeError` thrown out of the whole grading pass. What this function
-    adds is the SEMANTIC half the shared reader cannot know about — a row whose `source` is not
-    one of the ledger's own decision words is malformed for this reader even though it parsed.
+    The rows-plus-count split is `bound.read_jsonl`'s own contract, so the physical read is ITS
+    walk and not a second one here: it decodes with `errors="replace"`, which is what turns a
+    served ledger carrying one undecodable byte into a counted malformed row instead of a
+    `UnicodeDecodeError` thrown out of the whole grading pass. What this function adds is the
+    SEMANTIC half the shared reader cannot know about — a row whose `source` is not one of the
+    ledger's own decision words is malformed for this reader even though it parsed.
 
-    THROUGH THE GUARDED READER, not an `lstat` ahead of the tolerant reader's bare `read_text`:
-    the served ledger sits under the episode dir and a link at its name would have another
-    file's rows read as this world's decisions, and the lstat-then-read pair left both the
-    TOCTOU window and a bare `PermissionError` on a mode-000 file (root ignores this; a real
-    non-root run does not, #1025). ABSENT is a refusal (p7: "only an ABSENT ledger refuses"),
-    folded in with every other reason the bytes could not be read; `_grade_world` refuses a
-    missing ledger via `_missing_required_input` before this is reached on the grading path,
-    and the bare `render.render(..., facts=None)` path inherits the same refusal here rather
-    than silently assembling a prompt over a world that reads as "served nothing"."""
-    parsed, malformed, refusal = read_jsonl_rows_guarded(path)
-    if refusal is not None:
-        raise JudgeRefused(f"the ledger at {path} could not be read: {refusal}")
+    THROUGH THE BOUND READER (#1049), not an `lstat` ahead of a tolerant `read_text`: the
+    served ledger sits under the episode dir and a link at its name would have another file's
+    rows read as this world's decisions. ABSENT is the primitive's own absent STATE, not a
+    refusal (D-J2) — the caller (`_missing_required_input` on the grading path,
+    `read_world_facts` on every path) decides what to do with it; only a REFUSED shape raises
+    `JudgeRefused` here, naming the relative name and never the operator's tree."""
+    rows, malformed, rec = bound.read_jsonl(name)
+    if rec.refusal is not None:
+        raise JudgeRefused(f"the ledger could not be read: {rec.refusal}")
     kept: dict[str, dict[str, Any]] = {}
     order: list[str] = []
-    for row in parsed:
+    for row in rows:
         if normalized_source(row.get("source")) is None:
             malformed += 1
             continue
@@ -918,7 +916,7 @@ def _read_world_ledger(path: Path, world_token: str) -> tuple[list[dict[str, Any
         if key not in kept:
             kept[key] = row
             order.append(key)
-    return [kept[k] for k in order], malformed
+    return [kept[k] for k in order], malformed, rec
 
 
 def own_h_rows(rows: list[dict[str, Any]], holding_system: str) -> list[dict[str, Any]]:
@@ -1017,21 +1015,18 @@ def _resolution_facts(
     return moved, by_lead, (*scan.orphaned_headers, *unlanded)
 
 
-def _read_archived_text(path: Path, *, world: str, role: str) -> str:
-    """One archived document's text, with a missing or unreadable one answered as this
-    design's refusal — the judge is never asked to grade a world it cannot see. A reader that
-    wants a partial archive (the episode page, rendering a world whose investigation was never
-    archived) checks the name is there before asking for the facts; a grading path reaches
-    this only past `_missing_required_input`'s own gate.
-
-    Screened through `read_guarded` (#1025 O8): the archive sits in a tree a sibling box's rw
-    bind reaches, so a symlink or a FIFO at the name is something the model planted, refused
-    without being opened — never a bare `read_text`, which follows the link and would hand an
-    outside file's bytes back as this world's own archived text."""
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise JudgeRefused(f"world {world!r}: {role} could not be read: {refusal}")
-    return text
+def _read_archived_text(bound: Any, name: str, *, world: str, role: str) -> Any:
+    """One archived document (`worlds/<world>/<role>`) through the world-archive screen
+    (#1049): absent is the primitive's own absent STATE, answered as a value (D-J2) — never a
+    sentence, never `None` — a caller with a partial archive to render (the episode page)
+    branches on `.absent`; a REFUSED shape (a link, a hard link, an undecodable read) raises
+    `JudgeRefused` framed `world <world>: ...`, naming the relative name once and never the
+    operator's tree. A grading path reaches this only past `_missing_required_input`'s own
+    gate, which already refuses an absent document with its own bare name."""
+    rec = bound.read(name)
+    if rec.refusal is not None:
+        raise JudgeRefused(f"world {world!r}: {rec.refusal}")
+    return rec
 
 
 def _read_verdict(report: ReportRead, *, world: str) -> str:
@@ -1090,10 +1085,6 @@ class WorldFacts:
     ledger_rows: list[dict[str, Any]]
     malformed_rows: int
     investigation_text: str
-    #: The world's leads off its OWN queries table and lead files (`leads_by_id`), read here
-    #: for the same reason the three files above are: one read per world, which the render
-    #: takes for VIEW 1's chain rather than opening the table for itself.
-    leads: dict[str, JoinedLead]
     #: The report AS `_report.read_report` READ IT — its headline, its reason when there is
     #: none, and its bytes. The bytes alone would make every consumer re-decide what the
     #: headline is, which is the duplication this field exists to stop.
@@ -1106,6 +1097,12 @@ class WorldFacts:
     #: evidence the grading pass could not see, and silence about it reads exactly like a world
     #: that had none.
     unlanded_document_rows: tuple[str, ...] = ()
+    #: The world's leads off its OWN queries table and lead files (`leads_by_id`) — `{}` as
+    #: `read_world_facts` itself answers it (#1049: it takes a BOUND reader, never a `Path`,
+    #: and `leads_by_id` is `lead_repository`'s own surface, deliberately untouched and still
+    #: `Path`-taking); a caller that still holds the world's `Path` (`_grade_world`,
+    #: `render.render`) fills this in itself, once, the same way it always has.
+    leads: dict[str, JoinedLead] = field(default_factory=dict)
 
     @property
     def referenced_leads(self) -> frozenset[str]:
@@ -1118,30 +1115,26 @@ def world_ledger_path(episode_dir: Path, label: str, *, episode_token: str) -> P
     return Path(episode_dir) / "served" / f"{world_token_for(episode_token, label)}.jsonl"
 
 
-def read_archived_report(path: Path) -> ReportRead:
-    """`report.md` through the world-archive screen (#1025 O8) — a symlink or a FIFO at the
-    name reads as a report with no headline, never followed and never raised.
+def read_archived_report(bound: Any, name: str) -> ReportRead:
+    """`report.md` through the world-archive screen (#1049) — a symlink, a hard link or a FIFO
+    at the name reads as a report with no headline, never followed and never raised; nothing
+    at the name answers the primitive's own ABSENT state (`ReportRead.absent`), never a
+    "not found" sentence and never `None` (D-J2) — the caller branches on the value.
 
-    Screened with `read_guarded` (open `O_NOFOLLOW` + `fstat`) rather than an `artifact_file`
-    `lstat` taken ahead of `read_report`'s own bare `is_file()` + read: the lstat-then-open
-    form leaves the exact TOCTOU window `read_guarded` exists to close between the screen and
-    the open — a plant landing in that window would still be followed. ON EVERY BRANCH: the
-    absent case is decided AFTER the guarded read has refused, never by handing the path to
-    `read_report`, whose `is_file()` + read follows a link planted between the two. What a
-    headline IS is still `_report`'s one decision: the screened bytes go through
-    `parse_report_text`, the same interpretation `read_report` applies for its eight other
-    callers, and an absent report reads with `read_report`'s own "not found" sentence."""
-    text, refusal = read_guarded(path)
-    if text is None:
-        if not entry_present(path):
-            reason = f"{REPORT_NAME} not found: {path}"
-        else:
-            # `refusal` is `read_guarded`'s own sentence — the alias refusal, or the errno of
-            # a permission fault — so nothing is prefixed that would read an unreadable file
-            # as an aliased one.
-            reason = f"{REPORT_NAME} could not be read: {refusal}"
-        return ReportRead(disposition=None, reason=reason, frontmatter={}, body="", text="")
-    return parse_report_text(text)
+    ON EVERY BRANCH: the absent case is decided off `bound.read`'s own answer, never by
+    handing a path to `read_report`, whose `is_file()` + read follows a link planted between a
+    screen and an open. What a headline IS is still `_report`'s one decision: a present read's
+    bytes go through `parse_report_text`, the same interpretation `read_report` applies for
+    its other callers."""
+    rec = bound.read(name)
+    if rec.absent:
+        return ReportRead(disposition=None, reason=None, frontmatter={}, body="", text="",
+                          absent=True)
+    if rec.refusal is not None:
+        return ReportRead(
+            disposition=None, reason=f"{REPORT_NAME} could not be read: {rec.refusal}",
+            frontmatter={}, body="", text="")
+    return parse_report_text(rec.text)
 
 
 @dataclass(frozen=True)
@@ -1156,6 +1149,9 @@ class InvestigationFacts:
     resolution_moved: bool
     resolutions_by_lead: dict[str, list[dict[str, Any]]]
     unlanded_document_rows: tuple[str, ...] = ()
+    #: Nothing at `worlds/<world>/investigation.md` at all — the primitive's own absent STATE
+    #: (#1049 D-J2), never a sentence and never conflated with an empty document.
+    absent: bool = False
 
     @property
     def referenced_leads(self) -> frozenset[str]:
@@ -1163,39 +1159,61 @@ class InvestigationFacts:
         return frozenset(self.resolutions_by_lead)
 
 
-def read_investigation_facts(world_dir: Path, *, world: str) -> InvestigationFacts:
-    """`worlds/<label>/investigation.md` alone: its text and its resolution facts, or the
-    archived-text refusal (`JudgeRefused`) when the document is absent or not readable."""
-    text = _read_archived_text(
-        Path(world_dir) / INVESTIGATION_NAME, world=world, role=INVESTIGATION_NAME)
-    moved, by_lead, unlanded = _resolution_facts(text, world=world)
+def read_investigation_facts(bound: Any, *, world: str) -> InvestigationFacts:
+    """`worlds/<label>/investigation.md` alone: its text and its resolution facts, the
+    primitive's absent state passed up as `.absent` (D-J2), or the archived-text refusal
+    (`JudgeRefused`) when the document is present but not readable."""
+    name = f"{WORLDS_DIRNAME}/{world}/{INVESTIGATION_NAME}"
+    rec = _read_archived_text(bound, name, world=world, role=INVESTIGATION_NAME)
+    if rec.absent:
+        return InvestigationFacts(
+            investigation_text="", resolution_moved=False, resolutions_by_lead={}, absent=True)
+    moved, by_lead, unlanded = _resolution_facts(rec.text, world=world)
     return InvestigationFacts(
-        investigation_text=text, resolution_moved=moved, resolutions_by_lead=by_lead,
+        investigation_text=rec.text, resolution_moved=moved, resolutions_by_lead=by_lead,
         unlanded_document_rows=unlanded)
 
 
-def read_world_ledger(episode_dir: Path, label: str, *, episode_token: str,
-                      ) -> tuple[list[dict[str, Any]], int]:
-    """This world's own served-ledger rows and its malformed-row count — the ledger half of
-    `WorldFacts`, at the ONE spelling of the ledger's path (`world_ledger_path`). Refuses
-    (`JudgeRefused`) on an absent or unreadable ledger, as `_read_world_ledger` states."""
-    return _read_world_ledger(
-        world_ledger_path(episode_dir, label, episode_token=episode_token),
-        world_token_for(episode_token, label))
+def read_world_ledger(bound: Any, label: str, *, episode_token: str,
+                      ) -> tuple[list[dict[str, Any]], int, Any]:
+    """This world's own served-ledger rows, its malformed-row count and the `RecordRead` the
+    walk answered — the ledger half of `WorldFacts`, at the ONE spelling of the ledger's name
+    (`served/<token>.<label>.jsonl`). Refuses (`JudgeRefused`) on an unreadable ledger, and
+    answers the primitive's own absent state (never a raise) on a missing one, as
+    `_read_world_ledger` states."""
+    name = f"served/{world_token_for(episode_token, label)}.jsonl"
+    return _read_world_ledger(bound, name, world_token_for(episode_token, label))
 
 
-def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
+def read_world_facts(bound: Any, label: str, *, episode_token: str) -> WorldFacts:
     """Read one world's archived record: the ledger, the document and the report, once — the
-    composition of `read_world_ledger` and `read_investigation_facts`, in that order, so the
-    grading path's refusal on a missing ledger comes first exactly as before."""
-    world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
-    ledger_rows, malformed = read_world_ledger(episode_dir, label, episode_token=episode_token)
-    document = read_investigation_facts(world_dir, world=label)
+    composition of `read_world_ledger`, `read_investigation_facts` and `read_archived_report`,
+    in that order, so the grading path's refusal on a missing ledger comes first exactly as
+    before. Refuses (`JudgeRefused`, naming the relative name — the ledger's sentence still
+    says 'ledger') on an ABSENT ledger, report or investigation document: the three standalone
+    readers answer absence as a VALUE for a caller with a partial archive to render (the
+    episode page); this composition is the grading path's own, which has nothing to hand back
+    for a world it cannot see at all (F-H). `leads` is `{}`: this reader takes a bound reader,
+    never a `Path`, and `leads_by_id` is `lead_repository`'s own surface, left untouched — a
+    caller still holding the world's `Path` fills it in."""
+    ledger_name = f"served/{world_token_for(episode_token, label)}.jsonl"
+    ledger_rows, malformed, ledger_read = read_world_ledger(bound, label, episode_token=episode_token)
+    if ledger_read.absent:
+        raise JudgeRefused(f"the ledger ({ledger_name}) could not be read: nothing is at that name")
+    document = read_investigation_facts(bound, world=label)
+    if document.absent:
+        raise JudgeRefused(
+            f"world {label!r}: {WORLDS_DIRNAME}/{label}/{INVESTIGATION_NAME} could not be read: "
+            "nothing is at that name")
+    report = read_archived_report(bound, f"{WORLDS_DIRNAME}/{label}/{REPORT_NAME}")
+    if report.absent:
+        raise JudgeRefused(
+            f"world {label!r}: {WORLDS_DIRNAME}/{label}/{REPORT_NAME} could not be read: "
+            "nothing is at that name")
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed,
         investigation_text=document.investigation_text,
-        leads=leads_by_id(world_dir),
-        report=read_archived_report(world_dir / REPORT_NAME),
+        report=report,
         resolution_moved=document.resolution_moved,
         resolutions_by_lead=document.resolutions_by_lead,
         unlanded_document_rows=document.unlanded_document_rows,
@@ -1230,13 +1248,15 @@ def _archive_notes(world_dir: Path, *, world: str, facts: WorldFacts) -> list[st
 
 
 def _missing_required_input(
-    *, world_dir: Path, ledger_path: Path, alert_path: Path, declared: Any,
+    *, world_dir: Path, ledger_path: Path, ledger_name: str, alert_path: Path, declared: Any,
 ) -> str | None:
     # `artifact_file` on every one of them. These four decide whether a world is graded at all,
     # they are read straight afterwards, and they live in a tree three boxes had an rw bind on —
     # so `is_file()` admits a link and the world is then graded against whatever it points at.
+    # `ledger_name` is the RELATIVE spelling said on the record (#1049 O1); `ledger_path` is
+    # still the absolute path this pre-filter's own `artifact_file` stat needs, unchanged.
     if not artifact_file(ledger_path):
-        return f"served ledger ({ledger_path})"
+        return f"served ledger ({ledger_name})"
     if not artifact_file(world_dir / REPORT_NAME):
         return REPORT_NAME
     if not artifact_file(world_dir / INVESTIGATION_NAME):
@@ -1275,11 +1295,12 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
                            "holding_system": holding_system}
     world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
     ledger_path = world_ledger_path(episode_dir, label, episode_token=episode_token)
+    ledger_name = f"served/{world_token_for(episode_token, label)}.jsonl"
     alert_path = world_dir / ALERT_NAME
 
     missing = _missing_required_input(
-        world_dir=world_dir, ledger_path=ledger_path, alert_path=alert_path,
-        declared=raw_declared)
+        world_dir=world_dir, ledger_path=ledger_path, ledger_name=ledger_name,
+        alert_path=alert_path, declared=raw_declared)
     if missing is not None:
         row["ungradable"] = True
         row["ungradable_reason"] = f"world {label!r} is missing its {missing}"
@@ -1311,7 +1332,9 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # exists for — `malformed` is on the row beside `ungradable`, so a reader can still tell an
     # artifact that is not there from one that is there and wrong.
     try:
-        facts = read_world_facts(episode_dir, label, episode_token=episode_token)
+        bound = bind(Path(episode_dir))
+        facts = read_world_facts(bound, label, episode_token=episode_token)
+        facts = replace(facts, leads=leads_by_id(world_dir))
         h_rows = own_h_rows(facts.ledger_rows, holding_system)
         faulted = next((r for r in h_rows if r.get("source") == FAULT), None)
 
@@ -1534,14 +1557,15 @@ def _episode_has_any_served_row(
     incomplete`), so this reads first and cheaply rather than threading a two-pass state machine
     through `_grade_world` itself. A world whose ledger cannot even be read (J5 tier 1/2, which
     `_grade_world` will mark `ungradable` on its own pass) contributes nothing here either way."""
+    bound = bind(Path(episode_dir))
     for world in worlds:
         label = world.get("world_id")
         if not isinstance(label, str) or not label:
             continue
-        path = world_ledger_path(episode_dir, label, episode_token=episode_token)
+        name = f"served/{world_token_for(episode_token, label)}.jsonl"
         try:
-            rows, _malformed = _read_world_ledger(
-                path, world_token_for(episode_token, label))
+            rows, _malformed, _rec = _read_world_ledger(
+                bound, name, world_token_for(episode_token, label))
         except JudgeRefused:
             continue
         if rows:
@@ -1584,9 +1608,13 @@ def grade_family(
     episode_id = episode_id_of(doc)
     _check_world_labels(episode_id, worlds)
     episode_token = episode_token_for(episode_id)
-    review_doc = review if review is not None else read_review_record(
-        episode_dir, reader=review_reader)
-    samples_doc = samples if samples is not None else read_samples_record(episode_dir)
+    # BOUND ONCE AT ENTRY, handed down (#1049 D-V2) — the review and samples reads below, and
+    # every world's own read inside `_grade_world`, walk from this one handle rather than each
+    # formatting the episode dir for itself.
+    bound = bind(episode_dir)
+    review_doc = review if review is not None else (
+        read_review_record(bound, reader=review_reader) or {})
+    samples_doc = samples if samples is not None else read_samples_record(bound)
 
     # GATED ON THERE BEING A SIBLING TO SPEAK OF (len(worlds) >= 2). A single-world episode
     # whose one world queried nothing is structurally identical to the ordinary "no row on H"

@@ -36,7 +36,7 @@ from pydantic.dataclasses import dataclass
 # caller — including `_triplet_947.refusals()`'s `sym("learning.judge", "JudgeRefused")` — sees.
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender._io import guarded_mkdir, write_guarded  # noqa: E402
+from defender._io import bind, guarded_mkdir, write_guarded  # noqa: E402
 from defender.learning.branch.archive import (  # noqa: E402
     DRAWS_DIRNAME,
     JUDGE_NAME,
@@ -209,7 +209,7 @@ def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
     # `_grade_from_document` return an attacker-supplied grade and the pass never runs at all.
     # NOTHING AT THIS NAME (`None`) is an ordinary ungraded episode, while SOMETHING that is not
     # the record is the refusal.
-    return family_mod.screened_yaml_mapping(_judge_yaml_path(episode_dir),
+    return family_mod.screened_yaml_mapping(bind(Path(episode_dir)), JUDGE_NAME,
                                             what="the family grade")
 
 
@@ -529,7 +529,8 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     if existing is not None and existing.not_graded is None:
         return existing
 
-    review = family_mod.read_review_record(episode_dir)
+    bound = bind(Path(episode_dir))
+    review = family_mod.read_review_record(bound) or {}
     outcome, reason = _episode_outcome_from_review(review)
     if outcome != "accepted":
         reason = reason or f"the episode's {REVIEW_NAME} outcome is {outcome!r}, not 'accepted'"
@@ -555,7 +556,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     # `grade_family` for the mechanical rows and every `render` below for the prompt section
     # that claims to explain them. Read twice, the row and the prompt could come off two
     # different parses of a file the box can reach.
-    samples = family_mod.read_samples_record(episode_dir)
+    samples = family_mod.read_samples_record(bound) or {}
     grade = family_mod.grade_family(episode_dir, manifest=manifest, review=review,
                                     samples=samples)
     gradable = [row["world"] for row in grade.worlds if family_mod.is_gradable_row(row)]
@@ -843,8 +844,7 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
         record = EpisodeGrade(
             **{k: v for k, v in doc.items() if k not in _DERIVED}, episode_dir=episode_dir)
     except (ValidationError, TypeError) as bad:
-        raise JudgeRefused(
-            f"{_judge_yaml_path(episode_dir)} is not a family grade record: {bad}") from bad
+        raise JudgeRefused(f"{JUDGE_NAME} is not a family grade record: {bad}") from bad
     graded = frozenset(r["world"] for r in record.worlds if family_mod.is_gradable_row(r))
     measuring = frozenset(
         r["world"] for r in record.worlds
