@@ -624,7 +624,9 @@ def lead_chain(world: Any, lead_id: str, resolutions_by_lead: dict[str, list[dic
         if rec.text is not None:
             summary = rec.text
         elif not rec.absent:
-            summary = f"(the gather summary could not be read: {rec.refusal})"
+            assert rec.refusal is not None
+            reason = rec.refusal[len(name) + 2:]  # rec.refusal is f"{name}: {reason}"
+            summary = f"(the gather summary: {name} could not be read: {reason})"
     return {
         "goal": goal, "params": params, "payload": [q.payload_digest for q in queries],
         "summary": summary,
