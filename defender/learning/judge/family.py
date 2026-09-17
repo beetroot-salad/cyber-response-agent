@@ -662,7 +662,11 @@ def json_mapping(bound: Any, name: str) -> dict[str, Any] | None:
     component no-follow from the pass's own handle (#1049) — a link at the name, or at any
     directory above it, is never followed — and answers absent, unreadable and undecodable
     the same way this reader already did: `None`."""
-    text = bound.read(name).text
+    return json_mapping_of(bound.read(name).text)
+
+
+def json_mapping_of(text: str | None) -> dict[str, Any] | None:
+    """`json_mapping`'s parse half over bytes a caller has already read (`None` for none)."""
     if text is None:
         return None
     try:
@@ -1267,17 +1271,20 @@ def _missing_required_input(
     # world is graded at all, they are read straight afterwards, and they live in a tree three
     # boxes had an rw bind on — so a link at a name is "missing" here (RF-R10), and the world is
     # never graded against whatever it points at. `ledger_name` is the RELATIVE spelling said
-    # on the record (#1049 O1). A parent that cannot be LISTED (`served/` or `worlds/<label>`
-    # itself a link, a file at the name, a permission fault) decides nothing here: absence is
-    # the pre-filter's question, a refused entry is the reader's, and the walk that follows
-    # refuses at that component with its own reason — the world is malformed, not missing.
+    # on the record (#1049 O1). An ABSENT parent (`served/` or `worlds/<label>` not there at
+    # all) is the first input under it missing — tier 1, as before. A parent that is there but
+    # cannot be LISTED (a link at the name, a file squatting it, a permission fault) decides
+    # nothing here: absence is the pre-filter's question, a refused entry is the reader's, and
+    # the walk that follows refuses at that component with its own reason — the world is
+    # malformed, not missing.
     served = bound.under(SERVED_DIRNAME).entries()
-    if served.entries is not None and not served.has_file(ledger_name.removeprefix(f"{SERVED_DIRNAME}/")):
+    if served.absent or (served.entries is not None
+                         and not served.has_file(ledger_name.removeprefix(f"{SERVED_DIRNAME}/"))):
         return f"served ledger ({ledger_name})"
     world = bound.under(f"{WORLDS_DIRNAME}/{label}").entries()
+    if world.absent or (world.entries is not None and not world.has_file(REPORT_NAME)):
+        return REPORT_NAME
     if world.entries is not None:
-        if not world.has_file(REPORT_NAME):
-            return REPORT_NAME
         if not world.has_file(INVESTIGATION_NAME):
             return INVESTIGATION_NAME
         if not world.has_file(ALERT_NAME):
@@ -1717,7 +1724,7 @@ __all__ = [
     "FamilyGrade", "InvestigationFacts", "MECHANICAL_WORLD_BUCKET", "ReachabilityFacts",
     "WorldFacts",
     "declares_difference", "discriminator_of", "episode_id_of", "grade_family",
-    "is_gradable_row", "json_mapping", "lead_chain", "leads_by_id", "mapping_key",
+    "is_gradable_row", "json_mapping", "json_mapping_of", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "own_h_rows", "raw_manifest", "read_manifest", "read_review_record",
     "refused_entries", "has_refusals", "render_refused", "is_external_refusal",
     "read_archived_report", "read_investigation_facts", "read_samples_record",

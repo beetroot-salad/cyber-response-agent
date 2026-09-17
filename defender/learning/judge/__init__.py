@@ -567,7 +567,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     # `grade_family` for the mechanical rows and every `render` below for the prompt section
     # that claims to explain them. Read twice, the row and the prompt could come off two
     # different parses of a file the box can reach.
-    samples = family_mod.read_samples_record(bound) or {}
+    samples = family_mod.read_samples_record(bound)
     grade = family_mod.grade_family(episode_dir, manifest=manifest, review=review,
                                     samples=samples, bound=bound)
     gradable = [row["world"] for row in grade.worlds if family_mod.is_gradable_row(row)]

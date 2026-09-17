@@ -232,7 +232,7 @@ def _strict_samples_reader(bound: Any, name: str) -> dict[str, Any] | None:
     second spelling of it — `empty_ok=True` because a present-but-empty samples.yaml is
     "nothing recorded yet", not a reason to call the whole record unreadable (the manifest's
     own empty-document refusal is untouched)."""
-    return family.screened_yaml_mapping(bound, name, what=archive.SAMPLES_NAME, empty_ok=True)
+    return family.screened_yaml_mapping(bound, name, what="the samples record", empty_ok=True)
 
 
 def _read_samples(bound: Any) -> _Record:
@@ -665,8 +665,9 @@ class _Episode:
         #: judged the world directory real. Never formatted into the page.
         self.dir = episode_dir
         #: The one bound reader every episode-tree read below walks from (#1049 D-V2) — bound
-        #: once by `load_episode`, live for the load, closed when it returns.
-        self.bound = bound
+        #: once by `load_episode`, live for the load, `None` once it returns: every read the
+        #: page makes happens at load, and a renderer has no tree to reach for.
+        self.bound: Any = bound
         self.manifest = manifest
         self.episode_id = family.episode_id_of(manifest)
         # BUILT OR ABSENT, never the raw id in its place: the token is joined into
@@ -759,7 +760,9 @@ def load_episode(episode_dir: Path) -> _Episode:
     (d01: the ONE fatal refusal); every other refusal is a slot on the model."""
     episode_dir = Path(episode_dir)
     with bind(episode_dir) as bound:
-        return _load_episode(episode_dir, bound)
+        ep = _load_episode(episode_dir, bound)
+    ep.bound = None  # closed with the load; nothing renders off the tree
+    return ep
 
 
 def _load_episode(episode_dir: Path, bound: Any) -> _Episode:
@@ -1006,6 +1009,7 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
         return leads
     if listing.refusal is not None:
         leads.dir_error = listing.refusal
+        return leads
     facts = None
     try:
         read_facts = family.read_investigation_facts(ep.bound, world=label)
@@ -1016,8 +1020,6 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
     else:
         if not read_facts.absent:
             facts = read_facts
-    if listing.refusal is not None:
-        return leads
 
     # `leads_by_id` is the lead repository's own surface and takes the world's directory — the
     # one path this block hands anyone, and only now that the listing above judged

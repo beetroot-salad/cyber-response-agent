@@ -39,6 +39,7 @@ from defender.learning.judge.family import (
     discriminator_of,
     episode_id_of,
     json_mapping,
+    json_mapping_of,
     has_refusals,
     lead_chain,
     leads_by_id,
@@ -357,7 +358,7 @@ def _sibling_row(
     alert_rec = run.read(ALERT_NAME)
     if alert_rec.absent:
         return None, None
-    alert_doc = json_mapping(run, ALERT_NAME)
+    alert_doc = json_mapping_of(alert_rec.text)
     if alert_doc is None:
         return None, "skipped_unreadable"
     if alert_doc.get("alert_id") != alert_id:
@@ -452,7 +453,12 @@ def episode_alert(bound: Any, labels: list[str]) -> dict[str, Any]:
     """
     fallback: dict[str, Any] = {}
     for label in labels:
-        data = json_mapping(bound, f"{WORLDS_DIRNAME}/{label}/{ALERT_NAME}")
+        # A label off `judge.yaml` (a box-writable record) that is not a plain path component
+        # names no directory and so no alert — skipped, never a `ValueError` out of the walk.
+        try:
+            data = json_mapping(bound, f"{WORLDS_DIRNAME}/{label}/{ALERT_NAME}")
+        except ValueError:
+            continue
         if data is None:
             continue
         if data.get("alert_id") is not None:
@@ -645,7 +651,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     # agreeing"). `render` runs once per graded world, so reading these here made 2N further
     # parses of two box-reachable files the pass had already read, and let the mechanical row
     # and the prompt section that claims to render it come off different documents.
-    samples_doc = (read_samples_record(bound) or {}) if samples is None else samples
+    samples_doc = read_samples_record(bound) if samples is None else samples
     sample_text = _render_samples(world_staged_patterns, samples_doc)
     review_doc = (read_review_record(bound) or {}) if review is None else review
     review_block = world_review_block(review_doc, world_label)

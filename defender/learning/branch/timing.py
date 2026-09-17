@@ -151,7 +151,7 @@ def read_stage_timings(bound: Any) -> list[dict[str, Any]] | None:
     if rec.absent:
         return None
     if rec.refusal is not None:
-        raise ValueError(f"{TIMING_NAME} could not be read: {rec.refusal}")
+        raise ValueError(f"{TIMING_NAME} could not be read: {rec.reason}")
     try:
         document = json.loads(rec.text)
     # `RecursionError` too: the record sits in a tree a sibling's box can write into, and a

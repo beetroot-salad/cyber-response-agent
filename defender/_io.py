@@ -214,21 +214,30 @@ def _parse_name(name: str | PurePath) -> tuple[str, tuple[str, ...]]:
 
 
 @dataclasses.dataclass(frozen=True)
-class RecordRead:
-    """A `bind`ed reader's answer, in exactly one of three states: present (`text` a `str`,
-    possibly empty), absent (`absent=True`, nothing at the name) or refused (`reason` a
-    non-empty `str`). `name` is the relative name AS THE CALLER SPELLED IT — never the root —
-    and `refusal` is the one sentence every consumer that wants a sentence gets,
-    `f"{name}: {reason}"`; a consumer that wants the parts reads them, never the sentence."""
+class _Read:
+    """What every `bind`ed reader's answer carries: `name`, the relative name AS THE CALLER
+    SPELLED IT (never the root; `""` for the root itself), `absent` (nothing at the name) and
+    `reason` (a non-empty `str` when refused). `refusal` is the one sentence every consumer
+    that wants a sentence gets — `f"{name}: {reason}"`, or the bare reason for the root; a
+    consumer that wants the parts reads them, never the sentence."""
 
     name: str
-    text: str | None
     absent: bool
     reason: str | None
 
     @property
     def refusal(self) -> str | None:
-        return None if self.reason is None else f"{self.name}: {self.reason}"
+        if self.reason is None:
+            return None
+        return f"{self.name}: {self.reason}" if self.name else self.reason
+
+
+@dataclasses.dataclass(frozen=True)
+class RecordRead(_Read):
+    """A `bind`ed reader's answer to a file, in exactly one of three states: present (`text` a
+    `str`, possibly empty), absent (`absent=True`) or refused (`reason`)."""
+
+    text: str | None
 
 
 #: What one entry of a listed directory is, judged WITHOUT following it (`EntriesRead`): a
@@ -238,20 +247,13 @@ ENTRY_FILE, ENTRY_DIR, ENTRY_OTHER = "file", "dir", "other"
 
 
 @dataclasses.dataclass(frozen=True)
-class EntriesRead:
+class EntriesRead(_Read):
     """A `bind`ed reader's answer to "what is IN this directory" (`Bound.entries`), in the same
     three states `RecordRead` has: present (`entries` a mapping of each entry's own name to
     `ENTRY_FILE`/`ENTRY_DIR`/`ENTRY_OTHER`), absent (nothing at the bound name) or refused
     (`reason`). `name` is the bound directory's own relative spelling (`""` for the root)."""
 
-    name: str
     entries: dict[str, str] | None
-    absent: bool
-    reason: str | None
-
-    @property
-    def refusal(self) -> str | None:
-        return None if self.reason is None else f"{self.name}: {self.reason}"
 
     def files(self) -> list[str]:
         """The names classified regular files, sorted; `[]` when absent or refused."""
@@ -279,28 +281,30 @@ def _walk_chain(os_: Any, start_fd: int | None, components: tuple[str, ...]) -> 
     """
     owned: int | None = None  # an intermediate fd THIS walk opened and still holds
     dir_fd = start_fd
-    for index, component in enumerate(components):
-        is_last = index == len(components) - 1
-        try:
-            fd = os_.open(component, _WALK_FLAGS, dir_fd=dir_fd)
-        except OSError as e:
+    try:
+        for index, component in enumerate(components):
+            is_last = index == len(components) - 1
+            try:
+                fd = os_.open(component, _WALK_FLAGS, dir_fd=dir_fd)
+            except OSError as e:
+                return _open_fault(e)
+            try:
+                st = os_.fstat(fd)
+            except OSError as e:
+                os_.close(fd)
+                return "refused", (e.strerror or str(e))
+            if is_last:
+                return "leaf", (fd, st)
+            if not stat.S_ISDIR(st.st_mode):
+                os_.close(fd)
+                return "refused", os.strerror(errno.ENOTDIR)
             if owned is not None:
                 os_.close(owned)
-            return _open_fault(e)
-        st = os_.fstat(fd)
-        if is_last:
-            if owned is not None:
-                os_.close(owned)
-            return "leaf", (fd, st)
-        if not stat.S_ISDIR(st.st_mode):
-            os_.close(fd)
-            if owned is not None:
-                os_.close(owned)
-            return "refused", os.strerror(errno.ENOTDIR)
+            owned = fd
+            dir_fd = fd
+    finally:
         if owned is not None:
-            os_.close(owned)
-        owned = fd
-        dir_fd = fd
+            os_.close(owned)  # the last intermediate, on every exit — the leaf is the caller's
     raise AssertionError("_walk_chain: empty component sequence")  # _parse_name never yields one
 
 
@@ -371,19 +375,22 @@ class Bound:
     """
 
     def __init__(self, os_: Any, handle: _Handle, *, prefix: tuple[str, ...] = (),
-                 absent: bool = False, error: str | None = None) -> None:
+                 absent: bool = False, error: str | None = None, owner: bool = False) -> None:
         self._os = os_
         self._handle = handle
         self._prefix = prefix
         self._absent = absent
         self._error = error
+        self._owner = owner
 
     # -- lifetime: one handle per `bind` -------------------------------------------------------
 
     def close(self) -> None:
-        """Release the root handle — for THIS bind and every reader derived from it, which
-        answer `Bad file descriptor` from then on. Idempotent."""
-        self._handle.close()
+        """Release the root handle — the reader `bind` returned owns it; every reader derived
+        from it (`under`) answers `Bad file descriptor` from then on. On a derived reader this
+        is a no-op: it owns nothing. Idempotent."""
+        if self._owner:
+            self._handle.close()
 
     def __enter__(self) -> Bound:
         return self
@@ -419,7 +426,12 @@ class Bound:
         # stale handle on a network mount); the reader it replaced folded both into a refusal
         # (`TEXT_READ_ERRORS`), and a refusal is what every caller already handles.
         try:
-            with self._os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
+            fh = self._os.fdopen(fd, "r", encoding="utf-8", errors=errors)
+        except OSError as e:
+            self._os.close(fd)  # `fdopen` failed to take the fd, so it is still ours to close
+            return RecordRead(name=spelling, text=None, absent=False, reason=str(e))
+        try:
+            with fh:
                 text = fh.read()
         except TEXT_READ_ERRORS as e:
             return RecordRead(name=spelling, text=None, absent=False, reason=str(e))
@@ -496,7 +508,7 @@ def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelate
         return Bound(os_, _Handle(os_, None), absent=True)
     except OSError as e:
         return Bound(os_, _Handle(os_, None), error=(e.strerror or str(e)))
-    return Bound(os_, _Handle(os_, fd))
+    return Bound(os_, _Handle(os_, fd), owner=True)
 
 
 def use_utf8_stdio() -> None:

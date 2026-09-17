@@ -258,9 +258,11 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
         assert f'worlds/{label}/report.md' in world, (label, world)
         assert R.ALIAS in world, (label, world)
         assert "not archived" not in world, (label, world)
+        # The leads block is refused ONCE, at the directory: a `worlds/<w>` that is not a real
+        # directory rosters nothing beneath it, so the one sentence names `worlds/<w>` itself.
         leads = _leads(page, label)
-        assert f'worlds/{label}/investigation.md' in leads, (label, leads)
-        assert R.ALIAS in leads, (label, leads)
+        assert f'worlds/{label}' in leads, (label, leads)
+        assert leads.count(R.ALIAS) == 1, (label, leads)
         assert "not archived" not in leads, (label, leads)
     linked_leads = _leads(page, LINKED_WORLD)
     # NEVER FOLLOWED: the linked world's block names the directory's own refusal and rosters
@@ -363,9 +365,9 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
     arm ('report.md: not archived' AND 'investigation.md: not archived') and its leads block
     from the same absent states (the artifact_dir(world_dir) screens are gone; the
     whole-section word is said only as a derivation of all leaves absent); a symlinked
-    worlds/<w> renders every leaf's refusal naming worlds/<w>/<leaf> and no 'not archived'
-    anywhere in its section or block. No per-world section is worded from a stat or a
-    listing.
+    worlds/<w> renders every archive leaf's refusal naming worlds/<w>/<leaf>, its leads block
+    the directory's own refusal once (nothing beneath a link is rostered), and no 'not
+    archived' anywhere in its section or block. No per-world section is worded from a stat.
     """
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "investigation.md").unlink()
@@ -392,8 +394,8 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
     assert R.ALIAS in linked, linked
     assert "not archived" not in linked, linked
     linked_leads = _leads(page, E.CONTROL)
-    assert f'worlds/{E.CONTROL}/investigation.md' in linked_leads, linked_leads
-    assert R.ALIAS in linked_leads, linked_leads
+    assert f'worlds/{E.CONTROL}' in linked_leads, linked_leads  # the directory's own refusal, said once
+    assert linked_leads.count(R.ALIAS) == 1, linked_leads
     assert "not archived" not in linked_leads, linked_leads
     assert str(ep.dir) not in page.raw
     assert str(tmp_path) not in page.raw

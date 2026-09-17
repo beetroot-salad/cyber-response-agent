@@ -377,7 +377,7 @@ def read_staged(bound: Any) -> list[dict] | None:
     if rec.absent:
         return None
     if rec.refusal is not None:
-        raise StagingRefused(f"{STAGED_FILENAME} is refused: {rec.refusal}")
+        raise StagingRefused(f"{STAGED_FILENAME} is refused: {rec.reason}")
     try:
         rows = _yaml.safe_load(rec.text)
     except yaml.YAMLError as bad:

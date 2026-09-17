@@ -117,7 +117,7 @@ def read_family_stamp(bound: Any) -> dict[str, Any] | None:
     # A directory squatting the name is refused by the walk itself — no separate `is_dir()`
     # check, which would be an unscreened read of the same box-writable entry the walk judges.
     if rec.refusal is not None:
-        raise ValueError(f"{FAMILY_STAMP_NAME} could not be read: {rec.refusal}")
+        raise ValueError(f"{FAMILY_STAMP_NAME} could not be read: {rec.reason}")
     try:
         doc = json.loads(rec.text)
     except (ValueError, RecursionError) as bad:
