@@ -4,23 +4,25 @@
 reads — and D3's claim about it is not "the episode dir is where we happened to put things"
 but **self-containment**: after the archive, `delta_o` and `verdicts` answer from
 `episodes/<id>/` alone, with no re-run and no path outside it. That is only true if the copy
-here is complete, which is why the archived world carries SIX roles rather than a report and a
-pointer: the report, the investigation document, the two tables, the run's own provenance
-stamp, the scrub verdict, and a text pointer naming the run dir the bytes came from.
+here is complete, which is why the archived world carries SEVEN roles rather than a report and
+a pointer: the report, the investigation document, the two tables, the run's own provenance
+stamp, the scrub verdict, the run-end record (#1047 — how the run ended, and whether the model
+had closed before it did), and a text pointer naming the run dir the bytes came from.
 
-**None of the six is sourced from another.** The pointer is informational: it is a text file,
+**None of the seven is sourced from another.** The pointer is informational: it is a text file,
 never a symlink, and nothing in this design follows it. A reader that resolved it would make
 the episode self-contained only for as long as the runs base happens to still hold the run,
 which is the property the archive exists to stop depending on — the sibling run dirs are
 disposable, and one test deletes all three and asks both readers the same questions again.
 
-**The scrub verdict is a SIDECAR, and reaching for it inside the run dir finds nothing.**
-`scrub.verdict_path(tree)` is `tree.parent / f"{tree.name}.scrub-verdict.json"` (#771 §7 D8,
-re-probed here as G17): the verdict is written OUTSIDE the tree it judges precisely because a
-verdict inside a box-writable tree is both plantable and forgeable. So the archive reads a
-RUNS-BASE path, and a copy written against the design's "inside the run dir" sentence would
-copy a file that is never there and archive a world with no verdict at all — silently, since
-absence and "the scan did not run" are the same bytes on disk.
+**The scrub verdict and the run-end record are SIDECARS, and reaching for either inside the
+run dir finds nothing.** `scrub.verdict_path(tree)` is `tree.parent /
+f"{tree.name}.scrub-verdict.json"` (#771 §7 D8, re-probed here as G17) and
+`run_end.sidecar_path` has the same shape: both are written OUTSIDE the tree they describe
+precisely because such a file inside a box-writable tree is both plantable and forgeable. So
+the archive reads two RUNS-BASE paths, and a copy written against the design's "inside the run
+dir" sentence would copy a file that is never there and archive a world with no verdict at all
+— silently, since absence and "the scan did not run" are the same bytes on disk.
 
 **Every read out of the run dir goes through the lstat screens, and the screening happens
 BEFORE anything lands.** The run dir is the box's rw bind, so an entry there may be a symlink
@@ -51,13 +53,13 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import entry_present, guarded_mkdir, read_guarded, write_guarded
-from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file
+from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file, plain_file
 from defender.learning.lead_repository import (
     refuse_non_artifacts,
     refusing_copy2,
     stage_tables,
 )
-from defender.runtime.run_end import read_sidecar, sidecar_path as _run_end_sidecar_path
+from defender.runtime.run_end import sidecar_path as run_end_sidecar_path
 from defender.runtime.scrub import verdict_path
 
 #: The archived world's directory, under the episode. One level, keyed by the SHORT label X —
@@ -145,12 +147,9 @@ class ArchiveRefused(ValueError):
     """
 
 
-#: The run-end record's archived name (#1047, fork F6). NOT in `_single_files`: the archive
-#: never copies a file that name inside the run dir — it reads the host-side sidecar
-#: (`run_end.sidecar_path`, outside every box's rw bind) and writes this file itself, through
-#: `write_guarded` rather than the `copy2` lane the six single files use (fork F-F, round-2
-#: probe #11: `copy2` writes THROUGH a pre-existing hard link at a destination leaf, where
-#: `write_guarded` refuses one).
+#: The run-end record's archived name (#1047). Its SOURCE is the host-side sidecar beside the
+#: run dir (`run_end.sidecar_path`, outside every box's rw bind), exactly the scrub verdict's
+#: shape — a file wearing this name INSIDE the run dir is never an input to anything.
 RUN_END_NAME = "run_end.json"
 
 #: The judge's directory-of-summaries role's name, both in a sibling's run dir and archived.
@@ -161,7 +160,7 @@ ALERT_NAME = "alert.json"
 
 
 def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
-    """The six single-file roles, as `(source, archived name)`.
+    """The seven single-file roles, as `(source, archived name)`.
 
     Spelled once, in the order the archived-world row declares them, because two readers of
     this list exist — the screen and the copy — and a name in one and not the other is an
@@ -171,14 +170,20 @@ def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
     judge's three new inputs that are single files. `gather_summaries/` is the third and is a
     DIRECTORY, so it takes the per-entry-screened walk beside `stage_tables`' own two tables
     rather than a slot in this tuple — see `_gather_summaries_source`/`archive_episode`.
+
+    #1047 adds the seventh: the run-end record, the second host-side sidecar. Like the scrub
+    verdict it is read from BESIDE the run dir and takes the same screen, the same copy and
+    the same absent/planted split as the other six — the judge, not the archive, decides what
+    its bytes mean (`run_end.parse_record`), exactly as it does for the verdict.
     """
     paths = RunPaths(run_dir)
     return (
         (paths.report, "report.md"),
         (paths.investigation, "investigation.md"),
         (paths.provenance, PROVENANCE),
-        # The SIDECAR beside the run dir, not a path inside it (G17).
+        # The two SIDECARS beside the run dir, not paths inside it (G17).
         (verdict_path(run_dir), SCRUB_VERDICT_NAME),
+        (run_end_sidecar_path(run_dir), RUN_END_NAME),
         (run_dir / LESSONS_LOADED_NAME, LESSONS_LOADED_NAME),
         (paths.alert, ALERT_NAME),
     )
@@ -229,28 +234,6 @@ def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     return present
 
 
-def _archive_run_end(run_dir: Path, world: str, world_dir: Path) -> None:
-    """The run-end record (#1047): read the HOST-SIDE sidecar beside `run_dir`, never
-    anything inside it, and write the archived copy through `write_guarded` — the
-    stricter of the archive's two lanes (fork F-F). A run dir with no sidecar at all
-    (an archive that predates #1047, or a sidecar write that already failed and logged
-    loudly at write time) is SKIPPED IN SILENCE, exactly like an absent optional artifact
-    among the six `_single_files` roles. A sidecar that IS there but could not be read as
-    a record — a directory at its name, a JSON list, torn bytes — is SKIPPED AND REPORTED,
-    to `stderr`, because that shape means something occupied the name and the archive's
-    existing convention (the `refused` list below) is to say so rather than carry the
-    silence forward; the rest of the world still archives either way.
-    """
-    record = read_sidecar(run_dir)
-    if record is not None:
-        write_guarded(world_dir / RUN_END_NAME, json.dumps(record))
-        return
-    src = _run_end_sidecar_path(run_dir)
-    if src.exists() or src.is_symlink():
-        print(f"[archive] world {world!r}: {src} exists but could not be read as a "
-              "run-end record — archived without one", file=sys.stderr)
-
-
 def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, Path]:
     """Archive each world's run dir into `episode_dir/worlds/<label>/`; return what was written.
 
@@ -276,13 +259,16 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         # there — the episode dir is reachable from a sibling box's rw bind (it is why
         # `merge_review` and the run-dir pointer both go through the guarded seam), so an entry
         # at `worlds/<label>/report.md` would redirect an artifact copy out of the archive.
+        # `plain_file`, not `artifact_file`: a HARD link at the leaf is a regular file to
+        # `lstat`, and `copy2` opens it for writing all the same — the same rule
+        # `write_guarded` applies to every other write into this tree (#1047 F-F).
         for _source, name in sources:
             dest = world_dir / name
-            if (dest.exists() or dest.is_symlink()) and not artifact_file(dest):
+            if entry_present(dest) and not plain_file(dest):
                 raise ArchiveRefused(
-                    f"world {world!r}: {dest} is occupied by something that is not a regular "
-                    "file — the archive is written into a tree a box can reach, and copying "
-                    "onto a link would put this world's artifact wherever it points")
+                    f"world {world!r}: {dest} is occupied by something that is not a plain "
+                    "regular file — the archive is written into a tree a box can reach, and "
+                    "copying onto a link would put this world's artifact wherever it points")
         # The DIRECTORY destination is screened by the same rule and for the same reason. It is
         # not covered by the loop above (which judges the single files) and `copytree` will not
         # refuse it for us: under `dirs_exist_ok=True` its own `makedirs(dst, exist_ok=True)`
@@ -338,7 +324,6 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
             print(f"[archive] world {world}: {len(refused)} non-artifact entr"
                   f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                   f"{', '.join(str(p) for p in refused)}", file=sys.stderr)
-        _archive_run_end(run_dir, world, world_dir)
         # The pointer, LAST and as TEXT: informational only, so it is written after the bytes
         # it names have landed, and it is written through the guarded seam like every other
         # write into a tree a box can reach.

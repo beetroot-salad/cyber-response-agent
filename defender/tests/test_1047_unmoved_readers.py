@@ -113,7 +113,11 @@ def test_route_finding_still_carries_the_cut_short_reason_onto_the_ledger_entry_
     assert carried == reason, (
         "the ledger entry does not carry the cut-short reason verbatim; the operator reading "
         "the record would see the finding refused with no reason naming the exit")
-    assert enqueue.disposition_entry("f-1", lane, carried)["reason"] == reason
+    # The ledger lane production files it under: `enqueue_report`'s `_drop` folds a
+    # `ROUTE_UNGRADABLE` answer into `LANE_UNQUEUEABLE` with the route's reason — the route
+    # vocabulary and the ledger-lane vocabulary are two sets, and the reader that checks a
+    # ledger back (`check_disposition_entry`) accepts only what the writer writes.
+    assert enqueue.disposition_entry("f-1", enqueue.LANE_UNQUEUEABLE, carried)["reason"] == reason
 
 
 # ---------------------------------------------------------------------------------------

@@ -1,14 +1,17 @@
 """#1047 — the vocabulary owner: ONE answer to what a `truncated_by` value means.
 
-`session_store` defines `TRUNCATED_BY_VALUES` and today nothing owns MEMBERSHIP in it: every
-reader that wants to know whether a value is an exit class writes its own test. This piece adds
-three readers at once (the archive writer, the judge's reader, the ticket lane), so the design
-gives the vocabulary an owner before it gives it consumers — `normalized_truncated_by(value)`,
-the `_vocab.normalized_disposition` shape, in the module that defines the words.
+Before this piece `session_store` defined `TRUNCATED_BY_VALUES` and nothing owned MEMBERSHIP
+in it: every reader that wants to know whether a value is an exit class wrote its own test.
+This piece adds two readers at once (the judge's reader, the ticket lane), so the design gives
+the vocabulary an owner before it gives it consumers — `normalized_truncated_by(value)`, the
+`_vocab.normalized_disposition` shape, in the module that defines the words. That module is
+now `runtime/run_end.py` — the vocabulary moved there WITH its normalizer so that readers
+which are not store readers need not import the store — and `session_store` re-exports both,
+which is the spelling these tests keep using.
 
 Claim h11: `lint_borrowed_vocabulary` arms only when the DEFINING module has a membership
-function, and `session_store` has none today — so the owner function is also what makes that
-gate bite on the three new consumers.
+function, and the vocabulary had none before — so the owner function is also what makes that
+gate bite on the two new consumers.
 
 FORK F-M IS RESOLVED STRICT (§7 round 2, auto): whitespace padding, case variants and Unicode
 confusables all return `None`. This is a DELIBERATE divergence from `normalized_disposition`,
@@ -184,12 +187,15 @@ def test_normalized_truncated_by_given_an_older_vocabulary_spelling():
 
 
 def _three_sites(tmp_path, value):
-    """Drive the exit value through all three interpretation sites and return what each made
-    of it: the archive's written record, the judge's read, and the ticket lane's calls.
+    """Drive the exit value through the archive and both interpretation sites and return what
+    each made of it: the archive's copied record, the judge's read, and the ticket lane's calls.
 
     ONE spelling, three frames, driven end to end rather than compared symbolically — a
-    coherence demand bound at the owner's own altitude is green when two of three readers
-    moved, which is the bug (schema.md's rule for `kind: coherence`)."""
+    coherence demand bound at the owner's own altitude is green when one of two readers
+    moved, which is the bug (schema.md's rule for `kind: coherence`). The archive is NOT an
+    interpretation site: it copies the sidecar's bytes exactly as it copies the scrub
+    verdict's, and what is returned for it is the copy, asserted VERBATIM — an archive that
+    rewrote the value would be a third interpreter, the shape #785 was."""
     base, _src = S.runs_base(tmp_path)
     ep = S.episode(tmp_path)
     run_dir = S.sibling_run_dir(base, "b")
@@ -198,7 +204,7 @@ def _three_sites(tmp_path, value):
     archived = json.loads((ep / "worlds" / "b" / S.run_end_name()).read_text(encoding="utf-8"))
 
     graded_ep = S.cut_short_episode(tmp_path / "graded")
-    S.plant_archived_record(graded_ep, "b", raw=json.dumps({"truncated_by": value}))
+    S.plant_archived_record(graded_ep, "b", raw=json.dumps(S.record_doc(value)))
     row = S.graded(graded_ep)["b"]
 
     ticket_run = S.closed_run_dir(tmp_path / "ticket")
@@ -223,17 +229,15 @@ def test_every_reader_of_the_exit_class_takes_the_owners_answer(tmp_path):
     ticket close" are different questions with different acceptable risk postures. It is bound
     here so this coherence demand cannot ship green while missing a real reader."""
     refused_archived, refused_row, refused_ticket = _three_sites(tmp_path / "no", "REQUEST-LIMIT")
-    assert refused_archived["truncated_by"] is None, (
-        "the archive wrote a value the owner refuses into the host's own record — the archive "
-        "carries its own membership test")
+    assert refused_archived["truncated_by"] == "REQUEST-LIMIT", (
+        "the archive rewrote the sidecar's value instead of copying it — a third interpreter")
     assert refused_row.get("cut_short") is None, "the judge read a value the owner refuses"
     assert len(refused_ticket.transitions) == 1, (
         "a value the owner refuses did not take the report-driven fallback at the ticket lane")
 
     ok_archived, ok_row, ok_ticket = _three_sites(tmp_path / "yes", "request-limit")
     assert ok_archived["truncated_by"] == "request-limit", (
-        "the control failed: the archive refused a real member, so the refusals above are not "
-        "about the spelling")
+        "the control failed: the archive did not carry a real member through")
     assert ok_row.get("cut_short") == "request-limit"
     assert len(ok_ticket.transitions) == 1, "the request-limit arm made no transition at all"
 
@@ -244,16 +248,17 @@ def test_every_reader_of_the_exit_class_takes_the_owners_answer(tmp_path):
 
 
 def test_the_recorded_exit_value_is_a_spelling_that_only_the_owner_resolves(tmp_path):
-    """A recorded value whose meaning only the owner can settle is answered identically by all
-    three consumers, through the owner — which is what `one_interpreter_for_the_exit_class`
+    """A recorded value whose meaning only the owner can settle is answered identically by
+    both consumers, through the owner — which is what `one_interpreter_for_the_exit_class`
     asserts, driven on a single spelling.
 
     ` aborted ` is the spelling: a person reading the record sees `aborted`, and only the
-    owner's membership rule (fork F-M, strict) says whether that is one. All three consumers
-    must say "not an exit class" together — a lane that stripped it would leave a ticket open
-    and a world ungradable on a value its siblings read as absent."""
+    owner's membership rule (fork F-M, strict) says whether that is one. Both consumers must
+    say "not an exit class" together — a lane that stripped it would leave a ticket open and
+    a world ungradable on a value its sibling read as absent. The archive carries the spelling
+    through untouched, so the judge meets exactly what the host wrote."""
     archived, row, ticket = _three_sites(tmp_path, " aborted ")
-    assert archived["truncated_by"] is None
+    assert archived["truncated_by"] == " aborted ", "the archive rewrote the sidecar's value"
     assert row.get("cut_short") is None
     assert row.get("ungradable") is not True, (
         "a padded spelling only the owner can settle made a world ungradable at the judge "
@@ -264,14 +269,14 @@ def test_the_recorded_exit_value_is_a_spelling_that_only_the_owner_resolves(tmp_
 
 def test_the_exit_value_is_not_a_string_at_all_at_each_of_the_three_interpretation_sites(
         tmp_path):
-    """A non-string exit value answers "no exit class" consistently at all three interpretation
+    """A non-string exit value answers "no exit class" consistently at both interpretation
     sites — the joint coherence property no single demand tests.
 
-    Each site meets it on its own channel: the sidecar the archive reads carries `7`, the
-    archived record the judge reads carries `7`, and the ticket lane is handed `7` as its
-    in-process parameter. None of the three may raise, and none may treat it as a member."""
+    Each site meets it on its own channel: the archived record the judge reads carries `7`
+    (copied verbatim from the sidecar), and the ticket lane is handed `7` as its in-process
+    parameter. Neither may raise, and neither may treat it as a member."""
     archived, row, ticket = _three_sites(tmp_path, 7)
-    assert archived["truncated_by"] is None, "the archive copied a non-string through"
+    assert archived["truncated_by"] == 7, "the archive rewrote the sidecar's value"
     assert row.get("cut_short") is None, "the judge read a non-string as an exit class"
     assert row.get("ungradable") is not True, "a non-string made a world ungradable"
     assert len(ticket.transitions) == 1, (

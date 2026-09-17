@@ -140,12 +140,13 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     """A pre-existing REGULAR FILE at `worlds/<label>/run_end.json` is overwritten with the
     host's own record; a pre-existing HARD LINK there is refused rather than written through.
 
-    Fork F-F, narrowed to this reading by round-2 probe #11 (EXECUTED): the archive's existing
-    `copy2` lane silently overwrites a regular file AND writes through a hard link at a
-    destination leaf, while `write_guarded`'s `_refuse_unless_plain` refuses `S_ISREG and
-    st_nlink > 1`. The new leaf takes the guarded lane precisely because it refuses both link
-    kinds, so a planted alias cannot redirect the host's own record out of the archive. The
-    broader hard-link hole in the other six artifacts is pre-existing and out of scope here."""
+    Fork F-F, found by round-2 probe #11 (EXECUTED): the archive's `copy2` lane silently
+    overwrites a regular file AND wrote through a hard link at a destination leaf, while
+    `write_guarded`'s `_refuse_unless_plain` refuses `S_ISREG and st_nlink > 1`. Resolved at
+    the LANE: the record is the seventh single file, and the lane's pre-copy destination
+    screen now refuses a hard link at any of the seven (`_run_paths.plain_file`) — so a
+    planted alias cannot redirect the host's own record, or any other artifact, out of the
+    archive, and the whole world is refused before a byte lands."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="budget")
     dest = ep / "worlds" / "b"
@@ -163,38 +164,56 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     world = linked_ep / "worlds" / "b"
     world.mkdir(parents=True, exist_ok=True)
     (world / S.run_end_name()).hardlink_to(victim)
-    with pytest.raises(S.refusals() + (OSError,)):
+    with pytest.raises(S.refusals()):
         _archive().archive_episode(linked_ep, linked_dirs)
     assert victim.read_text(encoding="utf-8") == "VICTIM\n", (
         "the archive wrote this world's record through a hard link planted at the "
         "destination, landing it outside the archive tree")
+    assert not (world / "report.md").exists(), (
+        "the archive copied part of the world before refusing the planted hard link")
 
 
-def test_an_unreadable_sidecar_is_skipped_and_reported_rather_than_archived(tmp_path):
-    """A world whose host-side sidecar is unreadable or is not a file at all gets NO
-    run_end.json, and the archive says so — the existing absent/planted/refused three-way split
-    (forks F-G and F-AB, §7 round 2), not a fourth answer invented for this one artifact.
+def test_an_unreadable_sidecar_is_copied_verbatim_and_the_judge_reads_no_record(tmp_path):
+    """A sidecar that holds no record — zero bytes, truncated JSON, a JSON list — is archived
+    BYTE FOR BYTE, exactly as the scrub verdict is: the archive is a copy, not an interpreter,
+    and what the bytes MEAN is decided once, by the judge through `run_end.parse_record`,
+    which reads all three as "no record" and grades the world as today.
 
-    The rest of the world still archives: a record the host could not produce is the
-    `missing_run_end_grades_as_today` state, which is handled, and losing the world's other six
-    artifacts over it would be a strictly worse answer. Four shapes: zero bytes, truncated
-    JSON, a JSON list, and a DIRECTORY squatting the sidecar's name (F-AB — a type mismatch is
-    a read failure)."""
+    The rest of the world archives either way: a record the host could not produce is the
+    `missing_run_end_grades_as_today` state, which is handled, and losing the world's other
+    artifacts over it would be a strictly worse answer."""
     for name, raw in (("empty", ""), ("torn", '{"truncated_by": "abor'),
                       ("list", '[{"truncated_by": "aborted"}]')):
         ep, dirs, _base = _episode_with(tmp_path / name, worlds=("b",))
         S.plant_sidecar(dirs["b"], raw=raw)
         _archive().archive_episode(ep, dirs)
-        assert _record(ep, "b") is None, f"{name}: an unreadable sidecar produced a record"
+        archived = ep / "worlds" / "b" / S.run_end_name()
+        assert archived.read_text(encoding="utf-8") == raw, (
+            f"{name}: the archive rewrote the sidecar's bytes instead of copying them")
         assert (ep / "worlds" / "b" / "report.md").is_file(), (
             f"{name}: an unreadable sidecar cost the world its other artifacts")
+        graded = S.cut_short_episode(tmp_path / f"{name}-graded")
+        S.plant_archived_record(graded, "b", raw=raw)
+        row = S.graded(graded)["b"]
+        assert row.get("ungradable") is not True, (
+            f"{name}: bytes that hold no record made the world ungradable")
+        assert row.get("cut_short") is None
 
-    ep, dirs, _base = _episode_with(tmp_path / "dir", worlds=("b",))
+
+def test_a_directory_squatting_the_sidecars_name_refuses_the_world_like_any_planted_entry(
+        tmp_path):
+    """A DIRECTORY at the sidecar's own path is not an unreadable record but an entry that is
+    not the artifact — and the archive answers it the way it answers the scrub verdict's name
+    being squatted: the whole world is refused before anything is copied, never a half-world
+    archived without one role. The sidecar's path is host-side, so a directory there is a
+    host fault, and a host fault is the launcher's to see rather than the archive's to paper
+    over."""
+    ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.sidecar_path(dirs["b"]).mkdir(parents=True, exist_ok=True)
-    _archive().archive_episode(ep, dirs)
-    assert _record(ep, "b") is None, "a directory at the sidecar's name was read as a record"
-    assert (ep / "worlds" / "b" / "report.md").is_file(), (
-        "a directory squatting the sidecar's name cost the world its other artifacts")
+    with pytest.raises(S.refusals()):
+        _archive().archive_episode(ep, dirs)
+    assert not (ep / "worlds" / "b" / "report.md").exists(), (
+        "the archive copied part of the world before refusing it")
 
 
 # ---------------------------------------------------------------------------------------
@@ -413,8 +432,8 @@ def test_run_end_write_happens_even_for_a_run_that_ended_cleanly(tmp_path):
     `ReviewState.of(deps).closed`, which F-A's second field needs. Recorded on the demand
     (`s33`'s note), not silently widened away."""
     deps, run_dir = _deps(tmp_path)
-    _run, truncated_by, _reason = S.drive(deps, S.clean_model())
-    assert truncated_by is None, "the clean model did not produce a clean run"
+    _run, end, _reason = S.drive(deps, S.clean_model())
+    assert end.truncated_by is None, "the clean model did not produce a clean run"
     assert S.sidecar_doc(run_dir) == {"truncated_by": None, "closed_before_cut": False}, (
         f"a clean run left {S.sidecar_doc(run_dir)!r} beside its run dir")
 
@@ -511,9 +530,9 @@ def test_budget_kill_reaches_its_own_sidecar_write(tmp_path):
     from defender.hooks.budget_enforcer import BudgetKill
 
     deps, run_dir = _deps(tmp_path)
-    _run, truncated_by, _reason = S.drive(
+    _run, end, _reason = S.drive(
         deps, S.killing_model(BudgetKill("budget tail exhausted at read_file")))
-    assert truncated_by == "budget"
+    assert end.truncated_by == "budget"
     assert S.sidecar_doc(run_dir) == {"truncated_by": "budget", "closed_before_cut": False}
     assert not (run_dir / "report.md").exists(), (
         "the budget arm wrote a report.md; claim h1 says it does not, and the whole reason an "
@@ -543,9 +562,10 @@ def test_store_stamp_failure_does_not_leak_into_the_sidecar_or_ticket_value(tmp_
             raise session_store.StoreAppendError("the store is exactly what is broken")
 
     deps, run_dir = _deps(tmp_path)
-    _run, truncated_by, _reason = S.drive(
+    _run, end, _reason = S.drive(
         deps, S.killing_model(BudgetKill("budget tail exhausted at read_file")),
         store=_BrokenStore())
+    truncated_by = end.truncated_by
     assert truncated_by == "budget", "the run did not reach the handled exit at all"
     assert S.sidecar_doc(run_dir) == {"truncated_by": "budget", "closed_before_cut": False}, (
         "the sidecar took its value from the store rather than from what the driver observed")

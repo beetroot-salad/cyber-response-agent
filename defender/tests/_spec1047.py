@@ -45,9 +45,13 @@ would be written against two refuted readings:
 * **F-D (auto, confirmed EXECUTED by round-2 probe #30).** The leave-open arm's ticket identity
   is `run_dir.name` — the same namespace `open_case_ticket` already writes under, reachable
   with no report.md on disk at all.
-* **F-F (auto, confirmed EXECUTED by round-2 probe #11).** The new archive write goes through
-  `write_guarded`, never `copy2`: the existing `copy2` lane writes THROUGH a pre-existing hard
-  link at a destination leaf, where `write_guarded` refuses one (EMLINK).
+* **F-F (auto, confirmed EXECUTED by round-2 probe #11), resolved at the LANE rather than the
+  leaf.** The archive's `copy2` lane wrote THROUGH a pre-existing hard link at a destination
+  leaf. Rather than fork one file out of that lane, the record is the seventh single file —
+  beside the scrub verdict, the other host-side sidecar — and the lane's pre-copy destination
+  screen now refuses a hard link at ANY of the seven (`_run_paths.plain_file`, the rule
+  `write_guarded` already applied). The archive interprets nothing: it copies the sidecar's
+  bytes, and the judge alone decides what they mean (`run_end.parse_record`).
 * **F-M (auto).** The vocabulary owner is STRICT — no whitespace strip, no case fold, no
   confusable fold. Under the resolved mechanism the value's only producer is the driver's own
   stamp, so leniency buys nothing and costs a coercion path.
@@ -381,7 +385,8 @@ def drive(deps: Any, model: Any, *, bounds: Any = None, store: Any = None) -> tu
     The one seam every exit class in this suite is reached through, and it is the production
     frame: `run_investigation` calls exactly this, and F-B sited the run-end write inside it,
     before the forced close at `driver/__init__.py:303`. Returns
-    `(run, truncated_by, exit_reason)`."""
+    `(run, end, exit_reason)` — `end` is the driver's own `RunEnd` record, the same value
+    `run_investigation` flattens onto its summary."""
     import asyncio
 
     from defender.runtime import challenge_gate, driver

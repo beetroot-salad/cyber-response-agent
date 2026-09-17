@@ -9,11 +9,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from defender._io import write_guarded
 from defender._run_paths import RunPaths
 from defender.run_common import run_env
-from defender.runtime import session_store
-from defender.runtime.driver import FORCED_CLOSE_SET
-from defender.runtime.session_store import normalized_truncated_by
+from defender.runtime import run_end
 from defender.runtime.verbs import VerbContext
 from defender.scripts.case_history import case_ticket
 from defender.scripts.adapters import _stub_transport as transport
@@ -138,18 +137,19 @@ def close_case_ticket(
     none (F-K's intersection with F-A: there is no verdict on disk to defer to, so the
     escalation wins over inventing one)."""
     try:
-        truncated_by = normalized_truncated_by(truncated_by)  # F-I — first act, own parameter
+        truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
         config = deps.load_config()
         if config is None:
             return
         case_id = run_dir.name  # F-D — positional, same namespace `open_case_ticket` writes
-        if truncated_by == session_store.TRUNCATED_BY_ABORTED and not closed_before_cut:
+        if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
             _leave_open_with_escalation(run_dir, deps, config, case_id, truncated_by)
             return
-        if (truncated_by in (session_store.TRUNCATED_BY_BUDGET, session_store.TRUNCATED_BY_STORE)
+        if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
                 and not closed_before_cut):
+            _log(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
             return
-        if truncated_by in FORCED_CLOSE_SET:
+        if truncated_by in run_end.FORCED_CLOSE_EXITS:
             try:
                 rec = case_ticket.read_case_record(run_dir)
             except case_ticket.CaseTicketError:
@@ -220,6 +220,9 @@ def _write_receipt(
         "ok": ok,
     }
     try:
-        (run_dir / "ticket_write.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+        # The run dir is the box's rw bind: the receipt goes through the alias-refusing seam
+        # like every other host write into it, so a link planted at its name is refused, not
+        # followed.
+        write_guarded(run_dir / "ticket_write.json", json.dumps(receipt, indent=2) + "\n")
     except OSError as e:
         _warn(f"could not write receipt: {e}")

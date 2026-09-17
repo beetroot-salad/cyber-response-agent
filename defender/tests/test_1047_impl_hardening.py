@@ -9,17 +9,15 @@ THIS implementation.
 
 Claims adversary (reads only the code, falsifies its docstrings):
 
-1. `read_world_facts` used to re-derive `run_end.json`'s content even when `_grade_world`'s
-   early check had already read it — a second parse of the same file per graded world, and the
-   `WorldFacts.cut_short` docstring's "the ONE read... shared" claim was false. Fixed by
-   threading the already-known value through a `run_end=` parameter every other caller leaves
-   unset.
-2. `_archive_run_end`'s docstring claimed a sidecar that exists but cannot be read as a record
-   is "SKIPPED AND REPORTED" — matching what `test_1047_archive_record.py`'s own
-   `test_an_unreadable_sidecar_is_skipped_and_reported_rather_than_archived` says in its name —
-   but nothing was ever printed; only the "skipped" half held. Fixed by reporting to stderr
-   exactly when something occupies the sidecar's name and cannot be read (never for a genuinely
-   absent sidecar, which stays silent like the six pre-existing single-file artifacts).
+1. `read_world_facts` used to carry a `cut_short` field nothing in production read, and a
+   `run_end=` parameter whose only purpose was to spare the one caller that did not need the
+   field a second parse. Both are gone: the judge reads the record once, in `_grade_world`.
+2. `_archive_run_end` used to be a bespoke lane for one file, with its own reader and its own
+   "skipped and reported" arm. Gone too: the record is the seventh single file, copied through
+   the same screened lane as the scrub verdict (the other host-side sidecar), and the judge
+   alone decides what its bytes mean. The tests here pin what the dissolved shape promises
+   instead — one in-process value for both record fields, a named exit reason for a skipped
+   forced close, and a parser strict as a whole.
 
 Spec adversary (never sees the code, greens the committed suite with corner-cuts): its own
 from-scratch build satisfied all 106 committed tests while leaving `run.py`'s ticket-lane call
@@ -59,77 +57,70 @@ def _episode_with(tmp_path, worlds=("b",), **kw):
     return ep, {w: S.sibling_run_dir(base, w, **kw) for w in worlds}, base
 
 
-def test_read_world_facts_trusts_a_precomputed_run_end_value(tmp_path):
-    """`read_world_facts(..., run_end=(...))` uses the caller's value instead of re-reading
-    `run_end.json` itself.
+def test_run_py_tail_takes_both_record_fields_off_the_summary(tmp_path, monkeypatch):
+    """Both halves of the run-end record reach the ticket lane from ONE in-process value, the
+    driver's summary — `closed_before_cut` is not read back off the sidecar. Driven with a
+    summary that says the model had closed and NO sidecar on disk at all: a tail that read the
+    second field off disk would hand the lane `False` and leave a ticket open over a verdict
+    the run really produced."""
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    satisfy_entrypoint_keys(monkeypatch, tmp_path)
+    paths = loop_paths(tmp_path)
 
-    Proven by making a fresh read give a DIFFERENT answer than the one passed in: a directory
-    occupies the sidecar's archived name, which `_read_run_end_record` folds to `(None,
-    False)` — so if `read_world_facts` ignored `run_end=` and re-derived the value itself,
-    `facts.cut_short` would come back `None` instead of the `"aborted"` that was passed in.
+    from defender import run as run_py
 
-    Without the `run_end=` parameter at all (pre-fix), this call raises `TypeError` for an
-    unexpected keyword argument — the fix is what makes the call possible in the first place."""
-    family = _family()
-    ep = S.accepted_episode(tmp_path, ledgers={"b": [S.staged_row("b")], "c": []})
-    world_dir = ep / "worlds" / "b"
-    (world_dir / S.run_end_name()).mkdir(parents=True, exist_ok=True)
+    tail = SpecTail(paths, truncated_by="aborted", closed_before_cut=True)
+    rc = drive_tail(run_py.main, plant_alert(tmp_path / "both"), tail, "--update-ticket")
 
-    facts = family.read_world_facts(ep, "b", episode_token=S.EPISODE_TOKEN,
-                                     run_end=("aborted", True))
-
-    assert facts.cut_short == "aborted", (
-        "read_world_facts re-derived run_end.json itself instead of trusting the caller's "
-        "already-known value — the file at that name (a directory) would read back as "
-        "cut_short=None if it had actually been re-parsed")
+    assert rc == 0
+    assert tail.close_calls, "close_case_ticket was never called at all"
+    assert not S.sidecar_path(tail.run_dirs[0]).exists(), (
+        "the fixture wrote a sidecar, so nothing below is about the in-process value")
+    assert tail.close_calls[0] == {"truncated_by": "aborted", "closed_before_cut": True}, (
+        f"run.py's tail split the record between the summary and the disk: {tail.close_calls[0]!r}")
 
 
-def test_read_world_facts_still_reads_it_itself_when_no_value_is_passed(tmp_path):
-    """The default path — every caller other than `_grade_world` (render.py, the rest of the
-    suite) — is unchanged: with no `run_end=`, the function reads the archived record itself."""
-    family = _family()
-    ep = S.accepted_episode(tmp_path, ledgers={"b": [S.staged_row("b")], "c": []})
-    S.plant_archived_record(ep, "b", truncated_by="request-limit")
+def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
+    """When the record write fails on a forced-close exit, the forced report is skipped
+    (`test_a_failed_run_end_write_is_a_reason_not_to_write_the_forced_report`) — and the
+    summary SAYS so, rather than looking like an ordinary `retry-exhausted` exit that should
+    carry a report and mysteriously does not."""
+    from defender.tests import _spec923
 
-    facts = family.read_world_facts(ep, "b", episode_token=S.EPISODE_TOKEN)
+    deps, run_dir = _spec923.main_deps(tmp_path)
+    S.sidecar_path(run_dir).mkdir(parents=True, exist_ok=True)
 
-    assert facts.cut_short == "request-limit"
+    _run, truncated_by, exit_reason = _spec923.drive_to_retry_exhaustion(deps)
 
-
-def test_archive_reports_a_sidecar_that_exists_but_cannot_be_read(tmp_path, capsys):
-    """A sidecar that occupies its name but cannot be read as a record — empty, torn JSON, a
-    JSON list, or a directory, the same four shapes
-    `test_an_unreadable_sidecar_is_skipped_and_reported_rather_than_archived` drives — now
-    actually reaches stderr, closing the gap between that test's name and what it checked (it
-    only ever asserted the "skipped" half)."""
-    for name, raw in (("empty", ""), ("torn", '{"truncated_by": "abor'),
-                      ("list", '[{"truncated_by": "aborted"}]')):
-        ep, dirs, _base = _episode_with(tmp_path / name)
-        S.plant_sidecar(dirs["b"], raw=raw)
-        capsys.readouterr()
-        _archive().archive_episode(ep, dirs)
-        err = capsys.readouterr().err
-        assert "run-end record" in err, f"{name}: an occupied, unreadable sidecar went unreported"
-
-    ep, dirs, _base = _episode_with(tmp_path / "dir")
-    S.sidecar_path(dirs["b"]).mkdir(parents=True, exist_ok=True)
-    capsys.readouterr()
-    _archive().archive_episode(ep, dirs)
-    err = capsys.readouterr().err
-    assert "run-end record" in err, "a directory squatting the sidecar's name went unreported"
+    assert truncated_by == "retry-exhausted"
+    assert exit_reason == "RunEndRecordFailed", (
+        f"a skipped forced close left the exit reason at {exit_reason!r}, indistinguishable "
+        "from a run whose forced report should be there")
 
 
-def test_archive_stays_silent_when_the_sidecar_is_simply_absent(tmp_path, capsys):
-    """A run dir with NO sidecar at all — the ordinary case for a run that was not cut short,
-    or an archive that predates #1047 — is not a refusal and gets no message, exactly like an
-    absent optional artifact among the six pre-existing `_single_files` roles."""
-    ep, dirs, _base = _episode_with(tmp_path)
-    capsys.readouterr()
+def test_parse_record_is_strict_as_a_whole():
+    """`run_end.parse_record` reads exactly the shape the writer writes and nothing else: an
+    unrecognized exit class or a non-boolean `closed_before_cut` is NOT a record, rather than
+    folding to "not cut short" / "the model had closed" — a corrupted record must fail toward
+    "the host said nothing", never toward a verdict."""
+    run_end = S.mod("runtime.run_end")
+    ok = run_end.parse_record({"truncated_by": "aborted", "closed_before_cut": False})
+    assert ok == run_end.RunEnd("aborted", False)
+    clean = run_end.parse_record({"truncated_by": None, "closed_before_cut": False})
+    assert clean == run_end.RunEnd(None, False)
+    assert run_end.parse_record(
+        {"truncated_by": "aborted", "closed_before_cut": False, "verdict": "benign"}) == ok, (
+        "an extra key changed the record")
 
-    _archive().archive_episode(ep, dirs)
-
-    err = capsys.readouterr().err
-    assert "run-end record" not in err, "a plainly absent sidecar was reported as though occupied"
+    for doc in (
+        {"truncated_by": "Aborted", "closed_before_cut": False},   # not a member
+        {"truncated_by": "aborted", "closed_before_cut": "false"},  # a truthy string
+        {"truncated_by": "aborted", "closed_before_cut": 1},        # not a bool
+        {"truncated_by": "aborted"},                                # a field missing
+        {"closed_before_cut": False},
+        {}, [], None, "aborted",
+    ):
+        assert run_end.parse_record(doc) is None, f"{doc!r} was read as a record"
 
 
 def test_run_py_tail_threads_the_exit_class_into_close_case_ticket(tmp_path, monkeypatch):

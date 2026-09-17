@@ -305,12 +305,14 @@ class SpecTail:
         disposition: str = "benign",
         leads: tuple[str, ...] = ("l-001",),
         truncated_by: str | None = None,
+        closed_before_cut: bool = False,
         certify: bool = True,
     ) -> None:
         self._paths = paths
         self._disposition = disposition
         self._leads = leads
         self._truncated_by = truncated_by
+        self._closed_before_cut = closed_before_cut
         self._certify = certify
         self.run_dirs: list[Path] = []
         self.steps: list[TailStep] = []
@@ -331,7 +333,8 @@ class SpecTail:
         if self._certify:
             scrub_mod.scrub(run_dir)
         self._note("lifecycle", run_dir)
-        return {"output": "spec791 verdict", "requests": 1, "truncated_by": self._truncated_by}
+        return {"output": "spec791 verdict", "requests": 1, "truncated_by": self._truncated_by,
+                "closed_before_cut": self._closed_before_cut}
 
     def visualize(self, run_dir: Path) -> None:
         self._note("visualize", run_dir)

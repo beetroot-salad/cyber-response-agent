@@ -101,7 +101,7 @@ from defender.runtime.branch._family import (
     world_token_for,
 )
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS, INFRA_ERROR_CLASS
-from defender.runtime.session_store import normalized_truncated_by
+from defender.runtime.run_end import RunEnd, parse_record
 from defender.runtime.verbs import is_system_name
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
@@ -1108,11 +1108,6 @@ class WorldFacts:
     #: evidence the grading pass could not see, and silence about it reads exactly like a world
     #: that had none.
     unlanded_document_rows: tuple[str, ...] = ()
-    #: #1047 O1 — this world's normalized exit class, or `None` when its archived run_end.json
-    #: is absent, unreadable, or names no exit. `@owns cut_short` on `WorldFacts`: the value a
-    #: caller who already has it (`_grade_world`'s early check, via `read_world_facts`'s
-    #: `run_end=` parameter) hands in rather than paying a second parse for the same file.
-    cut_short: str | None = None
 
     @property
     def referenced_leads(self) -> frozenset[str]:
@@ -1120,25 +1115,15 @@ class WorldFacts:
         return frozenset(self.resolutions_by_lead)
 
 
-def _read_run_end_record(world_dir: Path) -> tuple[str | None, bool]:
-    """`(cut_short, closed_before_cut)` off `worlds/<label>/run_end.json` — the archive's own
-    host-written record (#1047 O1/O3), or `(None, False)` when it is absent, unreadable, or not
-    a mapping (`json_mapping`'s own tolerance: absent, undecodable, truncated, or a non-object
-    JSON value all fold to `None`).
-
-    `truncated_by` is re-normalized through `normalized_truncated_by` here — the record is
-    host-written, but this is still the one place the judge turns its raw value into "an exit
-    class or not one", exactly like the archive's and the ticket lane's own reads (the
-    coherence property `one_interpreter_for_the_exit_class` pins). Extra keys on the document
-    (a planted `ungradable`, `verdict`, `malformed`) are read by nothing here — only the two
-    named keys are ever looked at."""
-    doc = json_mapping(world_dir / RUN_END_NAME)
-    if doc is None:
-        return None, False
-    return (
-        normalized_truncated_by(doc.get("truncated_by")),
-        bool(doc.get("closed_before_cut", False)),
-    )
+def _read_run_end_record(world_dir: Path) -> RunEnd | None:
+    """The run-end record off `worlds/<label>/run_end.json` — the archive's copy of the host's
+    own sidecar (#1047 O1/O3) — or `None` when there is none: absent, undecodable, truncated
+    or not a mapping (`json_mapping`'s own tolerance), or a mapping that is not a record
+    (`run_end.parse_record`'s: a missing field, an exit class the vocabulary's owner refuses,
+    a non-boolean). The judge carries no interpretation of its own — what the two fields mean
+    is decided once, by the module that owns them, and the ticket lane takes the same answer
+    (the coherence property `one_interpreter_for_the_exit_class` pins)."""
+    return parse_record(json_mapping(world_dir / RUN_END_NAME))
 
 
 def world_ledger_path(episode_dir: Path, label: str, *, episode_token: str) -> Path:
@@ -1212,24 +1197,13 @@ def read_world_ledger(episode_dir: Path, label: str, *, episode_token: str,
         world_token_for(episode_token, label))
 
 
-def read_world_facts(
-    episode_dir: Path, label: str, *, episode_token: str,
-    run_end: tuple[str | None, bool] | None = None,
-) -> WorldFacts:
+def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
     """Read one world's archived record: the ledger, the document and the report, once — the
     composition of `read_world_ledger` and `read_investigation_facts`, in that order, so the
-    grading path's refusal on a missing ledger comes first exactly as before.
-
-    `run_end`, when given, is `(cut_short, closed_before_cut)` the caller already read off
-    `run_end.json` — `_grade_world`'s own early check, which runs before this function is ever
-    reached — reused here instead of a second parse of the same file. Every other caller
-    (render.py, the tests) leaves it unset and this function reads the record itself, exactly
-    as before."""
+    grading path's refusal on a missing ledger comes first exactly as before."""
     world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
     ledger_rows, malformed = read_world_ledger(episode_dir, label, episode_token=episode_token)
     document = read_investigation_facts(world_dir, world=label)
-    cut_short, _closed_before_cut = (
-        run_end if run_end is not None else _read_run_end_record(world_dir))
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed,
         investigation_text=document.investigation_text,
@@ -1238,7 +1212,6 @@ def read_world_facts(
         resolution_moved=document.resolution_moved,
         resolutions_by_lead=document.resolutions_by_lead,
         unlanded_document_rows=document.unlanded_document_rows,
-        cut_short=cut_short,
     )
 
 
@@ -1324,12 +1297,13 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # HAD already closed (`closed_before_cut`) keeps its own verdict instead — the exit class
     # is not an unconditional trump. `malformed` is deliberately absent here: this world's
     # inputs are neither missing (tier 1) nor wrong (tier 2), so the two tiers stay separable.
-    cut_short, closed_before_cut = _read_run_end_record(world_dir)
-    if cut_short is not None and not closed_before_cut:
+    end = _read_run_end_record(world_dir)
+    if end is not None and end.truncated_by is not None and not end.closed_before_cut:
         row["ungradable"] = True
-        row["cut_short"] = cut_short
+        row["cut_short"] = end.truncated_by
         row["ungradable_reason"] = (
-            f"world {label!r}: its run ended {cut_short!r} — the host's report is not a verdict")
+            f"world {label!r}: its run ended {end.truncated_by!r} — the host's report is not "
+            "a verdict")
         return row, None
 
     missing = _missing_required_input(
@@ -1366,8 +1340,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # exists for — `malformed` is on the row beside `ungradable`, so a reader can still tell an
     # artifact that is not there from one that is there and wrong.
     try:
-        facts = read_world_facts(episode_dir, label, episode_token=episode_token,
-                                  run_end=(cut_short, closed_before_cut))
+        facts = read_world_facts(episode_dir, label, episode_token=episode_token)
         h_rows = own_h_rows(facts.ledger_rows, holding_system)
         faulted = next((r for r in h_rows if r.get("source") == FAULT), None)
 

@@ -278,8 +278,10 @@ def test_the_record_must_distinguish_a_host_written_close_from_the_models_own(tm
 
 
 def _cut_short_of(episode_dir, label="b"):
-    """What `read_world_facts` made of one world's archived run-end record."""
-    return S.world_facts(episode_dir, label).cut_short
+    """What the grading pass made of one world's archived run-end record: the `cut_short` the
+    row carries, or `None` — the judge's one read of the record (`family._read_run_end_record`,
+    through `run_end.parse_record`) feeds the row and nothing else."""
+    return S.graded(episode_dir)[label].get("cut_short")
 
 
 def test_read_world_facts_given_an_empty_run_end_json(tmp_path):

@@ -1794,28 +1794,37 @@ demands:
       `[write_guarded, destination-screen]`. Round-2 probe #11 (EXECUTED) found the archive's
       existing `copy2` lane silently overwrites a regular file AND writes THROUGH a hard link at
       a destination leaf, where `write_guarded`'s `_refuse_unless_plain` refuses `S_ISREG and
-      st_nlink > 1` (EMLINK). The new leaf takes the guarded lane for that reason. The hard-link
-      hole in the other six archived artifacts is PRE-EXISTING and out of this piece's scope —
-      carried to `handoff.deviations` as a separate follow-up issue.
+      st_nlink > 1` (EMLINK). RESOLVED AT THE LANE, NOT THE LEAF (the dissolve pass after
+      write-code-from-spec): rather than fork one file out of the copy lane, the record is the
+      SEVENTH single file — beside the scrub verdict, the other host-side sidecar — and the
+      lane's pre-copy destination screen refuses a hard link at ANY of the seven
+      (`_run_paths.plain_file`, `write_guarded`'s own rule). The hard-link hole in the other six
+      is therefore closed here too, not carried as a follow-up.
 
   - id: archive_skips_and_reports_an_unreadable_sidecar              # F-G + F-AB + F-U
     kind: domain-outcome
     form: test
-    source: "70-resolutions-round2.md forks F-G / F-AB (auto) and F-U (human)"
+    source: "70-resolutions-round2.md forks F-G / F-AB (auto) and F-U (human); re-resolved by the dissolve pass"
     binds:
       - "interacts(archive_episode->run_end_sidecar).response"
       - "run_end_sidecar.access[fs-host-write]"
       - "run_end_json.domain.distinguished[absent]"
-    discharged_by: test_an_unreadable_sidecar_is_skipped_and_reported_rather_than_archived
+    discharged_by: test_an_unreadable_sidecar_is_copied_verbatim_and_the_judge_reads_no_record
     seed_docstring: >-
-      A world whose host-side sidecar is unreadable, or is a directory where a file belongs, gets
-      NO run_end.json and the archive says so — the existing absent/planted/refused three-way
-      split, not a fourth answer — and the rest of the world still archives.
+      A sidecar that holds no record (zero bytes, torn JSON, a JSON list) is archived byte for
+      byte, exactly as the scrub verdict is; the judge reads it as "no record" and grades the
+      world as today, and the rest of the world archives.
     note: >-
-      F-U (human): a real I/O error gets NO special-casing. Round-2 probe #11 (EXECUTED) found the
-      existing destination screen already lets EIO/EACCES propagate as a bare OSError for the
-      other six artifacts (only ENOENT/ENOTDIR/EBADF/ELOOP fold into "absent"); the new leaf is
-      consistent with that rather than an outlier. F-AB folds a type mismatch in as a read failure.
+      RE-RESOLVED by the dissolve pass: the archive is a COPY, not an interpreter. F-G's
+      "skipped and reported" arm existed only because the record had its own lane with its own
+      reader; with the record as the seventh single file there is nothing for the archive to
+      interpret, and "unreadable" is decided once, at the judge (`run_end.parse_record`,
+      strict as a whole). F-AB (a directory at the sidecar's name) now takes the existing
+      lane's answer for a squatted name — `ArchiveRefused` before anything is copied, exactly
+      as for the scrub verdict — pinned by
+      `test_a_directory_squatting_the_sidecars_name_refuses_the_world_like_any_planted_entry`.
+      F-U (human) is unchanged: a real I/O error gets no special-casing, and the seventh leaf is
+      consistent with the other six by construction now rather than by matching them.
 
   - id: ticket_forced_close_failed_leaves_open_with_escalation       # F-K
     kind: domain-outcome
@@ -2761,13 +2770,12 @@ claims:
     kind: behavior
     source: discuss
     claim: "`validate_report` admits an unknown key in report.md's frontmatter — no reader rejects one"
-    probe: "the design doc's frontmatter-reader sweep; re-stated by 10-brief.md §4's h8 re-census"
-    probe_kind: read
+    probe: "the dissolve pass's probe script (scratchpad probe_claims.py, run over the worktree at the dissolve commit): `validate_report(report_text('malicious', extra='truncated_by: request-limit\n'))`"
+    probe_kind: executed
     observed: >-
-      RECONSTRUCTED AT ASSEMBLY from 20-demands.md's citations ("a `truncated_by:` line spliced
-      into world b's report.md frontmatter — which validate_report admits (h3)"; waiver
-      report_md_gains_no_field's second rejected note). This is the finding that killed the first
-      draft's design, so it is cited by the waiver and by two negative demands.
+      EXECUTED: `validate_report` returned `None` (accepted) for a report whose frontmatter carries
+      a `truncated_by:` key beside `disposition:`. The finding that killed the first draft's design,
+      now observed rather than reconstructed from 20-demands.md's citations.
     verdict: holds
   - id: h7
     kind: behavior
@@ -2775,12 +2783,14 @@ claims:
     claim: >-
       the is_gradable_row -> graded -> measuring path already excludes an ungradable row from
       verdict_word, so a new ungradable row needs no change to the family tally
-    probe: "family.py:1388 (is_gradable_row), :1504-1512 (measuring/contrasting/verdict_word)"
-    probe_kind: read
+    probe: "the dissolve pass's probe script (scratchpad probe_claims.py, run over the worktree at the dissolve commit): `grade_family` over a control episode and over the same episode with world b's archived record `truncated_by: request-limit`; `is_gradable_row` on the cut row"
+    probe_kind: executed
     observed: >-
-      RECONSTRUCTED AT ASSEMBLY from 20-demands.md's citation ("which h7 confirms already excludes
-      an ungradable row"). Re-ground probe #28 (claim p28) independently re-read the same path and
-      agrees, and adds that an EMPTY measuring set computes `undecidable` on an already-tested path.
+      EXECUTED: control -> b `ungradable` absent, `verdict_word` 'caught'; cut -> b `ungradable:
+      True`, `is_gradable_row(b)` False, and `verdict_word` still computed ('caught') from the
+      remaining gradable world — the tally excluded the new row shape with no change to the
+      measuring path. p28's executed run adds the all-cut-short degenerate: an empty gradable set
+      computes 'undecidable'.
     verdict: holds
 
   # --- 10-brief.md's ledger (19) -----------------------------------------------------------
@@ -2816,7 +2826,7 @@ claims:
     verdict: refuted
   - id: h8
     kind: census
-    claim: "readers of report frontmatter — none rejects an unknown key"
+    claim: "readers of report frontmatter — the full list of production modules that are such readers (what each does with an unknown key is h3's question, executed there)"
     probe: "grep -rln \"read_report|require_report|parse_report_text|_declared_disposition|validate_report\" --include=*.py . | grep -v ./tests/"
     probe_kind: search
     observed: >-
@@ -2833,7 +2843,7 @@ claims:
       behaviour is unchanged by this piece; what changed is that it is an examined no.
     verdict: holds
   - id: h9
-    kind: reachability
+    kind: referential
     claim: "a sibling world's session store is under no sibling box's rw bind"
     probe: "cli.py:641-652 + :706-717; driver/__init__.py:155-173 (resume wins); branch/_spec.py::store_factory_for + open_source_store; box/_lifecycle.py:33-64 (the bind list); grep BoxRequest|Mount over defender/"
     probe_kind: read
@@ -2864,10 +2874,10 @@ claims:
     observed: "as claimed (flagged fact F8: adding the owner is what starts the lint biting on the new consumers)"
     verdict: holds
   - id: h12
-    kind: census
+    kind: referential
     claim: "this worktree's base is the tree the design was grounded on"
     probe: "git rev-parse HEAD origin/main; git rev-list --left-right --count HEAD...origin/main; git merge-base --is-ancestor ddd41b88 {HEAD,origin/main}; git diff --stat"
-    probe_kind: executed
+    probe_kind: read
     observed: >-
       REFUTED at phase A: HEAD was 47 commits BEHIND origin/main. REPAIRED since — the worktree was
       reset and claim a2 re-verifies HEAD == 59bdea44 == origin/main, the tree every anchor in every
@@ -2927,22 +2937,25 @@ claims:
   - id: h19
     kind: behavior
     claim: "open_store is safe to call on a path that may not exist (a read-shaped use)"
-    probe: "session_store.py:690-708; open_source_store's docstring"
-    probe_kind: read
+    probe: "the dissolve pass's probe script (scratchpad probe_claims.py, run over the worktree at the dissolve commit): `session_store.open_store(case_id='case-x', runs_base=<fresh dir>/runs)` then `open_store_for_read(<absent path>)`"
+    probe_kind: executed
     observed: >-
-      10-brief.md's verdict verbatim: "refuted-as-stated (flagged F1)". open_store CREATES if
-      missing (guarded_mkdir + executescript(DDL) + PRAGMA user_version), so a wrong runs_base
-      yields a live handle over an EMPTY store and truncated_by reads absent for every world with
-      no error anywhere; open_store_for_read (:710-733) is the fail-closed opener. Moot for both
-      lanes under F2/F3 (neither reads a store) — recorded so phase E's author does not reach for
-      open_store by habit.
+      EXECUTED, REFUTED as stated (flagged F1): `open_store` on a runs base with no `sessions/`
+      beside it CREATED `sessions/case-x.db` and returned a live handle over an empty store;
+      `open_store_for_read` on an absent path raised `FileNotFoundError('session store not found:
+      …')` — that is the fail-closed opener. Moot for both lanes under F2/F3 (neither reads a
+      store), kept because it is why.
     verdict: refuted
   - id: h20
     kind: behavior
     claim: "a run that was cut short always has truncated_by stamped in the store"
-    probe: "driver/__init__.py:215-219 (try/except Exception around set_truncated_by); tests/e2e/test_826_gather_deferred.py:231-279 pins the swallow"
-    probe_kind: read
-    observed: "REFUTED (flagged fact F2): the stamp is best-effort and its failure is only printed to stderr"
+    probe: "the dissolve pass's probe script (scratchpad probe_claims.py, run over the worktree at the dissolve commit): the real `_drive_agent` with a `BudgetKill` raised from the model call and a store whose `set_truncated_by` raises `StoreAppendError`"
+    probe_kind: executed
+    observed: >-
+      EXECUTED, REFUTED (flagged fact F2): the run returned normally with
+      `RunEnd(truncated_by='budget', closed_before_cut=False)` and `exit_reason='BudgetKill'` while
+      the store stamp never landed — its failure was printed to stderr only (`[run.py] truncated_by
+      write skipped: …`). The stamp is best-effort; the in-process value is what both lanes take.
     verdict: refuted
   - id: h21
     kind: referential
@@ -2976,13 +2989,13 @@ claims:
     kind: referential
     claim: "this worktree's base (ed890678) is 47 commits behind origin/main and carries none of the symbols the design doc anchors on"
     probe: "git merge-base --is-ancestor ddd41b88 HEAD; git rev-list --left-right --count HEAD...origin/main; grep -rn OWED_A_CLOSE; ls defender/tests | grep 992"
-    probe_kind: executed
+    probe_kind: read
     observed: >-
       holds as recorded, and REPAIRED since: the base was reset to origin/main@59bdea44 (claim a2),
       so every binds address in this graph resolves on the tree the frontiers were probed against.
     verdict: holds
   - id: n2
-    kind: reachability
+    kind: referential
     claim: "SETTLES h9 — no session store is under any box's rw bind, and a sibling's store is not under the episode dir at all"
     probe: "runtime/branch/_spec.py::store_factory_for -> open_source_store -> session_store.open_store(...); runtime/box/_lifecycle.py::_create_argv mount list"
     probe_kind: read
@@ -3030,12 +3043,14 @@ claims:
   - id: n7
     kind: behavior
     claim: "three of the five exit classes never reach a record-based check, because their worlds have no report.md and are already tier-1 ungradable"
-    probe: "family.py::_missing_required_input (artifact_file on the ledger, report.md, investigation.md, alert.json) runs before read_world_facts; test_921_family_facts.py:626-633"
-    probe_kind: read
+    probe: "the dissolve pass's probe script (scratchpad probe_claims.py, run over the worktree at the dissolve commit): `grade_family` over an episode whose world b has NO report.md, once with no archived record and once with `truncated_by: aborted`"
+    probe_kind: executed
     observed: >-
-      an aborted / budget / store world writes no report.md, so _grade_world returns early with
-      \"world 'b' is missing its report.md\" before any run_end.json is read. Routed to fork F5 and
-      resolved there (reading A): the cut-short check runs FIRST.
+      EXECUTED on the implemented tree: no report and no record -> `ungradable: True`, reason "world
+      'b' is missing its report.md" (tier 1, before any record read); no report and a record
+      `aborted` -> reason "world 'b': its run ended 'aborted' — the host's report is not a verdict".
+      So the pre-#1047 reading held (without a record, the three no-report classes stop at tier 1)
+      and fork F5 reading A is what makes the exit class name itself first.
     verdict: holds
   - id: n8
     kind: referential
@@ -3116,14 +3131,15 @@ claims:
     claim: >-
       archive membership is `_scrub_ran` alone and all five exit classes reach it identically, so
       the exit class does not gate the archive at all
-    probe: "cli.py:1007-1009 + :1042-1043 + :762-779 (_scrub_ran); runtime/scrub.py:169-209; run.py:349-367 (the finally); driver/__init__.py:273-301, :586-606"
-    probe_kind: read
+    probe: "the dissolve pass's probe script (scratchpad probe_claims.py, run over the worktree at the dissolve commit): the real `_drive_agent` driven to each of the five exit classes (`RunAborted`, `BudgetKill`, `StoreAppendError` raised from the model call; retry exhaustion via `StuckModel`; the request ceiling via `base_request_limit=1`)"
+    probe_kind: executed
     observed: >-
-      Every one of the five is caught inside `_drive_agent`, so run_investigation returns normally
-      and the lifecycle's `finally` scrubs; a TAINTED tree still gets `ran: true` before the raise.
-      What drops a world is orthogonal to exit class (a BoxFault teardown, a partial walk, a failed
-      verdict write, or a process killed before the `finally`). This is what moved fork F-C to
-      settled.
+      EXECUTED: every one of the five returned from `_drive_agent` without raising —
+      `aborted/RunAborted`, `budget/BudgetKill`, `store/StoreAppendError`, `retry-
+      exhausted/UnexpectedModelBehavior`, `request-limit/UsageLimitExceeded` — so
+      `run_investigation` returns normally on all five and the lifecycle's `finally` (the scrub, and
+      with it `_scrub_ran`) is reached identically. What drops a world is orthogonal to exit class.
+      This is what moved fork F-C to settled.
     verdict: unrefuted
   - id: p25
     kind: behavior
@@ -3155,17 +3171,14 @@ claims:
       nothing downstream of `gradable` crashes on an empty set, but two values degrade silently
       there: alert_rule_key becomes the literal "unkeyed" and family_pattern falls back to a value
       that makes every family-level finding permanently unselectable
-    probe: "family.py:1126-1200, :1331, :1495-1518; learning/judge/__init__.py:568-585, :663-666, :690-695, :711-740, :781-793, :848-858; enqueue.py:754, :768, :788-798; render.py:379-385, :428-447; persist.py:118-130; run.py:700-778"
-    probe_kind: read
+    probe: "the dissolve pass's probe script (scratchpad probe_claims.py, run over the worktree at the dissolve commit): `grade_family` over an episode whose every non-control world carries a cut-short record (b `request-limit`, c `aborted`); plus `test_1047_unmoved_readers.py`'s `_all_cut_short` scenarios for the downstream consumers (sibling union, lessons commit)"
+    probe_kind: executed
     observed: >-
-      Union walk short-circuited on `and gradable`; lessons commit returns None; verdict_word is
-      `undecidable` on an already-tested path; `max(..., default=0)`. But `episode_alert(dir, [])`
-      returns {} and `derive_alert_rule_key({})` returns "unkeyed" even though the worlds' alert.json
-      files sit there unread; and no early-returning row carries `pattern`, so `family_pattern`
-      falls back to the holding-system name, which enqueue.py:791-797's own comment says can never
-      be selected into any later episode. Also: `_render_family_mechanical_rows` renders a fixed
-      field list, so a new `cut_short` key is invisible to the family judge. NOTE THE INSTRUMENT: a
-      behaviour prediction closed on a read.
+      EXECUTED: `grade_family` returned with an EMPTY gradable set and `verdict_word` 'undecidable'
+      on the already-tested path — nothing crashed; the sibling union short-circuits and
+      `_pass_lessons_commit` returns `None` (pinned by the two `_all_cut_short` tests). The silent
+      degradation of `alert_rule_key` to 'unkeyed' and of `family_pattern` to the holding system's
+      name stands as read (family.py / judge/__init__.py) and is fork F-J's waived, recorded gap.
     verdict: unrefuted
   - id: p32
     kind: census
@@ -3538,7 +3551,7 @@ handoff:
     - "A READER NO DEMAND BINDS: `_render_family_mechanical_rows` (learning/judge/run.py:700-713) renders a hardcoded field list, so a new `cut_short` row key is invisible to the family-level judge — which would see only `ungradable=True` and could not tell a cut-short world from a malformed one (47-reground-probes.md red flag 5). Modelled as an unmoved reader edge so R7 fires; owned by nothing until F-J/F-X are answered."
     - "A SIXTH PRODUCER OF `store`: the setup-failure arm at driver/__init__.py:586-606 returns truncated_by='store' in the summary without ever reaching `_flush_run_end`, so the summary and the store column DISAGREE on that path. 10-brief.md §4's four-writer census does not name it. Harmless under the chosen mechanisms (both lanes read the summary) and fatal to any demand phrased as 'the store's truncated_by'. COMPOSED AT PHASE F with F-B's write placement, which this entry did not do: the arm returns from `run_investigation` WITHOUT ENTERING `_drive_agent`, the frame F-B sited the host-side run-end write in, so on that one path the summary says `store` and NO SIDECAR IS WRITTEN. `s33`'s demand text was therefore false as written ('unconditional for every run') and untestable, since every test of it drives the loop; the wording is narrowed to 'every run that reaches the agent loop' and the exception is recorded on `s33`'s own note. The cost is bounded: the ticket lane is correct either way (it reads the summary), but the sibling archives with no record and no report and takes the generic tier-1 reason 'missing its report.md' instead of a reason naming its exit — the outcome F5's resolution was taken to avoid, on one path out of five classes."
     - "A STATED DESIGN OBLIGATION THAT SHIPS UNPINNABLE, recorded at phase F rather than dropped: `one_interpreter_for_the_exit_class` cannot fail against a consumer that RE-IMPLEMENTS the owner's rule exactly (a `truncated_by == \"aborted\" elif …` chain in close_case_ticket, or `raw if raw in TRUNCATED_BY_VALUES else None` in read_world_facts). F-M's strict resolution makes `normalized_truncated_by(v)` behaviourally identical to those, so premise P-E1's discriminator survives only in the lenient and raw-passthrough directions, which the suite DOES catch. Probe obligation PO-7 — the probe that was supposed to find the discriminating input class — was dispatched in neither re-ground round and is now carried as DEFERRED in `handoff.deferred`. Not a live behavioural bug; a drift hazard for the day the vocabulary or the owner changes, and the half of F-I's stated purpose ('reachable by design rather than by accident of comparison') that no test can observe. The demand's own note carries the full statement and the structural alternative not taken."
-    - "A PRE-EXISTING HOLE IN `archive_episode`'s `copy2` LANE, found in passing and NOT fixed here — the entry `archive_overwrites_the_record_through_the_guarded_seam`'s note already promised and this list did not hold until phase F: the `copy2` lane WRITES THROUGH a pre-existing hard link at a destination leaf (claim p11, EXECUTED — a hard link planted at `worlds/<label>/report.md` left the link's target holding the archived bytes), where the `write_guarded` lane refuses one with EMLINK. It affects all SIX pre-existing archived artifacts, not the new leaf, which takes the guarded lane precisely for this reason (fork F-F). FILE AS A SEPARATE FOLLOW-UP ISSUE at ship time; out of #1047's scope to fix broadly."
+    - "A PRE-EXISTING HOLE IN `archive_episode`'s `copy2` LANE, found in passing: the `copy2` lane WROTE THROUGH a pre-existing hard link at a destination leaf (claim p11, EXECUTED — a hard link planted at `worlds/<label>/report.md` left the link's target holding the archived bytes), where the `write_guarded` lane refuses one with EMLINK. CLOSED by the dissolve pass rather than filed: the pre-copy destination screen now refuses a hard link at every single-file leaf (`_run_paths.plain_file`), so the record could join the copy lane as the seventh single file instead of taking a lane of its own (fork F-F, re-resolved at the lane)."
     - "AN INHERITED CLAIM THIS RUN COULD NOT RECOVER: the design doc declared 11 claims (h1-h11); the phase-A leaves re-probed seven and cited three more (h2, h3, h7 — reconstructed here from their citations, with the reconstruction stated in each `observed`). **h5 is cited by none of phase D's three inputs and the design doc is not one of them**, so it could not be carried. If §7 has the doc open, restore h5 or record it as deliberately dropped. — RESTORED AT THE GATE: the gate leaf fetched gh issue #1047's comments directly and transcribed h5 verbatim into `claims:`; nothing left to do at §7 for this one."
     - "CLAIM-INSTRUMENT MIS-TYPING, recorded rather than smoothed: h9/n2 (`reachability`), h7/h19/h20/n7 (`behavior`) and the four re-ground probes p21/p23/p25/p28 all closed on `probe_kind: read` or a static read. `spec-graph claims` will flag them, correctly — reading cannot falsify a prediction about what code does over an input. Two of them are load-bearing enough to deserve executed probes before phase E: p21 (the forced close's skip branch, which has zero test coverage today) and p25 (the two raising arms in run.py's tail that skip the whole tail). — ROUTED AT THE GATE as `re-ground` obligations in `60-residue.md` (dispatch an execution leaf to re-probe p21 and p25 with `probe_kind: executed` before phase E authors against them); not a `gate:` block entry since neither is an R0-R8 rule firing."
     - "THREE OF THE SIX `unknown` FIELDS ARE INVISIBLE TO `spec-graph gate`'s R0 ARM, and the gate leaf must route them from this list rather than from the tool's output. R0's unheard-unknown check is silenced by any demand binding the cell, and all three unknown access cells are legitimately bound: `run_end_sidecar.access[fs-host-write]` by s73/s83, `run_end_json.access[fs-archive-guarded-write]` by s39/s72, `ticket_store.access[http-note]` by ticket_aborted_leaves_open_with_escalation. A demand binding the cell is not a decision about the cell's policy — the policy is still undecided, and each slot names the fork that owes it. The other three unknowns (`payload.parts` on the sidecar, the archived record and the receipt) are read by no rule at all. — ROUTED AT THE GATE: all three are `gate.holes` entries (rule R0); `fs-archive-guarded-write` and `http-note` are additionally tagged `status: re-ground` (probe obligations #11 and #30/PO-10 respectively); `fs-host-write` stays a plain hole (probe #13 cannot be settled before the write exists). The other three unknowns (`payload.parts` x3) are caught by their own R1 firings, which are `gate.holes` too — see `gate:` block and `60-residue.md`."
