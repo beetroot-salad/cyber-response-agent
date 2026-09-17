@@ -54,6 +54,7 @@ import defender.learning.author.shared as _shared  # noqa: E402
 from defender.learning.frontend import serialize  # noqa: E402
 from defender.hooks import record_lesson_load  # noqa: E402
 
+from defender.tests._locale import C_LOCALE_ENV  # noqa: E402
 from defender.tests.test_corpus_fold_seed import _BlockYaml  # noqa: E402
 from defender.tests.test_curator_manifest import _findings_lesson, _headers  # noqa: E402
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
@@ -299,8 +300,7 @@ def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):
     """)
     proc = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True,
-        env={"PATH": "/usr/bin:/bin", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0",
-             "LC_ALL": "C", "LANG": "C"},
+        env=C_LOCALE_ENV,
     )
     assert proc.returncode == 0, f"the C-locale walk did not complete:\n{proc.stderr}"
     assert "enc=ANSI_X3.4-1968" in proc.stdout, f"the C locale did not take: {proc.stdout!r}"

@@ -40,6 +40,7 @@ from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._frontmatter import parse_frontmatter, split_frontmatter
 from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
 from defender.learning.core.config import LoopPaths
+from defender.tests._locale import C_LOCALE_ENV
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -48,13 +49,6 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 def _load_trace_lesson():
     return load_trace_lesson("trace_lesson_586")
 
-_C_LOCALE_ENV = {
-    "PATH": "/usr/bin:/bin",
-    "PYTHONCOERCECLOCALE": "0",
-    "PYTHONUTF8": "0",
-    "LC_ALL": "C",
-    "LANG": "C",
-}
 
 
 def _corpus_with_an_em_dash(tmp_path: Path) -> Path:
@@ -90,7 +84,7 @@ def test_the_utf8_pin_covers_the_write_not_only_the_read(tmp_path):
         "    print(lesson.fm['description'])\n"
     )
     proc = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, env=_C_LOCALE_ENV,
+        [sys.executable, "-c", script], capture_output=True, text=True, env=C_LOCALE_ENV,
     )
 
     assert proc.returncode == 0, f"printing a lesson under a C locale crashed:\n{proc.stderr}"
@@ -104,7 +98,7 @@ def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path)
     before the fix it exited 1 partway through the corpus, having emitted a truncated listing."""
     proc = subprocess.run(
         [sys.executable, str(WORKSPACE_ROOT / "defender/scripts/lessons/lessons_fm.py")],
-        capture_output=True, text=True, env=_C_LOCALE_ENV,
+        capture_output=True, text=True, env=C_LOCALE_ENV,
     )
 
     assert proc.returncode == 0, f"defender-lessons died under a C locale:\n{proc.stderr}"

@@ -43,6 +43,7 @@ import pytest
 from defender._io import read_text_utf8
 from defender.scripts.adapters.elastic_adapter import esql_payload
 from defender.tests._by_path import DEFENDER
+from defender.tests._locale import C_LOCALE_ENV
 
 _SQL_PY = DEFENDER / "scripts" / "gather_tools" / "sql.py"
 _DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
@@ -63,11 +64,6 @@ EXIT_INPUT_ERROR = 2
 #: `find_spec` asks the interpreter `_run_sql_py` spawns (`sys.executable`), so the answer
 #: is the child's, and nothing is imported at collection.
 _HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
-
-#: A shell with no locale set. Under it the tool's stdio would be strict ASCII, and both the
-#: epilog and the hints carry an em-dash — the tool reconfigures its own streams so that a
-#: lead in such a shell still gets the text rather than a traceback.
-_ASCII_SHELL = {"LC_ALL": "C", "LANG": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"}
 
 
 @pytest.fixture(scope="module")
@@ -96,11 +92,13 @@ def _run_sql_py(*args: str, stdin: str = "", env: dict[str, str] | None = None):
     )
 
 
-def _sql(payload: str, query: str) -> subprocess.CompletedProcess:
+def _sql(
+    payload: str, query: str, env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     """`cat <payload.json> | defender-sql '<query>'` as a lead types it."""
     if not _HAS_DUCKDB:
         pytest.skip("duckdb (the `runtime` extra) is not installed — no query can run")
-    return _run_sql_py(query, stdin=payload)
+    return _run_sql_py(query, stdin=payload, env=env)
 
 
 def _rows(payload: str, query: str) -> list:
@@ -250,9 +248,23 @@ def test_truncation_probe_is_shape_specific_not_universal(shape, esql):
 # ------------------------------------------- O2: a wrong-shape query is told the real shape
 
 
-def _positions(doc: dict) -> str:
+def _positions(payload_doc: dict) -> str:
     """The positional map the ES|QL hint must print for THIS payload, from its own `columns`."""
-    return "Positions: " + ", ".join(f"{i + 1}={c['name']}" for i, c in enumerate(doc["columns"]))
+    return "Positions: " + ", ".join(
+        f"{i + 1}={c['name']}" for i, c in enumerate(payload_doc["columns"])
+    )
+
+
+#: The two clauses of a hint that are DERIVED from the payload in hand. "The other payload's
+#: names are absent" is asserted of these, not of the idiom prose around them.
+_POSITIONS_CLAUSE = re.compile(r"Positions: .*?\.(?=\s)")
+_COLUMNS_CLAUSE = re.compile(r"columns \[[^\]]*\]")
+
+
+def _clause(hint: str, pattern: re.Pattern[str]) -> str:
+    found = pattern.search(hint)
+    assert found, f"no {pattern.pattern!r} clause in the hint: {hint!r}"
+    return found.group(0)
 
 
 def test_query_error_on_esql_shape_hint_gives_the_positional_map(esql):
@@ -261,7 +273,7 @@ def test_query_error_on_esql_shape_hint_gives_the_positional_map(esql):
 
     The runnable form is taken OUT of the hint text and executed, so the hint cannot hand
     back a recipe that does not run: `<value>` is the only thing substituted."""
-    doc = json.loads(esql)
+    payload_doc = json.loads(esql)
     proc = _sql(
         esql,
         'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."source.ip" = \'x\'',
@@ -269,11 +281,11 @@ def test_query_error_on_esql_shape_hint_gives_the_positional_map(esql):
     assert proc.returncode == EXIT_QUERY_ERROR
     hint = _hint(proc)
     assert "POSITIONAL JSON array" in hint
-    assert _positions(doc) in hint
+    assert _positions(payload_doc) in hint
 
     form = "v[2]->>'$' = '<value>'"
     assert form in hint
-    runnable = _fill(form, {"<value>": str(doc["values"][0][1])})
+    runnable = _fill(form, {"<value>": str(payload_doc["values"][0][1])})
     assert _rows(
         esql,
         f"SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) WHERE {runnable}",
@@ -285,14 +297,14 @@ def test_the_esql_positional_map_is_derived_from_each_payloads_own_columns():
     would satisfy it while being a lie about every other ES|QL payload a lead is handed. This
     is a different payload — three columns, none of them the fixture's — and the map has to
     follow it, with the fixture's own positions nowhere in sight."""
-    doc = {
+    payload_doc = {
         "columns": [{"name": "host.name", "type": "keyword"},
                     {"name": "bytes", "type": "long"},
                     {"name": "user", "type": "keyword"}],
         "values": [["web-1", 4096, "alice"], ["db-1", 512, "bob"]],
         "row_count": 2,
     }
-    payload = json.dumps(doc)
+    payload = json.dumps(payload_doc)
     proc = _sql(
         payload,
         'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."host.name" = \'x\'',
@@ -300,9 +312,12 @@ def test_the_esql_positional_map_is_derived_from_each_payloads_own_columns():
     assert proc.returncode == EXIT_QUERY_ERROR
     hint = _hint(proc)
     assert "POSITIONAL JSON array" in hint
-    assert _positions(doc) in hint, "the positional map did not follow this payload's own `columns`"
+    positions = _clause(hint, _POSITIONS_CLAUSE)
+    assert positions == _positions(payload_doc) + ".", (
+        "the positional map did not follow this payload's own `columns`"
+    )
     for fixture_column in ("failed", "source.ip"):
-        assert fixture_column not in hint, (
+        assert fixture_column not in positions, (
             "the hint carried the tracked fixture's columns into an unrelated payload — it is "
             "a memorized constant, not a map of the payload in hand"
         )
@@ -350,11 +365,12 @@ def test_the_hits_hint_column_list_is_derived_from_each_payloads_own_keys():
     proc = _sql(payload, "SELECT h.nope FROM (SELECT unnest(hits) h FROM data)")
     assert proc.returncode == EXIT_QUERY_ERROR
     hint = _hint(proc)
-    assert "columns [query, hits, returned, note]" in hint, (
+    columns = _clause(hint, _COLUMNS_CLAUSE)
+    assert columns == "columns [query, hits, returned, note]", (
         "the hint's column list did not follow this payload's own top-level keys"
     )
     for canonical_only in ("index", "total", "truncated"):
-        assert canonical_only not in hint, (
+        assert canonical_only not in columns, (
             "the hint printed a canonical envelope column for a payload that does not have it"
         )
     # Same branch, same copyable form — so the difference above is the derivation, not a
@@ -400,9 +416,8 @@ def test_the_hits_hint_form_runs_with_its_placeholders_filled():
             "WHERE h.<field> = '<value>'")
     assert form in _hint(proc)
     runnable = _fill(form, {"h.<field>": "h.user", "<value>": "alice"})
-    assert _rows(_TS_HITS, runnable) == [
-        {"@timestamp": "2026-08-07 11:32:52", "message": "Failed password"},
-    ]
+    # `message` only: how duckdb types and prints an ISO `Z` string is duckdb's, not the hint's.
+    assert [row["message"] for row in _rows(_TS_HITS, runnable)] == ["Failed password"]
 
 
 def test_each_error_class_gets_only_the_clause_that_answers_it():
@@ -498,15 +513,11 @@ def test_the_tool_prints_its_text_in_a_shell_with_no_locale():
     a container with no locale set hands Python strict-ASCII streams. The tool reconfigures its
     own stdio, so `--help` and a hint reach the lead as text — not as a `UnicodeEncodeError`
     in place of the very hint that was going to save the next turn."""
-    help_ = _run_sql_py("--help", env=_ASCII_SHELL)
+    help_ = _run_sql_py("--help", env=C_LOCALE_ENV)
     assert help_.returncode == EXIT_OK, help_.stderr
     assert "no wrapper envelope to reach" in " ".join(help_.stdout.split())
 
-    if not _HAS_DUCKDB:
-        pytest.skip("duckdb (the `runtime` extra) is not installed — no query can run")
-    hinted = _run_sql_py(
-        'SELECT h."@timestamp" FROM data, unnest(hits) AS h', stdin=_TS_HITS, env=_ASCII_SHELL,
-    )
+    hinted = _sql(_TS_HITS, 'SELECT h."@timestamp" FROM data, unnest(hits) AS h', env=C_LOCALE_ENV)
     assert hinted.returncode == EXIT_QUERY_ERROR, hinted.stderr
     assert "binds `h` to the TABLE" in _hint(hinted)
 
@@ -659,11 +670,16 @@ def test_the_adapter_emits_the_shape_this_fixture_has(esql):
 #: gone, is not a spelling to hunt for but simply not one of these two.
 _LIVE_SHAPES = {"hits", "values"}
 
-_UNNEST_ARG = re.compile(r"unnest\(\s*([^)]*?)\s*\)")
+#: Case-insensitive with optional space before the paren: SQL keywords are, and the recipes a
+#: curator records are LLM-written, which uppercases them as often as not.
+_UNNEST_ARG = re.compile(r"unnest\s*\(\s*([^)]*?)\s*\)", re.IGNORECASE)
 
 
 def _unnest_args(text: str) -> set[str]:
-    return set(_UNNEST_ARG.findall(text))
+    """What each `unnest(...)` on `text` reaches, with the table's own qualifier stripped —
+    `unnest(data.hits)` reaches `hits`; `unnest(result.hits)` reaches a wrapper that is not
+    there, and stays spelled as it is so the failure names it."""
+    return {re.sub(r"^data\.", "", arg, flags=re.IGNORECASE) for arg in _UNNEST_ARG.findall(text)}
 
 
 def _lead_surfaces() -> list[Path]:
@@ -732,7 +748,11 @@ def test_the_dead_recipe_stays_dead():
 #: placeholder `v.<field>` the doc uses to NAME the failing idiom is deliberately not matched:
 #: what is banned is a concrete field spelled after `v.`, which is a recipe rather than a
 #: citation. `(?<![A-Za-z0-9_])` keeps a hostname or a version string from counting.
-_STRUCT_ACCESS_ON_V = re.compile(r"(?<![A-Za-z0-9_])v\s*\.\s*[A-Za-z_\"]")
+_STRUCT_ACCESS_ON_V = re.compile(r"(?<![A-Za-z0-9_])v\s*\.\s*[A-Za-z_\"]", re.IGNORECASE)
+
+#: The lateral spelling, `FROM data, unnest(hits) [AS] h` — the one that looks right and binds
+#: `h` to the TABLE. Case-insensitive for the same reason as `_UNNEST_ARG`.
+_LATERAL_FORM = re.compile(r"FROM\s+data\s*,\s*unnest\s*\(\s*hits\s*\)", re.IGNORECASE)
 
 
 def _sql_fences(text: str) -> list[str]:
@@ -815,21 +835,15 @@ def test_the_docs_hits_idiom_is_literal_and_runs(doc):
     # occurrence sits inside the sentence that rules it out.
     fences = _sql_fences(doc)
     for fence in fences:
-        assert "unnest(hits) AS" not in fence, (
-            f"a copyable fence hands back the lateral form, which does not bind: {fence!r}"
-        )
-        assert ", unnest(hits)" not in fence, (
+        assert _LATERAL_FORM.search(fence) is None, (
             f"a copyable fence hands back the lateral form, which does not bind: {fence!r}"
         )
     assert idiom.strip() in [f.strip() for f in fences], "the subquery form left the copyable fences"
-    occurrences = [m.start() for m in re.finditer(r"FROM data,\s*unnest\(hits\)", doc)]
-    for start in occurrences:
-        window = doc[max(0, start - 250):start + 350]
+    for found in _LATERAL_FORM.finditer(doc):
+        window = doc[max(0, found.start() - 250):found.start() + 350]
         assert any(marker in window for marker in (
             "does not do what it looks like", "names the TABLE", "does not resolve",
         )), "the lateral form appears without the caveat that it does not bind"
-    # The AS-less lateral spelling has never been in this doc; keep it that way.
-    assert "FROM data, unnest(hits) h" not in doc, "the doc now teaches a lateral form that misbinds"
 
     runnable = _fill(idiom, {
         "h.<field>": "h.user", "h.<other>": "h.host", "<value>": "web-1",

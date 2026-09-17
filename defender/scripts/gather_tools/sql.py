@@ -9,6 +9,12 @@ import os
 import shutil
 import sys
 import tempfile
+from pathlib import Path
+
+if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender._io import use_utf8_stdio
 
 EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
@@ -227,20 +233,12 @@ def _run(sql: str) -> int:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def _use_utf8_stdio() -> None:
-    """The epilog and every hint carry an em-dash, and a lead's shell is not always UTF-8
-    (a container with no locale set is `C`): left to the locale, `--help` and each hint
-    die on the encode instead of printing. `_io.use_utf8_stdio` is this, but the module is
-    standalone (no `defender` import) so it is inlined; called from `main` only, so loading
-    the module in-process for its internals does not reconfigure the host's streams."""
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if callable(reconfigure):
-            reconfigure(encoding="utf-8")
-
-
 def main() -> int:
-    _use_utf8_stdio()
+    # The epilog and every hint carry an em-dash, and a lead's shell is not always UTF-8 (a
+    # container with no locale set is `C`): left to the locale, `--help` and each hint die on
+    # the encode instead of printing. Called here and not at import, so loading the module
+    # in-process for its internals does not reconfigure the host's streams.
+    use_utf8_stdio()
     parser = argparse.ArgumentParser(
         prog="defender-sql",
         description="Sandboxed SQL aggregation over a JSON/NDJSON payload on stdin, "
