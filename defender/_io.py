@@ -80,7 +80,7 @@ def read_guarded(path: Path, *, errors: str = "strict") -> tuple[str | None, str
 
     ``errors`` is ``open``'s own decoding policy. The default refuses an undecodable byte
     like any other read fault; the tolerant line readers pass ``"replace"`` so one bad byte
-    costs one row rather than the whole file (:func:`read_jsonl_rows_guarded`).
+    costs one row rather than the whole file (`Bound.read_jsonl`).
 
     Same return shape as :func:`read_text_soft` — ``(text, None)`` or ``(None, reason)`` — so it
     drops in wherever a reader already tolerates "could not read this". What it adds is that a
@@ -216,17 +216,61 @@ def _parse_name(name: str | PurePath) -> tuple[str, tuple[str, ...]]:
 @dataclasses.dataclass(frozen=True)
 class RecordRead:
     """A `bind`ed reader's answer, in exactly one of three states: present (`text` a `str`,
-    possibly empty), absent (`absent=True`, nothing at the name) or refused (`refusal` a
-    non-empty `str`, `f"{name}: {reason}"` — the whole relative name as given, said once)."""
+    possibly empty), absent (`absent=True`, nothing at the name) or refused (`reason` a
+    non-empty `str`). `name` is the relative name AS THE CALLER SPELLED IT — never the root —
+    and `refusal` is the one sentence every consumer that wants a sentence gets,
+    `f"{name}: {reason}"`; a consumer that wants the parts reads them, never the sentence."""
 
+    name: str
     text: str | None
     absent: bool
-    refusal: str | None
+    reason: str | None
+
+    @property
+    def refusal(self) -> str | None:
+        return None if self.reason is None else f"{self.name}: {self.reason}"
+
+
+#: What one entry of a listed directory is, judged WITHOUT following it (`EntriesRead`): a
+#: regular file (a hard link included — `read` is what refuses that, by its link count), a
+#: real directory, or anything else (a symlink, a FIFO, a socket, a device).
+ENTRY_FILE, ENTRY_DIR, ENTRY_OTHER = "file", "dir", "other"
+
+
+@dataclasses.dataclass(frozen=True)
+class EntriesRead:
+    """A `bind`ed reader's answer to "what is IN this directory" (`Bound.entries`), in the same
+    three states `RecordRead` has: present (`entries` a mapping of each entry's own name to
+    `ENTRY_FILE`/`ENTRY_DIR`/`ENTRY_OTHER`), absent (nothing at the bound name) or refused
+    (`reason`). `name` is the bound directory's own relative spelling (`""` for the root)."""
+
+    name: str
+    entries: dict[str, str] | None
+    absent: bool
+    reason: str | None
+
+    @property
+    def refusal(self) -> str | None:
+        return None if self.reason is None else f"{self.name}: {self.reason}"
+
+    def files(self) -> list[str]:
+        """The names classified regular files, sorted; `[]` when absent or refused."""
+        return sorted(n for n, k in (self.entries or {}).items() if k == ENTRY_FILE)
+
+    def dirs(self) -> list[str]:
+        """The names classified real directories, sorted; `[]` when absent or refused."""
+        return sorted(n for n, k in (self.entries or {}).items() if k == ENTRY_DIR)
+
+    def has_file(self, entry: str) -> bool:
+        return (self.entries or {}).get(entry) == ENTRY_FILE
+
+    def has_dir(self, entry: str) -> bool:
+        return (self.entries or {}).get(entry) == ENTRY_DIR
 
 
 def _walk_chain(os_: Any, start_fd: int | None, components: tuple[str, ...]) -> tuple[str, Any]:
-    """The shared per-component walk both `Bound.read`/`Bound.read_jsonl` (leaf wants a
-    regular file) and `Bound.under` (leaf wants a directory) build on: opens every component,
+    """The shared per-component walk `Bound.read`/`Bound.read_jsonl` (leaf wants a regular
+    file) and `Bound.entries` (leaf wants a directory) build on: opens every component,
     intermediate and leaf alike, no-follow from the previous handle, `fstat`-classifying each
     intermediate as a directory (D-V3). Answers `("absent", None)`, `("refused", reason)` or
     `("leaf", (fd, stat_result))` — the CALLER classifies the leaf's own `fstat` result and
@@ -278,49 +322,108 @@ def _classify_leaf_file(fd: int, st: Any) -> bool:
     return stat.S_ISREG(st.st_mode) and st.st_nlink == 1
 
 
+def _entry_kind(entry: Any) -> str:
+    """One `os.DirEntry`'s kind, judged of the entry itself (`follow_symlinks=False`)."""
+    if entry.is_symlink():
+        return ENTRY_OTHER
+    if entry.is_dir(follow_symlinks=False):
+        return ENTRY_DIR
+    if entry.is_file(follow_symlinks=False):
+        return ENTRY_FILE
+    return ENTRY_OTHER
+
+
+class _Handle:
+    """The one opened directory descriptor behind a `bind` and every `under` derived from it —
+    shared by reference, so it lives while any of them does and is closed exactly once: by
+    `Bound.close()` (the `with bind(...)` form) or, for a bind nobody scoped, on collection."""
+
+    __slots__ = ("_os", "fd")
+
+    def __init__(self, os_: Any, fd: int | None) -> None:
+        self._os = os_
+        self.fd = fd
+
+    def close(self) -> None:
+        if self.fd is not None:
+            fd, self.fd = self.fd, None
+            self._os.close(fd)
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self.close()
+
+
 class Bound:
-    """An episode-tree reader bound to one root (`bind`) or one sub-directory of it
+    """An episode-tree reader bound to one root (`bind`) or one directory named relative to it
     (`Bound.under`) — the ONLY value that ever held the root's own spelling, and it holds it
     as an opened directory HANDLE, never as a `str`/`bytes`/`os.PathLike` a reader body could
-    format (D-V2). Every read is `os.openat`-style, no-follow, from that handle down; below the
-    bound directory, nothing is cached between two calls to `read`/`read_jsonl` — each walks
-    the entry's shape at that moment (a name renamed, replaced or removed between two reads is
-    answered fresh on the second). The bound directory ITSELF is not re-resolved: `bind`/`under`
-    open it once, and if the operator deletes and recreates an entry at that same path during
-    this `Bound`'s lifetime, reads through it keep answering off the original (now unlinked)
-    directory rather than the replacement — a `Bound` is scoped to one grading or rendering
-    pass, never held across such a window.
+    format (D-V2). Every read is `os.openat`-style, no-follow, from that handle down. A
+    derivation (`under`) opens NOTHING: it is the same root handle plus a name prefix, so
+    every `read`/`read_jsonl`/`entries` walks the whole relative name from the root at that
+    moment (a name renamed, replaced or removed between two reads is answered fresh on the
+    second), and there is exactly one handle per `bind`, closed by `close()` — `bind` is a
+    context manager, and a handle nobody scoped is closed when its last reader is collected.
+    The root ITSELF is not re-resolved: `bind` opens it once, and if the operator deletes and
+    recreates an entry at that same path during this `Bound`'s lifetime, reads through it keep
+    answering off the original (now unlinked) directory rather than the replacement — a
+    `Bound` is scoped to one grading or rendering pass, never held across such a window.
     """
 
-    def __init__(self, os_: Any, fd: int | None, *, absent: bool = False, error: str | None = None) -> None:
+    def __init__(self, os_: Any, handle: _Handle, *, prefix: tuple[str, ...] = (),
+                 absent: bool = False, error: str | None = None) -> None:
         self._os = os_
-        self._fd = fd
+        self._handle = handle
+        self._prefix = prefix
         self._absent = absent
         self._error = error
+
+    # -- lifetime: one handle per `bind` -------------------------------------------------------
+
+    def close(self) -> None:
+        """Release the root handle — for THIS bind and every reader derived from it, which
+        answer `Bad file descriptor` from then on. Idempotent."""
+        self._handle.close()
+
+    def __enter__(self) -> Bound:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    # -- the reads ------------------------------------------------------------------------------
+
+    def _walk(self, parts: tuple[str, ...]) -> tuple[str, Any]:
+        if self._absent:
+            return "absent", None
+        if self._error is not None:
+            return "refused", self._error
+        if self._handle.fd is None:
+            return "refused", os.strerror(errno.EBADF)  # closed
+        return _walk_chain(self._os, self._handle.fd, self._prefix + parts)
 
     def read(self, name: str | PurePath, *, errors: str = "strict") -> RecordRead:
         spelling, parts = _parse_name(name)
         if errors not in _ERRORS_VALUES:
             raise ValueError("errors must be 'strict' or 'replace'")
-        if self._absent:
-            return RecordRead(text=None, absent=True, refusal=None)
-        if self._error is not None:
-            return RecordRead(text=None, absent=False, refusal=f"{spelling}: {self._error}")
-        kind, payload = _walk_chain(self._os, self._fd, parts)
+        kind, payload = self._walk(parts)
         if kind == "absent":
-            return RecordRead(text=None, absent=True, refusal=None)
+            return RecordRead(name=spelling, text=None, absent=True, reason=None)
         if kind == "refused":
-            return RecordRead(text=None, absent=False, refusal=f"{spelling}: {payload}")
+            return RecordRead(name=spelling, text=None, absent=False, reason=str(payload))
         fd, st = payload
         if not _classify_leaf_file(fd, st):
             self._os.close(fd)
-            return RecordRead(text=None, absent=False, refusal=f"{spelling}: {ALIAS_READ_REFUSAL}")
+            return RecordRead(name=spelling, text=None, absent=False, reason=ALIAS_READ_REFUSAL)
+        # `UnicodeDecodeError` AND `OSError` — the read itself can fail after the open (EIO, a
+        # stale handle on a network mount); the reader it replaced folded both into a refusal
+        # (`TEXT_READ_ERRORS`), and a refusal is what every caller already handles.
         try:
             with self._os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
                 text = fh.read()
-        except UnicodeDecodeError as e:
-            return RecordRead(text=None, absent=False, refusal=f"{spelling}: {e}")
-        return RecordRead(text=text, absent=False, refusal=None)
+        except TEXT_READ_ERRORS as e:
+            return RecordRead(name=spelling, text=None, absent=False, reason=str(e))
+        return RecordRead(name=spelling, text=text, absent=False, reason=None)
 
     def read_jsonl(self, name: str | PurePath) -> tuple[list[dict], int, RecordRead]:
         rec = self.read(name, errors="replace")
@@ -329,47 +432,71 @@ class Bound:
         rows, malformed = _jsonl_rows_of(rec.text)
         return rows, malformed, rec
 
-    def is_absent(self) -> bool:
-        """Is THIS bind itself the primitive's own absent state — the root, or a `.under()`
-        derivation, resolved to nothing? A caller that must answer "does this directory exist
-        at all" without a stat of its own (a page's directory-level "not archived" arm) asks
-        this rather than reaching for `entry_present`/`artifact_dir`, which is judged off a
-        NAME, never off a `Bound`."""
-        return self._absent
+    def entries(self) -> EntriesRead:
+        """What is IN the bound directory, each entry judged of itself (never followed): the
+        answer to "is this directory there, and what real files and real directories does it
+        hold" for a caller that used to `lstat` a name ahead of a read. The root's own listing
+        for a `bind`; for an `under` derivation, the walk to the named directory is the same
+        no-follow walk `read` makes, and a symlinked, file-squatted or unreadable component is
+        that walk's own refusal."""
+        spelling = "/".join(self._prefix)
+        if self._absent:
+            return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
+        if self._error is not None:
+            return EntriesRead(name=spelling, entries=None, absent=False, reason=self._error)
+        if self._handle.fd is None:
+            return EntriesRead(name=spelling, entries=None, absent=False,
+                               reason=os.strerror(errno.EBADF))
+        if not self._prefix:
+            fd, owned = self._handle.fd, False
+        else:
+            kind, payload = _walk_chain(self._os, self._handle.fd, self._prefix)
+            if kind == "absent":
+                return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
+            if kind == "refused":
+                return EntriesRead(name=spelling, entries=None, absent=False, reason=str(payload))
+            fd, st = payload
+            owned = True
+            if not stat.S_ISDIR(st.st_mode):
+                self._os.close(fd)
+                return EntriesRead(name=spelling, entries=None, absent=False,
+                                   reason=os.strerror(errno.ENOTDIR))
+        try:
+            with self._os.scandir(fd) as it:
+                listed = {entry.name: _entry_kind(entry) for entry in it}
+        except OSError as e:
+            return EntriesRead(name=spelling, entries=None, absent=False,
+                               reason=(e.strerror or str(e)))
+        finally:
+            if owned:
+                self._os.close(fd)
+        return EntriesRead(name=spelling, entries=listed, absent=False, reason=None)
 
     def under(self, name: str | PurePath) -> Bound:
-        spelling, parts = _parse_name(name)
-        if self._absent:
-            return Bound(self._os, None, absent=True)
-        if self._error is not None:
-            return Bound(self._os, None, error=self._error)
-        kind, payload = _walk_chain(self._os, self._fd, parts)
-        if kind == "absent":
-            return Bound(self._os, None, absent=True)
-        if kind == "refused":
-            return Bound(self._os, None, error=str(payload))
-        fd, st = payload
-        if not stat.S_ISDIR(st.st_mode):
-            self._os.close(fd)
-            return Bound(self._os, None, error=ALIAS_READ_REFUSAL)
-        return Bound(self._os, fd)
+        """A reader bound at `name` relative to this one — a NAME PREFIX over the same root
+        handle, opened only when a read through it walks. It owns no handle; closing it is a
+        no-op, and it answers off the root handle's lifetime."""
+        _spelling, parts = _parse_name(name)
+        return Bound(self._os, self._handle, prefix=self._prefix + parts,
+                     absent=self._absent, error=self._error)
 
 
 def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelated `bind` (an AgentDeps builder) already lives at runtime/agent_definition.py:294; the shared word names two unrelated concepts, not one contract split in two
     """The one operation in this module that takes a path (D-V2): opens `root` ONCE — its own
     open FOLLOWS a symlinked spelling (the operator's own, RF-R8; a `Bound.under` derived
     below it never does) — and hands back a `Bound` reader that holds only the resulting
-    handle. `root` absent, not a directory, or unreadable does not raise here: every subsequent
-    `.read`/`.read_jsonl`/`.under` call answers absent, or refuses `f"{name}: {reason}"`
+    handle, and OWNS it: use `with bind(root) as bound:` (or `close()`), one handle per pass.
+    `root` absent, not a directory, or unreadable does not raise here: every subsequent
+    `.read`/`.read_jsonl`/`.entries` call answers absent, or refuses `f"{name}: {reason}"`
     independently per name (F-C — the fault is the bind's, the observable is per name).
     """
     try:
         fd = os_.open(Path(root), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     except FileNotFoundError:
-        return Bound(os_, None, absent=True)
+        return Bound(os_, _Handle(os_, None), absent=True)
     except OSError as e:
-        return Bound(os_, None, error=(e.strerror or str(e)))
-    return Bound(os_, fd)
+        return Bound(os_, _Handle(os_, None), error=(e.strerror or str(e)))
+    return Bound(os_, _Handle(os_, fd))
 
 
 def use_utf8_stdio() -> None:
@@ -476,29 +603,6 @@ def read_jsonl_rows_report(path: Path) -> tuple[list[dict], int]:
         return [], 0
     text = path.read_text(encoding="utf-8", errors="replace")  # lint-jsonl-io: ok — the canonical tolerant reader  # noqa: E501
     return _jsonl_rows_of(text)
-
-
-def read_jsonl_rows_guarded(path: Path) -> tuple[list[dict], int, str | None]:
-    """:func:`read_jsonl_rows_report` through :func:`read_guarded`'s screen: the rows, the
-    count of non-blank lines that were not rows, and the refusal reason — ``None`` on a read.
-
-    ONE reader for a JSONL table that sits in a tree a box can write to (a served ledger, a
-    wire log, a run's tool trace). Before it, each such site took an ``lstat`` screen and then
-    called the tolerant reader's bare ``read_text`` — the check-then-act pair
-    :func:`read_guarded`'s docstring condemns, and a pair whose second half raised
-    ``PermissionError`` out of whichever caller forgot its own ``except``. The screen is asked
-    of the open descriptor here, once, and a fault is a reason string, never an exception.
-
-    Decoding is ``errors="replace"``, the tolerant reader's own policy: an undecodable byte is
-    one counted malformed row, not a refusal of the file. ABSENT is a refusal, as it is for
-    :func:`read_guarded`; a caller that wants to say "absent" rather than "refused" asks
-    :func:`entry_present` for the label and this for the bytes.
-    """
-    text, refusal = read_guarded(path, errors="replace")
-    if text is None:
-        return [], 0, refusal
-    rows, unreadable = _jsonl_rows_of(text)
-    return rows, unreadable, None
 
 
 def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:

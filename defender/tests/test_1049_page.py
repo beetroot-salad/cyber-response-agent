@@ -263,7 +263,11 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
         assert R.ALIAS in leads, (label, leads)
         assert "not archived" not in leads, (label, leads)
     linked_leads = _leads(page, LINKED_WORLD)
-    assert "gather_summaries/l-001.md" in linked_leads, "the summaries under a symlinked world dir are not said"
+    # NEVER FOLLOWED: the linked world's block names the directory's own refusal and rosters
+    # nothing beneath it — the target tree's leads (`l-001`, the control's) are not this
+    # world's, and the only way to name them was to have read through the link.
+    assert f"worlds/{LINKED_WORLD}" in linked_leads, linked_leads
+    assert "gather_summaries/l-001.md" not in linked_leads, "the leads under a symlinked world dir were read through the link"
     assert str(one.dir) not in page.raw
     assert str(tmp_path) not in page.raw
 
@@ -400,30 +404,24 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
 # ---------------------------------------------------------------------------------------
 
 
-#: The allow-list: which function may call which lstat helper, how many times — the six
-#: listing/roster questions and nothing else (RF-R9).
-ALLOWED_STAT_SITES = {
-    "load_episode": {"artifact_dir": 1},       # archived_world_dirs
-    "_entries_of": {"artifact_dir": 1},        # the listing helper's own directory question
-    "_build_roster": {"artifact_dir": 2},      # run_dirs, reached_runs
-    "_load_world_leads": {"artifact_file": 1},  # summary_stems
-    "_load_wire_logs": {"artifact_dir": 1},    # is wire_logs/ a directory
-}
+#: The allow-list: which function may call which lstat helper, how many times — NOTHING.
+#: The six listing/roster questions that used to remain (RF-R9: archived_world_dirs, the
+#: `_entries_of` helper, run_dirs and reached_runs, summary_stems, wire_logs/) are asked of
+#: the bind's own listing (`Bound.entries`) now, so no path-based screen is left in the page.
+ALLOWED_STAT_SITES: dict[str, dict[str, int]] = {}
 
 
 def test_1049_the_page_keeps_artifact_dir_and_entry_present_only_in_the_six_listing_sites():
-    """visualize_episode's AST names artifact_dir/artifact_file/entry_present ONLY in
-    archived_world_dirs (load_episode), _entries_of, run_dirs and reached_runs (_build_roster),
-    summary_stems (_load_world_leads) and _load_wire_logs — listing and roster questions whose
-    answer is never a read's absent/refused split and never words a per-world section — with
-    exactly those counts, and entry_present nowhere; the calls that stood ahead of the six
-    record readers, the tool-trace read, the report read, the investigation_present flag and
-    the two world_dir screens are gone. Positive control: d-26 (every planted arm is said in
+    """visualize_episode's AST names artifact_dir/artifact_file/entry_present NOWHERE: the six
+    listing and roster questions that were the closed allow-list (archived_world_dirs,
+    _entries_of, run_dirs and reached_runs, summary_stems, wire_logs/) are answered off the
+    bind's own listing, never a stat of a path — so no reader in the page can follow a link
+    the bound reader beside it refuses. Positive control: d-26 (every planted arm is said in
     its own slot off the reader's state).
     """
     tree = R.module_tree(_page())
     calls = R.calls_by_function(tree, frozenset({"entry_present", "artifact_dir", "artifact_file"}))
-    assert calls == ALLOWED_STAT_SITES, {k: v for k, v in calls.items() if ALLOWED_STAT_SITES.get(k) != v}
+    assert calls == ALLOWED_STAT_SITES, calls
 
 
 # ---------------------------------------------------------------------------------------

@@ -286,6 +286,7 @@
           "defender/_io.py::bind",
           "defender/_io.py::Bound.read",
           "defender/_io.py::Bound.read_jsonl",
+          "defender/_io.py::Bound.entries",
           "defender/_io.py::Bound.under"
         ],
         "grep": [

@@ -93,6 +93,10 @@ def _render():
     return J.mod("learning.judge.render")
 
 
+def _io():
+    return J.mod("_io")
+
+
 def _archive():
     return J.mod("learning.branch.archive")
 
@@ -559,8 +563,8 @@ def test_lead_chain_never_reads_outside_the_graded_world_for_a_traversing_lead_i
 
 
 def test_json_mapping_answers_a_mapping_and_none_for_everything_else(tmp_path):
-    """`json_mapping(path)` is the ONE tolerance policy for a JSON artifact: a mapping, or
-    `None` for an absent file, a corrupt one, or a JSON document that is not a mapping.
+    """`json_mapping(bound, name)` is the ONE tolerance policy for a JSON artifact: a mapping,
+    or `None` for an absent file, a corrupt one, or a JSON document that is not a mapping.
 
     Observably true: four inputs through the real file, four answers.
 
@@ -569,14 +573,15 @@ def test_json_mapping_answers_a_mapping_and_none_for_everything_else(tmp_path):
     """
     family = _family()
     path = tmp_path / "artifact.json"
+    bound = _io().bind(tmp_path)
 
     path.write_text(json.dumps({"alert_id": "a-1"}), encoding="utf-8")
-    assert family.json_mapping(path) == {"alert_id": "a-1"}
+    assert family.json_mapping(bound, "artifact.json") == {"alert_id": "a-1"}
     path.write_text(json.dumps([1, 2]), encoding="utf-8")
-    assert family.json_mapping(path) is None, "a JSON list was answered as a mapping"
+    assert family.json_mapping(bound, "artifact.json") is None, "a JSON list was answered as a mapping"
     path.write_text("{not json", encoding="utf-8")
-    assert family.json_mapping(path) is None, "a corrupt document raised or was answered"
-    assert family.json_mapping(tmp_path / "absent.json") is None
+    assert family.json_mapping(bound, "artifact.json") is None, "a corrupt document raised or was answered"
+    assert family.json_mapping(bound, "absent.json") is None
 
 
 def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regular_file(
@@ -589,26 +594,35 @@ def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regul
 
     Observably true: a regular file reads as its mapping (positive control); the same bytes
     behind a real symlink at the same name read as `None`; and `render._read_provenance` over a
-    world whose stamp is such a link answers `{}` — no commit, rather than the planted one.
+    world whose stamp is such a link — or whose DIRECTORY is (#1049: the walk follows no
+    component) — answers `{}` — no commit, rather than the planted one.
     """
     family, render = _family(), _render()
     outside = tmp_path / "planted.json"
     outside.write_text(json.dumps({"commit": "a" * 40, "dirty": False}), encoding="utf-8")
     regular = tmp_path / "artifact.json"
     regular.write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
-    assert family.json_mapping(regular) == {"commit": "a" * 40, "dirty": False}, (
+    bound = _io().bind(tmp_path)
+    assert family.json_mapping(bound, "artifact.json") == {"commit": "a" * 40, "dirty": False}, (
         "positive control: a regular file did not read")
 
     linked = tmp_path / "linked.json"
     linked.symlink_to(outside)
-    assert family.json_mapping(linked) is None, "a symlink at the artifact's name was followed"
+    assert family.json_mapping(bound, "linked.json") is None, "a symlink at the artifact's name was followed"
 
     ep = J.accepted_episode(tmp_path)
     stamp = ep / "worlds" / "b" / "provenance.json"
     stamp.unlink()
     stamp.symlink_to(outside)
-    assert render._read_provenance(ep / "worlds" / "b") == {}, (
+    episode = _io().bind(ep)
+    assert render._read_provenance(episode.under("worlds/b")) == {}, (
         "a planted link at provenance.json handed the pass the planted commit")
+    (ep / "worlds" / "b").rename(ep / "worlds" / "b-real")
+    (ep / "worlds" / "b-real" / "provenance.json").unlink()
+    (ep / "worlds" / "b-real" / "provenance.json").write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
+    (ep / "worlds" / "b").symlink_to(ep / "worlds" / "b-real")
+    assert render._read_provenance(episode.under("worlds/b")) == {}, (
+        "a planted link at worlds/<X> handed the pass the planted commit")
 
 
 def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path):

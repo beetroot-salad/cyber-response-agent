@@ -209,8 +209,8 @@ def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
     # `_grade_from_document` return an attacker-supplied grade and the pass never runs at all.
     # NOTHING AT THIS NAME (`None`) is an ordinary ungraded episode, while SOMETHING that is not
     # the record is the refusal.
-    return family_mod.screened_yaml_mapping(bind(Path(episode_dir)), JUDGE_NAME,
-                                            what="the family grade")
+    with bind(Path(episode_dir)) as bound:
+        return family_mod.screened_yaml_mapping(bound, JUDGE_NAME, what="the family grade")
 
 
 def _episode_outcome_from_review(review: dict[str, Any]) -> tuple[str, str]:
@@ -277,7 +277,7 @@ def _control_drift_discard(doc: dict[str, Any], review: dict[str, Any]) -> bool:
 
 
 def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threaded from the pass
-    episode_dir: Path, label: str, *, payload_cap: int, git_show: Any,
+    episode_dir: Path, label: str, *, bound: Any, payload_cap: int, git_show: Any,
     facts: family_mod.WorldFacts | None, lessons_commit: str | None,
     union: tuple[list[dict[str, Any]], dict[str, Any]], manifest: dict[str, Any],
     review: dict[str, Any], samples: dict[str, Any],
@@ -300,7 +300,7 @@ def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threade
     judge_input = render_mod.render(
         episode_dir, label, git_show=git_show, payload_cap=payload_cap, facts=facts,
         lessons_commit=lessons_commit, union=union, manifest=manifest,
-        review=review, samples=samples)
+        review=review, samples=samples, bound=bound)
     guarded_mkdir(Path(episode_dir) / WORLDS_DIRNAME / label / DRAWS_DIRNAME, base=episode_dir)
     return run_mod._build_prompt(judge_input)
 
@@ -529,7 +529,18 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     if existing is not None and existing.not_graded is None:
         return existing
 
-    bound = bind(Path(episode_dir))
+    # BOUND ONCE FOR THE PASS (#1049): every read below — the review, the manifest, the samples,
+    # the mechanical pass, every world's render — walks from this one handle.
+    with bind(Path(episode_dir)) as bound:
+        return _grade_bound_episode(
+            bound, episode_dir, judge=judge, runs_base=runs_base, draws=draws,
+            git_show=git_show, queue_dir=queue_dir)
+
+
+def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_grade_episode`
+    bound: Any, episode_dir: Path, *, judge: Any, runs_base: Path | None, draws: int | None,
+    git_show: Any, queue_dir: Path | None,
+) -> EpisodeGrade:
     review = family_mod.read_review_record(bound) or {}
     outcome, reason = _episode_outcome_from_review(review)
     if outcome != "accepted":
@@ -546,7 +557,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     model, effort, cap = _judge_model(), _judge_effort(), _judge_cap()
     knobs = {"draws": configured_draws, "model": model, "effort": effort, "payload_cap": cap}
 
-    manifest = family_mod.raw_manifest(episode_dir)
+    manifest = family_mod.read_manifest(bound)
     # THE PARSE THIS PASS ALREADY MADE. `grade_family` read and parsed `family.yaml` a second
     # time from the same directory — a tree a box can reach — so nothing held the two documents
     # in agreement, and one pass paid for two reads of the file that says which worlds exist.
@@ -558,7 +569,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     # different parses of a file the box can reach.
     samples = family_mod.read_samples_record(bound) or {}
     grade = family_mod.grade_family(episode_dir, manifest=manifest, review=review,
-                                    samples=samples)
+                                    samples=samples, bound=bound)
     gradable = [row["world"] for row in grade.worlds if family_mod.is_gradable_row(row)]
 
     # BOTH PER-PASS FACTS, RESOLVED ONCE AND THREADED (J8's own sentence, and J9's union with
@@ -573,7 +584,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     # walk of the operator's entire runs base, one `alert.json` read and one report parse per run
     # dir on it, to build a union no render would consume. The record it would have carried is
     # the same either way: `lessons_commit` is `None` and the union is empty.
-    lessons_commit = _pass_lessons_commit(episode_dir, gradable)
+    lessons_commit = _pass_lessons_commit(bound, gradable)
     # ONE `git show` PER (commit, path) FOR THE PASS. `lessons_commit` is a per-pass constant
     # and the corpus is small, so N worlds loading the same lesson spawned N subprocesses for
     # the same bytes. The memo wraps the injected seam rather than living inside `render`, so
@@ -582,7 +593,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     git_show = _memoized_show(git_show if git_show is not None else render_mod._git_show_default)
     union = render_mod.sibling_union(
         Path(runs_base) if runs_base is not None and gradable else None,
-        alert_id=_pass_alert_id(episode_dir, gradable),
+        alert_id=_pass_alert_id(bound, gradable),
         source_run_id=manifest.get("source_run_id"))
 
     per_world_completed: dict[str, int] = {}
@@ -602,7 +613,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
         # per-draw and per-append arms exist to eliminate.
         try:
             prompt = _prepare_world_prompt(
-                episode_dir, label, payload_cap=cap, git_show=git_show,
+                episode_dir, label, bound=bound, payload_cap=cap, git_show=git_show,
                 facts=grade.world_facts.get(label), lessons_commit=lessons_commit, union=union,
                 manifest=manifest, review=review, samples=samples)
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:
@@ -779,7 +790,7 @@ def _memoized_show(show: Any) -> Any:
     return invoke
 
 
-def _pass_lessons_commit(episode_dir: Path, labels: list[str]) -> str | None:
+def _pass_lessons_commit(bound: Any, labels: list[str]) -> str | None:
     """The commit every lesson body in this pass is read at — J8's "resolved once per pass".
 
     The FIRST graded world's provenance stamp, which is what the record has always reported;
@@ -787,13 +798,13 @@ def _pass_lessons_commit(episode_dir: Path, labels: list[str]) -> str | None:
     what makes the record's value and the rendered value the same value."""
     for label in labels:
         commit = render_mod._read_provenance(
-            Path(episode_dir) / WORLDS_DIRNAME / label).get("commit")
+            bound.under(f"{WORLDS_DIRNAME}/{label}")).get("commit")
         if commit is not None:
             return str(commit)
     return None
 
 
-def _pass_alert_id(episode_dir: Path, labels: list[str]) -> Any:
+def _pass_alert_id(bound: Any, labels: list[str]) -> Any:
     """The alert this episode's worlds all investigate — the union's key.
 
     Read off the first graded world that carries one: every world of a family branches from one
@@ -801,7 +812,7 @@ def _pass_alert_id(episode_dir: Path, labels: list[str]) -> Any:
     Through `render.episode_alert`, the one home for WHICH world's `alert.json` answers — the
     enqueue derives every row's `alert_rule_key` from that same call, and two spellings of "the
     first world that carries an alert" picked different worlds for the two."""
-    return render_mod.episode_alert(Path(episode_dir), labels).get("alert_id")
+    return render_mod.episode_alert(bound, labels).get("alert_id")
 
 
 def read_grade(episode_dir: Path) -> EpisodeGrade | None:

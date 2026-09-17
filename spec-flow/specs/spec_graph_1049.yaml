@@ -734,8 +734,12 @@ demands:
     kind: negative
     form: test
     discharged_by: test_1049_the_page_keeps_artifact_dir_and_entry_present_only_in_the_six_listing_sites
-    binds: ["render_episode", "load_episode", "_entries_of", "_build_roster", "_load_wire_logs", "_load_world_leads",
+    binds: ["render_episode", "load_episode", "entries", "_build_roster", "_load_wire_logs", "_load_world_leads",
             "artifact_dir", "artifact_file", "entry_present", "interacts(render_episode->episode_dir)"]
+    # FINALIZE (post-review): the closed allow-list is now EMPTY. The six listing sites were the one
+    # place a path-based screen survived beside the bound reader, and two of them followed a
+    # symlinked `worlds/<label>` into another tree's leads and stamps (review of PR #1061). Every
+    # listing/roster question is asked of `Bound.entries()` — the test pins ZERO calls.
     premises: ["#29", "#32", "#36", "#41"]
     # `load_episode` added by the assembler: :806 (archived_world_dirs) lives in load_episode, not
     # render_episode. docstring seed: "visualize_episode's AST names artifact_dir/artifact_file/entry_present
@@ -838,6 +842,11 @@ structure:
                                                                        # components from the episode handle). No public or private attribute may carry the root's spelling (D-V2, F-3).
     - {id: read,                   frame: leg, provenance: design}   # <bound>.read(name, *, errors) — the per-component no-follow walk (D-V3)
     - {id: read_jsonl,             frame: leg, provenance: design}   # <bound>.read_jsonl(name) — the JSONL twin, errors='replace' fixed
+    - {id: entries,                frame: leg, provenance: code}     # <bound>.entries() -> EntriesRead — the bound directory's own listing, each entry judged of itself (never
+                                                                       # followed): what every listing/roster/presence question the page and the grading lane's two pre-filters
+                                                                       # used to ask of an lstat'd path asks of the handle instead (finalize: D-V5's six sites and RF-R10's two
+                                                                       # pre-filters dissolved onto it — no path-based screen is left beside the bound reader). `under(name)` is a
+                                                                       # name PREFIX over the same handle, opening nothing; one descriptor per bind, closed by `with bind(...)`.
     # the rewritten readers (the doc's table, plus the two RF2 rows)
     - {id: screened_yaml_mapping,  frame: leg, provenance: design}   # family.py:125
     - {id: _default_review_reader, frame: leg, provenance: design}   # family.py:162
@@ -872,9 +881,9 @@ structure:
     - {id: world_review_block,     frame: leg, provenance: design}   # family.py:222 — must never receive None (r7)
     # the page (defender/scripts/visualize/visualize_episode.py)
     - {id: render_episode,         frame: composition, provenance: design}   # :1416 — the page; `_sentence` (:203) and `_root_pattern` (:228) deleted
-    - {id: load_episode,           frame: composition, provenance: code}     # :787 — builds _Episode; `archived_world_dirs` (:806) is a LISTING use of artifact_dir, kept (D-V5)
-    - {id: _entries_of,            frame: leg, provenance: code}     # :844 — the listing helper; `artifact_dir(directory)` at :849 is a listing question, kept (D-V5)
-    - {id: _build_roster,          frame: composition, provenance: code}     # :886 — `run_dirs` (:899) and `reached_runs` (:915) are roster questions, kept (D-V5)
+    - {id: load_episode,           frame: composition, provenance: code}     # :787 — builds _Episode; binds once, `archived_world_dirs` off `entries` (finalize: D-V5 dissolved)
+    - {id: _load_draws,            frame: leg, provenance: code}     # the draw reader (enqueue's, path-taking) reached only past `entries` judging worlds/<label>/judge a real dir
+    - {id: _build_roster,          frame: composition, provenance: code}     # :886 — `run_dirs` and `reached_runs` are roster questions, asked of `entries` (finalize)
     - {id: _read_review,           frame: leg, provenance: design}   # :252 — stat at :254 deleted
     - {id: _read_samples,          frame: leg, provenance: design}   # :273 — stat at :275 deleted
     - {id: _read_staged,           frame: leg, provenance: design}   # :286 — stat at :288 deleted
@@ -1215,11 +1224,10 @@ structure:
     - {from: _load_world_leads,   to: gather_summary, mode: read, via: fs,   provenance: design}   # via lead_chain at :1068 (uncaught — rg13; a NUL lead id no longer reaches it, D-V4)
     - {from: _load_world_leads,   to: entry_present, mode: remove, via: api, provenance: design}   # :1018, :1037
     - {from: _load_world_leads,   to: artifact_dir,  mode: remove, via: api, provenance: design}   # :1031 the world_dir screen GOES (F-F dissolved)
-    - {from: _load_world_leads,   to: artifact_file, mode: invoke, via: api, provenance: code}     # :1054 summary_stems — a LISTING use, kept (D-V5)
-    - {from: load_episode,        to: artifact_dir,  mode: invoke, via: api, provenance: code}     # :806 archived_world_dirs — a listing use, kept (D-V5; rg7: feeds reached_runs/off_roster/the alert fallback only)
-    - {from: _entries_of,         to: artifact_dir,  mode: invoke, via: api, provenance: code}     # :849 — the listing helper's own directory question, kept (D-V5)
-    - {from: _build_roster,       to: artifact_dir,  mode: invoke, via: api, provenance: code}     # :899 run_dirs, :915 reached_runs — roster questions, kept (D-V5)
-    - {from: _load_wire_logs,     to: artifact_dir,  mode: invoke, via: api, provenance: code}     # :1075 — is wire_logs/ a directory; a listing question, kept (D-V5)
+    - {from: _load_world_leads,   to: artifact_file, mode: remove, via: api, provenance: code}     # finalize: summary_stems off the world's `entries`; the block is gated on that listing (a link is never followed)
+    - {from: load_episode,        to: artifact_dir,  mode: remove, via: api, provenance: code}     # finalize: archived_world_dirs off `entries` (rg7: feeds reached_runs/off_roster/the alert fallback only)
+    - {from: _build_roster,       to: artifact_dir,  mode: remove, via: api, provenance: code}     # finalize: run_dirs/reached_runs asked of `entries` (D-V5 dissolved)
+    - {from: _load_wire_logs,     to: artifact_dir,  mode: remove, via: api, provenance: code}     # finalize: wire_logs/ listed through the bind
     - {from: _result_event,       to: tool_trace,    mode: read,  via: fs,   provenance: design}   # JSONL twin; state words
     - {from: _result_event,       to: entry_present, mode: remove, via: api, provenance: design}   # :967
     # ---- the unmoved neighbourhood (code) ----
@@ -1288,7 +1296,8 @@ structure:
     - {from: sweep,                  to: read_staged,             provenance: design, multiplicity: serial}
     # the page
     - {from: render_episode,         to: load_episode,            provenance: code,   multiplicity: serial}   # build_page → load_episode (:1421)
-    - {from: load_episode,           to: _entries_of,             provenance: code,   multiplicity: serial}
+    - {from: load_episode,           to: entries,                 provenance: code,   multiplicity: serial}   # archived_world_dirs, the runs/ roster, wire_logs/, each world's listing
+    - {from: load_episode,           to: _load_draws,             provenance: code,   multiplicity: serial}
     - {from: load_episode,           to: _build_roster,           provenance: code,   multiplicity: serial}
     - {from: render_episode,         to: raw_manifest,            provenance: code,   multiplicity: serial}
     - {from: render_episode,         to: _read_review,            provenance: design, multiplicity: serial}

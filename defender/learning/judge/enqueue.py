@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from defender._io import guarded_mkdir, read_guarded, read_jsonl_rows_report, write_guarded
+from defender._io import bind, guarded_mkdir, read_guarded, read_jsonl_rows_report, write_guarded
 from defender._run_paths import artifact_dir, artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
@@ -765,7 +765,8 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     # `__init__._pass_alert_id`, which takes the first that carries an `alert_id`: the sibling
     # union was then keyed on one world's alert while every row landed under a rule key derived
     # from another's document.
-    alert_rule_key = derive_alert_rule_key(episode_alert(episode_dir, graded_labels))
+    with bind(episode_dir) as bound:
+        alert_rule_key = derive_alert_rule_key(episode_alert(bound, graded_labels))
     defender_blocked = defender_lane_blocked(verdict_word)
 
     defender_rows: list[dict[str, Any]] = []

@@ -544,7 +544,8 @@ def teardown(episode_dir: Path, *, door: Any, review_path: Path | None = None) -
     written into the review record, and then RAISED — a teardown failure swallowed into a clean
     exit is the same lie one step later.
     """
-    rows = read_staged(bind(Path(episode_dir))) or []
+    with bind(Path(episode_dir)) as bound:
+        rows = read_staged(bound) or []
     failures: list[dict] = []
     for row in reversed(rows):
         name = str(row.get("name") or "")
@@ -657,7 +658,8 @@ def sweep(episode_dir: Path, *, episode_token: str, door: Any) -> list[str]:
     glob = sweep_glob(episode_token)
     door.count(glob)
     found = list(door.list_names(glob))
-    rows = read_staged(bind(Path(episode_dir))) or []
+    with bind(Path(episode_dir)) as bound:
+        rows = read_staged(bound) or []
     recorded = {str(r.get("name")) for r in rows}
     unrecorded = sorted(n for n in found if n not in recorded)
     if unrecorded:

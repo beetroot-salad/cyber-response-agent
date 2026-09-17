@@ -55,7 +55,7 @@ VULTURE_BASELINE = REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.json"
 PAGE_PATH = "scripts/visualize/visualize_episode.py"
 RECORD_NAMES = ("judge.yaml", "review.yaml", "samples.yaml", "family.yaml", "staged.yaml",
                 "timing.json", "provenance.json")
-PACKAGE_READERS = ("read_grade", "draws_on_disk_report", "read_stage_timings", "raw_manifest",
+PACKAGE_READERS = ("read_grade", "draws_on_disk_report", "read_stage_timings", "read_manifest",
                    "read_review_record", "read_samples_record", "read_staged",
                    # The ledger and the investigation document are TWO reads, each its own
                    # slot (#1025): the page never asks the composed `read_world_facts`, whose

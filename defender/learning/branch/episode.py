@@ -42,8 +42,8 @@ import yaml
 
 from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
-from defender._io import bind, read_guarded, read_jsonl_rows
-from defender._run_paths import artifact_dir, artifact_file
+from defender._io import bind, read_jsonl_rows
+from defender._run_paths import artifact_file
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.learning.branch.archive import REVIEW_NAME, WORLDS_DIRNAME
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
@@ -91,7 +91,7 @@ class EpisodeError(ValueError):
 # ---------------------------------------------------------------------------------------
 
 
-def _recorded_outcome(episode_dir: Path) -> tuple[str | None, str]:
+def _recorded_outcome(bound: Any) -> tuple[str | None, str]:
     """The episode's recorded outcome and its reason, or `(None, "")` when none is recorded.
 
     An absent, unreadable or unparseable record is NOT an outcome. It is how an episode looks
@@ -99,7 +99,7 @@ def _recorded_outcome(episode_dir: Path) -> tuple[str | None, str]:
     written episode must not be gated on a document that does not exist yet — the refusal
     below fires on a recorded `incomplete`, which is a positive statement someone made.
     """
-    text, _refusal = read_guarded(episode_dir / REVIEW_NAME)
+    text = bound.read(REVIEW_NAME).text
     if text is None:
         return None, ""
     try:
@@ -117,25 +117,26 @@ def _recorded_outcome(episode_dir: Path) -> tuple[str | None, str]:
             reason if isinstance(reason, str) else "")
 
 
-def _refuse_incomplete(episode_dir: Path) -> None:
+def _refuse_incomplete(bound: Any) -> None:
     """Refuse an episode the launcher recorded as `incomplete` — see the module docstring."""
-    outcome, reason = _recorded_outcome(episode_dir)
+    outcome, reason = _recorded_outcome(bound)
     if outcome == INCOMPLETE:
         raise EpisodeError(
-            f"the episode at {episode_dir} recorded outcome {INCOMPLETE!r}"
+            f"the episode recorded outcome {INCOMPLETE!r}"
             f"{f' ({reason})' if reason else ''} — the family stamp was withheld, so the "
             "worlds that ARE archived did not demonstrably run against one tree and a per-key "
             "answer over them would read as a measurement nobody made")
 
 
-def _archived_labels(episode_dir: Path) -> list[str]:
+def _archived_labels(bound: Any) -> list[str]:
     """Every archived world's label, sorted — the ONE definition of "this episode's worlds".
 
     Taken from the archive rather than from the manifest, because they are different sets and
     the difference is the point: an incomplete family archives the siblings that were
     individually clean and omits the one that was not, and both readers answer about what is
-    on disk. `artifact_dir` rather than `is_dir()`: this directory sits inside the episode
-    tree, and an entry there is judged on what it IS rather than on what it points at.
+    on disk. Off the bind's own listing (#1049) rather than `is_dir()`: this directory sits
+    inside the episode tree, and an entry there is judged on what it IS rather than on what it
+    points at.
 
     A RESERVED LABEL IS NOT A WORLD, and skipping it here is what keeps this reader honest
     about a directory the grading pass owns. #1007's family-level judge call archives its draws
@@ -148,11 +149,8 @@ def _archived_labels(episode_dir: Path) -> list[str]:
     through the owner's own normalizer, never a local `!= "family"`, so the two gates cannot
     come to disagree about what the reservation covers.
     """
-    worlds = Path(episode_dir) / WORLDS_DIRNAME
-    if not artifact_dir(worlds):
-        return []
-    return sorted(entry.name for entry in worlds.iterdir()
-                  if artifact_dir(entry) and not is_reserved_world_label(entry.name))
+    return [label for label in bound.under(WORLDS_DIRNAME).entries().dirs()
+            if not is_reserved_world_label(label)]
 
 
 # ---------------------------------------------------------------------------------------
@@ -195,11 +193,14 @@ def verdicts(episode_dir: Path) -> dict[str, str]:
     headline #921 grades on, and a world whose headline cannot be read is not a world with no
     headline.
     """
-    episode_dir = Path(episode_dir)
-    _refuse_incomplete(episode_dir)
-    bound = bind(episode_dir)
+    with bind(Path(episode_dir)) as bound:
+        return _verdicts(bound)
+
+
+def _verdicts(bound: Any) -> dict[str, str]:
+    _refuse_incomplete(bound)
     out: dict[str, str] = {}
-    for label in _archived_labels(episode_dir):
+    for label in _archived_labels(bound):
         name = f"{WORLDS_DIRNAME}/{label}/report.md"
         # ABSENT AND UNREADABLE ARE DIFFERENT ANSWERS, and `archive.py` is what forces the
         # split: "a path that is simply not there is skipped and reported (a sibling that died
@@ -215,9 +216,9 @@ def verdicts(episode_dir: Path) -> dict[str, str]:
             continue
         if rec.refusal is not None:
             raise EpisodeError(
-                f"world {label!r} is archived without a readable report "
-                f"({episode_dir / name}): {rec.refusal} — the archived report is the only "
-                "place this reader may learn what that sibling concluded")
+                f"world {label!r} is archived without a readable report — {rec.refusal} — "
+                "the archived report is the only place this reader may learn what that "
+                "sibling concluded")
         assert rec.text is not None, "present per the state check above"
         raw = _declared_disposition(rec.text)
         disposition = normalized_disposition(raw)
@@ -373,8 +374,9 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
     empty is the honest record of a world that served nothing.
     """
     episode_dir = Path(episode_dir)
-    _refuse_incomplete(episode_dir)
-    labels = _archived_labels(episode_dir)
+    with bind(episode_dir) as bound:
+        _refuse_incomplete(bound)
+        labels = _archived_labels(bound)
     if not labels:
         return {}
     family = load_family(episode_dir / MANIFEST_NAME)
