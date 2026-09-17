@@ -42,7 +42,6 @@
     "learning/leads/lead_author/__init__.py:_write_state": "",
     "run_common.py:materialize_run_dir": "",
     "runtime/verb_roster.py:generate_roster": "",
-    "scripts/case_history/ticket_writer.py:_write_receipt": "",
     "scripts/visualize/visualize_run.py:render_and_mirror": ""
   }
 }

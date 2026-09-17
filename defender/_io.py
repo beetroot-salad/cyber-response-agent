@@ -155,10 +155,10 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
         # directory, fifo, socket or device lands in the same refusal for the reason
         # `_refuse_unless_plain` gives: a caller must not have to tell those apart from a
         # planted symlink to know it has no artifact.
-        is_hardlink = stat.S_ISREG(st.st_mode) and st.st_nlink > 1
-        if is_hardlink or not stat.S_ISREG(st.st_mode):
+        if not is_plain_entry(st):
             raise OSError(
-                errno.EMLINK if is_hardlink else errno.ELOOP, ALIAS_READ_REFUSAL, str(path),
+                errno.EMLINK if is_hard_linked(st) else errno.ELOOP, ALIAS_READ_REFUSAL,
+                str(path),
             )
         with os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
             fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
@@ -710,6 +710,20 @@ def _mark_alias(exc: OSError, *, is_alias: bool) -> OSError:
     return exc
 
 
+def is_hard_linked(st: os.stat_result) -> bool:
+    """A regular file with more than one name — the alias `O_NOFOLLOW` cannot refuse (B9)."""
+    return stat.S_ISREG(st.st_mode) and st.st_nlink > 1
+
+
+def is_plain_entry(st: os.stat_result) -> bool:
+    """THE rule for "a plain, single-linked regular file" — what a guarded write may replace,
+    what a guarded read may open, and what an archive copy may land on. One predicate over
+    an `lstat`/`fstat` result, so the write seam, the read seam and the archive's destination
+    screen cannot drift on what counts as plain: not a symlink, not a hard link, not a
+    directory, fifo, socket or device."""
+    return stat.S_ISREG(st.st_mode) and not is_hard_linked(st)
+
+
 def _refuse_unless_plain(path: Path) -> None:
     """Refuse unless `path` is absent or a plain, single-linked regular file.
 
@@ -722,9 +736,9 @@ def _refuse_unless_plain(path: Path) -> None:
         st = os.lstat(path)
     except FileNotFoundError:
         return
-    is_hardlink = stat.S_ISREG(st.st_mode) and st.st_nlink > 1
+    is_hardlink = is_hard_linked(st)
     is_alias = stat.S_ISLNK(st.st_mode) or is_hardlink
-    if is_alias or not stat.S_ISREG(st.st_mode):
+    if not is_plain_entry(st):
         # D1: the refusal LEAVES the planted entry in place, symlink or hard link alike —
         # removal is sanitizing, and an entry the writer deletes is one the reap scan can
         # never report.

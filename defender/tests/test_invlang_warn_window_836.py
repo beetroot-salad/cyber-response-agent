@@ -890,9 +890,10 @@ def _drive_to_retry_exhaustion(deps):
             ])
 
     agent = build_main_agent(_Stuck())
-    return asyncio.run(driver._drive_agent(
+    run, end, exit_reason = asyncio.run(driver._drive_agent(
         agent, "go", deps, _NullStore(), "sid", challenge_gate.default_bounds(),
     ))
+    return run, end.truncated_by, exit_reason
 
 
 def test_close_gate_distinguishes_model_invoked_from_framework_invoked(tmp_path):

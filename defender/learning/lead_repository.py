@@ -22,6 +22,7 @@ from defender._run_paths import (
     artifact_dir,
     artifact_file,
     contained_payload,
+    plain_file,
 )
 from defender._text import as_str
 from defender.runtime.circuit_breaker import error_class_for_exit
@@ -556,7 +557,7 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
 
 
 def refusing_copy2(refused: list[Path]):
-    """`shutil.copy2`, refusing a DESTINATION that is not already a plain file.
+    """`shutil.copy2`, refusing a DESTINATION that is not already a plain, single-linked file.
 
     `refuse_non_artifacts` screens the SOURCE side of a walk; nothing screened the other end,
     and `copy2` opens its destination for writing — which resolves a link planted at that name
@@ -571,7 +572,9 @@ def refusing_copy2(refused: list[Path]):
     a world its whole archive, and the caller prints what it dropped."""
     def _copy(src, dst, *, follow_symlinks=True):
         target = Path(dst)
-        if (target.exists() or target.is_symlink()) and not artifact_file(target):
+        # `plain_file`, not `artifact_file`: a hard link at the leaf is a regular file to
+        # `lstat` and `copy2` opens it for writing all the same (#1047 F-F).
+        if (target.exists() or target.is_symlink()) and not plain_file(target):
             refused.append(target)
             return dst
         return shutil.copy2(  # lint-tree-read-follows-link: ok — destination screened above, source screened by `refuse_non_artifacts`

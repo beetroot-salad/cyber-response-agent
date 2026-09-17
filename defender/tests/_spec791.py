@@ -305,15 +305,24 @@ class SpecTail:
         disposition: str = "benign",
         leads: tuple[str, ...] = ("l-001",),
         truncated_by: str | None = None,
+        closed_before_cut: bool = False,
         certify: bool = True,
     ) -> None:
         self._paths = paths
         self._disposition = disposition
         self._leads = leads
         self._truncated_by = truncated_by
+        self._closed_before_cut = closed_before_cut
         self._certify = certify
         self.run_dirs: list[Path] = []
         self.steps: list[TailStep] = []
+        #: What `close_case_ticket` was actually called with, in order — #1047's own
+        #: `test_1047_ticket_lane.py` drives the ticket lane's per-class branching directly and
+        #: never through this seam, so this is the one place that can tell whether `run.py`'s
+        #: tail actually THREADS the exit class through rather than calling the old
+        #: no-argument shape: a `close_calls` entry missing `truncated_by` (or holding `None`
+        #: for a tail built with `truncated_by=` set) means the wiring, not the lane, is dead.
+        self.close_calls: list[dict[str, Any]] = []
 
     # the seam's three dependencies
     def lifecycle(self, *, run_dir: Path, **_kw: Any) -> dict:
@@ -324,7 +333,8 @@ class SpecTail:
         if self._certify:
             scrub_mod.scrub(run_dir)
         self._note("lifecycle", run_dir)
-        return {"output": "spec791 verdict", "requests": 1, "truncated_by": self._truncated_by}
+        return {"output": "spec791 verdict", "requests": 1, "truncated_by": self._truncated_by,
+                "closed_before_cut": self._closed_before_cut}
 
     def visualize(self, run_dir: Path) -> None:
         self._note("visualize", run_dir)
@@ -332,7 +342,14 @@ class SpecTail:
     def open_case_ticket(self, run_dir: Path) -> None:
         self._note("open_case_ticket", run_dir)
 
-    def close_case_ticket(self, run_dir: Path) -> None:
+    def close_case_ticket(self, run_dir: Path, **kw: Any) -> None:
+        # `**kw` absorbs #1047's `truncated_by=`/`closed_before_cut=` kwargs — this fake
+        # stands in for the ticket-system SEAM, not for the ticket lane's own per-class
+        # branching (which `test_1047_ticket_lane.py` drives against the real
+        # `close_case_ticket` directly), so it only needs to accept the call, not interpret
+        # it — but it DOES record what it was called with, in `close_calls`, because whether
+        # the tail passes these through at all is a question only this seam can answer.
+        self.close_calls.append(kw)
         self._note("close_case_ticket", run_dir)
 
     # what the steps saw

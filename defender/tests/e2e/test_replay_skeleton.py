@@ -39,6 +39,7 @@ from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
 from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX
+from defender.runtime.run_end import sidecar_path
 from defender.skills.invlang.validate import validate_companion
 from defender.tests import _review_bundle
 
@@ -258,7 +259,10 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
     to `<run_dir>/investigation.md` in the handler, so a model that wants to write elsewhere
     has nothing to say it with. Unreachable beats denied — but only if it is actually
     unreachable, so this asserts both halves: no path-taking writer is registered, and the
-    one writer that is lands on the transcript and creates nothing else."""
+    one writer that is lands on the transcript and creates nothing else THE MODEL COULD HAVE
+    ASKED FOR — the one HOST-WRITTEN exception is `run_end.sidecar_path`'s own record
+    (#1047), unconditional beside every run dir and on a path no tool call the model issues
+    can ever name."""
     run_id = "no-write-path"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
@@ -276,8 +280,8 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
     drive(run_dir, run_id=run_id, main=replay)
 
     assert (run_dir / "investigation.md").read_text() == "+ probe\n"
-    assert {p.name for p in run_dir.parent.iterdir()} == before, (
-        "the append created something outside the run dir"
+    assert {p.name for p in run_dir.parent.iterdir()} == before | {sidecar_path(run_dir).name}, (
+        "the append created something outside the run dir and the host's own run-end sidecar"
     )
 
 
