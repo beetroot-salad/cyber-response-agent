@@ -66,18 +66,32 @@ def _mapping_path() -> Path:
 
 
 def _label_template_can_render(template: str, approved_label: str) -> bool:
-    """Is `template` a shape that could render down to exactly `approved_label`?
+    """Is `template` a shape that could render down to what `is_approved` accepts?
 
     A property of the TEMPLATE, not of any alert (§7 R5/FAM-2): only the literal prefix before
     the FIRST placeholder can ever be pinned, so a template is safe iff `approved_label` cannot
-    start with that prefix. A template with no literal prefix at all can render to anything."""
+    start with that prefix. The comparison is made against the same reading `is_approved`
+    makes of a label — surrounding whitespace stripped (FK22) — so a prefix that is ONLY
+    whitespace pins nothing, and a template with no literal prefix at all can render to
+    anything."""
     idx = template.find("{")
     if idx == -1:
-        return template == approved_label
-    prefix = template[:idx]
+        return template.strip() == approved_label
+    prefix = template[:idx].lstrip()
     if not prefix:
         return True
     return approved_label.startswith(prefix)
+
+
+def _label_templates(section: dict[str, Any]) -> list[str]:
+    """Every string template `section.labels` could ship: a list's string entries, or a bare
+    string, which `_render` sends as one label just the same."""
+    labels = section.get("labels")
+    if isinstance(labels, str):
+        return [labels]
+    if isinstance(labels, list):
+        return [t for t in labels if isinstance(t, str)]
+    return []
 
 
 def _refuse_colliding_approved_label(data: dict[str, Any]) -> None:
@@ -95,11 +109,8 @@ def _refuse_colliding_approved_label(data: dict[str, Any]) -> None:
         section = data.get(section_name)
         if not isinstance(section, dict):
             continue
-        labels = section.get("labels")
-        if not isinstance(labels, list):
-            continue
-        for template in labels:
-            if isinstance(template, str) and _label_template_can_render(template, label):
+        for template in _label_templates(section):
+            if _label_template_can_render(template, label):
                 raise CaseTicketError(
                     f"case-history mapping's `{section_name}.labels` template {template!r} "
                     f"could render the approved label {label!r} — refusing to load a mapping "

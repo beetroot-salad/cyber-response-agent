@@ -135,16 +135,54 @@ def _build_comment_payload(run_dir: Path, case_id: str) -> dict | None:
         return None
 
 
+#: The receipt word for a record the writer declined to make because a person had already
+#: released the case (`_ticket_is_released`). Distinct from `error`: nothing failed.
+RECEIPT_REFUSED_RELEASED = "refused-released"
+
+
+def _ticket_is_released(
+    config: dict[str, str], deps: TicketWriterDeps, case_id: str, quoted: str,
+) -> bool | None:
+    """Read the case back and answer whether a person has released it — `None` when that
+    cannot be established (the read failed, or the reply is not a ticket object).
+
+    This is the writer's half of the release invariant: the person's tag is a statement
+    about the agent comments ON THE TICKET WHEN THEY READ IT, and a comment appended
+    afterwards would ride out under that same tag with no person having seen it. The writer
+    never touches the tag (O1), so the only way to keep it true is to never append behind it.
+    Undecidable reads as released — the direction that writes nothing. The tag's spelling
+    is the mapping's, read through the same predicate the screen decides with (O5)."""
+    try:
+        status, body = deps.request(config, "GET", f"/tickets/{quoted}")
+    except TransportFault as e:
+        status, body = None, f"transport error: {e.detail}"
+    if status is None or not status.startswith("2"):
+        _warn(f"record {case_id}: could not read the case back ({status or 'transport error'}: "
+              f"{body}); not recording")
+        return None
+    try:
+        ticket = json.loads(body)
+    except json.JSONDecodeError:
+        _warn(f"record {case_id}: the case read back is not JSON; not recording")
+        return None
+    if not isinstance(ticket, dict):
+        _warn(f"record {case_id}: the case read back is not a ticket object; not recording")
+        return None
+    is_released, _is_agent_comment = case_ticket.approval_predicates().as_pair()
+    return bool(is_released(ticket))
+
+
 def record_case_ticket(
     run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, key: str | None = None,
 ) -> None:
     """D2: the host RECORDS its investigation into the case rather than closing it — one
-    `POST /tickets/{key}/comments`, no transition. §7 R6/FAM-3: a failed or colliding open does
-    NOT suppress this attempt (the two post-steps are independent statements under one flag);
-    every write fault is caught, warned once, and leaves the run's exit code exactly what it
-    would have been (O7). `key` is a parameter now (§7 R8/FK04) so a vendor-minted, pre-existing
-    key on a later deployment is a call-site edit — today's deployment keeps `case_id =
-    run_dir.name`."""
+    `POST /tickets/{key}/comments`, no transition, and never onto a case a person has already
+    released (`_ticket_is_released`: one `GET /tickets/{key}` first, refusing on a released
+    or unreadable case). §7 R6/FAM-3: a failed or colliding open does NOT suppress this
+    attempt (the two post-steps are independent statements under one flag); every write fault
+    is caught, warned once, and leaves the run's exit code exactly what it would have been
+    (O7). `key` is a parameter now (§7 R8/FK04) so a vendor-minted, pre-existing key on a
+    later deployment is a call-site edit — today's deployment keeps `case_id = run_dir.name`."""
     try:
         config = deps.load_config()
         if config is None:
@@ -154,6 +192,15 @@ def record_case_ticket(
         if payload is None:
             return
         quoted = urllib.parse.quote(case_id, safe="")
+        released = _ticket_is_released(config, deps, case_id, quoted)
+        if released is None:
+            _write_receipt(run_dir, config, case_id, "error")
+            return
+        if released:
+            _warn(f"record {case_id}: a person has already released this case; a new comment "
+                  "would go out under that release unseen — not recording")
+            _write_receipt(run_dir, config, case_id, RECEIPT_REFUSED_RELEASED)
+            return
         try:
             status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload)
         except TransportFault as e:
@@ -163,20 +210,20 @@ def record_case_ticket(
             _warn(f"record {case_id}: {status or 'transport error'}: {body}")
         else:
             _log(f"record {case_id}: comment posted ({status})")
-        _write_receipt(run_dir, config, case_id, ok)
+        _write_receipt(run_dir, config, case_id, "commented" if ok else "error")
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _warn(f"record raised, ignored: {e!r}")
 
 
-def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, ok: bool) -> None:
+def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, status: str) -> None:
     receipt = {
         "key": case_id,
         # §7 R6/FK29: "commented", not "closed" — after D2 nothing closes, and the old literal
         # would record a false event. The receipt has zero readers (c5), which is why this word
         # is free to change and why no fault below is escalated beyond the warning.
-        "status": "commented" if ok else "error",
+        "status": status,
         "url": f"{config['URL_BASE'].rstrip('/')}/tickets/{case_id}",
-        "ok": ok,
+        "ok": status == "commented",
     }
     try:
         (run_dir / "ticket_write.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")

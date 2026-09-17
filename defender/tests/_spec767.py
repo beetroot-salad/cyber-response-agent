@@ -248,6 +248,11 @@ def make_run(tmp_path: Path, name: str = "20260917T000000Z-sshd", *, alert: Any 
 # --------------------------------------------------------------------------------------
 
 
+#: `ticket` on `FakeStore` distinguishes "omitted" (a default unapproved case) from an explicit
+#: `None` (the store holds no such key), the same way `_CONFIG_UNSET` does for `config`.
+_TICKET_UNSET = object()
+
+
 @dataclass(frozen=True)
 class OutboundCall:
     """One request the writer handed the transport — the CAPTURED INBOUND PAYLOAD every
@@ -271,8 +276,11 @@ class FakeStore:
       * ``status`` / ``status_by_suffix`` — HTTP status words the real stub answered when it
         was driven: 201 on create and on comment, 409 on a duplicate create, 404 on an
         unknown key, 405 on PATCH/PUT (c8, executed).
-      * ``body`` — the reply text. A malformed one is FK31's arm; nothing reads it (c5), and
-        no assertion in this suite is made against it.
+      * ``body`` — the reply text to a WRITE. A malformed one is FK31's arm; nothing reads
+        it (c5), and no assertion in this suite is made against it.
+      * ``ticket`` — the ticket object a `GET /tickets/{key}` answers with (200), which the
+        writer reads back before it records so that it never appends behind a person's
+        approval. Defaults to an unapproved case; `None` answers the read with a 404.
 
     It classifies nothing and decides no policy: every branch here is "record, then answer".
     """
@@ -282,12 +290,17 @@ class FakeStore:
         *,
         status: str = "201",
         body: str = '{"author": "defender", "body": "ok", "created": "2026-09-17T00:00:00Z"}',
+        ticket: dict[str, Any] | None | object = _TICKET_UNSET,
         status_by_suffix: dict[str, str] | None = None,
         transport_fault_on: str | None = None,
         transport_error_on: str | None = None,
     ) -> None:
         self.status = status
         self.body = body
+        self.ticket = (
+            {"key": "any", "labels": ["sig:5710"], "comments": []}
+            if ticket is _TICKET_UNSET else ticket
+        )
         self.status_by_suffix = dict(status_by_suffix or {})
         self.transport_fault_on = transport_fault_on
         self.transport_error_on = transport_error_on
@@ -305,9 +318,18 @@ class FakeStore:
         for suffix, status in self.status_by_suffix.items():
             if path.endswith(suffix):
                 return status, self.body
+        if method == "GET":
+            if self.ticket is None:
+                return "404", '{"detail": "not found"}'
+            return "200", json.dumps(self.ticket)
         return self.status, self.body
 
     # ---- what the fake recorded ---------------------------------------------------------
+
+    def writes(self) -> list[OutboundCall]:
+        """Every call that could change the estate — the census the write-side demands
+        count; the writer's own read-back (`GET`) is not one of them."""
+        return [c for c in self.calls if c.method != "GET"]
 
     def paths(self, suffix: str | None = None) -> list[str]:
         return [c.path for c in self.calls if suffix is None or c.path.endswith(suffix)]

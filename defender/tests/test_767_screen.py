@@ -696,6 +696,76 @@ def test_767_approval_predicates_cannot_be_built_in_a_serving_state(tmp_path, mo
     )
 
 
+def test_767_an_unattributable_comment_is_never_served_unreleased(tmp_path, monkeypatch):
+    """FK15's undecidable reading, applied to EVERY element of `comments` and not only to the
+    object-shaped ones. `is_agent_comment` already answers "agent-authored" for a comment it
+    cannot attribute — a bare string, a number, an object with no readable author — and the
+    screen must put every element to it rather than pre-filter by shape: a shape check in
+    the screen is a second, contradicting answer to the same question, under which a forged
+    or vendor-mangled comment (N6: forged comments bypass D2/D3) walks past the predicate
+    unexamined and is served on a case nobody released.
+
+    The positive control is the released case, where the latest agent-authored entry — by
+    the predicate's own reading — is served."""
+    _mapping(monkeypatch, tmp_path)
+    junk = ["PRIOR RUN NOTES as a bare string", 17, {"body": "no author at all"},
+            {"author": ["not", "a", "string"], "body": "unreadable author"}]
+    for element in junk:
+        unreleased = _unapproved("SOC-JUNK", comments=[element, comment(AGENT_TEXT)])
+        out, code, _ = screen_list(listing(copy.deepcopy(unreleased)))
+        assert code == 0
+        assert _one(out)["comments"] == [], (
+            f"{element!r} was served on an unreleased case — the screen answered the "
+            "attribution question itself instead of asking the predicate"
+        )
+        by_get, code, _ = screen_get(copy.deepcopy(unreleased))
+        assert code == 0
+        assert by_get["comments"] == [], f"{element!r} served through get-ticket"
+
+    human_then_junk = _unapproved("SOC-MIXED", comments=[comment(HUMAN_TEXT, author="analyst"),
+                                                         "a bare string"])
+    out, code, _ = screen_list(listing(human_then_junk))
+    assert code == 0
+    assert [c["body"] for c in _one(out)["comments"]] == [HUMAN_TEXT], (
+        "the analyst's own note was dropped alongside the unattributable one, or the "
+        "unattributable one survived"
+    )
+
+    released = _approved("SOC-OK", comments=[comment(OLDER_TEXT), comment(AGENT_TEXT)])
+    out, code, _ = screen_list(listing(released))
+    assert code == 0
+    assert [c["body"] for c in agent_comments(_one(out))] == [AGENT_TEXT], "the control failed"
+
+
+def test_767_an_unreadable_mapping_file_degrades_the_screen(tmp_path, monkeypatch):
+    """FK20's read-side degrade holds for EVERY way the predicates can fail to build, not only
+    for the mapper's own typed refusal. The mapping is a file: a non-UTF-8 byte in it raises
+    a decode error out of the loader, which is no `CaseTicketError`. A screen that caught only
+    the typed refusal would let that raise escape into the query tool's generic fault path —
+    refusing the whole ticket query as an INFRA fault and charging the `ticket` breaker for a
+    config defect, the opposite of "never refuse the whole gather call" (N5).
+
+    The observable is the same as the typed case's: the call answers `0`, every record stays
+    visible, and no agent text is served."""
+    root = tmp_path / "dfn"
+    use_mapping(monkeypatch, root, mapping_doc())
+    path = root / "knowledge/environment/systems/case-history/mapping.yaml"
+    path.write_bytes(b"approved:\n  label: \xff\xfe not utf-8\n")
+
+    # The control: the loader does NOT classify this one — it is the untyped raise the screen
+    # must survive. Were it ever classified, this test would stop exercising that case.
+    with pytest.raises(UnicodeDecodeError):
+        case_ticket.approval_predicates()
+
+    payload, code, detail = screen_list(listing(_approved(), _unapproved()))
+    assert code == 0, f"an unreadable mapping refused the whole gather call ({detail})"
+    kept = served_tickets(payload)
+    assert len(kept) == 2, "records were dropped rather than screened (N5)"
+    for t in kept:
+        assert agent_comments(t) == [], "agent text was served under an unreadable mapping"
+        assert t["summary"] == "a prior case"
+
+
 def test_767_an_author_rename_does_not_unhide_history(tmp_path, monkeypatch):
     """d_author_alias_keeps_history_withheld — SECURITY. §7 R4/FK10: renaming the mapping's
     agent identity must not UN-HIDE history. `is_agent_comment` matches a SET — the current

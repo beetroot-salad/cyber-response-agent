@@ -99,14 +99,17 @@ def _screen_one_ticket(
     own list order (§7 R3/FK02 — never a `created`-timestamp sort). Every other field —
     including a legacy `resolution` (§7 R9) — is left untouched, and the envelope carries no
     marker anywhere (`d4_no_marker`): a screen filters silently.
+
+    Every element of `comments` is put to `is_agent_comment`, whatever its shape: the
+    predicate owns the undecidable reading (a non-object entry, an unreadable author — FK15,
+    agent-authored), and a shape check here would be a second, contradicting answer to the
+    same question.
     """
     comments = ticket.get("comments")
     if not isinstance(comments, list):
         return ticket
     released = is_released(ticket)
-    agent_positions = [
-        i for i, c in enumerate(comments) if isinstance(c, dict) and is_agent_comment(c)
-    ]
+    agent_positions = [i for i, c in enumerate(comments) if is_agent_comment(c)]
     keep_agent_at = agent_positions[-1] if released and agent_positions else None
     new_comments = [
         c for i, c in enumerate(comments)

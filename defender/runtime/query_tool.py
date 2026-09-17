@@ -217,12 +217,17 @@ def _approval_screen_predicates() -> tuple[Any, Any]:
     no snapshot, no cache). §7 R1's read-side extension (FK20): a predicate-construction
     failure DEGRADES rather than raising into the model's turn or refusing the whole gather
     call (N5) — every ticket reads as unreleased, every comment as agent-authored, which is
-    the fail-closed direction for a screen that must never serve agent text by accident."""
+    the fail-closed direction for a screen that must never serve agent text by accident.
+
+    ANY failure degrades, not only the mapper's own typed refusal: the mapping is a file, and
+    a file can be unreadable (permissions, a non-UTF-8 byte) in ways the mapper never
+    classifies. Letting such a raise escape would refuse the whole ticket query as an infra
+    fault and charge the `ticket` breaker for a config defect — the opposite of degrading."""
     from defender.scripts.case_history import case_ticket
 
     try:
         predicates = case_ticket.approval_predicates()
-    except case_ticket.CaseTicketError:
+    except Exception:  # noqa: BLE001 — degrade on every construction failure, see docstring
         return (lambda _ticket: False), (lambda _comment: True)
     return predicates.as_pair()
 

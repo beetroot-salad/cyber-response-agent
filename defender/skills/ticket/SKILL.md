@@ -92,7 +92,10 @@ into this store.
   alert is raised and later records the investigation as a comment on it.
   That writer is a learning post-step, not an investigation surface; do
   not call it from a run, and it never sets `status`, `resolution` or the
-  `approved` label itself — a person does.
+  `approved` label itself — a person does. It also never records onto a
+  case a person has already tagged `approved`: the tag is a statement about
+  the comments the person saw, so a re-run of a released case is refused
+  rather than appended behind that tag.
 - **Not for change-window context.** Use the change-mgmt stub for
   CR-scoped questions; ticket labels may mention CRs but the
   authoritative answer is in change-mgmt.

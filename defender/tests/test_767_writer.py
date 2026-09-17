@@ -54,6 +54,7 @@ from defender.tests._spec767 import (
     record,
     require,
     shipped_mapping_doc,
+    ticket,
     use_mapping,
     write_mapping,
     writer_deps,
@@ -105,9 +106,13 @@ def test_767_record_case_ticket_returns_and_receipts(tmp_path, monkeypatch):
 
     ok_store = FakeStore()
     assert record(run_dir, ok_store) is None, "the post-step returns a value some caller reads"
-    assert [(c.method, c.path) for c in ok_store.calls] == [
+    assert [(c.method, c.path) for c in ok_store.writes()] == [
         ("POST", f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}")
     ], "D2 is ONE comment POST and no transition"
+    assert [(c.method, c.path) for c in ok_store.calls] == [
+        ("GET", f"{TICKETS_PATH}/{run_dir.name}"),
+        ("POST", f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"),
+    ], "the writer reads the case back once, before its one POST, and nothing else"
     assert not ok_store.paths(TRANSITIONS_SUFFIX), "the host still transitions the case (N1/O1)"
 
     good = receipt(run_dir)
@@ -197,6 +202,55 @@ def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
     assert ordinary["labels"] == ["sig:5710", "evt:2026-05-07T07:15:01Z"]
 
 
+def test_767_writer_never_records_behind_a_release(tmp_path, monkeypatch, capsys):
+    """The writer's half of the release invariant. A person's tag is a statement about the
+    agent comments on the ticket WHEN THEY READ IT; the screen serves the latest agent comment
+    on a released case, so a comment appended after the tag would ride out under it with no
+    person having seen it. The writer never touches the tag (O1), so it keeps the tag true the
+    only other way: it reads the case back first and refuses to append to a released one —
+    a receipt, a warning, and no POST.
+
+    Undecidable reads as released: a case the writer cannot read back (no such key, a
+    transport fault, a reply that is not a ticket object) is not written to either. The
+    positive control is the default fake's unreleased case, on which the POST proceeds."""
+    use_mapping(monkeypatch, tmp_path / "dfn")
+    run_dir = make_run(tmp_path)
+
+    released = FakeStore(ticket=ticket("any", labels=["sig:5710", APPROVED_LABEL]))
+    assert record(run_dir, released) is None
+    assert released.writes() == [], "the writer appended a comment behind a person's release"
+    assert [c.method for c in released.calls] == ["GET"], "the writer did more than read back"
+    assert receipt(run_dir) == {
+        **receipt(run_dir), "status": ticket_writer.RECEIPT_REFUSED_RELEASED, "ok": False,
+    }
+    assert "WARN" in capsys.readouterr().err, "the refusal was silent"
+
+    for why, store in (
+        ("no such key (404 on the read-back)", FakeStore(ticket=None)),
+        ("a transport fault on the read-back",
+         FakeStore(transport_fault_on=f"{TICKETS_PATH}/{run_dir.name}")),
+        ("a (None, detail) transport error on the read-back",
+         FakeStore(transport_error_on=f"{TICKETS_PATH}/{run_dir.name}")),
+        ("a read-back that is not JSON",
+         FakeStore(status_by_suffix={f"{TICKETS_PATH}/{run_dir.name}": "200"},
+                   body="<html>not json")),
+        ("a read-back that is JSON but not a ticket object",
+         FakeStore(status_by_suffix={f"{TICKETS_PATH}/{run_dir.name}": "200"}, body="[1, 2]")),
+    ):
+        undecidable_dir = make_run(tmp_path, name=run_dir.name)
+        assert record(undecidable_dir, store) is None, f"{why}: the fault escaped into the run"
+        assert store.writes() == [], f"{why}: the writer POSTed without knowing the case's state"
+        assert receipt(undecidable_dir)["ok"] is False, f"{why}: receipted as a success"
+
+    control = FakeStore()
+    record(run_dir, control)
+    assert [c.method for c in control.calls] == ["GET", "POST"], (
+        "the control failed: an unreleased case was not recorded, so the refusals above prove "
+        "nothing"
+    )
+    assert receipt(run_dir)["ok"] is True
+
+
 def test_767_no_host_payload_sets_verdict(tmp_path, monkeypatch, capsys):
     """o1_no_host_verdict_write — NEGATIVE. No payload the host sends carries a case verdict
     or the approved tag: not the open, not the record, and there is no third write site.
@@ -214,11 +268,11 @@ def test_767_no_host_payload_sets_verdict(tmp_path, monkeypatch, capsys):
     open_ticket(run_dir, store)
     record(run_dir, store)
 
-    assert [c.path for c in store.calls] == [
+    assert [c.path for c in store.writes()] == [
         TICKETS_PATH, f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"
     ], "the writer's site census is two POSTs — an open and a comment (c1/r3, S1)"
 
-    for call in store.calls:
+    for call in store.writes():
         body = call.body if isinstance(call.body, dict) else {}
         wire = json.dumps(body, ensure_ascii=False)
         assert "resolution" not in body, f"{call.path} carries a resolution"
@@ -256,9 +310,27 @@ def test_767_mapping_loader_refuses_approved_label_template(tmp_path, monkeypatc
          ("sig:{signature}", "evt:{event_time}", "{summary}"), None),
         ("a label template left in a stale close: section (FK27)",
          ("sig:{signature}",), {"status": "closed", "labels": ["{signature}"]}),
+        # The guard reads a template the way `is_approved` reads a label — surrounding
+        # whitespace stripped (FK22) — so a prefix that is only whitespace pins nothing.
+        ("a whitespace-only prefix, which the tag's matcher strips", (" {signature}",), None),
+        ("a tab-only prefix, which the tag's matcher strips", ("\t{signature}",), None),
+        ("a literal that is the tag once stripped", ("sig:{signature}", " approved "), None),
     ]
     for why, labels, close in colliding:
         use_mapping(monkeypatch, root, mapping_doc(open_labels=labels, close_section=close))
+        with pytest.raises(case_ticket.CaseTicketError) as refusal:
+            case_ticket._load_mapping()
+        assert APPROVED_LABEL in str(refusal.value), (
+            f"the loader refused ({why}) without naming the approved label it refused for"
+        )
+
+    # `open.labels` given as ONE bare string template renders to one label just the same, and
+    # the guard walks it as one template rather than skipping a non-list.
+    for why, bare in (
+        ("a bare-string template with no prefix", "{signature}"),
+        ("a bare-string template with a whitespace prefix", " {signature}"),
+    ):
+        use_mapping(monkeypatch, root, mapping_doc(extra_open={"labels": bare}))
         with pytest.raises(case_ticket.CaseTicketError) as refusal:
             case_ticket._load_mapping()
         assert APPROVED_LABEL in str(refusal.value), (
@@ -737,7 +809,7 @@ def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch,
     store = FakeStore(**store_kw)
 
     assert record(run_dir, store) is None, f"{arm}: the fault escaped into the run"
-    assert len(store.calls) == 1, f"{arm}: the writer retried — D2 is one POST"
+    assert len(store.writes()) == 1, f"{arm}: the writer retried — D2 is one POST"
     assert capsys.readouterr().err.count("[ticket_writer] WARN") <= 1, f"{arm}: warned twice"
     assert (run_dir / "ticket_write.json").is_file(), (
         f"{arm}: no receipt was written — r1/c14 record the receipt on BOTH branches, which "
@@ -930,15 +1002,15 @@ def test_767_record_case_ticket_is_the_writer_seam(tmp_path, monkeypatch):
 
     default_store = FakeStore()
     record(run_dir, default_store)
-    assert default_store.paths() == [f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"], (
-        "the default key is not the playground identity `case_id = run_dir.name`"
-    )
+    assert default_store.paths() == [
+        f"{TICKETS_PATH}/{run_dir.name}", f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"
+    ], "the default key is not the playground identity `case_id = run_dir.name`"
 
     injected = FakeStore()
     record(run_dir, injected, **{key_param: "SOC-4242"})
-    assert injected.paths() == [f"{TICKETS_PATH}/SOC-4242{COMMENTS_SUFFIX}"], (
-        "an explicitly-passed key did not reach the wire"
-    )
+    assert injected.paths() == [
+        f"{TICKETS_PATH}/SOC-4242", f"{TICKETS_PATH}/SOC-4242{COMMENTS_SUFFIX}"
+    ], "an explicitly-passed key did not reach the wire — on the read-back and the POST alike"
 
     assert hasattr(_spec791.SpecTail, "record_case_ticket"), (
         "tests/_spec791.py's tail fake still implements `close_case_ticket` only: D2's rename "
