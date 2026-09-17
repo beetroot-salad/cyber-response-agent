@@ -221,7 +221,7 @@ def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     """Every source that will be copied for one world, or the refusal — nothing copied yet.
 
     The whole point of running this before the first `copy2`: an archive that refused halfway
-    would leave a world directory holding some of its six roles, and a MISSING artifact is how
+    would leave a world directory holding some of its seven roles, and a MISSING artifact is how
     this design records "the run did not produce one". A half-archive is therefore not a
     partial answer but a wrong one.
     """
@@ -232,6 +232,65 @@ def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     _screen(paths.gather_raw, world=world, is_dir=True)
     _screen(_gather_summaries_source(run_dir), world=world, is_dir=True)
     return present
+
+
+def _screen_destinations(world: str, world_dir: Path, run_dir: Path,
+                         present: set[str]) -> None:
+    """Judge every name this lane will write under `world_dir`, BEFORE the first copy — or
+    raise `ArchiveRefused`. `present` is the single-file names that have a source this time."""
+    # THE DESTINATION IS SCREENED TOO, and before the first copy for the same reason the
+    # sources are. `guarded_mkdir` judges the DIRECTORY components; nothing judged the leaf,
+    # and `shutil.copy2` opens the destination for writing, which resolves a link planted
+    # there — the episode dir is reachable from a sibling box's rw bind (it is why
+    # `merge_review` and the run-dir pointer both go through the guarded seam), so an entry
+    # at `worlds/<label>/report.md` would redirect an artifact copy out of the archive.
+    # `plain_file`, not `artifact_file`: a HARD link at the leaf is a regular file to
+    # `lstat`, and `copy2` opens it for writing all the same — the same rule
+    # `write_guarded` applies to every other write into this tree (#1047 F-F), applied to
+    # EVERY destination this lane writes: the seven single files here, the two tables and
+    # the summaries directory below, and each leaf `refusing_copy2` lands inside them.
+    #
+    # EVERY single-file NAME is judged, not only the ones with a source. A MISSING artifact
+    # is how this design records "the run did not produce one", and that has to be true of
+    # the destination too: a plain file left at a name whose source is now absent (a
+    # re-archive after the sidecar or the report was lost) would be read by every later
+    # reader as this run's own, so it is removed — a plain regular file is exactly what the
+    # copy would have replaced. An ALIAS at such a name is refused, never removed (D1:
+    # removal is sanitizing, and an entry the archive deletes is one no scan can report).
+    for _source, name in _single_files(run_dir):
+        dest = world_dir / name
+        if not entry_present(dest):
+            continue
+        if not plain_file(dest):
+            raise ArchiveRefused(
+                f"world {world!r}: {dest} is occupied by something that is not a plain "
+                "regular file — the archive is written into a tree a box can reach, and "
+                "copying onto a link would put this world's artifact wherever it points")
+        if name not in present:
+            dest.unlink()
+    # The DIRECTORY destination is screened by the same rule and for the same reason. It is
+    # not covered by the loop above (which judges the single files) and `copytree` will not
+    # refuse it for us: under `dirs_exist_ok=True` its own `makedirs(dst, exist_ok=True)`
+    # RESOLVES a link planted at this name, writing the world's summaries wherever it
+    # points — the exact escape this screen exists to stop, one directory over.
+    # ALL THREE OF THEM, not only the one this design added. `stage_tables` runs the same
+    # `copytree(dirs_exist_ok=True)` onto `worlds/<label>/gather_raw` and a `copy2` onto
+    # `worlds/<label>/executed_queries.jsonl`, and it screens only its SOURCES — so the
+    # destination escape screened here for `gather_summaries/` was still open one directory
+    # over, on artifacts that predate it. The screen belongs to the destination tree, which
+    # is this function's, so it is applied to every name written into that tree.
+    summaries_dest = world_dir / GATHER_SUMMARIES_DIRNAME
+    staged_dests = RunPaths(world_dir)
+    for dest, is_dir in ((summaries_dest, True), (staged_dests.gather_raw, True),
+                         (staged_dests.executed_queries, False)):
+        if not entry_present(dest):
+            continue
+        if artifact_dir(dest) if is_dir else plain_file(dest):
+            continue
+        raise ArchiveRefused(
+            f"world {world!r}: {dest} is occupied by something that is not a "
+            f"{'real directory' if is_dir else 'plain regular file'} — copying onto it "
+            "would write this world's archived artifact wherever it points")
 
 
 def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, Path]:
@@ -253,45 +312,7 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         sources = _screened_sources(world, run_dir)
         world_dir = episode_dir / WORLDS_DIRNAME / world
         guarded_mkdir(world_dir, base=episode_dir)
-        # THE DESTINATION IS SCREENED TOO, and before the first copy for the same reason the
-        # sources are. `guarded_mkdir` judges the DIRECTORY components; nothing judged the leaf,
-        # and `shutil.copy2` opens the destination for writing, which resolves a link planted
-        # there — the episode dir is reachable from a sibling box's rw bind (it is why
-        # `merge_review` and the run-dir pointer both go through the guarded seam), so an entry
-        # at `worlds/<label>/report.md` would redirect an artifact copy out of the archive.
-        # `plain_file`, not `artifact_file`: a HARD link at the leaf is a regular file to
-        # `lstat`, and `copy2` opens it for writing all the same — the same rule
-        # `write_guarded` applies to every other write into this tree (#1047 F-F).
-        for _source, name in sources:
-            dest = world_dir / name
-            if entry_present(dest) and not plain_file(dest):
-                raise ArchiveRefused(
-                    f"world {world!r}: {dest} is occupied by something that is not a plain "
-                    "regular file — the archive is written into a tree a box can reach, and "
-                    "copying onto a link would put this world's artifact wherever it points")
-        # The DIRECTORY destination is screened by the same rule and for the same reason. It is
-        # not covered by the loop above (which judges the single files) and `copytree` will not
-        # refuse it for us: under `dirs_exist_ok=True` its own `makedirs(dst, exist_ok=True)`
-        # RESOLVES a link planted at this name, writing the world's summaries wherever it
-        # points — the exact escape this screen exists to stop, one directory over.
-        # ALL THREE OF THEM, not only the one this design added. `stage_tables` runs the same
-        # `copytree(dirs_exist_ok=True)` onto `worlds/<label>/gather_raw` and a `copy2` onto
-        # `worlds/<label>/executed_queries.jsonl`, and it screens only its SOURCES — so the
-        # destination escape screened here for `gather_summaries/` was still open one directory
-        # over, on artifacts that predate it. The screen belongs to the destination tree, which
-        # is this function's, so it is applied to every name written into that tree.
-        summaries_dest = world_dir / GATHER_SUMMARIES_DIRNAME
-        staged_dests = RunPaths(world_dir)
-        for dest, is_dir in ((summaries_dest, True), (staged_dests.gather_raw, True),
-                             (staged_dests.executed_queries, False)):
-            if not (dest.exists() or dest.is_symlink()):
-                continue
-            if artifact_dir(dest) if is_dir else artifact_file(dest):
-                continue
-            raise ArchiveRefused(
-                f"world {world!r}: {dest} is occupied by something that is not a "
-                f"{'real directory' if is_dir else 'regular file'} — copying onto it would "
-                "write this world's archived artifact wherever it points")
+        _screen_destinations(world, world_dir, run_dir, {name for _s, name in sources})
         for source, name in sources:
             # Screened by `_screen` above, before this loop began: a link at any of these
             # names has already raised, so nothing here can follow one.
@@ -308,6 +329,7 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
         # walk as `gather_raw` — a non-artifact entry at any depth is refused and reported, and
         # the rest of the directory (and the rest of the world) still archives.
         summaries_src = _gather_summaries_source(run_dir)
+        summaries_dest = world_dir / GATHER_SUMMARIES_DIRNAME
         if artifact_dir(summaries_src):
             summaries_refused: list[Path] = []
             shutil.copytree(  # lint-tree-read-follows-link: ok — source root screened by `_screen`, destination root screened above and every entry by `refusing_copy2`
@@ -333,8 +355,8 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
 
 
 __all__ = [
-    # The three D7 names, the three #1025 O8 record names and the draws directory are
-    # EXPORTED, not private constants: the judge reads every one of them back out of the
+    # The three D7 names, the three #1025 O8 record names, the #1047 run-end record's name and
+    # the draws directory are EXPORTED, not private constants: the judge reads every one of them back out of the
     # archive this module writes, and a name spelled here and re-spelled there is a rename that
     # leaves the writer and the reader looking at two different files with no error anywhere —
     # an absent `gather_summaries/` is a note on the record, not a refusal.

@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from defender import _provenance  # noqa: E402
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
+from defender.runtime import run_end  # noqa: E402
 
 VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
@@ -61,6 +62,19 @@ def materialize_run_dir(
     run_dir = runs_base / run_id
     if run_dir.exists():
         sys.exit(f"run dir already exists: {run_dir}")
+    # A previous attempt under this run id (its dir removed, its id reused) may have left its
+    # run-end record beside the dir it no longer has (#1047). Cleared HERE, host-side and
+    # before the box exists, for the same reason the provenance stamp is written here: a
+    # record that outlived its run would be copied into the archive as THIS run's own exit
+    # class the moment this attempt ended before writing one. The scrub verdict has no such
+    # window because `stop_and_scrub` rewrites it on every exit.
+    stale = run_end.sidecar_path(run_dir)
+    try:
+        stale.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        sys.exit(f"cannot clear a stale run-end record at {stale}: {e!r}")
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)
     shutil.copy(alert, paths.alert)

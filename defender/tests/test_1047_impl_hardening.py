@@ -83,19 +83,76 @@ def test_run_py_tail_takes_both_record_fields_off_the_summary(tmp_path, monkeypa
 def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
     """When the record write fails on a forced-close exit, the forced report is skipped
     (`test_a_failed_run_end_write_is_a_reason_not_to_write_the_forced_report`) — and the
-    summary SAYS so, rather than looking like an ordinary `retry-exhausted` exit that should
-    carry a report and mysteriously does not."""
+    summary SAYS so, beside the real exit rather than in place of it: an ordinary
+    `retry-exhausted` exit that should carry a report and mysteriously does not is exactly
+    the shape this must not look like, and an exit reason that lost `UnexpectedModelBehavior`
+    would be the same loss the other way round.
+
+    Only when a forced report was OWED. A model that had already closed when the cut landed
+    holds its own verdict; the record write failing beside it skips nothing, and its exit
+    reason stays the ordinary one — the same early return `_close_a_run_cut_short` takes."""
+    from defender.runtime import challenge_gate
     from defender.tests import _spec923
 
-    deps, run_dir = _spec923.main_deps(tmp_path)
+    deps, run_dir = _spec923.main_deps(tmp_path / "owed")
     S.sidecar_path(run_dir).mkdir(parents=True, exist_ok=True)
-
     _run, truncated_by, exit_reason = _spec923.drive_to_retry_exhaustion(deps)
-
     assert truncated_by == "retry-exhausted"
-    assert exit_reason == "RunEndRecordFailed", (
-        f"a skipped forced close left the exit reason at {exit_reason!r}, indistinguishable "
-        "from a run whose forced report should be there")
+    assert exit_reason == "UnexpectedModelBehavior+RunEndRecordFailed", (
+        f"a skipped forced close left the exit reason at {exit_reason!r}")
+
+    closed_deps, closed_run = _spec923.main_deps(tmp_path / "closed")
+    S.sidecar_path(closed_run).mkdir(parents=True, exist_ok=True)
+    challenge_gate.ReviewState.of(closed_deps).closed = True
+    _run, _t, closed_reason = _spec923.drive_to_retry_exhaustion(closed_deps)
+    assert closed_reason == "UnexpectedModelBehavior", (
+        f"a run that already held its verdict was told a forced close was skipped: "
+        f"{closed_reason!r}")
+
+
+def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path, monkeypatch):
+    """A run id whose dir was removed and reused (the operator's retry) starts with NO run-end
+    record beside it: `materialize_run_dir` clears a stale sidecar host-side, before the box
+    exists, so an attempt that ends before writing its own (a setup failure, an unhandled
+    fault) cannot be archived under the previous attempt's exit class."""
+    alert = tmp_path / "fixture.json"
+    alert.write_text("{}\n", encoding="utf-8")
+    runs_base = tmp_path / "runs"
+    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs_base))
+    run_common = S.mod("run_common")
+
+    run_dir = run_common.materialize_run_dir(alert, "case-1047-retry")
+    S.plant_sidecar(run_dir, truncated_by="aborted")
+    import shutil
+    shutil.rmtree(run_dir)
+
+    again = run_common.materialize_run_dir(alert, "case-1047-retry")
+
+    assert again == run_dir
+    assert not S.sidecar_path(again).exists(), (
+        "the retry inherited the previous attempt's run-end record")
+
+
+def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp_path):
+    """A world archived once WITH a record and archived again without a sidecar ends with no
+    `run_end.json` — the archive makes the destination agree with "a missing artifact means
+    the run did not produce one", instead of leaving the earlier attempt's record for the
+    judge to read as this run's. A plain file is removed; an alias at the name is still
+    refused, never removed (D1)."""
+    base, _src = S.runs_base(tmp_path)
+    ep = S.episode(tmp_path)
+    run_dir = S.sibling_run_dir(base, "b")
+    archive = S.mod("learning.branch.archive")
+
+    S.plant_sidecar(run_dir, truncated_by="aborted")
+    archive.archive_episode(ep, {"b": run_dir})
+    assert (ep / "worlds" / "b" / S.run_end_name()).is_file(), "the control did not archive"
+
+    S.sidecar_path(run_dir).unlink()
+    archive.archive_episode(ep, {"b": run_dir})
+    assert not (ep / "worlds" / "b" / S.run_end_name()).exists(), (
+        "a stale run-end record survived a re-archive whose run has none")
+    assert S.graded(S.cut_short_episode(tmp_path / "control"))["b"].get("cut_short") is None
 
 
 def test_parse_record_is_strict_as_a_whole():

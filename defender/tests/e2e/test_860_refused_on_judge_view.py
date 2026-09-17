@@ -858,8 +858,16 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
-    T.mod("learning.branch.archive").archive_episode(ep, {"b": r.run_dir})
     world = ep / "worlds" / "b"
+    # The replay closes no investigation, so the run dir has no report.md of its own; the
+    # archive makes the destination agree with its source (a name whose source is absent is
+    # removed, #1047), so the fixture's report has to travel THROUGH the run dir rather than
+    # be left behind in the world dir for the archive to step around.
+    for name in ("report.md", "lessons_loaded.jsonl"):
+        if (world / name).is_file():
+            (r.run_dir / name).write_text((world / name).read_text(encoding="utf-8"),
+                                          encoding="utf-8")
+    T.mod("learning.branch.archive").archive_episode(ep, {"b": r.run_dir})
     assert (world / "executed_queries.jsonl").is_file()
     assert not (world / "policy_denials.jsonl").exists(), \
         "the archive grew a second stream for what the table already carries"

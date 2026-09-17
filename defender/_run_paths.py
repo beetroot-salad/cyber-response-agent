@@ -5,6 +5,8 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from defender._io import is_plain_entry
+
 
 #: The run's ONE wire log, and the subdirectory that holds it — the layout fact, spelled here
 #: so the writers (`runtime.observe.wire_log_path` for the runtime, `stage_trace_path` for
@@ -229,17 +231,16 @@ def artifact_file(path: Path) -> bool:
 def plain_file(path: Path) -> bool:
     """True when ``path`` is a regular file with ONE name — ``artifact_file`` plus no hard link.
 
-    The DESTINATION-side rule, the same one ``_io.write_guarded`` applies before it replaces
-    an entry. A source hard-linked elsewhere is still the bytes it is; a hard link at a
-    destination is a second name for someone else's file, and a ``copy2`` onto it opens that
-    file for writing — the copied bytes land wherever the other name lives. ``artifact_file``
-    cannot see this: a hard link IS a regular file to ``lstat``.
+    The DESTINATION-side rule, ``_io.is_plain_entry`` — the same predicate ``write_guarded``
+    applies before it replaces an entry. A source hard-linked elsewhere is still the bytes it
+    is; a hard link at a destination is a second name for someone else's file, and a
+    ``copy2`` onto it opens that file for writing — the copied bytes land wherever the other
+    name lives. ``artifact_file`` cannot see this: a hard link IS a regular file to ``lstat``.
     """
     try:
-        st = path.lstat()
+        return is_plain_entry(path.lstat())
     except (OSError, ValueError):
         return False
-    return stat.S_ISREG(st.st_mode) and st.st_nlink == 1
 
 
 def artifact_dir(path: Path) -> bool:

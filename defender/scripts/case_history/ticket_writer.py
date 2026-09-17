@@ -149,21 +149,21 @@ def close_case_ticket(
                 and not closed_before_cut):
             _log(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
             return
-        if truncated_by in run_end.FORCED_CLOSE_EXITS:
-            try:
-                rec = case_ticket.read_case_record(run_dir)
-            except case_ticket.CaseTicketError:
-                _leave_open_with_escalation(run_dir, deps, config, case_id, truncated_by)
-                return
-            _close_off_report(run_dir, deps, config, rec)
-            return
-        # Every other case: `truncated_by is None`, a real vocabulary member with no arm here
-        # (F7 — `dead-end`), an out-of-vocabulary string (already normalized to `None` above),
-        # or a leave-open class whose model HAD closed (F-A) — today's report-driven close.
+        # Every remaining case closes off the report: a forced-close-set exit off the host's
+        # own forced report, and everything else — `truncated_by is None`, a real vocabulary
+        # member with no arm here (F7 — `dead-end`), an out-of-vocabulary string (already
+        # normalized to `None` above), or a leave-open class whose model HAD closed (F-A) —
+        # off the model's. ONE read and one close; the arms differ only in what a MISSING
+        # report means: for a forced-close-set exit it means the host's own forced close
+        # failed, so there is no verdict to defer to and the escalation wins (F-K); for any
+        # other it is today's warn-and-leave-open.
         try:
             rec = case_ticket.read_case_record(run_dir)
         except case_ticket.CaseTicketError as e:
-            _warn(f"no usable report.md; leaving ticket open: {e}")
+            if truncated_by in run_end.FORCED_CLOSE_EXITS:
+                _leave_open_with_escalation(run_dir, deps, config, case_id, truncated_by)
+            else:
+                _warn(f"no usable report.md; leaving ticket open: {e}")
             return
         _close_off_report(run_dir, deps, config, rec)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run

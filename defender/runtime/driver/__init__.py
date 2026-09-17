@@ -250,10 +250,12 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
     bounds: challenge_gate.Bounds, message_history: list | None = None,
 ) -> tuple[Any, run_end.RunEnd, str | None]:
-    """Runs the `async for node in run` loop and classifies its caught exits into
-    `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside the
-    run-end record and the exit reason, so the caller can still read `run.result`/`run.ctx`
-    on a clean exit and hand the record on without re-deriving it."""
+    """@owns truncated_by, @owns closed_before_cut — runs the `async for node in run` loop,
+    classifies its caught exits into the run-end record and an exit reason, and returns the
+    (possibly unfinished) `run` alongside both, so the caller can still read
+    `run.result`/`run.ctx` on a clean exit and hand the record on without re-deriving it.
+    The sole producer of a MAIN session's exit class and of `closed_before_cut`: the sidecar
+    and the summary both carry what is decided here, and nothing else stamps either."""
     truncated_by: str | None = None
     exit_reason: str | None = None
     run: Any = None
@@ -307,22 +309,25 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
     # #1047: the run-end record, stamped HERE — the one frame that can see both the exit class
-    # and whether the model had already closed when it landed (`@owns truncated_by,
-    # closed_before_cut`) — and taken at this moment, BEFORE the forced close below sets
-    # `closed` itself. The host-side sidecar is written UNCONDITIONALLY (a clean run records
-    # `truncated_by: null`, not nothing) and before the forced report: the record is what lets
-    # a later reader tell a real model verdict from a host-manufactured one, so a FAILED
-    # record write is a reason not to write the forced report at all — a report with no record
-    # beside it is the exact pre-#1047 bug (claim h2) — and that skip is named in the exit
-    # reason rather than left looking like an ordinary exit that should carry a report.
+    # and whether the model had already closed when it landed — and taken at this moment,
+    # BEFORE the forced close below sets `closed` itself. The host-side sidecar is written
+    # UNCONDITIONALLY (a clean run records `truncated_by: null`, not nothing) and before the
+    # forced report: the record is what lets a later reader tell a real model verdict from a
+    # host-manufactured one, so a FAILED record write is a reason not to write the forced
+    # report at all — a report with no record beside it is the exact pre-#1047 bug (claim h2).
+    # That skip is named in the exit reason ONLY when a forced report was actually owed (the
+    # model had not closed); a run that already holds its own verdict lost nothing and keeps
+    # its ordinary exit reason, exactly as `_close_a_run_cut_short`'s own `closed` early return
+    # would have left it.
     end = run_end.RunEnd(truncated_by, challenge_gate.ReviewState.of(deps).closed)
+    written = _write_run_end_sidecar(deps, end)
     if truncated_by in _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE:
-        if _write_run_end_sidecar(deps, end):
+        if written:
             exit_reason = await _close_a_run_cut_short(deps, bounds, exit_reason)
-        else:
-            exit_reason = "RunEndRecordFailed"
-    else:
-        _write_run_end_sidecar(deps, end)
+        elif not end.closed_before_cut:
+            print("[run.py] the run-end record could not be written; not forcing a close",
+                  file=sys.stderr)
+            exit_reason = f"{exit_reason}+RunEndRecordFailed"
     return run, end, exit_reason
 
 
