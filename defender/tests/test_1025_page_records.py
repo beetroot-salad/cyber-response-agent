@@ -556,7 +556,7 @@ def test_1025_one_malformed_sidecar_record_sits_beside_otherwise_intact_ones(tmp
 
 def test_1025_the_root_stamp_reader_lives_in_the_record_names_home_beside_family_stamp_name(tmp_path):
     """The episode-root `provenance.json` has a reader of its own (fk-8/J12): a public accessor
-    in the record-names home, `archive.read_family_stamp(episode_dir)`, distinct from the
+    in the record-names home, `archive.read_family_stamp(bound)`, distinct from the
     per-world run-stamp reader — `None` when nothing is at the name, the `{agreed, allow_dirty}`
     mapping when the stamp is there, a `ValueError` refusal for a directory or a document that
     is not the stamp — and `FAMILY_STAMP_NAME` lives beside the other record names in
@@ -567,18 +567,19 @@ def test_1025_the_root_stamp_reader_lives_in_the_record_names_home_beside_family
     cli_source = (Path(E.mod("learning.branch.cli").__file__)).read_text(encoding="utf-8")
     assert "FAMILY_STAMP_NAME =" not in cli_source, "the constant is still bound in cli.py"
     ep = E.sample_episode(tmp_path, stamp=False)
-    assert archive.read_family_stamp(ep.dir) is None
+    bound = E.mod("_io").bind(ep.dir)
+    assert archive.read_family_stamp(bound) is None
     E.write_stamp(ep.dir, commit="abc123", allow_dirty=True)
-    stamp = archive.read_family_stamp(ep.dir)
+    stamp = archive.read_family_stamp(bound)
     assert stamp["agreed"]["commit"] == "abc123"
     assert stamp["allow_dirty"] is True
     E.plant_raw(ep.dir / "provenance.json", json.dumps(T.provenance_record()))
     with pytest.raises(ValueError, match="provenance.json"):
-        archive.read_family_stamp(ep.dir)
+        archive.read_family_stamp(bound)
     (ep.dir / "provenance.json").unlink()
     (ep.dir / "provenance.json").mkdir()
     with pytest.raises(ValueError, match="provenance.json"):
-        archive.read_family_stamp(ep.dir)
+        archive.read_family_stamp(bound)
 
 
 def test_1025_episode_root_provenance_json_is_a_directory(tmp_path):
@@ -719,12 +720,13 @@ def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_p
     (outside / "report.md").write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
     (outside / "investigation.md").write_text("# OUTSIDE-INVESTIGATION\n", encoding="utf-8")
     E.plant_link(ep / "worlds" / "b" / "report.md", outside / "report.md")
-    facts = family.read_world_facts(ep, "b", episode_token=T.EPISODE_TOKEN)
+    bound = E.mod("_io").bind(ep)
+    facts = family.read_world_facts(bound, "b", episode_token=T.EPISODE_TOKEN)
     assert facts.report.disposition is None
     assert "OUTSIDE-REPORT-BODY" not in facts.report.text
     E.plant_link(ep / "worlds" / "c" / "investigation.md", outside / "investigation.md")
     with pytest.raises(_refused()):
-        family.read_world_facts(ep, "c", episode_token=T.EPISODE_TOKEN)
+        family.read_world_facts(bound, "c", episode_token=T.EPISODE_TOKEN)
 
     grade = E.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=tmp_path / "defender-runs")
