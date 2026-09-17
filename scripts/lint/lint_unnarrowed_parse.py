@@ -117,6 +117,10 @@ RAW_PARSERS = frozenset({
     "defender._yaml.safe_load",
     "._yaml.safe_load",
     ".._yaml.safe_load",
+    # Its sibling, which hands back the same un-shaped document twice (typed and spelled).
+    "defender._yaml.safe_load_typed_and_spelled",
+    "._yaml.safe_load_typed_and_spelled",
+    ".._yaml.safe_load_typed_and_spelled",
 })
 
 # The timestamp vocabulary's raw constructor, and the name of the owner's answer to it. The

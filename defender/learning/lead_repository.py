@@ -241,7 +241,12 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
         return [], 1
     for rec in raw_rows:
         lead_id = rec.get("lead_id")
-        if not lead_id:
+        # THE LEAD-ID SHAPE, at the one loader every consumer reads the table through. The
+        # writers only ever put a `claim_lead`-validated id here, but the file is in the box's
+        # rw bind, and since #860 an id with a `∅.` row reaches the judge's VIEW 1 heading
+        # from this column alone — so a value that is not a lead id (`_run_paths.LEAD_ID_RE`,
+        # the shape the claim enforces) is one unreadable record, like a row with no id.
+        if not isinstance(lead_id, str) or not _LEAD_ID_RE.match(lead_id):
             unreadable += 1
             continue
         raw_ref = contained_payload(run_dir, rec.get("payload_path"))

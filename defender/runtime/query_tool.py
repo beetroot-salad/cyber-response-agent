@@ -17,6 +17,7 @@ from pydantic_ai.exceptions import (
     CallDeferred,
     ModelRetry,
     SkipToolExecution,
+    ToolFailed,
     ToolRetryError,
 )
 
@@ -26,8 +27,11 @@ from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.payload_view import render as _render_payload
+from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
+from defender.runtime.tools import DeadEnd
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
+    DENIED_QUERY_ID,
     REPEAT_ESCAPE,
     REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
@@ -88,6 +92,31 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 DEFAULT_FAULT_EXIT = 2
+
+# ---------------------------------------------------------------------------------------------
+# #987 — THE DOOR. A lead a GUARD stops is told so IN THE TOOL RESULT, in gather's own
+# vocabulary, and writes its summary on the next turn like any lead that finished; nothing is
+# raised out of the run and nothing is replayed. These sentences are what the gather model
+# reads. MAIN's idiom ("Treat this lead as incomplete…") is never among them (#807 G19). The
+# request CEILING is not a door: it is a fact about the round, and `request_ceiling` tells the
+# model at the round — and withholds the tools on it, so no `query` call ever arrives here on
+# a final request.
+# ---------------------------------------------------------------------------------------------
+
+#: After a guard's dead end (`GatherDeadEnd.reason` precedes it): a FAILED tool result.
+QUERY_DOOR_CLOSED = "No further queries can be issued on this lead. " + WRITE_SUMMARY_NOW
+#: Any `query` after the door closed — a sibling in the closing round, or a later turn's call:
+#: not run, and said so, rather than answered with a reason that belongs to another call. The
+#: reason itself is in the tool result of the call that closed the door.
+QUERY_NOT_RUN = (
+    "This call was not executed: the lead was stopped by an earlier query. " + QUERY_DOOR_CLOSED
+)
+
+
+def _door_closed(deps: Any) -> bool:
+    """A deps with no stop record (lead zero's harness-driven calls) has no door to close."""
+    stop = getattr(deps, "stop", None)
+    return stop is not None and stop.door_closed
 
 #: How the host names a system it withheld — ONE spelling, spent by `_undeclared_target` on the
 #: sentence MAIN reads and by `UNDECLARED_SYSTEM_DETAIL` on the row. Not a shared PREDICATE (see
@@ -216,6 +245,19 @@ def _screen_ticket_payload(
     return payload, 0, ""
 
 
+def _dispatched_lead(deps: Any) -> str:
+    """The lead this call was dispatched inside. Every production `GatherDeps` carries one
+    (`tools_gather`, `lead_zero._capture`, `tools._bash` all bind it), and every frame of the
+    capture that touches the queries table is lead-scoped — so a call reaching any of them
+    without a lead is an internal error, said ONCE and the same way at each frame. The
+    rejection guard used to answer `None` here instead, a tolerance for a lead-less denial
+    that #860 retired (a denial is the dispatching lead's own row); left in place, the guard
+    tolerated what the row write two lines later raised on."""
+    if deps.lead_id is None:
+        raise RuntimeError("internal: query reached capture without a dispatched lead_id")
+    return deps.lead_id
+
+
 class QueryCapture(AbstractCapability[Any]):
 
     def __init__(self, registry: Any, role: str = "gather"):
@@ -230,12 +272,15 @@ class QueryCapture(AbstractCapability[Any]):
 
         return observe.denial_logger(run_dir)
 
-    def _decide_guarded(self, system: str, verb: str) -> tuple[Any, str | None]:
+    def _decide_guarded(
+        self, system: str, verb: str, params: dict,
+    ) -> tuple[Any, str | None]:
         """THE grant decision, guarded against a broken adapter import: the agreement check is
         deferred to first resolution, not policy compile, so a broken sibling adapter must not
-        unwind the stage (§7 R2)."""
+        unwind the stage (§7 R2). `decide_call`, not `decide`: this is a call being MADE, and
+        a registry that keeps a served record (a sibling world's) records what it decided."""
         try:
-            return self._registry.decide(system, verb), None
+            return self._registry.decide_call(system, verb, params), None
         except CONTROL_FLOW_EXCEPTIONS:
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
@@ -445,16 +490,15 @@ class QueryCapture(AbstractCapability[Any]):
         The budget is IDENTITY-BLIND, so it is asked with neither `system_key` nor the request
         triple — which is exactly why it catches the family the guard above cannot: an
         undeclared name per turn, whitespace drift, assigned-but-font-blank codepoints."""
-        if deps.lead_id is None:
-            return None
-        rows = lead_rows(deps.run_dir, deps.lead_id)
+        lead_id = _dispatched_lead(deps)
+        rows = lead_rows(deps.run_dir, lead_id)
         trip = rejection_trip(
-            rows, deps.lead_id,
+            rows, lead_id,
             system=system, verb=verb, params=params, system_key=system_key,
         )
         if trip is not None:
             return trip
-        return rejection_budget_trip(rows, deps.lead_id)
+        return rejection_budget_trip(rows, lead_id)
 
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
@@ -462,6 +506,12 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             return await handler(args)
         except (ValidationError, ModelRetry) as e:
+            # A schema-refused call after the door closed is not corrected — a correction is
+            # "try again", charged to the tool's retry budget, on a lead that was told to
+            # stop — and not rowed: it was never a call. A call the schema ACCEPTS goes on to
+            # the execute hook, where the grant check sees it before the door does.
+            if _door_closed(ctx.deps):
+                raise ToolFailed(QUERY_NOT_RUN) from e
             raw = _raw_args(args)
             # THE SECOND IDENTITY EXTRACTION. These are the RAW arguments: this frame runs
             # precisely because the schema refused to produce validated ones. A non-dict
@@ -510,21 +560,94 @@ class QueryCapture(AbstractCapability[Any]):
                 detail=detail,
             )
             if trip is not None:
-                raise rejection_dead_end(
+                raise self._stop(ctx, rejection_dead_end(
                     trip,
                     target=self._undeclared_target(recorded=system, raw=raw_system),
                     verb=verb,
-                ) from e
+                )) from e
             raise
+
+    async def _record_denied(
+        self, deps, *, system: str, verb: str, params: dict, refusal: str,
+    ) -> None:
+        """THE DENIED ROW (#860): a `∅.denied` sentinel, the same shape `_grant_check`'s two
+        other above-guard writers leave, so the lead's refused attempt is on the one surface
+        the offline judge reads leads from — inherited by a sibling world with the table,
+        archived with it, and split onto `JoinedLead.sentinels` by the join. It charges
+        nothing: `DENIED_EXIT_CODE` is outside `INFRA_EXIT_CODES` (no breaker), its id is
+        outside `repeat_trip`'s domain (`ABOVE_PLACEMENT_QUERY_IDS`), and its class is
+        neither guard's. `system_key=""` for the granted path's reason: `decide` returns
+        DENIED only for a system the grant names, so the row's `system` already identifies
+        the call.
+
+        A ROW WRITE THAT FAILS DOES NOT DISPLACE THE REFUSAL (`estate._record_beside`'s
+        posture, for its reason): the denial is a business outcome the model must see and
+        continue past (#632), the audit record already holds it, and a planted link or a
+        full disk under `executed_queries.jsonl` would otherwise turn "not granted" into an
+        `OSError` that ends the lead. Reported, dropped. The neighbouring branches keep
+        their raise — their rows ARE the outcome."""
+        try:
+            await self._record(
+                deps, system=system, verb=verb, query_id=DENIED_QUERY_ID, params=params,
+                payload=None, exit_code=circuit_breaker.DENIED_EXIT_CODE, detail=refusal,
+                system_key="",
+            )
+        except CONTROL_FLOW_EXCEPTIONS:
+            raise
+        except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+            raise
+        except Exception as write_failed:  # noqa: BLE001 — see the docstring
+            print(f"[query_tool] could not record the denied row for {system}.{verb} "
+                  f"({write_failed!r}); the refusal itself is what the model sees",
+                  file=sys.stderr)
 
     async def _grant_check(
         self, deps, system: str, verb: str, params: dict,
     ) -> tuple[Any, str | None]:
         """THE GRANT CHECK, ahead of everything else (§7 R3/R23, reversed at phase F — a denied
         call always produces its denial record and never an evidence row, whatever else is
-        wrong with it). Returns `(decision, early_result)`; `early_result` is set when the
-        caller must return without ever reaching execution."""
-        decision, load_error = self._decide_guarded(system, verb)
+        wrong with it; since #860 it also leaves its `∅.denied` sentinel row, which is not
+        evidence). Returns `(decision, early_result)`; `early_result` is set when the caller
+        must return without ever reaching execution."""
+        decision, load_error = self._decide_guarded(system, verb, params)
+        if load_error is None and decision.outcome == DENIED:
+            refusal = decision.refusal or f"denied: {system}.{verb}"
+            # THE AUDIT RECORD FIRST (§7 R2/R3): a denied call always produces it — above the
+            # door, because a lead told to stop does not get a quieter audit trail (#987) —
+            # and a row write that fails below has already left it behind.
+            self._denial_logger_for(deps.run_dir).log_policy_denial(
+                role=self._role, system=system, verb=verb,
+                call_id=f"{system}.{verb}", params=params,
+            )
+            # THE DOOR (#987), between the record and the row, and it withholds only the ROW:
+            # a call against a closed door is not an attempt the tables count, denied or not,
+            # but a denial is answered as the denial it is, never as `QUERY_NOT_RUN` — the
+            # grant check sits above the door (`test_a_denied_verb_after_a_dead_end_still_
+            # leaves_its_denial_record`). (A sibling's served ledger already holds the
+            # `refused` row `decide_call` wrote at the decision — the world's record of
+            # having asked, which the door does not change.)
+            if not _door_closed(deps):
+                await self._record_denied(deps, system=system, verb=verb, params=params,
+                                          refusal=refusal)
+            # NOT `_model_view`: that frame prepends the repeat guard's coaching, and a denial
+            # is the one refusal retrying cannot fix (#632). The model sees the refusal alone.
+            return None, _format_bash_result(
+                circuit_breaker.DENIED_EXIT_CODE, "", wrap_fresh(refusal, "untrusted"), "",
+            )
+
+        # THE DOOR (#987) sits BELOW the grant decision and ABOVE every row. Below the
+        # decision because a denied call always produces its denial record, whatever else is
+        # wrong with it — a lead told to stop does not get a quieter audit trail. Above every
+        # row because a call against a closed door never runs, whenever it came, and is not
+        # an attempt the tables should count: a sibling of the closing call in the same round
+        # (the round's calls are all validated, then all executed, so a trip at validation is
+        # seen by every sibling's execution), or the model querying again after being handed
+        # the closing sentence. Either is answered `QUERY_NOT_RUN` and costs the model nothing
+        # but the turn; the ceiling bounds a model that keeps trying, and `request_ceiling`
+        # still puts the summary request in front of it.
+        if _door_closed(deps):
+            raise ToolFailed(QUERY_NOT_RUN)
+
         if load_error is not None:
             # THE BREAKER CHECK, consulted HERE and not only in `wrap_tool_execute`. These
             # `infra` rows are excluded from `rejection_trip` on the promise that
@@ -550,15 +673,6 @@ class QueryCapture(AbstractCapability[Any]):
                 system_key="",
             )
             return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
-
-        if decision.outcome == DENIED:
-            self._denial_logger_for(deps.run_dir).log_policy_denial(
-                role=self._role, system=system, verb=verb,
-                call_id=f"{system}.{verb}", params=params,
-            )
-            return None, _format_bash_result(
-                DEFAULT_FAULT_EXIT, "", wrap_fresh(decision.refusal or "", "untrusted"), "",
-            )
 
         if decision.outcome != GRANTED:
             # The unresolvable-verb repeat class — the schema class's shape at a different
@@ -624,10 +738,36 @@ class QueryCapture(AbstractCapability[Any]):
             )
             raise ModelRetry(reason)
 
+    @staticmethod
+    def _stop(ctx, dead_end: GatherDeadEnd) -> BaseException:
+        """Close the lead's door on `dead_end` and return what THIS call raises in its place: a
+        failed tool result carrying the guard's own reason and the closing sentence, so the
+        model's next turn is the summary. `ToolFailed` and not `ModelRetry` because the
+        framework appends "try again" to a retry and charges the tool's retry budget for it;
+        a failed result does neither, from the validate hook as well as this one. Outside a
+        dispatch (deps with no stop record — lead zero's harness-driven calls) the dead end
+        itself, to unwind as it always has."""
+        stop = getattr(ctx.deps, "stop", None)
+        if stop is None:
+            return dead_end
+        stop.close_door(DeadEnd(dead_end.reason, dead_end.escape))
+        return ToolFailed(f"{dead_end.reason} {QUERY_DOOR_CLOSED}")
+
     async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
+        try:
+            return await self._execute(ctx, args, handler)
+        except GatherDeadEnd as e:
+            failed = self._stop(ctx, e)
+            if failed is e:
+                raise
+            raise failed from e
 
+    async def _execute(self, ctx, args, handler):  # noqa: ANN001
+        """The call itself — the grant, the door, the breaker, the repeat guard, the screens,
+        the verb, the row. Raises `GatherDeadEnd` for a guard's stop; `wrap_tool_execute`
+        owns the door."""
         deps = ctx.deps
         system = as_str(args.get("system"))
         verb = as_str(args.get("verb"))
@@ -656,7 +796,8 @@ class QueryCapture(AbstractCapability[Any]):
             # partition this table on `query_id`, and the model's id sends the trip row to the
             # wrong two — a coined id is minted as a `_draft/` template proposing the refused
             # query, a catalog id is handed to the lead-author as a failure of that template.
-            # The guard's own counted domain keys on ABOVE_GUARD_QUERY_ID alone, so untouched.
+            # The guard's own counted domain excludes `ABOVE_PLACEMENT_QUERY_IDS`, not this
+            # id, so the trip row is counted by neither scan (its docstring says why not).
             await self._record(
                 deps, system=system, verb=verb, query_id=REPEAT_TRIP_QUERY_ID, params=params,
                 payload=None, exit_code=USAGE_EXIT_CODE, detail=repeat_trip_detail(trip),
@@ -714,8 +855,7 @@ class QueryCapture(AbstractCapability[Any]):
         `_grant_check`'s unresolvable branch) are the ones a reader has to check, and a
         required keyword is what puts each of the four in front of that reader rather than
         letting a writer that OUGHT to fingerprint pass for one that has nothing to."""
-        if deps.lead_id is None:
-            raise RuntimeError("internal: query reached capture without a dispatched lead_id")
+        lead_id = _dispatched_lead(deps)
 
         text = "" if exit_code != 0 else json.dumps(payload, default=str)
         run_dir = deps.run_dir
@@ -726,7 +866,7 @@ class QueryCapture(AbstractCapability[Any]):
             # nothing will ever add an `await` here.
             row = append_query_row(
                 run_dir,
-                lead_id=deps.lead_id,
+                lead_id=lead_id,
                 system=system,
                 verb=verb,
                 query_id=query_id,

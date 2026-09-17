@@ -38,9 +38,10 @@ from defender.learning.judge.family import (
     discriminator_of,
     episode_id_of,
     json_mapping,
+    has_refusals,
     lead_chain,
-    leads_by_id,
     own_h_rows,
+    render_refused,
     raw_manifest,
     read_review_record,
     read_samples_record,
@@ -158,6 +159,10 @@ def _render_leads(leads: dict[str, dict[str, Any]]) -> str:
         lines.append(f"- goal: {chain.get('goal')}")
         lines.append(f"- params: {chain.get('params')}")
         lines.append(f"- payload: {chain.get('payload')}")
+        # Directly after `payload:` and printed for EVERY lead, `[]` included (#860 M4): the
+        # line's absence would be one more way for "refused nothing" and "refusals are not
+        # shown here" to read the same.
+        lines.append(f"- refused: {render_refused(chain['refused'])}")
         lines.append(f"- summary: {chain.get('summary')}")
         lines.append(f"- resolutions: {chain.get('resolutions')}")
     return "\n".join(lines) + "\n"
@@ -570,6 +575,16 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     summaries_dir = world_dir / GATHER_SUMMARIES_DIRNAME
     if artifact_dir(summaries_dir):
         lead_ids |= {p.stem for p in summaries_dir.glob("*.md")}
+    # #860 M4b: a lead whose only activity was refused may be cited by neither the document
+    # nor a summary — the harness writes a summary for a dead-ended lead, not for one the
+    # grant check turned away — and VIEW 1 built from those two sources alone left it out
+    # entirely. Every lead the surface knows to have a refusal is added; a lead with a file
+    # and nothing else is NOT (the judge grades what the lead did, and it did nothing). Off
+    # the world's one read of its table (`WorldFacts.leads`), which is also where the
+    # lead id was screened: the table is in the box's rw bind, and a `lead_id` that is not a
+    # lead id is an unreadable row at the loader, never a heading here.
+    by_id = record.leads
+    lead_ids |= {lid for lid, lead in by_id.items() if has_refusals(lead)}
 
     # The report's BYTES for the prompt, off the same read the mechanical pass made.
     report_text = record.report.text
@@ -674,7 +689,6 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
         for k, v in sorted(spread.items(), key=lambda kv: (kv[0] is None, str(kv[0])))
     ] if siblings else []
 
-    by_id = leads_by_id(world_dir)
     leads = {lid: lead_chain(world_dir, lid, resolutions_by_lead, leads=by_id)
              for lid in sorted(lead_ids)}
 

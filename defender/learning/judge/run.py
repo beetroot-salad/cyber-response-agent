@@ -237,7 +237,8 @@ _ROLE_PROMPT = Path(__file__).resolve().parent / "role.md"
 #: report are the graded world's own bytes and are titled for what they are.
 SECTION_TITLES: dict[str, str] = {
     "manifest": "THE FAMILY MANIFEST (the graded world last; every other world counterfactual)",
-    "leads": "VIEW 1 — PER-LEAD CHAIN (goal -> params -> payload -> summary -> resolutions)",
+    "leads": "VIEW 1 — PER-LEAD CHAIN (goal -> params -> payload -> refused -> summary -> "
+             "resolutions)",
     "coverage": "VIEW 2 — COVERAGE (what this world asked on the family's holding system)",
     "siblings": "VIEW 3 — SIBLING TRIALS OF THIS SAME ALERT",
     "lessons": "VIEW 4 — LESSONS LOADED INTO THIS WORLD (name, path, and the body at its "
@@ -573,11 +574,37 @@ def _build_prompt(judge_input: JudgeInput) -> str:
     task = (
         f"World {label} has run; grade it.\n\n"
         "Compare it against the four joined views below: its per-lead chain (goal, params, "
-        "payload, summary, resolutions), its coverage of the family's "
+        "payload, refused, summary, resolutions), its coverage of the family's "
         "discriminator, the sibling trials of this same alert, and the lessons it loaded — "
         "plus the trial spread. Every OTHER world is marked counterfactual: withhold its "
         "overlay from your reasoning and never cite its facts as facts about the graded "
         "world.\n\n"
+        # #860 O2/M5 — what a `refused:` entry MEANS, stated in host text. Without this the
+        # line is bytes the model can still read as absence: a lead that tried the holding
+        # system and was turned away by the harness rendered as `params: None`, `payload: []`,
+        # and a live draw concluded the defender never queried it — a `lead-set` finding the
+        # lessons curator folded into a lesson telling the runtime to run a query the role is
+        # not granted. The polarity (`external=true` -> observability, never lead-set) is the
+        # whole of the rule, spelled the way `family.render_refused` prints it; the rest says
+        # where the evidence pointer goes and ties VIEW 2's `source: refused` to it: the
+        # sibling's registry files a denial there too (`WorldRegistry.decide_call`), beside
+        # the seam's own refusal, and both count as having queried — the model must not read
+        # that row as a query that ran, nor as a second refusal.
+        "READ A LEAD'S `refused:` LINE BEFORE GRADING ITS COVERAGE. Each entry there is an "
+        "attempt that reached NO system — it is not a query, and it is not the absence of "
+        "one. `external=true` means the harness or the estate withheld it (a verb the "
+        "defender's role is not granted, an adapter that could not load): the defender asked "
+        "and was refused before the call was made, so for a lead whose refusal is external "
+        "on the family's holding system the finding is `observability` (subject: "
+        f"{SUBJECT_DEFENDER}) and NEVER `lead-set` — do not author a lesson telling the "
+        "defender to run a query it is not granted. `external=false` is the defender's own "
+        "conduct (a rejected call, a repeat the guard refused, a reducer it broke) and grades "
+        "as such. Every refused entry is a `∅.`-prefixed row in this world's own "
+        "`executed_queries.jsonl`, which is the `evidence` pointer for a finding about it. "
+        "A `source: refused` row in VIEW 2 is the served ledger's word for the same event "
+        "(a denied call), or for a call the estate seam itself turned away; either way the "
+        "world asked and was not answered — it counts as having queried, not as a query "
+        "that ran, and it is not a second refusal to grade.\n\n"
         "Before findings, run three passes and report each as its own table:\n"
         "1. CORRELATION — for every fact reachable across two joined rows, name the hand-off.\n"
         "2. SCOPE — for every lead touching the holding system, name the index, window and "

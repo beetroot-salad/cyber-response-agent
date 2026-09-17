@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -195,3 +196,65 @@ def test_every_checked_in_projection_has_a_score(case_dir, proj_path):
             for p in (case_dir / "scores").glob("*.json")}
     assert proj_path.name in tags, (
         f"{case_dir.name}/{proj_path.name} has no scores/ artifact — run score.py")
+
+
+# no checked-in projection carries a YAML-typed instant (#951, O4)
+#
+# The containment checks read a projection's values as the text in the file, so what they
+# compare against the author's literal is whatever the PRODUCER wrote. `yaml.safe_dump` quotes
+# any string that would resolve as a timestamp, so in a dumped projection an unquoted
+# instant can only be a `datetime` the producer had already parsed the model's text into —
+# and re-spelled as `2026-07-25 07:48:37.065000+00:00`, which no author's `T…Z` literal will
+# ever match. This sweep catches that producer at commit time. (A producer that wrote the
+# model's raw text with an unquoted instant would trip it too; the checks read that correctly,
+# and the fix would be to narrow this sweep, not to edit the model's output.) The author's
+# side needs no sweep: `validate_cases.check_clause_text` refuses an unquoted clause entry.
+
+PROJECTION_FILES = sorted(CASES_DIR.glob("*/projections/*.yaml"))
+
+
+def _typed_instants(doc, path: str = "") -> list[str]:
+    """Every place in a loaded document — keys included — that is a `date`/`datetime`."""
+    if isinstance(doc, date | datetime):
+        return [path or "<root>"]
+    found: list[str] = []
+    if isinstance(doc, dict):
+        for key, value in doc.items():
+            found += _typed_instants(key, f"{path}/<key {key!r}>")
+            found += _typed_instants(value, f"{path}/{key}")
+    elif isinstance(doc, list):
+        for i, value in enumerate(doc):
+            found += _typed_instants(value, f"{path}[{i}]")
+    return found
+
+
+def test_there_are_projections_to_scan():
+    """The sweep below would pass vacuously over an empty glob."""
+    assert len(PROJECTION_FILES) > 50
+
+
+@pytest.mark.parametrize(("typed", "where"), [
+    ({"a": date(2026, 7, 25)}, "/a"),
+    ({"projections": [{"events": [{"@timestamp": datetime(2026, 7, 25, 7, 48)}]}]},
+     "/projections[0]/events[0]/@timestamp"),
+    ({datetime(2026, 7, 25, 7, 48): "x"}, "/<key datetime.datetime(2026, 7, 25, 7, 48)>"),
+    ([[date(2026, 7, 25)]], "[0][0]"),
+])
+def test_the_typed_instant_walker_fires_on_a_synthetic_document(typed, where):
+    """The tree sweep is green today (design C9: 0 typed values in 101 projections), so
+    this proves its detector can fire — on a value, a nested value, a key, and inside a
+    bare list — and that a quoted instant does not trip it."""
+    assert _typed_instants(typed) == [where]
+    assert _typed_instants(yaml.safe_load("a: '2026-07-25T07:48:37.065Z'\nb: 2026-07-25")) == ["/b"]
+    assert _typed_instants(yaml.safe_load("a: '2026-07-25'\nb: [x, 22, ~]")) == []
+
+
+@pytest.mark.parametrize("path", PROJECTION_FILES,
+                         ids=lambda p: str(p.relative_to(CASES_DIR)))
+def test_no_checked_in_projection_carries_a_yaml_typed_instant(path):
+    """Under plain `yaml.safe_load`, no value (or key) anywhere in a committed projection
+    is a `date`/`datetime` — see the block comment above for what that detects."""
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert _typed_instants(doc) == [], (
+        f"{path.relative_to(CASES_DIR)} carries YAML-typed instant(s): a parse-then-dump "
+        f"producer re-spelled the model's text, and the containment checks compare text")

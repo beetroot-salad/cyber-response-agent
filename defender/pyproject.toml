@@ -14,7 +14,7 @@ dependencies = [
 # provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.3, selected
 # via a `fireworks:`/`glm-*` model id). Install with: uv pip install -e '.[runtime]'.
 runtime = [
-    "pydantic-ai-slim[anthropic,mcp,openai]>=1.107",
+    "pydantic-ai-slim[anthropic,mcp,openai]>=2.19",
     # toons — the TOON encoder behind the tool-boundary view gate (#872,
     # scripts/gather_tools/): a foreign toolset's dict/list result is re-encoded
     # and substituted only when the re-encoding is measurably cheaper on the

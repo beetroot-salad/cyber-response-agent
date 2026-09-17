@@ -23,6 +23,14 @@ What that ordering buys, and what every test here asserts in its own words:
   authorization is skipped and the refusal goes unrecorded.
 * A denied call leaves NO evidence row — full stop, not "when well-formed". The narrowing
   the earlier ordering forced onto every no-evidence-row obligation is WITHDRAWN.
+  AMENDED BY #860: "evidence row" means a row a call that REACHED a system wrote. A denied
+  call now leaves exactly one `∅.denied` SENTINEL row (`record_query.DENIED_QUERY_ID`) —
+  writer-only, split onto `JoinedLead.sentinels` and never `.queries`, partitioned out of
+  every learning-loop router by its `∅.` prefix like the repeat trip and the shim failure
+  before it — so the offline judge can see that the lead tried and was refused. It consumes
+  a seq and an empty sidecar the way every sentinel does; it charges no breaker, counts
+  toward no guard, and its `error_class` is `denied`, not `agent-fixable`. `_Run.own_evidence`
+  is the "no evidence row" reading; `_Run.own_denied_rows` the sentinel's.
 * A call that is both malformed and denied takes the DENIAL path: the model sees the
   denial, not the malformedness.
 * The traversal screen no longer precedes authorization. What keeps a hostile
@@ -48,7 +56,9 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime import circuit_breaker  # noqa: E402
+from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS  # noqa: E402
 from defender.runtime.driver import GATHER_DEF  # noqa: E402
+from defender.scripts.gather_tools.record_query import DENIED_QUERY_ID  # noqa: E402
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DENIED,
     DONE,
@@ -84,8 +94,9 @@ def _registry(rec: VerbRecorder, *, granted=(GRANTED_PAIR,), declared=DECLARED,
 
 def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path: Path):
     """A verb the role's verb_grant does not name returns a plain legible refusal as the
-    tool's ORDINARY result — nothing raised for the driver to catch, no sequence number, no
-    evidence row, no circuit-breaker contribution — and the agent's next turn still runs.
+    tool's ORDINARY result — nothing raised for the driver to catch, no evidence row (one
+    `∅.denied` sentinel, #860), no circuit-breaker contribution — and the agent's next turn
+    still runs.
 
     §7 R2 settles this as the pinned reading, no longer provisional: the refusal is a
     business outcome, and only a missing audit record is an infrastructure fault. The shape
@@ -97,9 +108,60 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
 
     assert rec.calls == [], "the denied verb body ran"
     assert r.gather.calls >= 2, "the refusal did not come back as a result the loop continued past"
-    assert r.own_rows == [], "a denied call wrote an evidence row"
+    assert r.own_evidence == [], "a denied call wrote an evidence row"
+    assert len(r.own_denied_rows) == 1, "the denial left no `∅.denied` sentinel row (#860)"
     assert r.breaker.get("total_failures", 0) == 0
     assert "esql" in r.gather_saw
+
+
+def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path: Path):
+    """§7 R2, held at the row: a denial is a BUSINESS outcome the model must see and continue
+    past, and the `∅.denied` row (#860) is written after the audit record and before the
+    refusal is returned — so a row write that faults (the table replaced by a directory here;
+    a planted link or a full disk in the box) must not turn "not granted" into an `OSError`
+    that escapes the capability and ends the lead. Reported to stderr and dropped, the way
+    the estate seam drops a failed `refused` row: the refusal is what propagates.
+
+    The table is broken from INSIDE the gather leg's first model turn, so lead-0's own rows
+    and the dispatch have already landed and only the denied call's write meets the fault.
+
+    Observed failing by: the gather loop stopping at one call (the exception ended the lead),
+    or the refusal text absent from what the model saw."""
+    from defender._run_paths import RunPaths
+    from defender.tests._verb_authorization_632 import _Run
+    from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, drive, materialize
+
+    class BreakingReplay(ReplayFn):
+        def __init__(self, turns, run_dir):
+            super().__init__(turns)
+            self.run_dir = run_dir
+
+        def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
+            if self.calls == 0:
+                table = RunPaths(self.run_dir).executed_queries
+                table.unlink()
+                table.mkdir()
+            return super().__call__(messages, info)
+
+    rec = VerbRecorder()
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    main = ReplayFn([
+        Turn(tool_calls=[("gather", {
+            "lead_id": LEAD, "system": "elastic", "goal": "measure this lead",
+            "what_to_summarize": ["auth events"],
+        })]),
+        Turn(text="Investigation complete."),
+    ])
+    gather = BreakingReplay([q(*DENIED_PAIR), DONE], run_dir)
+    drive(run_dir, run_id="d0-broken-table", main=main, gather=gather, verbs=_registry(rec))
+    r = _Run(run_dir, main, gather)
+
+    assert rec.calls == [], "the denied verb body ran"
+    assert r.gather.calls >= 2, \
+        "the row-write fault ended the lead: the refusal never came back as a result"
+    assert "not granted" in r.gather_saw, "the model did not see the refusal"
+    assert "esql" in r.gather_saw, "the refusal the model saw does not name the verb"
+    assert len(r.own_denials) == 1, "the audit record — written FIRST — is missing"
 
 
 def test_a_denied_verb_is_not_the_unknown_verb_path(tmp_path: Path):
@@ -113,7 +175,9 @@ def test_a_denied_verb_is_not_the_unknown_verb_path(tmp_path: Path):
     unknown = run_gather(tmp_path / "b", verbs=_registry(rec),
                          turns=[q("elastic", "nosuch-verb"), DONE], run_id="d2-unknown")
 
-    assert denied.own_rows == []
+    assert denied.own_evidence == []
+    assert [row["error_class"] for row in denied.own_denied_rows] == [DENIED_ERROR_CLASS], \
+        "the denial's sentinel row reads as something a retry could fix"
     assert len(unknown.own_rows) == 1, "an undeclared verb stopped writing its row"
     assert unknown.own_rows[0]["error_class"] == "agent-fixable"
     assert denied.own_denials, "the denial left no audit record at all"
@@ -194,11 +258,13 @@ def test_a_refusal_lists_only_the_roles_granted_subset(tmp_path: Path):
 
 
 
-def test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file(tmp_path: Path):
-    """A denied gather verb CONSERVES the run's evidence surface and allocates nothing of its
-    own: everything the run had written before the denied call is byte-identical afterwards,
-    and the three things a query call allocates — the lead-scoped payload directory, a
-    queries row, a sequence number — are all absent.
+def test_a_denied_gather_verb_leaves_only_its_sentinel_row_and_an_empty_sidecar(tmp_path: Path):
+    """A denied gather verb CONSERVES the run's evidence surface and allocates only what its
+    `∅.denied` sentinel is: everything the run had written before the denied call is
+    byte-identical afterwards (the queries table appended to, never rewritten), and what a
+    QUERY call allocates — a query row, a payload — is absent. Since #860 the denial takes a
+    sequence number and an EMPTY sidecar, exactly as the repeat trip and the shim failure do,
+    because the sidecar must exist for the row to survive `extract_from_joined`.
 
     CONSERVATION IS THE LOAD-BEARING HALF, and absence alone is not enough. "Leaves nothing
     behind" read as an empty tree is satisfiable by DESTROYING evidence, and an implementer
@@ -215,8 +281,10 @@ def test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file(tmp_path
     `payload_files` and the conservation snapshot replace it rather than joining it.
 
     Also carries the whole-lead consensus: a lead every query of which was denied leaves
-    ZERO rows on the evidence surface, which is what keeps a denial out of the learning
-    loop's input. Currently violated — the reject branch records before refusing (c4/g5).
+    ZERO query rows on the evidence surface. What keeps the denial out of the learning
+    loop's input is no longer absence but the `∅.` partition every router already applies
+    (`draft_synthesis`, `_handoff`, `capture`, the branch precondition) — pinned in
+    `test_a_denials_sentinel_row_is_a_sentinel_to_every_reader` below.
 
     NO NARROWING. Under the grant-first ordering this holds for every denied call, whatever
     else is wrong with it: a malformed-and-denied call and a traversal-shaped-id denied call
@@ -229,35 +297,47 @@ def test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file(tmp_path
                    watch=True)
 
     assert rec.calls == [], "a denied verb body ran"
-    assert r.own_rows == [], "a lead whose every query was denied still put rows on the evidence surface"
-    assert r.payload_files == [], "a denied call left a payload file behind"
-    assert not (r.run_dir / "gather_raw" / LEAD).exists(), \
-        "the lead-scoped payload directory was allocated for a denial"
+    assert r.own_evidence == [], \
+        "a lead whose every query was denied still put query rows on the evidence surface"
+    assert [row["query_id"] for row in r.own_rows] == [DENIED_QUERY_ID, DENIED_QUERY_ID], \
+        "the two denials are not the lead's two `∅.denied` rows and nothing else"
+    assert [f.read_bytes() for f in r.payload_files] == [b"", b""], \
+        "a denial's sidecar carries bytes — a denied call has no payload to persist"
     assert len(r.own_denials) == 2, "the two denials are not both in the audit stream"
 
     # Conservation. The snapshots straddle the two denied calls; the first is the state the
-    # dispatch left, and it must survive them byte for byte.
+    # dispatch left, and it must survive them byte for byte — the queries table APPENDED TO
+    # (its prior bytes a prefix of its later ones), nothing else touched, and the only
+    # additions the two sentinels' own empty sidecars (plus the table itself, when lead-0
+    # wrote no row before the dispatch).
     assert len(r.snapshots) >= 3, "the drive did not straddle both denied calls"
     before, after = r.snapshots[0], r.snapshots[-1]
     assert before, "the pre-call snapshot is empty — conservation would hold vacuously"
-    assert after == before, (
-        "a denial changed the evidence surface the run had already allocated: "
-        f"removed={sorted(set(before) - set(after))} added={sorted(set(after) - set(before))} "
-        f"rewritten={sorted(k for k in set(before) & set(after) if before[k] != after[k])}"
+    table = "executed_queries.jsonl"
+    assert sorted(set(before) - set(after)) == [], "a denial removed evidence the run had allocated"
+    assert sorted(k for k in set(before) & set(after) if before[k] != after[k] and k != table) == [], \
+        "a denial rewrote evidence the run had allocated"
+    if table in before:
+        assert after[table].startswith(before[table]), "the queries table was rewritten, not appended to"
+    sidecars = {f"gather_raw/{LEAD}/{row['seq']}.json" for row in r.own_denied_rows}
+    assert set(after) - set(before) <= sidecars | {table}, (
+        "a denial added something beyond its sentinel's own sidecar: "
+        f"{sorted(set(after) - set(before) - sidecars - {table})}"
     )
     assert (r.run_dir / "gather_raw" / f"{LEAD}.lead.json").is_file(), \
         "the lead's own dispatch sidecar was destroyed to make the tree look untouched"
 
-    # The sequence counter, observed where it is observable: the FIRST granted call after two
-    # denials still takes seq 0. A denial that quietly consumed a number shows up here and
-    # nowhere else, because the counter has no other reader.
+    # The sequence counter, observed where it is observable: the sentinel takes a number
+    # like every sentinel (#860), so the FIRST granted call after two denials takes seq 2,
+    # and the two numbers before it are the denials' own — neither skipped nor shared.
     kept = VerbRecorder()
     later = run_gather(tmp_path / "then-granted", verbs=_registry(kept),
                        turns=[q(*DENIED_PAIR), q(*DENIED_PAIR), q(*GRANTED_PAIR), DONE],
                        run_id="d3-seq")
     assert [c.verb for c in kept.calls] == ["query"]
-    assert [row["seq"] for row in later.own_rows] == [0], \
-        "a denial consumed a sequence number the granted call then skipped"
+    assert [(row["seq"], row["query_id"]) for row in later.own_rows] \
+        == [(0, DENIED_QUERY_ID), (1, DENIED_QUERY_ID), (2, "elastic.query")], \
+        "the denials' sentinel rows and the granted row do not take consecutive seqs in order"
 
 
 def test_a_granted_gather_verb_still_writes_its_row_and_its_payload(tmp_path: Path):
@@ -276,12 +356,14 @@ def test_a_granted_gather_verb_still_writes_its_row_and_its_payload(tmp_path: Pa
     assert r.own_denials == [], "a granted call was audited as a policy denial"
 
 
-def test_a_denial_outside_a_dispatched_lead_runs_no_lead_scoped_allocation(tmp_path: Path):
-    """A denial needs no lead context: the allocation machinery a denial must not touch is
-    LEAD-SCOPED, and the decision plus its audit record are both reachable without it. This
-    pins that the early return is genuinely EARLY rather than merely conditional — today
-    the capture path raises outright when a query reaches it with no dispatched lead, so a
-    denial routed through it would turn a policy refusal into an internal error."""
+def test_a_denial_is_the_dispatched_leads_own_row_and_the_audit_record_is_the_runs(tmp_path: Path):
+    """The DECISION needs no lead context — the grant is a function of role, system and verb —
+    but since #860 the denial's ROW is the dispatching lead's own conduct: its `lead_id` is
+    the lead the call was refused inside, which is how the offline judge finds it (the lead
+    whose only activity was a withheld verb used to be invisible there). The audit record
+    stays what it was — a fact about the RUN, §7 R12's bounded projection, with no lead
+    column: the row carries the attribution, the record carries the policy fact, and neither
+    is derived from the other."""
     rec = VerbRecorder()
     reg = _registry(rec)
 
@@ -291,12 +373,40 @@ def test_a_denial_outside_a_dispatched_lead_runs_no_lead_scoped_allocation(tmp_p
     assert "esql" in decision.refusal
 
     r = run_gather(tmp_path, verbs=reg, turns=[q(*DENIED_PAIR), DONE], run_id="d44")
-    assert not (r.run_dir / "gather_raw" / LEAD).exists()
     assert len(r.own_denials) == 1, "the denial was not audited at all"
     assert "lead_id" not in r.own_denials[0], \
-        "the denial record carries lead-scoped state a denial must never allocate"
+        "the audit record grew a lead column — attribution is the row's job, not the record's"
+    assert [(row["lead_id"], row["system"], row["verb"]) for row in r.own_denied_rows] \
+        == [(LEAD, *DENIED_PAIR)], "the denial's row does not name the lead it was refused inside"
+    assert r.own_evidence == [], "the denial allocated a query row"
 
 
+
+
+def test_a_lead_less_call_is_the_same_internal_error_at_every_capture_frame(tmp_path: Path):
+    """The premise d44 retired: a denial is the dispatching lead's own row, so the capture has
+    NO lead-less path any more — and the two frames that touch the queries table say so the
+    same way. The rejection guard used to answer `None` for deps with no `lead_id` while the
+    row write two lines later raised on the same deps; a denial routed through both turned a
+    policy refusal into an internal error at the second frame after the first had let it
+    through. Observably: the guard raises the row write's own `RuntimeError`, before reading
+    the table (positive control: the same guard, with a lead, reads it and answers `None`)."""
+    from defender._paths import PATHS
+    from defender.runtime import tools
+    from defender.runtime.agent_definition import compile_policy_for
+    from defender.runtime.query_tool import QueryCapture
+
+    policy = compile_policy_for(GATHER_DEF, run_dir=tmp_path, defender_dir=PATHS.defender_dir)
+    ident = dict(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id=tmp_path.name,
+                 cwd_anchor=tmp_path, policy=policy)
+    capture = QueryCapture(_registry(VerbRecorder()))
+
+    with pytest.raises(RuntimeError, match="without a dispatched lead_id"):
+        capture._rejection_guard(
+            tools.GatherDeps(**ident), "elastic", "esql", {}, system_key="")
+    assert capture._rejection_guard(
+        tools.GatherDeps(**ident, lead_id=LEAD), "elastic", "esql", {}, system_key="",
+    ) is None, "positive control: with a lead, an empty table trips nothing"
 
 
 def test_a_malformed_call_keeps_todays_queries_row(tmp_path: Path):
@@ -319,8 +429,8 @@ def test_a_malformed_call_keeps_todays_queries_row(tmp_path: Path):
 
 def test_a_malformed_and_denied_call_takes_the_denial_path(tmp_path: Path):
     """A call that is both malformed AND denied takes the DENIAL path: the grant check runs
-    first, so the model sees the denial rather than the malformedness, no queries row is
-    written, and the denial IS audited.
+    first, so the model sees the denial rather than the malformedness, no query row is
+    written (the `∅.denied` sentinel is), and the denial IS audited.
 
     This is the ordering reversed at phase F, and the reason is the composition the earlier
     split created: with the malformed check first, appending one unrecognised parameter to
@@ -332,7 +442,8 @@ def test_a_malformed_and_denied_call_takes_the_denial_path(tmp_path: Path):
                    turns=[q(*DENIED_PAIR, {"nosuch_param": 1}), DONE], run_id="d55")
 
     assert rec.calls == []
-    assert r.own_rows == [], "the malformed-and-denied call still left an evidence row"
+    assert r.own_evidence == [], "the malformed-and-denied call still left an evidence row"
+    assert len(r.own_denied_rows) == 1, "the malformed-and-denied call took the malformed path's row"
     assert len(r.own_denials) == 1, \
         "one unrecognised parameter suppressed the denial record — the malformed check ran first"
     assert r.own_denials[0]["verb"] == "esql"
@@ -341,8 +452,9 @@ def test_a_malformed_and_denied_call_takes_the_denial_path(tmp_path: Path):
 
 def test_a_denied_call_is_refused_before_its_query_id_meets_the_traversal_screen(tmp_path: Path):
     """A denied call carrying a path-traversal `query_id` is refused by the GRANT CHECK,
-    ahead of the traversal screen: no queries row, a denial record written, and the model
-    sees the denial reason rather than the traversal reason (§7 R23, reversed at phase F
+    ahead of the traversal screen: no query row (the `∅.denied` sentinel, whose id is the
+    writer's and never the model's), a denial record written, and the model sees the denial
+    reason rather than the traversal reason (§7 R23, reversed at phase F
     along with R3 — the screen was the third cheap silence).
 
     What R23's ordering used to buy — a hostile model-authored id kept out of the durable
@@ -366,13 +478,18 @@ def test_a_denied_call_is_refused_before_its_query_id_meets_the_traversal_screen
                    turns=[q(*DENIED_PAIR, query_id=hostile), DONE], run_id="d53")
 
     assert rec.calls == []
-    assert r.own_rows == [], "the traversal-and-denied call still left an evidence row"
+    assert r.own_evidence == [], "the traversal-and-denied call still left an evidence row"
     assert len(r.own_denials) == 1, "the traversal screen ran first and suppressed the denial record"
     assert "esql" in r.gather_saw, "the model saw the traversal reason, not the denial"
 
     record = r.own_denials[0]
     assert hostile not in json.dumps(record), \
         "the raw model-authored traversal id landed in the durable denial record unnormalized"
+    # The same hazard on the ROW (#860): the sentinel's id is the writer's literal, and the
+    # model's string reaches no column of it.
+    assert [row["query_id"] for row in r.own_denied_rows] == [DENIED_QUERY_ID]
+    assert hostile not in json.dumps(r.own_denied_rows), \
+        "the raw model-authored traversal id landed in the denial's sentinel row"
     assert record.get("call_id"), "the record identifies no call at all — the projection is empty"
 
     # The screen, where it is still reachable: authorization admits the call, so the screen is
@@ -413,7 +530,8 @@ def test_a_denial_is_decided_before_the_availability_short_circuit(tmp_path: Pat
     assert circuit_breaker.is_tripped(r.run_dir, "elastic"), "the system never went down"
     assert len(r.own_denials) == 1, "the availability short-circuit silenced the denial's audit record"
     assert r.own_denials[0]["verb"] == "esql"
-    assert len(r.own_rows) == 2, "the denial against a down system wrote an evidence row"
+    assert len(r.own_evidence) == 2, "the denial against a down system wrote an evidence row"
+    assert len(r.own_denied_rows) == 1, "the down-message short-circuited the denial's own row"
 
 
 
@@ -435,6 +553,54 @@ def test_a_denial_does_not_move_the_circuit_breaker(tmp_path: Path):
     assert r.breaker.get("total_failures", 0) == 0
     assert r.breaker.get("systems", {}) == {}
     assert r.main.calls == 2, "the run did not continue past three denials"
+    # The exit-code choice, read off the row the denial writes since #860: outside the infra
+    # set (so the three rows above charged nothing) and NOT the generic fault code the model
+    # used to see, so a reader of the table tells a withheld verb from an outage without
+    # parsing the detail.
+    assert {row["exit_code"] for row in r.own_denied_rows} == {circuit_breaker.DENIED_EXIT_CODE}
+    assert not circuit_breaker.is_infra_failure(circuit_breaker.DENIED_EXIT_CODE)
+
+
+def test_a_denials_sentinel_row_is_a_sentinel_to_every_reader(tmp_path: Path):
+    """The `∅.denied` row (#860) is a SENTINEL to every reader that partitions on the
+    prefix, and outside both repeat guards' domains — which is what lets it exist at all
+    where §7 R3 used to say "no row": the offline join files it under `.sentinels` and never
+    `.queries` (so the learning loop's routers, which read `.queries` or ask `is_sentinel`,
+    never see it), a model cannot spell its id onto a real query, and three identical denials
+    are three rows and no trip on either guard — the live run never reaches a guard for a
+    denied call, so a replay that counted them would report a stop the run never made."""
+    from defender.learning.lead_repository import joined
+    from defender.runtime.query_tool import resolve_query_id
+    from defender.scripts.gather_tools.record_query import (
+        in_rejection_domain,
+        is_reserved_query_id,
+        rejection_budget_trip,
+        repeat_trip,
+    )
+
+    rec = VerbRecorder()
+    r = run_gather(tmp_path, verbs=_registry(rec),
+                   turns=[q(*DENIED_PAIR), q(*DENIED_PAIR), q(*DENIED_PAIR), DONE], run_id="d86")
+    assert len(r.own_denied_rows) == 3
+    assert r.own_evidence == []
+
+    lead = next(lead for lead in joined(r.run_dir) if lead.lead_id == LEAD)
+    assert lead.queries == [], "a denial reached `.queries` — the learning loop's input"
+    assert [row.query_id for row in lead.sentinels] == [DENIED_QUERY_ID] * 3
+    assert all(row.is_sentinel for row in lead.sentinels)
+    assert all(row.error_class == DENIED_ERROR_CLASS for row in lead.sentinels)
+
+    assert is_reserved_query_id(DENIED_QUERY_ID)
+    assert resolve_query_id("elastic", "query", DENIED_QUERY_ID) != DENIED_QUERY_ID, \
+        "a model spelled the denial's own id onto a query"
+
+    rows = r.rows
+    params = dict(r.own_denied_rows[0]["params"])
+    assert repeat_trip(rows, LEAD, system=DENIED_PAIR[0], verb=DENIED_PAIR[1], params=params) is None, \
+        "three denials tripped the repeat guard — the replay reports a stop the live run never made"
+    assert not any(in_rejection_domain(row) for row in rows), \
+        "a denial's row entered the rejection domain — it is neither above-guard nor agent-fixable"
+    assert rejection_budget_trip(rows, LEAD, budget=3) is None
 
 
 def test_an_infra_fault_still_moves_the_circuit_breaker(tmp_path: Path):
@@ -509,7 +675,7 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
 
     r = run_gather(tmp_path / "run", verbs=reg, system="cmdb",
                    turns=[q("cmdb", "list-hosts"), DONE], run_id="d38-unloadable")
-    assert r.own_rows == [], \
+    assert [row["query_id"] for row in r.own_rows] == [DENIED_QUERY_ID], \
         "the denial on an unloadable system was recorded as an unresolvable query instead"
     assert len(r.own_denials) == 1, \
         "a denial on an unloadable system produced no audit record — it was downgraded"
@@ -550,15 +716,17 @@ def test_repeated_identical_denials_each_audit_and_never_move_run_state(tmp_path
     Recorded and NOT built (RS6): that indistinguishability is exactly why a denial loop has
     no exit. The design refuses to coach a retry and nothing else ends the loop, so a model
     re-issuing a denied call spins until the run-level budget stops it. Neither obvious home
-    for a counter is legal — the evidence table is the surface a denial must stay out of,
-    and the circuit breaker is for infrastructure faults."""
+    for a counter is legal — the circuit breaker is for infrastructure faults, and the
+    `∅.denied` rows (#860) sit outside both repeat guards' domains by construction, so
+    n identical denials are n rows and never a trip."""
     rec = VerbRecorder()
     n = 5
     r = run_gather(tmp_path, verbs=_registry(rec), turns=[*(q(*DENIED_PAIR) for _ in range(n)), DONE],
                    run_id="d42")
 
     assert len(r.own_denials) == n, "denials were deduplicated or cached"
-    assert r.own_rows == []
+    assert r.own_evidence == []
+    assert len(r.own_denied_rows) == n, "the nth identical denial was counted, tripped or deduplicated"
     assert r.breaker.get("total_failures", 0) == 0
     assert rec.calls == []
 
@@ -603,7 +771,7 @@ def test_gather_is_denied_ticket_get_ticket(tmp_path: Path):
                    turns=[q("ticket", "get-ticket", {"key": "SOC-1"}), DONE], run_id="d22")
 
     assert rec.calls == [], "gather reached get-ticket"
-    assert r.own_rows == []
+    assert r.own_evidence == []
     assert len(r.own_denials) == 1
     assert r.own_denials[0]["verb"] == "get-ticket"
 
@@ -717,7 +885,9 @@ def test_an_impersonated_query_id_does_not_change_the_grant_decision(tmp_path: P
     denied = run_gather(tmp_path / "a", verbs=_registry(rec),
                         turns=[q(*DENIED_PAIR, query_id=forged), DONE], run_id="d69-denied")
     assert rec.calls == [], "an impersonated id bought execution of a withheld verb"
-    assert denied.own_rows == []
+    assert denied.own_evidence == []
+    assert [row["query_id"] for row in denied.own_rows] == [DENIED_QUERY_ID], \
+        "the forged id reached the denial's row, or the denial wrote something other than its sentinel"
 
     allowed = run_gather(tmp_path / "b", verbs=_registry(rec),
                          turns=[q(*GRANTED_PAIR, query_id=forged), DONE], run_id="d69-allowed")
