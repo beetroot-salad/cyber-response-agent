@@ -985,9 +985,9 @@ class WorldFacts:
     #: that had none.
     unlanded_document_rows: tuple[str, ...] = ()
     #: #1047 O1 — this world's normalized exit class, or `None` when its archived run_end.json
-    #: is absent, unreadable, or names no exit. `@owns cut_short` on `WorldFacts`: the ONE read
-    #: of the run-end record, shared by `_grade_world`'s early check and any other reader that
-    #: wants what the host recorded without re-parsing the file.
+    #: is absent, unreadable, or names no exit. `@owns cut_short` on `WorldFacts`: the value a
+    #: caller who already has it (`_grade_world`'s early check, via `read_world_facts`'s
+    #: `run_end=` parameter) hands in rather than paying a second parse for the same file.
     cut_short: str | None = None
 
     @property
@@ -1088,14 +1088,24 @@ def read_world_ledger(episode_dir: Path, label: str, *, episode_token: str,
         world_token_for(episode_token, label))
 
 
-def read_world_facts(episode_dir: Path, label: str, *, episode_token: str) -> WorldFacts:
+def read_world_facts(
+    episode_dir: Path, label: str, *, episode_token: str,
+    run_end: tuple[str | None, bool] | None = None,
+) -> WorldFacts:
     """Read one world's archived record: the ledger, the document and the report, once — the
     composition of `read_world_ledger` and `read_investigation_facts`, in that order, so the
-    grading path's refusal on a missing ledger comes first exactly as before."""
+    grading path's refusal on a missing ledger comes first exactly as before.
+
+    `run_end`, when given, is `(cut_short, closed_before_cut)` the caller already read off
+    `run_end.json` — `_grade_world`'s own early check, which runs before this function is ever
+    reached — reused here instead of a second parse of the same file. Every other caller
+    (render.py, the tests) leaves it unset and this function reads the record itself, exactly
+    as before."""
     world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
     ledger_rows, malformed = read_world_ledger(episode_dir, label, episode_token=episode_token)
     document = read_investigation_facts(world_dir, world=label)
-    cut_short, _closed_before_cut = _read_run_end_record(world_dir)
+    cut_short, _closed_before_cut = (
+        run_end if run_end is not None else _read_run_end_record(world_dir))
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed,
         investigation_text=document.investigation_text,
@@ -1231,7 +1241,8 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     # exists for — `malformed` is on the row beside `ungradable`, so a reader can still tell an
     # artifact that is not there from one that is there and wrong.
     try:
-        facts = read_world_facts(episode_dir, label, episode_token=episode_token)
+        facts = read_world_facts(episode_dir, label, episode_token=episode_token,
+                                  run_end=(cut_short, closed_before_cut))
         h_rows = own_h_rows(facts.ledger_rows, holding_system)
         faulted = next((r for r in h_rows if r.get("source") == FAULT), None)
 

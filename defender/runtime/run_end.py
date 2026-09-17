@@ -15,9 +15,10 @@ member, or `None` for a run that ended cleanly — `None` is valid CONTENT, not 
 a genuine model verdict is indistinguishable from one the host manufactured.
 
 The one production writer is the driver (`runtime/driver/__init__.py`, before the forced
-report write); the one production reader is the archive (`learning/branch/archive.py`), which
+report write). Two production readers: the archive (`learning/branch/archive.py`), which
 copies this file's content into `worlds/<label>/run_end.json` — never anything inside the run
-dir itself.
+dir itself — and `run.py`'s own `--update-ticket` step, which reads it in-process to resolve
+`closed_before_cut` for the ticket lane before the archive ever runs.
 """
 from __future__ import annotations
 

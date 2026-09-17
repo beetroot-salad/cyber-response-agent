@@ -57,7 +57,7 @@ from defender.learning.lead_repository import (
     refusing_copy2,
     stage_tables,
 )
-from defender.runtime.run_end import read_sidecar
+from defender.runtime.run_end import read_sidecar, sidecar_path as _run_end_sidecar_path
 from defender.runtime.scrub import verdict_path
 
 #: The archived world's directory, under the episode. One level, keyed by the SHORT label X —
@@ -229,18 +229,26 @@ def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     return present
 
 
-def _archive_run_end(run_dir: Path, world_dir: Path) -> None:
+def _archive_run_end(run_dir: Path, world: str, world_dir: Path) -> None:
     """The run-end record (#1047): read the HOST-SIDE sidecar beside `run_dir`, never
     anything inside it, and write the archived copy through `write_guarded` — the
-    stricter of the archive's two lanes (fork F-F). An unreadable, absent, or
-    type-mismatched sidecar (a directory at its name, a JSON list, torn bytes) is
-    SKIPPED AND REPORTED, reusing the archive's existing three-way split rather than
-    inventing a fourth answer for this one artifact (forks F-G/F-AB) — the rest of the
-    world still archives.
+    stricter of the archive's two lanes (fork F-F). A run dir with no sidecar at all
+    (an archive that predates #1047, or a sidecar write that already failed and logged
+    loudly at write time) is SKIPPED IN SILENCE, exactly like an absent optional artifact
+    among the six `_single_files` roles. A sidecar that IS there but could not be read as
+    a record — a directory at its name, a JSON list, torn bytes — is SKIPPED AND REPORTED,
+    to `stderr`, because that shape means something occupied the name and the archive's
+    existing convention (the `refused` list below) is to say so rather than carry the
+    silence forward; the rest of the world still archives either way.
     """
     record = read_sidecar(run_dir)
     if record is not None:
         write_guarded(world_dir / RUN_END_NAME, json.dumps(record))
+        return
+    src = _run_end_sidecar_path(run_dir)
+    if src.exists() or src.is_symlink():
+        print(f"[archive] world {world!r}: {src} exists but could not be read as a "
+              "run-end record — archived without one", file=sys.stderr)
 
 
 def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, Path]:
@@ -330,7 +338,7 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
             print(f"[archive] world {world}: {len(refused)} non-artifact entr"
                   f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                   f"{', '.join(str(p) for p in refused)}", file=sys.stderr)
-        _archive_run_end(run_dir, world_dir)
+        _archive_run_end(run_dir, world, world_dir)
         # The pointer, LAST and as TEXT: informational only, so it is written after the bytes
         # it names have landed, and it is written through the guarded seam like every other
         # write into a tree a box can reach.
