@@ -50,7 +50,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from defender._io import guarded_mkdir, write_guarded
+from defender._io import Bound, guarded_mkdir, write_guarded
 from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file
 from defender.learning.lead_repository import (
     refuse_non_artifacts,
@@ -101,7 +101,7 @@ DRAWS_DIRNAME = "judge"
 FAMILY_STAMP_NAME = "provenance.json"
 
 
-def read_family_stamp(bound: Any) -> dict[str, Any] | None:
+def read_family_stamp(bound: Bound) -> dict[str, Any] | None:
     """The episode-root family stamp — `{agreed: {...}, allow_dirty}` — or `None` when nothing
     is at the name (#1025 J12).
 
@@ -116,7 +116,7 @@ def read_family_stamp(bound: Any) -> dict[str, Any] | None:
         return None
     # A directory squatting the name is refused by the walk itself — no separate `is_dir()`
     # check, which would be an unscreened read of the same box-writable entry the walk judges.
-    if rec.refusal is not None:
+    if rec.text is None:
         raise ValueError(f"{FAMILY_STAMP_NAME} could not be read: {rec.reason}")
     try:
         doc = json.loads(rec.text)

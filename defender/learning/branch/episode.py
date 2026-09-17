@@ -42,7 +42,7 @@ import yaml
 
 from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
-from defender._io import bind, read_jsonl_rows
+from defender._io import Bound, bind, read_jsonl_rows
 from defender._run_paths import artifact_file
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.learning.branch.archive import REVIEW_NAME, WORLDS_DIRNAME
@@ -91,7 +91,7 @@ class EpisodeError(ValueError):
 # ---------------------------------------------------------------------------------------
 
 
-def _recorded_outcome(bound: Any) -> tuple[str | None, str]:
+def _recorded_outcome(bound: Bound) -> tuple[str | None, str]:
     """The episode's recorded outcome and its reason, or `(None, "")` when none is recorded.
 
     An absent, unreadable or unparseable record is NOT an outcome. It is how an episode looks
@@ -117,7 +117,7 @@ def _recorded_outcome(bound: Any) -> tuple[str | None, str]:
             reason if isinstance(reason, str) else "")
 
 
-def _refuse_incomplete(bound: Any) -> None:
+def _refuse_incomplete(bound: Bound) -> None:
     """Refuse an episode the launcher recorded as `incomplete` — see the module docstring."""
     outcome, reason = _recorded_outcome(bound)
     if outcome == INCOMPLETE:
@@ -128,7 +128,7 @@ def _refuse_incomplete(bound: Any) -> None:
             "answer over them would read as a measurement nobody made")
 
 
-def _archived_labels(bound: Any) -> list[str]:
+def _archived_labels(bound: Bound) -> list[str]:
     """Every archived world's label, sorted — the ONE definition of "this episode's worlds".
 
     Taken from the archive rather than from the manifest, because they are different sets and
@@ -197,7 +197,7 @@ def verdicts(episode_dir: Path) -> dict[str, str]:
         return _verdicts(bound)
 
 
-def _verdicts(bound: Any) -> dict[str, str]:
+def _verdicts(bound: Bound) -> dict[str, str]:
     _refuse_incomplete(bound)
     out: dict[str, str] = {}
     for label in _archived_labels(bound):

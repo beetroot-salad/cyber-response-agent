@@ -17,7 +17,6 @@ call through `R.io()` so the failure is the missing primitive, once per test.
 """
 from __future__ import annotations
 
-import ast
 import dataclasses
 import errno
 import os
@@ -512,9 +511,8 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
     R.plant_link(root / "worlds" / "b" / "report.md", root / "plain.md")
     assert R.refusal(bound.read("worlds/b/report.md"), "worlds/b/report.md") == R.ALIAS
 
-    source = Path(R.io().__file__).read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    assert "O_PATH" in R.attribute_names(tree), "the primitive's step no longer names O_PATH"
+    assert R.io()._STEP_FLAGS & os.O_PATH, "the primitive's step is no longer an O_PATH handle"
+    assert R.io()._ROOT_FLAGS & os.O_PATH, "the root handle is no longer O_PATH"
 
 
 # ---------------------------------------------------------------------------------------

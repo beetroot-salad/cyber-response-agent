@@ -44,7 +44,7 @@ import yaml
 
 from defender import _yaml
 from defender._clock import now_iso
-from defender._io import bind, guarded_mkdir, open_guarded, write_guarded
+from defender._io import Bound, bind, guarded_mkdir, open_guarded, write_guarded
 from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
@@ -357,7 +357,7 @@ def staged_path(episode_dir: Path) -> Path:
     return Path(episode_dir) / STAGED_FILENAME
 
 
-def read_staged(bound: Any) -> list[dict] | None:
+def read_staged(bound: Bound) -> list[dict] | None:
     """Every row the staging record holds, in written order; `None` when nothing is at the
     name (#1049 D-J7 — the typed absent answer, coalesced `or []` at every read site) and `[]`
     for a present, empty (or comment-only) document.
@@ -376,7 +376,7 @@ def read_staged(bound: Any) -> list[dict] | None:
     rec = bound.read(STAGED_FILENAME)
     if rec.absent:
         return None
-    if rec.refusal is not None:
+    if rec.text is None:
         raise StagingRefused(f"{STAGED_FILENAME} is refused: {rec.reason}")
     try:
         rows = _yaml.safe_load(rec.text)

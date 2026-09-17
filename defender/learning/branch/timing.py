@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._clock import now_iso, parse_iso_utc
-from defender._io import write_guarded
+from defender._io import Bound, write_guarded
 from defender.learning.branch.steps import STEPS, Step
 
 #: The record's name at the episode root — sibling of `provenance.json`, the family stamp.
@@ -135,7 +135,7 @@ def _record_text(rows: list[dict[str, Any]]) -> str:
     return json.dumps({"steps": rows}, indent=2, sort_keys=True) + "\n"
 
 
-def read_stage_timings(bound: Any) -> list[dict[str, Any]] | None:
+def read_stage_timings(bound: Bound) -> list[dict[str, Any]] | None:
     """The recorded steps, in the order they completed; `None` when nothing is at the name
     (#1049 D-J7 — an abort before the first step finished, coalesced `or []` at the read site).
 
@@ -150,7 +150,7 @@ def read_stage_timings(bound: Any) -> list[dict[str, Any]] | None:
     rec = bound.read(TIMING_NAME)
     if rec.absent:
         return None
-    if rec.refusal is not None:
+    if rec.text is None:
         raise ValueError(f"{TIMING_NAME} could not be read: {rec.reason}")
     try:
         document = json.loads(rec.text)

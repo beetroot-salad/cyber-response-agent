@@ -36,7 +36,7 @@ from pydantic.dataclasses import dataclass
 # caller — including `_triplet_947.refusals()`'s `sym("learning.judge", "JudgeRefused")` — sees.
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender._io import bind, guarded_mkdir, write_guarded  # noqa: E402
+from defender._io import Bound, bind, guarded_mkdir, write_guarded  # noqa: E402
 from defender.learning.branch.archive import (  # noqa: E402
     DRAWS_DIRNAME,
     JUDGE_NAME,
@@ -277,7 +277,7 @@ def _control_drift_discard(doc: dict[str, Any], review: dict[str, Any]) -> bool:
 
 
 def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threaded from the pass
-    episode_dir: Path, label: str, *, bound: Any, payload_cap: int, git_show: Any,
+    episode_dir: Path, label: str, *, bound: Bound, payload_cap: int, git_show: Any,
     facts: family_mod.WorldFacts | None, lessons_commit: str | None,
     union: tuple[list[dict[str, Any]], dict[str, Any]], manifest: dict[str, Any],
     review: dict[str, Any], samples: dict[str, Any],
@@ -538,7 +538,7 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
 
 
 def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_grade_episode`
-    bound: Any, episode_dir: Path, *, judge: Any, runs_base: Path | None, draws: int | None,
+    bound: Bound, episode_dir: Path, *, judge: Any, runs_base: Path | None, draws: int | None,
     git_show: Any, queue_dir: Path | None,
 ) -> EpisodeGrade:
     review = family_mod.read_review_record(bound) or {}
@@ -790,7 +790,7 @@ def _memoized_show(show: Any) -> Any:
     return invoke
 
 
-def _pass_lessons_commit(bound: Any, labels: list[str]) -> str | None:
+def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
     """The commit every lesson body in this pass is read at — J8's "resolved once per pass".
 
     The FIRST graded world's provenance stamp, which is what the record has always reported;
@@ -804,7 +804,7 @@ def _pass_lessons_commit(bound: Any, labels: list[str]) -> str | None:
     return None
 
 
-def _pass_alert_id(bound: Any, labels: list[str]) -> Any:
+def _pass_alert_id(bound: Bound, labels: list[str]) -> Any:
     """The alert this episode's worlds all investigate — the union's key.
 
     Read off the first graded world that carries one: every world of a family branches from one

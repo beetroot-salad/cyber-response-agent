@@ -25,11 +25,10 @@ from typing import Any
 
 import contextlib
 
-from defender._io import bind
+from defender._io import Bound, bind
 from defender._run_paths import PROVENANCE
 from defender.learning.branch.archive import (
     ALERT_NAME,
-    GATHER_SUMMARIES_DIRNAME,
     LESSONS_LOADED_NAME,
     WORLDS_DIRNAME,
 )
@@ -41,8 +40,8 @@ from defender.learning.judge.family import (
     json_mapping,
     json_mapping_of,
     has_refusals,
+    _repository_leads,
     lead_chain,
-    leads_by_id,
     own_h_rows,
     render_refused,
     read_archived_report,
@@ -52,6 +51,7 @@ from defender.learning.judge.family import (
     read_world_facts,
     sample_patterns,
     scope_params,
+    summary_lead_ids,
     world_review_block,
 )
 from defender.run_common import REPO_ROOT
@@ -201,7 +201,7 @@ def _union_unattempted(union_notes: dict[str, Any]) -> bool:
     the answer must be the same in all of them: an unattempted union is not "no sibling exists",
     and only a walk that RAN over a real directory may render that sentence."""
     return bool(union_notes.get("runs_base_unset") or union_notes.get("runs_base_missing")
-                or union_notes.get("alert_unidentified"))
+                or union_notes.get("runs_base_unreadable") or union_notes.get("alert_unidentified"))
 
 
 def _union_empty_after_a_walk(union_notes: dict[str, Any]) -> bool:
@@ -235,6 +235,10 @@ def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
         out.append("(the runs base named for this pass is not a directory, so the sibling "
                    "union was never attempted — this is not a statement that no sibling "
                    "trial exists)")
+    if union_notes.get("runs_base_unreadable"):
+        out.append(f"(the runs base named for this pass could not be listed — "
+                   f"{union_notes['runs_base_unreadable']} — so the sibling union was never "
+                   "attempted — this is not a statement that no sibling trial exists)")
     if union_notes.get("alert_unidentified"):
         out.append("(this episode's own alert.json carries no alert id, so the sibling union "
                    "had nothing to match trials against and was never attempted — this is not "
@@ -334,7 +338,7 @@ def _manifest_text(doc: dict[str, Any], graded_label: str) -> str:
 
 
 def _sibling_row(
-    run: Any, run_id: str, *, alert_id: str | None,
+    run: Bound, run_id: str, *, alert_id: str | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """One directory under the operator's runs base (`run`, its sub-bind), CLASSIFIED
     EXHAUSTIVELY.
@@ -388,6 +392,7 @@ def sibling_union(
     notes: dict[str, Any] = {
         "source_run_excluded": None, "skipped_unreadable": 0, "skipped_unclosed": 0,
         "runs_base_unset": runs_base is None, "runs_base_missing": False,
+        "runs_base_unreadable": None,
         "alert_unidentified": alert_id is None,
     }
     if runs_base is None:
@@ -409,7 +414,12 @@ def sibling_union(
     # knob at a path that may itself be a link, and refusing that would refuse every union.
     with bind(runs_base) as runs:
         listing = runs.entries()
-        if listing.entries is None:
+        if listing.reason is not None:
+            # THERE, BUT NOT LISTABLE (a permission fault, a file squatting the name): a
+            # different fact from "missing", and the reason is carried so the view says it.
+            notes["runs_base_unreadable"] = listing.reason
+            return siblings, notes
+        if listing.absent:
             # NAMED, not folded into the empty union. `run_common.resolve_runs_base()` returns
             # whatever `DEFENDER_RUNS_BASE` says (or its compiled default) and never checks that
             # the directory exists — `defender/CLAUDE.md` documents the devcontainer having to
@@ -435,12 +445,12 @@ def sibling_union(
     return siblings, notes
 
 
-def _world_alert_id(world: Any) -> str | None:
+def _world_alert_id(world: Bound) -> str | None:
     data = json_mapping(world, ALERT_NAME)
     return data.get("alert_id") if data is not None else None
 
 
-def episode_alert(bound: Any, labels: list[str]) -> dict[str, Any]:
+def episode_alert(bound: Bound, labels: list[str]) -> dict[str, Any]:
     """The alert this episode's worlds all investigate, off the first world that names one.
 
     ONE RULE, because two readers want this file and they must not pick different worlds. The
@@ -557,7 +567,7 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
     facts: WorldFacts | None = None, review: dict[str, Any] | None = None,
     samples: dict[str, Any] | None = None,
     union: tuple[list[dict[str, Any]], dict[str, Any]] | None = None,
-    manifest: dict[str, Any] | None = None, bound: Any = None,
+    manifest: dict[str, Any] | None = None, bound: Bound | None = None,
 ) -> JudgeInput:
     """The judge's rendered input for one non-control world.
 
@@ -579,7 +589,7 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
 
 
 def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
-    bound: Any, episode_dir: Path, world_label: str, runs_base: Path | None, *,
+    bound: Bound, episode_dir: Path, world_label: str, runs_base: Path | None, *,
     git_show: Any, lessons_commit: str | None, payload_cap: int | None,
     facts: WorldFacts | None, review: dict[str, Any] | None,
     samples: dict[str, Any] | None,
@@ -597,17 +607,15 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     show = git_show if git_show is not None else _git_show_default
     world = bound.under(f"{WORLDS_DIRNAME}/{world_label}")
     # `leads_by_id` is `lead_repository`'s surface, shared with the live run dir, and takes the
-    # world's directory — the one path on this lane, reached only past the mechanical pass's
-    # own gate on `worlds/<label>` (the orchestration always hands `facts` over).
+    # world's directory — the one path on this lane, behind the same listing gate the
+    # mechanical pass keeps (`family._repository_leads`; the orchestration hands `facts` over).
     record = facts if facts is not None else replace(
         read_world_facts(bound, world_label, episode_token=episode_token),
-        leads=leads_by_id(episode_dir / WORLDS_DIRNAME / world_label))
+        leads=_repository_leads(world, episode_dir, world_label))
 
     text = record.investigation_text
     resolutions_by_lead = record.resolutions_by_lead
-    lead_ids = set(record.referenced_leads)
-    lead_ids |= {name[:-3] for name in world.under(GATHER_SUMMARIES_DIRNAME).entries().files()
-                 if name.endswith(".md")}
+    lead_ids = set(record.referenced_leads) | summary_lead_ids(world)
     # #860 M4b: a lead whose only activity was refused may be cited by neither the document
     # nor a summary — the harness writes a summary for a dead-ended lead, not for one the
     # grant check turned away — and VIEW 1 built from those two sources alone left it out
@@ -785,7 +793,7 @@ def _lesson_paths_for(lesson_name: Any) -> list[str]:
             for corpus in sorted(RUNTIME_LESSON_CORPORA)]
 
 
-def _read_provenance(world: Any) -> dict[str, Any]:
+def _read_provenance(world: Bound) -> dict[str, Any]:
     return json_mapping(world, PROVENANCE) or {}
 
 

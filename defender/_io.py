@@ -178,23 +178,28 @@ def _leaf_is_link(path: Path) -> bool:
         return False
 
 
-# LINUX ONLY. Every intermediate step of a `bind` walk is opened `O_PATH`: a handle to the
-# directory that is never read through, which the kernel grants on SEARCH permission alone —
-# exactly what traversing a path by name always needed, so a `drwx--x--x` component under the
-# episode root traverses here as it did for the path-based reader this replaced. Opened
-# `O_RDONLY` instead (the portable form) a step needed READ permission on every directory,
-# and a search-only directory anywhere on the way refused every record beneath it. `O_PATH` is
-# Linux-only, and this reader is now Linux-only with it: the check below fails the import
-# with the reason rather than letting a platform without the flag walk a weaker guard.
-if not hasattr(os, "O_PATH"):  # pragma: no cover — no CI box lacks it
-    raise ImportError(
-        "defender._io: the episode-tree reader walks each directory step with O_PATH, which "
-        "this platform's os module does not offer — the reader is Linux-only")
+# LINUX ONLY — the bound reader, not this module. The root and every intermediate step of a
+# `bind` walk are opened `O_PATH`: a handle to the directory that is never read through, which
+# the kernel grants on SEARCH permission alone — exactly what traversing a path by name always
+# needed, so a `drwx--x--x` root or component traverses here as it did for the path-based
+# reader this replaced. Opened `O_RDONLY` instead (the portable form) a step needed READ
+# permission on every directory, and a search-only directory anywhere on the way refused every
+# record beneath it. `O_PATH` is Linux-only; `bind()` refuses with the reason on a platform
+# without it (`_PLATFORM_FAULT`) — the rest of this module, and the package that imports it,
+# is untouched by the decision.
+_O_PATH: int | None = getattr(os, "O_PATH", None)
+_PLATFORM_FAULT = ("the episode-tree reader walks each directory step with O_PATH, which this "
+                   "platform's os module does not offer — the reader is Linux-only")
 
 #: One intermediate step (D-V3). `O_PATH|O_NOFOLLOW` never follows: a symlink at the step is
 #: OPENED AS THE LINK ITSELF (the handle `fstat`s `S_ISLNK`) and refused as an alias off that
 #: — never traversed, and never the kernel's own `ELOOP`. `O_CLOEXEC` is routine hygiene.
-_STEP_FLAGS = os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
+_STEP_FLAGS = (_O_PATH or 0) | os.O_NOFOLLOW | os.O_CLOEXEC
+
+#: The root's own open (`bind`): an `O_PATH` directory handle that FOLLOWS the operator's
+#: spelling (RF-R8) and needs search permission alone; `Bound.entries()` on the root opens
+#: `.` for reading off it only when asked to list.
+_ROOT_FLAGS = (_O_PATH or 0) | os.O_DIRECTORY | os.O_CLOEXEC
 
 #: The leaf (D-V3): opened for reading, no-follow (`ELOOP` for a symlink at the leaf);
 #: `O_NONBLOCK` keeps a FIFO at the leaf from wedging the walk open. No `O_DIRECTORY` —
@@ -478,20 +483,11 @@ class Bound:
         if self._handle.fd is None:
             return EntriesRead(name=spelling, entries=None, absent=False,
                                reason=os.strerror(errno.EBADF))
-        if not self._prefix:
-            fd, owned = self._handle.fd, False
-        else:
-            kind, payload = _walk_chain(self._os, self._handle.fd, self._prefix)
-            if kind == "absent":
-                return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
-            if kind == "refused":
-                return EntriesRead(name=spelling, entries=None, absent=False, reason=str(payload))
-            fd, st = payload
-            owned = True
-            if not stat.S_ISDIR(st.st_mode):
-                self._os.close(fd)
-                return EntriesRead(name=spelling, entries=None, absent=False,
-                                   reason=os.strerror(errno.ENOTDIR))
+        kind, payload = self._directory_fd()
+        if kind != "leaf":
+            return EntriesRead(name=spelling, entries=None, absent=kind == "absent",
+                               reason=None if kind == "absent" else str(payload))
+        fd = payload
         try:
             with self._os.scandir(fd) as it:
                 listed = {entry.name: _entry_kind(entry) for entry in it}
@@ -499,9 +495,29 @@ class Bound:
             return EntriesRead(name=spelling, entries=None, absent=False,
                                reason=(e.strerror or str(e)))
         finally:
-            if owned:
-                self._os.close(fd)
+            self._os.close(fd)
         return EntriesRead(name=spelling, entries=listed, absent=False, reason=None)
+
+    def _directory_fd(self) -> tuple[str, Any]:
+        """A READ handle on the bound directory for `entries` — `("leaf", fd)`, or the walk's
+        own `("absent", None)` / `("refused", reason)`. The root handle is `O_PATH` (search
+        permission alone), so the root is opened as `.` off it; a derivation walks its prefix,
+        and a leaf that is not a directory is 'Not a directory'."""
+        if not self._prefix:
+            try:
+                fd = self._os.open(  # lint-text-io: ok — os.open of a DIRECTORY handle, no text mode
+                    ".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=self._handle.fd)
+            except OSError as e:
+                return "refused", (e.strerror or str(e))
+            return "leaf", fd
+        kind, payload = _walk_chain(self._os, self._handle.fd, self._prefix)
+        if kind != "leaf":
+            return kind, payload
+        fd, st = payload
+        if not stat.S_ISDIR(st.st_mode):
+            self._os.close(fd)
+            return "refused", os.strerror(errno.ENOTDIR)
+        return "leaf", fd
 
     def under(self, name: str | PurePath) -> Bound:
         """A reader bound at `name` relative to this one — a NAME PREFIX over the same root
@@ -521,8 +537,10 @@ def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelate
     `.read`/`.read_jsonl`/`.entries` call answers absent, or refuses `f"{name}: {reason}"`
     independently per name (F-C — the fault is the bind's, the observable is per name).
     """
+    if _O_PATH is None:  # pragma: no cover — no CI box lacks it
+        raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
     try:
-        fd = os_.open(Path(root), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        fd = os_.open(Path(root), _ROOT_FLAGS)
     except FileNotFoundError:
         return Bound(os_, _Handle(os_, None), absent=True)
     except OSError as e:
