@@ -45,6 +45,7 @@ from .. import observe
 from .. import orient
 from .. import permission
 from .. import providers
+from .. import run_end
 from .. import selection
 from .. import session_store
 from .. import toon_gate as toon_gate_mod
@@ -174,15 +175,19 @@ def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None) -> S
 
 
 def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named once
-    *, output: Any, model_name: str | None, requests: int, truncated_by: str | None,
+    *, output: Any, model_name: str | None, requests: int, end: run_end.RunEnd,
     exit_reason: str | None, case_id: str, store_path: Any,
 ) -> dict:
     """The one shape `run_investigation` returns through, on every exit — setup-failure
-    and the normal end alike — so the two exits cannot drift apart on a field name."""
+    and the normal end alike — so the two exits cannot drift apart on a field name.
+
+    `end` is the run-end record (#1047) — the exit class and whether the model had already
+    closed when it was stamped — flattened onto the summary so `run.py`'s post-steps take
+    both halves of one record from one in-process value and read nothing off disk."""
     return {
         "output": output, "model": model_name, "requests": requests,
-        "truncated_by": truncated_by, "exit_reason": exit_reason,
-        "case_id": case_id, "store_path": store_path,
+        "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
+        "exit_reason": exit_reason, "case_id": case_id, "store_path": store_path,
     }
 
 
@@ -244,10 +249,13 @@ async def _reap_correlation_task(task: Any) -> None:
 async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, prompt, deps, store, bounds
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
     bounds: challenge_gate.Bounds, message_history: list | None = None,
-) -> tuple[Any, str | None, str | None]:
-    """Runs the `async for node in run` loop and classifies its caught exits into
-    `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside them so
-    the caller can still read `run.result`/`run.ctx` on a clean exit."""
+) -> tuple[Any, run_end.RunEnd, str | None]:
+    """@owns truncated_by, @owns closed_before_cut — runs the `async for node in run` loop,
+    classifies its caught exits into the run-end record and an exit reason, and returns the
+    (possibly unfinished) `run` alongside both, so the caller can still read
+    `run.result`/`run.ctx` on a clean exit and hand the record on without re-deriving it.
+    The sole producer of a MAIN session's exit class and of `closed_before_cut`: the sidecar
+    and the summary both carry what is decided here, and nothing else stamps either."""
     truncated_by: str | None = None
     exit_reason: str | None = None
     run: Any = None
@@ -300,9 +308,42 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         exit_reason = "StoreAppendError"
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
+    # #1047: the run-end record, stamped HERE — the one frame that can see both the exit class
+    # and whether the model had already closed when it landed — and taken at this moment,
+    # BEFORE the forced close below sets `closed` itself. The host-side sidecar is written
+    # UNCONDITIONALLY (a clean run records `truncated_by: null`, not nothing) and before the
+    # forced report: the record is what lets a later reader tell a real model verdict from a
+    # host-manufactured one, so a FAILED record write is a reason not to write the forced
+    # report at all — a report with no record beside it is the exact pre-#1047 bug (claim h2).
+    # That skip is named in the exit reason ONLY when a forced report was actually owed (the
+    # model had not closed); a run that already holds its own verdict lost nothing and keeps
+    # its ordinary exit reason, exactly as `_close_a_run_cut_short`'s own `closed` early return
+    # would have left it.
+    end = run_end.RunEnd(truncated_by, challenge_gate.ReviewState.of(deps).closed)
+    written = _write_run_end_sidecar(deps, end)
     if truncated_by in _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE:
-        exit_reason = await _close_a_run_cut_short(deps, bounds, exit_reason)
-    return run, truncated_by, exit_reason
+        if written:
+            exit_reason = await _close_a_run_cut_short(deps, bounds, exit_reason)
+        elif not end.closed_before_cut:
+            print("[run.py] the run-end record could not be written; not forcing a close",
+                  file=sys.stderr)
+            exit_reason = f"{exit_reason}+RunEndRecordFailed"
+    return run, end, exit_reason
+
+
+def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
+    """Write the host-side run-end sidecar beside `deps.run_dir`; `True` on success.
+
+    Best-effort like every other post-run write in this tree: a failure is logged loudly and
+    swallowed rather than taking the run down, and reported back so the forced-close arm can
+    refuse to write a report with no record beside it.
+    """
+    try:
+        run_end.write_sidecar(deps.run_dir, end)
+        return True
+    except OSError as e:
+        print(f"[run.py] run-end record write skipped: {e!r}", file=sys.stderr)
+        return False
 
 
 #: The exits on which the MODEL was stopped before it could close and the run still says
@@ -321,10 +362,10 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
 #: `unresolved` as a wrong disposition rather than a missing run. Until the host's report
 #: carries the exit class those consumers can key on, an infra exit keeps ending as it did
 #: before #992 — no report, dead-lettered at persist — rather than as a verdict.
-_CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE = frozenset({
-    session_store.TRUNCATED_BY_REQUEST_LIMIT,
-    session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
-})
+#:
+#: The set itself lives with the vocabulary (`run_end.FORCED_CLOSE_EXITS`): the ticket lane
+#: keys on the SAME set, and it must not import this module to get it.
+_CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE = run_end.FORCED_CLOSE_EXITS
 
 
 async def _close_a_run_cut_short(
@@ -602,8 +643,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         logger.close()
         return _run_summary(
             output=None, model_name=model_name, requests=logger.n_requests,
-            truncated_by="store", exit_reason=type(e).__name__,
-            case_id=case_id, store_path=None,
+            end=run_end.RunEnd(session_store.TRUNCATED_BY_STORE, closed_before_cut=False),
+            exit_reason=type(e).__name__, case_id=case_id, store_path=None,
         )
 
     prompt, lead_zero_block, lead_zero_status = _opening_prompt(
@@ -654,7 +695,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     )
 
     t0 = time.time()
-    run, truncated_by, exit_reason = await _drive_agent(
+    run, end, exit_reason = await _drive_agent(
         agent, prompt, deps, store, session_id, gate_bounds, resume_history,
     )
     wall_ms = (time.time() - t0) * 1000.0
@@ -679,8 +720,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     output = result.output if result is not None else None
     return _run_summary(
         output=output, model_name=model_name, requests=logger.n_requests,
-        truncated_by=truncated_by, exit_reason=exit_reason,
-        case_id=case_id, store_path=store.path,
+        end=end, exit_reason=exit_reason, case_id=case_id, store_path=store.path,
     )
 
 

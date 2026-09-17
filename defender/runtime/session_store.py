@@ -27,6 +27,21 @@ from pydantic_ai.messages import (
 )
 
 from defender._io import guarded_mkdir, write_guarded
+# THE `truncated_by` vocabulary — every value any writer of that column may put in it — and
+# its one normalizer are OWNED by `runtime/run_end.py` (which also says why `dead-end` is the
+# only lead-only member). Re-exported here so the column's own writers keep importing them
+# from the store; the readers that are not store readers (the ticket lane, the family judge)
+# take them from the owner and never import this module.
+from defender.runtime.run_end import (  # noqa: F401 — re-exports
+    TRUNCATED_BY_ABORTED,
+    TRUNCATED_BY_BUDGET,
+    TRUNCATED_BY_DEAD_END,
+    TRUNCATED_BY_REQUEST_LIMIT,
+    TRUNCATED_BY_RETRY_EXHAUSTED,
+    TRUNCATED_BY_STORE,
+    TRUNCATED_BY_VALUES,
+    normalized_truncated_by,
+)
 
 SCHEMA_VERSION = 2
 PAYLOAD_ENSURE_ASCII = True
@@ -36,31 +51,6 @@ POINTER_FILENAME = "session_store_pointer.json"
 #: a SQL CHECK (`reason_is_a_python_closed_set_not_a_sql_check`). `fork` has no legitimate
 #: caller through `append` at all: `fork()` writes its own entry directly.
 HEAD_MOVE_REASONS = ("fork", "fold")
-
-#: THE `truncated_by` vocabulary — every value any writer of that column may put in it. Two
-#: writers (the driver's run-end flush on the MAIN session, the gather dispatch's terminator
-#: stamp on a lead's) spelling the same shape differently would make "was this cut off, and by
-#: what" a per-session-kind question for every reader joining `session` rows. `dead-end` is the
-#: only value with no main-session analogue: only a lead can be stopped by a host guard, and
-#: since #1015 there are THREE of them — `wrap_tool_execute`'s repeat guard, the above-guard
-#: repeat guard, and the rejection budget. All three stamp this one value: the terminator
-#: column says a HOST guard ended the lead, and WHICH of them is recovered from the last trip
-#: row's `payload_digest` (the queries table has no `detail` column — `QueryCapture._record`
-#: folds the detail into that digest behind an `exit={code}; ` prefix), not from a second
-#: stamp. Which row that is depends on the guard: `wrap_tool_execute`'s writes a
-#: `REPEAT_TRIP_QUERY_ID` row whose phrase `record_query.repeat_trip_detail` owns, the two
-#: above-guard guards write an ordinary `ABOVE_GUARD_QUERY_ID` row whose phrase
-#: `record_query.rejection_detail` owns.
-TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
-TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"
-TRUNCATED_BY_ABORTED = "aborted"
-TRUNCATED_BY_BUDGET = "budget"
-TRUNCATED_BY_STORE = "store"
-TRUNCATED_BY_DEAD_END = "dead-end"
-TRUNCATED_BY_VALUES = (
-    TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED, TRUNCATED_BY_ABORTED,
-    TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
-)
 
 CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 

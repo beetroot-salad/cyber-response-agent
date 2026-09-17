@@ -421,7 +421,8 @@ class NullStore:
 
 def drive_to_retry_exhaustion(deps: Any, *, review_stages: Any = None) -> tuple[Any, Any, Any]:
     """Run the REAL agent loop until the retry budget is spent, so the driver's own forced-close
-    limb runs. Returns `(run, truncated_by, exit_reason)`.
+    limb runs. Returns `(run, truncated_by, exit_reason)` — the exit class alone off the
+    driver's run-end record, for the callers that predate it.
 
     `review_stages` is threaded so a scenario can observe that the forced close spent NO review
     — the fall-through this limb must not take is precisely one that dispatches review roles it
@@ -430,9 +431,10 @@ def drive_to_retry_exhaustion(deps: Any, *, review_stages: Any = None) -> tuple[
     from defender.tests._invlang_warn_836 import build_main_agent
 
     agent = build_main_agent(StuckModel(), review_stages=review_stages)
-    return asyncio.run(driver._drive_agent(
+    run, end, exit_reason = asyncio.run(driver._drive_agent(
         agent, "go", deps, NullStore(), "sid", challenge_gate.default_bounds(),
     ))
+    return run, end.truncated_by, exit_reason
 
 
 # ---------------------------------------------------------------------------------------

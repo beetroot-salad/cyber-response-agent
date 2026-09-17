@@ -166,7 +166,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
         def open_case_ticket(self, run_dir):
             self.calls.append("open")
 
-        def close_case_ticket(self, run_dir):
+        def close_case_ticket(self, run_dir, **_kw):
             self.calls.append("close")
 
     writer = Writer()

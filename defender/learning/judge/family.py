@@ -86,6 +86,7 @@ from defender.learning.branch.archive import (
     ALERT_NAME,
     GATHER_SUMMARIES_DIRNAME,
     REVIEW_NAME,
+    RUN_END_NAME,
     SAMPLES_NAME,
     WORLDS_DIRNAME,
 )
@@ -100,6 +101,7 @@ from defender.runtime.branch._family import (
     world_token_for,
 )
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS, INFRA_ERROR_CLASS
+from defender.runtime.run_end import RunEnd, parse_record
 from defender.runtime.verbs import is_system_name
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
@@ -1113,6 +1115,17 @@ class WorldFacts:
         return frozenset(self.resolutions_by_lead)
 
 
+def _read_run_end_record(world_dir: Path) -> RunEnd | None:
+    """The run-end record off `worlds/<label>/run_end.json` — the archive's copy of the host's
+    own sidecar (#1047 O1/O3) — or `None` when there is none: absent, undecodable, truncated
+    or not a mapping (`json_mapping`'s own tolerance), or a mapping that is not a record
+    (`run_end.parse_record`'s: a missing field, an exit class the vocabulary's owner refuses,
+    a non-boolean). The judge carries no interpretation of its own — what the two fields mean
+    is decided once, by the module that owns them, and the ticket lane takes the same answer
+    (the coherence property `one_interpreter_for_the_exit_class` pins)."""
+    return parse_record(json_mapping(world_dir / RUN_END_NAME))
+
+
 def world_ledger_path(episode_dir: Path, label: str, *, episode_token: str) -> Path:
     """The one spelling of a world's own served ledger, so its two readers cannot drift."""
     return Path(episode_dir) / "served" / f"{world_token_for(episode_token, label)}.jsonl"
@@ -1276,6 +1289,22 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0915 — the tier rule and the buck
     world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
     ledger_path = world_ledger_path(episode_dir, label, episode_token=episode_token)
     alert_path = world_dir / ALERT_NAME
+
+    # #1047 O1/F5 — THE THIRD ROW SHAPE, checked BEFORE every artifact-presence check below
+    # (not just the report's): a world the host cut short before the model could decide is
+    # never graded as a verdict about the case, on all five exit classes rather than only the
+    # two that also happen to leave a forced report.md. Fork F-A reading B: a world whose model
+    # HAD already closed (`closed_before_cut`) keeps its own verdict instead — the exit class
+    # is not an unconditional trump. `malformed` is deliberately absent here: this world's
+    # inputs are neither missing (tier 1) nor wrong (tier 2), so the two tiers stay separable.
+    end = _read_run_end_record(world_dir)
+    if end is not None and end.truncated_by is not None and not end.closed_before_cut:
+        row["ungradable"] = True
+        row["cut_short"] = end.truncated_by
+        row["ungradable_reason"] = (
+            f"world {label!r}: its run ended {end.truncated_by!r} — the host's report is not "
+            "a verdict")
+        return row, None
 
     missing = _missing_required_input(
         world_dir=world_dir, ledger_path=ledger_path, alert_path=alert_path,

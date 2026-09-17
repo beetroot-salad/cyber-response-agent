@@ -574,7 +574,13 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # The case ticket is settled BEFORE the request is published: a curation drainer can start
     # the moment the marker lands, and must never read this case with its ticket still open.
     if ns.update_ticket:
-        ticket_writer.close_case_ticket(run_dir)
+        # #1047 O2: the lane decides per exit class, and both halves of the run-end record —
+        # the exit class and whether the model had already closed — come off the driver's own
+        # summary, exactly as `enqueue_curation` below takes the exit class. Nothing on disk
+        # is an input: a failed or stale sidecar cannot split the record between two sources.
+        ticket_writer.close_case_ticket(
+            run_dir, truncated_by=summary.get("truncated_by"),
+            closed_before_cut=summary.get("closed_before_cut") is True)
 
     # A SIBLING FORCES THE NO-LEARN BRANCH, and that is a POSITIVE refusal rather than an
     # omission. Routing a sibling through this `main` acquires both automatic lanes; a world is
