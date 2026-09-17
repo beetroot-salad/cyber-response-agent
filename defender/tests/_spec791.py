@@ -314,6 +314,13 @@ class SpecTail:
         self._certify = certify
         self.run_dirs: list[Path] = []
         self.steps: list[TailStep] = []
+        #: What `close_case_ticket` was actually called with, in order — #1047's own
+        #: `test_1047_ticket_lane.py` drives the ticket lane's per-class branching directly and
+        #: never through this seam, so this is the one place that can tell whether `run.py`'s
+        #: tail actually THREADS the exit class through rather than calling the old
+        #: no-argument shape: a `close_calls` entry missing `truncated_by` (or holding `None`
+        #: for a tail built with `truncated_by=` set) means the wiring, not the lane, is dead.
+        self.close_calls: list[dict[str, Any]] = []
 
     # the seam's three dependencies
     def lifecycle(self, *, run_dir: Path, **_kw: Any) -> dict:
@@ -332,11 +339,14 @@ class SpecTail:
     def open_case_ticket(self, run_dir: Path) -> None:
         self._note("open_case_ticket", run_dir)
 
-    def close_case_ticket(self, run_dir: Path, **_kw: Any) -> None:
-        # `**_kw` absorbs #1047's `truncated_by=`/`closed_before_cut=` kwargs — this fake
+    def close_case_ticket(self, run_dir: Path, **kw: Any) -> None:
+        # `**kw` absorbs #1047's `truncated_by=`/`closed_before_cut=` kwargs — this fake
         # stands in for the ticket-system SEAM, not for the ticket lane's own per-class
         # branching (which `test_1047_ticket_lane.py` drives against the real
-        # `close_case_ticket` directly), so it only needs to accept the call, not interpret it.
+        # `close_case_ticket` directly), so it only needs to accept the call, not interpret
+        # it — but it DOES record what it was called with, in `close_calls`, because whether
+        # the tail passes these through at all is a question only this seam can answer.
+        self.close_calls.append(kw)
         self._note("close_case_ticket", run_dir)
 
     # what the steps saw

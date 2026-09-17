@@ -1,9 +1,13 @@
-"""#1047 implementation hardening — two defects the claims adversary found in the honest
-implementation itself (not in the committed spec), fixed here with their own regression pins.
+"""#1047 implementation hardening — defects found by the two adversaries the write-code-from-
+spec skill runs against the honest implementation (never against the committed spec), fixed
+here with their own regression pins.
 
-Both are about the code's own claims about itself, not about O1-O3: the committed
-`test_1047_*.py` files pin the design; this file pins that the code does what its own
-docstrings, once corrected, now say.
+None of this is about O1-O3: the committed `test_1047_*.py` files pin the design; this file
+pins that the code does what it (now, correctly) claims about itself, and that a handful of
+corner-cuts the spec adversary's own from-scratch reimplementation found live are absent from
+THIS implementation.
+
+Claims adversary (reads only the code, falsifies its docstrings):
 
 1. `read_world_facts` used to re-derive `run_end.json`'s content even when `_grade_world`'s
    early check had already read it — a second parse of the same file per graded world, and the
@@ -16,10 +20,29 @@ docstrings, once corrected, now say.
    but nothing was ever printed; only the "skipped" half held. Fixed by reporting to stderr
    exactly when something occupies the sidecar's name and cannot be read (never for a genuinely
    absent sidecar, which stays silent like the six pre-existing single-file artifacts).
+
+Spec adversary (never sees the code, greens the committed suite with corner-cuts): its own
+from-scratch build satisfied all 106 committed tests while leaving `run.py`'s ticket-lane call
+site unwired (F1) and hardcoding the graded row's world label in `_grade_world`'s cut-short
+reason string (F8) — the suite as committed cannot tell either apart from the honest answer.
+Both were independently verified ALREADY CORRECT by reading in this implementation, but the
+suite's own blind spot at those two sites is real, so both get a first-party regression test
+here rather than resting on a one-time reading. (F2-F7, F9-F11 were checked the same way and
+are genuinely absent from or pre-existing/out-of-scope for this implementation — see the PR
+body's "Spec adversary" section; they are not repeated as tests because verifying them would
+mean re-deriving the design's own forgery-universal machinery `test_1047_forgery_universals.py`
+already owns, for exploits this code does not contain.)
 """
 from __future__ import annotations
 
 from defender.tests import _spec1047 as S
+from defender.tests._spec791 import (
+    SpecTail,
+    drive_tail,
+    loop_paths,
+    plant_alert,
+    satisfy_entrypoint_keys,
+)
 
 
 def _family():
@@ -107,3 +130,45 @@ def test_archive_stays_silent_when_the_sidecar_is_simply_absent(tmp_path, capsys
 
     err = capsys.readouterr().err
     assert "run-end record" not in err, "a plainly absent sidecar was reported as though occupied"
+
+
+def test_run_py_tail_threads_the_exit_class_into_close_case_ticket(tmp_path, monkeypatch):
+    """The spec adversary's F1: an implementation that satisfies all 106 committed
+    `test_1047_*` tests while leaving `defender.run.main`'s `--update-ticket` call site on the
+    OLD no-argument `close_case_ticket(run_dir)` shape ships undetected — every one of
+    `test_1047_ticket_lane.py`'s 20 tests drives the real `close_case_ticket` directly, never
+    through `run.py`'s tail, and `test_791_curation_boundary.py` only asserts the step was
+    REACHED, never with what it was called with.
+
+    Driven for real, through the tail's own injection seam (`SpecTail`, `drive_tail`) — the
+    lifecycle fake reports `truncated_by="request-limit"`, exactly as a real cut-short
+    investigation's summary would, and the assertion is on `SpecTail.close_calls`, the record
+    the seam itself keeps of what it was handed."""
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    satisfy_entrypoint_keys(monkeypatch, tmp_path)
+    paths = loop_paths(tmp_path)
+
+    from defender import run as run_py
+
+    tail = SpecTail(paths, truncated_by="request-limit")
+    rc = drive_tail(run_py.main, plant_alert(tmp_path / "f1"), tail, "--update-ticket")
+
+    assert rc == 0
+    assert tail.close_calls, "close_case_ticket was never called at all"
+    assert tail.close_calls[0].get("truncated_by") == "request-limit", (
+        f"run.py's tail did not thread the exit class through to close_case_ticket "
+        f"(got {tail.close_calls[0]!r}) — the per-exit-class table in ticket_writer.py is "
+        "unreachable in production if this call site still uses the old no-argument shape")
+
+
+def test_cut_short_reason_names_the_actual_world_not_a_hardcoded_label(tmp_path):
+    """The spec adversary's F8: `_grade_world`'s cut-short reason string is only ever asserted
+    for a world literally named `b` anywhere in the committed suite, so an implementation that
+    hardcodes `"world 'b': ..."` instead of interpolating the real label satisfies every one of
+    them. Driven on world `c` specifically to catch that substitution."""
+    ep = S.cut_short_episode(tmp_path, cut={"c": "aborted"})
+
+    rows = S.graded(ep)
+
+    assert rows["c"]["ungradable_reason"].startswith("world 'c'"), (
+        f"the reason names the wrong world: {rows['c']['ungradable_reason']!r}")
