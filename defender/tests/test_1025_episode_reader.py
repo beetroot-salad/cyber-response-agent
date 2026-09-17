@@ -83,8 +83,18 @@ def _family():
     return J.mod("learning.judge.family")
 
 
+def _world(ep: Path, label: str):
+    """The reader `lead_chain` takes: the episode's bound primitive, bound one directory down
+    at `worlds/<label>` by derivation (#1049 D-V2) — never a path it could format."""
+    return J.mod("_io").bind(ep).under(f"worlds/{label}")
+
+
 def _render():
     return J.mod("learning.judge.render")
+
+
+def _io():
+    return J.mod("_io")
 
 
 def _archive():
@@ -383,7 +393,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     behavioural half of "one home": a real `render()` over an archived world produces a
     `leads` view equal, lead for lead, to `lead_chain` over the same world's own facts.
 
-    Observably true: `render(ep, "b").leads["l-001"]` equals `family.lead_chain(world_dir,
+    Observably true: `render(ep, "b").leads["l-001"]` equals `family.lead_chain(world,
     "l-001", facts.resolutions_by_lead, leads=family.leads_by_id(world_dir))`,
     with a real lead file and two issued queries on disk so every link carries a value.
 
@@ -405,8 +415,8 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     base, _src = J.runs_base(tmp_path)
 
     shown = _render().render(ep, "b", runs_base=base).leads
-    facts = family.read_world_facts(ep, "b", episode_token=J.EPISODE_TOKEN)
-    expected = family.lead_chain(world_dir, "l-001", facts.resolutions_by_lead,
+    facts = family.read_world_facts(J.mod("_io").bind(ep), "b", episode_token=J.EPISODE_TOKEN)
+    expected = family.lead_chain(_world(ep, "b"), "l-001", facts.resolutions_by_lead,
                                  leads=family.leads_by_id(world_dir))
 
     assert expected["goal"] == "find the pivot", "the fixture's lead file was not read"
@@ -467,7 +477,8 @@ def test_leads_by_id_is_the_canonical_surface_indexed_once(tmp_path):
 
 
 def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_lead(tmp_path):
-    """`lead_chain(world_dir, lead_id, resolutions_by_lead, *, leads=...)` is the
+    """`lead_chain(world, lead_id, resolutions_by_lead, *, leads=...)` — `world` the
+    episode's bound reader derived at `worlds/<label>` (#1049) — is the
     per-lead join the page needs and the input builder already computes: goal (the surface's,
     off the lead's own `gather_raw/<lead>.lead.json`), params (the first issued query's),
     payload digests (in issue order), the gather summary, and this lead's resolutions — and
@@ -498,7 +509,7 @@ def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_l
     resolutions = {"l-001": [{"before": "open", "after": "held"}]}
     by_id = family.leads_by_id(world_dir)
 
-    chain = family.lead_chain(world_dir, "l-001", resolutions, leads=by_id)
+    chain = family.lead_chain(_world(ep, "b"), "l-001", resolutions, leads=by_id)
 
     assert chain["goal"] == "find the pivot"
     assert chain["params"] == {"index": "logs-*"}, "params is not the FIRST issued query's"
@@ -508,7 +519,7 @@ def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_l
     assert "document_rows" not in chain, "the raw rows are back in the chain"
     assert chain["resolutions"] == resolutions["l-001"]
 
-    bare = family.lead_chain(world_dir, "l-002", resolutions, leads=by_id)
+    bare = family.lead_chain(_world(ep, "b"), "l-002", resolutions, leads=by_id)
     assert (bare["goal"], bare["summary"], bare["resolutions"]) == (None, None, [])
     assert bare["payload"] == ["d3"], "a lead with queries but no lead file lost its payload"
 
@@ -537,9 +548,10 @@ def test_lead_chain_never_reads_outside_the_graded_world_for_a_traversing_lead_i
     assert "world c" in sibling_summary, "the fixture's sibling summary does not name world c"
 
     by_id = family.leads_by_id(b_dir)
-    honest = family.lead_chain(b_dir, "l-001", {}, leads=by_id)
-    leaked_goal = family.lead_chain(b_dir, "../../c/gather_raw/l-001", {}, leads=by_id)
-    leaked_summary = family.lead_chain(b_dir, "../../c/gather_summaries/l-001", {},
+    world_b = _world(ep, "b")
+    honest = family.lead_chain(world_b, "l-001", {}, leads=by_id)
+    leaked_goal = family.lead_chain(world_b, "../../c/gather_raw/l-001", {}, leads=by_id)
+    leaked_summary = family.lead_chain(world_b, "../../c/gather_summaries/l-001", {},
                                        leads=by_id)
 
     assert honest["goal"] == "OWN GOAL", "positive control: b's own lead file not read"
@@ -551,8 +563,8 @@ def test_lead_chain_never_reads_outside_the_graded_world_for_a_traversing_lead_i
 
 
 def test_json_mapping_answers_a_mapping_and_none_for_everything_else(tmp_path):
-    """`json_mapping(path)` is the ONE tolerance policy for a JSON artifact: a mapping, or
-    `None` for an absent file, a corrupt one, or a JSON document that is not a mapping.
+    """`json_mapping(bound, name)` is the ONE tolerance policy for a JSON artifact: a mapping,
+    or `None` for an absent file, a corrupt one, or a JSON document that is not a mapping.
 
     Observably true: four inputs through the real file, four answers.
 
@@ -561,14 +573,15 @@ def test_json_mapping_answers_a_mapping_and_none_for_everything_else(tmp_path):
     """
     family = _family()
     path = tmp_path / "artifact.json"
+    bound = _io().bind(tmp_path)
 
     path.write_text(json.dumps({"alert_id": "a-1"}), encoding="utf-8")
-    assert family.json_mapping(path) == {"alert_id": "a-1"}
+    assert family.json_mapping(bound, "artifact.json") == {"alert_id": "a-1"}
     path.write_text(json.dumps([1, 2]), encoding="utf-8")
-    assert family.json_mapping(path) is None, "a JSON list was answered as a mapping"
+    assert family.json_mapping(bound, "artifact.json") is None, "a JSON list was answered as a mapping"
     path.write_text("{not json", encoding="utf-8")
-    assert family.json_mapping(path) is None, "a corrupt document raised or was answered"
-    assert family.json_mapping(tmp_path / "absent.json") is None
+    assert family.json_mapping(bound, "artifact.json") is None, "a corrupt document raised or was answered"
+    assert family.json_mapping(bound, "absent.json") is None
 
 
 def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regular_file(
@@ -581,26 +594,35 @@ def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regul
 
     Observably true: a regular file reads as its mapping (positive control); the same bytes
     behind a real symlink at the same name read as `None`; and `render._read_provenance` over a
-    world whose stamp is such a link answers `{}` — no commit, rather than the planted one.
+    world whose stamp is such a link — or whose DIRECTORY is (#1049: the walk follows no
+    component) — answers `{}` — no commit, rather than the planted one.
     """
     family, render = _family(), _render()
     outside = tmp_path / "planted.json"
     outside.write_text(json.dumps({"commit": "a" * 40, "dirty": False}), encoding="utf-8")
     regular = tmp_path / "artifact.json"
     regular.write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
-    assert family.json_mapping(regular) == {"commit": "a" * 40, "dirty": False}, (
+    bound = _io().bind(tmp_path)
+    assert family.json_mapping(bound, "artifact.json") == {"commit": "a" * 40, "dirty": False}, (
         "positive control: a regular file did not read")
 
     linked = tmp_path / "linked.json"
     linked.symlink_to(outside)
-    assert family.json_mapping(linked) is None, "a symlink at the artifact's name was followed"
+    assert family.json_mapping(bound, "linked.json") is None, "a symlink at the artifact's name was followed"
 
     ep = J.accepted_episode(tmp_path)
     stamp = ep / "worlds" / "b" / "provenance.json"
     stamp.unlink()
     stamp.symlink_to(outside)
-    assert render._read_provenance(ep / "worlds" / "b") == {}, (
+    episode = _io().bind(ep)
+    assert render._read_provenance(episode.under("worlds/b")) == {}, (
         "a planted link at provenance.json handed the pass the planted commit")
+    (ep / "worlds" / "b").rename(ep / "worlds" / "b-real")
+    (ep / "worlds" / "b-real" / "provenance.json").unlink()
+    (ep / "worlds" / "b-real" / "provenance.json").write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
+    (ep / "worlds" / "b").symlink_to(ep / "worlds" / "b-real")
+    assert render._read_provenance(episode.under("worlds/b")) == {}, (
+        "a planted link at worlds/<X> handed the pass the planted commit")
 
 
 def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path):
@@ -619,7 +641,7 @@ def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path)
     world_dir = ep / "worlds" / "b"
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
-    chain = family.lead_chain(world_dir, "l-001", {}, leads=family.leads_by_id(world_dir))
+    chain = family.lead_chain(_world(ep, "b"), "l-001", {}, leads=family.leads_by_id(world_dir))
     assert chain["goal"] == "find the pivot", "positive control: the real lead file was not read"
 
     outside = tmp_path / "planted-gather_raw"
@@ -630,7 +652,7 @@ def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path)
     shutil.rmtree(world_dir / "gather_raw")
     (world_dir / "gather_raw").symlink_to(outside, target_is_directory=True)
 
-    chain = family.lead_chain(world_dir, "l-001", {}, leads=family.leads_by_id(world_dir))
+    chain = family.lead_chain(_world(ep, "b"), "l-001", {}, leads=family.leads_by_id(world_dir))
     assert chain["goal"] is None, (
         "a link planted at gather_raw/ was followed to another tree's lead file")
 

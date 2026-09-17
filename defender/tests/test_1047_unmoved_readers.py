@@ -171,8 +171,9 @@ def test_pass_lessons_commit_still_returns_none_when_the_gradable_set_is_empty(t
     function's answer to everything."""
     judge = S.mod("learning.judge")
     ep = _all_cut_short(tmp_path)
-    assert judge._pass_lessons_commit(ep, []) is None
-    assert judge._pass_lessons_commit(ep, ["b", "c"]) is not None, (
+    bound = S.mod("_io").bind(ep)  # #1049: the resolver takes the pass's bound, not the root
+    assert judge._pass_lessons_commit(bound, []) is None
+    assert judge._pass_lessons_commit(bound, ["b", "c"]) is not None, (
         "the control failed: the commit resolver answered None for worlds that do carry a "
         "provenance stamp, so the empty-set answer above is not about the empty set")
 

@@ -499,8 +499,8 @@ def test_a_world_directory_holding_a_run_end_record_and_nothing_else(tmp_path):
     be green on the report arm and silently wrong on the other three."""
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
     world = ep / "worlds" / "b"
-    ledger = S.mod("learning.judge.family").world_ledger_path(
-        ep, "b", episode_token=S.EPISODE_TOKEN)
+    ledger = ep / S.mod("learning.judge.family").world_ledger_name(  # #1049: the relative spelling
+        "b", episode_token=S.EPISODE_TOKEN)
     for name in ("report.md", "investigation.md", "alert.json"):
         (world / name).unlink()
     if ledger.exists():

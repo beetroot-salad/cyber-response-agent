@@ -52,12 +52,13 @@ def _world(page: E.Page, label: str) -> str:
 
 
 def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
-    """The loader takes the episode directory's spelling out of every refusal sentence
-    (d05/x24). Rendered from `re` — a directory named with a substring of `report.md` and
-    `read` — the report slot's refusal still says `report.md` and `could not be read`: the
-    scrub matches the root only at a path boundary, never inside a word. Before, the same
-    page read "<episode>port.md could not be <episode>ad" (review of PR #1042). Positive
-    control: the root's real occurrence in the sentence is still gone."""
+    """Rendered from `re` — a directory named with a substring of `report.md` and `read` — the
+    report slot's refusal still says `report.md` and `could not be read`, whole: no scrub runs
+    over the sentence at all (#1049: the loader's `_sentence` is gone — the reader formats the
+    relative name `worlds/<w>/report.md` at its source and never holds the root, so a short
+    relative spelling of the root has nothing to leak from and nothing to be cut out of a
+    word). Before, the same page read "<episode>port.md could not be <episode>ad" (review of
+    PR #1042). Positive control: the root's spelling is absent from the page."""
     ep = E.sample_episode(tmp_path)
     short = tmp_path / "re"
     ep.dir.rename(short)
@@ -66,10 +67,12 @@ def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
     with contextlib.chdir(tmp_path):
         page = render(Path("re"))
     world = _world(page, E.GRADED_WORLD)
-    assert "report.md" in world, world
+    assert "report.md could not be read" in world, world
     assert "<episode>port" not in world, world
     assert "<episode>ad" not in world, world
-    assert f"'worlds/{E.GRADED_WORLD}/report.md'" in world, world
+    assert f"worlds/{E.GRADED_WORLD}/report.md" in world, world
+    # said bare — never as a quoted filename cut down from an absolute path
+    assert f"'worlds/{E.GRADED_WORLD}/report.md'" not in world, world
     assert "re/worlds" not in page.raw
 
 
@@ -260,7 +263,8 @@ def test_1025_an_unreadable_gather_summary_is_the_chains_own_sentence_for_the_ju
     summary = world / "gather_summaries" / "l-001.md"
     summary.chmod(0)
     try:
-        chain = family.lead_chain(world, "l-001", {}, leads=family.leads_by_id(world))
+        chain = family.lead_chain(E.mod("_io").bind(ep.dir).under(f"worlds/{E.GRADED_WORLD}"),
+                                  "l-001", {}, leads=family.leads_by_id(world))
         page = render(ep)
     finally:
         summary.chmod(0o644)

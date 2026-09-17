@@ -140,7 +140,7 @@ def test_an_episode_stages_and_is_read_under_one_namespace(tmp_path, monkeypatch
     a sibling process becomes a world through — resolves a `world_id` whose staged view the door
     actually created; `review` records that same token per world in `review.yaml`, having
     re-derived it from the manifest rather than being handed staging's; and
-    `judge.family.world_ledger_path`, which reads a sibling's rows back out of `served/`, names
+    `judge.family.world_ledger_name`, which reads a sibling's rows back out of `served/`, names
     the file that same `world_id` writes.
 
     AND BY CONSTRUCTION, which no coherence assertion over one launch can reach on its own: the
@@ -177,9 +177,9 @@ def test_an_episode_stages_and_is_read_under_one_namespace(tmp_path, monkeypatch
         assert [n for n in created if n.startswith(f"wv-{resumed}-")], (
             f"world {label!r} resumes into {resumed!r}, whose view the door never created: "
             f"{created}")
-        ledger = judge_family.world_ledger_path(ep, label, episode_token=token)
-        assert ledger.name == f"{resumed}.jsonl", (
-            f"the grader reads world {label!r}'s rows from {ledger.name}, which is not the file "
+        ledger = judge_family.world_ledger_name(label, episode_token=token)
+        assert ledger.rsplit("/", 1)[-1] == f"{resumed}.jsonl", (
+            f"the grader reads world {label!r}'s rows from {ledger}, which is not the file "
             f"the sibling writing as {resumed!r} appends to")
         reviewed = W.read_yaml(ep / W.REVIEW_NAME)["worlds"][label]["world_token"]
         assert reviewed == resumed, (

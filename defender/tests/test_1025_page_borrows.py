@@ -121,9 +121,10 @@ def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp
     and wrong for a permission fault."""
     family = E.mod("learning.judge.family")
     ep = E.sample_episode(tmp_path)
+    bound = E.mod("_io").bind(ep.dir)
     report = ep.world(E.GRADED_WORLD) / "report.md"
     with _restoring([report], 0):
-        got = family.read_archived_report(report)
+        got = family.read_archived_report(bound, f"worlds/{E.GRADED_WORLD}/report.md")
     assert got.disposition is None
     assert "Permission denied" in got.reason, got.reason
     assert "aliased" not in got.reason, got.reason
@@ -133,7 +134,7 @@ def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp
     link = ep.world(E.WITHHELD_WORLD) / "report.md"
     link.unlink()
     link.symlink_to(target)
-    got = family.read_archived_report(link)
+    got = family.read_archived_report(bound, f"worlds/{E.WITHHELD_WORLD}/report.md")
     assert got.disposition is None
     assert got.reason.count("non-plain or aliased") == 1, got.reason
 
@@ -151,7 +152,8 @@ def test_1025_the_ledgers_malformed_row_count_is_the_judges_own(tmp_path):
     with ledger.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(bogus) + "\n")
     family = E.mod("learning.judge.family")
-    facts = family.read_world_facts(ep.dir, E.GRADED_WORLD, episode_token=E.EPISODE_TOKEN)
+    facts = family.read_world_facts(E.mod("_io").bind(ep.dir), E.GRADED_WORLD,
+                                    episode_token=E.EPISODE_TOKEN)
     assert facts.malformed_rows == 1
     block = render(ep).text_of(f"leads-{E.GRADED_WORLD}")
     assert "1 malformed row" in block, block
@@ -166,7 +168,8 @@ def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
     ep = E.sample_episode(tmp_path)
     (ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl").unlink()
     with pytest.raises(J.sym("learning.judge", "JudgeRefused"), match="ledger"):
-        family.read_world_facts(ep.dir, E.GRADED_WORLD, episode_token=E.EPISODE_TOKEN)
+        family.read_world_facts(E.mod("_io").bind(ep.dir), E.GRADED_WORLD,
+                                episode_token=E.EPISODE_TOKEN)
     block = render(ep).text_of(f"leads-{E.GRADED_WORLD}")
     assert "absent" in block, block
 

@@ -52,7 +52,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from defender._io import entry_present, guarded_mkdir, read_guarded, write_guarded
+from defender._io import Bound, entry_present, guarded_mkdir, write_guarded
 from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file, plain_file
 from defender.learning.lead_repository import (
     refuse_non_artifacts,
@@ -104,35 +104,30 @@ DRAWS_DIRNAME = "judge"
 FAMILY_STAMP_NAME = "provenance.json"
 
 
-def read_family_stamp(episode_dir: Path) -> dict[str, Any] | None:
+def read_family_stamp(bound: Bound) -> dict[str, Any] | None:
     """The episode-root family stamp — `{agreed: {...}, allow_dirty}` — or `None` when nothing
     is at the name (#1025 J12).
 
     A public accessor distinct from the per-world run-stamp reader (`family.json_mapping`,
     tolerant and shape-agnostic): this one KNOWS the family stamp's own shape and refuses a
-    directory or a document that is not it, through `read_guarded`'s screen — the episode dir
-    is reachable from a sibling box's rw bind, exactly like every other episode-root record.
+    directory or a document that is not it, through the bound reader's own screen (#1049) —
+    the episode dir is reachable from a sibling box's rw bind, exactly like every other
+    episode-root record, and the refusal names the relative name, never the operator's tree.
     """
-    path = Path(episode_dir) / FAMILY_STAMP_NAME
-    # `entry_present` (one `lstat`), not `exists() or is_symlink()`: `Path.exists()` follows the
-    # link and on 3.11 re-raises a permission fault from the directory above, so a link planted
-    # into a mode-000 directory escaped as a bare `PermissionError` instead of the typed refusal
-    # every caller handles (#1025).
-    if not entry_present(path):
+    rec = bound.read(FAMILY_STAMP_NAME)
+    if rec.absent:
         return None
-    # A directory squatting the name is refused by `read_guarded` itself (`IsADirectoryError`
-    # is an `OSError`, one of its own refusal classes) — no separate `is_dir()` check, which
-    # would be an unscreened read of the same box-writable entry `read_guarded` already judges.
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise ValueError(f"{FAMILY_STAMP_NAME} at {path} could not be read: {refusal}")
+    # A directory squatting the name is refused by the walk itself — no separate `is_dir()`
+    # check, which would be an unscreened read of the same box-writable entry the walk judges.
+    if rec.text is None:
+        raise ValueError(f"{FAMILY_STAMP_NAME} could not be read: {rec.reason}")
     try:
-        doc = json.loads(text)
+        doc = json.loads(rec.text)
     except (ValueError, RecursionError) as bad:
-        raise ValueError(f"{FAMILY_STAMP_NAME} at {path} is not the family stamp: {bad}") from bad
+        raise ValueError(f"{FAMILY_STAMP_NAME} is not the family stamp: {bad}") from bad
     if not (isinstance(doc, dict) and isinstance(doc.get("agreed"), dict)
             and "allow_dirty" in doc):
-        raise ValueError(f"{FAMILY_STAMP_NAME} at {path} is not the family stamp")
+        raise ValueError(f"{FAMILY_STAMP_NAME} is not the family stamp")
     return doc
 
 

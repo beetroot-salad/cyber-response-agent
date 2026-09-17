@@ -70,6 +70,11 @@ class ReportRead:
     frontmatter: Mapping[str, Any]
     body: str
     text: str
+    #: Was there nothing at the name at all (#1049)? `False` for every reader that predates the
+    #: bound primitive — `read_report`'s own "not found" case included, which still answers
+    #: through `reason`, unchanged. The world-archive reader (`family.read_archived_report`) is
+    #: the one caller that sets this `True`, off the primitive's own absent state.
+    absent: bool = False
 
     @property
     def report(self) -> Report | None:

@@ -210,6 +210,17 @@ def read_yaml(path: Path) -> Any:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
+def read_yaml_record(bound: Any, name: str) -> Any:
+    """`read_yaml`'s twin in the `reader=` seam's shape — `(bound, name)`, never a path (#1049
+    d-21, RF-R2): the record's text comes off the bound primitive and is parsed; an absent
+    record is `None`, the seam's typed absent answer; a refused one is a fixture fault here."""
+    import yaml
+
+    read = bound.read(name)
+    assert read.refusal is None, f"fixture fault: {read.refusal}"
+    return None if read.absent else yaml.safe_load(read.text)
+
+
 #: One real corpus document, the shape `stagers/elastic.py::source_pattern` keys a sample by.
 SAMPLE_DOCUMENT = {
     "@timestamp": "2026-07-28T16:00:00Z",
