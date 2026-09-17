@@ -759,7 +759,7 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     the automatic feed into the offline learning pipeline is unhooked at its call site, so
     `main` no longer calls it at all, and a departed name with no stated reason is exactly the
     unfalsifiable shrink `test_removing_a_consumer...` exists to catch. `enqueue_curation` and
-    `close_case_ticket` join in its place: the new curation trigger and the ticket-close step,
+    `record_case_ticket` join in its place: the new curation trigger and the ticket-record step,
     both newly pre-certification consumers of the tree (R6/R17)."""
     log: list[str] = []
     rec = BoxLifecycleRecorder(events=log)
@@ -785,8 +785,8 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     # `enqueue_learning` left this list under #791 (bullet 1: the automatic feed is unhooked
     # at this call site — the surviving path is the operator's own hand invocation of the
     # learning entrypoint, never a call inside `main`). `enqueue_curation` and
-    # `close_case_ticket` are the two new pre-certification consumers R6/R17 add.
-    for consumer in ("iterdir", "cross_check_tables", "enqueue_curation", "close_case_ticket", "visualize"):
+    # `record_case_ticket` are the two new pre-certification consumers R6/R17 add.
+    for consumer in ("iterdir", "cross_check_tables", "enqueue_curation", "record_case_ticket", "visualize"):
         assert consumer in order, f"{consumer} left the entrypoint; re-site this demand"
         assert reap < order.index(consumer), \
             f"{consumer} reads the run dir BEFORE the lifecycle scrubbed it — an escaping " \

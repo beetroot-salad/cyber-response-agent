@@ -111,35 +111,70 @@ def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> No
         _warn(f"open raised, ignored: {e!r}")
 
 
-def close_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> None:
+def _build_comment_payload(run_dir: Path, case_id: str) -> dict | None:
+    """The outbound `{author, body}` for `record_case_ticket`, or `None` with a warning already
+    printed. §7 R10: an unreadable report takes the FIXED unreadable-branch sentence, never a
+    second, bespoke emptiness check — `case_ticket.ReportNotParsable` is `read_case_record`'s
+    own signal for exactly that case. Any other `CaseTicketError` (a bad mapping, a template
+    naming a key the context does not carry) refuses to POST at all (§7 R1/FAM-1)."""
+    try:
+        rec = case_ticket.read_case_record(run_dir)
+    except case_ticket.ReportNotParsable:
+        try:
+            return case_ticket.unreadable_comment_payload()
+        except case_ticket.CaseTicketError as e:
+            _warn(f"record {case_id}: {e}; skipping")
+            return None
+    except case_ticket.CaseTicketError as e:
+        _warn(f"record {case_id}: {e}; skipping")
+        return None
+    try:
+        return case_ticket.case_record_to_comment(rec)
+    except case_ticket.CaseTicketError as e:
+        _warn(f"record {case_id}: {e}; skipping")
+        return None
+
+
+def record_case_ticket(
+    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, key: str | None = None,
+) -> None:
+    """D2: the host RECORDS its investigation into the case rather than closing it — one
+    `POST /tickets/{key}/comments`, no transition. §7 R6/FAM-3: a failed or colliding open does
+    NOT suppress this attempt (the two post-steps are independent statements under one flag);
+    every write fault is caught, warned once, and leaves the run's exit code exactly what it
+    would have been (O7). `key` is a parameter now (§7 R8/FK04) so a vendor-minted, pre-existing
+    key on a later deployment is a call-site edit — today's deployment keeps `case_id =
+    run_dir.name`."""
     try:
         config = deps.load_config()
         if config is None:
             return
-        try:
-            rec = case_ticket.read_case_record(run_dir)
-        except case_ticket.CaseTicketError as e:
-            _warn(f"no usable report.md; leaving ticket open: {e}")
+        case_id = key if key is not None else run_dir.name
+        payload = _build_comment_payload(run_dir, case_id)
+        if payload is None:
             return
-        payload = case_ticket.case_record_to_close(rec)
-        key = urllib.parse.quote(rec.case_id, safe="")
-        status, body = deps.request(config, "POST", f"/tickets/{key}/transitions", payload)
+        quoted = urllib.parse.quote(case_id, safe="")
+        try:
+            status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload)
+        except TransportFault as e:
+            status, body = None, f"transport error: {e.detail}"
         ok = status is not None and status.startswith("2")
         if not ok:
-            _warn(f"close {rec.case_id}: {status or 'transport error'}: {body}")
+            _warn(f"record {case_id}: {status or 'transport error'}: {body}")
         else:
-            _log(f"close {rec.case_id}: {rec.disposition} ({status})")
-        _write_receipt(run_dir, config, rec.case_id, ok)
+            _log(f"record {case_id}: comment posted ({status})")
+        _write_receipt(run_dir, config, case_id, ok)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
-        _warn(f"close raised, ignored: {e!r}")
-
-
+        _warn(f"record raised, ignored: {e!r}")
 
 
 def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, ok: bool) -> None:
     receipt = {
         "key": case_id,
-        "status": "closed" if ok else "error",
+        # §7 R6/FK29: "commented", not "closed" — after D2 nothing closes, and the old literal
+        # would record a false event. The receipt has zero readers (c5), which is why this word
+        # is free to change and why no fault below is escalated beyond the warning.
+        "status": "commented" if ok else "error",
         "url": f"{config['URL_BASE'].rstrip('/')}/tickets/{case_id}",
         "ok": ok,
     }

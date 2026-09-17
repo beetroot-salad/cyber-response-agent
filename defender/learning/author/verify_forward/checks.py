@@ -69,20 +69,19 @@ def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) ->
 
 
 def _run_findings(ctx: CheckContext, *, salt: str | None = None) -> str:
+    # #767 D5: the cited-covering-policy prompt section is deleted along with the
+    # resolution-decoding lane it read through — `forward.load_cited_policy` keyed on a
+    # cross-run citation menu no non-test code writes (c5), so this section was always the
+    # same neutral placeholder in production. Removing it closes the second model-facing read
+    # path structurally, rather than leaving a prompt section that never varies.
     stage_salt = salt if salt is not None else uuid4().hex
     transcript, recorded = forward.load_run_context(ctx.source_id, runs_dir=ctx.runs_dir)
     disposition = forward.expected_disposition(ctx.direction, recorded)
-    cited_policy = (
-        forward.load_cited_policy(ctx.source_id, runs_dir=ctx.runs_dir)
-        if ctx.direction == "benign"
-        else forward._NO_CITED_POLICY
-    )
     user = stage_user_message(
         stage_salt,
         wrap(transcript, "case_transcript", stage_salt),
         wrap(ctx.lesson_text, "candidate_lesson", stage_salt),
         wrap(disposition, "case_ground_truth_disposition", stage_salt),
-        wrap(cited_policy, "cited_covering_policy", stage_salt),
     )
     return _verify(ctx, user, ctx.runs_dir / ctx.source_id, salt=stage_salt)
 

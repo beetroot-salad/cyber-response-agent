@@ -211,7 +211,6 @@ def _findings_prompt(tmp_path: Path, *, hostile="TRANSCRIPT-BODY", salt="5a" * 1
             "case_transcript",
             "candidate_lesson",
             "case_ground_truth_disposition",
-            "cited_covering_policy",
         ),
         (hostile,),
         salt,

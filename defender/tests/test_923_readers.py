@@ -44,7 +44,6 @@ from defender.tests._spec923 import (
     PAYING_ROW,
     finished_run,
     paid,
-    person_facing_refusal_defects,
 )
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
@@ -134,21 +133,6 @@ def _invlang_cli_accepts_it_as_a_filter(tmp_path: Path) -> None:
         "with the source it filters"
     )
 
-
-def _ticket_lane_refuses_it_as_an_authored_resolution(_tmp_path: Path) -> None:
-    """The refusal's TEXT is asserted here too, not just the exception class.
-
-    This edge and `test_every_authoring_surface_refuses_the_host_only_verdict` are the two
-    places a person meets this refusal, and a message check on one of them leaves the other
-    free to raise a bare word. Both go through the same oracle."""
-    from defender.scripts.case_history import case_ticket
-    from defender.scripts.case_history.case_ticket import CaseTicketError
-
-    with pytest.raises(CaseTicketError) as refusal:
-        case_ticket.parse_disposition_from_resolution(f"{MEMBER} — I could not get to a verdict")
-    defects = person_facing_refusal_defects(str(refusal.value), value=MEMBER)
-    assert defects == [], f"{defects}; the text was {str(refusal.value)!r}"
-    assert case_ticket.parse_disposition_from_resolution("malicious — confirmed") == "malicious"
 
 
 # --- the unmoved consumers of the committed report -------------------------------------------
@@ -311,7 +295,9 @@ _READERS = {
     "lessons_run": _lessons_run_has_no_confident_ground_truth,
     "invlang_queries": _invlang_queries_finds_the_case,
     "invlang_cli": _invlang_cli_accepts_it_as_a_filter,
-    "ticket_lane->disposition": _ticket_lane_refuses_it_as_an_authored_resolution,
+    # #767 N10 retired "ticket_lane->disposition" (`_ticket_lane_refuses_it_as_an_authored_
+    # resolution`): D5 deleted the decoder it drove, closing the surface structurally rather
+    # than leaving an edge that refuses a value nothing decodes any more.
     # the committed report's unmoved readers
     "report_reader": _report_reader_reads_it_back,
     "learning_validate": _learning_validate_does_not_dead_letter,
@@ -419,7 +405,6 @@ def test_a_malformed_committed_verdict_is_marked_not_coerced(tmp_path):
     read back as the member by every one of these readers. Without it the parity above is
     satisfied by a build where nothing can read a report at all."""
     from defender._report import read_report
-    from defender.scripts.case_history import case_ticket
     from defender.tests._spec923 import MALFORMED_MEMBER_SPELLINGS, NOT_A_MEMBER
 
     unknown = _reader_answers(finished_run(tmp_path / "unknown", disposition=NOT_A_MEMBER))
@@ -442,10 +427,6 @@ def test_a_malformed_committed_verdict_is_marked_not_coerced(tmp_path):
             f"asked to judge a malformed verdict cannot see an invisible character described "
             f"in prose"
         )
-        # The analyst-editable lane decodes the same value and must not hand it on either.
-        assert case_ticket.parse_disposition_from_resolution(
-            f"{spelling} — closed by hand",
-        ) != "malicious", "the ticket lane decoded a malformed verdict into a real member"
 
     # THE PAIRED POSITIVE CONTROL: the clean spelling, same fixture, same readers.
     clean = _reader_answers(finished_run(tmp_path / "clean", disposition="malicious"))

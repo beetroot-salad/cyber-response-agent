@@ -69,19 +69,21 @@ from defender.scripts.adapters.faults import TransportFault  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 CONFIGURED_PATTERNS = ("logs-*", "security-audit-*")
-# The four estate-write endpoints that exist at HEAD, two of them ungated (g14), as
-# (system, path, METHOD) triples — the shape the rule now keys on.
+# The four estate-write endpoints that exist at HEAD, as (system, path, METHOD) triples — the
+# shape the rule now keys on. #767 D2 retires the transition write (the host now RECORDS a
+# comment rather than closing the case) and D6 adds the operator's approve-label route in its
+# place — the census moves with the change (`d_checked_in_censuses_move_together`).
 #
 # THE SYSTEM LITERAL IS THE ONE THE WRITER REALLY CARRIES, and correcting it is half of why
-# the method axis had to exist. The three ticket-store mutations are reached by a post-run
-# script whose system identity is `case-history`, not `ticket`, and both configs resolve to
-# the SAME host — so neither the system label nor the host separates a read from a write, and
-# the previous literal `"ticket"` papered that over. What separates them is the method.
+# the method axis had to exist. The ticket-store mutations are reached by a post-run script
+# whose system identity is `case-history`, not `ticket`, and both configs resolve to the SAME
+# host — so neither the system label nor the host separates a read from a write, and the
+# previous literal `"ticket"` papered that over. What separates them is the method.
 TICKET_WRITER_SYSTEM = "case-history"
 WRITE_ENDPOINTS = (
     (TICKET_WRITER_SYSTEM, "/tickets", "POST"),
-    (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/transitions", "POST"),
     (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/comments", "POST"),
+    (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/labels", "POST"),
     ("elastic", "/logs-2026.01.01/_update/1", "POST"),
 )
 # The collision the endpoint-only rule could not survive, kept as its own case because it is

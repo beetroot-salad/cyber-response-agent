@@ -338,18 +338,27 @@ class FakeStore:
         return body
 
 
-def writer_deps(store: FakeStore, *, config: dict[str, str] | None = None):
+#: `config` distinguishes THREE states across `writer_deps`/`record`/`open_ticket`: omitted
+#: (use the fixture's own `CONFIG`), explicitly `None` (a run with no case-history config at
+#: all — `deps.load_config()` must answer `None`), or an explicit dict. Python gives both the
+#: first two the same spelling if the default is `None` itself, so the default is this
+#: sentinel instead — never `None` — and `None` is left free to mean what the writer's own
+#: `TicketWriterDeps.load_config` contract says it means.
+_CONFIG_UNSET = object()
+
+
+def writer_deps(store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET):
     """Bind the fake into the writer's real injection seam (g16)."""
     from defender.scripts.case_history import ticket_writer
 
-    resolved = CONFIG if config is None else config
+    resolved = CONFIG if config is _CONFIG_UNSET else config
     return ticket_writer.TicketWriterDeps(
         load_config=(lambda: None if resolved is None else dict(resolved)),
         request=store,
     )
 
 
-def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None = None,
+def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
            **kw: Any) -> Any:
     """Drive D2's writer over one run dir, through the real seam."""
     from defender.scripts.case_history import ticket_writer
@@ -362,7 +371,9 @@ def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None = N
     return fn(run_dir, writer_deps(store, config=config), **kw)
 
 
-def open_ticket(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None = None) -> Any:
+def open_ticket(
+    run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
+) -> Any:
     from defender.scripts.case_history import ticket_writer
 
     return ticket_writer.open_case_ticket(run_dir, writer_deps(store, config=config))

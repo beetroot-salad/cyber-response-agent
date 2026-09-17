@@ -126,7 +126,7 @@ def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_pa
     assert run_dir.is_dir(), "the lifecycle was handed a run dir that does not exist"
     assert (run_dir / "alert.json").is_file(), \
         "the lifecycle was handed a run dir the entrypoint had not materialized the alert into"
-    for step in ("open_case_ticket", "lifecycle", "close_case_ticket", "visualize"):
+    for step in ("open_case_ticket", "lifecycle", "record_case_ticket", "visualize"):
         assert step in tail.names, f"the tail never reached {step} (ran {tail.names})"
 
 
@@ -449,13 +449,13 @@ def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, st
     observed running against a tree the lifecycle had already certified, and the fail-closed
     control drives an uncertified one, where the request must be refused rather than written."""
     members = _property_members()
-    for consumer in ("enqueue_curation", "close_case_ticket"):
+    for consumer in ("enqueue_curation", "record_case_ticket"):
         assert consumer in members, \
             f"the pre-certification consumer property does not cover {consumer}"
 
     tail = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "ordered"), tail, "--update-ticket") == 0
-    for consumer in ("close_case_ticket", "visualize"):
+    for consumer in ("record_case_ticket", "visualize"):
         assert tail.step(consumer).tree_certified, \
             f"{consumer} read the run dir BEFORE the lifecycle certified it"
     assert author_markers(state), \

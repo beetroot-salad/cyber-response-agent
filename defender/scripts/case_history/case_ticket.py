@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION, normalized_disposition
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
 
@@ -18,51 +17,33 @@ _MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
 
 _SIGNATURE_FALLBACK = "unknown"
 _SUMMARY_FALLBACK = "(no rule description)"
-_CONFIDENCE_FALLBACK = "n/a"
 
-#: The bound on `CaseRecord.reason` once it leaves the process through the ticket bridge's
-#: outbound `resolution` — a field a PERSON and the judge model both read back. #923 makes
-#: `inconclusive`'s `ceiling_test` rows mandatory on every priced close (not just the two
-#: fixture documents that used to carry one), so model-authored text reaches this lane
-#: routinely rather than rarely.
-#: Held WELL under 512: `reason` does not render alone — `close.resolution`'s template
-#: (`mapping.yaml`) is `"{disposition} — {reason}"`, and the bound this demand pins is on the
-#: RENDERED resolution field on the wire, not on this input in isolation. The longest
-#: disposition (`false-positive`) plus its separator is 17 characters; 40 leaves a wide margin.
-_TICKET_REASON_MAX = 512 - 40
+#: #767 D3/O8 — ONE bound, 4096 UTF-8 BYTES on the rendered comment body. The cut rounds DOWN
+#: to the last whole character and the ellipsis sits INSIDE the bound. Retires the old
+#: `_TICKET_REASON_MAX` (472 characters), sized against the `close.resolution` field D5 deletes.
+WIRE_BOUND_BYTES = 4096
+_ELLIPSIS = "…"
 
+#: D3's empty-narrative marker — rendered in the narrative segment alone.
+NO_NOTES = "(no notes)"
 
-def _sanitize_ticket_reason(text: str) -> str:
-    """Strip injection-shaped structure from a reason before it leaves the process, and bound
-    its length — by TRUNCATION, never substitution, so a long claim is visibly cut rather than
-    silently swapped for a host placeholder that tells nobody what was not retrieved.
-
-    Only the frontmatter delimiter is stripped, structurally: everything from the first
-    standalone `---` onward is dropped, which removes a spoofed second frontmatter block (a
-    fabricated `disposition:`/`cause:` pair) and whatever text rides after it (an injected
-    instruction, in the one case observed) in one cut — a model-authored row cannot open a
-    second delimited block in a field that already left one. The legitimate half of the row,
-    which comes BEFORE any such attempt, survives untouched; a sanitizer that instead deleted
-    or replaced the whole reason would satisfy every negative here while telling the analyst
-    and the judge model nothing about the actual gap (#923, J29).
-
-    A LINE-ANCHORED match, not `split("\n---")`: the report BODY this falls back to is
-    everything after the document's own closing fence, so a planted block can be the very
-    FIRST thing in it and then carries no preceding newline. Splitting on `"\n---"` left
-    exactly that spelling — `---\ndisposition: malicious\n---\n<instruction>` — with its
-    fence and its spoofed verdict intact on the wire."""
-    # Not parsing a document's OWN frontmatter: this text is a `reason` field's contents, never
-    # required to start with `---\n`, so `_frontmatter.split_frontmatter` does not apply — it
-    # demands a leading fence and raises without one. This looks for an ATTACKER-PLANTED
-    # delimiter anywhere in the string, a different question with a different answer.
-    cleaned = re.split(r"(?m)^---", text)[0].strip()  # lint-frontmatter: ok — not a document's own fence, see above
-    if len(cleaned) > _TICKET_REASON_MAX:
-        cleaned = cleaned[: _TICKET_REASON_MAX - 1].rstrip() + "…"
-    return cleaned
+#: D2 — a run whose report yields no parsable disposition still comments, with this fixed host
+#: sentence and no narrative (§7 R10/FK06). Never built as a bespoke emptiness check: this
+#: branch is reached only through `_report.read_report`'s own verdict (`read_case_record`
+#: below), via `ReportNotParsable`.
+UNREADABLE_COMMENT_BODY = (
+    "No disposition could be recorded for this case: report.md carried no parsable "
+    "disposition to record."
+)
 
 
 class CaseTicketError(Exception):
     pass
+
+
+class ReportNotParsable(CaseTicketError):
+    """`read_case_record`'s own signal that `_report.read_report` found no disposition — the
+    unreadable-report branch, never a mapping or template defect (§7 R10)."""
 
 
 @dataclass(frozen=True)
@@ -71,16 +52,59 @@ class CaseRecord:
     case_id: str
     signature_id: str
     disposition: str
-    confidence: str
-    reason: str
-
-
+    #: The host's own sentence (frontmatter `cause`), always present on a close-tool report.
+    cause: str
+    #: The report's body, verbatim — fence-stripping and the wire bound are applied at render
+    #: time (`case_record_to_comment`), never here.
+    narrative: str
 
 
 def _mapping_path() -> Path:
     base = os.environ.get("DEFENDER_DIR")
     root = Path(base) if base else Path(__file__).resolve().parents[2]
     return root / _MAPPING_RELPATH
+
+
+def _label_template_can_render(template: str, approved_label: str) -> bool:
+    """Is `template` a shape that could render down to exactly `approved_label`?
+
+    A property of the TEMPLATE, not of any alert (§7 R5/FAM-2): only the literal prefix before
+    the FIRST placeholder can ever be pinned, so a template is safe iff `approved_label` cannot
+    start with that prefix. A template with no literal prefix at all can render to anything."""
+    idx = template.find("{")
+    if idx == -1:
+        return template == approved_label
+    prefix = template[:idx]
+    if not prefix:
+        return True
+    return approved_label.startswith(prefix)
+
+
+def _refuse_colliding_approved_label(data: dict[str, Any]) -> None:
+    """D1's loader refusal: walk every label-producing template under `open:` (and a stale
+    `close:`'s, FK27) and refuse the whole mapping if any could render the approved label's
+    exact spelling. Exhaustive over the section, not two named entries (FK26) — `open:` ships
+    to the wire unfiltered (g7), so a guard pinned to two names guards a fixed subset."""
+    approved = data.get("approved")
+    if not isinstance(approved, dict):
+        return
+    label = approved.get("label")
+    if not isinstance(label, str) or not label:
+        return
+    for section_name in ("open", "close"):
+        section = data.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        labels = section.get("labels")
+        if not isinstance(labels, list):
+            continue
+        for template in labels:
+            if isinstance(template, str) and _label_template_can_render(template, label):
+                raise CaseTicketError(
+                    f"case-history mapping's `{section_name}.labels` template {template!r} "
+                    f"could render the approved label {label!r} — refusing to load a mapping "
+                    "that could let an attacker-influenced field approve its own case"
+                )
 
 
 def _load_mapping() -> dict[str, Any]:
@@ -97,6 +121,7 @@ def _load_mapping() -> dict[str, Any]:
         raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
     if not isinstance(data, dict):
         raise CaseTicketError(f"case-history mapping is not a mapping: {path}")
+    _refuse_colliding_approved_label(data)
     return data
 
 
@@ -121,12 +146,9 @@ def _render(value: Any, ctx: dict[str, str]) -> Any:
 
 def _ctx(**kw: str) -> dict[str, str]:
     base = {k: "" for k in ("case_id", "signature", "summary", "disposition",
-                            "reason", "confidence", "outcome", "seed_eligible",
-                            "event_time")}
+                            "cause", "narrative", "event_time")}
     base.update(kw)
     return base
-
-
 
 
 def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
@@ -147,31 +169,15 @@ def alert_event_time(alert: dict[str, Any]) -> str | None:
 
 def read_case_record(run_dir: Path) -> CaseRecord:
     # The bridge writes to a real ticket system off this record, so an unreadable headline must
-    # stop it. Re-raise the shared accessor's refusal (text unchanged) as this lane's error
-    # type, which is what every caller here catches.
+    # take the unreadable branch (`ReportNotParsable`) rather than the ordinary one. Re-raised
+    # from the shared accessor's own refusal, so this classification is a CONSUMER of
+    # `_report.read_report`'s verdict rather than a second, bespoke emptiness check (§7 R10).
     try:
         report = require_report(RunPaths(run_dir).report)
     except ReportUnreadable as e:
-        raise CaseTicketError(str(e)) from e
+        raise ReportNotParsable(str(e)) from e
     fm, body, disposition = report.frontmatter, report.body, report.disposition
     case_id = run_dir.name
-    confidence = str(fm.get("confidence") or "")
-    # The reason is `cause` when the report carries one, and the body otherwise.
-    #
-    # The close gate host-renders the body from a closed vocabulary, so it is the SAME sentence
-    # on every close ("Disposition recorded by the close gate. outcome=…"). Using it as the
-    # reason hands a constant to three consumers: the judge's prompt, the outbound ticket
-    # comment, and — worst — the closed-ticket pool the challenge gate samples for base rates,
-    # where this close's own boilerplate comes back as evidence about prior closes. `cause` is
-    # the host's typed sentence for the disposition and has exactly one home, the frontmatter.
-    # Reports with no `cause` (anything the close gate did not write) keep the body verbatim.
-    #
-    # #923 §7 round 4's receipt redesign moved the gap CLAIM itself: `ceiling_test` in the
-    # frontmatter is now `ref`/`state`/`cap` alone — a closed vocabulary plus an id, host-
-    # verified, never free text — and the model's human-facing NOTE for each receipt is
-    # rendered into the BODY by `close_tool.render_report`. So for a priced `inconclusive`
-    # close with no `cause`, the body ALREADY carries the gap claim; no second lookup into
-    # `ceiling_test` is needed (or even meaningful — that key no longer holds prose).
     cause = str(fm.get("cause") or "")
 
     mapping = _load_mapping()
@@ -185,11 +191,9 @@ def read_case_record(run_dir: Path) -> CaseRecord:
         case_id=case_id,
         signature_id=signature_id,
         disposition=disposition,
-        confidence=confidence,
-        reason=_sanitize_ticket_reason(cause or body),
+        cause=cause,
+        narrative=body,
     )
-
-
 
 
 def alert_to_open_payload(alert: dict[str, Any], case_id: str) -> dict[str, Any]:
@@ -246,142 +250,178 @@ def signature_label(alert: dict[str, Any]) -> str | None:
     return labels[0] if labels else None
 
 
-def case_record_to_close(rec: CaseRecord) -> dict[str, Any]:
+# --------------------------------------------------------------------------------------------
+# D3 — the comment renderer, and D1's mapping accessors it shares with D4's predicates
+# --------------------------------------------------------------------------------------------
+
+# Not a document's own fence: this strips an ATTACKER-PLANTED delimiter from a `narrative`
+# field's free text (never required to start with a fence), the same reasoning the retired
+# `_sanitize_ticket_reason` carried for the same regex.
+_FENCE_SPLIT = re.compile(r"(?m)^---")  # lint-frontmatter: ok — see comment above
+
+
+def _resolve_comment_author(mapping: dict[str, Any]) -> str:
+    """§7 R1/FAM-1: fail closed rather than send an unattributable comment. Raised by both the
+    writer's render path and D4's `approval_predicates` — the same section, the same refusal."""
+    section = mapping.get("comment")
+    if not isinstance(section, dict):
+        raise CaseTicketError(
+            "case-history mapping has no `comment` section (comment.author/comment.body "
+            "required)"
+        )
+    author = section.get("author")
+    if not isinstance(author, str) or not author.strip():
+        raise CaseTicketError("case-history mapping's `comment.author` is missing or empty")
+    return author
+
+
+def _resolve_comment_body_template(mapping: dict[str, Any]) -> str:
+    section = mapping.get("comment")
+    if not isinstance(section, dict):
+        raise CaseTicketError(
+            "case-history mapping has no `comment` section (comment.author/comment.body "
+            "required)"
+        )
+    body = section.get("body")
+    if not isinstance(body, str):
+        raise CaseTicketError("case-history mapping's `comment.body` is missing")
+    return body
+
+
+def _prepare_narrative(narrative: str) -> str:
+    """Strip everything from the first line-anchored `---` onward (a planted frontmatter
+    fence, second and later fences included — S4/`d_first_fence_wins`), then substitute the
+    no-notes marker for an empty result. Runs BEFORE the wire bound (§7 FK07: strip first, then
+    bound) — a cut inside `---foo` can only ever yield `---…`, never a bare standalone fence."""
+    stripped = _FENCE_SPLIT.split(narrative)[0].strip()
+    return stripped if stripped else NO_NOTES
+
+
+def _bound_wire_bytes(text: str) -> str:
+    """§7 R2/FK01: ONE bound, 4096 UTF-8 bytes, on the whole rendered body. The cut rounds DOWN
+    to the last whole character and the ellipsis sits INSIDE the bound."""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= WIRE_BOUND_BYTES:
+        return text
+    budget = WIRE_BOUND_BYTES - len(_ELLIPSIS.encode("utf-8"))
+    cut = encoded[:budget].decode("utf-8", errors="ignore")
+    return cut + _ELLIPSIS
+
+
+def case_record_to_comment(rec: CaseRecord) -> dict[str, Any]:
+    """D3 replaces `case_record_to_close`: `{author, body}` and nothing else (S1). `body` is
+    the mapping's own `"{disposition} — {cause}\\n\\n{narrative}"` rendering, fence-stripped
+    and bounded on the wire."""
     mapping = _load_mapping()
+    author = _resolve_comment_author(mapping)
+    body_template = _resolve_comment_body_template(mapping)
+    narrative = _prepare_narrative(rec.narrative)
     ctx = _ctx(
         case_id=rec.case_id,
         signature=rec.signature_id,
         disposition=rec.disposition,
-        reason=rec.reason,
-        confidence=rec.confidence or _CONFIDENCE_FALLBACK,
+        cause=rec.cause,
+        narrative=narrative,
     )
-    return _render(mapping.get("close") or {}, ctx)
-
-
-def _disposition_separator(mapping: dict[str, Any]) -> str | None:
-    tmpl = _dig(mapping, "close.resolution")
-    if not isinstance(tmpl, str):
-        return None
-    marker = "{disposition}"
-    i = tmpl.find(marker)
-    if i != 0:
-        return None
-    rest = tmpl[len(marker):]
-    nxt = rest.find("{")
-    sep = rest[:nxt] if nxt != -1 else rest
-    return sep or None
-
-
-def parse_disposition_from_resolution(resolution: str | None) -> str | None:
-    if not resolution:
-        return None
     try:
-        sep = _disposition_separator(_load_mapping())
-    except CaseTicketError:
-        return None
-    if not sep:
-        return None
-    head, _, tail = resolution.partition(sep)
-    head = head.strip()
-    # The resolution line is analyst-editable and read back by the benign judge, so decode it
-    # through the shared vocabulary — same answer the report and the investigation give.
-    decoded = normalized_disposition(head)
-    # #923: the THIRD authoring surface the host-only verdict is refused at — the close tool's
-    # argument and the invlang document's `conclude.disposition` are the other two. This
-    # decoder made a host-owned verdict analyst-writable: before this refusal, a person typing
-    # `unresolved` into a ticket's resolution field decoded cleanly and indistinguishably from
-    # a host-forced close. Written FOR A PERSON — the field they edited, and what it may say
-    # instead — since this is the one surface whose author is neither the host nor a model.
-    #
-    # The host's OWN egress round-trips through this same function
-    # (`case_record_to_close` -> `{disposition} — {reason}`, decoded straight back by
-    # `ticket_disposition`), and its `reason` is one of the closed `REPORT_CAUSES` sentences
-    # whenever the report carries a `cause` — which every host-terminated close does. So the
-    # refusal fires only when the tail is NOT one of those sentences: the host's own resolution
-    # decodes cleanly, and a person's hand-typed tail (which cannot coincide with a
-    # closed host sentence except by deliberately copying one) is refused.
-    if decoded == HOST_ONLY_DISPOSITION:
-        from defender.runtime.close_tool import REPORT_CAUSES
-
-        # `startswith`, not equality: the host's own resolution is APPENDED to in this very
-        # module (`append_resolution_method` stamps ` [grounded: …]` onto it after the
-        # adversarial leg settles), and an analyst may add a note after the host's sentence.
-        # Under equality any such suffix made the host's own verdict undecodable — the ticket
-        # then falls out of every disposition-keyed pool through `ticket_disposition`'s
-        # degrade-to-`None`. What the refusal keys on is that the reason clause BEGINS with a
-        # closed host sentence, which a hand-typed one still cannot without copying it.
-        if not any(tail.strip().startswith(cause) for cause in REPORT_CAUSES):
-            # Derived from the vocabulary, never re-spelled: this list is exactly "the members
-            # a person MAY write", and a sixth member added at the owner has to reach the
-            # analyst being told what to write instead.
-            others = ", ".join(d for d in DISPOSITION_VALUES if d != HOST_ONLY_DISPOSITION)
-            raise CaseTicketError(
-                f"the case `resolution` field cannot record {decoded!r} — that verdict is "
-                f"written by the host, not by a person closing a ticket. Record one of "
-                f"{others} in `resolution` instead, or leave the disposition off it for the "
-                f"host to fill in."
-            )
-    return decoded
+        rendered = body_template.format_map(ctx)
+    except KeyError as e:
+        raise CaseTicketError(
+            f"case-history mapping's `comment.body` names a render key the context does not "
+            f"carry: {e}"
+        ) from e
+    return {"author": author, "body": _bound_wire_bytes(rendered)}
 
 
+def unreadable_comment_payload() -> dict[str, Any]:
+    """The unreadable-report branch's outbound comment: still attributed (O3), but a fixed
+    host sentence in place of a rendered narrative — never `(unreadable)` as an accidental
+    literal, never the report's own (unparsable) text."""
+    mapping = _load_mapping()
+    author = _resolve_comment_author(mapping)
+    return {"author": author, "body": UNREADABLE_COMMENT_BODY}
 
 
+# --------------------------------------------------------------------------------------------
+# D4 — the approval screen's predicates, safe by construction (§7 R1)
+# --------------------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ApprovalPredicates:
+
+    approved_label: str
+    agent_identities: frozenset[str]
+
+    def is_approved(self, ticket: Any) -> bool:
+        if not isinstance(ticket, dict):
+            return False
+        labels = ticket.get("labels")
+        if not isinstance(labels, list):
+            return False
+        return any(
+            isinstance(lbl, str) and lbl.strip() == self.approved_label for lbl in labels
+        )
+
+    def is_agent_comment(self, comment: Any) -> bool:
+        # FAM-1 (FK15): undecidable — not a dict, no author, or a non-string author — reads as
+        # AGENT-AUTHORED, the protective direction. `is_agent_comment` is a POSITIVE match
+        # against the identity set otherwise (FK23): a third identity (the stub's own `system`
+        # transition stamp, a retired lane's `learning`) is NOT agent-authored.
+        if not isinstance(comment, dict):
+            return True
+        author = comment.get("author")
+        if not isinstance(author, str):
+            return True
+        return author in self.agent_identities
+
+    def as_pair(self) -> tuple[Any, Any]:
+        """The two predicates as a plain pair — O5's own demand: the caller (the query tool)
+        reaches them without ever spelling the vendor tag's own literal in its own source."""
+        return self.is_approved, self.is_agent_comment
 
 
+def approval_predicates() -> ApprovalPredicates:
+    """§7 R1's downstream consequence: the predicates are SAFE BY CONSTRUCTION — this raises
+    in every unsafe mapping state (FK11-FK19) rather than merely behaving correctly when
+    configured right. The caller (the read screen) is what degrades on a raise; this function
+    never does."""
+    mapping = _load_mapping()
+    author = _resolve_comment_author(mapping)
+    _resolve_comment_body_template(mapping)
+    section = mapping.get("comment") or {}
+    aliases = section.get("author_aliases")
+    if aliases is not None and (
+        not isinstance(aliases, list) or not all(isinstance(a, str) for a in aliases)
+    ):
+        raise CaseTicketError(
+            "case-history mapping's `comment.author_aliases` must be a list of strings"
+        )
+    approved_section = mapping.get("approved")
+    if not isinstance(approved_section, dict):
+        raise CaseTicketError(
+            "case-history mapping has no `approved` section (approved.label required)"
+        )
+    label = approved_section.get("label")
+    if not isinstance(label, str) or not label:
+        raise CaseTicketError(
+            "case-history mapping's `approved.label` must be a non-empty string"
+        )
+    identities = frozenset({author, *(aliases or [])})
+    return ApprovalPredicates(approved_label=label, agent_identities=identities)
 
 
+def is_approved(ticket: Any) -> bool:
+    return approval_predicates().is_approved(ticket)
 
 
+def is_agent_comment(comment: Any) -> bool:
+    return approval_predicates().is_agent_comment(comment)
 
 
-def _resolution_method_marker(mapping: dict[str, Any]) -> tuple[str | None, str | None]:
-    tmpl = _dig(mapping, "enrich.resolution_method_suffix")
-    if not isinstance(tmpl, str):
-        return None, None
-    ph = "{resolution_method}"
-    i = tmpl.find(ph)
-    if i == -1:
-        return None, None
-    marker = tmpl[:i]
-    if "{" in marker:
-        return None, None
-    rest = tmpl[i + len(ph):]
-    nxt = rest.find("{")
-    sep = rest[:nxt] if nxt != -1 else rest
-    return (marker or None), (sep or None)
-
-
-def append_resolution_method(resolution: str, method: str) -> str:
-    if not resolution or not method or not method.strip():
-        return resolution
-    try:
-        marker, sep = _resolution_method_marker(_load_mapping())
-    except CaseTicketError:
-        return resolution
-    if not marker or resolution_method_from_resolution(resolution) is not None:
-        return resolution
-    method = " ".join(method.split())
-    return f"{resolution}{marker}{method}{sep or ''}"
-
-
-def resolution_method_from_resolution(resolution: str | None) -> str | None:
-    if not resolution:
-        return None
-    try:
-        marker, sep = _resolution_method_marker(_load_mapping())
-    except CaseTicketError:
-        return None
-    if not marker or marker not in resolution:
-        return None
-    if sep and not resolution.endswith(sep):
-        return None
-    tail = resolution.rsplit(marker, 1)[1]
-    seg = tail.rsplit(sep, 1)[0] if sep and sep in tail else tail
-    return seg.strip() or None
-
-
+# --------------------------------------------------------------------------------------------
+# The seed-era helpers D5 deliberately leaves (RF1/g13) — no obligation here retires them.
+# --------------------------------------------------------------------------------------------
 
 
 def ticket_created(ticket: Any) -> str | None:
@@ -404,50 +444,3 @@ def ticket_event_time(ticket: Any) -> str | None:
         if isinstance(lbl, str) and lbl.startswith(prefix):
             return lbl[len(prefix):] or None
     return None
-
-
-def ticket_disposition(ticket: Any) -> str | None:
-    """The READ side of `parse_disposition_from_resolution`, degrading rather than raising.
-
-    #923: that decoder now refuses a person's hand-typed host-only verdict (`CaseTicketError`)
-    — a refusal written for the AUTHORING surface, an analyst editing one field. This is a
-    different lane: a walk over every closed ticket a person could have edited (the benign seed
-    sampler, in particular), where one ticket's decode fault must cost that ticket and not the
-    whole pool — the same "one broken record degrades, it does not crash the walk" rule
-    `_report.read_report` applies to a malformed `report.md`. `None` here reads exactly like
-    any other undecodable resolution; the refusal itself still reaches whoever calls the
-    decoder directly to author or validate one ticket."""
-    if not isinstance(ticket, dict):
-        return None
-    try:
-        return parse_disposition_from_resolution(ticket.get("resolution"))
-    except CaseTicketError:
-        return None
-
-
-def ticket_reason(ticket: Any) -> str | None:
-    if not isinstance(ticket, dict):
-        return None
-    resolution = ticket.get("resolution")
-    if not isinstance(resolution, str):
-        return None
-    try:
-        mapping = _load_mapping()
-        sep = _disposition_separator(mapping)
-    except CaseTicketError:
-        return None
-    if not sep or sep not in resolution:
-        return None
-    tail = resolution.split(sep, 1)[1]
-    marker, msep = _resolution_method_marker(mapping)
-    if marker and marker in tail and (not msep or resolution.endswith(msep)):
-        tail = tail.rsplit(marker, 1)[0]
-    return tail.strip() or None
-
-
-def ticket_resolution_method(ticket: Any) -> str | None:
-    if not isinstance(ticket, dict):
-        return None
-    return resolution_method_from_resolution(ticket.get("resolution"))
-
-

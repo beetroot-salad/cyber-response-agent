@@ -332,8 +332,8 @@ class SpecTail:
     def open_case_ticket(self, run_dir: Path) -> None:
         self._note("open_case_ticket", run_dir)
 
-    def close_case_ticket(self, run_dir: Path) -> None:
-        self._note("close_case_ticket", run_dir)
+    def record_case_ticket(self, run_dir: Path) -> None:
+        self._note("record_case_ticket", run_dir)
 
     # what the steps saw
     def _note(self, name: str, run_dir: Path) -> None:

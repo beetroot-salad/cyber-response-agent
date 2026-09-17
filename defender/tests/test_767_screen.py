@@ -398,7 +398,13 @@ def test_767_a_sibling_world_reads_through_the_same_screen(tmp_path, monkeypatch
     asserted here, so this demand holds either way: the parent's own case is excluded by
     identity for the parent, and it is unapproved for the sibling."""
     _mapping(monkeypatch, tmp_path)
-    parent_case = _approved(SELF_KEY, comments=[comment(AGENT_TEXT)])
+    # A text distinct from AGENT_TEXT: the sibling's own approved case (`tagged_sibling_case`)
+    # legitimately carries AGENT_TEXT and is visible to BOTH readers (the parity this test
+    # drives), so the parent's own withheld comment needs its own, unique body — otherwise a
+    # negative on AGENT_TEXT would be vacuously satisfied (or defeated) by the sibling's own
+    # legitimate comment sharing the same literal text.
+    parent_fresh_text = "PRIOR-RUN-NOTES-the-parents-own-fresh-comment"
+    parent_case = _approved(SELF_KEY, comments=[comment(parent_fresh_text)])
     parent_case["labels"] = ["sig:5710"]  # the parent's fresh comment: nobody has tagged it yet
     tagged_sibling_case = _approved(OTHER_KEY)
     store = listing(parent_case, tagged_sibling_case)
@@ -408,8 +414,10 @@ def test_767_a_sibling_world_reads_through_the_same_screen(tmp_path, monkeypatch
     as_sibling, code, _ = screen_list(copy.deepcopy(store), self_key="20260917T000000Z-world-B")
     assert code == 0
 
-    assert AGENT_TEXT not in json.dumps(as_parent), "the parent read back its own fresh comment"
-    assert AGENT_TEXT not in json.dumps(as_sibling), (
+    assert parent_fresh_text not in json.dumps(as_parent), (
+        "the parent read back its own fresh comment"
+    )
+    assert parent_fresh_text not in json.dumps(as_sibling), (
         "a sibling world read the parent's un-approved comment — no sibling exemption exists"
     )
     parent_view = {t["key"]: [c["body"] for c in agent_comments(t)] for t in served_tickets(as_parent)}

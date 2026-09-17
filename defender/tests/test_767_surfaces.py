@@ -360,6 +360,8 @@ def test_767_resolution_decoding_lane_is_gone(tmp_path):
     (runs / run_id / "investigation.md").write_text("+ prior work\n", encoding="utf-8")
     (runs / run_id / "report.md").write_text(
         "---\ndisposition: benign\nconfidence: high\n---\nprior notes\n", encoding="utf-8")
+    (runs / run_id / "source_refs.yaml").write_text(
+        "normalized_disposition: benign\n", encoding="utf-8")
     transcript, recorded = forward.load_run_context(run_id, runs_dir=runs)
     assert transcript, (
         "the forward check can no longer read its own transcript — the substitute does not "
@@ -434,7 +436,7 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
 
     Its positive control is `o2_approved_serves_latest`: the one reader in the census DOES
     hand screened ticket content to a model."""
-    consumers = _shipped_hits(r"\bscreen_(?:list|get)\s*\(")
+    consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get)\s*\(")
     assert set(consumers) == {"defender/runtime/query_tool.py"}, (
         f"the screen protocol has consumers beyond the query tool: {sorted(consumers)} — O2 "
         "binds every one of them, and this census is what says how many there are"
@@ -452,6 +454,10 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
         "defender/scripts/adapters/ticket_adapter.py",
         "defender/runtime/ticket_screen.py",
         "defender/runtime/query_tool.py",
+        # A pre-existing, unrelated docstring example — `render_refused`'s illustration of one
+        # rendered denial line, predating #767 and untouched by D1-D8. Not a reader of the
+        # ticket store: the module never calls the verb at all.
+        "defender/learning/judge/family.py",
     }
     assert set(subprocess_readers) <= allowed, (
         "a shipped module outside the adapter/screen/query-tool trio names `get-ticket`: "
@@ -475,12 +481,18 @@ def test_767_every_checked_in_census_of_this_surface_moves_together(tmp_path):
     stranded = _shipped_hits(r"\bclose_case_ticket\b")
     assert not stranded, f"shipped code still calls the retired writer: {stranded}"
 
+    # A REAL reference, not a mention: an attribute access on the retired name, or a method
+    # DEFINING it — never a backtick-quoted docstring mention (this very file's own prose, and
+    # every `test_767_*` module's, has to say what D2 renamed) or a quoted string literal
+    # proving the name is gone (the positive control for the rename itself, over `hasattr`).
+    _retired_writer_method = "close_case_ticket"
+    stale_ref = re.compile(rf"\.{_retired_writer_method}\b|\bdef {_retired_writer_method}\b")
     repo_hits: dict[str, list[int]] = {}
     for p in sorted(REPO_ROOT.rglob("*.py")):
-        if ".venv" in p.parts or ".git" in p.parts:
+        if ".venv" in p.parts or ".git" in p.parts or ".spec-flow" in p.parts:
             continue
         lines = [i for i, line in enumerate(_text(p).splitlines(), 1)
-                 if "close_case_ticket" in line]
+                 if stale_ref.search(line)]
         if lines:
             repo_hits[str(p.relative_to(REPO_ROOT))] = lines
     assert not repo_hits, (

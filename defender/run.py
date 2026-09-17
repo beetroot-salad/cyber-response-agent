@@ -574,7 +574,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # The case ticket is settled BEFORE the request is published: a curation drainer can start
     # the moment the marker lands, and must never read this case with its ticket still open.
     if ns.update_ticket:
-        ticket_writer.close_case_ticket(run_dir)
+        ticket_writer.record_case_ticket(run_dir)
 
     # A SIBLING FORCES THE NO-LEARN BRANCH, and that is a POSITIVE refusal rather than an
     # omission. Routing a sibling through this `main` acquires both automatic lanes; a world is
