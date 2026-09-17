@@ -178,12 +178,28 @@ def _leaf_is_link(path: Path) -> bool:
         return False
 
 
-#: The flags every component of a `bind` walk is opened with — intermediate directories and
-#: the leaf alike (D-V3). `O_NOFOLLOW` refuses a symlinked component at the open itself
-#: (ELOOP); `O_NONBLOCK` keeps a FIFO at the leaf from wedging the walk open; `O_CLOEXEC` is
-#: routine hygiene. No `O_DIRECTORY`, no `O_PATH` (`O_PATH` is Linux-only; the primitive
-#: supports macOS, RF-V1/v2-2) — plainness is judged by `fstat`-ing the opened handle, not by
-#: asking the open to enforce a shape.
+# LINUX ONLY. Every intermediate step of a `bind` walk is opened `O_PATH`: a handle to the
+# directory that is never read through, which the kernel grants on SEARCH permission alone —
+# exactly what traversing a path by name always needed, so a `drwx--x--x` component under the
+# episode root traverses here as it did for the path-based reader this replaced. Opened
+# `O_RDONLY` instead (the portable form) a step needed READ permission on every directory,
+# and a search-only directory anywhere on the way refused every record beneath it. `O_PATH` is
+# Linux-only, and this reader is now Linux-only with it: the check below fails the import
+# with the reason rather than letting a platform without the flag walk a weaker guard.
+if not hasattr(os, "O_PATH"):  # pragma: no cover — no CI box lacks it
+    raise ImportError(
+        "defender._io: the episode-tree reader walks each directory step with O_PATH, which "
+        "this platform's os module does not offer — the reader is Linux-only")
+
+#: One intermediate step (D-V3). `O_PATH|O_NOFOLLOW` never follows: a symlink at the step is
+#: OPENED AS THE LINK ITSELF (the handle `fstat`s `S_ISLNK`) and refused as an alias off that
+#: — never traversed, and never the kernel's own `ELOOP`. `O_CLOEXEC` is routine hygiene.
+_STEP_FLAGS = os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
+
+#: The leaf (D-V3): opened for reading, no-follow (`ELOOP` for a symlink at the leaf);
+#: `O_NONBLOCK` keeps a FIFO at the leaf from wedging the walk open. No `O_DIRECTORY` —
+#: plainness is judged by `fstat`-ing the opened handle, not by asking the open to enforce a
+#: shape. A directory leaf (`Bound.entries` on a derivation) is opened with the same flags.
 _WALK_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 
 #: `errors=` values `Bound.read` admits. Anything else is a caller mistake, refused before any
@@ -272,12 +288,14 @@ class EntriesRead(_Read):
 
 def _walk_chain(os_: Any, start_fd: int | None, components: tuple[str, ...]) -> tuple[str, Any]:
     """The shared per-component walk `Bound.read`/`Bound.read_jsonl` (leaf wants a regular
-    file) and `Bound.entries` (leaf wants a directory) build on: opens every component,
-    intermediate and leaf alike, no-follow from the previous handle, `fstat`-classifying each
-    intermediate as a directory (D-V3). Answers `("absent", None)`, `("refused", reason)` or
-    `("leaf", (fd, stat_result))` — the CALLER classifies the leaf's own `fstat` result and
-    owns (reads or stores) the returned fd; every intermediate fd this walk opened is closed
-    here, on every path, before it returns.
+    file) and `Bound.entries` (leaf wants a directory) build on: opens every component
+    no-follow from the previous handle — each intermediate as an `O_PATH` step
+    (`_STEP_FLAGS`), the leaf for reading (`_WALK_FLAGS`) — `fstat`-classifying each
+    intermediate as a real directory (D-V3): a symlink at a step is the alias refusal, any
+    other non-directory is 'Not a directory'. Answers `("absent", None)`, `("refused",
+    reason)` or `("leaf", (fd, stat_result))` — the CALLER classifies the leaf's own `fstat`
+    result and owns (reads or stores) the returned fd; every intermediate fd this walk opened
+    is closed here, on every path, before it returns.
     """
     owned: int | None = None  # an intermediate fd THIS walk opened and still holds
     dir_fd = start_fd
@@ -285,7 +303,7 @@ def _walk_chain(os_: Any, start_fd: int | None, components: tuple[str, ...]) -> 
         for index, component in enumerate(components):
             is_last = index == len(components) - 1
             try:
-                fd = os_.open(component, _WALK_FLAGS, dir_fd=dir_fd)
+                fd = os_.open(component, _WALK_FLAGS if is_last else _STEP_FLAGS, dir_fd=dir_fd)
             except OSError as e:
                 return _open_fault(e)
             try:
@@ -297,7 +315,8 @@ def _walk_chain(os_: Any, start_fd: int | None, components: tuple[str, ...]) -> 
                 return "leaf", (fd, st)
             if not stat.S_ISDIR(st.st_mode):
                 os_.close(fd)
-                return "refused", os.strerror(errno.ENOTDIR)
+                return "refused", (ALIAS_READ_REFUSAL if stat.S_ISLNK(st.st_mode)
+                                   else os.strerror(errno.ENOTDIR))
             if owned is not None:
                 os_.close(owned)
             owned = fd

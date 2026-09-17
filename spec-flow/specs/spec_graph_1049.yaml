@@ -658,8 +658,10 @@ demands:
   # -----------------------------------------------------------------------------------------
   # The re-classification's new demands (47-dispositions-v2.md "New (5)"): the component grammar
   # (D-V1, the clause D-J1 tests), the bind as the only root holder (D-V2), the per-component walk
-  # (D-V3 — the probed mechanism: O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC + fstat, NOT O_DIRECTORY
-  # on intermediates and NOT O_PATH, claims v2-1/v2-2), names_one_file as the grammar (D-V4, RF-R7's
+  # (D-V3 — the probed mechanism: an O_PATH|O_NOFOLLOW|O_CLOEXEC step per intermediate + fstat (S_ISLNK
+  # is the alias), the leaf O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC, NOT O_DIRECTORY, claims v2-1/v2-2 —
+  # O_PATH ADOPTED post-review (PR #1061): Linux-only by decision, so a search-only 0o111 component
+  # traverses as it did for the path-based reader), names_one_file as the grammar (D-V4, RF-R7's
   # catch site), and the page's closed listing-site census (D-V5, RF-R9).
   # -----------------------------------------------------------------------------------------
   - id: D-V1-component-grammar
@@ -704,6 +706,11 @@ demands:
             "entry_shape.domain.distinguished[parent_is_file]", "entry_shape.domain.distinguished[absent_parent]",
             "entry_shape.domain.distinguished[mode_000_parent]", "entry_shape.domain.distinguished[search_only_parent]"]
     premises: ["#25", "#26", "#27", "#28", "#29", "#32", "#40"]
+    # FINALIZE (post-review, PR #1061): the intermediate step is O_PATH|O_NOFOLLOW|O_CLOEXEC — Linux-only by
+    # decision. A symlinked/dangling step is opened AS THE LINK (S_ISLNK on its fstat → the alias refusal,
+    # never the kernel's ELOOP); a search-only (0o111) parent TRAVERSES (search permission is all an O_PATH
+    # step needs — the delta v2-2 recorded, now the contract); mode-000 parents stay EACCES. The seed below
+    # is the superseded portable form.
     # docstring seed: "each intermediate component is opened os.open(c, O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC,
     # dir_fd=<previous handle>) and the HANDLE is fstat-classified: S_ISDIR → it is the next dir_fd; ELOOP from the
     # open (a symlink, live or dangling) → refused ALIAS_READ_REFUSAL; ENOENT → absent; EACCES → refused
@@ -975,8 +982,8 @@ structure:
           # symlinked_parent / dangling_parent: REFUSED by the per-component O_NOFOLLOW open's own
           # ELOOP on every lane (F-F dissolved; v2-1) — no parent screen anywhere in the package;
           # dangling_parent moved from d-01 (absent, c-15's read_plain fact) to d-02 (RF-R3).
-          # search_only_parent (0o111): refused 'Permission denied' — the one delta from O_PATH
-          # (rejected, v2-2: Linux-only); no launcher-built tree carries the mode (d-03, NOT_ROOT).
+          # search_only_parent (0o111): READS — the O_PATH step (adopted post-review, Linux-only)
+          # traverses on search permission alone (v2-2's delta, now the contract; d-03, NOT_ROOT).
     - id: reader
       provenance: design
       facets: {}

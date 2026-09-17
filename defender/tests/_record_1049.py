@@ -25,7 +25,7 @@ it (which opens, with which flags and `dir_fd`, which `fstat`s, which closes). I
 content cites the claims that observed it on the real filesystem: the leaf shapes are g1/c-15
 (hard link → EMLINK, both names refused), the permission arms g2/v2-1 (executed as uid 65534
 via `setpriv`), the parent-component shapes v2-1 (a symlinked or dangling parent is the
-kernel's own ELOOP under `O_NOFOLLOW` without `O_DIRECTORY`; a file or fifo squatting a parent
+`O_PATH|O_NOFOLLOW` handle to the link itself, `S_ISLNK` on `fstat`; a file or fifo squatting a parent
 is "Not a directory" off the handle's `fstat`), the over-long name rg1, the JSONL policy rg3.
 
 Underscore-prefixed so pytest does not collect it; it defines no tests.
@@ -194,8 +194,12 @@ class RecordingOs:
         return all(fd in self.closes or fd in via_fdopen for fd in component_fds)
 
 
-#: The flag set every component — intermediate and leaf alike — is opened with (D-V3, v2-1).
+#: The flag set the LEAF is opened with (D-V3, v2-1).
 WALK_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+#: The flag set every INTERMEDIATE step is opened with — an `O_PATH` handle, never read
+#: through, granted on search permission alone (Linux-only, by decision after PR #1061's review:
+#: a `drwx--x--x` component traverses as it did for the path-based reader).
+STEP_FLAGS = os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
 def surface(bound: Any) -> dict[str, str]:
@@ -338,9 +342,10 @@ REFUSED_SHAPES: dict[str, str] = {
     "name_too_long": os.strerror(errno.ENAMETOOLONG),
 }
 
-#: The refused shapes only a non-root uid observes (d-03, g2/v2-1).
+#: The refused shapes only a non-root uid observes (d-03, g2/v2-1). `search_only_parent` is
+#: NOT one: an `O_PATH` step traverses a search-only directory, so the leaf beneath it reads.
 PERMISSION_SHAPES: tuple[str, ...] = (
-    "mode_000_file", "mode_000_parent", "mode_000_parent_absent_leaf", "search_only_parent")
+    "mode_000_file", "mode_000_parent", "mode_000_parent_absent_leaf")
 
 
 @contextlib.contextmanager

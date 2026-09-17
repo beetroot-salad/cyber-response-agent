@@ -151,8 +151,8 @@ def test_1049_every_present_but_not_the_record_shape_is_refused_with_the_relativ
     """A symlink, hard link, directory, fifo, dangling link, undecodable bytes, a file OR a
     fifo squatting a parent component, an over-long name, a SYMLINKED parent and a DANGLING
     parent each answer absent=False with refusal '<name>: <reason>' — the alias shapes with
-    ALIAS_READ_REFUSAL (ELOOP; EMLINK for the hard link; the two parent aliases from the
-    intermediate open's own ELOOP, v2-1), the parent-is-file with 'Not a directory', the
+    ALIAS_READ_REFUSAL (ELOOP; EMLINK for the hard link; the two parent aliases off the
+    intermediate `O_PATH` handle's own S_ISLNK, v2-1), the parent-is-file with 'Not a directory', the
     over-long name with 'File name too long' (rg1), the undecodable with the codec's own
     message — the WHOLE relative name said once (RF-R6), and the reason is never 'None'
     (D-J6). A symlink whose target is itself unreadable is exactly one ELOOP refusal; a file
@@ -193,11 +193,12 @@ def test_1049_every_present_but_not_the_record_shape_is_refused_with_the_relativ
 @NOT_ROOT
 def test_1049_a_mode_000_file_or_parent_is_refused_never_absent(root, tmp_path):
     """A mode-000 file, a readable file AND an absent name under a mode-000 parent (never
-    absent — v2-1: EACCES for both as uid 65534), and a name under a search-only (0o111)
-    parent answer refusal '<name>: Permission denied' with absent=False — search_only_parent
-    is the deliberate contract row of the portable flag set (RF-V1: O_RDONLY, not O_PATH;
-    read_plain traverses it today); a mode-000 ROOT answers the same per name, six
-    independent '<name>: Permission denied' slots and no aggregate (F-C).
+    absent — v2-1: EACCES for both as uid 65534) answer refusal '<name>: Permission denied'
+    with absent=False; a name under a search-only (0o111) parent READS — the intermediate
+    step is an `O_PATH` handle, granted on search permission alone, as traversing the path
+    by name always was (the row the portable O_RDONLY flag set refused; Linux-only by
+    decision); a mode-000 ROOT answers the same per name, six independent
+    '<name>: Permission denied' slots and no aggregate (F-C).
     """
     bound = R.bind(root)
     denied = R.strerror(errno.EACCES)
@@ -207,6 +208,8 @@ def test_1049_a_mode_000_file_or_parent_is_refused_never_absent(root, tmp_path):
         assert R.refusal(read, name) == denied, (shape, read.refusal)
         assert read.absent is False, shape
         assert bound.read_jsonl(name) == ([], 0, read), shape
+    search_only = R.plant_shape(root, "search_only_parent")
+    assert bound.read(search_only).text == "under a closed parent\n", "a search-only parent did not traverse"
 
     closed_root = tmp_path / "closed-episode"
     R.write_bytes(closed_root / "family.yaml", "worlds: []\n")
@@ -229,7 +232,7 @@ def test_1049_the_primitive_asks_nothing_of_the_name_ahead_of_the_open(root):
     artifact_*, resolve or realpath call anywhere (an AST census over the three bodies and
     the bound reader's class names none of those); a recording os seam sees exactly one open
     per component and one fstat per opened handle — absent-vs-refused is the open's own
-    answer, and an ENOENT or ELOOP at a component stops the walk there with no further open.
+    answer, and an ENOENT, or a symlink, at a component stops the walk there with no further open.
     """
     rec = R.RecordingOs()
     bound = R.bind(root, os_=rec)
@@ -431,21 +434,21 @@ def test_1049_a_name_that_is_not_a_sequence_of_plain_components_cannot_be_constr
 
 
 def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_the_handle_is_classified_by_fstat(root):
-    """Each intermediate component is opened os.open(c, O_RDONLY|O_NOFOLLOW|O_NONBLOCK|
-    O_CLOEXEC, dir_fd=<previous handle>) and the HANDLE is fstat-classified: S_ISDIR → it is
-    the next dir_fd; ELOOP from the open (a symlink, live or dangling) → refused
-    ALIAS_READ_REFUSAL; ENOENT → absent; a non-directory handle (a file, a fifo — opened
-    without wedging) → refused 'Not a directory'; any other OSError → its strerror. The leaf
-    is opened with the same flags from the last handle and fstat-classified (S_ISREG and
-    st_nlink>1 → EMLINK alias; not S_ISREG → alias). Every handle is closed on every path;
-    nothing is cached between reads; the walk is per name from the root handle every time. A
-    recording os seam sees exactly one open per component and one fstat per opened handle and
-    no lstat/stat/exists anywhere. Portability: os.open supports dir_fd and
-    O_NOFOLLOW/O_NONBLOCK/O_CLOEXEC/O_DIRECTORY are present; the primitive's source never
-    names O_PATH (Linux-only; macOS is supported, v2-2). The EACCES arms are d-03's.
+    """Each intermediate component is opened os.open(c, O_PATH|O_NOFOLLOW|O_CLOEXEC,
+    dir_fd=<previous handle>) and the HANDLE is fstat-classified: S_ISDIR → it is the next
+    dir_fd; S_ISLNK (a symlink, live or dangling — O_PATH|O_NOFOLLOW opens the link itself)
+    → refused ALIAS_READ_REFUSAL; ENOENT → absent; any other non-directory handle (a file, a
+    fifo — an O_PATH open never wedges) → refused 'Not a directory'; any other OSError → its
+    strerror. The leaf is opened O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC from the last handle
+    and fstat-classified (S_ISREG and st_nlink>1 → EMLINK alias; not S_ISREG → alias). Every
+    handle is closed on every path; nothing is cached between reads; the walk is per name from
+    the root handle every time. A recording os seam sees exactly one open per component and
+    one fstat per opened handle and no lstat/stat/exists anywhere. Linux-only: os.open
+    supports dir_fd and O_PATH/O_NOFOLLOW/O_NONBLOCK/O_CLOEXEC/O_DIRECTORY are present, and
+    the primitive's source names O_PATH for the step. The EACCES arms are d-03's.
     """
     assert os.open in os.supports_dir_fd
-    for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"):
+    for flag in ("O_PATH", "O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"):
         assert hasattr(os, flag), flag
 
     rec = R.RecordingOs()
@@ -455,7 +458,7 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
     assert R.state(read) == "present"
     steps = rec.component_opens
     assert [str(o[0]) for o in steps] == ["worlds", "b", "report.md"], steps
-    assert all(o[1] == R.WALK_FLAGS for o in steps), [o[1] for o in steps]
+    assert [o[1] for o in steps] == [R.STEP_FLAGS, R.STEP_FLAGS, R.WALK_FLAGS], [o[1] for o in steps]
     fds = [o[3] for o in steps]
     assert all(isinstance(fd, int) for fd in fds), fds
     # the chain: each step's dir_fd is the handle the previous step opened
@@ -472,16 +475,16 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
         r = R.RecordingOs()
         return r, R.bind(root, os_=r).read(name)
 
-    # a symlinked / dangling parent: the kernel's ELOOP out of that component's own open
+    # a symlinked / dangling parent: the O_PATH step opens the LINK ITSELF, and its handle's
+    # own fstat says S_ISLNK — the alias refusal, with no further open
     for shape in ("symlinked_parent", "dangling_parent"):
         name = R.plant_shape(root, shape)
         r, got = walk(name)
         assert R.refusal(got, name) == R.ALIAS, shape
         opened = r.component_opens
         assert len(opened) == 1, (shape, opened)
-        assert isinstance(opened[0][3], OSError), (shape, opened)
-        assert opened[0][3].errno == errno.ELOOP, (shape, opened[0][3])
-        assert r.fstats == [], shape
+        assert isinstance(opened[0][3], int), (shape, opened)
+        assert r.fstats == [opened[0][3]], shape
         assert r.all_closed()
     # a file or a fifo squatting a parent: the open succeeds, the fstat says not a directory
     for shape in ("parent_is_file", "parent_is_fifo"):
@@ -511,7 +514,7 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
 
     source = Path(R.io().__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
-    assert "O_PATH" not in R.attribute_names(tree), "the primitive names O_PATH (Linux-only)"
+    assert "O_PATH" in R.attribute_names(tree), "the primitive's step no longer names O_PATH"
 
 
 # ---------------------------------------------------------------------------------------
