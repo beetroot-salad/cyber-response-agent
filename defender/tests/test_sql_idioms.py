@@ -35,7 +35,6 @@ import importlib.util
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -43,9 +42,15 @@ import pytest
 from defender._io import read_text_utf8
 from defender.scripts.adapters.elastic_adapter import esql_payload
 from defender.tests._by_path import DEFENDER
+from defender.tests._defender_sql import (
+    EXIT_INPUT_ERROR,
+    EXIT_OK,
+    EXIT_QUERY_ERROR,
+    SQL_PY as _SQL_PY,
+    run_sql_py as _run_sql_py,
+)
 from defender.tests._locale import C_LOCALE_ENV
 
-_SQL_PY = DEFENDER / "scripts" / "gather_tools" / "sql.py"
 _DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
 _SKILLS = DEFENDER / "skills"
 
@@ -57,11 +62,7 @@ _REAL_ESQL = (
     / "run" / "run-underfold-001" / "gather_raw" / "l-001" / "0.json"
 )
 
-EXIT_OK = 0
-EXIT_QUERY_ERROR = 1
-EXIT_INPUT_ERROR = 2
-
-#: `find_spec` asks the interpreter `_run_sql_py` spawns (`sys.executable`), so the answer
+#: `find_spec` asks the interpreter `run_sql_py` spawns (`sys.executable`), so the answer
 #: is the child's, and nothing is imported at collection.
 _HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
 
@@ -75,21 +76,6 @@ def esql() -> str:
 @pytest.fixture(scope="module")
 def doc() -> str:
     return read_text_utf8(_DOC)
-
-
-def _run_sql_py(*args: str, stdin: str = "", env: dict[str, str] | None = None):
-    """Spawn the tool — the ONE place it is reached from this file.
-
-    `bin/defender-sql` is the shim a lead types, and it is deliberately bypassed here: it
-    re-execs into `$DEFENDER_DIR/.venv/bin/python3`, so driving it would test the venv
-    layout as much as the tool. `tests/e2e/test_query_tool_611.py` drives the shim with
-    `DEFENDER_DIR` set; this file drives the program the shim ends in, with the interpreter
-    the tests run under.
-    """
-    return subprocess.run(
-        [sys.executable, str(_SQL_PY), *args],
-        input=stdin, capture_output=True, text=True, encoding="utf-8", timeout=60, env=env,
-    )
 
 
 def _sql(
@@ -195,8 +181,9 @@ def test_esql_values_are_positional_json_not_a_struct(esql):
         esql,
         'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."source.ip" = \'x\'',
     )
+    # The exit code is the contract; duckdb's own wording of WHY (`not a struct` today) is
+    # not, and the paired positive control below is what proves the failure is the idiom's.
     assert struct_idiom.returncode == EXIT_QUERY_ERROR
-    assert "not a struct" in struct_idiom.stderr
 
     assert _rows(
         esql,
@@ -241,7 +228,6 @@ def test_truncation_probe_is_shape_specific_not_universal(shape, esql):
     }[shape]
     proc = _sql(payload, "SELECT total, returned, truncated FROM data")
     assert proc.returncode == EXIT_QUERY_ERROR
-    assert "Binder Error" in proc.stderr
     assert _rows(payload, "DESCRIBE data")
 
 
@@ -458,6 +444,9 @@ def test_the_clause_is_keyed_off_duckdbs_message_not_off_the_querys_own_text():
     on a field this payload does not even carry). Each must get the SAME clause as its sibling
     above — which only a dispatch reading duckdb's message can do, because the query text it
     would have keyed on is gone."""
+    # These two probes assert duckdb's OWN wording on purpose: `_error_note` in `sql.py` keys
+    # the extra clause off exactly these strings, so a duckdb release that rewords them is a
+    # tool regression (the clause silently stops appearing), and this is where it surfaces.
     lateral = _sql(_TS_HITS, "SELECT ev.message FROM data, unnest(hits) AS ev")
     assert "Candidate bindings" in lateral.stderr, "this probe stopped producing the lateral-join error"
     lateral_hint = _hint(lateral)
@@ -734,8 +723,6 @@ def test_the_dead_recipe_stays_dead():
     Pinning the failure keeps anyone from reintroducing it on the strength of an old doc."""
     proc = _sql(_HITS, "SELECT count(*) FROM (SELECT unnest(result.hits) h FROM data)")
     assert proc.returncode == EXIT_QUERY_ERROR
-    assert "Binder Error" in proc.stderr
-    assert 'Referenced table "result" not found' in proc.stderr
     # and the live spelling, on the same payload, works
     assert _rows(_HITS, "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data)") \
         == [{"n": 3}]
@@ -756,8 +743,13 @@ _LATERAL_FORM = re.compile(r"FROM\s+data\s*,\s*unnest\s*\(\s*hits\s*\)", re.IGNO
 
 
 def _sql_fences(text: str) -> list[str]:
-    """The doc's ```sql blocks — what a lead copies, as opposed to what the prose discusses."""
-    return re.findall(r"```sql\n(.*?)```", text, re.S)
+    """The doc's ```sql blocks — what a lead copies, as opposed to what the prose discusses.
+
+    Tag-case and trailing attributes (` ```SQL`, ` ```sql {.x}`) are tolerated so a retagged
+    fence carrying a banned form is still read, not skipped. The paired positive checks
+    ("the example is IN the fences") already catch a scanner that reads nothing; this
+    catches one that reads all but the fence that matters."""
+    return re.findall(r"^[ \t]*```sql[^\n]*\n(.*?)^[ \t]*```", text, re.S | re.I | re.M)
 
 
 def test_the_docs_esql_example_is_literal_and_runs(doc, esql):

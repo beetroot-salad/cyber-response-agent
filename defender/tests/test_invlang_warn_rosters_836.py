@@ -28,13 +28,12 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-import sys
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from defender.tests._defender_sql import run_sql_py
 from defender.tests._invlang_warn_836 import (
     DEFENDER,
     PROLOGUE,
@@ -493,10 +492,7 @@ def test_bash_grant_cannot_construct_a_write_reaching_investigation_md(tmp_path)
         "the permission gate started parsing SQL — rt6's correction no longer applies and "
         "this test is pinning the wrong boundary"
     )
-    proc = subprocess.run(
-        [sys.executable, str(DEFENDER / "scripts" / "gather_tools" / "sql.py"), sql],
-        input=b'[{"a": 1}]', capture_output=True, check=False,
-    )
+    proc = run_sql_py(sql, stdin='[{"a": 1}]')
     assert proc.returncode != 0, "duckdb executed a write-shaped statement"
     assert inv.read_bytes() == before
 
