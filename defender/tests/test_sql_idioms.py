@@ -680,12 +680,20 @@ def test_every_unnest_on_a_lead_facing_surface_names_a_live_shape():
     This is what keeps `unnest(result.hits)` — and any wrapper-reaching spelling nobody has
     written yet — from coming back through a doc, a query template, or a system's execution
     notes, none of which a three-file list would have watched."""
-    seen = {path.name: _unnest_args(read_text_utf8(path)) for path in _lead_surfaces()}
+    # Keyed by the path, not the basename: every system has its own `execution.md`, and a
+    # basename key would keep only the last one read.
+    seen = {
+        str(path.relative_to(DEFENDER)): _unnest_args(read_text_utf8(path))
+        for path in _lead_surfaces()
+    }
     dead = {name: args - _LIVE_SHAPES for name, args in seen.items() if args - _LIVE_SHAPES}
     assert not dead, f"a lead-facing surface unnests something no adapter emits: {dead}"
     # Paired control: the census really covered the surfaces that teach the idioms, and between
     # them they teach both live shapes — a zero above cannot come from reading nothing.
-    assert {"sql.py", "defender-sql.md", "adapter.md"} <= {n for n, a in seen.items() if a}
+    teaching = {name for name, args in seen.items() if args}
+    assert {
+        "scripts/gather_tools/sql.py", "skills/gather/defender-sql.md", "skills/connect/adapter.md",
+    } <= teaching, teaching
     assert set().union(*seen.values()) == _LIVE_SHAPES
 
 
