@@ -11,6 +11,9 @@ from pathlib import Path
 
 from defender._run_paths import RunPaths
 from defender.run_common import run_env
+from defender.runtime import session_store
+from defender.runtime.driver import FORCED_CLOSE_SET
+from defender.runtime.session_store import normalized_truncated_by
 from defender.runtime.verbs import VerbContext
 from defender.scripts.case_history import case_ticket
 from defender.scripts.adapters import _stub_transport as transport
@@ -111,35 +114,108 @@ def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> No
         _warn(f"open raised, ignored: {e!r}")
 
 
-def close_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> None:
+def close_case_ticket(
+    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *,
+    truncated_by: str | None = None, closed_before_cut: bool = False,
+) -> None:
+    """#1047 O2 — the lane decides per exit class, taken as an IN-PROCESS PARAMETER from
+    `run.py` (fork F3 reading A), never read off anything inside the run dir:
+
+        aborted                        -> leave open, add the breaker's escalation note
+        request-limit, retry-exhausted -> close `unresolved` off the host's forced report;
+                                           no usable report (its own forced close failed,
+                                           fork F-K) -> leave open with the escalation instead
+        budget, store                  -> leave open, no call at all
+        anything else (None, a real
+        vocabulary member with no arm, an out-of-vocabulary string)
+                                        -> today's report-driven close
+
+    `closed_before_cut` (fork F-A reading B) makes the LEAVE-OPEN arms (`aborted`, `budget`,
+    `store`) defer to a genuine model verdict instead: a run whose model had already decided
+    when the cut landed closes off its own report exactly as an ordinary run would. It does
+    NOT change the forced-close-set arm — a `request-limit`/`retry-exhausted` run always tries
+    its own report first regardless, and falls to the escalation only when there genuinely is
+    none (F-K's intersection with F-A: there is no verdict on disk to defer to, so the
+    escalation wins over inventing one)."""
     try:
+        truncated_by = normalized_truncated_by(truncated_by)  # F-I — first act, own parameter
         config = deps.load_config()
         if config is None:
             return
+        case_id = run_dir.name  # F-D — positional, same namespace `open_case_ticket` writes
+        if truncated_by == session_store.TRUNCATED_BY_ABORTED and not closed_before_cut:
+            _leave_open_with_escalation(run_dir, deps, config, case_id, truncated_by)
+            return
+        if (truncated_by in (session_store.TRUNCATED_BY_BUDGET, session_store.TRUNCATED_BY_STORE)
+                and not closed_before_cut):
+            return
+        if truncated_by in FORCED_CLOSE_SET:
+            try:
+                rec = case_ticket.read_case_record(run_dir)
+            except case_ticket.CaseTicketError:
+                _leave_open_with_escalation(run_dir, deps, config, case_id, truncated_by)
+                return
+            _close_off_report(run_dir, deps, config, rec)
+            return
+        # Every other case: `truncated_by is None`, a real vocabulary member with no arm here
+        # (F7 — `dead-end`), an out-of-vocabulary string (already normalized to `None` above),
+        # or a leave-open class whose model HAD closed (F-A) — today's report-driven close.
         try:
             rec = case_ticket.read_case_record(run_dir)
         except case_ticket.CaseTicketError as e:
             _warn(f"no usable report.md; leaving ticket open: {e}")
             return
-        payload = case_ticket.case_record_to_close(rec)
-        key = urllib.parse.quote(rec.case_id, safe="")
-        status, body = deps.request(config, "POST", f"/tickets/{key}/transitions", payload)
-        ok = status is not None and status.startswith("2")
-        if not ok:
-            _warn(f"close {rec.case_id}: {status or 'transport error'}: {body}")
-        else:
-            _log(f"close {rec.case_id}: {rec.disposition} ({status})")
-        _write_receipt(run_dir, config, rec.case_id, ok)
+        _close_off_report(run_dir, deps, config, rec)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _warn(f"close raised, ignored: {e!r}")
 
 
+def _close_off_report(
+    run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], rec: case_ticket.CaseRecord,
+) -> None:
+    payload = case_ticket.case_record_to_close(rec)
+    key = urllib.parse.quote(rec.case_id, safe="")
+    status, body = deps.request(config, "POST", f"/tickets/{key}/transitions", payload)
+    ok = status is not None and status.startswith("2")
+    if not ok:
+        _warn(f"close {rec.case_id}: {status or 'transport error'}: {body}")
+    else:
+        _log(f"close {rec.case_id}: {rec.disposition} ({status})")
+    _write_receipt(run_dir, config, rec.case_id, ok)
 
 
-def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, ok: bool) -> None:
+def _leave_open_with_escalation(
+    run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
+    truncated_by: str,
+) -> None:
+    """Fork F4 reading A — a real second call to the operator's ticket system, addressed at the
+    SAME ticket key the open leg wrote (`case_id = run_dir.name`), asking a person to escalate.
+    Fork F-L: a failed note call never breaks the run and its outcome lands in the receipt."""
+    text = (
+        f"Investigation ended without a verdict (exit: {truncated_by}) — the environment "
+        "appears unreachable or the investigation could not complete automatically. "
+        "Escalate for manual review; this ticket is left open."
+    )
+    key = urllib.parse.quote(case_id, safe="")
+    status, body = deps.request(
+        config, "POST", f"/tickets/{key}/comments", {"author": "defender", "body": text})
+    ok = status is not None and status.startswith("2")
+    if not ok:
+        _warn(f"note {case_id}: {status or 'transport error'}: {body}")
+    else:
+        _log(f"note {case_id}: escalation recorded ({status})")
+    _write_receipt(run_dir, config, case_id, ok, status_when_ok="escalated")
+
+
+
+
+def _write_receipt(
+    run_dir: Path, config: dict[str, str], case_id: str, ok: bool, *,
+    status_when_ok: str = "closed",
+) -> None:
     receipt = {
         "key": case_id,
-        "status": "closed" if ok else "error",
+        "status": status_when_ok if ok else "error",
         "url": f"{config['URL_BASE'].rstrip('/')}/tickets/{case_id}",
         "ok": ok,
     }

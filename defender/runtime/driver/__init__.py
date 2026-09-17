@@ -45,6 +45,7 @@ from .. import observe
 from .. import orient
 from .. import permission
 from .. import providers
+from .. import run_end
 from .. import selection
 from .. import session_store
 from .. import toon_gate as toon_gate_mod
@@ -300,9 +301,35 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         exit_reason = "StoreAppendError"
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
-    if truncated_by in _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE:
+    # #1047 O3/F-B: the host-side run-end sidecar, UNCONDITIONAL (a clean run records
+    # `truncated_by: null`, not nothing) and written BEFORE the forced report — the record is
+    # what lets a later reader tell a real model verdict from a host-manufactured one, and F-H's
+    # second clause makes a FAILED write here a reason not to write the forced report at all:
+    # writing one without the other reproduces the exact pre-#1047 bug (claim h2) inside this
+    # piece's own mechanism.
+    run_end_written = _write_run_end_sidecar(deps, truncated_by)
+    if truncated_by in _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE and run_end_written:
         exit_reason = await _close_a_run_cut_short(deps, bounds, exit_reason)
     return run, truncated_by, exit_reason
+
+
+def _write_run_end_sidecar(deps: AgentDeps, truncated_by: str | None) -> bool:
+    """Write the host-side run-end sidecar beside `deps.run_dir`; `True` on success.
+
+    `@owns truncated_by, closed_before_cut` on the sidecar's PAYLOAD — this is the one place
+    that decides what those two fields say for a MAIN session; the archive only copies what is
+    written here. Best-effort like every other post-run write in this tree (F-H): a failure is
+    logged loudly and swallowed rather than taking the run down, but it is also reported back
+    to the caller so the forced-close arm can refuse to write a report with no record beside it.
+    """
+    closed_before_cut = challenge_gate.ReviewState.of(deps).closed
+    try:
+        run_end.write_sidecar(
+            deps.run_dir, truncated_by=truncated_by, closed_before_cut=closed_before_cut)
+        return True
+    except OSError as e:  # noqa: BLE001 — best-effort like every other post-run write here
+        print(f"[run.py] run-end record write skipped: {e!r}", file=sys.stderr)
+        return False
 
 
 #: The exits on which the MODEL was stopped before it could close and the run still says
@@ -325,6 +352,11 @@ _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE = frozenset({
     session_store.TRUNCATED_BY_REQUEST_LIMIT,
     session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
 })
+
+#: Public alias (#1047 F-K): the ticket lane keys on the SAME set — a forced-close-set exit
+#: whose own forced close failed (no report.md) still needs the escalation arm, not the
+#: report-driven fallback. One frozenset, two readers, so the two never drift apart.
+FORCED_CLOSE_SET = _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE
 
 
 async def _close_a_run_cut_short(

@@ -332,7 +332,11 @@ class SpecTail:
     def open_case_ticket(self, run_dir: Path) -> None:
         self._note("open_case_ticket", run_dir)
 
-    def close_case_ticket(self, run_dir: Path) -> None:
+    def close_case_ticket(self, run_dir: Path, **_kw: Any) -> None:
+        # `**_kw` absorbs #1047's `truncated_by=`/`closed_before_cut=` kwargs — this fake
+        # stands in for the ticket-system SEAM, not for the ticket lane's own per-class
+        # branching (which `test_1047_ticket_lane.py` drives against the real
+        # `close_case_ticket` directly), so it only needs to accept the call, not interpret it.
         self._note("close_case_ticket", run_dir)
 
     # what the steps saw

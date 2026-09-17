@@ -62,6 +62,26 @@ TRUNCATED_BY_VALUES = (
     TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
 )
 
+def normalized_truncated_by(value: object) -> str | None:
+    """A `truncated_by` value as it RENDERS — a `TRUNCATED_BY_VALUES` member — or `None`.
+
+    THE single answer to what an exit-class value means, for every reader downstream of the
+    driver's own stamp (#1047): the archive writer, the family judge and the ticket lane all
+    call this instead of writing their own membership test, so a value one of them refuses is
+    refused identically by all three (`test_every_reader_of_the_exit_class_takes_the_owners_answer`).
+
+    STRICT (fork F-M, deliberately unlike `_vocab.normalized_disposition`): no whitespace
+    strip, no case fold, no confusable fold. Under the resolved mechanism the only legitimate
+    producer of this value is the driver's own stamp, constrained to `TRUNCATED_BY_VALUES` at
+    every call site — no real source of a variant spelling exists, so leniency here would only
+    open a coercion path a future, less careful producer could lean on. `None` in, `None` out:
+    "no exit class" is a real domain member (the run was not cut short), not a rejection.
+    """
+    if not isinstance(value, str):
+        return None
+    return value if value in TRUNCATED_BY_VALUES else None
+
+
 CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 _CONFIG_REQUIRED_FIELDS = ("models", "corpus", "prompts", "versions")

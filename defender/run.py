@@ -46,6 +46,7 @@ from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
+from defender.runtime import run_end  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
 
@@ -574,7 +575,16 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # The case ticket is settled BEFORE the request is published: a curation drainer can start
     # the moment the marker lands, and must never read this case with its ticket still open.
     if ns.update_ticket:
-        ticket_writer.close_case_ticket(run_dir)
+        # #1047 O2/F3 reading A: the exit class is handed to the lane in-process, exactly as
+        # `enqueue_curation` twelve lines below already receives it — `summary` is the one
+        # value both readers take. `closed_before_cut` has no home on `summary` (widening its
+        # shape is a separate decision this piece does not make, see `handoff.deviations`), so
+        # it is read straight off the host-side sidecar the driver just wrote, the same record
+        # the archive will copy at grading time.
+        record = run_end.read_sidecar(run_dir)
+        ticket_writer.close_case_ticket(
+            run_dir, truncated_by=summary.get("truncated_by"),
+            closed_before_cut=bool(record and record.get("closed_before_cut")))
 
     # A SIBLING FORCES THE NO-LEARN BRANCH, and that is a POSITIVE refusal rather than an
     # omission. Routing a sibling through this `main` acquires both automatic lanes; a world is

@@ -57,6 +57,7 @@ from defender.learning.lead_repository import (
     refusing_copy2,
     stage_tables,
 )
+from defender.runtime.run_end import read_sidecar
 from defender.runtime.scrub import verdict_path
 
 #: The archived world's directory, under the episode. One level, keyed by the SHORT label X —
@@ -144,6 +145,14 @@ class ArchiveRefused(ValueError):
     """
 
 
+#: The run-end record's archived name (#1047, fork F6). NOT in `_single_files`: the archive
+#: never copies a file that name inside the run dir — it reads the host-side sidecar
+#: (`run_end.sidecar_path`, outside every box's rw bind) and writes this file itself, through
+#: `write_guarded` rather than the `copy2` lane the six single files use (fork F-F, round-2
+#: probe #11: `copy2` writes THROUGH a pre-existing hard link at a destination leaf, where
+#: `write_guarded` refuses one).
+RUN_END_NAME = "run_end.json"
+
 #: The judge's directory-of-summaries role's name, both in a sibling's run dir and archived.
 GATHER_SUMMARIES_DIRNAME = "gather_summaries"
 #: The judge's two single-file additions' archived names — the same as their run-dir names.
@@ -218,6 +227,20 @@ def _screened_sources(world: str, run_dir: Path) -> list[tuple[Path, str]]:
     _screen(paths.gather_raw, world=world, is_dir=True)
     _screen(_gather_summaries_source(run_dir), world=world, is_dir=True)
     return present
+
+
+def _archive_run_end(run_dir: Path, world_dir: Path) -> None:
+    """The run-end record (#1047): read the HOST-SIDE sidecar beside `run_dir`, never
+    anything inside it, and write the archived copy through `write_guarded` — the
+    stricter of the archive's two lanes (fork F-F). An unreadable, absent, or
+    type-mismatched sidecar (a directory at its name, a JSON list, torn bytes) is
+    SKIPPED AND REPORTED, reusing the archive's existing three-way split rather than
+    inventing a fourth answer for this one artifact (forks F-G/F-AB) — the rest of the
+    world still archives.
+    """
+    record = read_sidecar(run_dir)
+    if record is not None:
+        write_guarded(world_dir / RUN_END_NAME, json.dumps(record))
 
 
 def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, Path]:
@@ -307,6 +330,7 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
             print(f"[archive] world {world}: {len(refused)} non-artifact entr"
                   f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                   f"{', '.join(str(p) for p in refused)}", file=sys.stderr)
+        _archive_run_end(run_dir, world_dir)
         # The pointer, LAST and as TEXT: informational only, so it is written after the bytes
         # it names have landed, and it is written through the guarded seam like every other
         # write into a tree a box can reach.
@@ -329,6 +353,7 @@ __all__ = [
     "LESSONS_LOADED_NAME",
     "REVIEW_NAME",
     "RUN_DIR_POINTER",
+    "RUN_END_NAME",
     "SAMPLES_NAME",
     "SCRUB_VERDICT_NAME",
     "WORLDS_DIRNAME",

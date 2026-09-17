@@ -576,8 +576,13 @@ LANE_NEVER_ELIGIBLE = ROUTE_NEVER_ELIGIBLE
 """O7: the defender lane was closed by the family's word; `reason` is that `verdict_word`."""
 LANE_UNQUEUEABLE = "unqueueable"
 """Never a row: `reason` is the same line `unqueueable_findings` carries, minus the id."""
+LANE_UNGRADABLE = ROUTE_UNGRADABLE
+"""A world's own row was ungradable; today's production path folds this into
+`LANE_UNQUEUEABLE` per finding via `_drop` rather than writing this lane directly (#1047 —
+`disposition_entry` is total over every `route_finding` answer, production caller or not, so a
+lane the writer's own vocabulary names is never refused by the reader that checks it back)."""
 LEDGER_LANES = frozenset({LANE_DEFENDER, LANE_WORLD, LANE_WITHHELD, LANE_NEVER_ELIGIBLE,
-                          LANE_UNQUEUEABLE})
+                          LANE_UNQUEUEABLE, LANE_UNGRADABLE})
 
 
 def disposition_entry(finding_id: str, lane: str, reason: str | None = None) -> dict[str, Any]:
@@ -979,7 +984,8 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
 
 __all__ = [
     "DrawsSkipReport", "EnqueueReport", "KIND_DRAW", "KIND_FAMILY", "KIND_MECHANICAL",
-    "LANE_DEFENDER", "LANE_NEVER_ELIGIBLE", "LANE_UNQUEUEABLE", "LANE_WITHHELD", "LANE_WORLD",
+    "LANE_DEFENDER", "LANE_NEVER_ELIGIBLE", "LANE_UNGRADABLE", "LANE_UNQUEUEABLE",
+    "LANE_WITHHELD", "LANE_WORLD",
     "LEDGER_LANES", "ROUTE_DEFENDER", "ROUTE_NEVER_ELIGIBLE", "ROUTE_NO_CHANNEL", "ROUTE_NO_ROW",
     "ROUTE_UNGRADABLE", "ROUTE_WITHHELD", "ROUTE_WORLD", "append_rows", "append_rows_report",
     "append_world_rows", "append_world_rows_report", "build_finding_row",
