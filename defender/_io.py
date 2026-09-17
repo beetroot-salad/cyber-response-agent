@@ -282,9 +282,14 @@ class Bound:
     """An episode-tree reader bound to one root (`bind`) or one sub-directory of it
     (`Bound.under`) — the ONLY value that ever held the root's own spelling, and it holds it
     as an opened directory HANDLE, never as a `str`/`bytes`/`os.PathLike` a reader body could
-    format (D-V2). Every read is `os.openat`-style, no-follow, from that handle down; nothing
-    is cached between two calls to `read`/`read_jsonl` — each is its own walk of the entry's
-    shape at that moment.
+    format (D-V2). Every read is `os.openat`-style, no-follow, from that handle down; below the
+    bound directory, nothing is cached between two calls to `read`/`read_jsonl` — each walks
+    the entry's shape at that moment (a name renamed, replaced or removed between two reads is
+    answered fresh on the second). The bound directory ITSELF is not re-resolved: `bind`/`under`
+    open it once, and if the operator deletes and recreates an entry at that same path during
+    this `Bound`'s lifetime, reads through it keep answering off the original (now unlinked)
+    directory rather than the replacement — a `Bound` is scoped to one grading or rendering
+    pass, never held across such a window.
     """
 
     def __init__(self, os_: Any, fd: int | None, *, absent: bool = False, error: str | None = None) -> None:
