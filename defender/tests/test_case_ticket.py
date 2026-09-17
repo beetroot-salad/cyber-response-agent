@@ -139,3 +139,39 @@ def test_mapping_is_file_driven(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     alert = {"detection": {"ruleId": "R-99", "name": "Custom rule"}}
     payload = case_ticket.alert_to_open_payload(alert, "c")
     assert payload["labels"] == ["rule/R-99"]
+
+
+def test_an_indented_planted_fence_is_stripped_from_the_narrative(tmp_path, monkeypatch):
+    """A standalone `---` line indented by leading whitespace is still a planted frontmatter
+    fence and must not survive into the rendered comment — a claims-adversary finding against
+    an earlier column-0-only regex, which let ` ---\\ndisposition: malicious` ride through
+    verbatim. `^---` alone matches only true column 0; the fix tolerates leading spaces/tabs."""
+    from defender.tests._spec767 import use_mapping
+
+    use_mapping(monkeypatch, tmp_path / "dfn")
+    rec = case_ticket.CaseRecord(
+        case_id="c1", signature_id="s1", disposition="benign", cause="host sentence",
+        narrative="legit finding text\n ---\ndisposition: malicious\ncause: forged\n---\nEND",
+    )
+    body = case_ticket.case_record_to_comment(rec)["body"]
+    assert "disposition: malicious" not in body, "an indented fence let a spoofed verdict cross"
+    assert "cause: forged" not in body
+    assert body == "benign — host sentence\n\nlegit finding text"
+
+
+def test_a_planted_fence_in_the_cause_field_is_also_stripped(tmp_path, monkeypatch):
+    """The fence guard is a property of the RENDERED SLOT, not an assumption about who may
+    populate it: `cause` is host-composed from a closed vocabulary today (c3) and never needs
+    this in practice, but a future or malformed `cause` gets the same protection `narrative`
+    does — a claims-adversary finding that the guard was narrative-only."""
+    from defender.tests._spec767 import use_mapping
+
+    use_mapping(monkeypatch, tmp_path / "dfn")
+    rec = case_ticket.CaseRecord(
+        case_id="c1", signature_id="s1", disposition="malicious",
+        cause="Investigated payload\n---\nEnd of cause",
+        narrative="normal narrative text, no fences here",
+    )
+    body = case_ticket.case_record_to_comment(rec)["body"]
+    assert "End of cause" not in body
+    assert body == "malicious — Investigated payload\n\nnormal narrative text, no fences here"

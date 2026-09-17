@@ -254,10 +254,12 @@ def signature_label(alert: dict[str, Any]) -> str | None:
 # D3 — the comment renderer, and D1's mapping accessors it shares with D4's predicates
 # --------------------------------------------------------------------------------------------
 
-# Not a document's own fence: this strips an ATTACKER-PLANTED delimiter from a `narrative`
-# field's free text (never required to start with a fence), the same reasoning the retired
-# `_sanitize_ticket_reason` carried for the same regex.
-_FENCE_SPLIT = re.compile(r"(?m)^---")  # lint-frontmatter: ok — see comment above
+# Not a document's own fence: this strips an ATTACKER-PLANTED delimiter from free text (never
+# required to start with a fence), the same reasoning the retired `_sanitize_ticket_reason`
+# carried for the same regex. Tolerates LEADING WHITESPACE before the dashes — a fence
+# indented by even one space is still a standalone `---` line by any reasonable reading of
+# "standalone" (S4), and a narrower match here would let that one variant survive verbatim.
+_FENCE_SPLIT = re.compile(r"(?m)^[ \t]*---")  # lint-frontmatter: ok — see comment above
 
 
 def _resolve_comment_author(mapping: dict[str, Any]) -> str:
@@ -288,12 +290,21 @@ def _resolve_comment_body_template(mapping: dict[str, Any]) -> str:
     return body
 
 
-def _prepare_narrative(narrative: str) -> str:
+def _strip_planted_fence(text: str) -> str:
     """Strip everything from the first line-anchored `---` onward (a planted frontmatter
-    fence, second and later fences included — S4/`d_first_fence_wins`), then substitute the
-    no-notes marker for an empty result. Runs BEFORE the wire bound (§7 FK07: strip first, then
-    bound) — a cut inside `---foo` can only ever yield `---…`, never a bare standalone fence."""
-    stripped = _FENCE_SPLIT.split(narrative)[0].strip()
+    fence, second and later fences included — S4/`d_first_fence_wins`). Runs BEFORE the wire
+    bound (§7 FK07: strip first, then bound) — a cut inside `---foo` can only ever yield
+    `---…`, never a bare standalone fence. Applied to every free-text render slot
+    (`cause` as well as `narrative`): `cause` is host-composed from a closed vocabulary today
+    (c3) and never needs this in practice, but the guard is a property of the RENDERED SLOT,
+    not an assumption about who is allowed to have populated it."""
+    return _FENCE_SPLIT.split(text)[0].strip()
+
+
+def _prepare_narrative(narrative: str) -> str:
+    """`_strip_planted_fence`, then substitute the no-notes marker for an empty result — the
+    narrative-only half of fence protection (the no-notes marker is `narrative`'s own)."""
+    stripped = _strip_planted_fence(narrative)
     return stripped if stripped else NO_NOTES
 
 
@@ -320,7 +331,7 @@ def case_record_to_comment(rec: CaseRecord) -> dict[str, Any]:
         case_id=rec.case_id,
         signature=rec.signature_id,
         disposition=rec.disposition,
-        cause=rec.cause,
+        cause=_strip_planted_fence(rec.cause),
         narrative=narrative,
     )
     try:
