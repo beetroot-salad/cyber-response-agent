@@ -1,0 +1,459 @@
+"""Shared machinery for the #767 spec suite — NO test scripts.
+
+Every test in `test_767_*.py` is one demand of
+`spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by that demand's
+`discharged_by`. RED against `a77335d5` is the expected state: `record_case_ticket`,
+`case_record_to_comment`, the mapping's `comment:`/`approved:` sections, the approval
+predicates and D6's label route are all COINED here — none of them exists yet. Where the
+implementation spells a symbol otherwise, these names follow the code.
+
+THE SEAMS THESE FAKES ENTER THROUGH ARE PRODUCTION'S OWN (the project profile forbids
+`monkeypatch.setattr`, and CI ratchets new sites):
+
+  * the writer's collaborators — `TicketWriterDeps{load_config, request}`, the frozen
+    dataclass threaded as the second parameter of both writers (g16: there is no third);
+  * the mapping file — `$DEFENDER_DIR`, which `case_ticket._mapping_path` already resolves
+    from and which `tests/test_case_ticket.py` already drives a substitute mapping through
+    (g15), so a hostile-mapping control needs no new seam;
+  * the entrypoint's tail — `run.py main(..., ticket_writer=)`, the duck-typed seam
+    `tests/_spec791.py` already implements (g10).
+
+FAULT CONTENT IS PROBE-DERIVED, NEVER AUTHORED. `FakeStore`'s arms are exactly the shapes
+the ledger observed on the real dependency: `TransportFault` and the `(None, detail)`
+transport-error return are `ticket_writer._request`'s own two failure spellings (c14, g2);
+the status words are what the real stub answered when it was driven (c8: create 201, a
+duplicate create 409, an unknown key 404, PATCH/PUT 405). The fake injects and records; it
+classifies nothing and decides no policy.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+# --------------------------------------------------------------------------------------
+# The vendor spellings this lane introduces. Every one of them lives in the MAPPING (O5) —
+# these constants are the TEST's copy, used to build a mapping and to read the wire back,
+# never a claim about what the writer or the screen may hardcode (that is
+# o5_no_vendor_literals_in_code's own demand).
+# --------------------------------------------------------------------------------------
+
+#: §7 re-ground (`mapping_approved.domain.default`): the design never names the tag's literal
+#: spelling and `mapping.yaml` at HEAD has no `approved:` section (r6/g6), so the resolution
+#: settled it by lookup — `"approved"`, the spelling the design doc itself uses throughout,
+#: not colliding with the existing `sig:`/`evt:` prefixed-label convention.
+APPROVED_LABEL = "approved"
+
+#: The agent identity `mapping.yaml` already spells at `open.reporter` and `close.author`
+#: (c15/r6). D1's new `comment.author` carries it forward.
+AGENT_AUTHOR = "defender"
+
+#: §7 R2 (FK01, = 20-demands F4, MATERIAL): ONE bound, 4096 UTF-8 **bytes** on the rendered
+#: comment body. `_TICKET_REASON_MAX` (472 characters, r2/c10) retires with `CaseRecord.reason`.
+#: The cut rounds DOWN to the last whole character and the `…` sits INSIDE the bound.
+WIRE_BOUND_BYTES = 4096
+ELLIPSIS = "…"
+
+#: D3's empty-narrative marker.
+NO_NOTES = "(no notes)"
+
+COMMENTS_SUFFIX = "/comments"
+TRANSITIONS_SUFFIX = "/transitions"
+TICKETS_PATH = "/tickets"
+LABELS_SUFFIX = "/labels"
+
+#: A config the writer's `load_config` seam can answer with — the three keys `_load_config`
+#: itself requires.
+CONFIG: dict[str, str] = {
+    "URL_BASE": "http://case-history.test",
+    "BASTION_HOST": "bastion.test",
+    "TIMEOUT_SEC": "10",
+}
+
+ALERT = {
+    "rule": {"id": "5710", "description": "sshd: Attempt to login using a non-existent user"},
+    "agent": {"name": "target-endpoint"},
+    "timestamp": "2026-05-07T07:15:01.561+0000",
+}
+
+#: D3's rendered comment body. The em-dash separator is the MAPPING's, not a code literal.
+COMMENT_BODY_TEMPLATE = "{disposition} — {cause}\n\n{narrative}"
+
+MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
+
+
+def require(obj: Any, name: str, why: str) -> Any:
+    """The named attribute, or a failure that names the DEMAND rather than surfacing as an
+    `AttributeError` inside a scenario about something else.
+
+    Deliberately not a module-level import: every one of these symbols is coined by this
+    spec, and a module-level import of one would turn the whole suite into a collection
+    error instead of a per-demand red."""
+    got = getattr(obj, name, None)
+    assert got is not None, f"{getattr(obj, '__name__', obj)}.{name} does not exist — {why}"
+    return got
+
+
+# --------------------------------------------------------------------------------------
+# The mapping — built as data, written to a tree, driven through $DEFENDER_DIR (g15)
+# --------------------------------------------------------------------------------------
+
+
+def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises, not per concept
+    *,
+    open_labels: tuple[str, ...] = ("sig:{signature}", "evt:{event_time}"),
+    comment_author: str | None = AGENT_AUTHOR,
+    comment_body: str | None = COMMENT_BODY_TEMPLATE,
+    author_aliases: tuple[str, ...] | None = None,
+    approved_label: Any = APPROVED_LABEL,
+    with_comment: bool = True,
+    with_approved: bool = True,
+    close_section: dict[str, Any] | None = None,
+    extra_open: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The post-#767 mapping as a dict. Every knob is a member some demand exercises:
+    `with_comment`/`with_approved` are FAM-1's missing sections, `approved_label` carries
+    FK18's non-string, `author_aliases` is FK10's superseded-spelling list, `close_section`
+    is FK27's stale lane and `extra_open` is FK26's operator-added label template."""
+    doc: dict[str, Any] = {
+        "source": {
+            "signature": "rule.id",
+            "summary": "rule.description",
+            "event_time": "timestamp",
+        },
+        "open": {
+            "key": "{case_id}",
+            "summary": "{summary}",
+            "description": "Auto-created from alert {case_id} (rule {signature}).",
+            "status": "open",
+            "reporter": AGENT_AUTHOR,
+            "labels": list(open_labels),
+        },
+    }
+    if extra_open:
+        doc["open"].update(extra_open)
+    if with_comment:
+        section: dict[str, Any] = {}
+        if comment_author is not None:
+            section["author"] = comment_author
+        if comment_body is not None:
+            section["body"] = comment_body
+        if author_aliases is not None:
+            section["author_aliases"] = list(author_aliases)
+        doc["comment"] = section
+    if with_approved:
+        doc["approved"] = {"label": approved_label}
+    if close_section is not None:
+        doc["close"] = close_section
+    return doc
+
+
+def write_mapping(root: Path, doc: dict[str, Any] | str) -> Path:
+    """Write a mapping into a `$DEFENDER_DIR`-shaped tree and return its path."""
+    import yaml
+
+    path = root / MAPPING_RELPATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = doc if isinstance(doc, str) else yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None) -> Path:
+    """Point the ONE loader at a mapping of this test's choosing.
+
+    `$DEFENDER_DIR` is the seam both sides already resolve through
+    (`case_ticket._mapping_path`, g15) — the writer and the screen read the same file through
+    the same function, which is what `o5_no_vendor_literals_in_code` observes."""
+    path = write_mapping(root, mapping_doc() if doc is None else doc)
+    monkeypatch.setenv("DEFENDER_DIR", str(root))
+    return path
+
+
+def shipped_tag_and_author() -> tuple[str, str]:
+    """The approved tag and the agent identity as the SHIPPED mapping spells them.
+
+    Read off the real file rather than taken from this module's constants, because the
+    scenarios that cannot repoint `$DEFENDER_DIR` — anything driving the whole run — resolve
+    the shipped mapping, and reading it here is what makes those tests a statement about the
+    file an operator edits (O5) rather than about a literal."""
+    doc = shipped_mapping_doc()
+    approved = doc.get("approved") or {}
+    comment_section = doc.get("comment") or {}
+    assert isinstance(approved.get("label"), str), (
+        "the shipped mapping has no `approved: {label}` section (D1)"
+    )
+    assert isinstance(comment_section.get("author"), str), (
+        "the shipped mapping has no `comment: {author}` section (D1)"
+    )
+    return approved["label"], comment_section["author"]
+
+
+def shipped_mapping_doc() -> dict[str, Any]:
+    """The repo's own checked-in mapping, read off the real file."""
+    import yaml
+
+    from defender._paths import PATHS
+
+    return yaml.safe_load((PATHS.defender_dir / MAPPING_RELPATH).read_text(encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------------------
+# The run dir the writer reads
+# --------------------------------------------------------------------------------------
+
+HOST_CAUSE = "Disposition recorded by the close gate. outcome=holds"
+
+
+def write_report(
+    run_dir: Path,
+    *,
+    disposition: str | None = "benign",
+    cause: str | None = HOST_CAUSE,
+    confidence: str = "high",
+    body: str = "The account is a decommissioned service identity; no egress followed.",
+    text: str | None = None,
+) -> Path:
+    """Write a `report.md`. `text` writes raw bytes instead, for the unreadable members."""
+    path = run_dir / "report.md"
+    if text is not None:
+        path.write_text(text, encoding="utf-8")
+        return path
+    lines = ["---", f"case_id: {run_dir.name}"]
+    if disposition is not None:
+        lines.append(f"disposition: {disposition}")
+    lines.append(f"confidence: {confidence}")
+    if cause is not None:
+        lines.append(f"cause: {cause}")
+    lines += ["---", body, ""]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def make_run(tmp_path: Path, name: str = "20260917T000000Z-sshd", *, alert: Any = None,
+             **report_kw: Any) -> Path:
+    """A run dir carrying the two files the writer reads: `report.md` and `alert.json`."""
+    run_dir = tmp_path / name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    write_report(run_dir, **report_kw)
+    run_dir.joinpath("alert.json").write_text(
+        json.dumps(ALERT if alert is None else alert), encoding="utf-8"
+    )
+    return run_dir
+
+
+# --------------------------------------------------------------------------------------
+# The store fake — one fake per dependency, driven by a data fault-spec
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OutboundCall:
+    """One request the writer handed the transport — the CAPTURED INBOUND PAYLOAD every
+    `kind: shape` demand here asserts against, never the fake's canned reply."""
+
+    method: str
+    path: str
+    body: Any
+
+
+class FakeStore:
+    """The writer's `request` dependency: records what it receives, injects a stated fault.
+
+    The fault vocabulary is data, and each arm cites the claim that observed that shape on
+    the real dependency:
+
+      * ``transport_fault`` — `TransportFault` out of `ticket_writer._request`'s own
+        `except` clause (c14, read at ticket_writer.py:62-77);
+      * ``transport_error`` — the `(None, detail)` return `_request` produces when curl
+        answered nothing parseable (c14);
+      * ``status`` / ``status_by_suffix`` — HTTP status words the real stub answered when it
+        was driven: 201 on create and on comment, 409 on a duplicate create, 404 on an
+        unknown key, 405 on PATCH/PUT (c8, executed).
+      * ``body`` — the reply text. A malformed one is FK31's arm; nothing reads it (c5), and
+        no assertion in this suite is made against it.
+
+    It classifies nothing and decides no policy: every branch here is "record, then answer".
+    """
+
+    def __init__(
+        self,
+        *,
+        status: str = "201",
+        body: str = '{"author": "defender", "body": "ok", "created": "2026-09-17T00:00:00Z"}',
+        status_by_suffix: dict[str, str] | None = None,
+        transport_fault_on: str | None = None,
+        transport_error_on: str | None = None,
+    ) -> None:
+        self.status = status
+        self.body = body
+        self.status_by_suffix = dict(status_by_suffix or {})
+        self.transport_fault_on = transport_fault_on
+        self.transport_error_on = transport_error_on
+        self.calls: list[OutboundCall] = []
+
+    def __call__(self, config: dict[str, str], method: str, path: str,
+                 body: Any = None) -> tuple[str | None, str]:
+        self.calls.append(OutboundCall(method=method, path=path, body=body))
+        if self.transport_fault_on and path.endswith(self.transport_fault_on):
+            from defender.scripts.adapters.faults import TransportFault
+
+            raise TransportFault("injected: the bastion is unreachable")
+        if self.transport_error_on and path.endswith(self.transport_error_on):
+            return None, "transport error: injected"
+        for suffix, status in self.status_by_suffix.items():
+            if path.endswith(suffix):
+                return status, self.body
+        return self.status, self.body
+
+    # ---- what the fake recorded ---------------------------------------------------------
+
+    def paths(self, suffix: str | None = None) -> list[str]:
+        return [c.path for c in self.calls if suffix is None or c.path.endswith(suffix)]
+
+    def bodies(self, suffix: str) -> list[Any]:
+        return [c.body for c in self.calls if c.path.endswith(suffix)]
+
+    @property
+    def comment_payloads(self) -> list[Any]:
+        return self.bodies(COMMENTS_SUFFIX)
+
+    @property
+    def open_payloads(self) -> list[Any]:
+        return [c.body for c in self.calls if c.path == TICKETS_PATH]
+
+    def only_comment(self) -> dict[str, Any]:
+        payloads = self.comment_payloads
+        assert len(payloads) == 1, (
+            f"expected exactly one comment POST, saw {len(payloads)} "
+            f"(every path the writer took: {[ (c.method, c.path) for c in self.calls ]})"
+        )
+        assert isinstance(payloads[0], dict), "the comment payload is not a JSON object"
+        return payloads[0]
+
+    def comment_body(self) -> str:
+        body = self.only_comment().get("body")
+        assert isinstance(body, str), "the comment payload carries no string `body`"
+        return body
+
+
+def writer_deps(store: FakeStore, *, config: dict[str, str] | None = None):
+    """Bind the fake into the writer's real injection seam (g16)."""
+    from defender.scripts.case_history import ticket_writer
+
+    resolved = CONFIG if config is None else config
+    return ticket_writer.TicketWriterDeps(
+        load_config=(lambda: None if resolved is None else dict(resolved)),
+        request=store,
+    )
+
+
+def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None = None,
+           **kw: Any) -> Any:
+    """Drive D2's writer over one run dir, through the real seam."""
+    from defender.scripts.case_history import ticket_writer
+
+    fn = require(
+        ticket_writer, "record_case_ticket",
+        "D2 renames `close_case_ticket` to `record_case_ticket`: one POST "
+        "/tickets/{key}/comments, no transition",
+    )
+    return fn(run_dir, writer_deps(store, config=config), **kw)
+
+
+def open_ticket(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None = None) -> Any:
+    from defender.scripts.case_history import ticket_writer
+
+    return ticket_writer.open_case_ticket(run_dir, writer_deps(store, config=config))
+
+
+def receipt(run_dir: Path) -> dict[str, Any]:
+    path = run_dir / "ticket_write.json"
+    assert path.is_file(), "no `ticket_write.json` receipt was written"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------------------
+# The store's own records, and the screen the query tool applies to them
+# --------------------------------------------------------------------------------------
+
+
+def comment(body: str = "a prior run's notes", *, author: str | None = AGENT_AUTHOR,
+            created: str = "2026-09-16T12:00:00Z", drop_author: bool = False) -> dict[str, Any]:
+    out: dict[str, Any] = {"body": body, "created": created}
+    if not drop_author:
+        out["author"] = author
+    return out
+
+
+def ticket(key: str, *, labels: Any = (), comments: Any = (), summary: str = "a prior case",
+           status: str = "open", resolution: str | None = None,
+           drop_labels: bool = False, drop_comments: bool = False) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "key": key,
+        "summary": summary,
+        "description": "",
+        "status": status,
+        "resolution": resolution,
+        "reporter": AGENT_AUTHOR,
+    }
+    if not drop_labels:
+        out["labels"] = labels if labels is None or isinstance(labels, str) else list(labels)
+    if not drop_comments:
+        out["comments"] = (
+            comments if comments is None or isinstance(comments, str) else list(comments)
+        )
+    return out
+
+
+def listing(*tickets: dict[str, Any], source: str = "ticket-store") -> dict[str, Any]:
+    return {"total": len(tickets), "tickets": list(tickets), "source": source}
+
+
+SELF_KEY = "20260917T000000Z-the-current-case"
+OTHER_KEY = "20260101T000000Z-a-prior-case"
+
+
+def screen(payload: Any, *, verb: str, self_key: str = SELF_KEY) -> tuple[Any, int, str]:
+    """Drive the REAL screen the way `QueryCapture._execute` drives it (r5/c6: the single
+    insertion point, called after `handler(args)` and before `_record`/`_model_view`)."""
+    from defender.runtime import query_tool
+
+    return query_tool._screen_ticket_payload(self_key, "ticket", verb, payload)
+
+
+def screen_list(payload: Any, *, self_key: str = SELF_KEY) -> tuple[Any, int, str]:
+    return screen(payload, verb="list-tickets", self_key=self_key)
+
+
+def screen_get(payload: Any, *, self_key: str = SELF_KEY) -> tuple[Any, int, str]:
+    return screen(payload, verb="get-ticket", self_key=self_key)
+
+
+def served_tickets(payload: Any) -> list[dict[str, Any]]:
+    assert isinstance(payload, dict), (
+        f"the screen did not answer a ticket listing envelope: {payload!r}"
+    )
+    assert isinstance(payload.get("tickets"), list), (
+        f"the screen's envelope carries no ticket list: {payload!r}"
+    )
+    return payload["tickets"]
+
+
+def agent_comments(t: dict[str, Any], *, authors: tuple[str, ...] = (AGENT_AUTHOR,)
+                   ) -> list[dict[str, Any]]:
+    """Comments a MODEL would read as agent-authored, read off the served record's own
+    author field — the test's own reading of the wire, never the predicate under test."""
+    out = []
+    for c in t.get("comments") or []:
+        if isinstance(c, dict) and c.get("author") in authors:
+            out.append(c)
+    return out
+
+
+def rendered(payload: Any, tmp_path: Path, *, ceiling: int | None = None) -> str:
+    """What gather's payload view hands the model for this payload (c7, executed)."""
+    from defender.scripts.gather_tools.payload_view import render
+
+    return render(json.dumps(payload), None, tmp_path, ceiling=ceiling)
