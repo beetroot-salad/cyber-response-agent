@@ -10,16 +10,17 @@ disagree on what "the lessons for this document" means:
     — the store-backed fold displaces every turn before the boundary, the write returns that
     carried earlier blocks with them, and `_frontier_recall`'s gate is stateless over the
     on-disk documents, so nothing would re-push what the model no longer holds. The frontier
-    row carries a block derived over the FULL document at mint (`fold_block`), once per
+    row carries a block derived over the FULL document at mint (`compose_fold`), once per
     boundary. Not the record `compaction.frontier_text` builds, which may be cut before the
     slot a lesson keys on; and not a verbatim carry-over of the blocks the displaced turns
     held, which would re-show what an earlier state matched rather than what this one does.
 
-The gate that decides WHETHER to push stays with each caller — the write return diffs two
-documents, the fold asks the store whether the boundary's row already exists. What is shared
-is everything after the gate: the corpus-dir check with its stderr line, the walk, the match,
-the render with the caller's lead, and the record, so fail-open, loud-empty and the resolved
-path come along by construction.
+The gate that decides WHETHER to push stays with each caller — the write return diffs the
+hits of two documents and renders only when they differ, the fold composes only when the
+mint primitive asks it to (`selection.Composer`). So the shared steps are cut where the
+write return gates: corpus, walk, HITS, then render-with-lead and record as separate steps,
+so a caller can compare hits without paying for a block it will throw away. Fail-open,
+loud-empty and the resolved path come along by construction.
 
 NOT gated by `permission.decide_read`, deliberately, on the same terms `_frontier_recall`
 states: the gate governs what the MODEL may read; this is the runtime composing text to hand
@@ -28,7 +29,7 @@ it. The corpus is a fixed internal path under `defender_dir`, never a model oper
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -42,15 +43,16 @@ if TYPE_CHECKING:
     from .tools._deps import AgentDeps
 
 
-def corpus_dir(deps: AgentDeps) -> Path | None:
-    """`defender_dir/lessons`, or `None` — LOUD, on the same terms `frontier_from_text`
-    states: a corpus that is not there produces the same silence as a corpus that matched
-    nothing, and SKILL.md tells the model to read that silence as "nothing NEW matched". A
+def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
+    """`defender_dir/lessons`, or `None` — LOUD under the caller's stderr prefix (`lane`,
+    the same one its own failure line wears), on the same terms `frontier_from_text` states:
+    a corpus that is not there produces the same silence as a corpus that matched nothing,
+    and SKILL.md tells the model to read that silence as "nothing NEW matched". A
     mis-resolved `defender_dir` would otherwise disable the lane for the whole run with no
     exception, no test red, and no operator signal."""
     corpus = deps.defender_dir / "lessons"
     if not corpus.is_dir():
-        print(f"[tools] no lessons corpus at {corpus}; omitting recall", file=sys.stderr)
+        print(f"{lane} no lessons corpus at {corpus}; omitting the lessons push", file=sys.stderr)
         return None
     return corpus
 
@@ -72,17 +74,21 @@ def shape(hits: Iterable[Hit]) -> list[tuple[str, int]]:
     return sorted((str(h.path), h.score) for h in hits)
 
 
-def block_for(frontier: Frontier, lessons: list[Lesson], *, lead: str) -> tuple[str, list[Hit]]:
-    """The rendered block for `frontier` over an already-walked corpus, with the caller's
-    lead on line 1 — `""` and no hits when nothing matched. The hits come back beside the
-    text because the RECORD is the caller's to write after its own commit point (`record`),
-    not this function's to write on derivation."""
-    from defender.scripts.lessons.lessons_frontier import match_loaded, render
+def hits_for(frontier: Frontier, lessons: list[Lesson]) -> list[Hit]:
+    """WHICH lessons `frontier` matches over an already-walked corpus, ranked — the one
+    entry into the matcher for both pushes, so the write return's `was` and `now` and the
+    fold's block are the same derivation and `shape` compares like with like."""
+    from defender.scripts.lessons.lessons_frontier import match_loaded
 
-    hits = match_loaded(frontier, lessons)
-    if not hits:
-        return "", []
-    return render(hits, lead=lead), hits
+    return match_loaded(frontier, lessons)
+
+
+def render(hits: list[Hit], *, lead: str) -> str:
+    """The block for `hits` with the caller's lead on line 1 — a separate step from `hits_for`
+    because the write return decides on the hits and renders only when they moved."""
+    from defender.scripts.lessons.lessons_frontier import render as _render
+
+    return _render(hits, lead=lead)
 
 
 def record(deps: AgentDeps, hits: Iterable[Hit]) -> None:
@@ -102,31 +108,47 @@ def record(deps: AgentDeps, hits: Iterable[Hit]) -> None:
         _record_lesson_load(deps, hit.path.resolve(), kind=LOAD_KIND_PUSH)
 
 
-def fold_block(deps: AgentDeps, document: str) -> tuple[str, list[Hit]]:
-    """The fold's block over the FULL `document`, ready to append to the frontier row's text
-    (it carries its own `"\\n\\n"` separator), plus the hits for the caller to `record` AFTER
-    the row is minted. `("", [])` when nothing matched, the corpus is missing, or the
-    derivation failed.
+_FOLD_LANE = "[driver]"
 
-    FAILS OPEN, and that is not optional here either: this runs inside the history processor
-    that prepares MAIN's next request, so an exception would surface as a failed round on a
-    fold that is otherwise sound — the frontier row must mint whether or not the lessons lane
-    could contribute to it. One stderr line, never silence.
+
+def compose_fold(
+    deps: AgentDeps, record_text: str, document: str,
+) -> tuple[str, Callable[[], None] | None]:
+    """The frontier row's text — `record_text` plus the fold's block over the FULL `document`
+    — and the after-commit action that records the push, in the shape `selection.Composer`
+    names. The mint primitive calls this on the append path only and runs the action right
+    after the row landed: a row says the lesson was in front of the model, so a reuse round
+    neither derives nor records, and a mint that raised records nothing.
+
+    FAILS OPEN on both halves, and that is not optional here: this runs inside the history
+    processor that prepares MAIN's next request, so an exception would surface as a failed
+    round on a fold that is otherwise sound — the frontier row must mint whether or not the
+    lessons lane could contribute to it, and a row that minted must not fail its round over
+    the record. One stderr line, never silence.
     """
     try:
         from defender.scripts.lessons.lessons_frontier import FOLD_LEAD
         from defender.skills.invlang.frontier import frontier_from_text
 
-        corpus = corpus_dir(deps)
+        corpus = corpus_dir(deps, lane=_FOLD_LANE)
         if corpus is None:
-            return "", []
+            return record_text, None
         frontier = frontier_from_text(document)
         if frontier.is_empty():
-            return "", []
-        block, hits = block_for(frontier, walk_lessons(corpus), lead=FOLD_LEAD)
-        if not block:
-            return "", []
-        return "\n\n" + block, hits
+            return record_text, None
+        hits = hits_for(frontier, walk_lessons(corpus))
+        if not hits:
+            return record_text, None
+        block = render(hits, lead=FOLD_LEAD)
     except Exception as e:  # noqa: BLE001 — fail open; the frontier row mints regardless
-        print(f"[driver] fold lessons push failed, omitting it: {e!r}", file=sys.stderr)
-        return "", []
+        print(f"{_FOLD_LANE} fold lessons push failed, omitting it: {e!r}", file=sys.stderr)
+        return record_text, None
+
+    def on_minted() -> None:
+        try:
+            record(deps, hits)
+        except Exception as e:  # noqa: BLE001 — fail open; the row is already in front of MAIN
+            print(f"{_FOLD_LANE} fold lessons push minted but did not record: {e!r}",
+                  file=sys.stderr)
+
+    return record_text + "\n\n" + block, on_minted

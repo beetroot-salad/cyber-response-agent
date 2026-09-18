@@ -6,8 +6,9 @@ synthesized frontier row per boundary, keyed by a store query rather than an in-
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeAlias
 
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
@@ -24,6 +25,16 @@ from .session_store import (  # noqa: F401 — re-exported, identity checked by 
 )
 
 
+#: A frontier's text, composed ON THE APPEND PATH ONLY: `_fold_impl` calls it after every
+#: refusal it can raise and right before the append, and runs the action it returns right
+#: after the row landed — never on a reuse round, never on a mint that raised. A caller whose
+#: text is expensive or whose composition has an after-commit obligation (#936: the driver
+#: derives a lessons block over the document and must record the push once, only for a row
+#: that exists) hands this in instead of a string, and the reuse predicate stays the mint's
+#: own — nothing outside re-asks it to decide whether to compose.
+Composer: TypeAlias = Callable[[], tuple[str, Callable[[], None] | None]]
+
+
 def _default_boundary(store: Any, session_id: str) -> int:
     row = store.connection.execute(
         "SELECT COUNT(*) FROM message WHERE session_id = ? AND synthesized = 0",
@@ -35,7 +46,7 @@ def _default_boundary(store: Any, session_id: str) -> int:
 def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity, not a patch-after
     store: Any, session_id: str, *, agent_id: str, boundary: int | None = None,
     run_id: str | None = None, conversation_id: str | None = None,
-    text: str | None = None,
+    text: str | Composer | None = None,
 ) -> int:
     if boundary is None:
         # `_default_boundary` must NOT stand in here: it counts the session's non-synthesized
@@ -46,9 +57,13 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
         raise ValueError(
             "boundary is required; selection.fold no longer defaults it from the "
             "session's own row count")
-    existing = frontier_row(store, session_id, agent_id=agent_id, boundary=boundary)
+    existing = store.connection.execute(
+        "SELECT id FROM message WHERE session_id = ? AND agent_id = ? "
+        "AND synthesized = 1 AND seq = ?",
+        (session_id, agent_id, boundary),
+    ).fetchone()
     if existing is not None:
-        return existing
+        return existing[0]
     ids = path_row_ids(store, session_id)
     if not ids:
         raise StoreAppendError(
@@ -64,6 +79,9 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
     # The caller owns the frontier's CONTENT (the driver passes the invlang record of the
     # loops being folded). The placeholder is shape-only: a frontier saying just "boundary N"
     # discards the folded turns without replacing them, so no production path should take it.
+    on_minted: Callable[[], None] | None = None
+    if callable(text):
+        text, on_minted = text()
     text = text if text is not None else f"FRONTIER: fold boundary {boundary}"
     frontier = ModelRequest(
         parts=[UserPromptPart(content=text)], run_id=run_id, conversation_id=conversation_id,
@@ -71,25 +89,13 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
     )
     new_ids = store.append(session_id, [frontier], agent_id=agent_id,
                            synthesized=True, parent_id=root, seq=boundary, reason="fold")
+    if on_minted is not None:
+        on_minted()
     return new_ids[0]
 
 
-def frontier_row(store: Any, session_id: str, *, agent_id: str, boundary: int) -> int | None:
-    """The synthesized frontier row already minted for `boundary`, or `None` — the ONE
-    spelling of the reuse predicate `_fold_impl` keys on. Public so a caller that composes
-    the frontier's text can ask BEFORE composing (#936: the driver derives a lessons block
-    over the document at mint, and must neither derive nor record on a reuse round) and get
-    the same answer the mint will."""
-    row = store.connection.execute(
-        "SELECT id FROM message WHERE session_id = ? AND agent_id = ? "
-        "AND synthesized = 1 AND seq = ?",
-        (session_id, agent_id, boundary),
-    ).fetchone()
-    return row[0] if row is not None else None
-
-
 def fold(store: Any, session_id: str, *, agent_id: str, boundary: int | None = None,
-         text: str | None = None) -> int:
+         text: str | Composer | None = None) -> int:
     return _fold_impl(store, session_id, agent_id=agent_id, boundary=boundary, text=text)
 
 
@@ -140,7 +146,7 @@ def render(  # noqa: PLR0913 — the renderer's full parameter set
     store: Any, session_id: str, live: list, *, agent_id: str, fold: bool,  # noqa: A002
     run_step: int | None = None, duration_ms: float | None = None,
     run_id: str | None = None, conversation_id: str | None = None,
-    boundary: int | None = None, text: str | None = None,
+    boundary: int | None = None, text: str | Composer | None = None,
 ) -> list:
     if fold:
         _fold_impl(store, session_id, agent_id=agent_id, run_id=run_id,

@@ -113,10 +113,13 @@ et al. (feedback-loop debt, which starts accruing once lessons feed back).
    the forward-check.
 5. **Git history as the audit trail.** The loop is the sole committer; spawned
    agents run no git.
-6. **No index, no service.** Flat markdown, grep over frontmatter. Two pushes
-   read it: the PLAN-time signature block (`runtime/orient.py`) and the #919
+6. **No index, no service.** Flat markdown, grep over frontmatter. Three pushes
+   read it: the PLAN-time signature block (`runtime/orient.py`), the #919
    frontier block on a write that moved the open set
-   (`scripts/lessons/lessons_frontier.py`).
+   (`scripts/lessons/lessons_frontier.py`), and the #936 frontier block the
+   compaction fold's row carries — the same derivation as #919, over the whole
+   record at the moment the fold displaces the turns that showed earlier blocks
+   (`runtime/lessons_push.py`).
 
 ## Loop Shape
 

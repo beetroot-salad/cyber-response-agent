@@ -617,6 +617,41 @@ def test_one_frontier_row_per_fold_boundary(tmp_path):
         f"exactly two frontier rows for two boundaries; got {rows}")
 
 
+def test_a_composer_is_called_on_the_mint_only_and_its_action_runs_once_the_row_landed(tmp_path):
+    """`text` may be a `selection.Composer` (#936): a callable the mint invokes ON THE APPEND
+    PATH ONLY — after every refusal it can raise, never on a reuse round — returning the
+    row's text and an after-commit action the mint runs right after the row landed. The
+    driver composes the fold's lessons block this way and records the push in the action, so
+    "compose once per boundary" and "a row that exists has a record" hold by construction:
+    no caller re-asks the reuse predicate, and no record depends on what happens after the
+    append (a render that raised past it, say). An empty path refuses BEFORE composing."""
+    sel = selection_mod()
+    store = make_store(tmp_path)
+    session_id = store.new_session(agent_id="main")
+    calls: list[str] = []
+
+    def compose():
+        calls.append("compose")
+        def landed() -> None:
+            rows = sql(store, "SELECT seq FROM message WHERE synthesized = 1")
+            calls.append(f"landed:{[r[0] for r in rows]}")
+        return "FRONTIER: composed", landed
+
+    with pytest.raises(sel.StoreAppendError):
+        sel.fold(store, session_id, agent_id="main", boundary=1, text=compose)
+    assert calls == [], "an empty-path refusal must not compose (the refusals come first)"
+
+    sel.ingest(store, session_id, [user_request("orientation")], agent_id="main")
+    first = sel.fold(store, session_id, agent_id="main", boundary=1, text=compose)
+    assert calls == ["compose", "landed:[1]"], (
+        "composed once, and the action saw the row already in the store")
+    for _ in range(3):
+        assert sel.fold(store, session_id, agent_id="main", boundary=1, text=compose) == first
+    assert calls == ["compose", "landed:[1]"], "a reuse round neither composes nor acts"
+    (payload,), = sql(store, "SELECT payload FROM message_payload WHERE message_id = ?", (first,))
+    assert "FRONTIER: composed" in payload
+
+
 def test_folds_are_restart_shaped_with_an_empty_tail(tmp_path):
     """After a fold the rendered history is the orientation row plus the frontier and
     nothing else — no verbatim tail of turns since the previous fold survives on the path.

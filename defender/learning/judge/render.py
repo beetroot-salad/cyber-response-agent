@@ -683,8 +683,20 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     dirty = provenance.get("dirty")
     lessons_loaded, _malformed, _rec = world.read_jsonl(LESSONS_LOADED_NAME)
     lessons: list[dict[str, Any]] = []
+    # ONE BODY PER LESSON, first occurrence's order. The file is an EVENT log — a row per
+    # time a lesson reached an agent, and since #936 the compaction fold writes a `push` row
+    # per matching lesson at every boundary on top of the read and write-return rows — while
+    # this view is a set of what was in front of the model; rendered per row, a lesson the
+    # run kept matching would repeat its whole body once per boundary in the judge's prompt.
+    seen: set[str] = set()
     for entry in lessons_loaded:
         name = entry.get("lesson_name")
+        # A malformed name (not a string) is not deduplicated — it renders as the
+        # "unavailable" row it always did, and a set lookup on it could raise.
+        if isinstance(name, str):
+            if name in seen:
+                continue
+            seen.add(name)
         # DERIVED FROM THE NAME WHEN THE ROW CARRIES NO PATH, which on a real sibling is always.
         # `lessons_loaded.jsonl` has exactly one production writer — `runtime/tools/_deps.
         # _record_lesson_load` — and it writes `{lesson_name, ts, kind, role}` (#936 added the last

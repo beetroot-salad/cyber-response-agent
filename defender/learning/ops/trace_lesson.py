@@ -96,14 +96,14 @@ def _parse_dt(raw) -> datetime | None:
     return parse_iso_utc(raw)
 
 
-#: The `evidence` vocabulary, strongest first. `read` and `push` are the writer's own `kind`
-#: values; `indirect` and `unknown` are this reader's classifications of a row.
-EVIDENCE_READ = "read"
-EVIDENCE_PUSH = "push"
+#: The `evidence` vocabulary, strongest first. `read` and `push` ARE the writer's own `kind`
+#: values (aliased, not re-spelled, so the column and the match cannot drift apart);
+#: `indirect` and `unknown` are this reader's classifications of a row.
+EVIDENCE_READ = LOAD_KIND_READ
+EVIDENCE_PUSH = LOAD_KIND_PUSH
 EVIDENCE_INDIRECT = "indirect"
 EVIDENCE_UNKNOWN = "unknown"
 _EVIDENCE_RANK = {EVIDENCE_READ: 3, EVIDENCE_PUSH: 2, EVIDENCE_INDIRECT: 1, EVIDENCE_UNKNOWN: 0}
-_ROLES = frozenset(r.value for r in AgentRole)
 
 
 def _row_evidence(row: dict) -> str:
@@ -114,11 +114,16 @@ def _row_evidence(row: dict) -> str:
     kind, role = row.get("kind"), row.get("role")
     if kind == LOAD_KIND_PUSH:
         return EVIDENCE_PUSH
-    # `isinstance` BEFORE the membership test: a forged `role` that is a list is unhashable,
-    # and `in` on a set would raise here and cost the whole walk, not just this row.
-    if kind == LOAD_KIND_READ and isinstance(role, str) and role in _ROLES:
-        return EVIDENCE_READ if role == AgentRole.MAIN.value else EVIDENCE_INDIRECT
-    return EVIDENCE_UNKNOWN
+    if kind != LOAD_KIND_READ:
+        return EVIDENCE_UNKNOWN
+    # Membership answered by the enum itself, not a local copy of its values: `AgentRole(x)`
+    # raises `ValueError` for a string outside the vocabulary AND for a forged list, so the
+    # unhashable case that would cost the whole walk under a set lookup is the same branch.
+    try:
+        reader = AgentRole(role)
+    except ValueError:
+        return EVIDENCE_UNKNOWN
+    return EVIDENCE_READ if reader is AgentRole.MAIN else EVIDENCE_INDIRECT
 
 
 @dataclass

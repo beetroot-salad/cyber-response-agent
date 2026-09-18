@@ -416,7 +416,7 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
 
         from .. import lessons_push
 
-        corpus = lessons_push.corpus_dir(deps)
+        corpus = lessons_push.corpus_dir(deps, lane="[tools]")
         if corpus is None:
             return ""
         # THE FRONTIER is the cheap gate, and it is also the one SKILL.md states ("appears
@@ -458,7 +458,7 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # ONE walk for the two frontiers below — the two scores are pure functions of the
         # same bytes, which cannot change between them.
         lessons = lessons_push.walk_lessons(corpus)
-        now, hits = lessons_push.block_for(now_frontier, lessons, lead=WRITE_RETURN_LEAD)
+        hits = lessons_push.hits_for(now_frontier, lessons)
         # The second gate is what keeps a MOVE that changed no lesson quiet — the frontier can
         # open a slot no selector speaks to, and re-stapling the same three lines then teaches
         # the model to stop reading them.
@@ -492,12 +492,14 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # double-pushing (#936): the fold's block is derived from the same on-disk document
         # this `before` is, so "the top three moved from what the fold showed" and "the top
         # three moved from `before`" are the same question.
-        from defender.scripts.lessons.lessons_frontier import match_loaded
-
         if not hits or lessons_push.shape(hits) == lessons_push.shape(
-            match_loaded(was_frontier, lessons)
+            lessons_push.hits_for(was_frontier, lessons)
         ):
             return ""
+        # Rendered only past the gate — the block is yaml over three frontmatters and three
+        # resolved paths, built here and nowhere earlier so a write that moved the frontier
+        # but not the top three pays for the comparison alone.
+        now = lessons_push.render(hits, lead=WRITE_RETURN_LEAD)
         lessons_push.record(deps, hits)
         return "\n\n" + now
     except Exception as e:  # noqa: BLE001 — fail open; the write already landed
