@@ -91,8 +91,14 @@ class TwoLaneRecorder:
             return
         from defender.learning.author.lessons import run as lessons_run
 
+        # #773: the drain's own verifier-key preflight runs ahead of the first curator
+        # spawn (O10) — this class fakes only the CURATOR's model (`invoke_agent`), so the
+        # verifier's key source is faked too, or a host with no real key configured
+        # (CI) would fail here on a scenario that was never about key sourcing at all.
         cfg = dataclasses.replace(
-            lessons_run.build_author_config(paths, box=box), invoke_agent=self._agent)
+            lessons_run.build_author_config(paths, box=box), invoke_agent=self._agent,
+            source_key=lambda model, *, label=None: None,
+        )
         lessons_run.run_batch(paths=paths, cfg=cfg, hold_committed=True, box=box)
 
     @property
