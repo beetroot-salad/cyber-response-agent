@@ -747,7 +747,10 @@ def test_every_attacker_influenced_string_reaches_the_page_escaped(view):
                     "<img src=x onerror=alert(2)>"):
         assert hostile not in body, hostile
         assert html.escape(hostile, quote=True) in body, hostile
-    assert body.count("<script") == 0
+    # ONE script element: the page's own contract carrier (its `const DATA` line is stripped
+    # above, its tag is not), and none opened by content. `<img` has no legitimate twin.
+    assert body.count("<script") == 1
+    assert body.count("</script") == 1
     assert body.count("<img") == 0
 
 
