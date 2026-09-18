@@ -78,9 +78,10 @@ _CORPUS_AUTHOR_DENY_REASON = (
 )
 
 _CORPUS_REPAIR_DENY_REASON = (
-    "Blocked: the repair spawn rewrites ONE lesson file the forward check refused, keeping "
-    "its citations — write only, no bash, no rm. It reads the corpus manifest and the "
-    "BAD pair(s) it was handed; the drain re-checks whatever it writes."
+    "Blocked: the repair spawn rewrites the lesson file(s) the forward check refused (one "
+    "spawn covers every BAD pair this tick, however many files that spans), keeping their "
+    "citations — write only, no bash, no rm. It reads the corpus manifest and the BAD "
+    "pair(s) it was handed; the drain re-checks whatever it writes."
 )
 
 

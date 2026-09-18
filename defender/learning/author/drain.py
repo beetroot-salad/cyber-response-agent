@@ -1136,14 +1136,19 @@ def _changed_corpus_records(cfg: CorpusAuthorConfig) -> list[tuple[str, str]]:
 
 
 def _byte_identical_to_head(repo_root: Path, rel: str) -> bool:
-    head_text = _git.git_show_file(repo_root, "HEAD", rel)
-    if head_text is None:
+    """RAW byte comparison, not text: `git_show_file`/`read_text` both decode with
+    universal-newline translation, which makes CRLF and LF compare equal even though the
+    bytes genuinely differ — a real content change (and, per `_changed_corpus_records`'s own
+    contract, one that IS "content the check must judge") that a text-mode comparison would
+    silently drop (#773 claims-adversary finding)."""
+    head_bytes = _git.git_show_file_bytes(repo_root, "HEAD", rel)
+    if head_bytes is None:
         return False
     try:
-        wt_text = read_text_utf8(repo_root / rel)
-    except TEXT_READ_ERRORS:
+        wt_bytes = (repo_root / rel).read_bytes()
+    except OSError:
         return False
-    return wt_text == head_text
+    return wt_bytes == head_bytes
 
 
 def _deleted_corpus_records(cfg: CorpusAuthorConfig) -> list[str]:

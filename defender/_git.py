@@ -121,6 +121,21 @@ def git_show_file(cwd: Path, rev: str, path: str) -> str | None:
     return proc.stdout
 
 
+def git_show_file_bytes(cwd: Path, rev: str, path: str) -> bytes | None:
+    """The RAW bytes a path carries at `rev`, or `None` when it is not there. The byte-mode
+    twin of `git_show_file`: `_run` always decodes as text, which applies universal-newline
+    translation to the captured stdout — CRLF and LF decode to the identical string, so a
+    caller that wants to know whether two blobs are byte-for-byte identical (not just
+    decode-identical) cannot get there through `git_show_file` (#773 claims-adversary finding
+    on `_byte_identical_to_head`, which used to compare decoded text)."""
+    proc = subprocess.run(
+        ["git", "show", f"{rev}:{path}"], cwd=cwd, capture_output=True, check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
 def git_rev_list_count(
     cwd: Path, *, grep: str | None = None, rev_range: str = "HEAD"
 ) -> int:
