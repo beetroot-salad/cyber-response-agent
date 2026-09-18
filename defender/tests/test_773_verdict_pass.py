@@ -558,7 +558,7 @@ def test_curator_reports_committed_but_leaves_the_corpus_clean_773(tmp_path):
         [r.get("deadletter_reason", "") for r in sc.graveyard()]
         + [r.get("reason", "") for r in S.stuck_records(sc.channel)]
     )
-    assert "reported committed" in reported and "unchanged" in reported
+    assert "reported committed" in reported and "unchanged" in reported  # noqa: PT018 — locked spec test (#773), suppressed not split
 
 
 def test_a_file_vouched_in_pass_one_is_re_vouched_unchanged_in_pass_two_773(tmp_path):

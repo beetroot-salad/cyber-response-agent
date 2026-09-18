@@ -293,8 +293,11 @@ def test_t3_registers_lesson_read_not_read_file(tmp_path):
         assert "read_file" not in tools
     finally:
         logger.close()
+    # #773 M4: the repair spawn reads the corpus it is rewriting into, so it grants
+    # `lesson_read` too — the SECOND (and last) role to.
+    lesson_read_roles = {AgentRole.CORPUS_AUTHOR, AgentRole.CORPUS_REPAIR}
     for role, defn in AGENTS.items():
-        assert defn.tools.lesson_read is (role is AgentRole.CORPUS_AUTHOR)
+        assert defn.tools.lesson_read is (role in lesson_read_roles)
     ctrl = _bare_agent()
     register_tools(ctrl, ToolSet(read=True))
     ctrl_tools = ctrl._function_toolset.tools

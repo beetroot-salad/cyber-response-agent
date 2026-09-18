@@ -299,11 +299,13 @@ def test_runner_teardown_structural():
     references (not docstrings/comments), so the check is about real callers — a conservation
     guard against re-introducing the transport.
 
-    NB #558 INVERTS the old ``resolve_verifier_python`` SURVIVES assertion that used to live
-    here (the forward-check is now an in-process tool, not a ``python3 <verifier>`` subprocess).
-    That inversion is now owned by ``test_forward_check_tool.py::test_d26_no_curator_resolves_a
-    _verifier_interpreter`` (demand d26 in spec_graph_558-forward-check-tool.yaml), which asserts
-    ZERO callers — so it is dropped from this #556 teardown guard rather than kept green here."""
+    NB #558 INVERTED the old ``resolve_verifier_python`` SURVIVES assertion that used to live
+    here (the forward-check became an in-process tool, not a ``python3 <verifier>`` subprocess).
+    That inversion was owned by ``test_forward_check_tool.py::test_d26_no_curator_resolves_a
+    _verifier_interpreter`` (demand d26 in spec_graph_558-forward-check-tool.yaml); #773 M1 then
+    deleted the forward-check tool and that test file outright (the curator no longer calls it at
+    all — there is no verifier interpreter left to resolve), so the zero-callers guard this note
+    describes is now moot rather than owned elsewhere."""
     import defender.learning.author.shared as _anchor
 
     author_dir = Path(_anchor.__file__).resolve().parent

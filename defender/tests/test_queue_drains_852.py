@@ -124,15 +124,16 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     """F-02's control, and its second half.
 
     The control: a curator that DOES delete the rejected lesson commits normally — one file,
-    the one its committed finding vouches for — and the held row stays queued carrying its
-    `forward_bad:` reason. A gate that also blocked this would have replaced a durability
-    bug with a wedge.
+    the one its committed finding vouches for — while the OTHER finding, mentioned in no
+    bucket at all, is left exactly as it was (§773 C3). A gate that also blocked this would
+    have replaced a durability bug with a wedge.
 
-    The second half: the held report is written even though the batch committed. It used to
-    return early on `commit_sha is not None`, which silenced the report on exactly the batch
-    shape a forward-check hold is most interesting in — the mixed one, where the held
-    lesson's file sat in a corpus being committed for its batch-mates. What a tick held does
-    not depend on how its other rows went."""
+    #773 M1 retires the `held_forward_bad` bucket the curator used to self-report into — the
+    forward check is the drain's own now, and a curator that reports NOTHING for a row it
+    never wrote a lesson for is the honest, expected shape (not a retryable hold this
+    module's own held-report half used to cover); that half now lives in
+    `tests/test_773_gap_ledger.py`, against the drain-computed `consumed_forward_bad`/
+    `deferred` groups."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of(paths, "findings")
     for run_id in ("run-G", "run-B"):
@@ -144,7 +145,6 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
         return {
             "committed": ["run-G/0"],
             "consumed_skip": [],
-            "held_forward_bad": [{"finding_id": "run-B/0", "reason": "flips a green case"}],
             "commit_message": "defender: lesson vouched",
         }
 
@@ -153,18 +153,9 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
 
     assert _head_files(paths.repo_root) == ["defender/lessons/vouched.md"]
     assert list(h.pending_by_id(ch)) == ["run-B/0"]
-    # `forward_bad_reason`, not `held_reason`: this hold is RETRYABLE — the next tick
-    # re-admits the row — and #881/O2 made `held_reason` the wake gate's "not work"
-    # marker, which would have stopped the drain waking for exactly these rows.
-    assert h.pending_by_id(ch)["run-B/0"]["forward_bad_reason"].startswith("forward_bad: ")
+    assert "attempts" not in h.pending_by_id(ch)["run-B/0"]
     assert "held_reason" not in h.pending_by_id(ch)["run-B/0"], (
-        "a retryable hold stamped the permanent hold's field, so the wake gate stops "
-        "counting it and the lesson is never retried"
-    )
-    report = cfg.held_report.read_text(encoding="utf-8")
-    assert "run-B/0" in report, (
-        "the batch committed, so the forward-check hold went unreported — the operator's one "
-        "written trace of a BAD verdict is missing on the batch shape it matters most in"
+        "a row this tick never mentioned was stamped with a hold reason it was never given"
     )
 
 

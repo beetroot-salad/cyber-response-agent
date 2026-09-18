@@ -56,7 +56,7 @@ def _ids_in(line: str, label: str) -> str:
     """The contents of one `<label>=[...]` list on a held-report line.
 
     A MISSING LABEL FAILS HERE rather than answering `""`. The two assertions this feeds are
-    negative — a gate hold must appear in neither `forward_bad_ids` nor `skipped_ids` — so an
+    negative — a gate hold must appear in neither `forward_bad_terminal_ids` nor `skipped_ids` — so an
     absent label made them vacuously true: rename the field, drop an empty list, or move the
     line to JSON, and the whole "never merged under one label" demand passes without reading
     anything. `re.escape` for the same reason: a label carrying a regex metacharacter would
@@ -103,7 +103,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
     appended a line every tick would pass everything above while making the report
     unreadable — which is the same as not having one.
 
-    Each held id is also asserted NOT to be inside `forward_bad_ids=[...]` or
+    Each held id is also asserted NOT to be inside `forward_bad_terminal_ids=[...]` or
     `skipped_ids=[...]`. `DrainOutcome.held` is typed as the AUTHOR_RESULT bucket holds, so
     folding the gate's holds into that bucket would report a row the forward check never saw
     as a forward-check verdict, and a skip is terminal where a hold is forever. What the
@@ -142,7 +142,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
             f"committed a row alongside it: {first_tick!r}"
         )
         for line in first_tick.splitlines():
-            assert held_id not in _ids_in(line, "forward_bad_ids"), (
+            assert held_id not in _ids_in(line, "forward_bad_terminal_ids"), (
                 "a pre-author gate hold was reported as a forward-check verdict; the "
                 f"forward check never saw this row: {line!r}"
             )

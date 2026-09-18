@@ -34,7 +34,6 @@ class ToolSet:
     #: artifact (`investigation.md`) needs. Disjoint from `write` in practice but not
     #: enforced so; both are writer grants and both require `write_shapes`.
     append: bool = False
-    forward_check: bool = False
     lesson_read: bool = False
     template_search: bool = False
     query: bool = False

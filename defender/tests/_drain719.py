@@ -112,8 +112,21 @@ ALL_CHANNELS = AUTHOR_CHANNELS + ("pitfalls",)
 
 #: channel name -> the direction module's real config builder. The fold keeps these as
 #: per-direction config builders (D3); it deletes their batch-driver bodies, not them.
+def _findings_cfg(paths: LoopPaths):
+    """The real findings config, with the drain-run check disarmed by default (#773).
+
+    `build_author_config` wires the real `FINDINGS_CHECK` (a real model call) — correct in
+    production, wrong for the pre-773 tests built against this module, which fake
+    `invoke_agent` alone and never meant to exercise a real verifier. `cfg_for(..., name,
+    forward_check=...)` opts back in per test where that IS the point (the #852 vouching
+    suite, say)."""
+    import dataclasses as _dc
+
+    return _dc.replace(lessons_run.build_author_config(paths), forward_check=None)
+
+
 BUILDERS = {
-    "findings": lambda paths: lessons_run.build_author_config(paths),
+    "findings": _findings_cfg,
 }
 
 #: The append-lock file names as they stand at the base commit, per channel. D1 keeps these

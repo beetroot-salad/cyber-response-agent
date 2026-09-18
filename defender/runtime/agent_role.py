@@ -10,6 +10,11 @@ class AgentRole(Enum):
     VERIFIER = "verifier"
     LEAD_AUTHOR = "lead_author"
     CORPUS_AUTHOR = "corpus_author"
+    # #773 M4: the drain's ONE bounded repair spawn for a BAD-verdict lesson. A SEPARATE
+    # role, never a per-spawn override of CORPUS_AUTHOR's own definition (§7 F8) — its
+    # restricted toolset (write + lesson_read, no bash) is then a build-time fact about
+    # `CORPUS_REPAIR_DEF`, not a runtime choice a future caller could forget to apply.
+    CORPUS_REPAIR = "corpus_repair"
     # An enum key here grants compiled policy and names a trace file, so a member with no
     # definition behind it is a live grant nothing claims — a retired stage retires its key.
     # `judge`, `actor` and `oracle` left under #922 for exactly that reason: the pipeline that

@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender.learning.core.config import QueueChannel
+from defender.learning.author import shared as _shared
+from defender.learning.author.verify_forward.checks import ForwardCheck
+from defender.learning.core.config import QueueChannel, source_first_party_key
 
 
 @dataclass(frozen=True)
@@ -82,3 +84,23 @@ class CorpusAuthorConfig:
     #: held-report writer; the observation directions leave it unset.
     post_rotate: Callable[..., None] | None = None
     box: Any = None
+    #: #773 M2. The drain-run check, per channel — `None` skips ONLY the verdict step
+    #: (M3.3-4/M4); vouching (M3.2), the explicit-list commit (M5) and the tree-derived
+    #: `committed` recompute (O4/O5) run on EVERY channel regardless.
+    forward_check: ForwardCheck | None = None
+    #: A row this channel's check does not cover — EXEMPT by row kind, never by absence
+    #: from any id set (which is ERROR territory, J12's already-shipped bug). Consulted
+    #: BEFORE any verifier call, never by the check itself.
+    exempt: Callable[[dict], bool] = lambda row: False
+    #: The repair prompt M4's one bounded spawn reads. `None` is a legitimate, distinguished
+    #: member (the shipped default), never a reason to skip the repair pass; a path that is
+    #: CONFIGURED but unreadable is O10's fatal-config path.
+    repair_prompt: Path | None = None
+    #: M4's repair spawn — the injection seam its fake enters through, mirroring
+    #: `invoke_agent`. `(pairs, batch_id, cfg) -> dict`; the drain never trusts its return
+    #: value, only the tree it re-reads afterward.
+    invoke_repair: Callable[..., dict] = _shared.invoke_repair
+    #: The verifier-key preflight's resolver (M3.3), the seam `run_curator_stage` already
+    #: carries under this exact name (C16), moved to the drain by M3.3 and gated per §7
+    #: FK-27 on `forward_check is not None`.
+    source_key: Callable[..., object] = source_first_party_key

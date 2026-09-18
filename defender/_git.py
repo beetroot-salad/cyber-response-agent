@@ -157,6 +157,51 @@ def git_commit(
     return git_head_sha(cwd)
 
 
+def git_commit_paths(
+    cwd: Path,
+    paths: Sequence[str],
+    message: str,
+    *,
+    trailers: list[tuple[str, str]] | None = None,
+) -> str | None:
+    """#773 M5: the drain's own explicit-file-list commit — stages exactly `paths` (the
+    approved files plus curator deletions) and commits them.
+
+    A SECOND, SEPARATE primitive from `git_commit` above, which keeps its single-pathspec
+    signature byte-for-byte unchanged (§7 FK-1) — the three sibling lanes (questioner,
+    lead-author, pitfalls) never reference this function's name at all.
+
+    An EMPTY `paths` returns `None` WITHOUT calling git at all: `git add --` with an empty
+    pathspec stages nothing, but `git commit -F - --` with an empty pathspec then commits
+    the WHOLE INDEX (C15, probe-confirmed — a stray file reached HEAD that way) — so the
+    guard here is what keeps a tick with nothing approved from sweeping in whatever else
+    happens to be staged."""
+    if not paths:
+        return None
+    # A path already fully staged as deleted — a `git mv` decomposed by the drain's own
+    # `no_renames=True` reads already removed it from BOTH the worktree and the index —
+    # has nothing for `git add` to match, and it refuses the whole call with "did not match
+    # any files" rather than staging the other paths in the list. `git rm --cached
+    # --ignore-unmatch` handles that shape too (a no-op when the path is already gone from
+    # the index), so every path in `paths` goes through the ONE call that admits it.
+    present = [p for p in paths if (cwd / p).exists()]
+    absent = [p for p in paths if p not in present]
+    if present:
+        git(["add", "--", *present], cwd=cwd)
+    if absent:
+        git(["rm", "--cached", "--ignore-unmatch", "-q", "--", *absent], cwd=cwd)
+    staged = _run(["diff", "--cached", "--quiet", "--", *paths], cwd=cwd, check=False)
+    if staged.returncode == 0:
+        return None
+    if staged.returncode != 1:
+        raise GitError(["diff", "--cached", "--quiet"], staged.returncode, staged.stderr)
+    trailer_args: list[str] = []
+    for key, val in trailers or []:
+        trailer_args += ["--trailer", f"{key}: {val}"]
+    git(["commit", "-F", "-", *trailer_args, "--", *paths], cwd=cwd, input=message)
+    return git_head_sha(cwd)
+
+
 def git_fetch(cwd: Path) -> None:
     git(["fetch", "origin"], cwd=cwd)
 

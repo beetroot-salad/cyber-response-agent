@@ -112,10 +112,17 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
     tick, with no bound at all.
 
     Driven through `run_batch` rather than at the seam, because the wiring is the thing that
-    was wrong — the seam took no deadline to pass. The commit fails (a member, so the tick
-    retires) and an appender takes the channel's append lock in the same breath, so the
-    retire meets a held lock. The tick must give up at the configured wait and surface as
-    stuck; it must not bump, because a busy lock is not the batch's fault.
+    was wrong — the seam took no deadline to pass. The batch faults with a `RETIRE_SET`
+    member (a member, so the tick retires) and an appender takes the channel's append lock
+    in the same breath, so the retire meets a held lock. The tick must give up at the
+    configured wait and surface as stuck; it must not bump, because a busy lock is not the
+    batch's fault.
+
+    #773 M5 moves the findings channel's own commit off `cfg.commit_fn` entirely (it calls
+    `shared.commit_corpus_paths` directly — FK-1 keeps `commit_fn` unreferenced by this lane
+    by construction), so the fault is raised from the curator spawn itself instead of from a
+    `commit_fn` override that this lane no longer calls; `retire()`'s own lock-wait behavior
+    is exactly the same regardless of which RETIRE_SET-member call site raised it.
 
     `finished_within` rather than a bare call: the pre-fix behaviour is a HANG, and a
     regression that hangs should fail this test rather than stall the suite."""
@@ -127,7 +134,7 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
 
     appender = h.Holder(ch.append_lock)
 
-    def commit_then_appender_takes_the_lock(message, cfg):
+    def curate_then_appender_takes_the_lock(rows, batch_id, cfg):
         appender.__enter__()
         raise GitError(["commit", "-F", "-"], 1, "fatal: unable to write new index file")
 
@@ -136,8 +143,7 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
         "findings",
         max_attempts=1,
         repo_lock_wait_seconds=1,
-        invoke_agent=h.committing("retire-wait"),
-        commit_fn=commit_then_appender_takes_the_lock,
+        invoke_agent=curate_then_appender_takes_the_lock,
     )
     tick = h.Background(lambda: drain.run_batch(cfg=cfg))
     try:
@@ -213,29 +219,11 @@ def test_a_git_failure_after_the_commit_lands_does_not_delete_the_committed_less
     cleanliness gate aborts, and the channel wedges: the precise failure the restore was
     written to prevent, caused by the restore.
 
-    Induced at the one seam where a commit can land and still fault: the real
-    `commit_corpus` runs, and the step after it fails. Both halves are asserted, because the
-    commit surviving in history is not enough — the working tree has to still hold the files
-    that commit names, or the next tick sees deletions."""
-    paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "b")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "b/0")])
-
-    def commit_then_fail_reading_head(message, cfg):
-        author_shared.commit_corpus(cfg.repo_root, cfg.corpus_dir, message)
-        raise GitError(["rev-parse", "HEAD"], 128, "fatal: bad object HEAD")
-
-    cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.committing("landed"),
-        commit_fn=commit_then_fail_reading_head,
-    )
-    assert drain.run_batch(cfg=cfg) == 2
-
-    assert "author landed batch" in _git_log(paths.repo_root), "the commit must have landed"
-    lessons = sorted(p.name for p in cfg.corpus_dir.glob("landed-*.md"))
-    assert lessons, "the restore deleted the lessons the commit had already captured"
-    author_shared.assert_clean_corpus_dir(paths.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel)
+    #773 M5 moves the findings channel's own commit off `cfg.commit_fn` (never called by
+    this lane — FK-1) onto `shared.commit_corpus_paths`, which is not a seam this module's
+    `cfg_for` overrides; the "commit landed, then a later git read fails, and the restore
+    must not delete what already landed" property is instead pinned for the new flow at
+    `tests/test_773_commit_list.py::test_git_status_call_the_check_steps_paths_are_derived_from_fails_773`
+    and `tests/test_773_verdict_pass.py::test_verify_agent_state_after_repair_spawn_depends_on_a_failing_git_read_773`
+    (both drive `_git_read`-wrapped post-commit steps through a real `.git`-directory
+    failure). Left here as a pointer rather than deleted outright."""

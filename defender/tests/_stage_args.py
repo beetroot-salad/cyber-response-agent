@@ -10,9 +10,12 @@ field that stops existing fails loudly here rather than being silently absorbed.
 """
 from __future__ import annotations
 
-from defender.learning.author.curator_engine import ForwardCheckConfig
 from defender.learning.core.config import StageContext, StageWiring
 
+#: #773 M1: the forward-check config group is gone — the check moved out of the curator's
+#: own spawn entirely. A caller still passing one of these fields gets it silently dropped
+#: here rather than a `TypeError` from a stale kwarg, since the shape these suites drive
+#: (`run_curator_stage`) genuinely no longer takes them.
 _FORWARD_CHECK = ("check", "runs_dir", "pending", "queued_ids", "exempt_ids", "run_verify")
 
 
@@ -31,8 +34,9 @@ def as_curator_stage_args(kw: dict) -> dict:
         box=kw.pop("box", None),
         salt=kw.pop("salt", None),
     )
-    cfg = ForwardCheckConfig(**{k: kw.pop(k) for k in _FORWARD_CHECK if k in kw})
+    for k in _FORWARD_CHECK:
+        kw.pop(k, None)
     return dict(
         wiring=wiring, ctx=ctx,
-        corpus_dir=kw.pop("corpus_dir"), cfg=cfg, **kw,
+        corpus_dir=kw.pop("corpus_dir"), **kw,
     )

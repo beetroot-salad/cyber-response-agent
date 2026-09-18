@@ -55,21 +55,23 @@ def test_947_every_hand_maintained_role_census_agrees_on_the_roster():
     BOTH enumerations, including the compiled-policy sweep whose omission is silent rather
     than red.
 
-    NINE SINCE #1008: #922 took it to eight by retiring the actor, oracle and judge definitions
+    TEN SINCE #773: #922 took it to eight by retiring the actor, oracle and judge definitions
     with the pipeline they were the only callers of, and their enum keys went with them rather
-    than staying behind as names nothing answers to. `judge` has now RETURNED — re-added by
+    than staying behind as names nothing answers to. `judge` then RETURNED — re-added by
     #1008 and bound to the family judge, which until then ran under this role's own definition
-    — and this count moved with it, which is the whole reason the census is spelled in four
-    places and checked here rather than trusted to stay in step on its own."""
+    — taking it to nine, and #773 adds a tenth (`CORPUS_REPAIR`, M4's one bounded repair
+    spawn, a fixed separate definition rather than a per-spawn override). This count moves
+    with the roster, which is the whole reason the census is spelled in four places and
+    checked here rather than trusted to stay in step on its own."""
     AgentRole = T.sym("runtime.agent_role", "AgentRole")
     AGENTS = T.sym("agents", "AGENTS")
-    assert len(AgentRole) == 9
-    assert len(AGENTS) == 9
+    assert len(AgentRole) == 10
+    assert len(AGENTS) == 10
     src = (T.DEFENDER / "tests" / "test_bind_sole_seam_551.py").read_text(encoding="utf-8")
-    assert "== 9" in src, "the bind-case count was not moved with the roster"
+    assert "== 10" in src, "the bind-case count was not moved with the roster"
     assert "QUESTIONER_DEF" in src, "the bind-case enumeration was not moved"
     grant = (T.DEFENDER / "tests" / "test_grant_gate_575.py").read_text(encoding="utf-8")
-    assert "len(AGENTS) == 9" in grant, "the grant gate's hardcoded count was not moved"
+    assert "len(AGENTS) == 10" in grant, "the grant gate's hardcoded count was not moved"
     assert '"questioner"' in grant, "_all_policies never compiles the questioner's policy"
     assert '"judge"' in grant, "_all_policies never compiles the family judge's policy"
 

@@ -162,12 +162,14 @@ def _pending_queue_counts(pending_file: Path) -> tuple[int, int]:
     into this file. So the field this reads is the field the holder wrote, one source of
     truth, and no second rule about what "held" means (#881/O2).
 
-    IT IS THE PERMANENT HOLD'S FIELD ALONE. The forward-check bucket used to write it too,
-    and that made this count answer "not work" for a hold the very next tick would have
-    RETRIED — `_gate_findings` re-admits a forward-check row, and the check gets another
-    verdict once the corpus has moved. Those rows were then never retried and never consumed:
-    queued, uncounted, invisible, which is this issue's own subject. That bucket writes
-    `forward_bad_reason` now, so one field carries one meaning.
+    IT IS THE PERMANENT HOLD'S FIELD ALONE. A retryable hold used to share this field with
+    the forward-check bucket, which made this count answer "not work" for a hold the very
+    next tick would have RETRIED — `_gate_findings` re-admits a retryable row, and the check
+    got another verdict once the corpus had moved. Those rows were then never retried and
+    never consumed: queued, uncounted, invisible, which is this issue's own subject. #773
+    replaces that retryable hold outright with a bounded `deferrals` counter (M7) and a
+    terminal `consumed_forward_bad` disposition (M6) — neither stamps `held_reason` — so
+    this field now carries exactly the one meaning its name says.
 
     PRESENCE, NOT TRUTHINESS. The field is the contract and its value is the holder's prose,
     so a row stamped `held_reason: ""` (or `null`, by a writer that had no wording to give) is
@@ -274,14 +276,16 @@ def _drain_one_curator(
     # curator's model calls then started, and `_run_worktree_batch` went on to `finish_batch` —
     # committing, pushing and opening a PR for the batch the operator had just asked to stop.
     #
-    # `SystemExit` IS STILL CONTAINED, though, because it is not an interrupt: it is this
-    # repo's own fatal-configuration idiom (`verify_forward/checks._verify` raises it for a
-    # check carrying no verifier prompt, `curator_engine._refuse_forward_check` for a direction
-    # that registers none). Let out, it escapes `_drain_curators` — the one thing that frame's
-    # own comment says this frame must never do — skipping the sibling curator entirely and
-    # unwinding past `finish_batch`, so the FIRST curator's already-authored lessons are
-    # discarded with the worktree and nothing is committed, pushed or recorded on either
-    # channel. That is A2's third clause exactly: recorded on this channel, contained here.
+    # `SystemExit` IS STILL CONTAINED, though, because it is not an interrupt — some fatal
+    # configuration fault this repo's stages raise could still be one. Let out, it escapes
+    # `_drain_curators` — the one thing that frame's own comment says this frame must never
+    # do — skipping the sibling curator entirely and unwinding past `finish_batch`, so the
+    # FIRST curator's already-authored lessons are discarded with the worktree and nothing
+    # is committed, pushed or recorded on either channel. That is A2's third clause exactly:
+    # recorded on this channel, contained here. (#773: the drain's own `FatalConfigError`
+    # fatal-config path — a check with no prompt, a missing verifier key — is an ordinary
+    # `Exception` subclass already caught by the clause below; it needs no `SystemExit`
+    # carve-out of its own.)
     except KeyboardInterrupt:
         raise
     except (Exception, SystemExit) as e:  # noqa: BLE001 — A2's third clause: EVERY other fault class is recorded, never silently swallowed

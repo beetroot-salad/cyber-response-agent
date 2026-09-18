@@ -57,7 +57,6 @@ from defender.learning.core.config import (  # noqa: E402
     StageWiring,
 )
 from defender.learning.author.curator_engine import (  # noqa: E402
-    ForwardCheckConfig,
     run_curator_stage,
 )
 from defender.runtime import providers  # noqa: E402
@@ -94,20 +93,6 @@ def _run_dir(tmp_path: Path) -> Path:
     return d
 
 
-def _check_args(tmp_path: Path) -> dict:
-    """The forward-check binding every curator spawn carries: which check, and the roots it
-    reads. Bound on the deps at spawn (#558) — never a tool argument."""
-    # The actor check retired with its corpus (#922); the findings check is the surviving
-    # one, and this scene is about the curator engine rather than about which check runs.
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK as ACTOR_CHECK
-    return dict(
-        check=ACTOR_CHECK,
-        runs_dir=tmp_path / "runs",
-        pending=tmp_path / "_pending" / "actor_observations.jsonl",
-        queued_ids=frozenset(),
-    )
-
-
 def _prompt(tmp_path: Path) -> Path:
     p = tmp_path / "curator.md"
     p.write_text("Curate the corpus. Enumerate lessons via bash. Emit AUTHOR_RESULT when done.\n")
@@ -127,7 +112,6 @@ def _stage(tmp_path: Path, *, wiring: StageWiring | None = None, **over):
         batch_id="batch-A",
         user_prompt="u",
         corpus_dir=_corpus(tmp_path),
-        **_check_args(tmp_path),
         repo_root=_repo_root(tmp_path),
         learning_run_dir=_run_dir(tmp_path),
         model="glm-5.3",
@@ -323,7 +307,6 @@ def test_require_output_true_quarantines_empty_final(tmp_path):
         request_limit=4, wall_clock_timeout=config.author_timeout(),
         repo_root=_repo_root(tmp_path),
     )
-    cfg = ForwardCheckConfig(**_check_args(tmp_path))
     corpus_dir = _corpus(tmp_path)
 
     def _wiring(trace_name: str) -> StageWiring:
@@ -334,12 +317,12 @@ def test_require_output_true_quarantines_empty_final(tmp_path):
 
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_curator_pydantic(
-            _wiring("ro-empty.jsonl"), ctx, corpus_dir=corpus_dir, cfg=cfg,
+            _wiring("ro-empty.jsonl"), ctx, corpus_dir=corpus_dir,
             make_model=_fake_model(_replay("   ")),
         )
     with override_allow_model_requests(False):
         out = _run_curator_pydantic(
-            _wiring("ro-full.jsonl"), ctx, corpus_dir=corpus_dir, cfg=cfg,
+            _wiring("ro-full.jsonl"), ctx, corpus_dir=corpus_dir,
             make_model=_fake_model(_replay("real final text")),
         )
     assert out == "real final text"

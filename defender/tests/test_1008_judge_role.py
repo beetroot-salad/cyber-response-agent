@@ -710,18 +710,19 @@ def test_1008_the_default_seam_hands_run_stage_the_judges_deps_and_widens_nothin
 
 
 def test_1008_the_registry_holds_one_definition_per_role_and_nine_of_them():
-    """Nine roles, nine definitions, one per key.
+    """Ten roles, ten definitions, one per key.
 
     `set(AGENTS.keys()) == set(AgentRole)` is the invariant the whole roster rests on: an enum
     key with no definition behind it is a compiled grant nothing claims, and a definition with
     no key cannot be reached. The COUNT is stated too, because the four hand-kept censuses
     (`test_947_triplet_questioner.py`, `test_grant_gate_575.py`, `test_bind_sole_seam_551.py`)
-    move together and this is the ninth member arriving.
+    move together — the ninth member was `judge`, #1008's own; #773 adds a tenth,
+    `CORPUS_REPAIR`.
     """
     AgentRole = _role()
     AGENTS = _agents()
-    assert len(AgentRole) == 9
-    assert len(AGENTS) == 9
+    assert len(AgentRole) == 10
+    assert len(AGENTS) == 10
     assert set(AGENTS.keys()) == set(AgentRole)
     assert sorted(defn.role.value for defn in AGENTS.values()) == sorted(
         r.value for r in AgentRole)
