@@ -31,12 +31,11 @@ from __future__ import annotations
 import errno as errno_mod
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
+from defender.tests._defender_sql import EXIT_OK, assert_query_error, run_sql_py
 from defender.tests._session_store_705 import (
     complete_pair,
     make_store,
@@ -320,19 +319,13 @@ def test_every_via_reaching_store_rows_goes_through_the_role_scoped_projection(t
     with pytest.raises(TypeError):
         ss.hydrate(store, session_id)
 
-    sql_path = DEFENDER / "scripts" / "gather_tools" / "sql.py"
     query = f"SELECT * FROM sqlite_scan('{store.path}', 'message')"
-    proc = subprocess.run([sys.executable, str(sql_path), query],
-                          input=b'{"a": 1}\n', capture_output=True, timeout=120,
-                          cwd=str(REPO_ROOT))
-    assert proc.returncode != 0, (
-        "the defender-sql lane resolved a reference to the store file")
-    assert SECRET.encode() not in proc.stdout
+    proc = run_sql_py(query, stdin='{"a": 1}\n', cwd=REPO_ROOT)
+    assert_query_error(proc, "the defender-sql lane resolved a reference to the store file")
+    assert SECRET not in proc.stdout
 
-    control = subprocess.run([sys.executable, str(sql_path), "SELECT a FROM data"],
-                             input=b'{"a": 1}\n', capture_output=True, timeout=120,
-                             cwd=str(REPO_ROOT))
-    assert control.returncode == 0, (
+    control = run_sql_py("SELECT a FROM data", stdin='{"a": 1}\n', cwd=REPO_ROOT)
+    assert control.returncode == EXIT_OK, (
         f"positive control: the lane must still work at all; got {control.stderr!r}")
 
 

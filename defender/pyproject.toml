@@ -55,6 +55,9 @@ dev = [
     # it was turned on — zero tests changed outcome versus a serial run.
     "pytest-xdist>=3.5",
     "pytest-cov",
+    # tests/test_sql_idioms.py reads the doc's fences with a CommonMark parse. The `runtime`
+    # extra happens to carry it (fastmcp -> rich -> markdown-it-py); a dev-only sync does not.
+    "markdown-it-py",
     "coverage",
     "ruff",
     "vulture",
