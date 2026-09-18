@@ -14,13 +14,12 @@ under.
 The exit codes are LITERALS, deliberately not read off the tool: they are the contract
 `skills/gather/defender-sql.md` teaches the lead (`1` = query error, `2` = payload never
 arrived), and every `assert proc.returncode == EXIT_*` below a spawn is what holds the tool
-to it. Read off the tool they would follow any renumbering and pin nothing. Keeping the
-tool out of this process also keeps its top level (a `sys.path` insert, a `defender._io`
-import) out of every importer, and a tool that cannot execute here fails one assertion
-with the child's stderr rather than turning three modules into collection errors.
+to it, and `test_sql_idioms.py` pins the doc's sentence to the same numbers. Read off the
+tool they would follow any renumbering and pin nothing.
 """
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -34,10 +33,14 @@ SQL_PY: Path = DEFENDER / "scripts" / "gather_tools" / "sql.py"
 EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
 EXIT_INPUT_ERROR = 2
-#: `duckdb` missing — the `runtime` extra is not installed. `run_sql_py` turns this into a
-#: skip so the three files that spawn the tool share one policy instead of one skipping and
-#: two failing with a message about the query.
+#: The tool could not import duckdb. `run_sql_py` makes this a skip ONLY when the package
+#: is absent from the interpreter it spawns (a dev-only checkout); an installed duckdb that
+#: fails to import is a broken environment and stays a failure, so CI — where the `runtime`
+#: extra is synced and these tests block a merge — cannot go green on skips.
 EXIT_NO_RUNTIME = 69
+#: Asked of `sys.executable`, the interpreter `run_sql_py` spawns, so the answer is the
+#: child's; nothing is imported at collection.
+_DUCKDB_INSTALLED = importlib.util.find_spec("duckdb") is not None
 
 #: The tool's own prefix on a duckdb refusal — prose `sql.py` owns, not duckdb's. Exit 1 is
 #: also CPython's code for an uncaught exception, so the exit code alone cannot tell a
@@ -59,7 +62,7 @@ def run_sql_py(
         input=stdin, capture_output=True, text=True, encoding="utf-8",
         timeout=timeout, env=env, cwd=cwd,
     )
-    if proc.returncode == EXIT_NO_RUNTIME:
+    if proc.returncode == EXIT_NO_RUNTIME and not _DUCKDB_INSTALLED:
         pytest.skip(f"duckdb is not installed in {sys.executable} (the `runtime` extra)")
     return proc
 

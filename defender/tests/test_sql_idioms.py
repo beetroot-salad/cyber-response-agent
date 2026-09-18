@@ -31,7 +31,6 @@ and the doc census need nothing and run everywhere.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import re
 import subprocess
@@ -64,11 +63,6 @@ _REAL_ESQL = (
     / "run" / "run-underfold-001" / "gather_raw" / "l-001" / "0.json"
 )
 
-#: `find_spec` asks the interpreter `run_sql_py` spawns (`sys.executable`), so the answer
-#: is the child's, and nothing is imported at collection.
-_HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
-
-
 @pytest.fixture(scope="module")
 def esql() -> str:
     """The real ES|QL payload, as text — what goes on the tool's stdin."""
@@ -84,8 +78,6 @@ def _sql(
     payload: str, query: str, env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """`cat <payload.json> | defender-sql '<query>'` as a lead types it."""
-    if not _HAS_DUCKDB:
-        pytest.skip("duckdb (the `runtime` extra) is not installed — no query can run")
     return run_sql_py(query, stdin=payload, env=env)
 
 
@@ -593,6 +585,15 @@ def test_empty_payload_is_an_error_not_an_empty_result(payload):
     assert "NOT an empty result set" in proc.stderr
 
 
+def test_the_doc_teaches_the_exit_codes_the_tests_pin(doc):
+    """The exit codes in `_defender_sql` are literals BECAUSE they are what the doc teaches;
+    the spawn tests hold the tool to them, and this holds the doc to them, so neither the
+    tool nor the sentence can renumber alone."""
+    taught = re.search(r"`(\d)` = query error.*?`(\d)` = the payload never arrived", doc, re.S)
+    assert taught, "the doc no longer teaches the exit codes"
+    assert tuple(map(int, taught.groups())) == (EXIT_QUERY_ERROR, EXIT_INPUT_ERROR)
+
+
 def test_markdown_payload_is_an_input_error():
     """The other non-payload: an adapter's rendered text rather than JSON. Same contract —
     exit 2, nothing on stdout, a message that names the cause."""
@@ -727,8 +728,11 @@ def test_the_dead_recipe_stays_dead():
     proc = _sql(_HITS, "SELECT count(*) FROM (SELECT unnest(result.hits) h FROM data)")
     assert_query_error(proc, "the dead recipe ran")
     # ...and fails for the reason the census rests on: `result` is the identifier duckdb
-    # could not resolve, because no adapter emits that wrapper. Any wording names it.
-    assert "result" in proc.stderr, proc.stderr
+    # could not resolve, because no adapter emits that wrapper. Any wording quotes the
+    # name it could not find; read before the `LINE 1:` echo of the query, which would
+    # carry `result` for ANY failure.
+    message = proc.stderr.partition("\nLINE ")[0]
+    assert '"result"' in message, proc.stderr
     # and the live spelling, on the same payload, works
     assert _rows(_HITS, "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data)") \
         == [{"n": 3}]
@@ -750,6 +754,8 @@ _LATERAL_FORM = re.compile(r"FROM\s+data\s*,\s*unnest\s*\(\s*hits\s*\)", re.IGNO
 
 #: A line that LOOKS like a fence edge to someone reading the raw file.
 _FENCE_EDGE = re.compile(r"^[ \t]*(`{3,}|~{3,})", re.M)
+#: The info string names sql — ` ```sql`, ` ```SQL {.x}`, ` ```sql{.x}` — and not ` ```sqlite`.
+_SQL_INFO = re.compile(r"sql(?![\w-])", re.I)
 
 
 def _sql_fences(text: str) -> list[str]:
@@ -763,15 +769,21 @@ def _sql_fences(text: str) -> list[str]:
     The doc's reader is not a renderer, though — the gather subagent reads it as raw text and
     copies what looks like a fence. A fence CommonMark does not see (under an HTML wrapper
     with no blank line, indented four spaces) is still copyable, so the parse is checked
-    against the raw text: every fence-looking line must belong to a fence the parser found.
-    The scanner then fails loudly on the fence it cannot read, instead of skipping it."""
+    against the raw text: every fence-looking line must lie inside a fence the parser found
+    (as one of its edges, or nested in its body). The scanner then fails loudly on the fence
+    it cannot read, instead of skipping it."""
     fences = [tok for tok in MarkdownIt().parse(text) if tok.type == "fence"]
-    edges = _FENCE_EDGE.findall(text)
-    assert len(edges) == 2 * len(fences), (
-        f"{len(edges)} fence-looking lines but the markdown parser sees {len(fences)} fences "
-        "— a fence is written in a way a reader copies and this scanner cannot read"
+    spans = [tok.map for tok in fences]  # [first line, one past last), 0-based
+    lines = text.split("\n")
+    stray = [
+        f"{n + 1}: {line.strip()}" for n, line in enumerate(lines)
+        if _FENCE_EDGE.match(line) and not any(a <= n < b for a, b in spans)
+    ]
+    assert not stray, (
+        "fence-looking lines the markdown parser does not read as a fence — a reader "
+        f"would copy them and this scanner cannot see them: {stray}"
     )
-    return [tok.content for tok in fences if tok.info.lower().split()[:1] == ["sql"]]
+    return [tok.content for tok in fences if _SQL_INFO.match(tok.info.strip())]
 
 
 def test_the_docs_esql_example_is_literal_and_runs(doc, esql):
