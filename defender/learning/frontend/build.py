@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -332,53 +333,17 @@ QUEUES_PAGE = """<!doctype html>
 <style>__CSS__</style></head><body id="top">
 <header class="top"><div class="top-row">
   <h1>Learning loop — Queues</h1>
-  <div class="meta" id="headline"></div>
+  <div class="meta">generated __GENERATED__ · __STATE_ROOT__</div>
   <nav class="views"><a href="lessons.html">lessons →</a></nav>
 </div></header>
 <main class="queues">
 __FAULT_BAND__
-<div class="q-cards" id="root"></div>
+<div class="q-cards">__CARDS__</div>
 </main>
 <script>
+// The contract this page was rendered from, carried whole so the page stays self-contained
+// and a reader can pull the JSON back out of it (`const DATA = ...;` is the one line).
 const DATA = __QUEUES_JSON__;
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const when = s => s ? s.slice(0, 10) : "";
-const num = (v, warn) => '<span class="qt-val ' + (v === 0 ? "n-zero" : warn !== undefined && v >= warn ? "n-warn" : "") + '">' + v + '</span>';
-const pj = o => esc(JSON.stringify(o, null, 2)).replace(/"([^"]+)":/g, '<span class="j-key">"$1"</span>:').replace(/: "([^"]*)"/g, ': <span class="j-str">"$1"</span>').replace(/: (\\d+)/g, ': <span class="j-num">$1</span>');
-const q = DATA.quarantine;
-
-document.getElementById("headline").textContent = "generated " + (DATA.generated_at || "—") + " · " + DATA.state_root;
-
-function card(cls, name, stats, body, open){
-  return '<details class="q-card ' + cls + '"' + (open ? ' open' : '') + '><summary><span class="qc-name">' + name + '</span><span class="qc-stats">' + stats + '</span></summary><div class="qc-body">' + body + '</div></details>';
-}
-function unreadable(n){ return n ? '<p class="q-unreadable">' + n + ' unreadable line' + (n === 1 ? '' : 's') + ' skipped</p>' : ''; }
-function channelCard(ch){
-  const held = ch.held.count ? '<p class="q-held"><b>' + ch.held.count + ' held</b> until a person moves ' + (ch.held.count === 1 ? 'it' : 'them') + ' · ' + ch.held.ids.map(esc).join(", ") + '</p>' : "";
-  const dl = ch.deadletter.length
-    ? '<div class="dl">' + ch.deadletter.map(e => '<details><summary><span class="dl-id">' + (e.id === null ? 'no id' : esc(e.id)) + '</span><span class="dl-reason">' + esc(e.reason) + '</span><span class="dl-when">' + when(e.when) + '</span></summary><div class="body"><pre class="json-pretty">' + pj(e.row) + '</pre></div></details>').join("") + '</div>'
-    : '<div class="empty">No dead letters.</div>';
-  const stats = '<span class="qs"><span class="qt-key">queued</span>' + num(ch.depth.queued) + '</span><span class="qs"><span class="qt-key">dead</span>' + num(ch.deadletter.length, 1) + '</span>';
-  return card('t-' + ch.accent, esc(ch.name), stats, held + dl + unreadable(ch.unreadable), ch.deadletter.length > 0 || ch.held.count > 0);
-}
-function asideCard(){
-  const li = (k, v, t) => '<li><span class="k">' + esc(k) + '</span><span class="v">' + esc(v) + (t ? '<span class="t">' + esc(t) + '</span>' : '') + '</span></li>';
-  const list = rows => rows.length ? '<ul class="q-list">' + rows.join("") + '</ul>' : '<div class="empty">None.</div>';
-  const near = q.tainted.rows.length >= q.tainted.cap - 2;
-  const needsYou = q.markers.rows.length + q.tainted.rows.length;
-  const human = '<div class="q-group q-human"><div class="q-group-head">Needs a person <span class="q-group-sub">nothing retries these</span></div>'
-    + '<h3>Markers not served</h3>' + list(q.markers.rows.map(r => li(r.identity, r.failed, r.queue))) + unreadable(q.markers.unreadable)
-    + '<h3>Tainted worktrees<span class="cap' + (near ? ' near' : '') + '">' + q.tainted.rows.length + ' / ' + q.tainted.cap + '</span></h3>'
-    + list(q.tainted.rows.map(r => li(r.batch_id, r.taint, when(r.quarantined_at) + (Object.keys(r.verdict).length ? '' : ' · no scan recorded')))) + unreadable(q.tainted.unreadable)
-    + '</div>';
-  const system = '<div class="q-group q-system"><div class="q-group-head">Retrying itself <span class="q-group-sub">the lane serves nothing new until this lands</span></div>'
-    + '<h3>Committed, not delivered</h3>' + list(q.deliveries.rows.map(r => li(r.branch, r.reason, "since " + when(r.at) + ", retried every tick"))) + unreadable(q.deliveries.unreadable)
-    + '</div>';
-  const stats = '<span class="qs"><span class="qt-key">needs a person</span>' + num(needsYou, 1) + '</span><span class="qs"><span class="qt-key">retrying</span>' + num(q.deliveries.rows.length) + '</span>';
-  return card('t-raw', 'set aside', stats, human + system, needsYou > 0);
-}
-
-document.getElementById("root").innerHTML = DATA.channels.map(channelCard).join("") + asideCard();
 </script>
 </body></html>
 """
@@ -388,8 +353,124 @@ def _esc(value: object) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
 
 
+def _when(value: object) -> str:
+    return _esc(value)[:10] if isinstance(value, str) else ""
+
+
+def _num(value: int, warn_at: int | None = None) -> str:
+    cls = "n-zero" if value == 0 else ("n-warn" if warn_at is not None and value >= warn_at else "")
+    return f'<span class="qt-val{(" " + cls) if cls else ""}">{value}</span>'
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return one if n == 1 else many
+
+
+def _json_pretty(value: object) -> str:
+    """The row, pretty-printed and ESCAPED before any highlighting is stitched in — the
+    highlighter only ever wraps already-safe text."""
+    text = _esc(json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True, default=str))
+    text = re.sub(r'&quot;([^&]+?)&quot;:', r'<span class="j-key">&quot;\1&quot;</span>:', text)
+    text = re.sub(r': &quot;([^\n]*?)&quot;(,?)$', r': <span class="j-str">&quot;\1&quot;</span>\2',
+                  text, flags=re.MULTILINE)
+    text = re.sub(r': (-?\d+(?:\.\d+)?)(,?)$', r': <span class="j-num">\1</span>\2', text,
+                  flags=re.MULTILINE)
+    return text
+
+
+def _unreadable_line(n: int) -> str:
+    return (f'<p class="q-unreadable">{n} unreadable {_plural(n, "line", "lines")} skipped</p>'
+            if n else "")
+
+
+def _card(cls: str, name: str, stats: str, body: str, open_: bool) -> str:
+    return (
+        f'<details class="q-card {cls}"{" open" if open_ else ""}>'
+        f'<summary><span class="qc-name">{name}</span><span class="qc-stats">{stats}</span></summary>'
+        f'<div class="qc-body">{body}</div></details>'
+    )
+
+
+def _stat(key: str, value_html: str) -> str:
+    return f'<span class="qs"><span class="qt-key">{key}</span>{value_html}</span>'
+
+
+def _channel_card(ch: dict) -> str:
+    held = ch["held"]
+    held_html = ""
+    if held["count"]:
+        held_html = (
+            f'<p class="q-held"><b>{held["count"]} held</b> until a person moves '
+            f'{_plural(held["count"], "it", "them")} · '
+            + ", ".join(_esc(i) for i in held["ids"]) + "</p>"
+        )
+    if ch["deadletter"]:
+        rows = "".join(
+            "<details><summary>"
+            f'<span class="dl-id">{"no id" if e["id"] is None else _esc(e["id"])}</span>'
+            f'<span class="dl-reason">{_esc(e["reason"])}</span>'
+            f'<span class="dl-when">{_when(e["when"])}</span>'
+            f'</summary><div class="body"><pre class="json-pretty">{_json_pretty(e["row"])}</pre>'
+            "</div></details>"
+            for e in ch["deadletter"]
+        )
+        dead_html = f'<div class="dl">{rows}</div>'
+    else:
+        dead_html = '<div class="empty">No dead letters.</div>'
+    stats = _stat("queued", _num(ch["depth"]["queued"])) + _stat("dead", _num(len(ch["deadletter"]), 1))
+    return _card(
+        f't-{_esc(ch["accent"])}', _esc(ch["name"]), stats,
+        held_html + dead_html + _unreadable_line(ch["unreadable"]),
+        bool(ch["deadletter"]) or held["count"] > 0,
+    )
+
+
+def _list(items: list[str]) -> str:
+    return f'<ul class="q-list">{"".join(items)}</ul>' if items else '<div class="empty">None.</div>'
+
+
+def _li(key: object, value: object, tail: str = "") -> str:
+    tail_html = f'<span class="t">{_esc(tail)}</span>' if tail else ""
+    return f'<li><span class="k">{_esc(key)}</span><span class="v">{_esc(value)}{tail_html}</span></li>'
+
+
+def _aside_card(q: dict) -> str:
+    markers, deliveries, tainted = q["markers"], q["deliveries"], q["tainted"]
+    near = len(tainted["rows"]) >= tainted["cap"] - 2
+    needs_person = len(markers["rows"]) + len(tainted["rows"])
+    human = (
+        '<div class="q-group q-human"><div class="q-group-head">Needs a person '
+        '<span class="q-group-sub">nothing retries these</span></div>'
+        "<h3>Markers not served</h3>"
+        + _list([_li(r["identity"], r["failed"], r["queue"]) for r in markers["rows"]])
+        + _unreadable_line(markers["unreadable"])
+        + f'<h3>Tainted worktrees<span class="cap{" near" if near else ""}">'
+          f'{len(tainted["rows"])} / {tainted["cap"]}</span></h3>'
+        + _list([
+            _li(r["batch_id"], r["taint"],
+                _when(r["quarantined_at"]) + ("" if r["verdict"] else " · no scan recorded"))
+            for r in tainted["rows"]
+        ])
+        + _unreadable_line(tainted["unreadable"])
+        + "</div>"
+    )
+    system = (
+        '<div class="q-group q-system"><div class="q-group-head">Retrying itself '
+        '<span class="q-group-sub">the lane serves nothing new until this lands</span></div>'
+        "<h3>Committed, not delivered</h3>"
+        + _list([
+            _li(r["branch"], r["reason"], f'since {_when(r["at"]) or "?"}, retried every tick')
+            for r in deliveries["rows"]
+        ])
+        + _unreadable_line(deliveries["unreadable"])
+        + "</div>"
+    )
+    stats = _stat("needs a person", _num(needs_person, 1)) + _stat("retrying", _num(len(deliveries["rows"])))
+    return _card("t-raw", "set aside", stats, human + system, needs_person > 0)
+
+
 def _fault_band(view: dict) -> str:
-    """The machinery-health band, rendered here rather than in the page's script so a page
+    """The machinery-health band, present only when a channel has a stuck record, so a page
     whose channels all drained cleanly carries no fault heading at all. The stuck file is
     append-only and nothing clears it, so the band is titled by the record's time: "last
     fault", never "stuck now"."""
@@ -400,7 +481,8 @@ def _fault_band(view: dict) -> str:
         '<div class="qf-row">'
         f'<span class="qf-ch">{_esc(ch["name"])}</span>'
         f'<span class="qf-class">{_esc(ch["stuck"].get("fault_class"))}</span>'
-        f'<span class="qf-ticks">{_esc(ch["stuck"].get("consecutive_ticks"))} ticks running</span>'
+        f'<span class="qf-ticks">{_esc(ch["stuck"].get("consecutive_ticks"))} '
+        f'{_plural(int(ch["stuck"].get("consecutive_ticks") or 0), "tick", "ticks")} running</span>'
         f'<span class="qf-when">{_esc(ch["stuck"].get("recorded_at") or "time unknown")}</span>'
         f'<span class="qf-reason">{_esc(ch["stuck"].get("reason"))}</span>'
         "</div>"
@@ -414,10 +496,17 @@ def _fault_band(view: dict) -> str:
 
 
 def render_queues(view: dict) -> str:
+    """The whole page from the contract, RENDERED HERE rather than by a script in the page:
+    every value a person reads goes through `_esc` on this side, where a test can see it, and
+    the page needs no script to show anything."""
     payload = json.dumps(view, ensure_ascii=False).replace("<", "\\u003c")
+    cards = "".join(_channel_card(ch) for ch in view["channels"]) + _aside_card(view["quarantine"])
     return (
         QUEUES_PAGE.replace("__CSS__", RUN_CSS + QUEUES_CSS)
+        .replace("__GENERATED__", _esc(view.get("generated_at") or "—"))
+        .replace("__STATE_ROOT__", _esc(view.get("state_root")))
         .replace("__FAULT_BAND__", _fault_band(view))
+        .replace("__CARDS__", cards)
         .replace("__QUEUES_JSON__", payload)
     )
 
