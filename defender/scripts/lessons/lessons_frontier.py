@@ -681,9 +681,34 @@ def _render_frontmatter(fm: dict) -> str:
     return "\n".join(f"  {line}" for line in dumped.strip().splitlines())
 
 
-def render(hits: list[Hit]) -> str:
+#: The two leads a block can carry — ONE line each, the hits start at index 1 (see `render`).
+#: The read discipline lives HERE rather than in SKILL.md because it is about the block in
+#: front of the model: which of these to open, and what a hit does and does not license. The
+#: spec keeps only what is true when NO block arrives, which a return cannot say.
+#: "your record", not "the open frontier" — this fires on settled cells too.
+_READ_DISCIPLINE = (
+    "Precedent, not evidence: judge each from its `description`, Read only the bodies that fit."
+)
+#: The `append_block` / `fix_row` return's lead: the write that just landed moved the record.
+WRITE_RETURN_LEAD = (
+    "### Lessons matched against your record — pushed because this write moved it. "
+    + _READ_DISCIPLINE
+)
+#: The compaction fold's lead (#936): nothing moved — the turns that carried the earlier
+#: blocks were displaced by the fold, so the frontier row re-shows the current top three.
+#: A DIFFERENT sentence on purpose: told "this write moved it" on a row no write produced,
+#: the model would look for the write.
+FOLD_LEAD = (
+    "### Lessons matched against your record as it stands — the turns that carried these "
+    "are no longer in the history. " + _READ_DISCIPLINE
+)
+
+
+def render(hits: list[Hit], *, lead: str = WRITE_RETURN_LEAD) -> str:
     """The injected block. Empty string when nothing matched — the caller decides whether
-    silence or a loud-empty is right for its surface.
+    silence or a loud-empty is right for its surface. `lead` is the block's first line: the
+    default is the write return's (the CLI below and #919's pins take it), the fold passes
+    `FOLD_LEAD`.
 
     The path is ABSOLUTE, and that is a gate requirement rather than a style choice. MAIN's
     `cwd_anchor` is the RUN DIR (`MAIN_DEF` sets no `anchors_on_tree`), so `_resolve_operand`
@@ -696,18 +721,10 @@ def render(hits: list[Hit]) -> str:
     """
     if not hits:
         return ""
-    # The read discipline lives HERE rather than in SKILL.md because it is about the block in
-    # front of the model: which of these to open, and what a hit does and does not license. The
-    # spec keeps only what is true when NO block arrives, which a return cannot say.
-    # "your record", not "the open frontier" — this fires on settled cells too.
     # ONE line, and the hits start at index 1 — `test_the_block_hands_main_a_path_its_own_gate
     # _will_read` reads the first hit positionally, and this block is re-injected on every
     # frontier-moving write, so every line here is paid for many times per run.
-    lines = [
-        "### Lessons matched against your record — pushed because this write moved it. "
-        "Precedent, not evidence: judge each from its `description`, "
-        "Read only the bodies that fit.",
-    ]
+    lines = [lead]
     for hit in hits:
         # `matched` is the model's ONLY account of why this lesson was pushed: `HIDDEN_KEYS`
         # strips the selectors, so without this line the block is an unexplained list.

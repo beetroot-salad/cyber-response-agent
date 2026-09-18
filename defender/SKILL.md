@@ -250,7 +250,7 @@ alert: the cells your `:V` / `:R` rows have settled, the ones they left `??`,
 and undischarged `ac<n>` contracts. A lesson whose trigger is a procedure
 rather than a fact carries none and is reached by grep.
 
-**Lessons come to you; you do not have to go and ask.** Two pushes:
+**Lessons come to you; you do not have to go and ask.** Three pushes:
 
 1. **Orientation → Lessons block** (first message) — this signature's
    `source_signature` hits plus the viable tags, printed
@@ -259,11 +259,18 @@ rather than a fact carries none and is reached by grep.
 2. **The `append_block` / `fix_row` return** (every loop) — up to three lessons
    matched against your record, pushed when your write moved it. Each block
    carries its own read instructions.
+3. **The frontier message after a fold** — when your history is folded, the
+   turns that carried earlier returns are gone, so the frontier message that
+   replaces them re-shows the current top three, matched against your record
+   as it stands. Keyed on the record like push 2, not on the alert like push 1.
+   Nothing moved: this is what you had already been shown, put back in front
+   of you.
 
 **No block means nothing new reached the TOP THREE**, never that the corpus is
 exhausted and never that nothing matched: your write left the state where it
 was, nothing in it matched, or what it opened lost the three slots to lessons
-you were already shown. Losing a slot is not the same as scoring below them —
+you were already shown. After a fold, "no block" on a write means unchanged
+since the fold showed you. Losing a slot is not the same as scoring below them —
 the three cover as many DIFFERENT open things as the matches allow before any
 one of them gets a second lesson, so a second lesson about a question already
 represented is cut even when it speaks to that question more precisely than

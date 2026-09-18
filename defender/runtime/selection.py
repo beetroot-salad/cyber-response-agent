@@ -46,13 +46,9 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
         raise ValueError(
             "boundary is required; selection.fold no longer defaults it from the "
             "session's own row count")
-    existing = store.connection.execute(
-        "SELECT id FROM message WHERE session_id = ? AND agent_id = ? "
-        "AND synthesized = 1 AND seq = ?",
-        (session_id, agent_id, boundary),
-    ).fetchone()
+    existing = frontier_row(store, session_id, agent_id=agent_id, boundary=boundary)
     if existing is not None:
-        return existing[0]
+        return existing
     ids = path_row_ids(store, session_id)
     if not ids:
         raise StoreAppendError(
@@ -76,6 +72,20 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
     new_ids = store.append(session_id, [frontier], agent_id=agent_id,
                            synthesized=True, parent_id=root, seq=boundary, reason="fold")
     return new_ids[0]
+
+
+def frontier_row(store: Any, session_id: str, *, agent_id: str, boundary: int) -> int | None:
+    """The synthesized frontier row already minted for `boundary`, or `None` — the ONE
+    spelling of the reuse predicate `_fold_impl` keys on. Public so a caller that composes
+    the frontier's text can ask BEFORE composing (#936: the driver derives a lessons block
+    over the document at mint, and must neither derive nor record on a reuse round) and get
+    the same answer the mint will."""
+    row = store.connection.execute(
+        "SELECT id FROM message WHERE session_id = ? AND agent_id = ? "
+        "AND synthesized = 1 AND seq = ?",
+        (session_id, agent_id, boundary),
+    ).fetchone()
+    return row[0] if row is not None else None
 
 
 def fold(store: Any, session_id: str, *, agent_id: str, boundary: int | None = None,

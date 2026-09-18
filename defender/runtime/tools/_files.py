@@ -18,6 +18,7 @@ from defender._untrusted import wrap_fresh
 # The SAME byte ruler the artifact bounds are measured with — a write tool that reports
 # "bytes" must report the number the gate will judge, not a codepoint count that under-reads it.
 from defender.hooks.record_lesson_load import (
+    LOAD_KIND_READ as _LOAD_KIND_READ,
     RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
 )
 from ._deps import AgentDeps, _bounded_read, _cap_for, _overflow_filter_hint, _record_lesson_load
@@ -71,7 +72,7 @@ def _gated_read(
         raise ModelRetry(f"file not found: {path}")
     _deny_authored_read(deps, p)
     text = _probe_read_text(p, path)
-    _record_lesson_load(deps, p, lesson_corpora)
+    _record_lesson_load(deps, p, lesson_corpora, kind=_LOAD_KIND_READ)
     return p, text
 
 

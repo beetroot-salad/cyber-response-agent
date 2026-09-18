@@ -687,7 +687,8 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
         name = entry.get("lesson_name")
         # DERIVED FROM THE NAME WHEN THE ROW CARRIES NO PATH, which on a real sibling is always.
         # `lessons_loaded.jsonl` has exactly one production writer — `runtime/tools/_deps.
-        # _record_lesson_load` — and it writes `{lesson_name, ts}`: no `path` column exists. Read
+        # _record_lesson_load` — and it writes `{lesson_name, ts, kind, role}` (#936 added the last
+        # two; this builder does not read them): no `path` column exists. Read
         # as an absent path, EVERY lesson of EVERY real archived world rendered as "unavailable:
         # no path is recorded", so VIEW 4 shipped with no bodies at all and the whole `git_show`
         # /`lessons_commit` seam below was dead in production while green against fixtures that

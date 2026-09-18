@@ -30,3 +30,16 @@ def lesson_name(file_path: str, corpora: frozenset[str] = LESSON_CORPORA) -> str
     return None
 
 
+
+
+#: The `kind` a `lessons_loaded.jsonl` row carries (#936): `read` when the MODEL chose to open
+#: the lesson (`runtime/tools._gated_read`), `push` when the RUNTIME put its description and
+#: dimensions in front of MAIN without a read (`_frontier_recall`'s write return, and the
+#: compaction fold's frontier row). The two mean different things about whether the lesson
+#: was actually in front of the model, and `learning/ops/trace_lesson.py` renders them as
+#: different evidence classes. HERE, beside `lesson_name`, because this leaf is the one the
+#: writer (`runtime/tools/_deps.py`) and the readers already share, and it imports nothing
+#: heavier than `pathlib` — the trace CLI must not pay for the runtime to agree on a spelling.
+LOAD_KIND_READ = "read"
+LOAD_KIND_PUSH = "push"
+LOAD_KINDS = frozenset({LOAD_KIND_READ, LOAD_KIND_PUSH})

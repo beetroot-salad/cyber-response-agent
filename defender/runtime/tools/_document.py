@@ -21,7 +21,7 @@ from .. import permission
 # The SAME byte ruler the artifact bounds are measured with — a write tool that reports
 # "bytes" must report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
-from ._deps import AgentDeps, _record_lesson_load
+from ._deps import AgentDeps
 from ._bash import _guarded_parents, _resolved
 from ._files import _closed_for_investigation_write
 
@@ -393,7 +393,11 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
     of the same three lines re-stapled to every write until it stops reading them.
 
     DERIVED, NEVER STORED, like the repair window above — nothing caches this, so it cannot
-    go stale or disagree with the file.
+    go stale or disagree with the file. The derivation itself — corpus, walk, match, render,
+    record — is `runtime/lessons_push.py`, shared with the compaction fold's frontier row
+    (#936): after a fold the turns that carried these returns are gone from MAIN's history,
+    and the fold re-shows the current top three from the same derivation, so this gate's
+    "moved from `before`" is also "moved from what the fold showed".
 
     NOT gated by `permission.decide_read`, deliberately. The gate governs what the MODEL may
     read; this is the runtime composing text to hand it, the same way `runtime/orient.py`
@@ -407,21 +411,13 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
     exact lie `_warn_over` fails open to avoid.
     """
     try:
-        from defender._corpus import iter_lessons
-        from defender.scripts.lessons.lessons_frontier import (
-            match_loaded,
-            render,
-        )
+        from defender.scripts.lessons.lessons_frontier import WRITE_RETURN_LEAD
         from defender.skills.invlang.frontier import frontier_from_text
 
-        corpus = deps.defender_dir / "lessons"
-        if not corpus.is_dir():
-            # LOUD, on the same terms `frontier_from_text` states: a corpus that is not there
-            # produces the same silence as a corpus that matched nothing, and SKILL.md tells
-            # the model to read that silence as "nothing NEW matched". A mis-resolved
-            # `defender_dir` would otherwise disable the lane for the whole run with no
-            # exception, no test red, and no operator signal.
-            print(f"[tools] no lessons corpus at {corpus}; omitting recall", file=sys.stderr)
+        from .. import lessons_push
+
+        corpus = lessons_push.corpus_dir(deps)
+        if corpus is None:
             return ""
         # THE FRONTIER is the cheap gate, and it is also the one SKILL.md states ("appears
         # only when your append *changed* what is open"). `Frontier` is a frozen dataclass of
@@ -459,11 +455,10 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
             return ""
         if now_frontier.is_empty():
             return ""
-        # ONE walk for the two frontiers below. `iter_lessons` re-opens and re-YAML-parses
-        # every file in the corpus per call, and it is the dominant cost here — the two scores
-        # are pure functions of the same bytes, which cannot change between them.
-        lessons = list(iter_lessons(corpus))
-        hits = match_loaded(now_frontier, lessons)
+        # ONE walk for the two frontiers below — the two scores are pure functions of the
+        # same bytes, which cannot change between them.
+        lessons = lessons_push.walk_lessons(corpus)
+        now, hits = lessons_push.block_for(now_frontier, lessons, lead=WRITE_RETURN_LEAD)
         # The second gate is what keeps a MOVE that changed no lesson quiet — the frontier can
         # open a slot no selector speaks to, and re-stapling the same three lines then teaches
         # the model to stop reading them.
@@ -483,34 +478,27 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # holds — the churn this gate exists to prevent. `matched` still RENDERS, because it is
         # the model's only account of why a lesson was pushed; it just does not decide.
         #
-        # SORTED, which is what keeps that true now that `_spread_over_items` exists (#935).
-        # The ranked list used to be ordered by `(-score, name)` alone, so the ORDER of these
-        # pairs was a function of the pairs themselves and comparing the list was already a
-        # comparison of the multiset. The spread re-orders on `matched` — it groups hits by
-        # which frontier item won `_best_match`'s `max` — so an unsorted comparison would let
-        # exactly the flip described above decide emission through the back door: same
-        # lessons, same scores, same frontmatter, re-stapled because one hit's `max` moved
-        # from v-003 to v-004. Sorting restores "which lessons, and at what score" as the
-        # whole question.
-        shape = sorted((str(h.path), h.score) for h in hits)
-        if not shape or shape == sorted(
-            (str(h.path), h.score) for h in match_loaded(was_frontier, lessons)
+        # SORTED (`lessons_push.shape`), which is what keeps that true now that
+        # `_spread_over_items` exists (#935). The ranked list used to be ordered by
+        # `(-score, name)` alone, so the ORDER of these pairs was a function of the pairs
+        # themselves and comparing the list was already a comparison of the multiset. The
+        # spread re-orders on `matched` — it groups hits by which frontier item won
+        # `_best_match`'s `max` — so an unsorted comparison would let exactly the flip
+        # described above decide emission through the back door: same lessons, same scores,
+        # same frontmatter, re-stapled because one hit's `max` moved from v-003 to v-004.
+        # Sorting restores "which lessons, and at what score" as the whole question.
+        #
+        # AFTER A FOLD this is also what keeps the frontier row and the write return from
+        # double-pushing (#936): the fold's block is derived from the same on-disk document
+        # this `before` is, so "the top three moved from what the fold showed" and "the top
+        # three moved from `before`" are the same question.
+        from defender.scripts.lessons.lessons_frontier import match_loaded
+
+        if not hits or lessons_push.shape(hits) == lessons_push.shape(
+            match_loaded(was_frontier, lessons)
         ):
             return ""
-        now = render(hits)
-        # RECORDED, on the same terms a Read is. `lessons_loaded.jsonl` is the loop's only
-        # "was this lesson in context" signal and the post-merge control `learning/ops/
-        # trace_lesson.py` reasons from — and this block puts a lesson's description and
-        # dimensions in front of MAIN with enough to act on, since SKILL.md tells it to judge
-        # relevance from `description` and NOT to open the file to decide. A push that left no
-        # row would make a merged lesson look inert to the human reviewing its impact.
-        for hit in hits:
-            # RESOLVED, the same spelling `render` hands the model and the same one
-            # `_gated_read` records (it passes the post-`_resolve_operand` path).
-            # `record_lesson_load.lesson_name` gates on `p.parent.parent.name == "defender"`,
-            # so an unresolved `defender_dir` carrying a symlink or a `..` shows the block and
-            # writes no row — the lesson then reads as never-in-context to `trace_lesson`.
-            _record_lesson_load(deps, hit.path.resolve())
+        lessons_push.record(deps, hits)
         return "\n\n" + now
     except Exception as e:  # noqa: BLE001 — fail open; the write already landed
         print(f"[tools] frontier recall failed, omitting it: {e!r}", file=sys.stderr)

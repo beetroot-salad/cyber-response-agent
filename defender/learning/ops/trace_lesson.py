@@ -7,20 +7,28 @@ human control loop after". This is **in context**, not demonstrably *influenced*
 ``defender/hooks/record_lesson_load.py``'s caveat; the green bar + one-click revert
 are the load-bearing safety controls, this is best-effort visibility.
 
-TWO KINDS OF ROW reach ``lessons_loaded.jsonl``, and the count does not distinguish them
-(#919). The original is a READ: ``runtime/tools._gated_read`` records a lesson the model
-chose to open. The second is a PUSH: ``runtime/tools._frontier_recall`` records each lesson
-whose ``description`` and dimensions it put in front of MAIN on a write that moved the
-investigation's frontier — the model saw enough to act on and was told not to open the file
-to decide relevance, so the row is honest, but it is weaker evidence than a Read. Neither
-covers ``runtime/orient.py``'s PLAN-time signature block, which pushes the same way and
-records nothing. So a lesson carrying ``frontier_nodes`` / ``frontier_edges`` selectors has
-more ways to earn a row than one that does not; read a difference in counts between two
-lessons with that in mind.
+TWO KINDS OF ROW reach ``lessons_loaded.jsonl`` (#919), and since #936 each row says which
+(``kind``) and for which agent (``role``). A READ (``runtime/tools._gated_read``) records a
+lesson the model chose to open. A PUSH (``runtime/lessons_push``: the write return that moved
+the investigation's frontier, and the compaction fold's frontier row) records each lesson
+whose ``description`` and dimensions the runtime put in front of MAIN — the model saw enough
+to act on and was told not to open the file to decide relevance, so the row is honest, but it
+is weaker evidence than a Read. Neither covers ``runtime/orient.py``'s PLAN-time signature
+block, which pushes the same way and records nothing. So a lesson carrying ``frontier_nodes``
+/ ``frontier_edges`` selectors has more ways to earn a row than one that does not; read a
+difference in counts between two lessons with that in mind.
+
+The ``evidence`` column names the strongest class behind a case's "in context", from the
+CLOSED vocabulary ``read`` (a MAIN read) > ``push`` > ``indirect`` (a read by another role
+only — a GATHER agent or a curator) > ``unknown`` (rows from before #936, which cannot say —
+an honest downgrade of history rather than an assumed read). Only qualifying rows count: a
+row outside the lesson's ``created_at`` window lifts nothing. The value is EMITTED from that
+vocabulary, never from the row's bytes: ``lessons_loaded.jsonl`` is a #1047 forgery
+universal, and a ``kind`` carrying a tab must not forge a column.
 
 Usage:
-  trace_lesson.py --all                 # <name>\\t<description>\\t<in_context_cases>
-  trace_lesson.py <lesson_name>         # per-case: case_id  disposition  loaded_at
+  trace_lesson.py --all                 # <name>\\t<description>\\t<in_context_cases>\\t<main_read_cases>
+  trace_lesson.py <lesson_name>         # per-case: case_id  disposition  loaded_at  evidence
 
 Runs scanned: the durable learning runs dir (``DEFAULT_PATHS.runs_dir`` —
 ``$DEFENDER_LEARNING_STATE_DIR/runs`` or in-repo ``defender/learning/runs/``),
@@ -46,6 +54,8 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._clock import parse_iso_utc
 from defender._corpus import iter_lessons
+from defender.hooks.record_lesson_load import LOAD_KIND_PUSH, LOAD_KIND_READ
+from defender.runtime.agent_role import AgentRole
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._report import UNKNOWN_DISPOSITION, read_report
@@ -86,11 +96,35 @@ def _parse_dt(raw) -> datetime | None:
     return parse_iso_utc(raw)
 
 
+#: The `evidence` vocabulary, strongest first. `read` and `push` are the writer's own `kind`
+#: values; `indirect` and `unknown` are this reader's classifications of a row.
+EVIDENCE_READ = "read"
+EVIDENCE_PUSH = "push"
+EVIDENCE_INDIRECT = "indirect"
+EVIDENCE_UNKNOWN = "unknown"
+_EVIDENCE_RANK = {EVIDENCE_READ: 3, EVIDENCE_PUSH: 2, EVIDENCE_INDIRECT: 1, EVIDENCE_UNKNOWN: 0}
+_ROLES = frozenset(r.value for r in AgentRole)
+
+
+def _row_evidence(row: dict) -> str:
+    """One row's class, from the closed vocabulary and nothing else. A `kind` or `role`
+    outside the writer's spelling — legacy rows, or bytes a forger put there — is `unknown`,
+    never echoed, never guessed: `role` is matched against the `AgentRole` values, so a read
+    under a role that is not one of them says "cannot say" rather than "another agent"."""
+    kind, role = row.get("kind"), row.get("role")
+    if kind == LOAD_KIND_PUSH:
+        return EVIDENCE_PUSH
+    if kind == LOAD_KIND_READ and role in _ROLES:
+        return EVIDENCE_READ if role == AgentRole.MAIN.value else EVIDENCE_INDIRECT
+    return EVIDENCE_UNKNOWN
+
+
 @dataclass
 class CaseHit:
     case_id: str
     disposition: str
     loaded_at: str
+    evidence: str
 
 
 @functools.cache
@@ -117,8 +151,11 @@ def _report_disposition(run_dir: Path) -> str:
 
 def _earliest_load(
     loaded: Path, lesson_name: str, created_at: datetime | None
-) -> str | None:
+) -> tuple[str, str] | None:
+    """`(loaded_at, evidence)` over the QUALIFYING rows — the earliest timestamp, and the
+    strongest evidence class any of them carries — or `None` when no row qualifies."""
     qualifying: list[tuple[datetime | None, str]] = []
+    evidence = EVIDENCE_UNKNOWN
     for row in read_jsonl_rows(loaded):
         if row.get("lesson_name") != lesson_name:
             continue
@@ -126,12 +163,14 @@ def _earliest_load(
         if created_at is not None and (ts is None or ts < created_at):
             continue
         qualifying.append((ts, str(row.get("ts"))))
+        evidence = max(evidence, _row_evidence(row), key=_EVIDENCE_RANK.__getitem__)
     if not qualifying:
         return None
-    return min(
+    earliest = min(
         qualifying,
         key=lambda q: (q[0] is None, q[0] if q[0] is not None else _DT_MAX, q[1]),
     )[1]
+    return earliest, evidence
 
 
 def in_context_cases(
@@ -144,10 +183,15 @@ def in_context_cases(
         loaded = run_dir / "lessons_loaded.jsonl"
         if not loaded.is_file():
             continue
-        earliest = _earliest_load(loaded, lesson_name, created_at)
-        if earliest is not None:
-            hits.append(CaseHit(run_dir.name, _report_disposition(run_dir), earliest))
+        found = _earliest_load(loaded, lesson_name, created_at)
+        if found is not None:
+            earliest, evidence = found
+            hits.append(CaseHit(run_dir.name, _report_disposition(run_dir), earliest, evidence))
     return hits
+
+
+def _main_read_count(hits: list[CaseHit]) -> int:
+    return sum(1 for h in hits if h.evidence == EVIDENCE_READ)
 
 
 def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
@@ -156,14 +200,15 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
         name = lesson.path.stem
         raw_created = lesson.fm.get("created_at")
         created_at = _parse_dt(raw_created)
-        n = len(in_context_cases(name, created_at, runs_dir))
+        cases = in_context_cases(name, created_at, runs_dir)
         desc = _flatten(str(lesson.fm.get("description") or "")).strip()
         if created_at is None:
             desc = f"{desc} ({_unwindowed_reason(raw_created)} — unwindowed count)"
-        print(f"{_flatten(name)}\t{desc}\t{n}")
+        print(f"{_flatten(name)}\t{desc}\t{len(cases)}\t{_main_read_count(cases)}")
     for path in skipped:
-        n = len(in_context_cases(path.stem, None, runs_dir))
-        print(f"{_flatten(path.stem)}\t(malformed lesson — unwindowed count)\t{n}")
+        cases = in_context_cases(path.stem, None, runs_dir)
+        print(f"{_flatten(path.stem)}\t(malformed lesson — unwindowed count)\t{len(cases)}"
+              f"\t{_main_read_count(cases)}")
 
 
 def main(argv: list[str]) -> int:
@@ -218,7 +263,10 @@ def main(argv: list[str]) -> int:
     since = str(created_at) if created_at is not None else f"? ({_unwindowed_reason(raw_created)})"
     print(f"# {_flatten(path.stem)} — {len(hits)} case(s) in context since {since}")
     for h in hits:
-        print(f"{_flatten(h.case_id)}\t{_flatten(h.disposition)}\t{_flatten(h.loaded_at)}")
+        # `evidence` goes through the same flatten as every other cell even though it is
+        # emitted from a closed vocabulary — one rule for the row, not one per column.
+        print(f"{_flatten(h.case_id)}\t{_flatten(h.disposition)}\t{_flatten(h.loaded_at)}"
+              f"\t{_flatten(h.evidence)}")
     return 0
 
 

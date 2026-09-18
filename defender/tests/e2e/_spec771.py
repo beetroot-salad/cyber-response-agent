@@ -863,7 +863,7 @@ def _invoke_lesson_load(run_dir: Path) -> None:
     from defender.runtime.agent_definition import bind
 
     deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
-    runtime_tools._record_lesson_load(deps, DEFENDER / "lessons" / "spec-771.md")
+    runtime_tools._record_lesson_load(deps, DEFENDER / "lessons" / "spec-771.md", kind="read")
 
 
 def _invoke_queries_table(run_dir: Path) -> Any:

@@ -11,13 +11,14 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 
 
 from .. import compaction
+from .. import lessons_push
 from .. import observe
 from .. import permission
 from .. import providers
@@ -303,7 +304,16 @@ def _summary_pointers(run_dir: Path) -> dict[str, str]:
     return {p.stem: str(p) for p in sorted(d.glob("*.md"))}
 
 
-def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
+class _FoldDecision(NamedTuple):
+    #: The LOOP number (see `_fold_decision`), the frontier's record text, and the whole
+    #: document the record was cut from — the fold's lessons block keys on the document, not
+    #: the record (`lessons_push.fold_block`).
+    boundary: int
+    text: str
+    document: str
+
+
+def _fold_decision(run_dir: Path) -> _FoldDecision | None:
     """WHEN to fold, and what the frontier carries — `None` for "not yet".
 
     `compaction.fold_boundary` is the highest CONTIGUOUS closed investigation loop that
@@ -320,7 +330,31 @@ def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
     fold_through = compaction.fold_boundary(inv_text)
     if fold_through <= 0:
         return None
-    return fold_through, compaction.frontier_text(inv_text, fold_through)
+    return _FoldDecision(fold_through, compaction.frontier_text(inv_text, fold_through), inv_text)
+
+
+def _fold_text(
+    store: Any, session_id: str, deps: AgentDeps, decision: _FoldDecision | None,
+) -> tuple[str | None, list]:
+    """The frontier row's text for this render, and the lessons hits to record once the row
+    has minted — `(None, [])` when there is no fold.
+
+    The row carries the lessons block the FULL document matches at mint (#936): the fold
+    displaces every turn before the boundary, the write returns that carried earlier blocks
+    with them, and nothing else would re-push them. Composed ONLY at mint — the store is
+    asked first, with the same predicate `_fold_impl` reuses on, so a reuse round neither
+    walks the corpus nor writes a row and the boundary shows one block, once. The record
+    itself may be cut before the slot a lesson keys on (`_frontier_through`), which is why
+    the block keys on `decision.document` and not on `decision.text`.
+    """
+    if decision is None:
+        return None, []
+    if selection.frontier_row(
+        store, session_id, agent_id="main", boundary=decision.boundary,
+    ) is not None:
+        return decision.text, []
+    block, pushed = lessons_push.fold_block(deps, decision.document)
+    return decision.text + block, pushed
 
 
 def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation injector rides this seam
@@ -385,10 +419,11 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
         if requests >= 1:
             await _inject_correlation()
         decision = _fold_decision(ctx.deps.run_dir) if fold else None
-        return selection.render(
+        text, pushed = _fold_text(store, session_id, ctx.deps, decision)
+        rendered = selection.render(
             store, session_id, messages, agent_id="main", fold=decision is not None,
-            boundary=decision[0] if decision else None,
-            text=decision[1] if decision else None,
+            boundary=decision.boundary if decision else None,
+            text=text,
             run_step=int(getattr(ctx, "run_step", 0) or 0),
             # The latency of the request this render is PREPARING cannot be known here;
             # `_log_request` measures it and patches this same pending stamp before the
@@ -396,6 +431,11 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
             duration_ms=None,
             run_id=getattr(ctx, "run_id", None), conversation_id=getattr(ctx, "conversation_id", None),
         )
+        # AFTER the mint, never before: a row says the lesson was in front of the model, and
+        # a mint that raised put nothing in front of it. `pushed` is empty on a reuse round.
+        if pushed:
+            lessons_push.record(ctx.deps, pushed)
+        return rendered
 
     return process
 
