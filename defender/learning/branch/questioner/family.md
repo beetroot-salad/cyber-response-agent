@@ -85,6 +85,11 @@ not be `base`, and two labels differing only in case are one label.
 An entity key under `patches` is bounded the same way and for the same reason: a leading
 alphanumeric, then alphanumerics, `.`, `_` and `-`.
 
+A `ticket` patch that puts words in a prior case's `comments` must also set that case's
+`status` to `closed`. A case a person has not closed serves NO comments to any run — the
+defender is only shown history a person has reviewed — so a difference authored into an open
+case's comments is one no query could reach, and the family is refused when it is parsed.
+
 `base_disposition` is what the REAL investigation had established by the branch point, not what
 you would conclude — it is the reading every counterfactual is measured against.
 

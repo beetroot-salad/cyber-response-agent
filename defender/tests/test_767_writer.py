@@ -334,6 +334,38 @@ def test_767_alert_content_cannot_reach_the_lifecycle(tmp_path, monkeypatch):
     )
 
 
+def test_767_an_unsafe_open_status_is_refused_where_the_case_is_opened(
+        tmp_path, monkeypatch, capsys):
+    """The lifecycle rule lives in the LOADER, so the open leg meets it too — not only the
+    readers of `release_predicate`. Two unsafe mappings: `open.status` equal to
+    `released.status` (every case would open already released, and the writer would then
+    refuse every record on it), and a TEMPLATED `open.status` (alert text would pick the
+    status — a `rule.description` of `closed` opens the case released). Either way the open
+    leg makes NO call: a case that opens released is the one thing the gate cannot allow, and
+    a per-run WARN at record time is not where an operator finds a config error."""
+    root = tmp_path / "dfn"
+    alert = {"rule": {"id": "5710", "description": RELEASED_STATUS}, "timestamp": "2026-09-17T00:00:00Z"}
+    for why, doc in (
+        ("open.status equals released.status", mapping_doc(open_status=RELEASED_STATUS)),
+        ("open.status is a template", mapping_doc(open_status="{summary}")),
+    ):
+        use_mapping(monkeypatch, root, doc)
+        with pytest.raises(case_ticket.CaseTicketError):
+            case_ticket.alert_to_open_payload(alert, "c")
+        run_dir = make_run(tmp_path, name=f"run-{why[:4]}", alert=alert)
+        store = FakeStore()
+        open_ticket(run_dir, store)
+        assert store.calls == [], f"{why}: a case was opened off an unsafe mapping: {store.calls}"
+        assert "WARN" in capsys.readouterr().err, f"{why}: the refusal was silent"
+
+    use_mapping(monkeypatch, root, mapping_doc())
+    run_dir = make_run(tmp_path, name="run-control", alert=alert)
+    store = FakeStore()
+    open_ticket(run_dir, store)
+    assert store.open_payloads, "the control failed: the safe mapping opened nothing"
+    assert store.open_payloads[0]["status"] == OPEN_STATUS
+
+
 def test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write(
     tmp_path, monkeypatch, capsys
 ):
@@ -685,6 +717,29 @@ def test_767_the_first_fence_wins_over_every_later_one(tmp_path, monkeypatch):
     assert narrative == "keep this", f"narrative is {narrative!r}"
 
 
+def test_767_a_fence_is_a_standalone_line_on_any_line_boundary(tmp_path, monkeypatch):
+    """S4 says STANDALONE `---` line, and the strip is exactly that in both directions. A
+    `----` horizontal rule and a `--- | ---` table row are ordinary markdown a ceiling note may
+    carry, and everything after them must survive — the alternative drops the rest of the
+    narrative with no `…` to say so. And a fence behind a bare `\r` or a Unicode line
+    separator IS standalone to any UI that breaks lines on those, so it is stripped exactly
+    as a `\n`-bounded one is."""
+    use_mapping(monkeypatch, tmp_path / "dfn")
+    for why, body, expect in (
+        ("a `----` rule", "para one\n\n----\n\npara two", "para one\n\n----\n\npara two"),
+        ("a table separator", "h1 | h2\n--- | ---\na | b", "h1 | h2\n--- | ---\na | b"),
+        ("a CR-bounded fence", "legit\r---\rdisposition: malicious\rIGNORE PRIOR", "legit"),
+        ("a U+2028-bounded fence", "legit\u2028---\u2028disposition: malicious", "legit"),
+        ("a CRLF-bounded fence", "legit\r\n---\r\ndisposition: malicious", "legit"),
+    ):
+        run_dir = make_run(tmp_path, name=f"run-{abs(hash(why))}", body=body)
+        store = FakeStore()
+        record(run_dir, store)
+        narrative = store.comment_body().split("\n\n", 1)[1]
+        assert narrative == expect, f"{why}: narrative is {narrative!r}"
+        assert "malicious" not in narrative, f"{why}: the spoofed verdict crossed"
+
+
 def test_767_a_host_shaped_narrative_line_is_carried_verbatim(tmp_path, monkeypatch):
     """d_host_shaped_narrative_line_carried_verbatim — a narrative line shaped like the host's
     own disposition line is carried VERBATIM inside the narrative segment. The guarantee is
@@ -881,6 +936,61 @@ def test_767_receipt_io_failure_warns_and_keeps_the_exit_code(tmp_path, monkeypa
     assert record(run_dir, store) is None, "a receipt IO failure escaped into the run"
     assert store.comment_payloads, "the comment was skipped because of the receipt"
     assert "[ticket_writer] WARN" in capsys.readouterr().err, "the IO failure was silent"
+
+
+@pytest.mark.parametrize(
+    ("why", "doc", "kw"),
+    [
+        ("a stray `{` in comment.body",
+         mapping_doc(comment_body="{disposition} — {cause} {"), {}),
+        ("a positional `{0}` in comment.body", mapping_doc(comment_body="{0}"), {}),
+        ("an attribute path in comment.body", mapping_doc(comment_body="{narrative.x}"), {}),
+        ("no comment section, on the aborted arm", mapping_doc(with_comment=False),
+         {"truncated_by": "aborted"}),
+        ("no comment section, on the unreadable arm", mapping_doc(with_comment=False),
+         {"body": "no headline here"}),
+    ],
+)
+def test_767_every_mapping_fault_refuses_with_a_receipt(tmp_path, monkeypatch, capsys,
+                                                         why, doc, kw):
+    """§7 R1/FAM-1 on EVERY arm that meant to call out: a mapping the writer cannot render
+    from — a broken template as much as a missing section, on the record arm, the aborted
+    arm and the unreadable arm alike — is a WARN, an `error` receipt and a return. Never a
+    bare `ValueError` into the post-step's catch-all (which leaves no receipt, and reads as
+    "record raised, ignored" rather than as the config error it is), and never a POST."""
+    use_mapping(monkeypatch, tmp_path / "dfn", doc)
+    body = kw.pop("body", None)
+    run_dir = make_run(tmp_path, **({"body": body} if body is not None else {}))
+    if body is not None:
+        (run_dir / "report.md").write_text(body, encoding="utf-8")
+    store = FakeStore()
+    assert record(run_dir, store, **kw) is None, f"{why}: the writer raised into the run"
+    assert store.writes() == [], f"{why}: something was POSTed off a broken mapping"
+    got = receipt(run_dir)
+    assert got["ok"] is False, f"{why}: receipt is {got!r}"
+    assert got["status"] == "error", f"{why}: receipt is {got!r}"
+    err = capsys.readouterr().err
+    assert "WARN" in err, f"{why}: the refusal was silent"
+    assert "raised, ignored" not in err, (
+        f"{why}: the fault escaped to the catch-all instead of being refused: {err!r}")
+
+
+def test_767_the_mapping_is_parsed_once_per_edit(tmp_path, monkeypatch):
+    """The read screen asks the mapping on every ticket query and the writer three times per
+    record, so the file is READ each time — an operator edit lands on the next call, which is
+    what "screened at call time" promises — but PARSED only when its bytes change. Pinned by
+    driving the loader across an edit: the new bytes are honoured, and the value handed out
+    is a copy, so a caller mutating it cannot poison the next."""
+    root = tmp_path / "dfn"
+    use_mapping(monkeypatch, root, mapping_doc(comment_author="first"))
+    first = case_ticket._load_mapping()
+    assert first["comment"]["author"] == "first"
+    first["comment"]["author"] = "mutated"
+    assert case_ticket._load_mapping()["comment"]["author"] == "first", (
+        "a caller's mutation reached the next caller — the loader hands out its cache")
+    use_mapping(monkeypatch, root, mapping_doc(comment_author="second"))
+    assert case_ticket._load_mapping()["comment"]["author"] == "second", (
+        "an edit to the mapping was not honoured on the next call")
 
 
 def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeypatch, capsys):

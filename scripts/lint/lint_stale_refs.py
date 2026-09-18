@@ -21,7 +21,9 @@ Algorithm:
   1. Diff from `merge-base($STALE_REF_BASE, HEAD)` (default base `origin/main`) to the
      working tree.
   2. Collect identifiers removed by `-`-side lines:
-       - `def NAME(` / `class NAME`
+       - `def NAME(` / `class NAME` — except a def nested inside a function body
+         (resolved against the base tree's AST): invisible outside its scope, so
+         its removal can strand nothing
        - top-level `NAME =` (uppercase constants)
        - removed `from ... import NAME` targets
   3. Filter: skip identifiers under 8 chars that contain no underscore, and
@@ -434,17 +436,61 @@ def _changed_files(repo_root: Path, diff_base: str) -> set[str]:
     return {line.strip() for line in out.splitlines() if line.strip()}
 
 
+_DIFF_FILE_HEADER = re.compile(r"^diff --git a/(.*?) b/(.*)$")
+
+
+def _function_local_defs(repo_root: Path, diff_base: str, path: str) -> set[str]:
+    """Names bound by a `def`/`class` INSIDE A FUNCTION BODY in the base version of `path`,
+    minus any bound at module or class scope in the same file.
+
+    A function-local name is invisible outside its scope by construction, so removing it can
+    leave no stale reference anywhere — and it is usually an ordinary word (`outbound`,
+    `render`, `check`) that the rest of the tree uses as prose or as an unrelated local.
+    Harvesting it as a removed identifier turns every such use into a finding (#1060: 33
+    baseline entries for one nested test helper). Read off the BASE tree's AST because that
+    is where the definition existed; the diff's `-` line alone cannot say what scope it sat
+    in (a local `def` inside a top-level function and a method are both indented four)."""
+    try:
+        text = _git(["show", f"{diff_base}:{path}"], cwd=repo_root)
+        tree = ast.parse(text)
+    except (GitError, SyntaxError, ValueError):
+        return set()
+    local: set[str] = set()
+    scoped: set[str] = set()
+
+    def walk(node: ast.AST, in_function: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                (local if in_function else scoped).add(child.name)
+                walk(child, in_function or not isinstance(child, ast.ClassDef))
+            else:
+                walk(child, in_function)
+
+    walk(tree, False)
+    return local - scoped
+
+
 def _collect_removed_idents(repo_root: Path, diff_base: str) -> set[str]:
     diff = _git(["diff", "--unified=0", diff_base, "--", ".",
                  *(f":(exclude){d}" for d in NON_SOURCE_DIRS)], cwd=repo_root)
     idents: set[str] = set()
+    current: str | None = None
+    local_defs: set[str] = set()
     for line in diff.splitlines():
+        header = _DIFF_FILE_HEADER.match(line)
+        if header:
+            current = header.group(1)
+            local_defs = (_function_local_defs(repo_root, diff_base, current)
+                          if current.endswith(".py") else set())
+            continue
         if not line.startswith("-") or line.startswith("---"):
             continue
-        for pat in (REMOVED_DEF, REMOVED_ASSIGN):
-            m = pat.match(line)
-            if m:
-                idents.add(m.group(1))
+        m = REMOVED_DEF.match(line)
+        if m and m.group(1) not in local_defs:
+            idents.add(m.group(1))
+        m = REMOVED_ASSIGN.match(line)
+        if m:
+            idents.add(m.group(1))
         m = REMOVED_PY_IMPORT.match(line)
         if m:
             # ONLY the from-import's TARGETS (group 2) are candidate removed identifiers.

@@ -64,6 +64,50 @@ def unappliable(world: Any, patches: Mapping) -> list[str]:
     return sorted(s for s in patches if not _touches(world, s) or s in STAGERS)
 
 
+#: The one state system whose responses pass a second screen after the patch (#767 D4).
+_TICKET_SYSTEM = "ticket"
+
+
+def unservable(patches: Mapping) -> list[str]:
+    """The `ticket` patches whose difference the read screen would empty before the sibling
+    ever saw it.
+
+    #767 D4: a ticket a person has not released serves NO comments, and that screen runs on
+    every ticket response — the estate's patched one included, since it is applied on the
+    query path AFTER the patch. So a `ticket` patch that writes `comments` without also moving
+    the ticket to the released status authors a difference no query can reach: the family
+    would end as "a declared difference no query could reach", truthfully, with nothing
+    pointing at the gate that emptied it. Refused where the world is built, like the other
+    two silent drops above, and with the rule spelled out — the fix is to say, in the patch,
+    that the case is one a person has reviewed (`status: <released>`), which is also what a
+    world putting words in a prior case's comments means.
+
+    The released status is the operator mapping's (`case_ticket.release_predicate`); a mapping
+    that cannot say what it is refuses every such patch, since nothing could be served."""
+    table = patches.get(_TICKET_SYSTEM)
+    if not isinstance(table, Mapping):
+        return []
+    with_comments = {
+        entity: patch for entity, patch in table.items()
+        if isinstance(patch, Mapping) and "comments" in patch
+    }
+    if not with_comments:
+        return []
+    from defender.scripts.case_history import case_ticket
+
+    try:
+        released = case_ticket.release_predicate().released_status
+    except case_ticket.CaseTicketError as e:
+        return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but the case-history mapping "
+                f"cannot say which status releases them ({e})" for entity in with_comments]
+    return [
+        f"{_TICKET_SYSTEM}/{entity}: patches `comments` on a case it does not also move to "
+        f"the released status ({released!r}) — an unreleased case serves no comments (#767), "
+        "so the sibling could never observe this difference"
+        for entity, patch in with_comments.items() if patch.get("status") != released
+    ]
+
+
 def unnameable(world: Any) -> list[str]:
     """Why each staged system this world declares could not name a view for it, if any.
 

@@ -127,33 +127,21 @@ _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 
 def _build_comment_payload(
     run_dir: Path, case_id: str, truncated_by: str | None,
-) -> tuple[dict, str] | None:
-    """The outbound `{author, body}` for `record_case_ticket` and its receipt word, or `None`
-    with a warning already printed. §7 R10: an unreadable report takes the FIXED
-    unreadable-branch sentence, never a second, bespoke emptiness check —
-    `case_ticket.ReportNotParsable` is `read_case_record`'s own signal for exactly that case.
-    #1047 F-K: for a forced-close-set exit that same signal means the host's own forced close
-    failed, so there is no verdict to propose and the escalation note goes instead. Any other
-    `CaseTicketError` (a bad mapping, a template naming a key the context does not carry)
-    refuses to POST at all (§7 R1/FAM-1)."""
+) -> tuple[dict, str]:
+    """The outbound `{author, body}` for `record_case_ticket` and its receipt word. §7 R10: an
+    unreadable report takes the FIXED unreadable-branch sentence, never a second, bespoke
+    emptiness check — `case_ticket.ReportNotParsable` is `read_case_record`'s own signal for
+    exactly that case. #1047 F-K: for a forced-close-set exit that same signal means the
+    host's own forced close failed, so there is no verdict to propose and the escalation note
+    goes instead. Any other `CaseTicketError` (a bad mapping, a broken template) propagates
+    to the caller's refusal branch — no POST, a warning and an `error` receipt (§7 R1/FAM-1)."""
     try:
         rec = replace(case_ticket.read_case_record(run_dir), case_id=case_id)
     except case_ticket.ReportNotParsable:
-        try:
-            if truncated_by in run_end.FORCED_CLOSE_EXITS:
-                return case_ticket.escalation_comment_payload(truncated_by), RECEIPT_ESCALATED
-            return case_ticket.unreadable_comment_payload(), RECEIPT_COMMENTED
-        except case_ticket.CaseTicketError as e:
-            _warn(f"record {case_id}: {e}; skipping")
-            return None
-    except case_ticket.CaseTicketError as e:
-        _warn(f"record {case_id}: {e}; skipping")
-        return None
-    try:
-        return case_ticket.case_record_to_comment(rec), RECEIPT_COMMENTED
-    except case_ticket.CaseTicketError as e:
-        _warn(f"record {case_id}: {e}; skipping")
-        return None
+        if truncated_by in run_end.FORCED_CLOSE_EXITS:
+            return case_ticket.escalation_comment_payload(truncated_by), RECEIPT_ESCALATED
+        return case_ticket.unreadable_comment_payload(), RECEIPT_COMMENTED
+    return case_ticket.case_record_to_comment(rec), RECEIPT_COMMENTED
 
 
 def _ticket_is_released(
@@ -192,7 +180,7 @@ def _ticket_is_released(
 
 
 def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)
-    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, key: str | None = None, *,
+    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, key: str | None = None,
     truncated_by: str | None = None, closed_before_cut: bool = False,
 ) -> None:
     """D2: the host RECORDS its investigation into the case rather than closing it — at most
@@ -220,26 +208,32 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     are independent statements under one flag); every write fault is caught, warned once, and
     leaves the run's exit code exactly what it would have been (O7). `key` is a parameter (§7
     R8/FK04) so a vendor-minted, pre-existing key on a later deployment is a call-site edit —
-    today's deployment keeps `case_id = run_dir.name`. The key is the case's identity
-    EVERYWHERE this write names it: the two paths, the receipt and the rendered `{case_id}`."""
+    today's deployment keeps `case_id = run_dir.name`. Keyword-only, so a bare string in the
+    second position cannot bind as `deps` and vanish into the catch-all. The key is the
+    case's identity EVERYWHERE this write names it: the two paths, the receipt and the
+    rendered `{case_id}`."""
     try:
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
         config = deps.load_config()
         if config is None:
             return
         case_id = key if key is not None else run_dir.name
-        if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
-            _post_comment(run_dir, deps, config, case_id,
-                          case_ticket.escalation_comment_payload(truncated_by), RECEIPT_ESCALATED)
-            return
         if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
                 and not closed_before_cut):
             _log(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
             return
-        built = _build_comment_payload(run_dir, case_id, truncated_by)
-        if built is None:
+        try:
+            if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
+                payload, word = (case_ticket.escalation_comment_payload(truncated_by),
+                                 RECEIPT_ESCALATED)
+            else:
+                payload, word = _build_comment_payload(run_dir, case_id, truncated_by)
+        except case_ticket.CaseTicketError as e:
+            # The mapping (or a template in it) refused: no POST, but the receipt still says
+            # so — a WARN, a receipt and a return on every arm that meant to call out.
+            _warn(f"record {case_id}: {e}; not recording")
+            _write_receipt(run_dir, config, case_id, RECEIPT_ERROR)
             return
-        payload, word = built
         _post_comment(run_dir, deps, config, case_id, payload, word)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _warn(f"record raised, ignored: {e!r}")

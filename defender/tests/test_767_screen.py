@@ -717,24 +717,21 @@ def test_767_release_predicate_cannot_be_built_in_a_serving_state(tmp_path, monk
 
 
 def test_767_an_unreadable_mapping_file_degrades_the_screen(tmp_path, monkeypatch, capsys):
-    """FK20's read-side degrade holds for EVERY way the predicate can fail to build, not only
-    for the mapper's own typed refusal. The mapping is a file: a non-UTF-8 byte in it raises
-    a decode error out of the loader, which is no `CaseTicketError`. A screen that caught only
-    the typed refusal would let that raise escape into the query tool's generic fault path —
-    refusing the whole ticket query as an INFRA fault and charging the `ticket` breaker for a
-    config defect, the opposite of "never refuse the whole gather call" (N5).
-
-    The observable is the same as the typed case's: the call answers `0`, every record stays
-    visible, no comment is served — and ONE warning names the cause on stderr, so the degrade
-    is visible to the operator who can fix it rather than to nobody."""
+    """FK20's read-side degrade holds for a mapping that is not even text. A non-UTF-8 byte
+    in the file is the loader's OWN typed refusal (so the writer can receipt it like any other
+    mapping fault), and the screen degrades on it exactly as on a missing section: the call
+    answers `0`, every record stays visible, no comment is served — and ONE warning names the
+    cause on stderr, so the degrade is visible to the operator who can fix it rather than to
+    nobody. The screen still catches EVERY exception out of the predicate, not only the typed
+    one — a raise escaping into the query tool's generic fault path would refuse the whole
+    ticket query as an INFRA fault and charge the `ticket` breaker for a config defect, the
+    opposite of "never refuse the whole gather call" (N5)."""
     root = tmp_path / "dfn"
     use_mapping(monkeypatch, root, mapping_doc())
     path = root / "knowledge/environment/systems/case-history/mapping.yaml"
     path.write_bytes(b"released:\n  status: \xff\xfe not utf-8\n")
 
-    # The control: the loader does NOT classify this one — it is the untyped raise the screen
-    # must survive. Were it ever classified, this test would stop exercising that case.
-    with pytest.raises(UnicodeDecodeError):
+    with pytest.raises(case_ticket.CaseTicketError, match="UTF-8"):
         case_ticket.release_predicate()
 
     capsys.readouterr()
@@ -750,7 +747,7 @@ def test_767_an_unreadable_mapping_file_degrades_the_screen(tmp_path, monkeypatc
         "the screen degraded silently — from every gather turn a broken mapping is now "
         "indistinguishable from a store with no comments"
     )
-    assert "UnicodeDecodeError" in err, "the warning does not name the cause"
+    assert "UTF-8" in err, "the warning does not name the cause"
 
 
 # =======================================================================================

@@ -23,7 +23,9 @@ source:
 # This whole section ships to the wire UNFILTERED (`alert_to_open_payload`).
 # `status` must be a literal and must differ from `released.status` below —
 # the status vocabulary is the store's own closed set, so nothing rendered from
-# an alert can move a case along its lifecycle.
+# an alert can move a case along its lifecycle. Both rules are ENFORCED when
+# this file is loaded (`case_ticket._check_lifecycle`): a templated or colliding
+# `status` refuses the open leg, the record leg and the read screen alike.
 open:
   key: "{case_id}"
   summary: "{summary}"
