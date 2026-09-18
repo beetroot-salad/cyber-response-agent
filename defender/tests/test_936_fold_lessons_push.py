@@ -115,6 +115,30 @@ l-006|2|cmdb-host|v-001||cmdb|w
 
 FOLDING_DOC = CLOSED_LOOP + OPEN_CLASS_BLOCK
 
+#: ONE append that resolves loop 2's lead, closes loop 2, opens loop 3 and opens
+#: `attrs.loginuid` — so the render after it folds through loop 2 (`fold_boundary == 2`,
+#: checked in the test) on a document that now matches a second lesson. One append rather
+#: than four so no intermediate state trips `flagged_diagnostics`.
+SECOND_LOOP = """
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-007|process|nc|nc[pid=4243]|loginuid=??;image=/usr/bin/nc
+
+:E l-005.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-002|spawned|v-006|v-007|2026-05-01T10:12:00Z|siem-event:wazuh|outcome=success
+```
+
+```invlang
+:T close
+loop 2
+```
+
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-009|3|proc-tree|v-007||edr|w
+```
+"""
+
 CLASS_LESSON = "class-open-936"
 LOGINUID_LESSON = "loginuid-open-936"
 CLASS_SELECTOR = ("type: process, slot: class",)
@@ -274,6 +298,78 @@ def test_the_fold_row_carries_the_block_the_whole_document_matched(tmp_path, mon
         "the lesson path is in the store but not in the request MAIN received")
 
 
+def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
+    tmp_path, monkeypatch,
+):
+    """M1 / M4: with TWO slots open at mint against a corpus of three lessons (two match),
+    the frontier row's block is byte-for-byte `render(match_lessons(frontier_from_text(doc),
+    corpus), lead=FOLD_LEAD)` — the same top-k, the same ranking, the same lead the fold
+    is documented to use. A fold that derived with its own `top_k`, or its own corpus, or a
+    lead that does not tell the model the turns are gone, differs here and nowhere else in
+    this file: every other scenario matches at most one lesson at mint."""
+    from defender.scripts.lessons.lessons_frontier import FOLD_LEAD, match_lessons, render
+    from defender.skills.invlang.frontier import frontier_from_text
+
+    tree = _planted_defender(tmp_path)
+    corpus = tree / "lessons"
+    _write_lesson(corpus, CLASS_LESSON, nodes=CLASS_SELECTOR)
+    _write_lesson(corpus, LOGINUID_LESSON, nodes=LOGINUID_SELECTOR)
+    _write_lesson(corpus, "ident-open-936", nodes=IDENT_SELECTOR)
+    doc = FOLDING_DOC + OPEN_LOGINUID_BLOCK
+    expected = render(match_lessons(frontier_from_text(doc), corpus), lead=FOLD_LEAD)
+    assert CLASS_LESSON in expected, "control: two hits"
+    assert LOGINUID_LESSON in expected, "control: two hits"
+    assert "no longer in the history" in FOLD_LEAD
+    assert "as it stands" in FOLD_LEAD
+    assert WRITE_RETURN_HEADER not in FOLD_LEAD
+
+    rd, _replay, store, _ = _fold_run(
+        tmp_path, monkeypatch, tree=tree, doc=doc,
+        turns=lambda rd: _reads(rd, 2) + [Turn(text="done")])
+    (_rid, _seq, text), = _frontier_rows(store)
+    assert text.endswith("\n\n" + expected), (
+        f"the fold block is not the shared derivation:\n{text[-len(expected) - 200:]}")
+    assert sorted(r["lesson_name"] for r in _rows(rd)) == sorted([CLASS_LESSON, LOGINUID_LESSON])
+
+
+def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, monkeypatch):
+    """N3 / key flow 4 / O1 for every fold after the first: boundary 2 mints a FRESH row
+    from the document as it stands then — naming the lesson loop 2 opened, which boundary
+    1's row could not — and records a fresh set of push rows. A fold that cached boundary
+    1's block in the processor would show the loop-2 lesson to no one and record nothing
+    at the second mint."""
+    from defender.runtime import compaction
+
+    tree = _planted_defender(tmp_path)
+    class_lesson = _write_lesson(tree / "lessons", CLASS_LESSON, nodes=CLASS_SELECTOR)
+    loginuid_lesson = _write_lesson(tree / "lessons", LOGINUID_LESSON, nodes=LOGINUID_SELECTOR)
+    assert compaction.fold_boundary(FOLDING_DOC + SECOND_LOOP) == 2, "control: loop 2 closes"
+
+    rd, replay, store, result = _fold_run(
+        tmp_path, monkeypatch, tree=tree,
+        turns=lambda rd: _reads(rd, 2) + [
+            Turn(tool_calls=[("append_block", {"text": SECOND_LOOP})]),
+            *_reads(rd, 1),
+            Turn(text="done"),
+        ])
+
+    assert result["exit_reason"] is None, result
+    rows = _frontier_rows(store)
+    assert [seq for _id, seq, _t in rows] == [1, 2], rows
+    (_r1, _s1, first), (_r2, _s2, second) = rows
+    assert str(class_lesson.resolve()) in first
+    assert str(loginuid_lesson.resolve()) not in first, "loop 2 had not opened loginuid yet"
+    assert str(loginuid_lesson.resolve()) in second, (
+        "boundary 2 re-used boundary 1's block — the lesson loop 2 opened never reached MAIN")
+    assert second.count(FOLD_HEADER) == 1
+    assert (rd / "investigation.md").read_text(encoding="utf-8").endswith(SECOND_LOOP), (
+        "control: the append that closes loop 2 was refused")
+    # fold 1 (class) + the write that opened loginuid (class, loginuid) + fold 2 (class, loginuid)
+    assert Counter(r["lesson_name"] for r in _rows(rd)) == Counter(
+        {CLASS_LESSON: 3, LOGINUID_LESSON: 2}), _rows(rd)
+    assert all(r["kind"] == "push" for r in _rows(rd))
+
+
 def test_one_frontier_row_and_one_push_row_per_lesson_across_the_rounds_on_a_boundary(
     tmp_path, monkeypatch,
 ):
@@ -336,6 +432,11 @@ def test_a_missing_corpus_fails_open_at_the_fold_and_says_so(tmp_path, monkeypat
     err = capsys.readouterr().err
     assert "no lessons corpus" in err, f"the fold disabled its lessons lane silently:\n{err[-2000:]}"
     assert str(tree / "lessons") in err, "the stderr line does not name the corpus it looked for"
+    # M2: composed ONLY at mint. Three renders on this boundary, one corpus lookup — a fold
+    # that derived on every render and gated only the rows would print this line per render.
+    assert _replay.calls == 3
+    assert err.count("no lessons corpus") == 1, (
+        f"the fold looked for the corpus {err.count('no lessons corpus')} times on one boundary")
 
 
 def test_a_malformed_lesson_beside_a_good_one_does_not_stop_the_mint(tmp_path, monkeypatch):
@@ -450,6 +551,27 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
         ("read-936", "read", "gather"),
     ], rows
     assert [r["role"] for r in rows] == [main.role.value, gather.role.value]
+
+
+def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
+    """O5: the row's `role` is the deps' `AgentRole` value for EVERY role, not "gather or
+    else main". The curator's `lesson_read` (CORPUS_AUTHOR deps, the wider corpora) is the
+    third reader of `_gated_read`, and a two-way guess records it as MAIN — which
+    `trace_lesson` would then lift to `read`."""
+    from defender.learning.author.lesson_read import _tool_lesson_read
+    from defender.runtime.agent_role import AgentRole
+    from defender.tests._curator_scene import curator_deps, curator_scene
+
+    scene = curator_scene(tmp_path)
+    (scene.corpus / "curated-936.md").write_text(
+        "---\nname: curated-936\n---\nlesson body\n", encoding="utf-8")
+    deps = curator_deps(scene, run_verify=lambda *a, **kw: "")
+    assert deps.role is AgentRole.CORPUS_AUTHOR, "control: the deps are the curator's"
+
+    assert "lesson body" in _tool_lesson_read(deps, "defender/lessons/curated-936.md")
+    rows = _rows(deps.run_dir)
+    assert [(r["lesson_name"], r["kind"], r["role"]) for r in rows] == [
+        ("curated-936", "read", "corpus_author")], rows
 
 
 def test_a_push_row_names_the_push_and_the_main_role(tmp_path):
@@ -590,12 +712,17 @@ def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, ca
     _mk_run(runs, "case-read", [_row("L", kind="read", role="main"), _row("M", kind="push", role="main")])
     _mk_run(runs, "case-push", [_row("L", kind="push", role="main"), _row("M", kind="read", role="gather")])
     _mk_run(runs, "case-legacy", [_row("L"), _row("M")])
+    # in context through a push; its only MAIN read predates `created_at` and must not count
+    _mk_run(runs, "case-stale-read", [
+        _row("L", ts="2026-06-01T00:00:00+00:00", kind="read", role="main"),
+        _row("L", kind="push", role="main"), _row("M", kind="push", role="main")])
 
     tl = _tl()
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
-    assert sorted(cap.out.splitlines()) == ["L\td\t3\t1", "M\td\t3\t0"]
+    assert sorted(cap.out.splitlines()) == ["L\td\t4\t1", "M\td\t4\t0"], (
+        "the fourth column counts MAIN reads among QUALIFYING rows, not any MAIN read ever")
 
 
 def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp_path, capsys):
@@ -612,21 +739,25 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
     _mk_run(runs, "tab-role", [_row("L", kind="read", role="main\tFORGED")])
     _mk_run(runs, "newline-role", [_row("L", kind="read", role="main\nforged")])
     _mk_run(runs, "int-kind", [_row("L", kind=7, role=["main"])])
+    # UNHASHABLE, each on its own so neither masks the other: the natural `x in {...}`
+    # membership test raises `TypeError` on a list, and a traceback loses the whole walk
+    _mk_run(runs, "list-kind", [_row("L", kind=["read"], role="main")])
+    _mk_run(runs, "list-role", [_row("L", kind="read", role=["main"])])
 
     tl = _tl()
     rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     cap = capsys.readouterr()
-    assert rc == 0
+    assert rc == 0, cap.err
     lines = cap.out.splitlines()
-    assert len(lines) == 8, f"a row was forged or lost:\n{cap.out}"
+    assert len(lines) == 10, f"a row was forged or lost:\n{cap.out}"
     for echoed in ("FORGED", "forged", "decisive"):
         assert echoed not in cap.out, f"the row's own bytes reached the TSV: {echoed!r}"
     cells = {ln.split("\t")[0]: ln.split("\t") for ln in lines[1:]}
     assert all(len(c) == 4 for c in cells.values()), cells
     assert cells["clean"][3] == "read"
-    for case in ("tab-kind", "newline-kind", "word-kind", "int-kind"):
+    for case in ("tab-kind", "newline-kind", "word-kind", "int-kind", "list-kind"):
         assert cells[case][3] == "unknown", (case, cells[case])
-    for case in ("tab-role", "newline-role"):
+    for case in ("tab-role", "newline-role", "list-role"):
         # a read by a role that is not MAIN's spelling: either "not MAIN" or "cannot say" is
         # honest, echoing the role is not
         assert cells[case][3] in {"indirect", "unknown"}, (case, cells[case])
@@ -644,8 +775,10 @@ def test_skill_md_names_the_fold_push_and_what_no_block_means_after_it():
     text = (DEFENDER / "SKILL.md").read_text(encoding="utf-8")
     start = text.index("**Lessons.**")
     end = text.index("### GATHER", start)
-    section = text[start:end]
+    section = " ".join(text[start:end].split())  # the paragraphs are hard-wrapped
     assert "Two pushes" not in section, "SKILL.md still describes two pushes"
     assert "fold" in section.lower(), "SKILL.md §Lessons does not name the fold push"
-    assert "since the fold" in section.lower(), (
-        "SKILL.md does not tell the model what \"no block\" means after a fold")
+    assert "keyed on the record" in section.lower(), (
+        "SKILL.md does not say the fold push is keyed on the record (like push 2, not the alert)")
+    assert "unchanged since the fold" in section.lower(), (
+        "SKILL.md does not tell the model \"no block\" after a fold means unchanged since it")
