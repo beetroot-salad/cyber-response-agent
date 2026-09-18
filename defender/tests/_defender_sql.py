@@ -11,9 +11,13 @@ as much as the tool. `tests/e2e/test_query_tool_611.py` drives the shim with `DE
 set; this helper drives the program the shim ends in, with the interpreter the tests run
 under.
 
-The exit-code names are read off the tool itself rather than retyped as integers, so the
-contract has one source of truth. Loading the module executes its top level, which is
-cheap and imports duckdb lazily — nothing here needs the `runtime` extra.
+The exit codes are LITERALS, deliberately not read off the tool: they are the contract
+`skills/gather/defender-sql.md` teaches the lead (`1` = query error, `2` = payload never
+arrived), and every `assert proc.returncode == EXIT_*` below a spawn is what holds the tool
+to it. Read off the tool they would follow any renumbering and pin nothing. Keeping the
+tool out of this process also keeps its top level (a `sys.path` insert, a `defender._io`
+import) out of every importer, and a tool that cannot execute here fails one assertion
+with the child's stderr rather than turning three modules into collection errors.
 """
 from __future__ import annotations
 
@@ -21,14 +25,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from defender.tests._by_path import DEFENDER, load_module
+from defender.tests._by_path import DEFENDER
 
 SQL_PY: Path = DEFENDER / "scripts" / "gather_tools" / "sql.py"
 
-_tool = load_module(SQL_PY, name="defender_sql")
-EXIT_OK: int = _tool.EXIT_OK
-EXIT_QUERY_ERROR: int = _tool.EXIT_QUERY_ERROR
-EXIT_INPUT_ERROR: int = _tool.EXIT_INPUT_ERROR
+EXIT_OK = 0
+EXIT_QUERY_ERROR = 1
+EXIT_INPUT_ERROR = 2
 
 
 def run_sql_py(

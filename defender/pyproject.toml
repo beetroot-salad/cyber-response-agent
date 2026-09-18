@@ -55,6 +55,9 @@ dev = [
     # it was turned on — zero tests changed outcome versus a serial run.
     "pytest-xdist>=3.5",
     "pytest-cov",
+    # tests/test_sql_idioms.py reads the doc's fences with a CommonMark parse. It is already
+    # here transitively via `rich`; declared so dropping `rich` cannot take it away.
+    "markdown-it-py",
     "coverage",
     "ruff",
     "vulture",

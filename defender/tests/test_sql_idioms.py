@@ -38,6 +38,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from markdown_it import MarkdownIt
 
 from defender._io import read_text_utf8
 from defender.scripts.adapters.elastic_adapter import esql_payload
@@ -445,10 +446,11 @@ def test_the_clause_is_keyed_off_duckdbs_message_not_off_the_querys_own_text():
     above — which only a dispatch reading duckdb's message can do, because the query text it
     would have keyed on is gone."""
     # These two probes assert duckdb's OWN wording on purpose: `_error_note` in `sql.py` keys
-    # the extra clause off exactly these strings, so a duckdb release that rewords them is a
-    # tool regression (the clause silently stops appearing), and this is where it surfaces.
+    # the extra clause off these strings, case-folded, so a duckdb release that rewords them
+    # is a tool regression (the clause silently stops appearing), and this is where it
+    # surfaces. Case-folded here too, so the pin is the tool's key and nothing stricter.
     lateral = _sql(_TS_HITS, "SELECT ev.message FROM data, unnest(hits) AS ev")
-    assert "Candidate bindings" in lateral.stderr, "this probe stopped producing the lateral-join error"
+    assert "candidate bindings" in lateral.stderr.lower(), "this probe stopped producing the lateral-join error"
     lateral_hint = _hint(lateral)
     assert "binds `h` to the TABLE" in lateral_hint, (
         "a lateral join under a different alias lost the lateral-join clause — the clause is "
@@ -723,6 +725,10 @@ def test_the_dead_recipe_stays_dead():
     Pinning the failure keeps anyone from reintroducing it on the strength of an old doc."""
     proc = _sql(_HITS, "SELECT count(*) FROM (SELECT unnest(result.hits) h FROM data)")
     assert proc.returncode == EXIT_QUERY_ERROR
+    # ...and fails for the reason the census rests on — no adapter emits a `result` wrapper,
+    # so the column is not there to unnest — not for some other query error.
+    columns = [row["column_name"] for row in _rows(_HITS, "DESCRIBE data")]
+    assert "result" not in columns, columns
     # and the live spelling, on the same payload, works
     assert _rows(_HITS, "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data)") \
         == [{"n": 3}]
@@ -743,13 +749,16 @@ _LATERAL_FORM = re.compile(r"FROM\s+data\s*,\s*unnest\s*\(\s*hits\s*\)", re.IGNO
 
 
 def _sql_fences(text: str) -> list[str]:
-    """The doc's ```sql blocks — what a lead copies, as opposed to what the prose discusses.
+    """The doc's sql-tagged fences — what a lead copies, as opposed to what the prose discusses.
 
-    Tag-case and trailing attributes (` ```SQL`, ` ```sql {.x}`) are tolerated so a retagged
-    fence carrying a banned form is still read, not skipped. The paired positive checks
-    ("the example is IN the fences") already catch a scanner that reads nothing; this
-    catches one that reads all but the fence that matters."""
-    return re.findall(r"^[ \t]*```sql[^\n]*\n(.*?)^[ \t]*```", text, re.S | re.I | re.M)
+    A CommonMark parse, not a regex: tildes, four-backtick fences, a space before the tag,
+    ` ```SQL`, ` ```sql {.x}` are all the same fence to a renderer and so to this scanner, and
+    ` ```sqlite` is not. A hand-rolled pattern tolerated a list of spellings and missed the
+    rest, which is how a retagged fence carrying a banned form went unscanned (#1059)."""
+    return [
+        tok.content for tok in MarkdownIt().parse(text)
+        if tok.type == "fence" and tok.info.lower().split()[:1] == ["sql"]
+    ]
 
 
 def test_the_docs_esql_example_is_literal_and_runs(doc, esql):
