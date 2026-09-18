@@ -209,7 +209,7 @@ def test_run_mains_own_read_of_the_run_dir_is_unaffected_by_this_change(tmp_path
 def test_a_host_write_into_the_run_dir_still_goes_through_write_guarded_and_the_destination_screen(
         tmp_path):
     """The forced close's `report.md` write into a run dir this design's two new readers
-    (`archive_episode`, `close_case_ticket`) now depend on still goes through `write_guarded`
+    (`archive_episode`, `record_case_ticket`) now depend on still goes through `write_guarded`
     and the destination screen — the one cell this piece leans on harder for trust is still the
     one actually enforcing `[write_guarded, destination-screen]`, not silently narrowed by this
     change to something weaker.

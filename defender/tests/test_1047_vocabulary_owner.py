@@ -208,7 +208,7 @@ def _three_sites(tmp_path, value):
     row = S.graded(graded_ep)["b"]
 
     ticket_run = S.closed_run_dir(tmp_path / "ticket")
-    fake = S.close_ticket(ticket_run, truncated_by=value)
+    fake = S.record_ticket(ticket_run, truncated_by=value)
     return archived, row, fake
 
 
@@ -225,21 +225,21 @@ def test_every_reader_of_the_exit_class_takes_the_owners_answer(tmp_path):
 
     THE FOURTH READER IS DELIBERATELY DIFFERENT AND THAT IS RECORDED, NOT REPAIRED (fork F-E,
     §7 round 2): `run_common.learning_refusal_gate` refuses on ANY non-None value with no
-    vocabulary test of its own, because "can this feed training data" and "how should the
-    ticket close" are different questions with different acceptable risk postures. It is bound
+    vocabulary test of its own, because "can this feed training data" and "what should the
+    ticket record" are different questions with different acceptable risk postures. It is bound
     here so this coherence demand cannot ship green while missing a real reader."""
     refused_archived, refused_row, refused_ticket = _three_sites(tmp_path / "no", "REQUEST-LIMIT")
     assert refused_archived["truncated_by"] == "REQUEST-LIMIT", (
         "the archive rewrote the sidecar's value instead of copying it — a third interpreter")
     assert refused_row.get("cut_short") is None, "the judge read a value the owner refuses"
-    assert len(refused_ticket.transitions) == 1, (
+    assert len(refused_ticket.records) == 1, (
         "a value the owner refuses did not take the report-driven fallback at the ticket lane")
 
     ok_archived, ok_row, ok_ticket = _three_sites(tmp_path / "yes", "request-limit")
     assert ok_archived["truncated_by"] == "request-limit", (
         "the control failed: the archive did not carry a real member through")
     assert ok_row.get("cut_short") == "request-limit"
-    assert len(ok_ticket.transitions) == 1, "the request-limit arm made no transition at all"
+    assert len(ok_ticket.records) == 1, "the request-limit arm made no record at all"
 
     gate = S.mod("run_common").learning_refusal_gate
     assert gate(tmp_path, tmp_path / "alert.json", truncated_by="REQUEST-LIMIT") is not None, (
@@ -264,7 +264,7 @@ def test_the_recorded_exit_value_is_a_spelling_that_only_the_owner_resolves(tmp_
         "a padded spelling only the owner can settle made a world ungradable at the judge "
         "while the archive and the ticket lane read it as absent")
     assert ticket.notes == [], "the padded spelling reached the aborted arm's escalation note"
-    assert len(ticket.transitions) == 1, "the padded spelling did not take the report fallback"
+    assert len(ticket.records) == 1, "the padded spelling did not take the report fallback"
 
 
 def test_the_exit_value_is_not_a_string_at_all_at_each_of_the_three_interpretation_sites(
@@ -279,6 +279,6 @@ def test_the_exit_value_is_not_a_string_at_all_at_each_of_the_three_interpretati
     assert archived["truncated_by"] == 7, "the archive rewrote the sidecar's value"
     assert row.get("cut_short") is None, "the judge read a non-string as an exit class"
     assert row.get("ungradable") is not True, "a non-string made a world ungradable"
-    assert len(ticket.transitions) == 1, (
+    assert len(ticket.records) == 1, (
         "a non-string exit value did not take the ticket lane's report-driven fallback")
     assert ticket.notes == [], "a non-string exit value reached the escalation-note arm"

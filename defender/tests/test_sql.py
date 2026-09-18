@@ -17,6 +17,7 @@ Skipped when duckdb isn't installed (it lives in the `runtime` extra, not
 """
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import types
@@ -25,7 +26,14 @@ from defender.tests._by_path import DEFENDER, load_module
 
 import pytest
 
-pytest.importorskip("duckdb")
+# `find_spec` LOCATES duckdb without executing it. The import costs 31 MB, every xdist
+# worker was paying it at COLLECTION time, and with `--dist loadfile` only the one worker
+# that actually runs this file ever needs it — the shim under test imports duckdb lazily
+# too. Same skip semantics as the `importorskip` this replaces.
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("duckdb") is None,
+    reason="duckdb isn't installed (it lives in the `runtime` extra, not dev/CI)",
+)
 
 defender_sql = load_module(DEFENDER / "scripts" / "gather_tools" / "sql.py", name="defender_sql")
 

@@ -31,21 +31,27 @@ and the doc census need nothing and run everywhere.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from markdown_it import MarkdownIt
 
 from defender._io import read_text_utf8
 from defender.scripts.adapters.elastic_adapter import esql_payload
 from defender.tests._by_path import DEFENDER
+from defender.tests._defender_sql import (
+    EXIT_INPUT_ERROR,
+    EXIT_OK,
+    EXIT_QUERY_ERROR,
+    SQL_PY,
+    assert_query_error,
+    run_sql_py,
+)
 from defender.tests._locale import C_LOCALE_ENV
 
-_SQL_PY = DEFENDER / "scripts" / "gather_tools" / "sql.py"
 _DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
 _SKILLS = DEFENDER / "skills"
 
@@ -56,15 +62,6 @@ _REAL_ESQL = (
     DEFENDER / "evals" / "scenarios_lead" / "underfold-sshd-narrowing"
     / "run" / "run-underfold-001" / "gather_raw" / "l-001" / "0.json"
 )
-
-EXIT_OK = 0
-EXIT_QUERY_ERROR = 1
-EXIT_INPUT_ERROR = 2
-
-#: `find_spec` asks the interpreter `_run_sql_py` spawns (`sys.executable`), so the answer
-#: is the child's, and nothing is imported at collection.
-_HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
-
 
 @pytest.fixture(scope="module")
 def esql() -> str:
@@ -77,28 +74,11 @@ def doc() -> str:
     return read_text_utf8(_DOC)
 
 
-def _run_sql_py(*args: str, stdin: str = "", env: dict[str, str] | None = None):
-    """Spawn the tool — the ONE place it is reached from this file.
-
-    `bin/defender-sql` is the shim a lead types, and it is deliberately bypassed here: it
-    re-execs into `$DEFENDER_DIR/.venv/bin/python3`, so driving it would test the venv
-    layout as much as the tool. `tests/e2e/test_query_tool_611.py` drives the shim with
-    `DEFENDER_DIR` set; this file drives the program the shim ends in, with the interpreter
-    the tests run under.
-    """
-    return subprocess.run(
-        [sys.executable, str(_SQL_PY), *args],
-        input=stdin, capture_output=True, text=True, encoding="utf-8", timeout=60, env=env,
-    )
-
-
 def _sql(
     payload: str, query: str, env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """`cat <payload.json> | defender-sql '<query>'` as a lead types it."""
-    if not _HAS_DUCKDB:
-        pytest.skip("duckdb (the `runtime` extra) is not installed — no query can run")
-    return _run_sql_py(query, stdin=payload, env=env)
+    return run_sql_py(query, stdin=payload, env=env)
 
 
 def _rows(payload: str, query: str) -> list:
@@ -195,8 +175,9 @@ def test_esql_values_are_positional_json_not_a_struct(esql):
         esql,
         'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."source.ip" = \'x\'',
     )
-    assert struct_idiom.returncode == EXIT_QUERY_ERROR
-    assert "not a struct" in struct_idiom.stderr
+    # A refusal is the contract; duckdb's own wording of WHY (`not a struct` today) is not,
+    # and the paired positive control below is what proves the failure is the idiom's.
+    assert_query_error(struct_idiom, "the struct spelling was not refused")
 
     assert _rows(
         esql,
@@ -240,8 +221,7 @@ def test_truncation_probe_is_shape_specific_not_universal(shape, esql):
         "bare_array": json.dumps([{"user": "alice"}]),
     }[shape]
     proc = _sql(payload, "SELECT total, returned, truncated FROM data")
-    assert proc.returncode == EXIT_QUERY_ERROR
-    assert "Binder Error" in proc.stderr
+    assert_query_error(proc, "the envelope columns resolved on a payload that has none")
     assert _rows(payload, "DESCRIBE data")
 
 
@@ -458,8 +438,12 @@ def test_the_clause_is_keyed_off_duckdbs_message_not_off_the_querys_own_text():
     on a field this payload does not even carry). Each must get the SAME clause as its sibling
     above — which only a dispatch reading duckdb's message can do, because the query text it
     would have keyed on is gone."""
+    # These two probes assert duckdb's OWN wording on purpose: `_error_note` in `sql.py` keys
+    # the extra clause off these strings, case-folded, so a duckdb release that rewords them
+    # is a tool regression (the clause silently stops appearing), and this is where it
+    # surfaces. Case-folded here too, so the pin is the tool's key and nothing stricter.
     lateral = _sql(_TS_HITS, "SELECT ev.message FROM data, unnest(hits) AS ev")
-    assert "Candidate bindings" in lateral.stderr, "this probe stopped producing the lateral-join error"
+    assert "candidate bindings" in lateral.stderr.lower(), "this probe stopped producing the lateral-join error"
     lateral_hint = _hint(lateral)
     assert "binds `h` to the TABLE" in lateral_hint, (
         "a lateral join under a different alias lost the lateral-join clause — the clause is "
@@ -469,7 +453,7 @@ def test_the_clause_is_keyed_off_duckdbs_message_not_off_the_querys_own_text():
     assert "double-quoted" not in lateral_hint
 
     at_field = _sql(_TS_HITS, "SELECT rec.@version FROM (SELECT unnest(hits) rec FROM data)")
-    assert 'syntax error at or near "@"' in at_field.stderr, "this probe stopped being a parser error"
+    assert 'syntax error at or near "@"' in at_field.stderr.lower(), "this probe stopped being a parser error"
     at_field_hint = _hint(at_field)
     assert "must be double-quoted" in at_field_hint, (
         "an unquoted `@`-field under a different alias lost the quoting rule — the rule is "
@@ -513,7 +497,7 @@ def test_the_tool_prints_its_text_in_a_shell_with_no_locale():
     a container with no locale set hands Python strict-ASCII streams. The tool reconfigures its
     own stdio, so `--help` and a hint reach the lead as text — not as a `UnicodeEncodeError`
     in place of the very hint that was going to save the next turn."""
-    help_ = _run_sql_py("--help", env=C_LOCALE_ENV)
+    help_ = run_sql_py("--help", env=C_LOCALE_ENV)
     assert help_.returncode == EXIT_OK, help_.stderr
     assert "no wrapper envelope to reach" in " ".join(help_.stdout.split())
 
@@ -599,6 +583,15 @@ def test_empty_payload_is_an_error_not_an_empty_result(payload):
     assert proc.stdout == ""
     assert "no input on stdin" in proc.stderr
     assert "NOT an empty result set" in proc.stderr
+
+
+def test_the_doc_teaches_the_exit_codes_the_tests_pin(doc):
+    """The exit codes in `_defender_sql` are literals BECAUSE they are what the doc teaches;
+    the spawn tests hold the tool to them, and this holds the doc to them, so neither the
+    tool nor the sentence can renumber alone."""
+    taught = re.search(r"`(\d)` = query error.*?`(\d)` = the payload never arrived", doc, re.S)
+    assert taught, "the doc no longer teaches the exit codes"
+    assert tuple(map(int, taught.groups())) == (EXIT_QUERY_ERROR, EXIT_INPUT_ERROR)
 
 
 def test_markdown_payload_is_an_input_error():
@@ -687,7 +680,7 @@ def _lead_surfaces() -> list[Path]:
     itself, and every skill doc — `defender-sql.md`, the adapter contract, the query
     templates, and each system's recorded execution notes, which is where a curator would
     write a recipe down. Enumerated, not hand-listed, so a new doc is censused on arrival."""
-    return [_SQL_PY, *sorted(_SKILLS.rglob("*.md"))]
+    return [SQL_PY, *sorted(_SKILLS.rglob("*.md"))]
 
 
 def test_every_unnest_on_a_lead_facing_surface_names_a_live_shape():
@@ -719,7 +712,7 @@ def test_the_help_epilog_the_lead_actually_prints_is_clean_too():
     So run the program and read its output, under the same whitelist. The paired control is
     the live idiom: the epilog really does hand the lead a hits query, so a clean census here
     cannot come from an epilog that says nothing."""
-    proc = _run_sql_py("--help")
+    proc = run_sql_py("--help")
     assert proc.returncode == EXIT_OK, proc.stderr
     printed = proc.stdout + proc.stderr
     assert _unnest_args(printed) == {"hits"}, f"`--help` unnests something no adapter emits: {printed!r}"
@@ -733,9 +726,13 @@ def test_the_dead_recipe_stays_dead():
     """Why the census above is worth having: the recipe does not merely look stale, it FAILS.
     Pinning the failure keeps anyone from reintroducing it on the strength of an old doc."""
     proc = _sql(_HITS, "SELECT count(*) FROM (SELECT unnest(result.hits) h FROM data)")
-    assert proc.returncode == EXIT_QUERY_ERROR
-    assert "Binder Error" in proc.stderr
-    assert 'Referenced table "result" not found' in proc.stderr
+    assert_query_error(proc, "the dead recipe ran")
+    # ...and fails for the reason the census rests on: `result` is the identifier duckdb
+    # could not resolve, because no adapter emits that wrapper. Any wording quotes the
+    # name it could not find; read before the `LINE 1:` echo of the query, which would
+    # carry `result` for ANY failure.
+    message = proc.stderr.partition("\nLINE ")[0]
+    assert '"result"' in message, proc.stderr
     # and the live spelling, on the same payload, works
     assert _rows(_HITS, "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data)") \
         == [{"n": 3}]
@@ -755,9 +752,38 @@ _STRUCT_ACCESS_ON_V = re.compile(r"(?<![A-Za-z0-9_])v\s*\.\s*[A-Za-z_\"]", re.IG
 _LATERAL_FORM = re.compile(r"FROM\s+data\s*,\s*unnest\s*\(\s*hits\s*\)", re.IGNORECASE)
 
 
+#: A line that LOOKS like a fence edge to someone reading the raw file.
+_FENCE_EDGE = re.compile(r"^[ \t]*(`{3,}|~{3,})", re.M)
+#: The info string names sql — ` ```sql`, ` ```SQL {.x}`, ` ```sql{.x}` — and not ` ```sqlite`.
+_SQL_INFO = re.compile(r"sql(?![\w-])", re.I)
+
+
 def _sql_fences(text: str) -> list[str]:
-    """The doc's ```sql blocks — what a lead copies, as opposed to what the prose discusses."""
-    return re.findall(r"```sql\n(.*?)```", text, re.S)
+    """The doc's sql-tagged fences — what a lead copies, as opposed to what the prose discusses.
+
+    A CommonMark parse, not a regex: tildes, four-backtick fences, a space before the tag,
+    ` ```SQL`, ` ```sql {.x}` are all the same fence to a renderer and so to this scanner, and
+    ` ```sqlite` is not. A hand-rolled pattern tolerated a list of spellings and missed the
+    rest, which is how a retagged fence carrying a banned form went unscanned (#1059).
+
+    The doc's reader is not a renderer, though — the gather subagent reads it as raw text and
+    copies what looks like a fence. A fence CommonMark does not see (under an HTML wrapper
+    with no blank line, indented four spaces) is still copyable, so the parse is checked
+    against the raw text: every fence-looking line must lie inside a fence the parser found
+    (as one of its edges, or nested in its body). The scanner then fails loudly on the fence
+    it cannot read, instead of skipping it."""
+    fences = [tok for tok in MarkdownIt().parse(text) if tok.type == "fence"]
+    spans = [tok.map for tok in fences]  # [first line, one past last), 0-based
+    lines = text.split("\n")
+    stray = [
+        f"{n + 1}: {line.strip()}" for n, line in enumerate(lines)
+        if _FENCE_EDGE.match(line) and not any(a <= n < b for a, b in spans)
+    ]
+    assert not stray, (
+        "fence-looking lines the markdown parser does not read as a fence — a reader "
+        f"would copy them and this scanner cannot see them: {stray}"
+    )
+    return [tok.content for tok in fences if _SQL_INFO.match(tok.info.strip())]
 
 
 def test_the_docs_esql_example_is_literal_and_runs(doc, esql):

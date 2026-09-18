@@ -232,7 +232,7 @@ def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
         )
 
     writer_src = Path(ticket_writer.__file__).read_text(encoding="utf-8")
-    assert 'quote(rec.case_id, safe="")' in writer_src, (
+    assert 'quote(case_id, safe="")' in writer_src, (
         "ticket_writer no longer encodes the keys it mints the way this test assumes — "
         "re-derive the reader's encoding from what the writer now does"
     )

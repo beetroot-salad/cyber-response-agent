@@ -315,6 +315,56 @@ def test_moved_symbol_is_not_flagged(tmp_path):
     assert GATE._scan(work, "origin/main") == []
 
 
+def test_a_function_local_def_is_not_a_removed_identifier(tmp_path):
+    """A `def` nested inside a function body is invisible outside that scope, so deleting it
+    can strand no reference — and its name is usually an ordinary word the rest of the tree
+    uses as prose. The PR deletes `outbound_note`, a helper nested inside a test function,
+    while `docs.md` (untouched, on main) uses the word; that must not be a finding. Positive
+    control in the same repo: the same PR also deletes the module-level `some_removed_helper`
+    that `caller.py` still calls, and THAT is flagged — so the scan ran and the local def was
+    excluded by scope, not by accident. Scope is read off the base tree's AST, because a
+    local def inside a top-level function and a method are both indented four."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "test_thing.py": (
+                "def test_thing():\n"
+                "    def outbound_note(run_dir):\n"
+                "        return run_dir\n"
+                "    assert outbound_note(1) == 1\n"
+            ),
+            "docs.md": "The outbound_note channel is what a person reads.\n",
+        },
+        pr_files={"test_thing.py": "def test_thing():\n    assert True\n"},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "caller.py:some_removed_helper" in fingerprints, "the control failed: nothing scanned"
+    assert not any(f.endswith(":outbound_note") for f in fingerprints), fingerprints
+
+
+def test_a_method_with_the_same_indent_as_a_local_def_IS_a_removed_identifier(tmp_path):
+    """The complement: a METHOD is also indented four, but it is reachable from anywhere as
+    `.name`, so its removal is real signal. Only the AST can tell the two apart."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "thing.py": (
+                "class Thing:\n"
+                "    def outbound_note(self):\n"
+                "        return 1\n"
+            ),
+            "docs.md": "Call outbound_note on a Thing.\n",
+        },
+        pr_files={"thing.py": "class Thing:\n    pass\n"},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "docs.md:outbound_note" in fingerprints, fingerprints
+
+
 def test_removed_ident_with_no_surviving_reference_exits_0(tmp_path):
     """`git grep` exits 1 on "no match". That is a legitimate empty answer, not a failure
     — an over-eager fail-closed refactor would turn it into a GitError."""

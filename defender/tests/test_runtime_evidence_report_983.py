@@ -255,16 +255,22 @@ def test_render_report_no_longer_claims_ceiling_test_is_the_one_exception():
     )
 
 
-def test_baseline_context_does_not_reach_the_case_ticket(tmp_path):
-    """The baseline consultation reaches `report.md` and stops there: the case ticket's closing
-    comment carries no consultation content (demand `baseline_not_wired_to_ticket`,
-    non-obligation 3).
+def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
+    """#767 SUPERSEDES this demand's premise (`baseline_not_wired_to_ticket`, non-obligation 3)
+    — recorded here rather than left a silently-deleted test, because the reversal is
+    deliberate and total, not an accident this change happened to cause.
 
-    Wiring baseline context out to `ticket_writer.py` is an acknowledged gap this change
-    DEFERS, and the deferral is minted as a test so a later change that quietly widens the
-    egress trips something. It holds today because `read_case_record` takes its outbound reason
-    from the frontmatter's `cause` — the host's own typed sentence — and falls back to the body
-    only for a report that carries no cause at all; every close-gate report carries one."""
+    Before #767, `read_case_record`'s outbound reason took the frontmatter's `cause` and fell
+    back to the report's body only when no `cause` was present; every close-gate report carried
+    one, so baseline-consultation text (which lives in the body) never reached the ticket
+    bridge. #767 D3 deletes that fallback: `CaseRecord` now always carries BOTH `cause` and
+    `narrative` (the report's own body, unconditionally), and `case_record_to_comment` renders
+    the narrative into the recorded comment's `body` on every case — that is O4's whole point,
+    "the report body (the model's notes)" is what a person needs to approve. So whatever the
+    model cited while investigating, baseline consultations included, now legitimately crosses
+    to the outbound comment. What protects a LATER run from reading it back is D4's approval
+    screen (`test_767_screen.py`'s `o2_unapproved_no_agent_comment` and
+    `o2_approved_serves_latest`), never an absence of the content on the wire."""
     from defender.scripts.case_history import case_ticket
 
     receipts = _receipts(BENIGN_DOC)
@@ -284,12 +290,13 @@ def test_baseline_context_does_not_reach_the_case_ticket(tmp_path):
     (run_dir / "report.md").write_text(report, encoding="utf-8")
     (run_dir / "investigation.md").write_text(BENIGN_DOC, encoding="utf-8")
 
-    payload = case_ticket.case_record_to_close(case_ticket.read_case_record(run_dir))
+    payload = case_ticket.case_record_to_comment(case_ticket.read_case_record(run_dir))
     wire = json.dumps(payload, sort_keys=True)
-    for leaked in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
-        assert leaked not in wire, (
-            f"{leaked!r} reached the outbound ticket payload — the baseline's egress is "
-            f"`report.md` and the deferral is deliberate"
+    for crossed in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
+        assert crossed in wire, (
+            f"{crossed!r} did not reach the outbound comment — #767 D3 carries the whole "
+            f"report body into it now, deliberately, gated by D4's approval screen on the "
+            f"read side rather than by anything withheld on the write side"
         )
 
 

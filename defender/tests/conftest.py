@@ -9,6 +9,7 @@ files copied in. The fixture builds one ``LoopPaths(repo_root=tmp)`` and an
 """
 from __future__ import annotations
 
+import ctypes
 import shutil
 import subprocess
 from pathlib import Path
@@ -46,6 +47,35 @@ def _held_capabilities(checkout_roster):
         yield
     finally:
         release_capabilities()
+
+
+def _resolve_malloc_trim():
+    """Bind glibc's `malloc_trim`, or a no-op off glibc (musl has no such symbol)."""
+    try:
+        trim = ctypes.CDLL("libc.so.6").malloc_trim
+    except (OSError, AttributeError):
+        return lambda: None
+    trim.argtypes = [ctypes.c_size_t]
+    trim.restype = ctypes.c_int
+    return lambda: trim(0)
+
+
+_malloc_trim = _resolve_malloc_trim()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _return_freed_arenas():
+    """Hand freed allocator arenas back to the OS at every module boundary.
+
+    xdist workers are persistent and `--dist loadfile` keeps feeding them new files, so one
+    transient peak raises that worker's floor for the rest of the run: the memory is already
+    free to Python, but glibc keeps the arenas. The three files that drive the runtime loop to
+    its request limit each cost 150-250 MB this way, and a single trim returns essentially all
+    of it (one measured case: 157 MB grown, 152 MB returned). Runs after the module's own
+    fixtures tear down, so what it reclaims is genuinely dead.
+    """
+    yield
+    _malloc_trim()
 
 
 

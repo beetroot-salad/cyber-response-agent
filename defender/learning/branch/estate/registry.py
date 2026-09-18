@@ -376,6 +376,11 @@ class WorldRegistry(ModuleVerbRegistry):
                     f"can never apply — `touches` is {declared!r} and a staged system is served "
                     "from its corpus rather than patched, so the overlay would be silently "
                     "dropped while every row still read honestly")
+            unservable = applier_module.unservable(patches)
+            if unservable:
+                raise EstateError(
+                    f"world {world_id!r} carries a difference the read screen would empty "
+                    f"before the sibling saw it: {'; '.join(unservable)}")
         self._wrapped: dict[str, dict[str, Any]] = {}
 
     def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:

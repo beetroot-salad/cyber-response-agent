@@ -166,8 +166,8 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
         def open_case_ticket(self, run_dir):
             self.calls.append("open")
 
-        def close_case_ticket(self, run_dir, **_kw):
-            self.calls.append("close")
+        def record_case_ticket(self, run_dir, **_kw):
+            self.calls.append("record")
 
     writer = Writer()
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),

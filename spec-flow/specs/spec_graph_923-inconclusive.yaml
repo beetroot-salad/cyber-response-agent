@@ -548,20 +548,22 @@ demands:
 
   - id: ticket_egress_body_renders_with_every_slot_bound
     kind: shape
-    form: test
+    form: clause
     source: "gate leaf, R1 obligation"
     binds:
       - 'interacts(close_investigation->ticket_egress).payload'
-    discharged_by: test_ticket_egress_body_renders_with_every_slot_bound
-    seed_docstring: >-
-      The ticket bridge's outbound close payload renders with every `{...}` slot bound, over the
-      dimensions that actually reach the renderer, and the payload MOVES with each of them: the
-      committed verdict (including the host's own), the reason lane — `reason = cause or body`,
-      so a report with no `cause` renders its BODY into the outbound resolution — and an absent
-      confidence, the one slot with a fallback behind it. Three assertions per case: no
-      unsubstituted token reaches the wire, the rendered payloads are pairwise DISTINCT, and the
-      resolution's disposition head decodes back through the lane's own reader to the verdict
-      that was committed.
+    outcome:
+      nl: >-
+        SUPERSEDED BY #767 (D1-D3), downgraded from `form: test` to `form: clause` rather than
+        left with a dangling `discharged_by`: #767 deletes `case_record_to_close` and the
+        `reason = cause or body` fallback this demand's seed_docstring named, replacing them
+        with `case_record_to_comment`, which always renders BOTH `cause` and `narrative` (the
+        report's body, never a fallback) into a `{author, body}` comment. The concern this
+        demand pinned — every slot bound, no unsubstituted token reaching the wire, the
+        rendered payload moving with its inputs — is now discharged by #767's own suite:
+        `test_767_case_record_to_comment_shape` and `test_767_case_record_splits_cause_from_
+        narrative` (both in defender/tests/test_767_writer.py) pin the render context and its
+        failure-closed behavior on a template naming an unbound key.
     note: >-
       MINTED at the gate leaf; REBUILT AT §7 ROUND 3 because it could not fail. The dimension the
       first version varied does not exist at this seam: `case_record_to_close` builds its context
@@ -932,12 +934,12 @@ demands:
   - id: a_gap_row_reaching_the_ticket_resolution_is_sanitized
     kind: negative
     form: test
-    source: "J29 re-ground (executed); `20-demands` #7's dropped half; resolved HUMAN at §7 round 3 — 'mint the demand'"
+    source: "J29 re-ground (executed); `20-demands` #7's dropped half; resolved HUMAN at §7 round 3 — 'mint the demand'; RE-SITED by #767 (D1-D3) — see the note below, which supersedes this id's seed_docstring but not its id, its `binds`, or its place in the graph"
     binds:
       - 'interacts(close_investigation->ticket_egress).payload'
       - 'ceiling_test.domain.distinguished[parser-significant-content]'
       - 'ceiling_test.domain.distinguished[over-the-size-bound]'
-    discharged_by: test_a_gap_row_reaching_the_ticket_resolution_is_sanitized
+    discharged_by: test_767_planted_frontmatter_fence_never_reaches_the_wire
     seed_docstring: >-
       The ONE surface a `ceiling_test` row is not inert on. With `cause` absent the report BODY
       becomes the outbound ticket `resolution` — a field read back by a PERSON and by the judge
@@ -950,6 +952,25 @@ demands:
       the claim rather than a substituted string, so truncation is visible as truncation. The
       second control is `cause` PRESENT, where the row provably cannot reach the field at all.
     note: >-
+      RE-SITED BY #767 (D1-D3), a real supersession rather than a rename. #767 deletes
+      `case_record_to_close` and the outbound ticket `resolution` field this demand's
+      seed_docstring names — the close transition is gone, replaced by a recorded COMMENT
+      whose `body` always carries the report's own narrative (fence-stripped, bounded at 4096
+      UTF-8 bytes), with no `cause`-absent/`cause`-present branch left to sanitize
+      differently. `discharged_by` now points at `test_767_planted_frontmatter_fence_never_
+      reaches_the_wire` (defender/tests/test_767_writer.py), which pins the surviving half of
+      this demand's `binds` — `parser-significant-content` (a planted frontmatter delimiter, a
+      spoofed second verdict, an injected instruction, none of which cross) and the legitimate
+      claim surviving whole below the bound (`test_767_narrative_is_the_fence_stripped_report_
+      body` is its positive control). `over-the-size-bound` moves too, discharged by
+      `test_767_comment_body_is_bounded_on_the_wire` / `test_767_wire_bound_wins_and_the_cut_
+      is_visible` in the same file — TRUNCATED, never substituted, with the cut visible as a
+      cut. Kept as `form: test` rather than downgraded to `form: clause`, because a clause
+      would silently drop `parser-significant-content` back onto the R4 gate as UNANSWERED
+      (no other executable demand in this graph binds that domain member).
+
+      HISTORICAL RECORD, preserved verbatim below the re-siting above:
+
       MINTED AT §7 ROUND 3 (human). Every other sink was probed and HOLDS, and none of that is
       softened here: `split_frontmatter` never re-parses a second delimiter block, `format_map`
       does not re-substitute braces inside a substituted value, `json.dumps` escapes the payload

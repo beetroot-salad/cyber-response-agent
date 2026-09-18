@@ -12,7 +12,7 @@ world from grading. Everything in this module exists to keep the value off that 
 
 **None of the mechanism exists at base `59bdea44`.** `session_store.normalized_truncated_by`,
 `runtime/run_end.py`, `archive.RUN_END_NAME`, `_grade_world`'s cut-short early return and
-`close_case_ticket`'s exit-class parameter are all absent. That is the expected state of a
+the ticket lane's exit-class parameter are all absent. That is the expected state of a
 spec — RED against HEAD. Every import goes through `mod()`/`sym()` PER TEST (the
 `_triplet_947` / `_judge_921` idiom) so a missing target is one failure per test rather than
 one collection error that hides the other ninety-odd assertions.
@@ -72,7 +72,7 @@ and each fake's fault content cites the ledger claim that observed it:
 * `FakeTicketSystem(configured=False)` — `_load_config` returning `None`, the unconfigured
   lane F-R resolved to today's silence.
 
-Fakes enter through the entry point's INJECTION SEAMS — `deps=` on `close_case_ticket`,
+Fakes enter through the entry point's INJECTION SEAMS — `deps=` on `record_case_ticket`,
 `run_dirs=` on `archive_episode`, the `agent`/`store` arguments on `_drive_agent` — never by
 `monkeypatch.setattr`, which CI ratchets (`scripts/lint/lint_monkeypatch.py`).
 
@@ -254,6 +254,14 @@ TICKET_CONFIG = {
 }
 
 
+#: The words the two comment kinds are told apart by on the wire. `ESCALATION_MARK` is a
+#: phrase of the host's fixed escalation sentence; `UNREADABLE_MARK` is the fixed sentence the
+#: record carries when the report yields no disposition (#767 §7 R10) — a record with no
+#: proposal in it, which is still a record and not a note.
+ESCALATION_MARK = "Escalate for manual review"
+UNREADABLE_MARK = "No disposition could be recorded"
+
+
 @dataclass
 class TicketCall:
     """One outbound call the ticket lane made, as the transport saw it."""
@@ -264,16 +272,32 @@ class TicketCall:
 
     @property
     def is_transition(self) -> bool:
+        """A lifecycle move. The host's client has none (#767 O1: closing is a person's act),
+        so this is the census every scenario expects EMPTY — the one property here whose
+        positive case is a defect."""
         return self.path.endswith("/transitions")
 
     @property
-    def is_note(self) -> bool:
+    def is_comment(self) -> bool:
         return self.path.endswith("/comments")
+
+    @property
+    def is_note(self) -> bool:
+        """The cut-short escalation note (#1047 O2): the fixed host sentence asking a person
+        to escalate, with no verdict in it. Told apart from a record by its body — both are
+        comments on the wire, since a comment is the only write the host can make."""
+        return self.is_comment and ESCALATION_MARK in self.text()
+
+    @property
+    def is_record(self) -> bool:
+        """The investigation record (#767 D2): the host's PROPOSED disposition off the report,
+        for a person to review and close on."""
+        return self.is_comment and not self.is_note
 
     @property
     def key(self) -> str:
         """The ticket key this call addressed — the path segment between `/tickets/` and the
-        verb. `open_case_ticket` writes its key in the BODY and the close addresses it in the
+        verb. `open_case_ticket` writes its key in the BODY and the record addresses it in the
         PATH, so a scenario proving the two lanes share one namespace has to read both."""
         parts = self.path.strip("/").split("/")
         return parts[1] if len(parts) > 1 else ""
@@ -309,6 +333,12 @@ class FakeTicketSystem:
     def request(self, _config: dict[str, str], method: str, path: str,
                 body: dict | None = None) -> tuple[str | None, str]:
         self.calls.append(TicketCall(method, path, body))
+        if method == "GET":
+            # The writer's courtesy read-back before it comments (#767): an open, unreleased
+            # case. The scripted fault below is about the WRITE — a note call that fails —
+            # so the read always answers.
+            return "200", json.dumps({"key": path.rsplit("/", 1)[-1], "status": "open",
+                                      "labels": [], "comments": []})
         if self.status is None:
             return None, "transport error: docker exec failed"
         return self.status, ""
@@ -318,23 +348,32 @@ class FakeTicketSystem:
             load_config=self.load_config, request=self.request)
 
     @property
+    def writes(self) -> list[TicketCall]:
+        """Every call that could change the estate — the read-back is not one."""
+        return [c for c in self.calls if c.method != "GET"]
+
+    @property
     def transitions(self) -> list[TicketCall]:
         return [c for c in self.calls if c.is_transition]
+
+    @property
+    def records(self) -> list[TicketCall]:
+        return [c for c in self.calls if c.is_record]
 
     @property
     def notes(self) -> list[TicketCall]:
         return [c for c in self.calls if c.is_note]
 
 
-def close_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
-                 **kw: Any) -> FakeTicketSystem:
-    """Drive the REAL `close_case_ticket` over `run_dir` and return the fake it talked to.
+def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
+                  **kw: Any) -> FakeTicketSystem:
+    """Drive the REAL `record_case_ticket` over `run_dir` and return the fake it talked to.
 
     `**kw` is the lane's new input under F3 reading A — `truncated_by=` and
     `closed_before_cut=`, passed in-process by `run.py` from the driver's own summary. Nothing
     here reads a store, a pointer file or anything else inside the run dir to get them."""
     fake = ticket or FakeTicketSystem()
-    mod("scripts.case_history.ticket_writer").close_case_ticket(
+    mod("scripts.case_history.ticket_writer").record_case_ticket(
         Path(run_dir), fake.deps(), **kw)
     return fake
 

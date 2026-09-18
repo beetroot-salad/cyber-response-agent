@@ -557,16 +557,19 @@ def test_report_confidence_field_carries_unvalidated_payload_to_html_render(env)
 
 
 def test_report_body_within_bound_reaches_ticket_http_egress(env):
-    """cc4 — an in-bound report body reaches the ticket bridge's `reason` field verbatim
-    (case_ticket.py:216 `reason=body`), capped only in volume by D2. Decision(True) at the gate,
-    and the real `read_case_record` egress builder carries the payload verbatim as its reason."""
+    """cc4 — an in-bound report body reaches the ticket bridge's `narrative` field verbatim
+    (#767 D3 split `reason` into `cause`/`narrative`; `narrative` is the report body,
+    unconditionally), capped only in volume by D2 at RENDER time
+    (`case_record_to_comment`'s 4096-byte wire bound), not here. Decision(True) at the gate,
+    and the real `read_case_record` egress builder carries the payload verbatim as its
+    narrative."""
     payload = "TICKET-EGRESS-PAYLOAD marker-7f3a rides as the ticket reason."
     text = report(disposition="malicious", body=payload + "\n")
     assert env.decide("report.md", text).allow is True
     (env.run / "report.md").write_text(text, encoding="utf-8")
     (env.run / "alert.json").write_text('{"id": "a-1", "timestamp": "2026-01-01T00:00:00Z"}\n',
                                         encoding="utf-8")
-    assert read_case_record(env.run).reason == payload  # captured inbound payload, verbatim
+    assert read_case_record(env.run).narrative == payload  # captured inbound payload, verbatim
 
 
 def test_combined_report_and_investigation_bytes_reaching_judge_uncapped(env):

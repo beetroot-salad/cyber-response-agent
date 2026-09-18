@@ -73,11 +73,11 @@ def test_run_py_tail_takes_both_record_fields_off_the_summary(tmp_path, monkeypa
     rc = drive_tail(run_py.main, plant_alert(tmp_path / "both"), tail, "--update-ticket")
 
     assert rc == 0
-    assert tail.close_calls, "close_case_ticket was never called at all"
+    assert tail.record_calls, "record_case_ticket was never called at all"
     assert not S.sidecar_path(tail.run_dirs[0]).exists(), (
         "the fixture wrote a sidecar, so nothing below is about the in-process value")
-    assert tail.close_calls[0] == {"truncated_by": "aborted", "closed_before_cut": True}, (
-        f"run.py's tail split the record between the summary and the disk: {tail.close_calls[0]!r}")
+    assert tail.record_calls[0] == {"truncated_by": "aborted", "closed_before_cut": True}, (
+        f"run.py's tail split the record between the summary and the disk: {tail.record_calls[0]!r}")
 
 
 def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
@@ -180,17 +180,17 @@ def test_parse_record_is_strict_as_a_whole():
         assert run_end.parse_record(doc) is None, f"{doc!r} was read as a record"
 
 
-def test_run_py_tail_threads_the_exit_class_into_close_case_ticket(tmp_path, monkeypatch):
+def test_run_py_tail_threads_the_exit_class_into_record_case_ticket(tmp_path, monkeypatch):
     """The spec adversary's F1: an implementation that satisfies all 106 committed
     `test_1047_*` tests while leaving `defender.run.main`'s `--update-ticket` call site on the
-    OLD no-argument `close_case_ticket(run_dir)` shape ships undetected — every one of
-    `test_1047_ticket_lane.py`'s 20 tests drives the real `close_case_ticket` directly, never
+    OLD no-argument `record_case_ticket(run_dir)` shape ships undetected — every one of
+    `test_1047_ticket_lane.py`'s 20 tests drives the real `record_case_ticket` directly, never
     through `run.py`'s tail, and `test_791_curation_boundary.py` only asserts the step was
     REACHED, never with what it was called with.
 
     Driven for real, through the tail's own injection seam (`SpecTail`, `drive_tail`) — the
     lifecycle fake reports `truncated_by="request-limit"`, exactly as a real cut-short
-    investigation's summary would, and the assertion is on `SpecTail.close_calls`, the record
+    investigation's summary would, and the assertion is on `SpecTail.record_calls`, the record
     the seam itself keeps of what it was handed."""
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
@@ -202,10 +202,10 @@ def test_run_py_tail_threads_the_exit_class_into_close_case_ticket(tmp_path, mon
     rc = drive_tail(run_py.main, plant_alert(tmp_path / "f1"), tail, "--update-ticket")
 
     assert rc == 0
-    assert tail.close_calls, "close_case_ticket was never called at all"
-    assert tail.close_calls[0].get("truncated_by") == "request-limit", (
-        f"run.py's tail did not thread the exit class through to close_case_ticket "
-        f"(got {tail.close_calls[0]!r}) — the per-exit-class table in ticket_writer.py is "
+    assert tail.record_calls, "record_case_ticket was never called at all"
+    assert tail.record_calls[0].get("truncated_by") == "request-limit", (
+        f"run.py's tail did not thread the exit class through to record_case_ticket "
+        f"(got {tail.record_calls[0]!r}) — the per-exit-class table in ticket_writer.py is "
         "unreachable in production if this call site still uses the old no-argument shape")
 
 

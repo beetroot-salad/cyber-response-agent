@@ -352,33 +352,29 @@ def test_vocabularies_and_types_unchanged():
     ]
 
 
-def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_path):
+def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_path, monkeypatch):
     """Driving a reviewed, ceiling-held `inconclusive` close through to the ticket bridge, the
-    closing comment carries `disposition: inconclusive`, `outcome: stands` and the SEVENTH cause
+    outbound comment's first line carries `disposition: inconclusive` beside the SEVENTH cause
     sentence — "the challenge review examined the ceiling claim and found nothing further
-    measurable" — verbatim, `case_ticket`'s membership check (which imports REPORT_CAUSES)
-    accepts it, and a machinery-failed `inconclusive` (failed closed to `unresolved` +
-    failure_kind + CAUSE_REVIEW_INCOMPLETE) renders through the same reader as the host's own
-    verdict, never as the ceiling claim the review could not check."""
+    measurable" — verbatim, and a machinery-failed `inconclusive` (failed closed to
+    `unresolved` + failure_kind + CAUSE_REVIEW_INCOMPLETE) renders through the same reader as
+    the host's own verdict, never as the ceiling claim the review could not check.
+
+    #767 D2/D3 replaced the close transition and `case_record_to_close`'s `resolution` field
+    with a recorded comment and `case_record_to_comment`'s `body`; the membership check this
+    test names (REPORT_CAUSES gaining a seventh member) is unaffected by that rename."""
+    from defender.tests._spec767 import use_mapping
+
+    use_mapping(monkeypatch, tmp_path / "dfn")
     deps, run_dir = deps_over(tmp_path / "held", ceiling_companion())
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
     fm = frontmatter(run_dir)
     assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CEILING_EXAMINED)
     rec = case_ticket.read_case_record(run_dir)
     assert rec.disposition == GAP
-    assert rec.reason == CEILING_EXAMINED
-    closing = case_ticket.case_record_to_close(rec)
-    assert closing["resolution"].startswith(GAP)
-    assert CEILING_EXAMINED in closing["resolution"]
-    assert case_ticket.parse_disposition_from_resolution(closing["resolution"]) == GAP
-
-    # The membership check covers seven: the host's own verdict beside the new sentence
-    # decodes, where an arbitrary reason is refused.
-    host_close = case_ticket.case_record_to_close(case_ticket.CaseRecord(
-        case_id="c", signature_id="5710", disposition="unresolved", confidence="medium",
-        reason=CEILING_EXAMINED,
-    ))
-    assert case_ticket.parse_disposition_from_resolution(host_close["resolution"]) == "unresolved"
+    assert rec.cause == CEILING_EXAMINED
+    comment = case_ticket.case_record_to_comment(rec)
+    assert comment["body"].startswith(f"{GAP} — {CEILING_EXAMINED}")
 
     deps, run_dir = deps_over(tmp_path / "broken", ceiling_companion())
     broken = close_with(deps, GAP, recording(faults={"composer": raises(RuntimeError("down"))}))
@@ -386,5 +382,5 @@ def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_pat
     assert broken.failure_kind is not None
     rec = case_ticket.read_case_record(run_dir)
     assert rec.disposition == UNRESOLVED
-    assert rec.reason == CAUSE_REVIEW_INCOMPLETE
-    assert CEILING_EXAMINED not in case_ticket.case_record_to_close(rec)["resolution"]
+    assert rec.cause == CAUSE_REVIEW_INCOMPLETE
+    assert CEILING_EXAMINED not in case_ticket.case_record_to_comment(rec)["body"]

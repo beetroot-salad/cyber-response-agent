@@ -6,7 +6,7 @@ import os
 import sys
 import urllib.parse
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from defender._io import write_guarded
@@ -113,111 +113,164 @@ def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> No
         _warn(f"open raised, ignored: {e!r}")
 
 
-def close_case_ticket(
-    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *,
+#: The receipt words. `commented` is the record (#767 D2) and `escalated` the cut-short note
+#: (#1047 O2) — the two comments the host can make; `refused-released` is a record the writer
+#: declined because a person had already released the case; `error` is a call that failed.
+#: There is no `closed`: the host never transitions a case, so a receipt claiming it would
+#: record a false event.
+RECEIPT_COMMENTED = "commented"
+RECEIPT_ESCALATED = "escalated"
+RECEIPT_REFUSED_RELEASED = "refused-released"
+RECEIPT_ERROR = "error"
+_RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
+
+
+def _build_comment_payload(
+    run_dir: Path, case_id: str, truncated_by: str | None,
+) -> tuple[dict, str]:
+    """The outbound `{author, body}` for `record_case_ticket` and its receipt word. §7 R10: an
+    unreadable report takes the FIXED unreadable-branch sentence, never a second, bespoke
+    emptiness check — `case_ticket.ReportNotParsable` is `read_case_record`'s own signal for
+    exactly that case. #1047 F-K: for a forced-close-set exit that same signal means the
+    host's own forced close failed, so there is no verdict to propose and the escalation note
+    goes instead. Any other `CaseTicketError` (a bad mapping, a broken template) propagates
+    to the caller's refusal branch — no POST, a warning and an `error` receipt (§7 R1/FAM-1)."""
+    try:
+        rec = replace(case_ticket.read_case_record(run_dir), case_id=case_id)
+    except case_ticket.ReportNotParsable:
+        if truncated_by in run_end.FORCED_CLOSE_EXITS:
+            return case_ticket.escalation_comment_payload(truncated_by), RECEIPT_ESCALATED
+        return case_ticket.unreadable_comment_payload(), RECEIPT_COMMENTED
+    return case_ticket.case_record_to_comment(rec), RECEIPT_COMMENTED
+
+
+def _ticket_is_released(
+    config: dict[str, str], deps: TicketWriterDeps, case_id: str, quoted: str,
+) -> bool | None:
+    """Read the case back and answer whether a person has released it — `None` when that
+    cannot be established (the read failed, the reply is not a ticket object, or the mapping
+    cannot say what "released" is spelled).
+
+    A person's close is a statement about the comments ON THE TICKET WHEN THEY CLOSED IT, so
+    the writer looks before it appends and declines when the case is already released.
+    This is a COURTESY, not the gate: it is one read followed by one write, and a close that
+    lands between the two still gets the comment. What makes `closed` mean "a person did this"
+    is that the host cannot transition a case at all — this module has no transition call, and
+    `test_767_writer.py` keeps it that way — not this check. Undecidable reads as released,
+    the direction that writes nothing. The released status's spelling is the mapping's, read
+    through the same predicate the screen decides with (O5)."""
+    status, body = deps.request(config, "GET", f"/tickets/{quoted}")
+    if status is None or not status.startswith("2"):
+        _warn(f"record {case_id}: could not read the case back ({status or 'transport error'}: "
+              f"{body}); not recording")
+        return None
+    try:
+        ticket = json.loads(body)
+    except json.JSONDecodeError:
+        _warn(f"record {case_id}: the case read back is not JSON; not recording")
+        return None
+    if not isinstance(ticket, dict):
+        _warn(f"record {case_id}: the case read back is not a ticket object; not recording")
+        return None
+    try:
+        return case_ticket.release_predicate().is_released(ticket)
+    except case_ticket.CaseTicketError as e:
+        _warn(f"record {case_id}: {e}; cannot tell whether the case is released; not recording")
+        return None
+
+
+def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)
+    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, key: str | None = None,
     truncated_by: str | None = None, closed_before_cut: bool = False,
 ) -> None:
-    """#1047 O2 — the lane decides per exit class, taken as an IN-PROCESS PARAMETER from
+    """D2: the host RECORDS its investigation into the case rather than closing it — at most
+    one `POST /tickets/{key}/comments`, never a transition. Closing is a person's act; the
+    host's client has no transition call, which is what lets the store's own `closed` mean
+    "a person reviewed this" to every later reader (#767 O1/O2).
+
+    #1047 O2 — WHICH comment is decided per exit class, taken as an IN-PROCESS PARAMETER from
     `run.py` (fork F3 reading A), never read off anything inside the run dir:
 
-        aborted                        -> leave open, add the breaker's escalation note
-        request-limit, retry-exhausted -> close `unresolved` off the host's forced report;
-                                           no usable report (its own forced close failed,
-                                           fork F-K) -> leave open with the escalation instead
-        budget, store                  -> leave open, no call at all
+        aborted                        -> the escalation note: no verdict, a person escalates
+        request-limit, retry-exhausted -> the record, proposing the host's own forced
+                                          `unresolved`; no usable report (the forced close
+                                          itself failed, fork F-K) -> the escalation note
+        budget, store                  -> no call at all, no receipt
         anything else (None, a real
         vocabulary member with no arm, an out-of-vocabulary string)
-                                        -> today's report-driven close
+                                        -> the record, proposing the report's disposition
 
-    `closed_before_cut` (fork F-A reading B) makes the LEAVE-OPEN arms (`aborted`, `budget`,
-    `store`) defer to a genuine model verdict instead: a run whose model had already decided
-    when the cut landed closes off its own report exactly as an ordinary run would. It does
-    NOT change the forced-close-set arm — a `request-limit`/`retry-exhausted` run always tries
-    its own report first regardless, and falls to the escalation only when there genuinely is
-    none (F-K's intersection with F-A: there is no verdict on disk to defer to, so the
-    escalation wins over inventing one)."""
+    `closed_before_cut` (fork F-A reading B) makes the two no-verdict arms (`aborted`,
+    `budget`/`store`) defer to a genuine model verdict instead: a run whose model had already
+    decided when the cut landed records off its own report exactly as an ordinary run would.
+
+    §7 R6/FAM-3: a failed or colliding open does NOT suppress this attempt (the two post-steps
+    are independent statements under one flag); every write fault is caught, warned once, and
+    leaves the run's exit code exactly what it would have been (O7). `key` is a parameter (§7
+    R8/FK04) so a vendor-minted, pre-existing key on a later deployment is a call-site edit —
+    today's deployment keeps `case_id = run_dir.name`. Keyword-only, so a bare string in the
+    second position cannot bind as `deps` and vanish into the catch-all. The key is the
+    case's identity EVERYWHERE this write names it: the two paths, the receipt and the
+    rendered `{case_id}`."""
     try:
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
         config = deps.load_config()
         if config is None:
             return
-        case_id = run_dir.name  # F-D — positional, same namespace `open_case_ticket` writes
-        if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
-            _leave_open_with_escalation(run_dir, deps, config, case_id, truncated_by)
-            return
+        case_id = key if key is not None else run_dir.name
         if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
                 and not closed_before_cut):
             _log(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
             return
-        # Every remaining case closes off the report: a forced-close-set exit off the host's
-        # own forced report, and everything else — `truncated_by is None`, a real vocabulary
-        # member with no arm here (F7 — `dead-end`), an out-of-vocabulary string (already
-        # normalized to `None` above), or a leave-open class whose model HAD closed (F-A) —
-        # off the model's. ONE read and one close; the arms differ only in what a MISSING
-        # report means: for a forced-close-set exit it means the host's own forced close
-        # failed, so there is no verdict to defer to and the escalation wins (F-K); for any
-        # other it is today's warn-and-leave-open.
         try:
-            rec = case_ticket.read_case_record(run_dir)
-        except case_ticket.CaseTicketError as e:
-            if truncated_by in run_end.FORCED_CLOSE_EXITS:
-                _leave_open_with_escalation(run_dir, deps, config, case_id, truncated_by)
+            if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
+                payload, word = (case_ticket.escalation_comment_payload(truncated_by),
+                                 RECEIPT_ESCALATED)
             else:
-                _warn(f"no usable report.md; leaving ticket open: {e}")
+                payload, word = _build_comment_payload(run_dir, case_id, truncated_by)
+        except case_ticket.CaseTicketError as e:
+            # The mapping (or a template in it) refused: no POST, but the receipt still says
+            # so — a WARN, a receipt and a return on every arm that meant to call out.
+            _warn(f"record {case_id}: {e}; not recording")
+            _write_receipt(run_dir, config, case_id, RECEIPT_ERROR)
             return
-        _close_off_report(run_dir, deps, config, rec)
+        _post_comment(run_dir, deps, config, case_id, payload, word)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
-        _warn(f"close raised, ignored: {e!r}")
+        _warn(f"record raised, ignored: {e!r}")
 
 
-def _close_off_report(
-    run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], rec: case_ticket.CaseRecord,
-) -> None:
-    payload = case_ticket.case_record_to_close(rec)
-    key = urllib.parse.quote(rec.case_id, safe="")
-    status, body = deps.request(config, "POST", f"/tickets/{key}/transitions", payload)
-    ok = status is not None and status.startswith("2")
-    if not ok:
-        _warn(f"close {rec.case_id}: {status or 'transport error'}: {body}")
-    else:
-        _log(f"close {rec.case_id}: {rec.disposition} ({status})")
-    _write_receipt(run_dir, config, rec.case_id, ok)
-
-
-def _leave_open_with_escalation(
+def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
     run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
-    truncated_by: str,
+    payload: dict, word: str,
 ) -> None:
-    """Fork F4 reading A — a real second call to the operator's ticket system, addressed at the
-    SAME ticket key the open leg wrote (`case_id = run_dir.name`), asking a person to escalate.
-    Fork F-L: a failed note call never breaks the run and its outcome lands in the receipt."""
-    text = (
-        f"Investigation ended without a verdict (exit: {truncated_by}) — the environment "
-        "appears unreachable or the investigation could not complete automatically. "
-        "Escalate for manual review; this ticket is left open."
-    )
-    key = urllib.parse.quote(case_id, safe="")
-    status, body = deps.request(
-        config, "POST", f"/tickets/{key}/comments", {"author": "defender", "body": text})
+    """The one write the host makes to a case: look (`_ticket_is_released`), then one
+    `POST /tickets/{key}/comments`, then the receipt on every branch (fork F-L: a failed call
+    never breaks the run and its outcome lands in the receipt)."""
+    quoted = urllib.parse.quote(case_id, safe="")
+    released = _ticket_is_released(config, deps, case_id, quoted)
+    if released is None:
+        _write_receipt(run_dir, config, case_id, RECEIPT_ERROR)
+        return
+    if released:
+        _warn(f"record {case_id}: a person has already released this case; a new comment "
+              "would go out under that release unseen — not recording")
+        _write_receipt(run_dir, config, case_id, RECEIPT_REFUSED_RELEASED)
+        return
+    status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload)
     ok = status is not None and status.startswith("2")
     if not ok:
-        _warn(f"note {case_id}: {status or 'transport error'}: {body}")
+        _warn(f"record {case_id}: {status or 'transport error'}: {body}")
     else:
-        _log(f"note {case_id}: escalation recorded ({status})")
-    _write_receipt(run_dir, config, case_id, ok, status_when_ok="escalated")
+        _log(f"record {case_id}: comment posted ({status}, {word})")
+    _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR)
 
 
-
-
-def _write_receipt(
-    run_dir: Path, config: dict[str, str], case_id: str, ok: bool, *,
-    status_when_ok: str = "closed",
-) -> None:
+def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, status: str) -> None:
     receipt = {
         "key": case_id,
-        "status": status_when_ok if ok else "error",
+        "status": status,
         "url": f"{config['URL_BASE'].rstrip('/')}/tickets/{case_id}",
-        "ok": ok,
+        "ok": status in _RECEIPT_OK,
     }
     try:
         # The run dir is the box's rw bind: the receipt goes through the alias-refusing seam

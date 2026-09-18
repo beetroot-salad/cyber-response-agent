@@ -49,7 +49,6 @@ from defender.tests._spec923 import (
     doc,
     main_deps,
     paid,
-    person_facing_refusal_defects,
     shipping_modules,
 )
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
@@ -72,9 +71,10 @@ _AUTHORING_SURFACES = {
     # not reading — the value originates here rather than being read back from a committed
     # report. Arrived with #920, unclassified until the census below caught it.
     "runtime/branch/_family.py",                # a world's declared disposition in family.yaml
-    # An ANALYST supplies the value — the only surface whose writer is neither the host nor
-    # the investigating model.
-    "scripts/case_history/case_ticket.py",      # the ticket's resolution line, decoded back
+    # #767 N10: the analyst-editable ticket resolution line was a fourth surface here — the
+    # only one whose writer was neither the host nor the investigating model — until D5 deleted
+    # the decoder that made it one. A person may still type anything into a ticket's
+    # `resolution` field; nothing reads it back as a verdict any more (c12).
 }
 _VOCABULARY_READERS = {
     "_vocab.py",                                # the owner
@@ -129,7 +129,6 @@ _VOCABULARY_OWNER_NAMES = frozenset({
 _AUTHORING_ENTRY_POINTS = {
     "runtime/close_tool.py::_close_investigation_async",
     "skills/invlang/validate/_structure.py::_check_conclude_vocab",
-    "scripts/case_history/case_ticket.py::parse_disposition_from_resolution",
     "runtime/branch/_family.py::_check_disposition",
 }
 
@@ -319,43 +318,30 @@ def test_the_tool_schema_and_the_refusal_render_one_ordering(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
-    """All THREE surfaces from which a disposition can be authored refuse `unresolved`. "Only
-    the host produces this verdict" is a universal, not a property of one door.
+    """Every surface from which a disposition can be authored refuses `unresolved`. "Only the
+    host produces this verdict" is a universal, not a property of one door.
 
     * **the close tool's argument** — refused, nothing committed;
     * **the invlang document's `conclude.disposition`** — refused at the write gate. Without
       this the member is admitted for free (the document vocabulary is the same tuple), and a
       model writing it into its conclude block gets a legal document at the very boundary the
       two-boundary price exists to close — and the host's verdict carries no price row;
-    * **the analyst-editable ticket resolution line** — refused. It decodes by bare enum
-      membership, so once the member exists an analyst's hand-typed
-      `unresolved — I stalled, can't get to a verdict` decodes cleanly and is indistinguishable
-      from a host-forced close. The refusal here is written FOR A PERSON: this is the one
-      surface whose author is neither the host nor a model, and model-facing retry phrasing is
-      not something an analyst can act on.
-
-    THE PERSON-FACING CLAUSE IS AN ORACLE HERE, NOT A RATIONALE. It reached this test twice as
-    a note and once as a two-phrase blacklist that the single word `unresolved` satisfied —
-    absence of two spellings is not a message written for anybody. `person_facing_refusal_
-    defects` states it as what a WRONG build fails: an analyst who typed a verdict into a field
-    is told which field they typed it into and what that field may say instead, and is not
-    handed the owner's full tuple (which offers back the very verdict they were refused) or the
-    model's tool-argument vocabulary. A refusal whose whole text is `unresolved` fails three of
-    those; the close tool's own retry text fails three of them.
-
     * **a branched world's `disposition_declared`** — refused at the family manifest's
       validator. The questioner authors that field, and the manifest's check is the owner's own
       normalizer, which admits the member for free — the invlang document's exact shape one
       design later. A world declaring it would have #921's judge grade the questioner's guess
       about a gate overrule against what the world's run actually concluded. Model-facing, like
-      the close tool's and unlike the ticket line's: the author here is the questioner.
+      the close tool's.
+
+    #767 N10 retired the fourth surface this test used to drive: the analyst-editable ticket
+    resolution line decoded by bare enum membership, so a hand-typed `unresolved` decoded
+    cleanly and indistinguishably from a host-forced close. D5 deleted that decoder
+    structurally — nothing reads a ticket's `resolution` as a verdict any more — so there is
+    no third authoring surface left to refuse it there.
 
     Each surface is driven and each verdict is asserted AT THAT SURFACE — a check that the
-    vocabulary "refuses it somewhere" is green when three of four moved."""
+    vocabulary "refuses it somewhere" is green when one of three moved."""
     from pydantic_ai.exceptions import ModelRetry
-
-    from defender.scripts.case_history import case_ticket
-    from defender.scripts.case_history.case_ticket import CaseTicketError
 
     deps, run_dir = main_deps(tmp_path, paid(PAYING_ROW))
     with pytest.raises(ModelRetry) as e:
@@ -369,29 +355,7 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
         f"the document vocabulary admits the host's own verdict for free: {errors}"
     )
 
-    with pytest.raises(CaseTicketError) as ticket_refusal:
-        case_ticket.parse_disposition_from_resolution(
-            f"{MEMBER} — I stalled, can't get to a verdict",
-        )
-    message = str(ticket_refusal.value)
-    defects = person_facing_refusal_defects(message, value=MEMBER)
-    assert defects == [], (
-        f"the ticket refusal is not written for a person — {defects}. Its text was {message!r}"
-    )
-    # And it is not the model's message with a different exception class around it: the two
-    # surfaces refuse the same value and a person and a model need different sentences.
-    with pytest.raises(ModelRetry) as model_refusal:
-        close(main_deps(tmp_path / "model-text", paid(PAYING_ROW))[0], MEMBER)
-    assert message != str(model_refusal.value), (
-        "both surfaces raise the model's own retry text — the analyst gets a tool-argument "
-        "diagnostic for a word they typed into a ticket field"
-    )
-
-    # The control, on the same decoder: an analyst closing a case in the ordinary vocabulary is
-    # not refused, so the refusal above is the host-only verdict and not a decoder that broke.
-    assert case_ticket.parse_disposition_from_resolution("benign — duplicate of CASE-12") == "benign"
-
-    # The fourth surface: a world entry declaring the host's verdict, refused at the manifest.
+    # The third surface: a world entry declaring the host's verdict, refused at the manifest.
     from defender.runtime.branch._family import FamilyError, parse_world
 
     def _world(disposition: str) -> dict:
@@ -504,9 +468,9 @@ def test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_
     assert record["reviewed_disposition"] in DISPOSITION_ENUM
     assert marker not in str(record["reviewed_disposition"])
 
-    payload = case_ticket.case_record_to_close(case_ticket.read_case_record(run_dir))
-    assert payload["resolution"].split(" — ", 1)[0] in DISPOSITION_ENUM, (
-        "the outbound resolution's disposition head is not a member of the closed enum"
+    payload = case_ticket.case_record_to_comment(case_ticket.read_case_record(run_dir))
+    assert payload["body"].split(" — ", 1)[0] in DISPOSITION_ENUM, (
+        "the outbound comment's disposition head is not a member of the closed enum"
     )
 
     rows = frontmatter.get("ceiling_test")
@@ -522,173 +486,16 @@ def test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_
     )
 
 
-def test_ticket_egress_body_renders_with_every_slot_bound(tmp_path):
-    """The ticket bridge's outbound close payload renders with every `{...}` slot bound, over
-    the dimensions that actually reach the renderer — and the payload MOVES with each of them.
-
-    The dimension this originally varied does not exist at this seam: `case_record_to_close`
-    builds its context from a fixed key set (`case_id`, `signature`, `disposition`, `reason`,
-    `confidence`) and `CaseRecord` carries no `ceiling_test`, so zero, one and several gap rows
-    render BYTE-IDENTICAL payloads and the check could not fail. What varies here instead is
-    every slot the context actually holds: the committed verdict (including the host's own,
-    which is why this is red until M2 lands), the reason lane — `reason = cause or body`, so a
-    report with no `cause` renders its BODY into the outbound resolution — and an absent
-    confidence, which is the slot with a fallback behind it.
-
-    Three assertions per case, and the second is what makes the first mean anything: no
-    unsubstituted token reaches the wire, the rendered payloads are pairwise DISTINCT (a
-    renderer ignoring its context passes an all-slots-bound check perfectly), and the
-    resolution's disposition head decodes back through the lane's own reader to the verdict
-    that was committed."""
-    from defender.scripts.case_history import case_ticket
-    from defender.tests._spec923 import HOST_CAUSE, SECOND_PAYING_ROW, finished_run
-
-    rendered: dict[str, str] = {}
-    for name, disposition, kw in (
-        ("host-verdict", MEMBER, {}),
-        ("model-gap", GAP_MEMBER, {"rows": (PAYING_ROW, SECOND_PAYING_ROW)}),
-        ("no-cause", GAP_MEMBER, {"cause": None, "body": "the run was imported, not closed"}),
-        ("no-confidence", "malicious", {"confidence": None, "cause": HOST_CAUSE}),
-    ):
-        run_dir = finished_run(tmp_path / name, disposition=disposition, **kw)
-        payload = case_ticket.case_record_to_close(case_ticket.read_case_record(run_dir))
-        for field, value in payload.items():
-            for brace in ("{", "}"):
-                assert brace not in str(value), (
-                    f"{name}: `{field}` reached the wire with an unsubstituted slot: {value!r}"
-                )
-        assert case_ticket.parse_disposition_from_resolution(payload["resolution"]) == disposition, (
-            f"{name}: the outbound resolution does not read back as the committed verdict"
-        )
-        rendered[name] = json.dumps(payload, sort_keys=True)
-
-    assert len(set(rendered.values())) == len(rendered), (
-        f"two of these render the same payload — the renderer is not reading the context it is "
-        f"handed: { {k: v[:80] for k, v in rendered.items()} }"
-    )
-
-
-def test_a_gap_row_reaching_the_ticket_resolution_is_sanitized(tmp_path):
-    """The ONE surface a `ceiling_test` receipt's `note` is not inert on. §7 round 4's redesign
-    moved the free text OUT of the frontmatter (where a hostile row this demand named could
-    plant a `---` and hijack the frontmatter/body split itself) and into the report BODY — so
-    the threat this test drives is now `body` verbatim, which is what a hostile `note` lands
-    in. With `cause` absent the report BODY becomes the outbound ticket `resolution` — a field
-    read back by a PERSON and by the judge model — and a hostile note can reach it verbatim,
-    delimiters, spoofed verdict, injected instruction and all (J29, executed, restated for the
-    new home of the text).
-
-    Every other sink was probed and holds: `_report.split_frontmatter` never re-parses a second
-    delimiter block, `json.dumps` escapes the payload correctly, `format_map` does not
-    re-substitute braces inside a substituted value, and `evals/held_out` never reads the body
-    at all. This is the residue, and M1 is what makes it routine: the entry price takes the
-    population reaching this field from two fixture documents to every model-authored uncertain
-    close.
-
-    SANITIZING IS NOT DELETION, AND THAT IS THE HALF THIS DEMAND LOST TWICE. Its first two
-    spellings asserted only that hostile substrings were ABSENT, with controls that read the
-    committed report's own frontmatter — a different artifact on a different lane, which no
-    sanitizer of this field would touch. Executed, a build that replaced the cause-absent
-    reason with any fixed host string passed every assertion while the analyst's and the judge
-    model's copy of the gap claim was gone. So the positive is now on `payload["resolution"]`
-    ITSELF: the legitimate half of the row must still arrive, on the same lane, in the same
-    string the negatives are read off. A channel that was emptied fails it.
-
-    The size bound is driven HERE rather than inherited: this demand binds
-    `ceiling_test.domain.distinguished[over-the-size-bound]` and nothing used to push an
-    over-bound row into this field, so the `<= 512` assertion was already green at HEAD on a
-    347-character resolution and pinned nothing. The oversize case carries a legitimate claim
-    of nine thousand characters and asserts both ends: the field is bounded, AND what survives
-    is the HEAD of the claim rather than a substituted string, so truncation is visible as
-    truncation.
-
-    `cause` PRESENT is the second control: the same hostile row provably cannot reach the field
-    on that lane, so the refusal above is the sanitizing and not a reader that stopped
-    working."""
-    from defender.scripts.case_history import case_ticket
-    from defender.tests._spec923 import (
-        HOST_CAUSE,
-        HOSTILE_ROW,
-        HOSTILE_ROW_CLAIM,
-        OVERSIZE_CLAIM,
-        finished_run,
-    )
-
-    def outbound(run_dir) -> str:
-        return str(case_ticket.case_record_to_close(case_ticket.read_case_record(run_dir))
-                   ["resolution"])
-
-    # `rows=()`: the frontmatter's OWN `ceiling_test` block is irrelevant to this reader on
-    # the new design (it holds `ref`/`state`/`cap` alone, never free text — see
-    # `test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_chosen`) and
-    # would otherwise plant a SECOND copy of `HOSTILE_ROW`'s own embedded `---` ahead of the
-    # real frontmatter close, shifting where `body` starts and confusing what this test means
-    # to drive. `body=HOSTILE_ROW` alone is the faithful shape: a hostile NOTE, landed in the
-    # body the way `close_tool.render_report` lands one today.
-    unsanitized = finished_run(
-        tmp_path / "no-cause", disposition=GAP_MEMBER, rows=(),
-        cause=None, body=HOSTILE_ROW,
-    )
-    resolution = outbound(unsanitized)
-
-    assert case_ticket.parse_disposition_from_resolution(resolution) == GAP_MEMBER
-    assert "\n---" not in resolution, (
-        "a frontmatter delimiter from a model-authored row reached the ticket resolution — the "
-        "field a person and the judge model read back"
-    )
-    assert "disposition: malicious" not in resolution, (
-        "a spoofed second verdict reached the ticket resolution verbatim"
-    )
-    assert "Ignore prior instructions" not in resolution, (
-        "a model-authored instruction reached the field that rides into the judge's prompt"
-    )
-    assert len(resolution) <= 512, (
-        f"the outbound resolution is {len(resolution)} characters of model-authored text — "
-        f"the accumulated gap text is bounded and this is where it leaves the process"
-    )
-    # THE POSITIVE, ON THE FIELD THE NEGATIVES ARE READ OFF. Sanitizing this row means removing
-    # the delimiter, the spoofed verdict and the instruction — not removing the coverage claim
-    # the analyst is owed. A build that substitutes a fixed host string here passes every
-    # assertion above and tells nobody what was not retrieved.
-    assert HOSTILE_ROW_CLAIM in resolution, (
-        f"the gap claim itself did not survive to the ticket resolution: {resolution!r} — the "
-        f"assertions above are then satisfied by deleting the channel, which is what this "
-        f"demand's first two spellings were satisfied by"
-    )
-
-    # The over-bound row, driven into THIS field: the bound is the demand's own distinguished
-    # value and this is the seam it binds. Both ends, because either alone is weak — bounded,
-    # and bounded by TRUNCATION rather than by substitution.
-    oversize = finished_run(
-        tmp_path / "oversize", disposition=GAP_MEMBER, rows=(),
-        cause=None, body=OVERSIZE_CLAIM,
-    )
-    long_resolution = outbound(oversize)
-    assert len(long_resolution) <= 512, (
-        f"a {len(OVERSIZE_CLAIM)}-character gap claim left the process whole "
-        f"({len(long_resolution)} characters on the wire)"
-    )
-    assert OVERSIZE_CLAIM[:40] in long_resolution, (
-        "the over-bound claim was replaced rather than trimmed — an analyst reading this "
-        "ticket cannot tell a truncated finding from a host string standing in for one"
-    )
-
-    # Control one: with `cause` present the host's own sentence is the reason, so the row
-    # cannot reach this field at all — the lane, not the sanitizing, is what excludes it there.
-    with_cause = finished_run(
-        tmp_path / "cause", disposition=GAP_MEMBER, rows=(), cause=HOST_CAUSE,
-        body=HOSTILE_ROW,
-    )
-    assert HOST_CAUSE in outbound(with_cause)
-
-    # Control two, on the lane and the field this demand is about: an ORDINARY gap claim, with
-    # nothing hostile in it, arrives whole. Without it the sanitizer is free to be a deleter
-    # for every row it does not like the look of.
-    ordinary = finished_run(
-        tmp_path / "ordinary", disposition=GAP_MEMBER, rows=(),
-        cause=None, body=PAYING_ROW,
-    )
-    assert PAYING_ROW in outbound(ordinary), (
-        "a legitimate gap claim does not reach the analyst on the cause-absent lane either — "
-        "the negative above is then true of a channel that carries nothing"
-    )
+# #767 D1-D3 retired the mechanism `test_ticket_egress_body_renders_with_every_slot_bound` and
+# `test_a_gap_row_reaching_the_ticket_resolution_is_sanitized` pinned: `case_record_to_close`,
+# the `reason = cause or body` fallback, and the 512-character `_TICKET_REASON_MAX` bound are
+# all gone. `CaseRecord` now always carries BOTH `cause` and `narrative` (the report's body,
+# never a fallback), rendered by `case_record_to_comment` into a `{author, body}` comment
+# bounded at 4096 UTF-8 bytes with the same fence-stripping property these two tests drove.
+# That coverage — every slot bound, no unsubstituted token, the fence strip, the size bound
+# with truncation visible as truncation, the positive control that a legitimate claim survives
+# whole — is now `test_767_writer.py`'s: `test_767_case_record_to_comment_shape`,
+# `test_767_narrative_is_the_fence_stripped_report_body`,
+# `test_767_comment_body_is_bounded_on_the_wire`, `test_767_wire_bound_wins_and_the_cut_is_
+# visible`, `test_767_planted_frontmatter_fence_never_reaches_the_wire` and
+# `test_767_the_first_fence_wins_over_every_later_one`.

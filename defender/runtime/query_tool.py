@@ -66,6 +66,8 @@ from .ticket_screen import (
     TICKET_SYSTEM,
     screen_get,
     screen_list,
+    screen_release_get,
+    screen_release_list,
     self_case_key,
 )
 from .verbs import (
@@ -210,21 +212,52 @@ def _self_ticket_reject_reason(
     return None
 
 
+def _release_predicate() -> Any:
+    """#767 D4's release predicate, built fresh per call (`d_each_query_screened_at_call_time`
+    — no snapshot, no cache). §7 R1's read-side extension (FK20): a predicate-construction
+    failure DEGRADES rather than raising into the model's turn or refusing the whole gather
+    call (N5) — every ticket reads as unreleased, so no comment is served, which is the
+    fail-closed direction for a screen that must never serve agent text by accident.
+
+    ANY failure degrades, not only the mapper's own typed refusal: the mapping is a file, and
+    a file can be unreadable (permissions, a non-UTF-8 byte) in ways the mapper never
+    classifies. Letting such a raise escape would refuse the whole ticket query as an infra
+    fault and charge the `ticket` breaker for a config defect — the opposite of degrading.
+    Degrading is right; degrading SILENTLY is not, so the one line on stderr names the cause:
+    without it a broken mapping looks, from every gather turn, like a store with no comments."""
+    from defender.scripts.case_history import case_ticket
+
+    try:
+        return case_ticket.release_predicate().is_released
+    except Exception as e:  # noqa: BLE001 — degrade on every construction failure, see docstring
+        print(
+            f"[query_tool] WARN ticket release predicate unavailable ({e!r}); serving no "
+            "ticket comments this call",
+            file=sys.stderr,
+        )
+        return lambda _ticket: False
+
+
 def _screen_ticket_payload(
     self_key: str, system: str, verb: str, payload: Any,
 ) -> tuple[Any, int, str]:
-    """Apply gather's current-case exclusion before capture and model display.
+    """Apply gather's current-case exclusion, then #767 D4's per-ticket release step, before
+    capture and model display.
 
     Bound here is gather's own predicate, intentionally IDENTITY-ONLY: another ticket may
     mention ``self_key`` in its free text and remains useful correlation evidence — unlike the
     judge, gather is not scoring the case, so a mention is not an answer key. A record whose
     key cannot be established is withheld, being unprovably distinct from this case.
+
+    D4 runs strictly AFTER the own-case exclusion above (`d4_screen_after_own_case`) and only
+    when it answered a served payload (``code == 0``) — a malformed envelope stays malformed,
+    never patched into something the release step could act on.
     """
     if system != TICKET_SYSTEM:
         return payload, 0, ""
 
     if verb == TICKET_GET:
-        return screen_get(
+        payload, code, detail = screen_get(
             payload,
             require_key=True,
             withhold=lambda ticket: (
@@ -233,14 +266,20 @@ def _screen_ticket_payload(
                 if ticket["key"] == self_key else None
             ),
         )
+        if code != 0:
+            return payload, code, detail
+        return screen_release_get(payload, is_released=_release_predicate()), 0, ""
 
     if verb == TICKET_LIST:
-        return screen_list(
+        payload, code, detail = screen_list(
             payload,
             keep=lambda ticket: (
                 isinstance(ticket.get("key"), str) and ticket["key"] != self_key
             ),
         )
+        if code != 0:
+            return payload, code, detail
+        return screen_release_list(payload, is_released=_release_predicate()), 0, ""
 
     return payload, 0, ""
 
