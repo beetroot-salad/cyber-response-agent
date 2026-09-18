@@ -273,8 +273,12 @@ class FakeStore:
     The fault vocabulary is data, and each arm cites the claim that observed that shape on
     the real dependency:
 
-      * ``transport_fault`` — `TransportFault` out of `ticket_writer._request`'s own
-        `except` clause (c14, read at ticket_writer.py:62-77);
+      * ``transport_fault`` — a `TransportFault` raised by the transport underneath
+        `ticket_writer._request`, which `_request`'s own `except` clause converts to the
+        `(None, "transport error: …")` return (c14, read at ticket_writer.py:62-77). The
+        fake stands in for `deps.request` — i.e. for `_request` itself — so it answers with
+        that converted shape rather than raising: no production `request` ever raises this,
+        and a fake that did would exercise a path the writer cannot reach;
       * ``transport_error`` — the `(None, detail)` return `_request` produces when curl
         answered nothing parseable (c14);
       * ``status`` / ``status_by_suffix`` — HTTP status words the real stub answered when it
@@ -316,7 +320,8 @@ class FakeStore:
         if self.transport_fault_on and path.endswith(self.transport_fault_on):
             from defender.scripts.adapters.faults import TransportFault
 
-            raise TransportFault("injected: the bastion is unreachable")
+            fault = TransportFault("injected: the bastion is unreachable")
+            return None, f"transport error: {fault.detail}"
         if self.transport_error_on and path.endswith(self.transport_error_on):
             return None, "transport error: injected"
         for suffix, status in self.status_by_suffix.items():

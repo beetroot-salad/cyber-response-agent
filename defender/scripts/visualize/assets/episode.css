@@ -167,7 +167,7 @@
   padding: 10px 14px; margin-bottom: 12px; border-radius: 6px;
   background: var(--bg-2); border: 1px solid var(--border); overflow-wrap: anywhere;
 }
-.episode .ld-served, .episode .ld-investigation, .episode .ld-moved { font-size: 12px; color: var(--warn); padding: 2px 0; }
+.episode .ld-served, .episode .ld-dir, .episode .ld-investigation, .episode .ld-moved { font-size: 12px; color: var(--warn); padding: 2px 0; }
 .episode .ld-lead { padding: 6px 0; border-top: 1px solid var(--border-2); line-height: 1.55; }
 .episode .ld-id { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--code); margin-right: 8px; }
 .episode .ld-goal { color: var(--text); }

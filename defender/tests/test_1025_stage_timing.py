@@ -64,9 +64,15 @@ def _steps_mod():
     return T.mod("learning.branch.steps")
 
 
+def _read(episode_dir) -> list[dict] | None:
+    """`read_stage_timings` over the episode dir's bound reader — the reader takes the bound
+    primitive, never a root it could format (#1049 D-V2), so the bind is made here."""
+    return _timing().read_stage_timings(T.mod("_io").bind(episode_dir))
+
+
 def _steps(episode_dir) -> list[str]:
     """The step names on the record, in the order the READER returns them."""
-    return [row["step"] for row in _timing().read_stage_timings(episode_dir)]
+    return [row["step"] for row in _read(episode_dir) or []]
 
 
 def _raw_rows(episode_dir) -> list[dict]:
@@ -286,7 +292,7 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
     assert record.read_text(encoding="utf-8") == (
         json.dumps({"steps": [first, second]}, indent=2, sort_keys=True) + "\n"), (
         "the file is not the one whole document holding every entry, verbatim")
-    assert timing.read_stage_timings(episode_dir) == [first, second]
+    assert _read(episode_dir) == [first, second]
     for row in (first, second):
         for key in ("started_at", "ended_at"):
             assert parse_iso_utc(row[key]) is not None, f"{key}={row[key]!r} is not a timestamp"
@@ -310,14 +316,16 @@ def test_1025_the_reader_returns_record_order_not_step_order(tmp_path):
     earlier = clock.record("questioner", started_at="2026-01-01T00:00:00+00:00",
                            ended_at="2026-01-01T00:00:05+00:00")
 
-    assert timing.read_stage_timings(episode_dir) == [later, earlier], (
+    assert _read(episode_dir) == [later, earlier], (
         "the reader reordered the entries")
     assert _raw_rows(episode_dir) == [later, earlier], "the writer reordered the entries"
 
 
 def test_1025_an_absent_record_reads_as_no_rows(tmp_path):
-    """An episode with no `timing.json` reads as `[]` — an aborted-before-any-step episode is
-    a legitimate state, not an error — and reading does not bring the file into existence.
+    """An episode with no `timing.json` reads as `None` — the reader's typed absent answer
+    (#1049 d-19: an aborted-before-any-step episode records `{"steps": []}` and reads `[]`;
+    NOTHING at the name is a different fact, and the page's timing slot tells the two apart)
+    — and reading does not bring the file into existence.
 
     Positive control in the same test: once one step is recorded, the reader returns it.
     """
@@ -325,11 +333,11 @@ def test_1025_an_absent_record_reads_as_no_rows(tmp_path):
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
 
-    assert timing.read_stage_timings(episode_dir) == []
+    assert _read(episode_dir) is None
     assert not (episode_dir / timing.TIMING_NAME).exists(), "reading created the record"
 
     row = _clock(episode_dir).record("questioner", started_at=now_iso(), ended_at=now_iso())
-    assert timing.read_stage_timings(episode_dir) == [row], "the control failed"
+    assert _read(episode_dir) == [row], "the control failed"
 
 
 def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tmp_path):
@@ -358,7 +366,7 @@ def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tm
             "in place rather than replaced")
     assert os.stat(record).st_ino != before_inode, "the write reused the existing file"
     assert json.loads(record.read_text(encoding="utf-8")) == {"steps": [first, second]}
-    assert timing.read_stage_timings(episode_dir) == [first, second]
+    assert _read(episode_dir) == [first, second]
 
 
 def test_1025_a_document_that_is_not_the_record_raises_rather_than_reading_as_no_steps(tmp_path):
@@ -393,12 +401,12 @@ def test_1025_a_document_that_is_not_the_record_raises_rather_than_reading_as_no
         episode_dir.mkdir()
         (episode_dir / timing.TIMING_NAME).write_text(text, encoding="utf-8")
         with pytest.raises(ValueError, match=timing.TIMING_NAME):
-            timing.read_stage_timings(episode_dir)
+            _read(episode_dir)
 
     plain = tmp_path / "plain-episode"
     plain.mkdir()
     (plain / timing.TIMING_NAME).write_text(json.dumps({"steps": [good]}), encoding="utf-8")
-    assert timing.read_stage_timings(plain) == [good], "the control failed"
+    assert _read(plain) == [good], "the control failed"
 
 
 def test_1025_an_unknown_step_is_refused_and_nothing_is_written(tmp_path):
@@ -424,7 +432,7 @@ def test_1025_an_unknown_step_is_refused_and_nothing_is_written(tmp_path):
     with pytest.raises(ValueError, match="teardown"):
         clock.record("teardown", started_at=now_iso(), ended_at=now_iso())
     assert record.read_bytes() == bytes_before, "a refused step still wrote to the record"
-    assert timing.read_stage_timings(episode_dir) == [good], "the control failed"
+    assert _read(episode_dir) == [good], "the control failed"
 
 
 def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_path):
@@ -477,13 +485,13 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
     plain = tmp_path / "plain-episode"
     plain.mkdir()
     row = _clock(plain).record("questioner", started_at=now_iso(), ended_at=now_iso())
-    assert timing.read_stage_timings(plain) == [row], "the control failed"
+    assert _read(plain) == [row], "the control failed"
 
 
 def test_1025_the_reader_refuses_what_it_cannot_read_and_only_absence_is_empty(tmp_path):
     """`read_stage_timings` reads through `_io.read_guarded`, the posture of every other reader
     of the episode tree, and splits ABSENT from REFUSED the way the judge's readers do: no
-    entry at `episodes/<id>/timing.json` is `[]`; a symlink planted there, a directory
+    entry at `episodes/<id>/timing.json` is `None`; a symlink planted there, a directory
     squatting the name, or a plain file whose bytes are not text RAISES `ValueError` naming
     the file — never `[]`, which would read a refused or tampered record as an episode that
     aborted before its first step, and never the document a link points at. The link's target
@@ -501,26 +509,26 @@ def test_1025_the_reader_refuses_what_it_cannot_read_and_only_absence_is_empty(t
     symlinked.mkdir()
     (symlinked / timing.TIMING_NAME).symlink_to(planted)
     with pytest.raises(ValueError, match=timing.TIMING_NAME):
-        timing.read_stage_timings(symlinked)
+        _read(symlinked)
     assert (symlinked / timing.TIMING_NAME).is_symlink(), "the planted link was replaced"
 
     squatted = tmp_path / "squatted-episode"
     squatted.mkdir()
     (squatted / timing.TIMING_NAME).mkdir()
     with pytest.raises(ValueError, match=timing.TIMING_NAME):
-        timing.read_stage_timings(squatted)
+        _read(squatted)
 
     binary = tmp_path / "binary-episode"
     binary.mkdir()
     (binary / timing.TIMING_NAME).write_bytes(b"\xff\xfe not text")
     with pytest.raises(ValueError, match=timing.TIMING_NAME):
-        timing.read_stage_timings(binary)
+        _read(binary)
 
     plain = tmp_path / "plain-episode"
     plain.mkdir()
     (plain / timing.TIMING_NAME).write_text(json.dumps({"steps": [stray]}) + "\n",
                                             encoding="utf-8")
-    assert timing.read_stage_timings(plain) == [stray], "the control failed"
+    assert _read(plain) == [stray], "the control failed"
 
 
 def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_path):

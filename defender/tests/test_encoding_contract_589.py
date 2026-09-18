@@ -14,7 +14,7 @@ Two halves, and they need different tests:
   with no locale games at all; that is the point, and a test that reached for a C locale to drive
   it would be testing the wrong half.
 - **The pin** is locale-dependent: it needs an ambient encoding that isn't UTF-8. Those tests use
-  the subprocess + `_C_LOCALE_ENV` idiom from `test_corpus_fold_584.py::test_d5`, because the
+  the subprocess + `C_LOCALE_ENV` idiom from `test_corpus_fold_584.py::test_d5`, because the
   locale is process-wide and a *bare* `LC_ALL=C` does NOT reproduce (PEP 538 coerces it to
   C.UTF-8) — hence `PYTHONCOERCECLOCALE=0` + `PYTHONUTF8=0`.
 
@@ -35,16 +35,10 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.skills.invlang.corpus import load_corpus  # noqa: E402
+from defender.tests._locale import C_LOCALE_ENV  # noqa: E402
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 
-_C_LOCALE_ENV = {
-    "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin",
-    "PYTHONCOERCECLOCALE": "0",
-    "PYTHONUTF8": "0",
-    "LC_ALL": "C",
-    "LANG": "C",
-}
 
 _COMPANION = """## ORIENT
 
@@ -123,7 +117,7 @@ def test_an_undecodable_alert_json_degrades_the_signature_it_does_not_sink_the_c
 
 def _c_locale_python(script: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, env=_C_LOCALE_ENV,
+        [sys.executable, "-c", script], capture_output=True, text=True, env=C_LOCALE_ENV,
     )
 
 
@@ -171,7 +165,7 @@ def test_the_real_invlang_shim_prints_corpus_text_under_a_c_locale(tmp_path):
         [str(WORKSPACE_ROOT / "defender" / "bin" / "defender-invlang"),
          "hypothesis-vocabulary", "--signature", "sig-emdash"],
         capture_output=True, text=True, encoding="utf-8",
-        env={**_C_LOCALE_ENV,
+        env={**C_LOCALE_ENV,
              "DEFENDER_DIR": str(WORKSPACE_ROOT / "defender"),
              "DEFENDER_RUNS_BASE": str(runs)},
     )

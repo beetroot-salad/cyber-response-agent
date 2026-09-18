@@ -32,8 +32,18 @@ NO_NOTES = "(no notes)"
 #: branch is reached only through `_report.read_report`'s own verdict (`read_case_record`
 #: below), via `ReportNotParsable`.
 UNREADABLE_COMMENT_BODY = (
-    "No disposition could be recorded for this case: report.md carried no parsable "
-    "disposition to record."
+    "No disposition could be recorded for this case: report.md was missing or carried no "
+    "parsable disposition to record."
+)
+
+#: #1047 O2 — a run cut short with no verdict (an `aborted` exit, or a forced-close-set exit
+#: whose own forced report is unusable) leaves the case open and asks a person to escalate.
+#: `{exit}` is the exit class the driver stamped; it is the one rendered value, and it comes
+#: from the driver's closed vocabulary, never from anything the box wrote.
+ESCALATION_COMMENT_BODY = (
+    "Investigation ended without a verdict (exit: {exit}) — the environment appears "
+    "unreachable or the investigation could not complete automatically. Escalate for manual "
+    "review; this ticket is left open."
 )
 
 
@@ -307,6 +317,15 @@ def unreadable_comment_payload() -> dict[str, Any]:
     mapping = _load_mapping()
     author = _resolve_comment_author(mapping)
     return {"author": author, "body": UNREADABLE_COMMENT_BODY}
+
+
+def escalation_comment_payload(truncated_by: str) -> dict[str, Any]:
+    """The cut-short branch's outbound comment (#1047 O2): attributed like every other comment
+    the host makes, a fixed host sentence naming the exit class, and no verdict — the case
+    stays open for a person."""
+    mapping = _load_mapping()
+    author = _resolve_comment_author(mapping)
+    return {"author": author, "body": ESCALATION_COMMENT_BODY.format(exit=truncated_by)}
 
 
 # --------------------------------------------------------------------------------------------

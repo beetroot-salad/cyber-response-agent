@@ -372,12 +372,12 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
     challenged_record = record(run_dir, 1)
     stages = recording(holds())
     agent = build_main_agent(_spec923.StuckModel(), review_stages=stages.bundle())
-    _run, truncated_by, exit_reason = asyncio.run(driver._drive_agent(
+    _run, end, exit_reason = asyncio.run(driver._drive_agent(
         agent, "go", deps, _spec923.NullStore(), "sid",
         bounds(extra_turns=1, base_request_limit=1),
     ))
     assert exit_reason == "UsageLimitExceeded", exit_reason
-    assert truncated_by is not None
+    assert end.truncated_by is not None
     assert stages.calls == [], f"the forced close dispatched {stages.calls}"
     assert review_state(deps).closed is True
     fm = frontmatter(run_dir)
@@ -428,12 +428,12 @@ def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
         challenged_record = record(run_dir, 1)
         stages = recording(holds())
         agent = build_main_agent(_Killed(exc), review_stages=stages.bundle())
-        _run, truncated_by, exit_reason = asyncio.run(driver._drive_agent(
+        _run, end, exit_reason = asyncio.run(driver._drive_agent(
             agent, "go", deps, _spec923.NullStore(), "sid", bounds(),
         ))
         assert exit_reason == expected_reason, exit_reason
-        assert truncated_by == expected_truncation
-        assert truncated_by not in driver._CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE
+        assert end.truncated_by == expected_truncation
+        assert end.truncated_by not in driver._CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE
         assert stages.calls == [], f"a forced close dispatched {stages.calls}"
         assert review_state(deps).closed is False, f"{expected_reason} was closed as a verdict"
         assert not (run_dir / "report.md").exists(), f"{expected_reason} wrote a report.md"

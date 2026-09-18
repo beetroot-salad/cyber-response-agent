@@ -478,7 +478,7 @@ def test_grade_family_reads_the_review_record_once_through_the_guarded_reader(
     """
     ep = graded_episode(tmp_path, monkeypatch, worlds=("b", "c", "d"))
     family = W.mod("learning.judge.family")
-    reader = W.RecordingReader(W.read_yaml)
+    reader = W.RecordingReader(W.read_yaml_record)   # (bound, name) — the seam's shape, #1049 d-21
 
     family.grade_family(ep, review_reader=reader)
 

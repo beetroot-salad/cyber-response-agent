@@ -46,9 +46,11 @@ class Tail(SpecTail):
     Subclassed rather than edited in place: `_spec791.SpecTail` is #791's, and whether IT has
     been migrated off `close_case_ticket` is `test_767_record_case_ticket_is_the_writer_seam`'s
     own assertion (RF2 — a rename is silent at every duck-typed implementor of this seam, and
-    the test that does not carry it keeps passing while the run's ticket step does nothing)."""
+    the test that does not carry it keeps passing while the run's ticket step does nothing).
+    `**kw` is #1047's exit-class pair, which the tail threads through and this suite does not
+    interpret."""
 
-    def record_case_ticket(self, run_dir) -> None:
+    def record_case_ticket(self, run_dir, **kw) -> None:
         self._note(RECORD_STEP, run_dir)
 
 

@@ -26,9 +26,7 @@ the writer.
 """
 from __future__ import annotations
 
-import dataclasses
 import math
-import os
 import re
 import sys
 from pathlib import Path
@@ -39,10 +37,10 @@ if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])
 
 from defender._artifact_schema import INVESTIGATION_NAME, REPORT_NAME
 from defender._clock import parse_iso_utc
-from defender._io import entry_present, read_jsonl_rows_guarded, write_guarded
+from defender._io import Bound, bind, write_guarded
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
-from defender._run_paths import PROVENANCE, WIRE_LOG_DIR, artifact_dir, artifact_file
+from defender._run_paths import PROVENANCE, WIRE_LOG_DIR
 from defender._vocab import normalized_disposition, normalized_judge_outcome
 from defender.learning.branch import archive, staging
 from defender.learning.branch import timing as timing_mod
@@ -200,39 +198,6 @@ def _page_section(anchor: str, title: str, body: str) -> str:
 # =========================================================================================
 
 
-def _sentence(episode_dir: Path, text: str) -> str:
-    """A reader's refusal sentence, with the episode directory's own spelling taken out of it.
-
-    THE ONE PLACE A REFUSAL PASSES ON ITS WAY TO THE PAGE. The package readers were written for
-    the grading pass, whose log wants the absolute path in every refusal (`read_guarded`'s
-    alias sentence, an errno's `'/abs/...'`, `<name> at <path> could not be read`); this page
-    promises the opposite — two copies of one archive render byte-identical, and nothing in the
-    bytes says where the operator keeps episodes (d05/x24) — and that property held only for a
-    HEALTHY episode while the refusals were rendered verbatim. Every `_Record.error`, the leads
-    block's two refusal notes and the archived report's reason go through here, so a reader
-    added later cannot leak the root by accident: the loader, not each render site, owns it."""
-    # Both spellings the readers can have formatted: the directory as the caller passed it
-    # (every reader joins from it unresolved) and, should one resolve first, its real path.
-    # ANCHORED TO A PATH BOUNDARY, never a bare substring: a relative spelling like `re` or
-    # `ep` is a substring of `report.md`, `read`, `keep`, and an unanchored replace turned a
-    # refusal about `report.md` into "<episode>port.md could not be <episode>ad" (review of
-    # PR #1042). The root counts only where nothing path-like precedes it and a separator,
-    # a quote, whitespace, punctuation or the end follows it.
-    for root in dict.fromkeys((str(episode_dir), os.path.realpath(episode_dir))):
-        if root and root != ".":
-            text = _root_pattern(root).sub(
-                lambda m: "" if m.group("sep") else "<episode>", text)
-    return text
-
-
-def _root_pattern(root: str) -> re.Pattern[str]:
-    """`root` at a path boundary: `root/` followed by the rest of a path (dropped, leaving the
-    relative remainder) or `root` on its own (spelled `<episode>`)."""
-    sep = re.escape(os.sep)
-    return re.compile(
-        rf"(?<![\w.~{sep}-]){re.escape(root)}(?:(?P<sep>{sep})(?=\S)|{sep}?(?![\w.~{sep}-]))")
-
-
 class _Record:
     """One episode-level record's read: `value` (or `None`), `present` (was anything at all at
     the name), and `error` (the reader's refusal sentence, or `None`)."""
@@ -249,77 +214,66 @@ class _Record:
         return self.error is None
 
 
-def _read_review(episode_dir: Path) -> _Record:
-    path = Path(episode_dir) / archive.REVIEW_NAME
-    present = entry_present(path)
+def _read_review(bound: Bound) -> _Record:
     try:
-        doc = family.read_review_record(episode_dir)
+        doc = family.read_review_record(bound)
     except JudgeRefused as bad:
-        return _Record(present=True,
-                       error=_sentence(episode_dir, f"review record unreadable: {bad}"))
-    return _Record(doc, present=present)
+        return _Record(present=True, error=f"review record unreadable: {bad}")
+    return _Record(doc, present=doc is not None)
 
 
-def _strict_samples_reader(path: Path) -> dict[str, Any]:
+def _strict_samples_reader(bound: Bound, name: str) -> dict[str, Any] | None:
     """The page's own STRICT reading of `samples.yaml` (#1025 F-4) — through `read_samples_
     record`'s `reader=` seam. The DEFAULT reader `read_samples_record` uses everywhere else
     stays permissive (#1007 M4/O5); this one refuses what it cannot read so the page's
-    "unreadable" state is distinguishable from "absent". The screen itself is the package's
-    one home for a YAML record read (`screened_yaml_mapping`), not a second spelling of it."""
-    doc = family.screened_yaml_mapping(path, what=archive.SAMPLES_NAME)
-    return doc if doc is not None else {}
+    "unreadable" state is distinguishable from "absent", and answers `None` on absence — the
+    typed answer `_read_samples` coalesces at its own read site (#1049 RF-R1). The screen
+    itself is the package's one home for a YAML record read (`screened_yaml_mapping`), not a
+    second spelling of it — `empty_ok=True` because a present-but-empty samples.yaml is
+    "nothing recorded yet", not a reason to call the whole record unreadable (the manifest's
+    own empty-document refusal is untouched)."""
+    return family.screened_yaml_mapping(bound, name, what="the samples record", empty_ok=True)
 
 
-def _read_samples(episode_dir: Path) -> _Record:
-    path = Path(episode_dir) / archive.SAMPLES_NAME
-    present = entry_present(path)
+def _read_samples(bound: Bound) -> _Record:
     try:
-        doc = family.read_samples_record(episode_dir, reader=_strict_samples_reader)
+        doc = family.read_samples_record(bound, reader=_strict_samples_reader)
     except JudgeRefused as bad:
-        return _Record(present=True,
-                       error=_sentence(episode_dir, f"samples record unreadable: {bad}"))
-    if not doc and not present:
-        return _Record({}, present=False)
-    return _Record(doc, present=present)
+        return _Record(present=True, error=f"samples record unreadable: {bad}")
+    return _Record(doc or {}, present=doc is not None)
 
 
-def _read_staged(episode_dir: Path) -> _Record:
-    path = staging.staged_path(episode_dir)
-    present = entry_present(path)
+def _read_staged(bound: Bound) -> _Record:
     try:
-        rows = staging.read_staged(episode_dir)
+        rows = staging.read_staged(bound)
     except staging.StagingRefused as bad:
-        return _Record(present=True,
-                       error=_sentence(episode_dir, f"staging record unreadable: {bad}"))
-    if not rows and not present:
-        return _Record([], present=False)
-    return _Record(rows, present=present)
+        return _Record(present=True, error=f"staging record unreadable: {bad}")
+    return _Record(rows or [], present=rows is not None)
 
 
-def _read_timing(episode_dir: Path) -> _Record:
+def _read_timing(bound: Bound) -> _Record:
     try:
-        rows = timing_mod.read_stage_timings(episode_dir)
+        rows = timing_mod.read_stage_timings(bound)
     except ValueError as bad:
-        return _Record(present=True,
-                       error=_sentence(episode_dir, f"timing record unreadable: {bad}"))
-    return _Record(rows, present=bool(rows))
+        return _Record(present=True, error=f"timing record unreadable: {bad}")
+    return _Record(rows or [], present=rows is not None)
 
 
-def _read_family_stamp(episode_dir: Path) -> _Record:
+def _read_family_stamp(bound: Bound) -> _Record:
     try:
-        doc = archive.read_family_stamp(episode_dir)
+        doc = archive.read_family_stamp(bound)
     except ValueError as bad:
-        return _Record(present=True,
-                       error=_sentence(episode_dir, f"provenance record unreadable: {bad}"))
+        return _Record(present=True, error=f"provenance record unreadable: {bad}")
     return _Record(doc, present=doc is not None)
 
 
 def _read_grade(episode_dir: Path) -> _Record:
+    # `read_grade` KEEPS the root and binds at entry (#1049 non-obligation) — its own refusal
+    # never quotes it (RF-C3), so no scrub is needed here either.
     try:
         grade = read_grade(episode_dir)
     except JudgeRefused as bad:
-        return _Record(present=True,
-                       error=_sentence(episode_dir, f"grade record unreadable: {bad}"))
+        return _Record(present=True, error=f"grade record unreadable: {bad}")
     return _Record(grade, present=grade is not None)
 
 
@@ -376,7 +330,7 @@ class _Timing:
     ONE bit `measured` turns on. `caption` is the table's fallback line for an unmeasured
     clock, `None` once there is a real wall to show instead."""
 
-    __slots__ = ("error", "rows_by_step", "trusted_by_step", "launcher_wall_ms")
+    __slots__ = ("error", "present", "rows_by_step", "trusted_by_step", "launcher_wall_ms")
 
     def step_wall_ms(self, step: str) -> float | None:
         """ONE step's wall: its first trusted entry's start to its last trusted entry's end
@@ -390,6 +344,7 @@ class _Timing:
 
     def __init__(self, rec: _Record) -> None:
         self.error = rec.error
+        self.present = rec.present
         self.rows_by_step: dict[str, list[dict[str, Any]]] = {}
         self.trusted_by_step: dict[str, list[dict[str, Any]]] = {}
         if rec.ok:
@@ -422,20 +377,24 @@ class _Timing:
         if self.error is not None:
             return None  # the table renders the refusal itself, as its own `st-error` line
         if not self.rows_by_step:
-            # ABSENT, or a record with no completed step — the reader folds the two (an abort
-            # before the first step finished leaves `{"steps": []}`, a legitimate record it
-            # answers with the same `[]`), so neither can be told from the other here.
+            # ABSENT vs a present record with no completed step (an abort before the first
+            # step finished leaves `{"steps": []}`, a legitimate record) — told apart by the
+            # reader's own `present` (#1049 D-J7: derived from `rows is not None`, never
+            # `bool(rows)`), never conflated into one caption.
+            if self.present:
+                return "model-call time — no completed stages"
             return "model-call time — no timing record"
         return "model-call time — the timing record has no usable span (every row inverted)"
 
 
 class _WorldArchive:
-    """What `worlds/<label>/` holds for the world section: the archived report (`None` when
-    nothing is at its name), whether the investigation is archived, and the two JSON stamps."""
+    """What `worlds/<label>/` holds for the world section: the archived report (its own
+    `absent` when nothing is at its name; a refused entry is its `reason`), whether the
+    investigation is archived, and the two JSON stamps (`None` when absent or unreadable)."""
 
     __slots__ = ("report", "investigation_present", "provenance", "scrub")
 
-    def __init__(self, *, report: ReportRead | None, investigation_present: bool,
+    def __init__(self, *, report: ReportRead, investigation_present: bool,
                  provenance: dict[str, Any] | None, scrub: dict[str, Any] | None) -> None:
         self.report = report
         self.investigation_present = investigation_present
@@ -454,11 +413,15 @@ class _WorldLeads:
     referenced-lead roster all come off `investigation.md`, which is read whether or not the
     ledger could be."""
 
-    __slots__ = ("ledger_note", "archived", "facts_error", "moved", "chains")
+    __slots__ = ("ledger_note", "archived", "dir_error", "facts_error", "moved", "chains")
 
     def __init__(self) -> None:
         self.ledger_note: str | None = None
         self.archived = False
+        #: `worlds/<label>` is there but is not a listable real directory (a planted link, a
+        #: file squatting the name, a permission fault): the bind's own refusal, said once for
+        #: the block — no lead is rostered off a directory that was never listed.
+        self.dir_error: str | None = None
         self.facts_error: str | None = None
         self.moved = False
         self.chains: list[tuple[str, dict[str, Any]]] = []
@@ -509,7 +472,7 @@ class WorldEntry:
         self.nameable = False
         self.run_dir_name: str | None = None  # the runs/ dir that decomposed to this label
         self.result: _ResultEvent | None = None  # `None` when there is no run dir at all
-        self.archive: _WorldArchive | None = None  # `None` when worlds/<label> is not a dir
+        self.archive: _WorldArchive | None = None  # `None` when nothing is at worlds/<label>
 
 
 class _Trace:
@@ -696,7 +659,14 @@ class _Episode:
     """One read of the episode directory — everything a section renders, already typed."""
 
     def __init__(self, episode_dir: Path, manifest: dict[str, Any]) -> None:
+        #: Held for EXACTLY two readers that are not this page's to rewrite — the lead
+        #: repository (`family.leads_by_id`, the run dir's own surface) and the draw reader
+        #: (`draws_on_disk_report`) — and reached only past the bind's own listing having
+        #: judged the world directory real. Never formatted into the page.
         self.dir = episode_dir
+        # NO bound reader is stored here (#1049 D-V2): `load_episode` binds once, threads the
+        # handle through every loader as an argument, and closes it when it returns — every
+        # read the page makes happens at load, and a renderer has no tree to reach for.
         self.manifest = manifest
         self.episode_id = family.episode_id_of(manifest)
         # BUILT OR ABSENT, never the raw id in its place: the token is joined into
@@ -788,24 +758,29 @@ def load_episode(episode_dir: Path) -> _Episode:
     """Every record the page shows, read once. Raises `JudgeRefused` for the manifest alone
     (d01: the ONE fatal refusal); every other refusal is a slot on the model."""
     episode_dir = Path(episode_dir)
-    ep = _Episode(episode_dir, family.raw_manifest(episode_dir))
+    with bind(episode_dir) as bound:
+        return _load_episode(episode_dir, bound)
+
+
+def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
+    ep = _Episode(episode_dir, family.read_manifest(bound))
 
     ep.grade_rec = _read_grade(episode_dir)
-    ep.review_rec = _read_review(episode_dir)
-    ep.samples_rec = _read_samples(episode_dir)
-    ep.staged_rec = _read_staged(episode_dir)
-    ep.stamp_rec = _read_family_stamp(episode_dir)
-    ep.timing_rec = _read_timing(episode_dir)
+    ep.review_rec = _read_review(bound)
+    ep.samples_rec = _read_samples(bound)
+    ep.staged_rec = _read_staged(bound)
+    ep.stamp_rec = _read_family_stamp(bound)
+    ep.timing_rec = _read_timing(bound)
     ep.timing = _Timing(ep.timing_rec)
 
     grade = ep.grade
     grade_rows = [r for r in (_items(grade.worlds) if grade is not None else [])
                   if isinstance(r, dict) and isinstance(r.get("world"), str)]
-    worlds_dir = episode_dir / archive.WORLDS_DIRNAME
     ep.archived_world_dirs = [
-        p.name for p in _entries_of(worlds_dir) if artifact_dir(p) and p.name != _FAMILY_LABEL]
+        name for name in bound.under(archive.WORLDS_DIRNAME).entries().dirs()
+        if name != _FAMILY_LABEL]
     ep.entries, ep.roster, ep.off_roster = _build_roster(
-        ep, [r["world"] for r in grade_rows], grade_present=ep.grade_rec.present)
+        ep, bound, [r["world"] for r in grade_rows], grade_present=ep.grade_rec.present)
     for row in grade_rows:
         w = ep.entries.get(row["world"])
         if w is not None:
@@ -817,41 +792,38 @@ def load_episode(episode_dir: Path) -> _Episode:
     nameable = [w.label for w in ep.entries.values() if w.nameable]
     labels = [w["world_id"] for w in ep.manifest_worlds
               if isinstance(w.get("world_id"), str) and w["world_id"] in nameable]
-    ep.alert = episode_alert(episode_dir, labels or [
+    ep.alert = episode_alert(bound, labels or [
         n for n in ep.archived_world_dirs if family.world_label_names_directory(ep.episode_id, n)])
 
     for label in [*ep.entries, _FAMILY_LABEL]:
-        ep.draws[label] = (draws_on_disk_report(worlds_dir / label / archive.DRAWS_DIRNAME)
+        ep.draws[label] = (_load_draws(ep, bound, label)
                            if label == _FAMILY_LABEL or ep.entries[label].nameable
                            else ({}, DrawsSkipReport()))
     for w in ep.entries.values():
         if not w.nameable:
             continue
         if w.run_dir_name is not None:
-            w.result = _result_event(episode_dir / RUNS_SUBDIR / w.run_dir_name)
-        w.archive = _load_world_archive(episode_dir, worlds_dir / w.label)
+            w.result = _result_event(bound, f"{RUNS_SUBDIR}/{w.run_dir_name}")
+        w.archive = _load_world_archive(bound, w.label)
     for item in ep.sectioned:
         entry = ep.entries.get(item.label)
-        ep.leads[item.label] = (_load_world_leads(ep, item.label)
+        ep.leads[item.label] = (_load_world_leads(ep, bound, item.label)
                                 if entry is None or entry.nameable else _WorldLeads())
 
-    ep.wire = _load_wire_logs(episode_dir / WIRE_LOG_DIR)
+    ep.wire = _load_wire_logs(bound.under(WIRE_LOG_DIR))
     ep.findings = _walk_findings(ep)
     ep.total_cost, ep.runs_costed, ep.costed, ep.worlds_wall, ep.lower_bound = _cost_totals(ep)
     return ep
 
 
-def _entries_of(directory: Path) -> list[Path]:
-    """The directory's children, or nothing when it is not a listable directory — a
-    permission-denied listing (mode 000; root ignores this, a non-root operator does not) is
-    that directory's own absence, never the page's crash. `artifact_dir` screens a link or a
-    non-directory at the name first."""
-    if not artifact_dir(directory):
-        return []
-    try:
-        return sorted(directory.iterdir())
-    except OSError:
-        return []
+def _load_draws(ep: _Episode, bound: Bound, label: str) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
+    """The draws under `worlds/<label>/judge/` through the enqueue's own reader — which takes
+    a path — reached ONLY when the bind's listing of `worlds/<label>` says the draw directory
+    is a real one (never a link the page would otherwise hand the reader to follow)."""
+    world = bound.under(f"{archive.WORLDS_DIRNAME}/{label}").entries()
+    if not world.has_dir(archive.DRAWS_DIRNAME):
+        return {}, DrawsSkipReport()
+    return draws_on_disk_report(ep.dir / archive.WORLDS_DIRNAME / label / archive.DRAWS_DIRNAME)
 
 
 def _duration(value: Any) -> float | None:
@@ -883,7 +855,7 @@ def _decompose_run_dir(name: str, *, episode_id: str) -> str | None:
     return None
 
 
-def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — one union-membership decision (manifest ∪ judge.yaml rows ∪ runs/ dirs), the roster every other section keys on
+def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # noqa: C901 — one union-membership decision (manifest ∪ judge.yaml rows ∪ runs/ dirs), the roster every other section keys on
                   *, grade_present: bool) -> tuple[dict[str, WorldEntry], list[RosterItem], int]:
     """Every world label the page must give a section to: manifest worlds ∪ `judge.yaml`
     rows ∪ `runs/` directories that decompose to `<episode_id>-<label>` (#1025 J7/J8).
@@ -895,8 +867,8 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — o
     (reported on one templated line, never rendered)."""
     entries: dict[str, WorldEntry] = {}
     order: list[str] = []
-    runs_dir = ep.dir / RUNS_SUBDIR
-    run_dirs = [p.name for p in _entries_of(runs_dir) if artifact_dir(p)]
+    runs = bound.under(RUNS_SUBDIR).entries()
+    run_dirs = runs.dirs()
 
     def entry(label: str) -> WorldEntry:
         if label not in entries:
@@ -910,9 +882,9 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — o
     # (readable or not; `runs/` is disposable after it, J8), or a world was archived under
     # `worlds/`. An episode that never got past REVIEW/STAGING (a rejection, an abort) has none
     # of these: a manifest but no world to show anything about yet (#1025 J7/J8).
-    # (`run_dirs` non-empty implies `artifact_dir(runs_dir)` — it is listed from it — so the
-    # rule is these three, not four.)
-    reached_runs = artifact_dir(runs_dir) or grade_present or bool(ep.archived_world_dirs)
+    # (`run_dirs` non-empty implies `runs/` listed — it is listed from it — so the rule is
+    # these three, not four.)
+    reached_runs = runs.entries is not None or grade_present or bool(ep.archived_world_dirs)
     # `family` IS NOT A WORLD. It is the reserved label the family-level call's draws live under
     # (`worlds/family/judge/`), and the judge refuses a manifest that spells a world with it —
     # but the page reads whatever tree it is given, and a manifest row, a grade row or a
@@ -962,16 +934,15 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str],  # noqa: C901 — o
     return entries, roster, off_roster
 
 
-def _result_event(run_dir: Path) -> _ResultEvent:
-    trace = run_dir / _TOOL_TRACE_NAME
-    if not entry_present(trace):
+def _result_event(bound: Bound, run_dir_name: str) -> _ResultEvent:
+    # THE EPISODE BIND, WALKED THROUGH THE JSONL TWIN (#1049) — absent/refused are the
+    # primitive's own states, never an `entry_present` stat ahead of the read; a link or a
+    # FIFO at the name is refused at the open itself rather than crashing the page with a
+    # bare `PermissionError` (root ignores mode 000; a real non-root run does not, #1025).
+    rows, _bad, rec = bound.read_jsonl(f"{run_dir_name}/{_TOOL_TRACE_NAME}")
+    if rec.absent:
         return _ResultEvent(None, None, "absent")
-    # ONE guarded read decides "refused" — a link or a FIFO at the name, a permission-denied
-    # file — rather than an lstat and then the tolerant reader's bare `read_text`, whose
-    # `PermissionError` took the whole page down (root ignores mode 000; a real non-root run
-    # does not, #1025).
-    rows, _bad, refusal = read_jsonl_rows_guarded(trace)
-    if refusal is not None:
+    if rec.refusal is not None:
         return _ResultEvent(None, None, "refused")
     if not rows or rows[-1].get("type") != "result":
         return _ResultEvent(None, None, "none")
@@ -983,29 +954,25 @@ def _result_event(run_dir: Path) -> _ResultEvent:
     return _ResultEvent(cost, wall, "ok")
 
 
-def _load_world_archive(episode_dir: Path, world_dir: Path) -> _WorldArchive | None:
-    if not artifact_dir(world_dir):
-        return None
-    report_path = world_dir / REPORT_NAME
-    report = None
-    if entry_present(report_path):
-        # The world-archive screen (`read_guarded`: open `O_NOFOLLOW` + `fstat`), not an lstat
-        # taken ahead of a bare read — the same one reader the judge's own pass uses for these
-        # bytes, so a link planted at the name is refused at the open itself.
-        report = family.read_archived_report(report_path)
-    if report is not None and report.reason:
-        report = dataclasses.replace(report, reason=_sentence(episode_dir, report.reason))
-    inv_path = world_dir / INVESTIGATION_NAME
+def _load_world_archive(bound: Bound, label: str) -> _WorldArchive:
+    # NO PRE-CHECK OF `worlds/<label>` (#1049 D-36): each leaf below reads for itself, through
+    # the episode bind, and answers its own absent/refused/present state — a world with no
+    # `worlds/<label>` directory at all reads every leaf absent exactly as one with the
+    # directory but no file at a leaf does, because the walk's own ENOENT does not care which
+    # component was missing; a LINK at `worlds/<label>` is every leaf's own refusal.
+    name = f"{archive.WORLDS_DIRNAME}/{label}"
+    report = family.read_archived_report(bound, f"{name}/{REPORT_NAME}")
+    investigation = bound.read(f"{name}/{INVESTIGATION_NAME}")
     return _WorldArchive(
         report=report,
-        investigation_present=entry_present(inv_path),
-        provenance=family.json_mapping(world_dir / PROVENANCE),
-        scrub=family.json_mapping(world_dir / archive.SCRUB_VERDICT_NAME))
+        investigation_present=not investigation.absent,
+        provenance=family.json_mapping(bound, f"{name}/{PROVENANCE}"),
+        scrub=family.json_mapping(bound, f"{name}/{archive.SCRUB_VERDICT_NAME}"))
 
 
-def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, PLR0912 — the served ledger, the archive notes and every lead's chain are one world's leads block (#1025 O3)
+def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  # noqa: C901, PLR0912 — the served ledger, the archive notes and every lead's chain are one world's leads block (#1025 O3)
     leads = _WorldLeads()
-    world_dir = ep.dir / archive.WORLDS_DIRNAME / label
+    world = bound.under(f"{archive.WORLDS_DIRNAME}/{label}")
 
     # The served ledger is read ONCE, through the judge's own reader (`read_world_ledger`) —
     # its `malformed_rows` is the judge's own count (a torn line AND a row whose `source` is
@@ -1015,43 +982,54 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
     # investigation read below.
     if ep.episode_token is None:
         leads.ledger_note = "served ledger: not readable — the episode id names no token"
-    elif not entry_present(
-            family.world_ledger_path(ep.dir, label, episode_token=ep.episode_token)):
-        leads.ledger_note = "served ledger: absent"
     else:
         try:
-            _rows, malformed = family.read_world_ledger(
-                ep.dir, label, episode_token=ep.episode_token)
+            _rows, malformed, ledger_read = family.read_world_ledger(
+                bound, label, episode_token=ep.episode_token)
         except JudgeRefused as bad:
-            leads.ledger_note = _sentence(ep.dir, f"served ledger unreadable: {bad}")
+            leads.ledger_note = f"served ledger unreadable: {bad}"
         else:
-            if malformed:
+            if ledger_read.absent:
+                leads.ledger_note = "served ledger: absent"
+            elif malformed:
                 leads.ledger_note = f"{malformed} malformed row"
 
-    leads.archived = artifact_dir(world_dir)
+    # DIRECTORY-LEVEL, OFF THE BIND'S OWN LISTING (#1049 D-36) — never a stat: a world whose
+    # `worlds/<label>` is wholly absent has nothing this block can chain leads over; one whose
+    # entry is there but is not a real, listable directory (a planted link, a file at the
+    # name) is refused ONCE, here, and nothing below it is rostered — a link is never a way to
+    # another tree's leads; one that exists but is missing individual records
+    # (investigation.md, a lead's summary) still renders every leaf it can, each its own arm.
+    listing = world.entries()
+    leads.archived = not listing.absent
     if not leads.archived:
         return leads
-
-    inv_path = world_dir / INVESTIGATION_NAME
+    if listing.refusal is not None:
+        leads.dir_error = listing.refusal
+        return leads
     facts = None
-    if entry_present(inv_path):
-        try:
-            facts = family.read_investigation_facts(world_dir, world=label)
-        except JudgeRefused as bad:
-            leads.facts_error = _sentence(ep.dir, str(bad))
-        except Exception as bad:  # noqa: BLE001
-            leads.facts_error = _sentence(ep.dir, str(bad))
-
     try:
-        all_leads = family.leads_by_id(world_dir)
+        read_facts = family.read_investigation_facts(bound, world=label)
+    except JudgeRefused as bad:
+        leads.facts_error = str(bad)
+    except Exception as bad:  # noqa: BLE001 — a model-written document is parsed here; whatever the parser raises is this slot's, never the page's
+        leads.facts_error = f"{archive.WORLDS_DIRNAME}/{label}/{INVESTIGATION_NAME}: {bad!r}"
+    else:
+        if not read_facts.absent:
+            facts = read_facts
+
+    # `leads_by_id` is the lead repository's own surface and takes the world's directory — the
+    # one path this block hands anyone, and only now that the listing above judged
+    # `worlds/<label>` a real directory.
+    try:
+        all_leads = family.leads_by_id(ep.dir / archive.WORLDS_DIRNAME / label)
     except Exception:  # noqa: BLE001
         all_leads = {}
 
     # A summary is a `.md` plain file; anything else in the directory is invisible here — its
-    # stem is a lead id the roster below neutralizes on its own if it cannot be named.
-    summaries_dir = world_dir / archive.GATHER_SUMMARIES_DIRNAME
-    summary_stems = {p.stem for p in _entries_of(summaries_dir)
-                     if p.suffix == ".md" and artifact_file(p)}
+    # stem is a lead id the roster below neutralizes on its own if it cannot be named. The
+    # judge prompt's roster and this one come off one spelling (`summary_lead_ids`).
+    summary_stems = family.summary_lead_ids(world)
 
     if facts is not None:
         roster = set(facts.referenced_leads) | summary_stems
@@ -1062,21 +1040,21 @@ def _load_world_leads(ep: _Episode, label: str) -> _WorldLeads:  # noqa: C901, P
         resolutions_by_lead = {}
 
     for lead_id in sorted(roster):
-        # `lead_chain` reads the gather summary through `read_guarded` and answers a refusal
-        # as the summary's own sentence; nothing is caught here, so the page and the grading
-        # pass see one and the same reader.
-        chain = family.lead_chain(world_dir, lead_id, resolutions_by_lead, leads=all_leads)
+        # `lead_chain` reads the gather summary through the world's derived sub-bind and
+        # answers a refusal as the summary's own sentence; nothing is caught here, so the page
+        # and the grading pass see one and the same reader.
+        chain = family.lead_chain(world, lead_id, resolutions_by_lead, leads=all_leads)
         leads.chains.append((lead_id, chain))
     return leads
 
 
-def _load_wire_logs(wire: Path) -> _WireLogs:
+def _load_wire_logs(wire: Bound) -> _WireLogs:
     logs = _WireLogs()
-    if not artifact_dir(wire):
+    listing = wire.entries()
+    if listing.entries is None:
         return logs
     logs.present = True
-    for path in _entries_of(wire):
-        name = path.name
+    for name in sorted(listing.entries):
         if not name.endswith(".jsonl"):
             continue
         if "_framed_trace" in name:
@@ -1084,7 +1062,7 @@ def _load_wire_logs(wire: Path) -> _WireLogs:
                 continue
             stem = name[: -len("_framed_trace.jsonl")] + "_trace"
             trace = logs.traces.setdefault(stem, _Trace(stem))
-            frows, _bad, _refusal = read_jsonl_rows_guarded(path)
+            frows, _bad, _rec = wire.read_jsonl(name)
             if frows:
                 trace.framed = frows[0]
             continue
@@ -1093,12 +1071,12 @@ def _load_wire_logs(wire: Path) -> _WireLogs:
         stem = name[: -len(".jsonl")]
         trace = logs.traces.setdefault(stem, _Trace(stem))
         # `wire_logs/` sits under the episode dir, a tree a sibling box has an rw bind on
-        # (`judge.__init__._write_wire_log`'s own docstring names it): the guarded reader
+        # (`judge.__init__._write_wire_log`'s own docstring names it): the bound reader
         # refuses a link or a FIFO at the name at the open itself and answers a permission
         # fault as a refusal rather than an exception.
-        rows, unreadable, refusal = read_jsonl_rows_guarded(path)
-        if refusal is not None:
-            trace.plain = "refused"
+        rows, unreadable, rec = wire.read_jsonl(name)
+        if rec.text is None:
+            trace.plain = "refused" if rec.refusal is not None else "absent"
             continue
         trace.plain = "ok"
         trace.rows, trace.unreadable = rows, unreadable
@@ -1870,7 +1848,7 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
     if archived is None:
         bits.append('<div class="w-archive">not archived</div>')
     else:
-        if archived.report is None:
+        if archived.report.absent:
             bits.append(f'<div class="w-archive">{esc(REPORT_NAME)}: not archived</div>')
         else:
             headline = archived.report.disposition_or_unknown
@@ -2398,6 +2376,8 @@ def _render_world_leads(label: str, leads: _WorldLeads) -> str:
         return f'<div id="leads-{esc(label)}" class="leads-section">not archived' \
               f'{"".join(bits)}</div>'
 
+    if leads.dir_error is not None:
+        bits.append(f'<div class="ld-dir">world directory unreadable: {_uv(leads.dir_error)}</div>')
     if leads.facts_error is not None:
         bits.append(f'<div class="ld-investigation">investigation record unavailable: '
                    f'{_uv(leads.facts_error)}</div>')

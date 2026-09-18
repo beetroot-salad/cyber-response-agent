@@ -329,7 +329,8 @@ def write_timing(episode_dir: Path, steps: list[tuple[str, str, str]] | None = N
     rows = [{"step": s, "started_at": a, "ended_at": b} for s, a, b in (steps or [])]
     write_guarded(path, json.dumps({"steps": rows}, indent=2) + "\n", mode="replace")
     if check:
-        assert timing.read_stage_timings(episode_dir) == rows
+        # the reader takes the BOUND primitive, never a root it could format (#1049 D-V2)
+        assert timing.read_stage_timings(J.mod("_io").bind(episode_dir)) == rows
     return path
 
 

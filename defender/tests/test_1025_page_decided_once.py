@@ -73,13 +73,16 @@ def test_1025_a_measured_record_repeats_no_fallback_on_the_tile(tmp_path):
 
 
 def test_1025_a_record_with_no_completed_step_reads_as_no_record(tmp_path):
-    """`{"steps": []}` — an abort before the first step finished — is a legitimate record the
-    reader answers with the same `[]` as an absent file, so the page cannot tell the two apart
-    and says so with the absent sentence on every surface, consistently."""
+    """`{"steps": []}` — an abort before the first step finished — is a legitimate PRESENT
+    record with no completed stage: the reader answers `[]` for it and `None` for an absent
+    file (#1049 d-19/s-66 closed the conflation g20 found), so the stage table's caption says
+    it holds no stages — not the absent sentence — while the lower-bound label is still owed
+    on every surface, consistently."""
     ep = E.sample_episode(tmp_path)
     E.write_timing(ep.dir, [])
     page = render(ep)
-    assert "no timing record" in page.text_of("stage-timing")
+    assert "no timing record" not in page.text_of("stage-timing"), page.text_of("stage-timing")
+    assert "unreadable" not in page.text_of("stage-timing")
     assert LOWER_BOUND in page.text_of("vd-tile-4")
     assert LOWER_BOUND in page.text_of("sec-stages")
 
@@ -242,17 +245,19 @@ def test_1025_a_finding_row_refuses_an_unknown_field():
 
 
 def test_1025_an_absent_archived_report_is_decided_after_the_guarded_read(tmp_path):
-    """An absent `report.md` reads with `read_report`'s own "not found" sentence — but decided
-    from the guarded read's refusal, never by handing the path to `read_report`, whose
-    `is_file()` + `read_text` follow a link planted between the two."""
+    """An absent `report.md` reads as the ABSENT STATE (`ReportRead.absent`; #1049 F-I: the
+    "not found" sentence died with the path it named) — decided from the bound walk's own
+    open, never by handing a path to `read_report`, whose `is_file()` + `read_text` follow a
+    link planted between the two."""
     family = E.mod("learning.judge.family")
-    got = family.read_archived_report(tmp_path / "report.md")
+    bound = E.mod("_io").bind(tmp_path)
+    got = family.read_archived_report(bound, "report.md")
     assert got.disposition is None, got
-    assert "not found" in got.reason, got
+    assert got.absent is True, got
     target = tmp_path / "elsewhere.md"
     target.write_text("---\ndisposition: malicious\n---\nnot this world's\n", encoding="utf-8")
     (tmp_path / "report.md").symlink_to(target)
-    got = family.read_archived_report(tmp_path / "report.md")
+    got = family.read_archived_report(bound, "report.md")
     assert got.disposition is None, got
     assert "aliased" in got.reason, got
     assert "not this world" not in got.body

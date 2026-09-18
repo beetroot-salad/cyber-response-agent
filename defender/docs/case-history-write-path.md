@@ -26,11 +26,30 @@ what manufactures the read PR's fixtures.
   as a thin **bridge** (open ticket at `materialize_run_dir`) + a post-run
   **comment**. The close is the person's act and doubles as the release: a later
   run's gather is served a case's comments only once its status is the mapping's
-  `released.status` (`closed`), and the writer never appends behind that close —
-  it reads the case back first and refuses with a `refused-released` receipt.
-  Idempotency still falls out: create-once (a replay's `POST /tickets` returns
-  409 = already there); a re-run of an open case appends a second comment, which
-  the person's close then covers too.
+  `released.status` (`closed`). What makes that status MEAN "a person did this" is
+  structural, not a check: the defender's client has no transition call at all —
+  create and comment are the only writes it can make, and `test_767_writer.py` /
+  `test_1047_ticket_lane.py` keep it that way. (In a real store this is the
+  agent credential's permission scheme; in the playground, which has no auth, the
+  client is the enforcement.) The writer also looks before it appends — one
+  read-back, and a `refused-released` receipt if the case is already closed — but
+  that is a courtesy against commenting on a case the person has finished with,
+  not the gate: a close landing between the read and the write still gets the
+  comment. Idempotency still falls out: create-once (a replay's `POST /tickets`
+  returns 409 = already there); a re-run of an open case appends a second
+  comment, which the person's close then covers too.
+
+- **Cut-short runs record per exit class (#1047 O2), still as comments.** The exit
+  class comes in-process from `run.py` off the driver's own summary, never off
+  anything in the run dir. `aborted` → an escalation note (no verdict; "environment
+  appears unreachable, escalate"), ticket stays open. `request-limit` /
+  `retry-exhausted` → the record, proposing the host's forced `unresolved`; with no
+  usable report (the forced close itself failed) → the escalation note.
+  `budget` / `store` → no call at all. Anything else → the record off the report.
+  A run whose model had already closed when the cut landed (`closed_before_cut`)
+  records its own verdict instead. Before #767 the forced-close arms CLOSED the
+  ticket; that is the one thing this design cannot allow, since a host-set `closed`
+  would read to every later run as a person's approval.
 
 - **Anti-corruption boundary — internal model ≠ external model.** `report.md`
   (+ `alert.json`) is the *internal* case model; the ticket schema is the *external*
@@ -70,9 +89,10 @@ what manufactures the read PR's fixtures.
 - **Never breaks the run.** Like `cross_check_tables` / `visualize`, every failure —
   missing config, unreachable stub, HTTP error, a mapping that cannot say what
   "released" is spelled — is a WARN, a receipt and a return, never a raise/exit. A
-  report with no parsable disposition still records, with a fixed host sentence. A
-  crashed run with no `report.md` leaves the ticket open and uncommented
-  (investigation incomplete — realistic).
+  report that is missing or carries no parsable disposition still records, with a
+  fixed host sentence and no proposal in it — the person sees on the ticket that
+  the run ended with nothing to propose, rather than inferring it from silence.
+  (The cut-short exit classes above take their own arms first.)
 
 - **Opt-in, deferred product target.** `--update-ticket` (default off) on both
   engines; users turn it on per deployment. The helper is engine-agnostic (one
@@ -94,8 +114,8 @@ what manufactures the read PR's fixtures.
 - `knowledge/environment/systems/case-history/mapping.yaml` — the de-facto schema
   (field mapping + conventions + the released status), editable without touching code.
 - `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
-  `record_case_ticket` (one read-back, one comment POST, a `ticket_write.json`
-  receipt on every branch), non-fatal.
+  `record_case_ticket` (one read-back, at most one comment POST, a `ticket_write.json`
+  receipt on every branch that called out; no transition call exists), non-fatal.
 - `runtime/ticket_screen.py` + `runtime/query_tool.py` — the read side: an
   unreleased case's comments are served to no model; a released case is served whole.
 - `run.py` — `--update-ticket`: open after materialize, record after
