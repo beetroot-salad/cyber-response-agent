@@ -12,6 +12,7 @@ sourcing.
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -20,14 +21,17 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip("pydantic_ai")
-pytest.importorskip("openai")
+# `find_spec` LOCATES the openai SDK without executing it. Importing the two pydantic-ai
+# model modules below costs 38 MB, and EVERY xdist worker was paying it at collection
+# time for the four tests in this file that assert on the classes. The defender source
+# builds providers lazily, so nothing else here pulls them — they moved into those four.
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("openai") is None, reason="openai SDK not installed"
+)
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 if str(_DEFENDER) not in sys.path:
     sys.path.insert(0, str(_DEFENDER))
-
-from pydantic_ai.models.anthropic import AnthropicModel  # noqa: E402
-from pydantic_ai.models.openai import OpenAIChatModel  # noqa: E402
 
 import run  # noqa: E402
 from defender import agents  # noqa: E402
@@ -122,6 +126,8 @@ def test_api_key_vars_covers_both_providers():
 
 
 def test_build_model_routes_claude_to_anthropic(monkeypatch):
+    from pydantic_ai.models.anthropic import AnthropicModel
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     m = providers.provider_for("claude-sonnet-4-6").build_model("claude-sonnet-4-6")
     assert isinstance(m, AnthropicModel)
@@ -129,6 +135,8 @@ def test_build_model_routes_claude_to_anthropic(monkeypatch):
 
 @pytest.mark.parametrize("name", ["glm-5.3", "glm-5p3", f"fireworks:{_GLM_ID}"])
 def test_build_model_fireworks_from_alias_or_prefix(name, monkeypatch):
+    from pydantic_ai.models.openai import OpenAIChatModel
+
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     m = providers.FIREWORKS.build_model(name)
     assert isinstance(m, OpenAIChatModel)
@@ -144,6 +152,8 @@ def test_build_model_fireworks_requires_key(monkeypatch):
 
 
 def test_build_model_kimi_alias(monkeypatch):
+    from pydantic_ai.models.openai import OpenAIChatModel
+
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     m = providers.FIREWORKS.build_model("kimi-k3")
     assert isinstance(m, OpenAIChatModel)
@@ -151,6 +161,8 @@ def test_build_model_kimi_alias(monkeypatch):
 
 
 def test_build_pairs_model_with_settings(monkeypatch):
+    from pydantic_ai.models.openai import OpenAIChatModel
+
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     built = providers.build_for_effort("glm-5.3", providers.effort_for_role("glm-5.3", AgentRole.MAIN))

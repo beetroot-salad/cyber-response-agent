@@ -17,9 +17,9 @@ all production. A new scenario is a verb table and two `Turn`s, not fresh plumbi
 
 THE MAPPING IS THE SHIPPED ONE HERE, deliberately: a driven run resolves `$DEFENDER_DIR` for
 its skills, its lessons and its grants, so repointing it at a fixture tree would change the run
-rather than the mapping. The approved tag and the agent identity are therefore READ OFF the
-shipped file (`shipped_tag_and_author`), which also makes these tests a statement about the
-file an operator edits (O5).
+rather than the mapping. The released status and the agent identity are therefore READ OFF
+the shipped file (`shipped_released_status_and_author`), which also makes these tests a
+statement about the file an operator edits (O5).
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime.verbs import VerbContext  # noqa: E402
-from defender.tests._spec767 import shipped_tag_and_author  # noqa: E402
+from defender.tests._spec767 import shipped_released_status_and_author  # noqa: E402
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DONE,
     ScopedFakeVerbs,
@@ -44,11 +44,13 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-APPROVED_KEY = "SOC-APPROVED"
-UNAPPROVED_KEY = "SOC-UNAPPROVED"
-SERVED_TEXT = "LATEST-AGENT-NOTES-on-an-approved-case"
-SUPERSEDED_TEXT = "OLDER-AGENT-NOTES-on-the-same-approved-case"
-WITHHELD_TEXT = "AGENT-NOTES-on-a-case-nobody-approved"
+CLOSED_KEY = "SOC-CLOSED"
+OPEN_KEY = "SOC-OPEN"
+SERVED_TEXT = "LATEST-AGENT-NOTES-on-a-closed-case"
+EARLIER_TEXT = "OLDER-AGENT-NOTES-on-the-same-closed-case"
+ANALYST_TEXT = "an-analysts-own-note-on-the-closed-case"
+WITHHELD_TEXT = "AGENT-NOTES-on-a-case-nobody-closed"
+OPEN_ANALYST_TEXT = "an-analysts-note-on-the-open-case"
 CORRELATION_SUMMARY = "brute force against the jump host"
 
 
@@ -56,29 +58,30 @@ def _comment(author: str, body: str) -> dict[str, Any]:
     return {"author": author, "body": body, "created": "2026-09-16T12:00:00Z"}
 
 
-def _seed(tag: str, author: str, *, approved: bool = True) -> dict[str, Any]:
-    """D6's e2e seed (the `d6_e2e_seed` clause): one approved case carrying TWO agent
-    comments, one unapproved case carrying one. `approved` revokes the tag, which is what the
-    retroactive-scrub demand drives across two calls in one run."""
-    approved_ticket = {
-        "key": APPROVED_KEY,
+def _seed(released: str, author: str, *, closed: bool = True) -> dict[str, Any]:
+    """The e2e seed (the `d6_e2e_seed` clause): one closed case carrying two agent comments
+    and an analyst's, one open case carrying an agent's and an analyst's. `closed=False`
+    re-opens the first case, which is what the retroactive-scrub demand drives across two
+    calls in one run."""
+    closed_ticket = {
+        "key": CLOSED_KEY,
         "summary": CORRELATION_SUMMARY,
-        "status": "closed",
-        "labels": ["sig:5710", *( [tag] if approved else [])],
+        "status": released if closed else "in_progress",
+        "labels": ["sig:5710"],
         "comments": [
-            _comment(author, SUPERSEDED_TEXT),
-            _comment("analyst", "an analyst's own note"),
+            _comment(author, EARLIER_TEXT),
+            _comment("analyst", ANALYST_TEXT),
             _comment(author, SERVED_TEXT),
         ],
     }
-    unapproved_ticket = {
-        "key": UNAPPROVED_KEY,
+    open_ticket = {
+        "key": OPEN_KEY,
         "summary": "a second case on the same host",
         "status": "open",
         "labels": ["sig:5710"],
-        "comments": [_comment(author, WITHHELD_TEXT)],
+        "comments": [_comment(author, WITHHELD_TEXT), _comment("analyst", OPEN_ANALYST_TEXT)],
     }
-    return {"total": 2, "tickets": [approved_ticket, unapproved_ticket]}
+    return {"total": 2, "tickets": [closed_ticket, open_ticket]}
 
 
 def _registry(payloads: list[dict[str, Any]]) -> ScopedFakeVerbs:
@@ -126,9 +129,9 @@ def test_767_the_capture_carries_the_screened_payload(tmp_path: Path):
 
     Bound at this reader's own edge rather than at the boundary's altitude, per R7: a demand
     on `case_history_store` would read green with only the model's turn observed."""
-    tag, author = shipped_tag_and_author()
+    released, author = shipped_released_status_and_author()
     run = run_gather(
-        tmp_path, verbs=_registry([_seed(tag, author)]),
+        tmp_path, verbs=_registry([_seed(released, author)]),
         system="ticket", turns=[q("ticket", "list-tickets"), DONE], run_id="s767-capture",
     )
 
@@ -136,23 +139,22 @@ def test_767_the_capture_carries_the_screened_payload(tmp_path: Path):
     assert captured, "the lead's ticket read left no evidence row at all"
     blob = json.dumps([payload for _, payload in captured])
 
-    assert SERVED_TEXT in blob, (
-        "the approved case's latest agent comment is absent from the capture, so every "
-        "absence asserted below could be green for any reason at all"
-    )
-    assert WITHHELD_TEXT not in blob, (
-        "the capture persisted an agent comment from an UNAPPROVED case — the screen runs "
-        "after the handler and before `_record`, and this is what that ordering is FOR"
-    )
-    assert SUPERSEDED_TEXT not in blob, (
-        "the capture persisted more than one agent comment for one ticket (O8)"
-    )
-    assert CORRELATION_SUMMARY in blob, (
-        "the unapproved case's non-agent fields were dropped from the capture (N5)"
+    for text in (SERVED_TEXT, EARLIER_TEXT, ANALYST_TEXT):
+        assert text in blob, (
+            f"{text} is absent from the capture — a closed case is served WHOLE, and every "
+            "absence asserted below could otherwise be green for any reason at all"
+        )
+    for text in (WITHHELD_TEXT, OPEN_ANALYST_TEXT):
+        assert text not in blob, (
+            f"the capture persisted {text} from an OPEN case — the screen runs after the "
+            "handler and before `_record`, and this is what that ordering is FOR"
+        )
+    assert "a second case on the same host" in blob, (
+        "the open case's non-comment fields were dropped from the capture (N5)"
     )
 
     turn = "\n".join(run.gather.seen)
-    assert SERVED_TEXT in turn, "the model never saw the approved case's comment"
+    assert SERVED_TEXT in turn, "the model never saw the closed case's comment"
     assert WITHHELD_TEXT not in turn, "the model's turn carries the withheld comment"
 
 
@@ -166,9 +168,9 @@ def test_767_an_archived_world_carries_only_the_screened_capture(tmp_path: Path)
     Asserted over the whole surface a world archives — `executed_queries.jsonl` and every file
     under `gather_raw/` — rather than over the one payload the previous demand reads, because
     the archive copies the tree and not a row."""
-    tag, author = shipped_tag_and_author()
+    released, author = shipped_released_status_and_author()
     run = run_gather(
-        tmp_path, verbs=_registry([_seed(tag, author)]),
+        tmp_path, verbs=_registry([_seed(released, author)]),
         system="ticket", turns=[q("ticket", "list-tickets"), DONE], run_id="s767-archive",
     )
 
@@ -184,8 +186,8 @@ def test_767_an_archived_world_carries_only_the_screened_capture(tmp_path: Path)
     joined = "\n".join(surface.values())
     assert SERVED_TEXT in joined, "nothing screened reached the surface — the assertion is vacuous"
     for withheld, why in (
-        (WITHHELD_TEXT, "an unapproved case's agent comment"),
-        (SUPERSEDED_TEXT, "a superseded agent comment on an approved case"),
+        (WITHHELD_TEXT, "an open case's agent comment"),
+        (OPEN_ANALYST_TEXT, "an open case's analyst comment"),
     ):
         offenders = sorted(k for k, v in surface.items() if withheld in v)
         assert not offenders, (
@@ -201,9 +203,9 @@ def test_767_a_later_revocation_does_not_touch_an_existing_capture(tmp_path: Pat
     nothing in D1-D8 is a retroactive scrub. Future reads correctly stop serving.
 
     Driven as the pair the premise describes, inside ONE run: the same store is read twice,
-    with the person's tag REMOVED between the calls, so the first capture and the second are
-    both on disk and can be compared. The first must still hold what it lawfully held; the
-    second must hold nothing.
+    with the case RE-OPENED between the calls, so the first capture and the second are both
+    on disk and can be compared. The first must still hold what it lawfully held; the second
+    must hold nothing.
 
     Its positive control is `d_capture_carries_the_screened_payload` — a capture that DOES
     carry screened agent text — so "the earlier capture is untouched" is not "no capture was
@@ -212,10 +214,10 @@ def test_767_a_later_revocation_does_not_touch_an_existing_capture(tmp_path: Pat
     KNOWN LIMIT, stated rather than implied: this demand is about the absence of a scrub, and
     no mechanism in this design could produce one. It is written to fail if a future retention
     or revocation feature reaches back into a written run dir."""
-    tag, author = shipped_tag_and_author()
+    released, author = shipped_released_status_and_author()
     run = run_gather(
         tmp_path,
-        verbs=_registry([_seed(tag, author), _seed(tag, author, approved=False)]),
+        verbs=_registry([_seed(released, author), _seed(released, author, closed=False)]),
         system="ticket",
         turns=[
             q("ticket", "list-tickets", {"label": "first"}),
@@ -236,7 +238,7 @@ def test_767_a_later_revocation_does_not_touch_an_existing_capture(tmp_path: Pat
         "the first read captured nothing the revocation could have removed"
     )
     assert SERVED_TEXT not in json.dumps(second), (
-        "the second read served the agent comment after the tag was removed — O2 binds each "
+        "the second read served the comment after the case was re-opened — O2 binds each "
         "read at read time"
     )
     assert WITHHELD_TEXT not in json.dumps([first, second])

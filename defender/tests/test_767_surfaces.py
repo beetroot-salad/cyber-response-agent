@@ -29,19 +29,18 @@ from defender.scripts.adapters.confinement import ConfinementFault
 from defender.scripts.case_history import case_ticket
 from defender.tests._spec767 import (
     AGENT_AUTHOR,
-    APPROVED_LABEL,
     COMMENTS_SUFFIX,
-    LABELS_SUFFIX,
+    RELEASED_STATUS,
     TICKETS_PATH,
     TRANSITIONS_SUFFIX,
     FakeStore,
-    agent_comments,
     comment,
     listing,
     make_run,
     mapping_doc,
     record,
     screen_list,
+    served_comments,
     served_tickets,
     ticket,
     use_mapping,
@@ -52,10 +51,13 @@ REPO_ROOT = PATHS.repo_root
 URL_BASE = "http://case-history.test"
 
 #: Every source file the shipping tree collects, tests excluded — the population every census
-#: below is a claim about.
+#: below is a claim about. The tree's own `.venv` is third-party code, not shipped source:
+#: without this cut the census reads six thousand vendored files and a dependency's stray
+#: `get-ticket` turns it red for a reason that has nothing to do with defender.
 SHIPPED_PY = tuple(
     p for p in sorted(DEFENDER_DIR.rglob("*.py"))
     if "tests" not in p.relative_to(DEFENDER_DIR).parts
+    and ".venv" not in p.relative_to(DEFENDER_DIR).parts
 )
 
 
@@ -109,8 +111,7 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
                 )
 
     for path in (TICKETS_PATH, f"{TICKETS_PATH}/SOC-1{COMMENTS_SUFFIX}",
-                 f"{TICKETS_PATH}/SOC-1{TRANSITIONS_SUFFIX}",
-                 f"{TICKETS_PATH}/SOC-1{LABELS_SUFFIX}"):
+                 f"{TICKETS_PATH}/SOC-1{TRANSITIONS_SUFFIX}"):
         with pytest.raises(ConfinementFault):
             confinement.guard_outbound(None, "ticket", f"{URL_BASE}{path}", method="POST")
     with pytest.raises(ConfinementFault):
@@ -182,37 +183,38 @@ def test_767_verb_class_vocabulary_stays_closed_at_two():
     )
 
 
-def test_767_labels_route_is_not_on_the_confinement_allowlist(tmp_path):
-    """d6_labels_route_not_confined — NEGATIVE. D6's `POST /tickets/{key}/labels` is the
-    OPERATOR's route, and it is not on the adapter's confinement allowlist, which is GET-only:
-    a model driving the adapter's door cannot add the approved tag.
+def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
+    """d6_transitions_route_not_confined — NEGATIVE. `POST /tickets/{key}/transitions` is the
+    PERSON's route — closing a case is the release act — and it is not on the adapter's
+    confinement allowlist, which is GET-only: a model driving the adapter's door cannot move a
+    case along its lifecycle, and so cannot release its own or any other case's comments.
 
-    RF4 bounds this: the allowlist is the MODEL's door. D6's route inherits the host writer's
-    bypass of `guard_outbound` (g2), so this demand is a control over model reach and NOT a
-    control over who may really call the route — on the playground nothing authenticates it at
-    all (N6), which the clause `n6_approve_action_is_unattributable_on_the_playground` records
-    rather than tests.
+    RF4 bounds this: the allowlist is the MODEL's door. On the playground nothing
+    authenticates the route at all (N6), which the clause
+    `n6_approve_action_is_unattributable_on_the_playground` records rather than tests.
 
     Its positive control is `o6_read_verb_still_granted`."""
     allowlist = confinement.READ_ENDPOINT_ALLOWLIST["ticket"]
     assert all(method == "GET" for _, method in allowlist), (
         f"the ticket allowlist is no longer GET-only: {allowlist}"
     )
-    assert not any(pattern.endswith("labels") for pattern, _ in allowlist)
+    assert not any(pattern.endswith("transitions") for pattern, _ in allowlist)
 
     for method in ("POST", "PUT", "PATCH", "DELETE"):
         with pytest.raises(ConfinementFault):
             confinement.guard_outbound(
-                None, "ticket", f"{URL_BASE}{TICKETS_PATH}/SOC-1{LABELS_SUFFIX}", method=method
+                None, "ticket", f"{URL_BASE}{TICKETS_PATH}/SOC-1{TRANSITIONS_SUFFIX}",
+                method=method,
             )
 
     rows = verb_dispositions.shipped_dispositions()
     for d in rows:
         if d.system == "ticket":
-            assert "label" not in d.verb, (
-                f"a label verb ({d.verb}) entered the grant table: approval is a person's act, "
-                "outside every role"
-            )
+            for word in ("transition", "close"):
+                assert word not in d.verb, (
+                    f"a lifecycle verb ({d.verb}) entered the grant table: closing is a "
+                    "person's act, outside every role"
+                )
 
 
 def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
@@ -434,7 +436,7 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
     consumers; a stale docstring is doc-vs-code drift for `finalize`, not a design fork, and
     this test does not assert prose.
 
-    Its positive control is `o2_approved_serves_latest`: the one reader in the census DOES
+    Its positive control is `o2_released_serves_whole`: the one reader in the census DOES
     hand screened ticket content to a model."""
     consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get)\s*\(")
     assert set(consumers) == {"defender/runtime/query_tool.py"}, (
@@ -471,8 +473,8 @@ def test_767_every_checked_in_census_of_this_surface_moves_together(tmp_path):
 
     Four censuses move and RF5 is why this demand exists: D2 carries the callsite list, D5
     carries the vulture rows and the #923 authoring surfaces, and NOBODY named `WRITE_ENDPOINTS`
-    (g4) — the checked-in list of estate-write endpoint triples, which D6's labels route makes
-    a fifth.
+    (g4) — the checked-in list of estate-write endpoint triples, which must keep BOTH live
+    writes on the stub: the comment this change makes and the transition it hands to a person.
 
     The callsite half is the sharp one (RF2): c11's census under-counts the duck-typed
     `ticket_writer=` seam by a whole file, because its "non-definition reference" wording
@@ -488,8 +490,11 @@ def test_767_every_checked_in_census_of_this_surface_moves_together(tmp_path):
     _retired_writer_method = "close_case_ticket"
     stale_ref = re.compile(rf"\.{_retired_writer_method}\b|\bdef {_retired_writer_method}\b")
     repo_hits: dict[str, list[int]] = {}
+    # Sibling worktrees (`.claude/worktrees/`, `.worktrees/`) hold OTHER branches' copies of
+    # this tree, so a walk that enters them reports another branch's callsites as this one's.
+    skip = {".venv", ".git", ".spec-flow", ".claude", ".worktrees"}
     for p in sorted(REPO_ROOT.rglob("*.py")):
-        if ".venv" in p.parts or ".git" in p.parts or ".spec-flow" in p.parts:
+        if skip & set(p.parts):
             continue
         lines = [i for i, line in enumerate(_text(p).splitlines(), 1)
                  if stale_ref.search(line)]
@@ -504,9 +509,9 @@ def test_767_every_checked_in_census_of_this_surface_moves_together(tmp_path):
 
     triples = set(confinement_census.WRITE_ENDPOINTS)
     system = confinement_census.TICKET_WRITER_SYSTEM
-    assert (system, f"{TICKETS_PATH}/SOC-1{LABELS_SUFFIX}", "POST") in triples, (
-        "WRITE_ENDPOINTS does not carry D6's labels route: it is the fourth census this "
-        "change moves and no D-row names it (RF5/g4)"
+    assert (system, f"{TICKETS_PATH}/SOC-1{TRANSITIONS_SUFFIX}", "POST") in triples, (
+        "WRITE_ENDPOINTS dropped the transitions route: the stub still serves it, and it is "
+        "the person's release act — a property of the store, not of who calls it (RF5/g4)"
     )
     assert (system, f"{TICKETS_PATH}/SOC-1{COMMENTS_SUFFIX}", "POST") in triples, (
         "the comments route left the estate-write census, which is the one write this "
@@ -519,11 +524,11 @@ def test_767_every_checked_in_census_of_this_surface_moves_together(tmp_path):
 # =======================================================================================
 
 
-def test_767_no_tag_or_author_literal_in_writer_or_screen(tmp_path, monkeypatch):
+def test_767_no_status_or_author_literal_in_writer_or_screen(tmp_path, monkeypatch):
     """o5_no_vendor_literals_in_code — COHERENCE. The vendor spellings this lane introduces —
-    the approved tag, the agent author identity, the comment field — live in the mapping, and
-    changing them there changes what the WRITER sends AND what the SCREEN keeps, with no code
-    edit.
+    the released status, the agent author identity, the comment field — live in the mapping,
+    and changing them there changes what the WRITER sends, what the WRITER refuses behind, AND
+    what the SCREEN keeps, with no code edit.
 
     §7 FK54 settled the shape: ONE loader, one resolution, asserted as a single test that
     changes the mapping ONCE and observes both sides. That test fails if the two sides ever
@@ -534,19 +539,30 @@ def test_767_no_tag_or_author_literal_in_writer_or_screen(tmp_path, monkeypatch)
     stub's envelope — `tickets`, `key`, `comments`, `author` — is the stub adapter's own and
     stays in code, outside O5's scope."""
     use_mapping(monkeypatch, tmp_path / "dfn",
-                mapping_doc(comment_author="acme-bot", approved_label="acme-released"))
+                mapping_doc(comment_author="acme-bot", released_status="acme-done"))
 
     run_dir = make_run(tmp_path, name="20260101T000000Z-acme")
     store = FakeStore()
     record(run_dir, store)
     assert store.only_comment()["author"] == "acme-bot", "the writer did not follow the mapping"
 
-    tagged = ticket("SOC-ACME", labels=["acme-released"],
-                    comments=[comment("prior notes", author="acme-bot")])
-    payload, code, _ = screen_list(listing(tagged))
+    behind = FakeStore(ticket=ticket("any", status="acme-done"))
+    record(make_run(tmp_path, name="20260101T000001Z-acme"), behind)
+    assert behind.writes() == [], "the writer's release check did not follow the mapping"
+
+    done = ticket("SOC-ACME", status="acme-done",
+                  comments=[comment("prior notes", author="acme-bot")])
+    payload, code, _ = screen_list(listing(done))
     assert code == 0
-    assert [c["body"] for c in agent_comments(served_tickets(payload)[0], authors=("acme-bot",))] \
-        == ["prior notes"], "the screen did not follow the same mapping the writer did"
+    assert [c["body"] for c in served_comments(served_tickets(payload)[0])] == ["prior notes"], (
+        "the screen did not follow the same mapping the writer did"
+    )
+    stock, code, _ = screen_list(listing(ticket("SOC-STOCK", status=RELEASED_STATUS,
+                                                comments=[comment("prior notes")])))
+    assert code == 0
+    assert served_comments(served_tickets(stock)[0]) == [], (
+        "the store's stock status still releases under a mapping that named another"
+    )
 
     for path, why in (
         (DEFENDER_DIR / "scripts" / "case_history" / "ticket_writer.py", "the writer"),
@@ -554,7 +570,8 @@ def test_767_no_tag_or_author_literal_in_writer_or_screen(tmp_path, monkeypatch)
         (DEFENDER_DIR / "runtime" / "query_tool.py", "the query tool"),
     ):
         source = _text(path)
-        assert APPROVED_LABEL not in source, f"{why} spells the approved tag as a code literal"
+        for quoted in (f'"{RELEASED_STATUS}"', f"'{RELEASED_STATUS}'"):
+            assert quoted not in source, f"{why} spells the released status as a code literal"
         for quoted in (f'"{AGENT_AUTHOR}"', f"'{AGENT_AUTHOR}'"):
             assert quoted not in source, (
                 f"{why} spells the agent author identity as a code literal"
@@ -566,7 +583,7 @@ def test_767_no_tag_or_author_literal_in_writer_or_screen(tmp_path, monkeypatch)
 # =======================================================================================
 
 
-def test_767_ticket_skill_md_describes_the_approval_lane(tmp_path):
+def test_767_ticket_skill_md_describes_the_release_lane(tmp_path):
     """d7_briefing_rewrite — settled premise 69 (and §7 FK55's first half, which keeps the
     SKILL.md rewrite IN the suite). `skills/ticket/SKILL.md` is MODEL-FACING prose, and D4
     makes three of its sentences false.
@@ -574,13 +591,13 @@ def test_767_ticket_skill_md_describes_the_approval_lane(tmp_path):
     RF3/g14 is the finding this carries: D7's own line ranges omit lines 58-60 — "Comments are
     signal-bearing. Resolution rationale and related-ticket references typically live in
     comment bodies, not in structured fields." — which is exactly the read_guidance sentence
-    D4 falsifies for unapproved cases. The close/`resolution` lifecycle text goes with D5, and
+    D4 falsifies for unreleased cases. The close-by-the-host text goes with D5, and
     line 78's duplicated "`run.py` / `run.py`" is a stale-reference artifact the same rewrite
     should clear.
 
-    §7 FK43 adds the meaning that must be said out loud: the tag is RELEASE-FOR-READING, not
-    an endorsement of the verdict. §7 FK42 adds the other: what a person approves is the
-    record AS DISPLAYED, visibly truncated when cut.
+    §7 FK43 adds the meaning that must be said out loud: a person's close RELEASES the case
+    for reading and does not endorse the agent's proposed verdict. §7 FK42 adds the other:
+    what a person reviewed is the record AS DISPLAYED, visibly truncated when cut.
 
     FK55's second half is NOT here and deliberately so: `defender/docs/case-history-write-path.md`
     is human-facing architecture prose named by no D-row, and stale prose there is a
@@ -592,6 +609,7 @@ def test_767_ticket_skill_md_describes_the_approval_lane(tmp_path):
         "the close-lifecycle sentence": "closes it with the disposition",
         "the RF3 read_guidance sentence": "resolution rationale and related-ticket references",
         "the duplicated run.py artifact": "`run.py` / `run.py`",
+        "the retired approval tag": "`approved`",
     }
     for why, text in stale.items():
         assert text.lower() not in lowered, (
@@ -600,11 +618,12 @@ def test_767_ticket_skill_md_describes_the_approval_lane(tmp_path):
         )
 
     for why, needle in (
-        ("the approved tag's own spelling", APPROVED_LABEL),
-        ("that agent comments are a prior run's output", "prior run"),
-        ("that the tag is a release to read, not an endorsement", "endors"),
-        ("that the comment a person approves may be visibly truncated", "truncat"),
+        ("the released status's own spelling", RELEASED_STATUS),
+        ("that comments reach the model only from a closed case", "closed"),
+        ("that a close is a release to read, not an endorsement", "endors"),
+        ("that the comment a person reviewed may be visibly truncated", "truncat"),
         ("that the disposition is the human's", "disposition"),
+        ("that a person's close is what releases a case", "person"),
     ):
         assert needle.lower() in lowered, (
             f"the rewritten briefing never says {why} ({needle!r} appears nowhere)"

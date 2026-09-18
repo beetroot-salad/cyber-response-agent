@@ -43,31 +43,31 @@ into this store.
 
 ### read_guidance
 
-- **`status` ∈ {open, in_progress, closed}.** A `resolution` field, when
-  present, is a legacy record from before this store gated agent-authored
-  comments — the disposition is the human's now, never decoded from it.
+- **`status` ∈ {open, in_progress, closed}.** A case's status is its
+  lifecycle: the host opens it when the alert is raised, and a person moves
+  it to `closed` once they have reviewed it. A `resolution` field, when
+  present, is the person's own verdict on a closed case (or a legacy record
+  from before this store gated comments) — the disposition is the human's
+  now, never decoded from an agent's text.
 - **The current investigation's own ticket is excluded by identity.**
   Gather removes that record from `list-tickets` results before the payload
   is cached. Other open and in-progress tickets remain available for
   correlation, including tickets whose free text references the current case.
-- **A comment authored by the agent is a PRIOR RUN's output, and it only
-  reaches you when the case is tagged `approved`.** Each run that
+- **Comments reach you only from a `closed` case.** Each run that
   investigates a case records its own findings as a comment; a person
-  reviews that comment and adds the `approved` label to release it — the
-  disposition it proposes is a suggestion, and the tag means only "release
-  this text for reading," never that the person endorses the proposed
-  verdict. An unapproved case's other fields (summary, status, labels) stay
-  visible for correlation; only its agent-authored comments are withheld.
-  A released comment may be visibly truncated (it ends `…`) — what a
-  person approved is the record as displayed, not the model's full report.
+  reviews the case and closes it, and only then are its comments — the
+  agent's and anyone else's — served to a later run. Until then an open or
+  in-progress case's other fields (summary, status, labels) stay visible
+  for correlation and its comment list is served empty. An agent comment's
+  proposed disposition is a suggestion the person's close does not endorse,
+  and a comment may be visibly truncated (it ends `…`) — what was reviewed
+  is the record as displayed, not the model's full report.
 - **`labels` are short tags.** Common ones: `brute-force`,
-  `false-positive`, `change-window`, `escalated`, `approved`. Treat the
-  hypothesis tags as curator-supplied hints, not refutations, and read
-  `approved` as "this case's agent comment has been released," not as a
-  hypothesis tag itself.
+  `false-positive`, `change-window`, `escalated`. Treat them as
+  curator-supplied hypothesis hints, not refutations.
 - **`--q` matches against summary OR description, case-insensitive.**
   Use for free-text searches when the precise key isn't known.
-- **Comments are signal-bearing on an approved case.** A released agent
+- **Comments are signal-bearing on a closed case.** A released agent
   comment's own notes typically carry the resolution's rationale and any
   related-case references, ahead of anything in a structured field.
 
@@ -91,11 +91,11 @@ into this store.
   (`scripts/case_history/ticket_writer.py`), which opens a ticket when the
   alert is raised and later records the investigation as a comment on it.
   That writer is a learning post-step, not an investigation surface; do
-  not call it from a run, and it never sets `status`, `resolution` or the
-  `approved` label itself — a person does. It also never records onto a
-  case a person has already tagged `approved`: the tag is a statement about
-  the comments the person saw, so a re-run of a released case is refused
-  rather than appended behind that tag.
+  not call it from a run, and it never sets `status` or `resolution`
+  itself — closing is a person's act. It also never records onto a case a
+  person has already closed: the close is a statement about the comments
+  the person saw, so a re-run of a closed case is refused rather than
+  appended behind it.
 - **Not for change-window context.** Use the change-mgmt stub for
   CR-scoped questions; ticket labels may mention CRs but the
   authoritative answer is in change-mgmt.

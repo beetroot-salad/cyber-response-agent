@@ -3,9 +3,14 @@
 Every test in `test_767_*.py` is one demand of
 `spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by that demand's
 `discharged_by`. RED against `a77335d5` is the expected state: `record_case_ticket`,
-`case_record_to_comment`, the mapping's `comment:`/`approved:` sections, the approval
-predicates and D6's label route are all COINED here — none of them exists yet. Where the
-implementation spells a symbol otherwise, these names follow the code.
+`case_record_to_comment`, the mapping's `comment:`/`released:` sections and the release
+predicate are all COINED here — none of them exists yet. Where the implementation spells a
+symbol otherwise, these names follow the code.
+
+THE RELEASE SIGNAL IS THE CASE'S LIFECYCLE STATE, never a tag and never a comment's author.
+A person closes a case once they have reviewed it; `status` is a closed vocabulary the
+store itself enforces, so nothing rendered from an alert can move a case along it, and a
+comment's `author` — whatever the posting client chose to send — decides nothing.
 
 THE SEAMS THESE FAKES ENTER THROUGH ARE PRODUCTION'S OWN (the project profile forbids
 `monkeypatch.setattr`, and CI ratchets new sites):
@@ -39,11 +44,13 @@ from typing import Any
 # o5_no_vendor_literals_in_code's own demand).
 # --------------------------------------------------------------------------------------
 
-#: §7 re-ground (`mapping_approved.domain.default`): the design never names the tag's literal
-#: spelling and `mapping.yaml` at HEAD has no `approved:` section (r6/g6), so the resolution
-#: settled it by lookup — `"approved"`, the spelling the design doc itself uses throughout,
-#: not colliding with the existing `sig:`/`evt:` prefixed-label convention.
-APPROVED_LABEL = "approved"
+#: The lifecycle state a person moves a reviewed case to — the store's own `closed` (c8: the
+#: stub enforces `status ∈ {open, in_progress, closed}` as a Literal, rejecting anything else
+#: with 422). The test's copy of the mapping's `released.status`; O5 owns that the code never
+#: spells it.
+RELEASED_STATUS = "closed"
+#: The state the bridge opens a case in (`open.status`).
+OPEN_STATUS = "open"
 
 #: The agent identity `mapping.yaml` already spells at `open.reporter` and `close.author`
 #: (c15/r6). D1's new `comment.author` carries it forward.
@@ -61,7 +68,6 @@ NO_NOTES = "(no notes)"
 COMMENTS_SUFFIX = "/comments"
 TRANSITIONS_SUFFIX = "/transitions"
 TICKETS_PATH = "/tickets"
-LABELS_SUFFIX = "/labels"
 
 #: A config the writer's `load_config` seam can answer with — the three keys `_load_config`
 #: itself requires.
@@ -103,19 +109,19 @@ def require(obj: Any, name: str, why: str) -> Any:
 def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises, not per concept
     *,
     open_labels: tuple[str, ...] = ("sig:{signature}", "evt:{event_time}"),
+    open_status: Any = OPEN_STATUS,
     comment_author: str | None = AGENT_AUTHOR,
     comment_body: str | None = COMMENT_BODY_TEMPLATE,
-    author_aliases: tuple[str, ...] | None = None,
-    approved_label: Any = APPROVED_LABEL,
+    released_status: Any = RELEASED_STATUS,
     with_comment: bool = True,
-    with_approved: bool = True,
+    with_released: bool = True,
     close_section: dict[str, Any] | None = None,
     extra_open: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The post-#767 mapping as a dict. Every knob is a member some demand exercises:
-    `with_comment`/`with_approved` are FAM-1's missing sections, `approved_label` carries
-    FK18's non-string, `author_aliases` is FK10's superseded-spelling list, `close_section`
-    is FK27's stale lane and `extra_open` is FK26's operator-added label template."""
+    `with_comment`/`with_released` are FAM-1's missing sections, `released_status` carries
+    FK18's non-string, `open_status` the open/released collision, `close_section` is FK27's
+    stale lane and `extra_open` is an operator-added open field."""
     doc: dict[str, Any] = {
         "source": {
             "signature": "rule.id",
@@ -126,7 +132,7 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
             "key": "{case_id}",
             "summary": "{summary}",
             "description": "Auto-created from alert {case_id} (rule {signature}).",
-            "status": "open",
+            "status": open_status,
             "reporter": AGENT_AUTHOR,
             "labels": list(open_labels),
         },
@@ -139,11 +145,9 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
             section["author"] = comment_author
         if comment_body is not None:
             section["body"] = comment_body
-        if author_aliases is not None:
-            section["author_aliases"] = list(author_aliases)
         doc["comment"] = section
-    if with_approved:
-        doc["approved"] = {"label": approved_label}
+    if with_released:
+        doc["released"] = {"status": released_status}
     if close_section is not None:
         doc["close"] = close_section
     return doc
@@ -171,23 +175,23 @@ def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None
     return path
 
 
-def shipped_tag_and_author() -> tuple[str, str]:
-    """The approved tag and the agent identity as the SHIPPED mapping spells them.
+def shipped_released_status_and_author() -> tuple[str, str]:
+    """The released status and the agent identity as the SHIPPED mapping spells them.
 
     Read off the real file rather than taken from this module's constants, because the
     scenarios that cannot repoint `$DEFENDER_DIR` — anything driving the whole run — resolve
     the shipped mapping, and reading it here is what makes those tests a statement about the
     file an operator edits (O5) rather than about a literal."""
     doc = shipped_mapping_doc()
-    approved = doc.get("approved") or {}
+    released = doc.get("released") or {}
     comment_section = doc.get("comment") or {}
-    assert isinstance(approved.get("label"), str), (
-        "the shipped mapping has no `approved: {label}` section (D1)"
+    assert isinstance(released.get("status"), str), (
+        "the shipped mapping has no `released: {status}` section (D1)"
     )
     assert isinstance(comment_section.get("author"), str), (
         "the shipped mapping has no `comment: {author}` section (D1)"
     )
-    return approved["label"], comment_section["author"]
+    return released["status"], comment_section["author"]
 
 
 def shipped_mapping_doc() -> dict[str, Any]:
@@ -248,8 +252,8 @@ def make_run(tmp_path: Path, name: str = "20260917T000000Z-sshd", *, alert: Any 
 # --------------------------------------------------------------------------------------
 
 
-#: `ticket` on `FakeStore` distinguishes "omitted" (a default unapproved case) from an explicit
-#: `None` (the store holds no such key), the same way `_CONFIG_UNSET` does for `config`.
+#: `ticket` on `FakeStore` distinguishes "omitted" (a default open, unreleased case) from an
+#: explicit `None` (the store holds no such key), the same way `_CONFIG_UNSET` does for `config`.
 _TICKET_UNSET = object()
 
 
@@ -280,7 +284,7 @@ class FakeStore:
         it (c5), and no assertion in this suite is made against it.
       * ``ticket`` — the ticket object a `GET /tickets/{key}` answers with (200), which the
         writer reads back before it records so that it never appends behind a person's
-        approval. Defaults to an unapproved case; `None` answers the read with a 404.
+        close. Defaults to an open, unreleased case; `None` answers the read with a 404.
 
     It classifies nothing and decides no policy: every branch here is "record, then answer".
     """
@@ -298,7 +302,7 @@ class FakeStore:
         self.status = status
         self.body = body
         self.ticket = (
-            {"key": "any", "labels": ["sig:5710"], "comments": []}
+            {"key": "any", "status": OPEN_STATUS, "labels": ["sig:5710"], "comments": []}
             if ticket is _TICKET_UNSET else ticket
         )
         self.status_by_suffix = dict(status_by_suffix or {})
@@ -420,17 +424,19 @@ def comment(body: str = "a prior run's notes", *, author: str | None = AGENT_AUT
     return out
 
 
-def ticket(key: str, *, labels: Any = (), comments: Any = (), summary: str = "a prior case",
-           status: str = "open", resolution: str | None = None,
-           drop_labels: bool = False, drop_comments: bool = False) -> dict[str, Any]:
+def ticket(key: str, *, labels: Any = (), comments: Any = (), summary: str = "a prior case",  # noqa: PLR0913 — one keyword per FIELD a demand drives, drop_* included
+           status: Any = OPEN_STATUS, resolution: str | None = None,
+           drop_labels: bool = False, drop_comments: bool = False,
+           drop_status: bool = False) -> dict[str, Any]:
     out: dict[str, Any] = {
         "key": key,
         "summary": summary,
         "description": "",
-        "status": status,
         "resolution": resolution,
         "reporter": AGENT_AUTHOR,
     }
+    if not drop_status:
+        out["status"] = status
     if not drop_labels:
         out["labels"] = labels if labels is None or isinstance(labels, str) else list(labels)
     if not drop_comments:
@@ -474,15 +480,11 @@ def served_tickets(payload: Any) -> list[dict[str, Any]]:
     return payload["tickets"]
 
 
-def agent_comments(t: dict[str, Any], *, authors: tuple[str, ...] = (AGENT_AUTHOR,)
-                   ) -> list[dict[str, Any]]:
-    """Comments a MODEL would read as agent-authored, read off the served record's own
-    author field — the test's own reading of the wire, never the predicate under test."""
-    out = []
-    for c in t.get("comments") or []:
-        if isinstance(c, dict) and c.get("author") in authors:
-            out.append(c)
-    return out
+def served_comments(t: dict[str, Any]) -> list[Any]:
+    """The comment list a served record carries — the test's own reading of the wire, never
+    the predicate under test. A record with no list serves no comments."""
+    comments = t.get("comments")
+    return list(comments) if isinstance(comments, list) else []
 
 
 def rendered(payload: Any, tmp_path: Path, *, ceiling: int | None = None) -> str:

@@ -571,8 +571,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # Catalog curation has its own trigger here instead, behind the tree certification the
     # lifecycle already performed — a corpus optimisation, cheap to lose, so its failure is
     # reported and swallowed rather than costing the investigation its exit status.
-    # The case ticket is settled BEFORE the request is published: a curation drainer can start
-    # the moment the marker lands, and must never read this case with its ticket still open.
+    # The investigation is RECORDED onto the case ticket BEFORE the request is published — a
+    # comment, never a close; closing is a person's act (#767). A curation drainer can start the
+    # moment the marker lands, and the ordering keeps the record ahead of it.
     if ns.update_ticket:
         ticket_writer.record_case_ticket(run_dir)
 

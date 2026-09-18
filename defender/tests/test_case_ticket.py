@@ -3,7 +3,7 @@ approval by #767).
 
 Pure layer only — no transport, no network. `alert_to_open_payload` and `read_case_record` are
 the two halves this file drives directly; the render/screen halves D2-D4 add
-(`case_record_to_comment`, `approval_predicates`) have their own suite under
+(`case_record_to_comment`, `release_predicate`) have their own suite under
 `test_767_writer.py` / `test_767_screen.py`, driven against the spec's own mapping fixtures.
 """
 from __future__ import annotations

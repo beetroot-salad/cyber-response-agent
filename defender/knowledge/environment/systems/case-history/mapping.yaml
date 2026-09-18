@@ -1,4 +1,4 @@
-# Case-history field mapping (issue #317, gated for approval by #767).
+# Case-history field mapping (issue #317, gated by a person's close since #767).
 #
 # How the defender's INTERNAL case model (alert.json + report.md) maps onto the
 # EXTERNAL ticket schema — the "de-facto schema". The frozen v1 ticket has no
@@ -20,9 +20,10 @@ source:
 
 # POST /tickets — the bridge create: an OPEN ticket, when the alert is raised.
 # Keys are external ticket fields (TicketCreate); values are rendered templates.
-# This whole section ships to the wire UNFILTERED (`alert_to_open_payload`) — the
-# loader refuses any label template here that could render the approved tag
-# below, so an attacker-influenced field can never approve its own case.
+# This whole section ships to the wire UNFILTERED (`alert_to_open_payload`).
+# `status` must be a literal and must differ from `released.status` below —
+# the status vocabulary is the store's own closed set, so nothing rendered from
+# an alert can move a case along its lifecycle.
 open:
   key: "{case_id}"
   summary: "{summary}"
@@ -30,30 +31,25 @@ open:
   status: open
   reporter: defender
   # `sig:` is the signature filter key; `evt:` carries the alert event time.
-  # Each label's literal prefix (text before its {placeholder}) is what makes it
-  # impossible for the placeholder's value to collide with the approved tag —
-  # keep it pure-literal so the loader's refusal has something to check.
   labels:
     - "sig:{signature}"
     - "evt:{event_time}"
 
 # POST /tickets/{key}/comments — the host RECORDS its investigation into the
 # case as its own comment (#767 D2/D3); it never transitions or closes the
-# ticket, and it never sets a disposition or the approved tag itself — both are
-# a person's (O1). `body` is rendered from a `CaseRecord`'s `disposition`
-# (proposed, never committed by this write), `cause` (the host's own sentence)
-# and `narrative` (the report's body, fence-stripped and bounded on the wire).
+# ticket, and it never sets a disposition itself — closing is a person's (O1).
+# `body` is rendered from a `CaseRecord`'s `disposition` (proposed, never
+# committed by this write), `cause` (the host's own sentence) and `narrative`
+# (the report's body, fence-stripped and bounded on the wire).
 comment:
   author: defender
   body: "{disposition} — {cause}\n\n{narrative}"
-  # Superseded spellings of `author` above, kept so a later rename does not
-  # un-hide an unapproved case's history (§7 R4): `is_agent_comment` matches
-  # the CURRENT author plus every alias here.
-  author_aliases: []
 
-# The label a person adds to a case to release its agent-authored comments to
-# a later run's gather (O2/O5). Not `open.labels` — that is the bridge's own
-# unfiltered set, and O1 requires the two to never collide (the loader refuses
-# a mapping where they could).
-approved:
-  label: approved
+# The lifecycle state a person moves a case to when they have reviewed it. A
+# later run's gather is served a case's comments ONLY once it is in this state
+# (O2/O5); until then it sees the case — summary, labels, status — with no
+# comments at all. The host never sets this status (it records, never
+# transitions), so the person's close is the one act that releases a case's
+# history, and re-opening it hides that history again.
+released:
+  status: closed

@@ -73,10 +73,6 @@ class Transition(BaseModel):
     comment: Optional[str] = None
 
 
-class LabelIn(BaseModel):
-    label: str
-
-
 STORE: dict[str, Ticket] = {}
 
 
@@ -168,22 +164,6 @@ def add_comment(key: str, body: CommentIn):
     t.comments.append(c)
     t.updated = _now()
     return c
-
-
-@app.post("/tickets/{key}/labels", status_code=201)
-def add_label(key: str, body: LabelIn):
-    """#767 D6 — the operator's approve action. Adds one label to an EXISTING ticket only: an
-    unknown key 404s with no side effect (approval is an act on a case that already exists —
-    a route that could conjure one would let approving create the thing it approves), and a
-    label already present is an idempotent no-op (set semantics, so clicking approve twice is
-    safe). Not authenticated — a playground limit, not a design gap (#767 N6)."""
-    t = STORE.get(key)
-    if not t:
-        raise HTTPException(status_code=404, detail=f"ticket {key} not found")
-    if body.label not in t.labels:
-        t.labels.append(body.label)
-        t.updated = _now()
-    return t
 
 
 @app.post("/admin/reset")

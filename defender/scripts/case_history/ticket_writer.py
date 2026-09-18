@@ -6,7 +6,7 @@ import os
 import sys
 import urllib.parse
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from defender._run_paths import RunPaths
@@ -118,7 +118,7 @@ def _build_comment_payload(run_dir: Path, case_id: str) -> dict | None:
     own signal for exactly that case. Any other `CaseTicketError` (a bad mapping, a template
     naming a key the context does not carry) refuses to POST at all (§7 R1/FAM-1)."""
     try:
-        rec = case_ticket.read_case_record(run_dir)
+        rec = replace(case_ticket.read_case_record(run_dir), case_id=case_id)
     except case_ticket.ReportNotParsable:
         try:
             return case_ticket.unreadable_comment_payload()
@@ -144,14 +144,15 @@ def _ticket_is_released(
     config: dict[str, str], deps: TicketWriterDeps, case_id: str, quoted: str,
 ) -> bool | None:
     """Read the case back and answer whether a person has released it — `None` when that
-    cannot be established (the read failed, or the reply is not a ticket object).
+    cannot be established (the read failed, the reply is not a ticket object, or the mapping
+    cannot say what "released" is spelled).
 
-    This is the writer's half of the release invariant: the person's tag is a statement
-    about the agent comments ON THE TICKET WHEN THEY READ IT, and a comment appended
-    afterwards would ride out under that same tag with no person having seen it. The writer
-    never touches the tag (O1), so the only way to keep it true is to never append behind it.
-    Undecidable reads as released — the direction that writes nothing. The tag's spelling
-    is the mapping's, read through the same predicate the screen decides with (O5)."""
+    This is the writer's half of the release invariant: a person's close is a statement
+    about the comments ON THE TICKET WHEN THEY CLOSED IT, and a comment appended afterwards
+    would be served under that close with no person having seen it. The writer never moves
+    the status (O1), so the only way to keep it true is to never append behind it.
+    Undecidable reads as released — the direction that writes nothing. The released status's
+    spelling is the mapping's, read through the same predicate the screen decides with (O5)."""
     try:
         status, body = deps.request(config, "GET", f"/tickets/{quoted}")
     except TransportFault as e:
@@ -168,8 +169,11 @@ def _ticket_is_released(
     if not isinstance(ticket, dict):
         _warn(f"record {case_id}: the case read back is not a ticket object; not recording")
         return None
-    is_released, _is_agent_comment = case_ticket.approval_predicates().as_pair()
-    return bool(is_released(ticket))
+    try:
+        return case_ticket.release_predicate().is_released(ticket)
+    except case_ticket.CaseTicketError as e:
+        _warn(f"record {case_id}: {e}; cannot tell whether the case is released; not recording")
+        return None
 
 
 def record_case_ticket(
@@ -182,7 +186,9 @@ def record_case_ticket(
     attempt (the two post-steps are independent statements under one flag); every write fault
     is caught, warned once, and leaves the run's exit code exactly what it would have been
     (O7). `key` is a parameter now (§7 R8/FK04) so a vendor-minted, pre-existing key on a
-    later deployment is a call-site edit — today's deployment keeps `case_id = run_dir.name`."""
+    later deployment is a call-site edit — today's deployment keeps `case_id = run_dir.name`.
+    The key is the case's identity EVERYWHERE this write names it: the two paths, the receipt
+    and the rendered `{case_id}` alike."""
     try:
         config = deps.load_config()
         if config is None:
@@ -218,7 +224,7 @@ def record_case_ticket(
 def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, status: str) -> None:
     receipt = {
         "key": case_id,
-        # §7 R6/FK29: "commented", not "closed" — after D2 nothing closes, and the old literal
+        # §7 R6/FK29: `commented`, not the old close word — after D2 nothing closes, and the old literal
         # would record a false event. The receipt has zero readers (c5), which is why this word
         # is free to change and why no fault below is escalated beyond the warning.
         "status": status,

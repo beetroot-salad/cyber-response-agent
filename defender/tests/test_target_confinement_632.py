@@ -70,9 +70,10 @@ pytestmark = pytest.mark.e2e
 
 CONFIGURED_PATTERNS = ("logs-*", "security-audit-*")
 # The four estate-write endpoints that exist at HEAD, as (system, path, METHOD) triples — the
-# shape the rule now keys on. #767 D2 retires the transition write (the host now RECORDS a
-# comment rather than closing the case) and D6 adds the operator's approve-label route in its
-# place — the census moves with the change (`d_checked_in_censuses_move_together`).
+# shape the rule now keys on. #767 D2 moves the host's ticket write from a transition to a
+# comment; the transition route STAYS in this census because the stub still serves it and a
+# person's close is now the release act — the triple is a property of the store, not of who
+# currently calls it (`d_checked_in_censuses_move_together`).
 #
 # THE SYSTEM LITERAL IS THE ONE THE WRITER REALLY CARRIES, and correcting it is half of why
 # the method axis had to exist. The ticket-store mutations are reached by a post-run script
@@ -82,8 +83,8 @@ CONFIGURED_PATTERNS = ("logs-*", "security-audit-*")
 TICKET_WRITER_SYSTEM = "case-history"
 WRITE_ENDPOINTS = (
     (TICKET_WRITER_SYSTEM, "/tickets", "POST"),
+    (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/transitions", "POST"),
     (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/comments", "POST"),
-    (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/labels", "POST"),
     ("elastic", "/logs-2026.01.01/_update/1", "POST"),
 )
 # The collision the endpoint-only rule could not survive, kept as its own case because it is

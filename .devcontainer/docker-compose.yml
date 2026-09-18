@@ -14,6 +14,14 @@ services:
     container_name: response-devcontainer
     env_file:
       - ../.env
+    environment:
+      # Cap what pytest's `-n auto` means. `auto` is one worker per host CPU (12
+      # here) and xdist workers share almost nothing — a live worker measured
+      # 292 MB resident, 246 MB of it private-dirty — so the bill is linear in
+      # worker count. Two agent sessions running fleets at once (12 + 8) pinned
+      # this container at its memory ceiling and got workers OOM-killed.
+      # pytest-xdist >= 3.8 reads this var as the cap for `auto`.
+      PYTEST_XDIST_AUTO_NUM_WORKERS: "6"
     volumes:
       - ../:/workspace # Mount full workspace directory
       # Docker-outside-of-Docker: hand the dev container the HOST daemon so it can
@@ -31,4 +39,21 @@ services:
     # kill -0 / wait-on-pid liveness checks see zombies as still-alive.
     # `init: true` injects tini as PID 1 to reap them.
     init: true
+    # Memory ceiling, deliberately LOWER than the 10 GiB this container had been
+    # running with. That 10 GiB was never declared here — it was applied
+    # out-of-band to the live container — so this line is also the first time the
+    # limit is written down. It is NOT a mistake and must not be "corrected"
+    # upward: the kill that actually hurt was the HOST running out globally and
+    # the kernel taking down the user's VS Code. The host has 14 GiB and also
+    # carries a desktop, an editor and a browser. A ceiling the container hits
+    # BEFORE the host does means the container kills its own test worker instead
+    # of the user's session — the container is the cheaper thing to lose.
+    # memswap_limit is pinned to the same value on purpose: it keeps the
+    # container's swap allowance at zero, which is the posture it already had
+    # (HostConfig.MemorySwap == HostConfig.Memory). Without it Docker defaults
+    # memswap to 2x mem_limit and the container could spill 8 GiB onto the
+    # host's 4 GiB swap file — reintroducing the host-side pressure this exists
+    # to remove.
+    mem_limit: 8g
+    memswap_limit: 8g
     command: ["sleep", "infinity"]

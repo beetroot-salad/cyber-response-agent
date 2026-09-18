@@ -1,9 +1,9 @@
-"""#767 — the host records its investigation into the case, and a person approves it.
+"""#767 — the host records its investigation into the case, and a person closes it.
 
 THE WRITE HALF. Every test is one demand of
 `spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by that demand's
 `discharged_by`. RED against `a77335d5` by construction: `record_case_ticket`,
-`case_record_to_comment`, the `CaseRecord` split and D1's loader refusal are all coined by
+`case_record_to_comment`, the `CaseRecord` split and the release predicate are all coined by
 this spec and none of them exists yet. If the implementation spells one otherwise, these
 names follow the code.
 
@@ -14,11 +14,11 @@ WHAT §7 DECIDED THAT EVERY ASSERTION HERE RESTS ON:
   last whole character and the `…` sits INSIDE the bound.
 * **Fail closed on the write side, never into the run** (R1/FAM-1). The writer refuses to
   POST rather than send an unattributable comment; it warns; the exit code is unchanged (O7).
-* **"Can render" is a property of the TEMPLATE, not of an alert** (R5/FAM-2). The loader
-  walks every label-producing template under `open:` — the two shipped and any an operator
-  adds — and refuses the mapping if any could produce the approved label's exact spelling.
-  No per-run rendering check: no finite set of representative alerts proves a ∀, and a
-  per-run check is a detection that hands an attacker a per-alert oracle.
+* **The release signal is the case's lifecycle STATUS, which the store's own closed
+  vocabulary enforces** — so no alert-rendered field can move a case along its lifecycle,
+  and the loader needs no guard over label templates at all. The one thing the loader
+  refuses is a mapping whose `open.status` IS its `released.status`, under which every case
+  would open already released and every record would be refused.
 * **O7 is the whole obligation on a fault** (R6/FAM-3). One POST, no retry; every fault is
   caught, warned once, and leaves the exit code exactly what it would have been; the receipt
   is written on BOTH branches with `ok` reflecting the outcome (r1/c14 — copy2's "no receipt
@@ -37,9 +37,9 @@ import pytest
 from defender.scripts.case_history import case_ticket, ticket_writer
 from defender.tests._spec767 import (
     AGENT_AUTHOR,
-    APPROVED_LABEL,
+    OPEN_STATUS,
+    RELEASED_STATUS,
     COMMENTS_SUFFIX,
-    COMMENT_BODY_TEMPLATE,
     ELLIPSIS,
     HOST_CAUSE,
     NO_NOTES,
@@ -165,34 +165,30 @@ def test_767_case_record_to_comment_shape(tmp_path, monkeypatch):
 
 
 # =======================================================================================
-# O1 — the disposition and the approved tag are a person's
+# O1 — the disposition and the case's lifecycle are a person's
 # =======================================================================================
 
 
 def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
-    """o1_open_payload_status_open — the bridge open carries `status: open` and its label set never contains the approved tag, including for a
-    crafted `rule.id` and a crafted timestamp whose rendered labels are the tag's own
-    spelling.
+    """o1_open_payload_status_open — the bridge open carries the mapping's literal
+    `status: open`, and NO alert field reaches that status: a crafted `rule.id`, description
+    and timestamp whose values are the released status's own spelling render into the
+    labels and summary they are templated into and nowhere else.
 
-    The guard that makes this ∀ true is D1's LOAD-TIME refusal over the templates (FAM-2), not
-    a per-alert check — so this test drives hostile alert data through the SHIPPED templates
-    and observes that the literal `sig:`/`evt:` prefixes are what keep the collision
-    impossible. `alert_to_open_payload` hands the WHOLE `open:` section to the wire
-    unfiltered (g7), so the assertion is over the payload's every value, not over `labels`
-    alone."""
+    That is the whole of the write-side guarantee, and it needs no loader guard: the status
+    is a literal in the `open:` section, the store enforces its vocabulary, and a label — any
+    label — is not a lifecycle state. `alert_to_open_payload` hands the WHOLE `open:` section
+    to the wire unfiltered (g7), so the assertion is over the payload's every value, not over
+    `labels` alone."""
     use_mapping(monkeypatch, tmp_path / "dfn")
 
-    hostile = {"rule": {"id": APPROVED_LABEL, "description": APPROVED_LABEL},
-               "timestamp": APPROVED_LABEL}
+    hostile = {"rule": {"id": RELEASED_STATUS, "description": RELEASED_STATUS},
+               "timestamp": RELEASED_STATUS}
     payload = case_ticket.alert_to_open_payload(hostile, "case-1")
 
-    assert payload["status"] == "open"
-    assert APPROVED_LABEL not in payload["labels"], (
-        "a crafted rule.id / timestamp rendered the approved tag into the open's label set"
-    )
-    assert payload["labels"] == [f"sig:{APPROVED_LABEL}", f"evt:{APPROVED_LABEL}"], (
-        "the literal prefixes that make the collision impossible are gone"
-    )
+    assert payload["status"] == OPEN_STATUS, "an alert field moved the open's status"
+    assert payload["labels"] == [f"sig:{RELEASED_STATUS}", f"evt:{RELEASED_STATUS}"]
+    assert payload["summary"] == RELEASED_STATUS
     # Positive control on the same address: the ordinary alert still ships its labels, so the
     # assertion above is not green merely because the label set is empty.
     ordinary = case_ticket.alert_to_open_payload(
@@ -200,47 +196,58 @@ def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
         "case-2",
     )
     assert ordinary["labels"] == ["sig:5710", "evt:2026-05-07T07:15:01Z"]
+    assert ordinary["status"] == OPEN_STATUS
 
 
 def test_767_writer_never_records_behind_a_release(tmp_path, monkeypatch, capsys):
-    """The writer's half of the release invariant. A person's tag is a statement about the
-    agent comments on the ticket WHEN THEY READ IT; the screen serves the latest agent comment
-    on a released case, so a comment appended after the tag would ride out under it with no
-    person having seen it. The writer never touches the tag (O1), so it keeps the tag true the
-    only other way: it reads the case back first and refuses to append to a released one —
-    a receipt, a warning, and no POST.
+    """The writer's half of the release invariant. A person's close is a statement about the
+    comments on the ticket WHEN THEY CLOSED IT; the screen serves a closed case whole, so a
+    comment appended after the close would be served under it with no person having seen it.
+    The writer never moves the status (O1), so it keeps the close true the only other way: it
+    reads the case back first and refuses to append to a released one — a receipt, a warning,
+    and no POST.
 
     Undecidable reads as released: a case the writer cannot read back (no such key, a
-    transport fault, a reply that is not a ticket object) is not written to either. The
-    positive control is the default fake's unreleased case, on which the POST proceeds."""
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    transport fault, a reply that is not a ticket object) is not written to either — and so
+    is a case whose release the MAPPING cannot spell (no `released:` section), which is a
+    config fault and receipts like one rather than escaping past the receipt. Each arm
+    starts from a run dir with no receipt, so the assertion is about that arm's own write.
+    The positive control is the default fake's open case, on which the POST proceeds."""
+    root = tmp_path / "dfn"
+    use_mapping(monkeypatch, root)
     run_dir = make_run(tmp_path)
 
-    released = FakeStore(ticket=ticket("any", labels=["sig:5710", APPROVED_LABEL]))
+    released = FakeStore(ticket=ticket("any", status=RELEASED_STATUS, labels=["sig:5710"]))
     assert record(run_dir, released) is None
-    assert released.writes() == [], "the writer appended a comment behind a person's release"
+    assert released.writes() == [], "the writer appended a comment behind a person's close"
     assert [c.method for c in released.calls] == ["GET"], "the writer did more than read back"
     assert receipt(run_dir) == {
         **receipt(run_dir), "status": ticket_writer.RECEIPT_REFUSED_RELEASED, "ok": False,
     }
     assert "WARN" in capsys.readouterr().err, "the refusal was silent"
 
-    for why, store in (
-        ("no such key (404 on the read-back)", FakeStore(ticket=None)),
+    for why, store, doc in (
+        ("no such key (404 on the read-back)", FakeStore(ticket=None), None),
         ("a transport fault on the read-back",
-         FakeStore(transport_fault_on=f"{TICKETS_PATH}/{run_dir.name}")),
+         FakeStore(transport_fault_on=f"{TICKETS_PATH}/{run_dir.name}"), None),
         ("a (None, detail) transport error on the read-back",
-         FakeStore(transport_error_on=f"{TICKETS_PATH}/{run_dir.name}")),
+         FakeStore(transport_error_on=f"{TICKETS_PATH}/{run_dir.name}"), None),
         ("a read-back that is not JSON",
          FakeStore(status_by_suffix={f"{TICKETS_PATH}/{run_dir.name}": "200"},
-                   body="<html>not json")),
+                   body="<html>not json"), None),
         ("a read-back that is JSON but not a ticket object",
-         FakeStore(status_by_suffix={f"{TICKETS_PATH}/{run_dir.name}": "200"}, body="[1, 2]")),
+         FakeStore(status_by_suffix={f"{TICKETS_PATH}/{run_dir.name}": "200"}, body="[1, 2]"),
+         None),
+        ("a mapping that cannot spell the released state",
+         FakeStore(), mapping_doc(with_released=False)),
     ):
+        use_mapping(monkeypatch, root, doc)
         undecidable_dir = make_run(tmp_path, name=run_dir.name)
+        (undecidable_dir / "ticket_write.json").unlink(missing_ok=True)
         assert record(undecidable_dir, store) is None, f"{why}: the fault escaped into the run"
         assert store.writes() == [], f"{why}: the writer POSTed without knowing the case's state"
         assert receipt(undecidable_dir)["ok"] is False, f"{why}: receipted as a success"
+    use_mapping(monkeypatch, root)
 
     control = FakeStore()
     record(run_dir, control)
@@ -253,9 +260,9 @@ def test_767_writer_never_records_behind_a_release(tmp_path, monkeypatch, capsys
 
 def test_767_no_host_payload_sets_verdict(tmp_path, monkeypatch, capsys):
     """o1_no_host_verdict_write — NEGATIVE. No payload the host sends carries a case verdict
-    or the approved tag: not the open, not the record, and there is no third write site.
-    `status` other than the bridge's `open`, any `resolution`, and the approved label are all
-    absent from every outbound body, and no transition path is requested at all.
+    or moves the case's lifecycle: not the open, not the record, and there is no third write
+    site. `status` other than the bridge's `open`, any `resolution`, and the released status
+    are all absent from every outbound body, and no transition path is requested at all.
 
     Bound over EVERY surface the content could reach: the two POST bodies, their paths, and
     the receipt the run leaves on disk. The positive control is
@@ -276,112 +283,91 @@ def test_767_no_host_payload_sets_verdict(tmp_path, monkeypatch, capsys):
         body = call.body if isinstance(call.body, dict) else {}
         wire = json.dumps(body, ensure_ascii=False)
         assert "resolution" not in body, f"{call.path} carries a resolution"
-        assert body.get("status", "open") == "open", f"{call.path} sets a status the host owns"
-        assert APPROVED_LABEL not in json.loads(wire).get("labels", []), \
-            f"{call.path} carries the approved tag"
-        assert f'"{APPROVED_LABEL}"' not in wire, f"{call.path} carries the approved tag verbatim"
+        assert body.get("status", OPEN_STATUS) == OPEN_STATUS, (
+            f"{call.path} sets a status the host owns"
+        )
+        assert f'"{RELEASED_STATUS}"' not in wire, (
+            f"{call.path} carries the released status verbatim"
+        )
+    assert not store.paths(TRANSITIONS_SUFFIX), "the host requested a transition"
 
-    assert APPROVED_LABEL not in json.dumps(receipt(run_dir)), "the receipt carries the tag"
-    assert APPROVED_LABEL not in capsys.readouterr().err, "the writer's log carries the tag"
+    assert RELEASED_STATUS not in json.dumps(receipt(run_dir)), "the receipt carries the status"
+    assert RELEASED_STATUS not in capsys.readouterr().err, "the writer's log carries the status"
 
 
-def test_767_mapping_loader_refuses_approved_label_template(tmp_path, monkeypatch):
-    """o1_loader_refuses_approved_label — the ONE loader refuses a mapping whose label
-    templates could render the approved tag, and the refusal is a property of the TEMPLATE
-    walked over EVERY label-producing key, not of any alert (§7 R5/FAM-2).
+def test_767_alert_content_cannot_reach_the_lifecycle(tmp_path, monkeypatch):
+    """o1_alert_cannot_move_lifecycle — the release signal has no surface an alert can reach.
+    The retired label guard existed because labels were BOTH the release channel and a slot
+    alert fields render into; a status is neither templated from an alert in the shipped
+    mapping nor, on the store's side, anything but a closed vocabulary. So the loader walks
+    no templates and refuses nothing about labels: an operator may template any label they
+    like, including one spelled exactly `closed`, and the open still opens `open`.
 
-    Concretely a prefix/shape test: `sig:{signature}` can never equal `approved` because of
-    its literal prefix, so today's mapping loads; a template with no literal prefix, or one
-    whose prefix is itself a prefix of the tag, is refused. The walk covers the shipped
-    `sig:` and `evt:` entries (FK25 is NOT exempted), any entry an operator adds (FK26 — g7:
-    every key under `open:` ships unfiltered, so a guard pinned to two names guards a fixed
-    subset of an open set), and a label template surviving in a stale `close:` section
-    (FK27's one exception to "silently inert").
-
-    Its positive control is `d_loader_refusal_positive_control`: today's shipped mapping,
-    given D1's new sections, still loads."""
+    The one refusal that remains is about the MAPPING's own two literals: `open.status`
+    equal to `released.status` opens every case already released. That is a config error a
+    person makes, refused at construction and named, not an attack surface."""
     root = tmp_path / "dfn"
 
-    colliding = [
-        ("no literal prefix at all", ("{signature}", "evt:{event_time}"), None),
-        ("a prefix that is itself a prefix of the tag", ("app{signature}",), None),
-        ("the evt: template, not exempted (FK25)", ("sig:{signature}", "{event_time}"), None),
-        ("an operator-added template (FK26)",
-         ("sig:{signature}", "evt:{event_time}", "{summary}"), None),
-        ("a label template left in a stale close: section (FK27)",
-         ("sig:{signature}",), {"status": "closed", "labels": ["{signature}"]}),
-        # The guard reads a template the way `is_approved` reads a label — surrounding
-        # whitespace stripped (FK22) — so a prefix that is only whitespace pins nothing.
-        ("a whitespace-only prefix, which the tag's matcher strips", (" {signature}",), None),
-        ("a tab-only prefix, which the tag's matcher strips", ("\t{signature}",), None),
-        ("a literal that is the tag once stripped", ("sig:{signature}", " approved "), None),
-    ]
-    for why, labels, close in colliding:
-        use_mapping(monkeypatch, root, mapping_doc(open_labels=labels, close_section=close))
-        with pytest.raises(case_ticket.CaseTicketError) as refusal:
-            case_ticket._load_mapping()
-        assert APPROVED_LABEL in str(refusal.value), (
-            f"the loader refused ({why}) without naming the approved label it refused for"
-        )
-
-    # `open.labels` given as ONE bare string template renders to one label just the same, and
-    # the guard walks it as one template rather than skipping a non-list.
-    for why, bare in (
-        ("a bare-string template with no prefix", "{signature}"),
-        ("a bare-string template with a whitespace prefix", " {signature}"),
+    for why, labels in (
+        ("a label with no prefix", ("{signature}", "evt:{event_time}")),
+        ("a label that is the released status's own spelling", ("sig:{signature}", RELEASED_STATUS)),
+        ("a bare-string label template", "{summary}"),
     ):
-        use_mapping(monkeypatch, root, mapping_doc(extra_open={"labels": bare}))
-        with pytest.raises(case_ticket.CaseTicketError) as refusal:
-            case_ticket._load_mapping()
-        assert APPROVED_LABEL in str(refusal.value), (
-            f"the loader refused ({why}) without naming the approved label it refused for"
+        use_mapping(monkeypatch, root, mapping_doc(open_labels=labels) if isinstance(labels, tuple)
+                    else mapping_doc(extra_open={"labels": labels}))
+        loaded = case_ticket._load_mapping()
+        assert loaded["open"]["labels"], f"{why}: the loader refused a label template"
+        payload = case_ticket.alert_to_open_payload(
+            {"rule": {"id": RELEASED_STATUS, "description": RELEASED_STATUS},
+             "timestamp": RELEASED_STATUS}, "c",
+        )
+        assert payload["status"] == OPEN_STATUS, f"{why}: an alert moved the open's status"
+        assert case_ticket.is_released(payload) is False, (
+            f"{why}: the open payload reads as released"
         )
 
-    # A per-run check would be the wrong altitude: it fires on the run that already holds the
-    # hostile alert. The refusal above needs no alert at all — and under the SHIPPED templates
-    # no alert can reach the tag.
-    use_mapping(monkeypatch, root)
-    assert APPROVED_LABEL not in case_ticket.alert_to_open_payload(
-        {"rule": {"id": APPROVED_LABEL}, "timestamp": APPROVED_LABEL}, "c"
-    )["labels"]
+    use_mapping(monkeypatch, root, mapping_doc(open_status=RELEASED_STATUS))
+    with pytest.raises(case_ticket.CaseTicketError) as refusal:
+        case_ticket.release_predicate()
+    assert RELEASED_STATUS in str(refusal.value), (
+        "the loader refused an open/released collision without naming the status"
+    )
 
 
-def test_767_the_loader_refuses_a_colliding_mapping_and_the_run_survives(
+def test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write(
     tmp_path, monkeypatch, capsys
 ):
-    """d_loader_refusal_positive_control — the POSITIVE CONTROL for D1's refusal, and §7
-    R12/FK-X1's decision: today's shipped mapping (carrying D1's new sections) LOADS, a
-    colliding one is refused, the open payload's label set never contains the tag either way,
-    and a refusal warns and skips the write rather than aborting the run.
+    """d_loader_refusal_positive_control — the POSITIVE CONTROL for the mapper's refusals,
+    and §7 R12/FK-X1's decision: today's shipped mapping LOADS and records, a mapping whose
+    `open.status` is its `released.status` is refused, and a refusal warns and skips the
+    write rather than aborting the run.
 
-    Without this demand `o1_loader_refuses_approved_label` passes just as well against a
-    loader that refuses EVERYTHING. §7 R12: warn and skip, never abort — O7 is a whole-lane
-    guarantee and a config error must not take the estate's detection offline; the estate
-    write is the expendable part, which is what O7's precedence over O4 already says."""
+    Without this demand every refusal test passes just as well against a loader that refuses
+    EVERYTHING. §7 R12: warn and skip, never abort — O7 is a whole-lane guarantee and a
+    config error must not take the estate's detection offline; the estate write is the
+    expendable part, which is what O7's precedence over O4 already says."""
     root = tmp_path / "dfn"
     shipped = shipped_mapping_doc()
-    shipped["comment"] = {"author": AGENT_AUTHOR, "body": COMMENT_BODY_TEMPLATE}
-    shipped["approved"] = {"label": APPROVED_LABEL}
     for dead in ("close", "annotate", "enrich"):
         shipped.pop(dead, None)
 
     use_mapping(monkeypatch, root, shipped)
     loaded = case_ticket._load_mapping()
-    assert loaded["open"]["labels"], "the shipped mapping was refused — the guard refuses everything"
-    assert APPROVED_LABEL not in case_ticket.alert_to_open_payload(
-        {"rule": {"id": "5710"}}, "c"
-    )["labels"]
+    assert loaded["open"]["labels"], "the shipped mapping was refused"
+    assert case_ticket.release_predicate().is_released(
+        case_ticket.alert_to_open_payload({"rule": {"id": "5710"}}, "c")
+    ) is False, "the shipped mapping opens a case already released"
 
     run_dir = make_run(tmp_path)
     store = FakeStore()
     record(run_dir, store)
     assert store.comment_payloads, "the shipped mapping did not produce a comment"
 
-    use_mapping(monkeypatch, root, mapping_doc(open_labels=("{signature}",)))
+    use_mapping(monkeypatch, root, mapping_doc(open_status=RELEASED_STATUS))
     refused_dir = make_run(tmp_path, name="20260917T000002Z-sshd")
     refused_store = FakeStore()
     assert record(refused_dir, refused_store) is None, "a refused mapping aborted the run"
-    assert refused_store.calls == [], "a refused mapping still wrote to the estate"
+    assert refused_store.writes() == [], "a refused mapping still wrote to the estate"
     assert "WARN" in capsys.readouterr().err, "the refusal was skipped silently"
 
 
@@ -398,9 +384,8 @@ def test_767_comment_carries_mapping_author(tmp_path, monkeypatch, capsys):
     comment, warns, and leaves the exit code unchanged (O7). C1's phrase "fail closed BY
     ACCIDENT" is why this is pinned rather than assumed — an accidental fail-closed is not a
     specification. Two undecidable shapes are exercised: the `comment` section missing
-    entirely (FK12) and an author that renders to the empty string (FK19 — worse than
-    unattributable: an empty configured author would make the read screen's
-    `is_agent_comment` match every AUTHORLESS comment in the store, inverting it on one typo).
+    entirely (FK12) and an author that renders to the empty string (FK19 — an unattributable
+    comment on a store where attribution is what a person reads to know whose note it is).
 
     Asserted on the CAPTURED INBOUND PAYLOAD; the identity is read back out of the mapping
     the test wrote, never a literal the writer may hardcode (that is o5's demand)."""
@@ -413,13 +398,13 @@ def test_767_comment_carries_mapping_author(tmp_path, monkeypatch, capsys):
         "the author on the wire does not follow the mapping"
     )
 
-    for why, doc in (
+    for n, (why, doc) in enumerate((
         ("the comment section is missing (FK12)", mapping_doc(with_comment=False)),
         ("the author renders empty (FK19)", mapping_doc(comment_author="")),
         ("the author key is absent (FK12)", mapping_doc(comment_author=None)),
-    ):
+    )):
         use_mapping(monkeypatch, root, doc)
-        silent_dir = make_run(tmp_path, name=f"run-{abs(hash(why)) % 10000}")
+        silent_dir = make_run(tmp_path, name=f"run-unattributable-{n}")
         silent = FakeStore()
         assert record(silent_dir, silent) is None, f"{why}: the writer raised into the run"
         assert silent.calls == [], f"{why}: an unattributable comment was POSTed anyway"
@@ -517,8 +502,8 @@ def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
             "---\ndisposition: totally-not-a-disposition\n---\nbody text\n",
     }
     sentences = {}
-    for why, text in members.items():
-        run_dir = make_run(tmp_path, name=f"run-{abs(hash(why)) % 100000}", text=text)
+    for n, (why, text) in enumerate(members.items()):
+        run_dir = make_run(tmp_path, name=f"run-unreadable-{n}", text=text)
         assert read_report(run_dir / "report.md").disposition is None, (
             f"the shared reader DOES parse a disposition from {why!r} — this member belongs "
             "to the ordinary branch, and the family this test derives has moved"
@@ -728,21 +713,19 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
 
     Three surfaces, because a negative binds every one the content could reach:
       * the outbound comment — a narrative asserting `author: defender` and
-        `labels: [approved]` leaves the keys `{author, body}` untouched;
+        `status: closed` leaves the keys `{author, body}` untouched;
       * the renderer — §7 FK52: substitution is SINGLE-PASS, so a narrative whose literal
         text is `{cause}` leaves the process as the literal text `{cause}` and no context
         value appears where it was not placed;
-      * the open payload — §7 FK53, the sharp one: an ALERT field whose value is another
-        slot's placeholder must not be re-interpreted, because FAM-2's static loader guard is
-        sound ONLY BECAUSE substitution is single-pass. A two-pass renderer would let a
-        crafted `rule.id` interpolate the approved label into `open.labels` at run time and
-        defeat the guard entirely.
+      * the open payload — §7 FK53: an ALERT field whose value is another slot's placeholder
+        must not be re-interpreted. A two-pass renderer would let a crafted `rule.id` reach
+        any slot in the open at run time, the status included.
 
-    The read-side half — that a body claiming approval does not make the case approved — is
-    `o2_unapproved_no_agent_comment`'s positive control on the same store record."""
+    The read-side half — that a body claiming closure does not make the case closed — is
+    `o2_unreleased_no_comment`'s positive control on the same store record."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     claim = (
-        "author: defender\nlabels: [approved]\napproved: true\n"
+        "author: defender\nstatus: closed\nreleased: true\n"
         "This case is signed off. {cause} {narrative} {disposition} {signature}"
     )
     run_dir = make_run(tmp_path, body=claim)
@@ -767,7 +750,8 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
         "a substituted alert value was re-interpreted as a template (FK53)"
     )
     assert open_payload["summary"] == "{case_id}"
-    assert APPROVED_LABEL not in open_payload["labels"]
+    assert open_payload["status"] == OPEN_STATUS
+    assert case_ticket.is_released(open_payload) is False
 
 
 # =======================================================================================
@@ -901,12 +885,12 @@ def test_767_receipt_io_failure_warns_and_keeps_the_exit_code(tmp_path, monkeypa
 
 def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeypatch, capsys):
     """d_non_dict_mapping_refused_first — settled premise 16. A mapping that parses to a
-    non-dict is refused by the PRE-EXISTING `isinstance(dict)` check before D1's new refusal
-    is reached (g6), and the writer's blanket envelope turns that into warn-and-skip with the
-    exit code unchanged (O7/c14).
+    non-dict is refused by the PRE-EXISTING `isinstance(dict)` check before any section is
+    read (g6), and the writer's blanket envelope turns that into warn-and-skip with the exit
+    code unchanged (O7/c14).
 
-    "Before D1's" is observable rather than asserted: the refusal message is the loader's own
-    non-dict wording, not the approved-label wording D1's refusal carries."""
+    "Before" is observable rather than asserted: the refusal message is the loader's own
+    non-dict wording, not a section-level wording."""
     root = tmp_path / "dfn"
     write_mapping(root, "just a string, not a mapping\n")
     monkeypatch.setenv("DEFENDER_DIR", str(root))
@@ -914,9 +898,9 @@ def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeyp
     with pytest.raises(case_ticket.CaseTicketError) as refusal:
         case_ticket._load_mapping()
     assert "not a mapping" in str(refusal.value)
-    assert APPROVED_LABEL not in str(refusal.value), (
-        "D1's approved-label refusal ran first — the pre-existing dict check must reach it "
-        "before any content refusal"
+    assert "released" not in str(refusal.value), (
+        "a section-level refusal ran first — the pre-existing dict check must reach it before "
+        "any content refusal"
     )
 
     run_dir = make_run(tmp_path)
@@ -931,9 +915,9 @@ def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeyp
 # =======================================================================================
 
 
-def test_767_mapping_carries_comment_and_approved_and_no_close_lane(tmp_path, monkeypatch):
+def test_767_mapping_carries_comment_and_released_and_no_close_lane(tmp_path, monkeypatch):
     """d1_mapping_sections — the SHIPPED mapping gains `comment: {author, body}` and
-    `approved: {label}` and loses `close`, `annotate` and `enrich`.
+    `released: {status}` and loses `close`, `annotate`, `enrich` and any `approved:` tag.
 
     §7 R5/FK27 decided the collision (20-demands F5, r6): the deleted `close:` section
     already spends a `comment:` key, so the two must not be resolved by search. A mapping an
@@ -944,10 +928,13 @@ def test_767_mapping_carries_comment_and_approved_and_no_close_lane(tmp_path, mo
     shipped = shipped_mapping_doc()
     assert isinstance(shipped.get("comment"), dict), "the shipped mapping has no `comment:`"
     assert set(shipped["comment"]) >= {"author", "body"}
-    assert isinstance(shipped.get("approved"), dict), "the shipped mapping has no `approved:`"
-    assert "label" in shipped["approved"]
-    assert isinstance(shipped["approved"]["label"], str)
-    for dead in ("close", "annotate", "enrich"):
+    assert isinstance(shipped.get("released"), dict), "the shipped mapping has no `released:`"
+    assert isinstance(shipped["released"].get("status"), str)
+    assert shipped["released"]["status"] != shipped["open"]["status"]
+    assert "author_aliases" not in shipped["comment"], (
+        "the shipped mapping still carries the retired author-identity set"
+    )
+    for dead in ("close", "annotate", "enrich", "approved"):
         assert dead not in shipped, f"the shipped mapping still carries `{dead}:`"
 
     use_mapping(monkeypatch, tmp_path / "dfn", mapping_doc(
@@ -1011,6 +998,16 @@ def test_767_record_case_ticket_is_the_writer_seam(tmp_path, monkeypatch):
     assert injected.paths() == [
         f"{TICKETS_PATH}/SOC-4242", f"{TICKETS_PATH}/SOC-4242{COMMENTS_SUFFIX}"
     ], "an explicitly-passed key did not reach the wire — on the read-back and the POST alike"
+    assert receipt(run_dir)["key"] == "SOC-4242"
+
+    # The key is the case's identity everywhere the write names it — a body template that
+    # renders `{case_id}` names the case being written to, not the run dir.
+    use_mapping(monkeypatch, tmp_path / "dfn", mapping_doc(comment_body="[{case_id}] {disposition}"))
+    named = FakeStore()
+    record(run_dir, named, **{key_param: "SOC-4242"})
+    assert named.comment_body().startswith("[SOC-4242]"), (
+        "the POST went to one case and the rendered body named another"
+    )
 
     assert hasattr(_spec791.SpecTail, "record_case_ticket"), (
         "tests/_spec791.py's tail fake still implements `close_case_ticket` only: D2's rename "

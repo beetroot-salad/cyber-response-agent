@@ -4,14 +4,13 @@ design: "767"   # gh issue #767, "Gate the ungated estate-write paths in the tic
                 # posted intent+design (O1–O8, N1–N11, D1–D8, S1–S5, Scale), 15 inherited claims.
 tests: defender/tests   # the suite this graph derives (project profile, `tests.dir`). check_binds
                         # scans its docstrings; every `discharged_by` below names a `test_767_*`
-                        # function that phase E has now WRITTEN, in six modules plus one shared
+                        # function that phase E has now WRITTEN, in five modules plus one shared
                         # non-collected helper:
                         #   defender/tests/_spec767.py                 the fakes + fixtures
                         #   defender/tests/test_767_writer.py          D1-D3, O1/O3/O4/O7/O8/S1/S4/S5
-                        #   defender/tests/test_767_screen.py          D4, O2/S3, the predicates, Scale
+                        #   defender/tests/test_767_screen.py          D4, O2/S3, the predicate, Scale
                         #   defender/tests/test_767_surfaces.py        O6/N9/D5/D6-reach, the censuses, D7
                         #   defender/tests/test_767_run_tail.py        O4/N1/N7 against run.py's real tail
-                        #   defender/tests/test_767_stub.py            D6's route on the playground stub
                         #   defender/tests/test_767_gather_read.py     the three capture-edge demands
                         #                                              (pytest.mark.e2e, sited here
                         #                                              rather than under tests/e2e/
@@ -20,7 +19,46 @@ tests: defender/tests   # the suite this graph derives (project profile, `tests.
 base: a77335d5          # main. write-code-from-spec's gate diffs against it.
 
 # ===========================================================================================
-# READ THIS FIRST
+# THE REWORK (post-review, on the PR branch — read this before the phase-E/F history below).
+#
+# The review of the first implementation found twelve of its fifteen defects in ONE place: the
+# person's approval lived in the same free-text namespace the agent writes into (a label), and
+# "who wrote this comment" was inferred from a string the posting client chooses (`author`).
+# Every boundary then needed a normaliser — lstrip here, strip there, exact-match on author —
+# and the normalisers drifted (a padded label template could self-approve a case; a padded
+# configured label could never approve anything; a vendor that trims authors un-hid every
+# agent comment). The rework dissolves the class instead of patching its instances:
+#
+#   * THE RELEASE SIGNAL IS THE CASE'S LIFECYCLE STATE. The mapping's `approved: {label}`
+#     becomes `released: {status}` (shipped: `closed`). A person closes a case once they have
+#     reviewed it; `status` is a closed vocabulary the store itself enforces (c8: a Literal,
+#     422 on anything else), so no alert-rendered field can move a case along it. The loader's
+#     label-template collision guard (old D1/FAM-2) has no surface left to guard and is gone;
+#     the one refusal kept is `open.status == released.status` (every case would open
+#     released). The stub gains NO route: `POST /tickets/{key}/transitions` already exists and
+#     is the person's act. Re-opening a case hides its history again — the lifecycle's own
+#     revoke, which a label would have needed an "un-approve" story for.
+#   * NO AUTHOR PREDICATE. `is_agent_comment`, the identity set and `comment.author_aliases`
+#     are deleted. A released case is served WHOLE; an unreleased case serves NO comments —
+#     an analyst's note on an open sibling waits for the close with the rest of the list.
+#     "Keep only the latest agent comment" (old O8/FK02) goes with it: what bounds a closed
+#     case's comment count is the writer, which never records behind a close.
+#   * ONE predicate, `case_ticket.is_released`, built by `release_predicate()` — safe by
+#     construction as before (§7 R1), with the configured status stripped ONCE at load and the
+#     ticket's status compared exactly. The screen degrades on any construction failure as
+#     before, and now says so once on stderr.
+#
+# Element and demand ids below were renamed where their MEANING changed (`mapping_approved` →
+# `mapping_released`, `is_approved` → `is_released`, `o2_unapproved_no_agent_comment` →
+# `o2_unreleased_no_comment`, …) and deleted where the concept went (`is_agent_comment`,
+# `d6_stub_label_route`, `d6_labels_route_not_confined`, `o8_one_agent_comment_per_ticket`,
+# `d_author_alias_keeps_history_withheld`). The `fork:`/`unknown:` tags on renamed demands are
+# struck where the rework answered them; the rest stay as the historical record phase E kept.
+# The prose below this block is that history and is NOT rewritten — where it says "the tag",
+# "approved" or "agent-authored", read it as what the first implementation did.
+#
+# ===========================================================================================
+# READ THIS FIRST (as phase E/F left it)
 #
 # THE CHANGE. The host stops closing tickets and starts RECORDING into them: `close_case_ticket`
 # becomes `record_case_ticket`, one `POST /tickets/{key}/comments` and no transition (D2); the
@@ -184,41 +222,57 @@ demands:
   - {id: o1_open_payload_status_open, kind: shape, form: test, stakeholder: analyst,
      discharged_by: test_767_open_payload_status_and_labels,
      binds: ["interacts(open_case_ticket->case_history_store).payload", mapping_open,
-             mapping_approved]}
+             mapping_released, is_released, alert_json,
+             "alert_json.domain.distinguished[rule-id-rendering-to-the-released-status]",
+             "alert_json.domain.distinguished[timestamp-rendering-to-the-released-status]"]}
   - {id: o1_no_host_verdict_write, kind: negative, form: test, stakeholder: analyst,
      discharged_by: test_767_no_host_payload_sets_verdict,
      binds: ["interacts(open_case_ticket->case_history_store).payload",
-             "interacts(record_case_ticket->case_history_store).payload", mapping_approved],
+             "interacts(record_case_ticket->case_history_store).payload", mapping_released],
      positive_control: o1_open_payload_status_open,
      note: "census: exactly two POST sites in the writer after D2 (c1, r3, S1)."}
-  - {id: o1_loader_refuses_approved_label, kind: domain-outcome, form: test, stakeholder: operator,
-     discharged_by: test_767_mapping_loader_refuses_approved_label_template,
-     binds: [case_history_mapping, mapping_open, mapping_approved,
-             "case_history_mapping.domain.distinguished[open-labels-can-render-approved]",
+  - {id: o1_alert_cannot_move_lifecycle, kind: negative, form: test, stakeholder: operator,
+     discharged_by: test_767_alert_content_cannot_reach_the_lifecycle,
+     binds: [case_history_mapping, mapping_open, mapping_released, is_released, alert_json,
+             "case_history_mapping.domain.distinguished[open-status-is-the-released-status]",
              "mapping_open.domain.distinguished[sig-template]",
              "mapping_open.domain.distinguished[evt-template]",
-             "mapping_open.domain.distinguished[operator-added-label-template]"],
+             "mapping_open.domain.distinguished[operator-added-label-template]",
+             "alert_json.domain.distinguished[rule-id-rendering-to-the-released-status]",
+             "alert_json.domain.distinguished[timestamp-rendering-to-the-released-status]"],
      positive_control: d_loader_refusal_positive_control,
-     fork: "FAM-2 (FK24, FK25, FK26, FK27)",
-     unknown: "how wide the refusal is — one template, two, or every label-producing key under
-       `open:`. g7 is why it matters: `alert_to_open_payload` ships the WHOLE section unfiltered."}
+     note: "REWORK — replaces `o1_loader_refuses_approved_label` (FAM-2, FK24-FK27). The release
+       signal has no surface an alert can reach: a status is not templated from an alert in the
+       shipped mapping and, on the store's side, is a closed vocabulary (c8). So the loader walks
+       no label templates and refuses nothing about labels — an operator may template any label,
+       including one spelled exactly like the released status — and the open still opens `open`.
+       The one refusal kept is over the mapping's own two literals, `open.status` equal to
+       `released.status`, which is a config error and not an attack surface."}
 
-  # ---- O2 / S3 / S3′ — agent text only from approved cases -----------------------------------
-  - {id: o2_unapproved_no_agent_comment, kind: negative, form: test, stakeholder: a later run,
-     discharged_by: test_767_unapproved_ticket_serves_no_agent_comment,
-     binds: [ticket_screen, "interacts(query_tool->ticket_screen).response", is_agent_comment,
-             is_approved, "ticket_screen.access[list-tickets]", "ticket_screen.access[get-ticket]"],
-     positive_control: o2_approved_serves_latest,
-     fork: "FAM-1, FK10, FK22",
-     unknown: "the adversarial control's expected outcome under a confusable tag (FK22) and under
-       an author-spelling change (FK10 — the author half fails OPEN and is O2's exact witness)."}
-  - {id: o2_approved_serves_latest, kind: behavior, form: test, stakeholder: a later run,
-     discharged_by: test_767_approved_ticket_serves_latest_agent_comment,
-     binds: [ticket_screen, is_approved, is_agent_comment],
-     fork: "FK02, FK03", unknown: "which of two agent comments survives (store list order vs a
-       `created` sort), and the tie-break when `created` collides."}
+  # ---- O2 / S3 / S3′ — comments only from released (closed) cases ----------------------------
+  - {id: o2_unreleased_no_comment, kind: negative, form: test, stakeholder: a later run,
+     discharged_by: test_767_unreleased_ticket_serves_no_comment,
+     binds: [ticket_screen, "interacts(query_tool->ticket_screen).response", is_released,
+             "ticket_screen.access[list-tickets]", "ticket_screen.access[get-ticket]",
+             "is_released.domain.distinguished[no-status-field]",
+             "is_released.domain.distinguished[status-not-a-string]",
+             "is_released.domain.distinguished[confusable-status]",
+             "is_released.domain.distinguished[undecidable-record-in-a-listing]"],
+     positive_control: o2_released_serves_whole,
+     note: "REWORK — replaces `o2_unapproved_no_agent_comment` (FAM-1, FK10, FK22). No comment
+       from an unreleased case reaches a model, whoever wrote it and whatever shape it has; the
+       comment list is emptied whole, so there is no author to match and no undecidable element
+       to classify. The status matches EXACTLY — the store's vocabulary is canonical, so there is
+       no whitespace concession to make and a padded status is a NEGATIVE arm, not a control."}
+  - {id: o2_released_serves_whole, kind: behavior, form: test, stakeholder: a later run,
+     discharged_by: test_767_released_ticket_serves_comments_whole,
+     binds: [ticket_screen, is_released],
+     note: "REWORK — replaces `o2_approved_serves_latest` (FK02, FK03). A released case is served
+       WHOLE: every comment, in the store's own order, untouched. The person's close covers the
+       list as it stood, and the writer never appends behind a close; the 'latest agent comment'
+       rule, and the ordering and tie-break forks it carried, have nothing left to decide."}
   - {id: o2_both_verbs_screened, kind: parity, form: test, stakeholder: a later run,
-     discharged_by: test_767_approval_screen_applies_on_both_ticket_verbs,
+     discharged_by: test_767_release_screen_applies_on_both_ticket_verbs,
      binds: [ticket_screen, query_tool, "interacts(query_tool->case_history_store)",
              "ticket_screen.access[list-tickets]", "ticket_screen.access[get-ticket]"],
      note: "per-cell binding added at phase D: R3's discharge is per (constraint × via), never
@@ -228,7 +282,7 @@ demands:
      discharged_by: test_767_query_tool_is_only_ticket_reader,
      binds: [query_tool, ticket_screen, cited_covering_policy, forward_check,
              "interacts(forward_check->case_history_store)"],
-     positive_control: o2_approved_serves_latest,
+     positive_control: o2_released_serves_whole,
      note: "census demand over c5/c13. RFJ5: O2's own text ('on every read path into the store,
        not only the query tool's') already DECIDES the second-consumer question (FK49); this
        demand is the census that pins the population at one."}
@@ -237,7 +291,10 @@ demands:
   - {id: o3_comment_author_identity, kind: shape, form: test, stakeholder: analyst,
      discharged_by: test_767_comment_carries_mapping_author,
      binds: ["interacts(record_case_ticket->case_history_store).payload", mapping_comment,
-             is_agent_comment],
+             "case_history_mapping.domain.distinguished[missing-comment-section]",
+             "case_history_mapping.domain.distinguished[empty-comment-author]",
+             "mapping_comment.domain.distinguished[absent]",
+             "mapping_comment.domain.distinguished[author-renders-empty]"],
      fork: "FAM-1 (FK12, FK19), FK46",
      unknown: "what the writer does when the mapping cannot supply the identity (missing section,
        empty render) and whether the configured identity must be provably not a person's."}
@@ -283,22 +340,21 @@ demands:
 
   # ---- O5 — vendor spellings live in the mapping ----------------------------------------------
   - {id: o5_no_vendor_literals_in_code, kind: coherence, form: test, stakeholder: operator,
-     discharged_by: test_767_no_tag_or_author_literal_in_writer_or_screen,
-     binds: [case_history_mapping, mapping_approved, mapping_comment, ticket_screen,
+     discharged_by: test_767_no_status_or_author_literal_in_writer_or_screen,
+     binds: [case_history_mapping, mapping_released, mapping_comment, ticket_screen, is_released,
              record_case_ticket, "interacts(record_case_ticket->case_history_mapping)",
              "interacts(query_tool->case_history_mapping)",
              "mapping_comment.domain.alternatives[renamed-comment-author]",
-             "mapping_approved.domain.alternatives[renamed-approved-label]"],
-     fork: "FK10, FK54",
-     unknown: "whether an author rename un-hides history (FK10 — `crosses_validation: unknown` on
-       the renamed-author alternative) and whether writer and screen provably resolve the SAME
-       file in every execution context (FK54, probe auth_P6).",
+             "mapping_released.domain.alternatives[renamed-released-status]"],
+     fork: "FK54",
+     unknown: "whether writer and screen provably resolve the SAME file in every execution
+       context (FK54, probe auth_P6). FK10 (an author rename un-hiding history) is CLOSED by the
+       rework: the screen asks nothing of authorship, so a rename can un-hide nothing.",
      rejected: [{nl: "N8 — ticket_screen's existing envelope binding (tickets, key, comments,
        author) is the stub adapter's own and stays bound in code."}]}
   - {id: d4_predicates_in_mapper, kind: seam, form: test, stakeholder: operator,
-     discharged_by: test_767_approval_predicates_live_in_the_mapper,
-     binds: [is_approved, is_agent_comment, ticket_screen, case_ticket,
-             "interacts(query_tool->is_approved)", "interacts(query_tool->is_agent_comment)"]}
+     discharged_by: test_767_release_predicate_lives_in_the_mapper,
+     binds: [is_released, ticket_screen, case_ticket, "interacts(query_tool->is_released)"]}
 
   # ---- O6 / S2 / N9 — no model role can reach a write -----------------------------------------
   - {id: o6_no_model_write_reach, kind: negative, form: test, stakeholder: operator,
@@ -320,13 +376,16 @@ demands:
              "verb_class_vocabulary.domain.distinguished[third-effect-tier]"],
      positive_control: o6_read_verb_still_granted,
      note: "issue item 3 answered as 'not needed' — minted independently observable per charge."}
-  - {id: d6_labels_route_not_confined, kind: negative, form: test, stakeholder: operator,
-     discharged_by: test_767_labels_route_is_not_on_the_confinement_allowlist,
-     binds: [confinement_allowlist, ticket_stub, "case_history_store.access[operator-labels]",
-             "confinement_allowlist.domain.distinguished[labels-route]"],
+  - {id: d6_transitions_route_not_confined, kind: negative, form: test, stakeholder: operator,
+     discharged_by: test_767_transitions_route_is_not_on_the_confinement_allowlist,
+     binds: [confinement_allowlist, ticket_stub, "case_history_store.access[operator-transition]",
+             "confinement_allowlist.domain.distinguished[transitions-route]"],
      positive_control: o6_read_verb_still_granted,
-     note: "RF5: `WRITE_ENDPOINTS` (g4) already carries four estate-write triples and D6's route is
-       a fifth; no D-row names that census — carried by d_checked_in_censuses_move_together."}
+     note: "REWORK — replaces `d6_labels_route_not_confined`. The person's release act is the
+       stub's EXISTING `POST /tickets/{key}/transitions`; no label route is added. A model
+       driving the adapter's door cannot transition a case, so it cannot release its own or any
+       other case's comments. RF5: `WRITE_ENDPOINTS` (g4) keeps the transitions triple — it is a
+       property of the store, not of who calls it — carried by d_checked_in_censuses_move_together."}
 
   # ---- O7 — the write never breaks the run ----------------------------------------------------
   - {id: o7_store_failure_never_fails_run, kind: behavior, form: test, stakeholder: operator,
@@ -337,6 +396,21 @@ demands:
      unknown: "the fault ARMS the fake must express — a hang with no transport timeout (FK28,
        probe dep_PO1), a 404 (FK30), a 2xx with a malformed body (FK31), a 409 on the open (FK33).
        The exit-code observable itself is settled; the arm list is not."}
+  - {id: d_writer_never_records_behind_a_release, kind: negative, form: test, stakeholder: analyst,
+     minted_from: "the review's fourth rule (84a091ff), re-grounded by the REWORK on the lifecycle",
+     discharged_by: test_767_writer_never_records_behind_a_release,
+     binds: [record_case_ticket, is_released, mapping_released, ticket_write_receipt,
+             "case_history_store.identity", "interacts(record_case_ticket->case_history_store)",
+             "interacts(record_case_ticket->case_history_store).response",
+             "case_history_mapping.domain.distinguished[missing-released-section]"],
+     positive_control: d0_record_return,
+     note: "the writer's half of the release invariant, and what answers the R2 hole on
+       `case_history_store.identity` now that the read side picks no comment: a person's close
+       covers the comments on the case WHEN THEY CLOSED IT, so the writer reads the case back
+       first and refuses — receipt `refused-released`, a warning, no POST — when it is already in
+       the mapping's released state. Undecidable reads as released: an unreadable case, a
+       non-ticket reply, or a mapping that cannot spell the state all receipt `error` and write
+       nothing. This is what bounds a closed case's comment count after the rework."}
   - {id: p_o7_beats_o4, kind: domain-outcome, form: test, stakeholder: operator,
      discharged_by: test_767_unreachable_store_loses_the_record_not_the_run,
      binds: [record_case_ticket, "interacts(record_case_ticket->case_history_store).response"]}
@@ -358,12 +432,10 @@ demands:
      positive_control: o4_narrative_is_report_body,
      fork: "FK01, FK07", unknown: "where the 20 KB control cuts (472 or 4096) and whether the fence
        strip runs before or after the cut — the boundary-planted fence only survives one ordering."}
-  - {id: o8_one_agent_comment_per_ticket, kind: behavior, form: test, stakeholder: a later run,
-     discharged_by: test_767_one_agent_comment_per_ticket_however_many_runs,
-     binds: [ticket_screen, is_agent_comment, "case_history_store.identity"],
-     fork: "FK02, FK03, FK35",
-     unknown: "which comment survives, and whether the WRITE side accrues at all — FK35's
-       recommendation (append unconditionally, no dedupe) is what makes this demand falsifiable."}
+  # REWORK — `o8_one_agent_comment_per_ticket` (FK02, FK03, FK35) is DELETED: the read side no
+  # longer picks a comment, and what bounds a closed case's comment count is the writer, which
+  # never records behind a close (`test_767_writer_never_records_behind_a_release`). The
+  # model-view bound survives as `scale_model_view_stays_bounded`.
   - {id: p_o8_beats_o4, kind: domain-outcome, form: test, stakeholder: a later run,
      discharged_by: test_767_wire_bound_wins_and_the_cut_is_visible,
      binds: [case_record_to_comment, "interacts(record_case_ticket->case_history_store).payload",
@@ -389,19 +461,20 @@ demands:
              render_context]}
   - {id: s5_text_cannot_become_a_field, kind: negative, form: test, stakeholder: analyst,
      discharged_by: test_767_a_body_claiming_approval_does_not_approve,
-     binds: [is_approved, is_agent_comment, ticket_screen,
+     binds: [is_released, ticket_screen, mapping_open,
              "interacts(record_case_ticket->case_history_store).payload",
              "case_record_to_comment.domain.distinguished[narrative-with-placeholder-syntax]",
-             "render_context.domain.distinguished[value-containing-placeholder-syntax]"],
-     positive_control: o2_approved_serves_latest,
+             "render_context.domain.distinguished[value-containing-placeholder-syntax]",
+             "alert_json.domain.distinguished[field-containing-placeholder-syntax]"],
+     positive_control: o2_released_serves_whole,
      fork: "FK52, FK53", unknown: "whether substitution is single-pass. FK53 is the sharp one: if a
-       substituted ALERT value were re-rendered, a crafted `rule.id` could interpolate the approved
-       label into `open.labels` at run time and defeat FAM-2's static guard entirely."}
+       substituted ALERT value were re-rendered, a crafted `rule.id` could reach any slot of the
+       open at run time, the status included."}
 
   # ---- Mechanism demands (D1–D6) and the N-rows that are independently observable --------------
   - {id: d1_mapping_sections, kind: shape, form: test, stakeholder: operator,
-     discharged_by: test_767_mapping_carries_comment_and_approved_and_no_close_lane,
-     binds: [case_history_mapping, mapping_comment, mapping_approved,
+     discharged_by: test_767_mapping_carries_comment_and_released_and_no_close_lane,
+     binds: [case_history_mapping, mapping_comment, mapping_released,
              "interacts(record_case_ticket->case_history_mapping)",
              "case_history_mapping.domain.distinguished[retains-close-section]"],
      fork: FK27, unknown: "20-demands F5 — the new top-level `comment:` reuses a key name the
@@ -423,12 +496,12 @@ demands:
        `cause` and `narrative` in the render context and `case_ticket._ctx` does not carry them
        today (probe auth_P5)."}
   - {id: d4_screen_after_own_case, kind: behavior, form: test, stakeholder: a later run,
-     discharged_by: test_767_approval_screen_runs_after_the_own_case_exclusion,
+     discharged_by: test_767_release_screen_runs_after_the_own_case_exclusion,
      binds: [ticket_screen, query_tool, "interacts(query_tool->ticket_screen)"]}
   - {id: d4_no_marker, kind: negative, form: test, stakeholder: a later run,
      discharged_by: test_767_screen_leaves_no_marker,
      binds: [ticket_screen, payload_view, "interacts(query_tool->ticket_screen).response"],
-     positive_control: o2_approved_serves_latest}
+     positive_control: o2_released_serves_whole}
   - {id: d5_resolution_lane_deleted, kind: survival, form: test, stakeholder: a later run,
      discharged_by: test_767_resolution_decoding_lane_is_gone,
      binds: [case_ticket, cited_covering_policy, forward_check, vulture_baseline,
@@ -444,11 +517,14 @@ demands:
      fork: FK05, unknown: "a legacy `resolution` written by the pre-#767 close lane is still SERVED
        by list-tickets/get-ticket; whether that is an examined-no (citing c3) or a second field D4
        must screen is undecided."}
-  - {id: n5_unapproved_non_agent_fields_visible, kind: behavior, form: test,
+  - {id: n5_unreleased_non_comment_fields_visible, kind: behavior, form: test,
      stakeholder: a later run,
-     discharged_by: test_767_unapproved_tickets_stay_visible_for_correlation,
-     binds: [ticket_screen, "interacts(query_tool->ticket_screen).response", is_approved],
-     rejected: [{nl: "N5 — withholding unapproved tickets entirely was examined and rejected."}]}
+     discharged_by: test_767_unreleased_tickets_stay_visible_for_correlation,
+     binds: [ticket_screen, "interacts(query_tool->ticket_screen).response", is_released],
+     rejected: [{nl: "N5 — withholding unreleased tickets entirely was examined and rejected."}],
+     note: "REWORK — replaces `n5_unapproved_non_agent_fields_visible`. The fields that stay
+       visible are every field but `comments`; an analyst's own note on an OPEN case is no longer
+       served either, because nothing sound tells it from an agent's."}
   - {id: n7_writes_only_under_the_flag, kind: domain-outcome, form: test, stakeholder: operator,
      discharged_by: test_767_no_store_write_without_the_flag,
      binds: [update_ticket_flag, "drives(run_main->record_case_ticket)",
@@ -464,14 +540,9 @@ demands:
              "interacts(run_main->curation_marker)"],
      rejected: [{nl: "N1 — the rationale 'a drainer must never read this case with its ticket still
        open' has no reader at HEAD (c5) and is not carried; the ordering is kept, not its reason."}]}
-  - {id: d6_stub_label_route, kind: behavior, form: test, stakeholder: operator,
-     discharged_by: test_767_stub_label_route_adds_one_label,
-     binds: [ticket_stub, mapping_approved, "interacts(approver->case_history_store).payload",
-             "ticket_stub.domain.distinguished[existing-ticket]",
-             "ticket_stub.domain.distinguished[unknown-ticket-key]",
-             "ticket_stub.domain.distinguished[duplicate-label]"],
-     fork: "FK38, FK39", unknown: "the route's response on an unknown key (404 / 201 / other) and
-       on a duplicate label (idempotent / append / 4xx). c8/g1: no such route exists today."}
+  # REWORK — `d6_stub_label_route` (FK38, FK39) is DELETED: the stub gains no route. The person's
+  # release act is the existing `POST /tickets/{key}/transitions` (c8), whose behaviour on an
+  # unknown key (404) and on a status outside the enum (422) the stub already pins.
 
   # ---- Minted at the gate (phase D, step 6) from R3/R7 obligations with no blocking fork --------
   - {id: d_adapter_http_confinement_capture_positive_control, kind: parity, form: test,
@@ -480,7 +551,7 @@ demands:
      binds: ["case_history_store.access[adapter-http]"],
      note: "R3 obligation: adapter-http is the ESTABLISHED via carrying confine-read-endpoint and
        guard-outbound-capture-record; no demand pinned that baseline before the gate leaf minted this
-       one, so the two vias this design adds (host-curl, operator-labels) had nothing to be a parity
+       one, so the two vias this design adds (host-curl, operator-transition) had nothing to be a parity
        demand AGAINST. Positive control, same shape as d_loader_refusal_positive_control. Cites g2/g3/c2
        (adapter-http's confinement facts) and g2 (guard_outbound's two callers, both adapter transports)."}
   - {id: d_ticket_adapter_read_stays_non_model_facing, kind: coherence, form: test,
@@ -517,17 +588,19 @@ demands:
              record_case_ticket],
      note: "g6: the pre-existing `isinstance(dict)` check refuses it BEFORE D1's new refusal is
        reached; the writer's blanket envelope turns that into warn-and-skip (O7/c14)."}
-  - {id: d_approved_ticket_without_agent_comment_unchanged, kind: behavior, form: test,
+  - {id: d_released_ticket_unchanged, kind: behavior, form: test,
      stakeholder: a later run, settled_premise: 39,
-     discharged_by: test_767_approved_ticket_with_no_agent_comment_is_unchanged,
-     binds: [ticket_screen, is_agent_comment, is_approved,
-             "interacts(query_tool->ticket_screen).response"]}
+     discharged_by: test_767_released_ticket_is_unchanged,
+     binds: [ticket_screen, is_released, "interacts(query_tool->ticket_screen).response"],
+     note: "REWORK — replaces `d_approved_ticket_without_agent_comment_unchanged`: a released case
+       is served exactly as the store answered it, comments or no comments."}
   - {id: d_each_query_screened_at_call_time, kind: behavior, form: test,
      stakeholder: a later run, settled_premise: 40,
      discharged_by: test_767_each_query_is_screened_against_the_store_at_call_time,
-     binds: [ticket_screen, "interacts(query_tool->ticket_screen)", is_approved],
+     binds: [ticket_screen, "interacts(query_tool->ticket_screen)", is_released],
      note: "D4 is a per-payload step (F8) and the doc names no snapshot or cache: two queries in
-       one run may legitimately see different approval outcomes. `life_PO4` stays a MECHANISM
+       one run may legitimately see different release outcomes — and a RE-OPEN between them is
+       the lifecycle's own revoke. `life_PO4` stays a MECHANISM
        probe, not a design fork."}
   - {id: d_capture_not_retroactively_scrubbed, kind: negative, form: test,
      stakeholder: a later run, settled_premise: 41,
@@ -573,15 +646,15 @@ demands:
      note: "the guarantee is structural and exactly this wide: the host-rendered
        `{disposition} — {cause}` occupies the first line, above a blank line. No escaping, marking
        or neutralising is demanded (S5's 'nothing further is claimed', N11)."}
-  - {id: d_two_hop_chain_closed_by_approval, kind: negative, form: test,
+  - {id: d_two_hop_chain_closed_by_release, kind: negative, form: test,
      stakeholder: a later run, settled_premise: 61,
-     discharged_by: test_767_a_served_agent_comment_cannot_re_enter_without_a_second_human_act,
-     binds: [ticket_screen, is_approved, "interacts(query_tool->ticket_screen).response",
+     discharged_by: test_767_a_served_comment_cannot_re_enter_without_a_second_human_act,
+     binds: [ticket_screen, is_released, "interacts(query_tool->ticket_screen).response",
              "interacts(record_case_ticket->case_history_store).payload"],
-     positive_control: o2_approved_serves_latest,
-     note: "the chain is closed by APPROVAL, not by content inspection: a run's own fresh comment
-       lands on its own case, unapproved until a person tags it. The doc requires no detection of
-       novel-vs-reproduced content (S5)."}
+     positive_control: o2_released_serves_whole,
+     note: "the chain is closed by the person's CLOSE, not by content inspection: a run's own
+       fresh comment lands on its own case, open until a person closes it. The doc requires no
+       detection of novel-vs-reproduced content (S5)."}
   - {id: d_checked_in_censuses_move_together, kind: coherence, form: test,
      stakeholder: operator, settled_premise: 68,
      discharged_by: test_767_every_checked_in_census_of_this_surface_moves_together,
@@ -589,32 +662,35 @@ demands:
              ticket_writer_seam, case_ticket],
      note: "RF5 is the reason this demand exists: D2 carries the callsite census, D5 the vulture
        rows and the #923 authoring surfaces, and NO D-row names `WRITE_ENDPOINTS` (g4) — the fourth
-       census this change moves, which D6's route makes a fifth triple."}
-  - {id: d_approved_label_is_served_to_the_model, kind: behavior, form: test,
+       census this change moves, which must keep BOTH live writes on the stub: the comment this
+       change makes and the transition it hands to a person."}
+  - {id: d_status_is_served_to_the_model, kind: behavior, form: test,
      stakeholder: a later run, settled_premise: 70,
-     discharged_by: test_767_the_approved_label_is_served_to_the_model,
-     binds: [ticket_screen, mapping_approved, "interacts(query_tool->ticket_screen).response"],
-     note: "D4 filters COMMENTS only and N5 keeps non-agent fields, so the tag that governs the
-       screen is itself in the `labels` the model reads. Harmless: the model cannot write one
-       (O6/c2) and cannot become one (S5)."}
+     discharged_by: test_767_the_lifecycle_state_is_served_to_the_model,
+     binds: [ticket_screen, mapping_released, "interacts(query_tool->ticket_screen).response"],
+     note: "REWORK — replaces `d_approved_label_is_served_to_the_model`. D4 filters COMMENTS only
+       and N5 keeps the other fields, so the status that governs the screen is itself in the
+       record the model reads, with the person's `resolution` beside it on a closed case.
+       Harmless: the model cannot transition a case (O6/c2) and text cannot become a status (S5)."}
 
   # ---- Minted at phase D from the two follow-up premises routed before this phase --------------
   - {id: d_loader_refusal_positive_control, kind: domain-outcome, form: test,
      stakeholder: operator, minted_from: "40-premises.md red flag 1 (FK-X1)",
-     discharged_by: test_767_the_loader_refuses_a_colliding_mapping_and_the_run_survives,
-     binds: [case_history_mapping, record_case_ticket, mapping_open,
+     discharged_by: test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write,
+     binds: [case_history_mapping, record_case_ticket, mapping_open, mapping_released, is_released,
              "case_history_mapping.domain.distinguished[shipped-default]",
-             "case_history_mapping.domain.distinguished[open-labels-can-render-approved]"],
-     fork: "FK-X1", unknown: "abort the run, or warn and skip the write? Without this demand
-       `o1_loader_refuses_approved_label` has no positive control and passes just as well against
-       a loader that refuses EVERYTHING — today's shipped mapping must still load."}
+             "case_history_mapping.domain.distinguished[open-status-is-the-released-status]"],
+     fork: "FK-X1", unknown: "abort the run, or warn and skip the write? Without this demand the
+       mapper's refusals have no positive control and pass just as well against a loader that
+       refuses EVERYTHING — today's shipped mapping must still load and record. REWORK: the
+       refused arm is now an `open.status == released.status` mapping, not a label collision."}
   - {id: n6_approve_action_is_unattributable_on_the_playground, kind: negative, form: clause,
      stakeholder: operator, minted_from: "40-premises.md red flag 2 (FK-X2)",
-     outcome: {nl: "The approve action is not attributable to anyone on the playground: D6's route
-       is unauthenticated (N6), the writer's egress bypasses `guard_outbound` so nothing is
-       captured (g2), and D6's route inherits that bypass — so O1's 'only by a person' is an
-       assumption about the deployment, not a property this system provides."},
-     binds: [ticket_stub, mapping_approved, "case_history_store.access[operator-labels]"],
+     outcome: {nl: "The release act is not attributable to anyone on the playground: the stub's
+       transition route is unauthenticated (N6), the writer's egress bypasses `guard_outbound` so
+       nothing is captured (g2), and the transition route sits outside it too — so O1's 'only by
+       a person' is an assumption about the deployment, not a property this system provides."},
+     binds: [ticket_stub, mapping_released, "case_history_store.access[operator-transition]"],
      note: "downgraded: O3 binds writes the SYSTEM makes and the approve action is a person's,
        outside it (N3, N6). Recorded as a row rather than inert prose because it is the
        load-bearing assumption of the whole change. Residual FK-X2."}
@@ -622,9 +698,9 @@ demands:
   # ---- Deliberate downgrades (form: clause) — each a recorded choice, not a default -------------
   - {id: d6_e2e_seed, kind: behavior, form: clause, stakeholder: a later run,
      binds: [ticket_stub],
-     outcome: {nl: "The e2e store is seeded with one approved ticket carrying two agent comments
-       and one unapproved ticket carrying an agent comment, which is the fixture S3's controls
-       discharge against."},
+     outcome: {nl: "The e2e store is seeded with one closed ticket carrying two agent comments and
+       an analyst's, and one open ticket carrying an agent's and an analyst's, which is the
+       fixture S3's controls discharge against."},
      fork: "FK02, FK05",
      unknown: "the two agent comments' ORDER is what FK02 decides; FK05's recommendation adds the
        playground's POST /admin/reset so no legacy `resolution` record is present.",
@@ -648,18 +724,18 @@ demands:
      note: "downgraded: a test would pin today's absence of a bound as a requirement."}
   - {id: n3_approval_not_modelled, kind: negative, form: clause, stakeholder: operator,
      binds: [ticket_stub],
-     outcome: {nl: "Approval is not modelled inside defender: no approval UI, no webhook and no
-       vendor client is built; the stub's operator endpoint is the whole of it."},
-     note: "downgraded: absence of an unbuilt subsystem; d6_stub_label_route carries what exists."}
+     outcome: {nl: "Release is not modelled inside defender: no review UI, no webhook and no
+       vendor client is built; the stub's existing transition endpoint is the whole of it."},
+     note: "downgraded: absence of an unbuilt subsystem; the stub's own tests carry what exists."}
   - {id: n2_no_learning_loop_consumer, kind: negative, form: clause, stakeholder: a later run,
      binds: [ticket_screen, query_tool, cited_covering_policy],
      outcome: {nl: "No learning-loop consumer of ticket history is built or rebuilt here; gather's
        read is the only reader once the resolution lane is deleted."},
      note: "downgraded: its observable half is s3p_single_model_facing_reader, which is a test."}
   - {id: n6_stub_authenticates_nothing, kind: negative, form: clause, stakeholder: operator,
-     binds: [ticket_stub, "case_history_store.access[operator-labels]"],
-     outcome: {nl: "Anything on the compose network can POST as the agent identity or add the
-       approved label; the read screen keys on the author field and the label regardless."},
+     binds: [ticket_stub, "case_history_store.access[operator-transition]"],
+     outcome: {nl: "Anything on the compose network can POST as the agent identity or close a
+       case; the read screen keys on the status regardless."},
      rejected: [{nl: "N6 — a playground limit, not a design gap: on a vendor both are account-ACL'd."}],
      fork: FK41,
      unknown: "FK41's impact decides an ASSERTION: S4's and O8's write-side bounds must not be
@@ -670,7 +746,7 @@ demands:
   - {id: n8_screen_envelope_binding_out_of_scope, kind: coherence, form: clause,
      stakeholder: operator, binds: [ticket_screen, "ticket_screen.payload"],
      outcome: {nl: "ticket_screen's existing binding of the stub's envelope — tickets, key,
-       comments, author — is the stub adapter's own and stays in code, outside O5's scope."},
+       comments, status — is the stub adapter's own and stays in code, outside O5's scope."},
      note: "downgraded: it scopes o5_no_vendor_literals_in_code rather than adding an observable."}
   - {id: n11_narrative_unconstrained, kind: negative, form: clause, stakeholder: analyst,
      binds: [case_record_to_comment,
@@ -683,7 +759,7 @@ demands:
        (FK44's cheap version is a fixed host-authored prefix line — new mechanism, not a test).",
      note: "downgraded: the testable half is s5_text_cannot_become_a_field."}
   - {id: d7_briefing_rewrite, kind: coherence, form: test, stakeholder: a later run,
-     discharged_by: test_767_ticket_skill_md_describes_the_approval_lane,
+     discharged_by: test_767_ticket_skill_md_describes_the_release_lane,
      binds: [ticket_skill_md],
      settled_premise: 69,
      fork: FK43,
@@ -711,42 +787,36 @@ demands:
   # resolution it comes from; none of them existed at the gate, because each is an answer.
   - {id: d_predicates_fail_closed_by_construction, kind: seam, form: test, stakeholder: a later run,
      minted_from: "70-resolutions.md R1 (FAM-1's downstream consequence)",
-     discharged_by: test_767_approval_predicates_cannot_be_built_in_a_serving_state,
-     binds: [is_approved, is_agent_comment, case_ticket, case_history_mapping, ticket_screen,
+     discharged_by: test_767_release_predicate_cannot_be_built_in_a_serving_state,
+     binds: [is_released, case_ticket, case_history_mapping, ticket_screen,
              "case_history_mapping.domain.distinguished[invalid-yaml]",
-             "case_history_mapping.domain.distinguished[missing-comment-section]",
-             "case_history_mapping.domain.distinguished[missing-approved-section]",
+             "case_history_mapping.domain.distinguished[missing-released-section]",
              "case_history_mapping.domain.distinguished[unmigrated-pre-767]",
-             "case_history_mapping.domain.distinguished[empty-comment-author]",
-             "case_history_mapping.domain.distinguished[approved-label-non-string]",
-             "mapping_comment.domain.distinguished[absent]",
-             "mapping_comment.domain.distinguished[author-renders-empty]",
-             "mapping_approved.domain.distinguished[absent]",
-             "mapping_approved.domain.distinguished[non-string]"],
+             "case_history_mapping.domain.distinguished[released-status-non-string]",
+             "case_history_mapping.domain.distinguished[open-status-is-the-released-status]",
+             "mapping_released.domain.distinguished[absent]",
+             "mapping_released.domain.distinguished[non-string]",
+             "mapping_released.domain.distinguished[blank]",
+             "mapping_released.domain.distinguished[padded]",
+             "is_released.domain.distinguished[released-section-missing]"],
      note: "the R5 judgment hole's `resolved_to`. §7 R1 decided FAM-1 fail-closed on both sides
-       AND, along with it, that the predicates must be SAFE BY CONSTRUCTION once it lands: the
+       AND, along with it, that the predicate must be SAFE BY CONSTRUCTION once it lands: the
        constructor raises in the unsafe state rather than merely behaving when configured right.
        The test carries FK20's read-side extension too — O7 is stated for the WRITE only, so the
-       screen degrades (everything unapproved, everything agent-authored, every record KEPT per
-       N5) rather than raising into the model's turn or refusing the whole gather call."}
-  - {id: d_author_alias_keeps_history_withheld, kind: negative, form: test, stakeholder: a later run,
-     minted_from: "70-resolutions.md R4 (FK10, 'pin as a security test')",
-     discharged_by: test_767_an_author_rename_does_not_unhide_history,
-     binds: [is_agent_comment, mapping_comment, ticket_screen,
-             "mapping_comment.domain.alternatives[renamed-comment-author]",
-             "is_agent_comment.domain.distinguished[author-renamed-between-runs]"],
-     positive_control: o2_approved_serves_latest,
-     note: "resolves `mapping_comment.domain.alternatives[renamed-comment-author]`'s
-       crosses_validation hole: §7 R4 added `mapping.comment.author_aliases: []`, a list of
-       superseded author spellings `is_agent_comment` matches alongside the current identity, so
-       an operator's rename does not un-hide an unapproved ticket's old agent comments. This is
-       FK10's half that fails OPEN and is O2's exact named failure witness."}
+       screen degrades (everything unreleased, every record KEPT per N5) rather than raising into
+       the model's turn or refusing the whole gather call — and, REWORK, says so once on stderr.
+       The padded arm is the one normalisation kept, on the MAPPING's side only: a quoted
+       `\" closed \"` configures `closed`, because the ticket's status is compared exactly."}
+  # REWORK — `d_author_alias_keeps_history_withheld` (§7 R4 / FK10) is DELETED with the author
+  # predicate: the screen asks nothing of authorship, so an operator's rename of `comment.author`
+  # can un-hide nothing. `mapping_comment.domain.alternatives[renamed-comment-author]` therefore
+  # crosses no validation at all on the read side; on the write side it is o5's concern.
   - {id: d_failed_ticket_read_puts_no_content_in_the_turn, kind: negative, form: test,
      stakeholder: a later run, minted_from: "70-resolutions.md Part 2, FK36",
      discharged_by: test_767_a_failed_ticket_read_puts_no_content_in_the_turn,
      binds: [ticket_screen, "interacts(query_tool->case_history_store).response",
              "interacts(query_tool->ticket_screen).response"],
-     positive_control: o2_approved_serves_latest,
+     positive_control: o2_released_serves_whole,
      note: "FK36's resolution, exactly as written: assert only what O2 gives — a failed ticket
        read puts NO ticket content into the model's turn or the capture — and leave the error's
        class and the run's fate to the query tool's pre-existing envelope, which this lane
@@ -797,8 +867,9 @@ demands:
        list-tickets and get-ticket, and D4 is NOT extended to it: c3 (executed) establishes that
        such a field carries the HOST's cause sentence plus a disposition, never the model's body,
        so screening it would buy nothing and widen ticket_screen's binding to the stub envelope
-       N8 deliberately scopes out. The e2e fixture calls POST /admin/reset so no legacy record is
-       present in the suite itself."},
+       N8 deliberately scopes out — and after the rework it is simply the person's own field on
+       a closed case. The e2e fixture calls POST /admin/reset so no legacy record is present in
+       the suite itself."},
      cites: [c3],
      note: "§7 R9 (FK05). The observable half — the field is served untouched — is asserted by
        d0_screen_shape's test; this row is the examined no the doc was missing."}
@@ -823,14 +894,14 @@ demands:
        carries no provenance label: the approver is the whole control against round-tripped
        content, because the laundering path terminates at a human — the run's own comment lands
        on its own unapproved case. Provenance labelling would be new mechanism with no reader."},
-     note: "§7 Part 2, FK45. Its mechanism half is d_two_hop_chain_closed_by_approval's test."}
+     note: "§7 Part 2, FK45. Its mechanism half is d_two_hop_chain_closed_by_release's test."}
   - {id: n_comment_author_names_no_human_identity, kind: negative, form: clause,
-     stakeholder: operator, binds: [mapping_comment, is_agent_comment],
-     outcome: {nl: "The mapping's `comment.author` must name an identity no human account can
-       carry. On a vendor that is an account-provisioning fact, not a defender check — defender
-       has no directory of human identities to check against, so the broad 'anything not a
-       person' reading is unimplementable. The assumption carries O2 and S5 both, and writing it
-       down is the whole fix."},
+     stakeholder: operator, binds: [mapping_comment],
+     outcome: {nl: "The mapping's `comment.author` should name an identity no human account can
+       carry, so a person reading a case can tell the agent's note from a colleague's. On a
+       vendor that is an account-provisioning fact, not a defender check. REWORK: the assumption
+       now carries O3 alone — nothing on the read side keys on authorship any more, so a shared
+       or spoofed author changes what a person reads, never what a model is served."},
      note: "§7 Part 2, FK46. The empty-identity case is excluded by construction
        (d_predicates_fail_closed_by_construction / FK19)."}
   - {id: n_no_sibling_isolation, kind: negative, form: clause, stakeholder: a later run,
@@ -859,7 +930,7 @@ structure:
   actors:
     # --- the legs the design adds or changes ------------------------------------------------
     - {id: record_case_ticket, frame: leg,         provenance: design}  # D2: scripts/case_history/ticket_writer.py::record_case_ticket
-    - {id: approver,           frame: leg,         provenance: design}  # the person: D6's route, or the vendor UI (N3)
+    - {id: approver,           frame: leg,         provenance: design}  # the person who CLOSES a reviewed case: the stub's transition route, or the vendor UI (N3)
     - {id: run_main,           frame: composition, provenance: design}  # run.py::main — it FANS the post-steps; R2 places the uniqueness demand here, never on a leg
     - {id: open_case_ticket,   frame: leg,         provenance: design}  # exists (ticket_writer.py:101) but O1/D1 change its payload contract
     - {id: close_case_ticket,  frame: leg,         provenance: design}  # REMOVED by D2's rename — its `mode: remove` edge is R5's trigger
@@ -883,30 +954,31 @@ structure:
           parts:
             - {role: open,     source: template:MAPPING_OPEN,     slots: {summary: alert_json, labels: mapping_open, signature: alert_json}}
             - {role: comment,  source: template:MAPPING_COMMENT,  slots: {author: mapping_comment, body: case_record_to_comment}}
-            - {role: approval, source: template:MAPPING_APPROVED, slots: {label: mapping_approved}}
+            - {role: release,  source: template:MAPPING_RELEASED, slots: {status: mapping_released}}
           invariants: [roles-disjoint-sources, all-slots-bound]
-          nl: "the three things that cross to the store: the bridge open (the mapping's whole `open:` section, unfiltered — g7), the agent's comment (`{author, body}` and nothing else — S1), and a person's approved label. `roles-disjoint-sources` is load-bearing here and not decorative: r6 records that the `close:` section D1 deletes already spends a `comment:` key, so `comment` and `approval` must resolve through DIFFERENT mapping sections or the writer binds the wrong one (FK27 / 20-demands F5)"
+          nl: "the three things that cross to the store: the bridge open (the mapping's whole `open:` section, unfiltered — g7), the agent's comment (`{author, body}` and nothing else — S1), and a person's close (a transition to the mapping's `released.status`). `roles-disjoint-sources` is load-bearing here and not decorative: r6 records that the `close:` section D1 deletes already spends a `comment:` key, so `comment` and `release` must resolve through DIFFERENT mapping sections or the writer binds the wrong one (FK27 / 20-demands F5)"
         access:
           constraints_by_via:
             adapter-http:    {trust: attacker-influenced, constraints: [confine-read-endpoint, guard-outbound-capture-record]}
             host-curl:       {trust: operator, constraints: []}
-            operator-labels: {trust: operator, constraints: unknown}
-          nl: "the model's door is the adapter's `http_get`/`http_get_obj` → `_request:360` → `guard_outbound` → `confine_read_endpoint`, whose `ticket` entry is GET-only (SR6, c2). The host writer's door is `ticket_writer._request` calling `transport.docker_exec_curl` DIRECTLY (ticket_writer.py:62-77) — it reaches `guard_outbound` at neither call site, so its POSTs are confined by nothing and, because `guard_outbound` IS the capture recorder, recorded by nothing either (g2, F3, RF4). D6's operator route inherits that same bypass, and its own policy is undecided (FK38, FK39)"
+            operator-transition: {trust: operator, constraints: [store-status-enum]}
+          nl: "the model's door is the adapter's `http_get`/`http_get_obj` → `_request:360` → `guard_outbound` → `confine_read_endpoint`, whose `ticket` entry is GET-only (SR6, c2). The host writer's door is `ticket_writer._request` calling `transport.docker_exec_curl` DIRECTLY (ticket_writer.py:62-77) — it reaches `guard_outbound` at neither call site, so its POSTs are confined by nothing and, because `guard_outbound` IS the capture recorder, recorded by nothing either (g2, F3, RF4). The person's door is the stub's EXISTING `POST /tickets/{key}/transitions` (REWORK — no label route is added), outside `guard_outbound` like the writer's, and constrained by the one thing the store enforces on it: `status` is a Literal (c8), so nothing outside the enum lands"
         identity:
           key_axes: [case_id]
           evidence: {nl: "the writer keys every call on `case_id`, and on the playground `case_id = run_dir.name` — read off ticket_writer.py:101/:126 and run.py:531/:576 (c1, r1, r3). `POST /tickets` 409s on a duplicate key and `POST /tickets/{key}/comments` appends uncapped (c8), which is why `sharing` is the append one. FK04 is the fork this evidence cannot close: the doc's stated motive is a platform where the ticket PRE-EXISTS with a vendor-minted key, and neither the writer's `run_dir.name` nor the screen's `deps.run_id` can learn one"}
           derivations: [{value: case_id, fn_of: run_id, injective: true}]
           sharing: serialized-append
     # The playground server's own route set — a DIFFERENT origin from the seam above, and a
-    # different artifact to fix. D6 adds a route here and a via there.
+    # different artifact to fix. REWORK: D6 adds NOTHING here; the person's release act is the
+    # transition route the stub already serves.
     - id: ticket_stub
-      provenance: design
+      provenance: code
       facets:
         domain:
           type: str
-          refinement: {nl: "the routes `playground-v2/ticket-server/app.py` serves. At HEAD: GET /health, GET /tickets, GET /tickets/{key}, POST /tickets, POST /tickets/{key}/transitions, POST /tickets/{key}/comments, POST /admin/reset — no label-edit route of any kind and no PATCH/PUT handler, so those are 405 by absence (g1, c8). D6 adds `POST /tickets/{key}/labels`"}
-          default: unknown   # FK38/FK39: D6 names the route and its purpose and no error behaviour at all
-          distinguished: [existing-ticket, unknown-ticket-key, duplicate-label]
+          refinement: {nl: "the routes `playground-v2/ticket-server/app.py` serves. At HEAD: GET /health, GET /tickets, GET /tickets/{key}, POST /tickets, POST /tickets/{key}/transitions, POST /tickets/{key}/comments, POST /admin/reset — no label-edit route of any kind and no PATCH/PUT handler, so those are 405 by absence (g1, c8). `status` is `Literal['open', 'in_progress', 'closed']` on the model, so a transition outside the enum is 422 by construction — the fact the rework's release signal rests on"}
+          default: "the checked-in stub, unchanged by this lane"
+          distinguished: [existing-ticket, unknown-ticket-key]
           falsy_valid: false
           documented_alternatives: []
 
@@ -919,9 +991,9 @@ structure:
           refinement: {nl: "`knowledge/environment/systems/case-history/mapping.yaml`, resolved by `case_ticket._mapping_path:80-83` from `$DEFENDER_DIR` or `Path(__file__).parents[2]`. The sole loader is `_load_mapping:86-100` and at HEAD it validates existence, YAML syntax and dict-ness ONLY — g6: NO content refusal exists to extend, so D1's refusal is entirely new mechanism. `$DEFENDER_DIR` is the seam a hostile-mapping control drives through and it already works (g15)"}
           default: "the checked-in file: source/open/close/annotate/enrich, `reporter: defender`, `close.author: defender`, `close.comment` (c15, r6)"
           distinguished: [shipped-default, non-dict, invalid-yaml, missing-comment-section,
-                          missing-approved-section, unmigrated-pre-767, retains-close-section,
-                          empty-comment-author, approved-label-non-string,
-                          open-labels-can-render-approved]
+                          missing-released-section, unmigrated-pre-767, retains-close-section,
+                          empty-comment-author, released-status-non-string,
+                          open-status-is-the-released-status]
           falsy_valid: false
           documented_alternatives: []
     - id: mapping_open
@@ -929,7 +1001,7 @@ structure:
       facets:
         domain:
           type: str
-          refinement: {nl: "the `open:` section. g7: `alert_to_open_payload:205` hands the WHOLE section to `_render` and every key under it becomes an outbound field, filtered only for labels that render down to a bare literal prefix (:206-208). That is why FAM-2's scope question is load-bearing — a refusal pinned to two named templates is a guard over a fixed subset of an open set"}
+          refinement: {nl: "the `open:` section. g7: `alert_to_open_payload:205` hands the WHOLE section to `_render` and every key under it becomes an outbound field, filtered only for labels that render down to a bare literal prefix (:206-208). REWORK: no template under it is guarded any more — labels are not a lifecycle state, and `status` is a literal the store's enum would reject an alert value in anyway; the one thing checked is that `open.status` is not `released.status`"}
           default: "`sig:{rule.id}` and `evt:{timestamp}` label templates, plus status/summary/description/reporter"
           distinguished: [sig-template, evt-template, operator-added-label-template]
           falsy_valid: false
@@ -941,43 +1013,32 @@ structure:
           type: str
           refinement: {nl: "D1's NEW top-level `comment: {author, body}` section. It is a different element from `close.comment`, which r6 records as already existing inside the section D1 deletes and which has no reader after D5 — the writer binds the top-level keys EXPLICITLY, never by search (FK27 / 20-demands F5)"}
           default: unknown   # FAM-1: the doc never says what the writer does when the section cannot supply the identity
-          distinguished: [absent, author-renders-empty]   # a comment's OWN author shapes (authorless, a third identity) are is_agent_comment's members, not this section's
+          distinguished: [absent, author-renders-empty]   # REWORK: a comment's OWN author is nobody's member any more — the read side asks nothing of it
           falsy_valid: false
           documented_alternatives:
             - {value: renamed-comment-author, crosses_validation: unknown}
-    - id: mapping_approved
+    - id: mapping_released
       provenance: design
       facets:
         domain:
           type: str
-          refinement: {nl: "D1's NEW `approved: {label}` section — the one vendor spelling the whole design routes through. O5 puts it here precisely so an operator can change it with no code edit; FK10 is the judge's finding that the same invitation, applied to `comment.author`, fails OPEN"}
-          default: unknown   # the design never names the tag's literal spelling, and the mapping at HEAD has no `approved:` section (r6/g6) — there is no value to read off the resource
-          distinguished: [absent, non-string, differently-spelled-tag]
+          refinement: {nl: "REWORK — D1's NEW `released: {status}` section (replacing `approved: {label}`): the lifecycle state a person moves a reviewed case to, in the store's own vocabulary. O5 puts it here so an operator can change it with no code edit. The value is stripped ONCE at load, so a quoted YAML scalar with stray whitespace configures the state the store carries rather than one nothing can ever reach"}
+          default: closed   # the shipped mapping's value — the stub's own terminal status (c8)
+          distinguished: [absent, non-string, blank, padded, differently-spelled-status]
           falsy_valid: false
           documented_alternatives:
-            - {value: renamed-approved-label, crosses_validation: unknown}
+            - {value: renamed-released-status, crosses_validation: false}   # fails CLOSED: a case closed under the old spelling reads as unreleased until re-closed; nothing un-hides
 
-    # ===== the two mapper predicates D4 introduces ===========================================
-    - id: is_approved
+    # ===== the one mapper predicate D4 introduces (REWORK: `is_agent_comment` is gone) =========
+    - id: is_released
       provenance: design
       facets:
         domain:
           type: str
-          refinement: {nl: "`is_approved(ticket)` — true iff the ticket's labels carry the mapping's approved label. Two things the doc does not settle: the MATCH's tolerance (exact, whitespace-trimmed, case-folded, unicode-normalised — FK22) and the value on a ticket the predicate cannot decide about (FAM-1). Fail-open here serves every agent comment in the store to a model, which is O2's exact named failure mode"}
-          default: unknown   # FAM-1 (FK11, FK14, FK17): undecided, and the direction is a security decision
-          distinguished: [no-labels-field, tag-spelled-differently, approved-section-missing,
+          refinement: {nl: "`is_released(ticket)` — true iff the ticket's `status` is exactly the mapping's `released.status`. The match is EXACT: the store canonicalises its own vocabulary, so there is no whitespace, case or unicode tolerance to decide (old FK22 is void). A ticket the predicate cannot decide about — not an object, no string status — reads as UNRELEASED (FAM-1's read-side direction, §7 R1), which serves nothing"}
+          default: false   # FAM-1 decided at §7 R1: undecidable is unreleased
+          distinguished: [no-status-field, status-not-a-string, confusable-status, released-section-missing,
                           undecidable-record-in-a-listing]
-          falsy_valid: true
-          documented_alternatives: []
-    - id: is_agent_comment
-      provenance: design
-      facets:
-        domain:
-          type: str
-          refinement: {nl: "`is_agent_comment(comment)` — keyed on the author field the mapping names (O3, S5: author is a field, not text). FK15 is the family's sharpest instance: the two escalation copies use the words 'fail closed' and 'safe' for OPPOSITE behaviours, so the phrase must never appear unqualified in this test's docstring"}
-          default: unknown   # FAM-1 (FK15, FK16, FK23) + FK10's author-rename direction, which fails OPEN
-          distinguished: [authorless-comment, third-identity-author, author-renamed-between-runs,
-                          comments-not-a-list]
           falsy_valid: true
           documented_alternatives: []
 
@@ -988,13 +1049,13 @@ structure:
         payload:
           parts:
             - {role: envelope, source: const:STUB_TICKET_ENVELOPE}
-            - {role: screen,   source: template:PER_TICKET_SCREEN, slots: {approved: is_approved, agent: is_agent_comment, store: case_history_store}}
+            - {role: screen,   source: template:PER_TICKET_SCREEN, slots: {released: is_released, store: case_history_store}}
           invariants: [roles-disjoint-sources, all-slots-bound]
-          nl: "the screen returns the envelope it received — `screen_list`'s `{**payload, 'tickets': kept, 'total': len(kept)}` and `screen_get`'s `(payload, 0, '')` — with each surviving ticket's `comments` rewritten IN PLACE and no field added, removed or annotated anywhere else (D4's no-marker rule). The envelope half (`tickets`, `key`, `comments`, `author`) is the stub adapter's own binding and stays in code (N8)"
+          nl: "the screen returns the envelope it received — `screen_list`'s `{**payload, 'tickets': kept, 'total': len(kept)}` and `screen_get`'s `(payload, 0, '')` — with each surviving UNRELEASED ticket's `comments` emptied IN PLACE and no field added, removed or annotated anywhere else (D4's no-marker rule); a released ticket is returned as it came. The envelope half (`tickets`, `key`, `comments`, `status`) is the stub adapter's own binding and stays in code (N8)"
         access:
           constraints_by_via:
-            list-tickets: {trust: attacker-influenced, constraints: [own-case-exclusion, drop-agent-comments-when-unapproved, keep-only-latest-agent-comment-when-approved, no-marker]}
-            get-ticket:   {trust: attacker-influenced, constraints: [own-case-exclusion, drop-agent-comments-when-unapproved, keep-only-latest-agent-comment-when-approved, no-marker]}
+            list-tickets: {trust: attacker-influenced, constraints: [own-case-exclusion, empty-comments-when-unreleased, serve-whole-when-released, no-marker]}
+            get-ticket:   {trust: attacker-influenced, constraints: [own-case-exclusion, empty-comments-when-unreleased, serve-whole-when-released, no-marker]}
           nl: "the same per-ticket step on both verbs, applied AFTER the own-case exclusion in both (c6, r5: `_screen_ticket_payload` dispatches TICKET_GET to `screen_get` and TICKET_LIST to `screen_list`). Per-cell discharge is the point — a constraint pinned on one verb and silently absent on the other is the canonical fail-open R3 exists for"
     - id: query_capture
       provenance: code
@@ -1094,7 +1155,7 @@ structure:
           type: str
           refinement: {nl: "F6: alert-derived text crosses to the store unsanitized and unbounded — `rule.description` → summary, `rule.id` → description text and the `sig:` label, `timestamp` → the `evt:` label (case_ticket.py:195-209). N4 is the examined no; FK24/FK25/FK53/FK47 are what that no does not cover"}
           default: "an operator-authored detection rule's metadata (N4)"
-          distinguished: [rule-id-rendering-to-the-approved-tag, timestamp-rendering-to-the-approved-tag,
+          distinguished: [rule-id-rendering-to-the-released-status, timestamp-rendering-to-the-released-status,
                           field-containing-placeholder-syntax, oversized-rule-description]
           falsy_valid: false
           documented_alternatives: []
@@ -1117,7 +1178,7 @@ structure:
           type: str
           refinement: {nl: "`confinement.READ_ENDPOINT_ALLOWLIST`'s `ticket` entry = (/health,GET),(/tickets,GET),(/tickets/*,GET), enforced at `confine_read_endpoint:127-140` by `fnmatchcase` on the normalized path PLUS method; sole caller `guard_outbound:161-168`, itself called from exactly two transports (SR6). There is no `case-history` key at all, and `tests/test_target_confinement_632.py:537` asserts that absence explicitly (g3) — which is exactly why RF4 bounds what O6's confinement witness can mean"}
           default: "GET-only, and no `case-history` key"
-          distinguished: [post-on-the-ticket-allowlist, labels-route]
+          distinguished: [post-on-the-ticket-allowlist, transitions-route]
           falsy_valid: false
           documented_alternatives: []
     - id: bash_program_set
@@ -1153,9 +1214,9 @@ structure:
 
     # ===== the checked-in censuses and the prose this change moves ==========================
     - {id: vulture_baseline,           provenance: design, facets: {}}   # scripts/lint/lint_vulture_baseline.json:56-63 — EIGHT case_ticket rows (g13/RF1); D5 retires exactly four
-    - {id: write_endpoints_census,     provenance: design, facets: {}}   # tests/test_target_confinement_632.py:79-85 — four estate-write triples (g4); D6's route is a fifth, named by no D-row (RF5)
+    - {id: write_endpoints_census,     provenance: design, facets: {}}   # tests/test_target_confinement_632.py:79-85 — four estate-write triples (g4); REWORK: the transitions triple STAYS (the person's release act), the comments triple joins it, no labels triple exists
     - {id: authoring_surfaces_census,  provenance: design, facets: {}}   # the #923 authoring-surface census, which N10 shrinks by exactly one entry (c12)
-    - {id: case_ticket,                provenance: design, facets: {}}   # scripts/case_history/case_ticket.py — the mapper module: loader, renderers, and D4's two predicates. ONE element, never doubled as an actor
+    - {id: case_ticket,                provenance: design, facets: {}}   # scripts/case_history/case_ticket.py — the mapper module: loader, renderers, and D4's one predicate. ONE element, never doubled as an actor
     - {id: ticket_writer_seam,         provenance: code,   facets: {}}   # SR9: the duck-typed `ticket_writer=` module-shaped seam on run.py main — one production implementor, three test implementors (g10), invisible to an import-following census
     - {id: TicketWriterDeps,           provenance: code,   facets: {}}   # g16: frozen dataclass {load_config, request}, DEFAULT_DEPS at :86 — the only injection point, and there is no third
     - {id: cited_covering_policy,      provenance: design, facets: {}}   # verify_forward/checks.py:76-85's prompt section — D5 deletes it; c5: always `_NO_CITED_POLICY` today because nothing writes past_tickets.txt
@@ -1186,18 +1247,15 @@ structure:
     - {from: forward_check,     to: cited_covering_policy, mode: remove, via: api, provenance: design}
     - {from: open_case_ticket,  to: case_ticket,          mode: remove, via: api, provenance: design}          # D5 deletes nine `case_ticket` symbols, `case_record_to_close` among them
     - {from: record_case_ticket, to: vulture_baseline,    mode: remove, via: fs, provenance: design}           # four of the eight baselined rows retire (g13/RF1)
-    # --- the approve action (D6) --------------------------------------------------------------
-    - {from: approver, to: case_history_store, mode: write, via: operator-labels, provenance: design, sends: payload, interpolates: [case_id], transport: http}
-    - {from: approver, to: ticket_stub,        mode: invoke, via: operator-labels, provenance: design}
-    - {from: approver, to: mapping_approved,   mode: read,   via: fs, provenance: design}
+    # --- the release act (REWORK: a person closes the case on the stub's existing route) ------
+    - {from: approver, to: case_history_store, mode: write, via: operator-transition, provenance: design, sends: payload, interpolates: [case_id], transport: http}
+    - {from: approver, to: ticket_stub,        mode: invoke, via: operator-transition, provenance: code}
     # --- the model-facing read path (D4) ------------------------------------------------------
     - {from: query_tool, to: case_history_store,   mode: read,   via: adapter-http, provenance: design}
     - {from: query_tool, to: ticket_screen,        mode: invoke, via: api, provenance: design, sends: payload}
-    - {from: query_tool, to: is_approved,          mode: read,   via: api, provenance: design}
-    - {from: query_tool, to: is_agent_comment,     mode: read,   via: api, provenance: design}
+    - {from: query_tool, to: is_released,          mode: read,   via: api, provenance: design}
     - {from: query_tool, to: case_history_mapping, mode: read,   via: fs,  provenance: design}
-    - {from: query_tool, to: mapping_approved,     mode: read,   via: fs,  provenance: design}
-    - {from: query_tool, to: mapping_comment,      mode: read,   via: fs,  provenance: design}
+    - {from: query_tool, to: mapping_released,     mode: read,   via: fs,  provenance: design}
     - {from: query_tool, to: query_capture,        mode: write,  via: fs,  provenance: design, sends: payload, interpolates: [run_id, lead_id, query_seq]}
     - {from: query_tool, to: payload_view,         mode: read,   via: api, provenance: design, sends: payload}
     # --- the grounded neighborhood: readers and writers reality imposes, that no demand asked for
@@ -1211,7 +1269,7 @@ structure:
     - {from: run_main,           to: bash_program_set,   mode: read,  via: api, provenance: code}
     - {from: run_main,           to: verb_class_vocabulary, mode: read, via: api, provenance: code}
     - {from: run_main,           to: ticket_writer_seam, mode: read,  via: api, provenance: design}          # the `ticket_writer=` parameter D2's rename moves
-    - {from: run_main,           to: write_endpoints_census, mode: read, via: fs, provenance: design}        # RF5: the census D6's route makes a fifth triple, named by no D-row
+    - {from: run_main,           to: write_endpoints_census, mode: read, via: fs, provenance: design}        # RF5: the census named by no D-row; REWORK keeps both live ticket writes in it
     - {from: run_main,           to: authoring_surfaces_census, mode: read, via: fs, provenance: design}     # N10: shrinks by exactly one entry
     - {from: run_main,           to: ticket_skill_md,    mode: read,  via: fs,  provenance: design}          # D7's briefing — model-facing prose, RF3's lines 58-60 included
 
@@ -1482,6 +1540,13 @@ claims:
      probe: "drive ticket_writer._request against a 2xx whose body is not JSON",
      note: "phase C `dep:PO3` / `insurf:PO7`, under FK31 — confirming today's behaviour before the spec pins it."}
 
+# REWORK NOTE ON THE GATE RECORD BELOW. `holes` is the gate leaf's record of what was open at the
+# gate and is kept as history: entries naming `is_approved`, `is_agent_comment`, `mapping_approved`
+# or `access[operator-labels]` describe elements the rework renamed or deleted (see the block at the
+# top of this file), and the forks they carry (FK10, FK11, FK14-FK17, FK22, FK23, FK38, FK39) are
+# void — not answered, VOID: the question has no surface left to be asked on. `pre_discharged` and
+# the one `resolved_to` that pointed at a deleted demand were re-pointed, because the checkers read
+# those and a dangling pointer is a finding rather than a record.
 gate:
   evaluated:
   - rule: R0
@@ -1593,10 +1658,12 @@ gate:
     element: case_history_store.identity
     witness: >-
       the assembler deliberately left this unanswered: writers ['approver','open_case_ticket','record_case_ticket']
-      share the sink and record_case_ticket is driven repeatedly; o8_one_agent_comment_per_ticket binds
-      the address but its own unknown says whether the WRITE side accrues at all is undecided — FK35 (two
-      phase-B markers) is the fork. Recommendation on file (append unconditionally, no dedupe) but UNRESOLVED.
-    resolved_to: o8_one_agent_comment_per_ticket
+      share the sink and record_case_ticket is driven repeatedly; o8_one_agent_comment_per_ticket bound
+      the address but its own unknown said whether the WRITE side accrues at all is undecided — FK35 (two
+      phase-B markers) was the fork. REWORK: resolved on the WRITE side — the writer appends
+      unconditionally to an open case and never behind a person's close, which is what bounds what a
+      closed case carries; the read side no longer picks.
+    resolved_to: d_writer_never_records_behind_a_release
   - rule: R4
     element: case_history_mapping.domain.distinguished[invalid-yaml]
     witness: >-
@@ -1779,12 +1846,13 @@ gate:
       is what actually crosses, which is what the shape test must scope against.
   - rule: R1
     element: interacts(approver->case_history_store).payload
-    by: d6_stub_label_route
+    by: d6_transitions_route_not_confined
     cites:
     - c8
     witness: >-
-      d6_stub_label_route reads this simple (label-only) payload; c8 grounds the stub's create/label/comment
-      behaviour the test drives against.
+      REWORK: the person's payload is the stub's EXISTING transition body (`{status, resolution, comment}`),
+      which c8 already grounds and the stub's own tests pin; this lane adds nothing to it and
+      d6_transitions_route_not_confined is the demand that binds the route from defender's side.
   - rule: R1
     element: interacts(query_tool->ticket_screen).payload
     by: d0_screen_shape
@@ -1837,16 +1905,15 @@ gate:
       the writer's bypass of guard_outbound (no confinement, no capture) that this cell's empty constraints
       list records as fact, not a gap this spec must close.
   - rule: R3
-    element: case_history_store.access[operator-labels]
-    by: d6_labels_route_not_confined
+    element: case_history_store.access[operator-transition]
+    by: d6_transitions_route_not_confined
     cites:
     - g4
     witness: >-
-      d6_labels_route_not_confined (kind: negative, form: test — the clause-form n6_* demands binding
+      d6_transitions_route_not_confined (kind: negative, form: test — the clause-form n6_* demands binding
       the same cell do not pre-discharge on their own) asserts the MODEL-reach half; g4 grounds WRITE_ENDPOINTS'
-      four-then-five-triple census this route joins. NOTE: the cell's own `constraints: unknown` (FK38/FK39)
-      is separately carried as an R0 hole above — this pre-discharge is scoped to R3's parity obligation
-      only, not to the unresolved policy.
+      census, in which the transitions triple STAYS. REWORK: the cell's constraint is no longer unknown —
+      the store enforces its status enum (c8) — so the old R0 hole on `access[operator-labels]` is void.
   - rule: R3
     element: ticket_screen.access[list-tickets]
     by: o2_both_verbs_screened
@@ -1864,26 +1931,21 @@ gate:
     witness: same demand and ground as list-tickets — the parity pair R3 exists to force.
   - rule: R4
     element: ticket_stub.domain.distinguished[existing-ticket]
-    by: d6_stub_label_route
+    by: d_writer_never_records_behind_a_release
     cites:
     - c8
-    witness: the happy-path label add; c8 grounds the stub's create/label behaviour.
+    witness: >-
+      REWORK: the stub is `provenance: code` and unchanged; the member is exercised from defender's side
+      by the writer's read-back of an existing case (200, a ticket object). c8 grounds the stub's
+      get/comment behaviour.
   - rule: R4
     element: ticket_stub.domain.distinguished[unknown-ticket-key]
-    by: d6_stub_label_route
+    by: d_writer_never_records_behind_a_release
     cites:
     - c8
     witness: >-
-      FK38's 404-no-side-effect recommendation, exercised by the same demand; c8 plus g1's seven-route
-      census ground the stub's 404-by-absence convention.
-  - rule: R4
-    element: ticket_stub.domain.distinguished[duplicate-label]
-    by: d6_stub_label_route
-    cites:
-    - c8
-    witness: >-
-      FK39's idempotent-accept recommendation; c8 grounds the stub's append-uncapped/dup-409 conventions
-      this member must match against for labels specifically.
+      the writer's read-back of an unknown key (404) is an undecidable arm that writes nothing; c8 plus
+      g1's seven-route census ground the stub's 404-by-absence convention.
   - rule: R4
     element: case_history_mapping.domain.distinguished[shipped-default]
     by: d_loader_refusal_positive_control
@@ -1909,33 +1971,33 @@ gate:
       r6 grounds that mapping.yaml's close: section already carries a comment: key D1's new top-level
       section must not collide with.
   - rule: R4
-    element: case_history_mapping.domain.distinguished[open-labels-can-render-approved]
-    by: o1_loader_refuses_approved_label
+    element: case_history_mapping.domain.distinguished[open-status-is-the-released-status]
+    by: o1_alert_cannot_move_lifecycle
     cites:
     - g7
     witness: >-
-      g7 grounds that the whole open: section ships unfiltered, which is why FAM-2 scopes the refusal
-      over every label-producing template, not two named ones.
+      REWORK: the one loader refusal kept — g7 grounds that the whole open: section ships unfiltered, so
+      the only way the open could land released is the operator's own `open.status` literal.
   - rule: R4
     element: mapping_open.domain.distinguished[sig-template]
-    by: o1_loader_refuses_approved_label
+    by: o1_alert_cannot_move_lifecycle
     cites:
     - g7
-    witness: the shipped sig:{rule.id} template; g7 as above.
+    witness: the shipped sig:{rule.id} template, rendered from a hostile alert and still just a label.
   - rule: R4
     element: mapping_open.domain.distinguished[evt-template]
-    by: o1_loader_refuses_approved_label
+    by: o1_alert_cannot_move_lifecycle
     cites:
     - g7
-    witness: the shipped evt:{timestamp} template; g7 as above, FAM-2 covers it explicitly (FK25).
+    witness: the shipped evt:{timestamp} template; g7 as above.
   - rule: R4
     element: mapping_open.domain.distinguished[operator-added-label-template]
-    by: o1_loader_refuses_approved_label
+    by: o1_alert_cannot_move_lifecycle
     cites:
     - g7
     witness: >-
-      FAM-2's load-bearing member — an operator-added template under an open set; g7 grounds why a two-name
-      guard cannot discharge this.
+      REWORK: an operator-added template — even one spelled exactly like the released status — loads
+      and opens `open`; g7 grounds that it ships, and the store's enum grounds that it cannot matter.
   - rule: R4
     element: mapping_comment.domain.alternatives[renamed-comment-author]
     by: o5_no_vendor_literals_in_code
@@ -1945,11 +2007,19 @@ gate:
       g15 grounds the $DEFENDER_DIR seam a rename-driving control uses; the alternative's crossing itself
       is separately an R0 hole (FK10).
   - rule: R4
-    element: mapping_approved.domain.alternatives[renamed-approved-label]
+    element: mapping_released.domain.alternatives[renamed-released-status]
     by: o5_no_vendor_literals_in_code
     cites:
     - g15
-    witness: same ground as the comment-author alternative; FK10's opposite (fail-closed) direction.
+    witness: same ground as the comment-author alternative; fails CLOSED (a case closed under the old spelling reads as unreleased).
+  - rule: R4
+    element: mapping_released.domain.distinguished[differently-spelled-status]
+    by: d4_predicates_in_mapper
+    cites:
+    - g15
+    witness: >-
+      REWORK: the mapping names `resolved` instead of the stub's `closed` and the screen follows it in
+      both directions — a `resolved` case serves, a `closed` one no longer does; g15 grounds the seam.
   - rule: R4
     element: payload_view.domain.distinguished[8192-boundary]
     by: scale_model_view_stays_bounded

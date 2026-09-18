@@ -65,59 +65,6 @@ def _mapping_path() -> Path:
     return root / _MAPPING_RELPATH
 
 
-def _label_template_can_render(template: str, approved_label: str) -> bool:
-    """Is `template` a shape that could render down to what `is_approved` accepts?
-
-    A property of the TEMPLATE, not of any alert (§7 R5/FAM-2): only the literal prefix before
-    the FIRST placeholder can ever be pinned, so a template is safe iff `approved_label` cannot
-    start with that prefix. The comparison is made against the same reading `is_approved`
-    makes of a label — surrounding whitespace stripped (FK22) — so a prefix that is ONLY
-    whitespace pins nothing, and a template with no literal prefix at all can render to
-    anything."""
-    idx = template.find("{")
-    if idx == -1:
-        return template.strip() == approved_label
-    prefix = template[:idx].lstrip()
-    if not prefix:
-        return True
-    return approved_label.startswith(prefix)
-
-
-def _label_templates(section: dict[str, Any]) -> list[str]:
-    """Every string template `section.labels` could ship: a list's string entries, or a bare
-    string, which `_render` sends as one label just the same."""
-    labels = section.get("labels")
-    if isinstance(labels, str):
-        return [labels]
-    if isinstance(labels, list):
-        return [t for t in labels if isinstance(t, str)]
-    return []
-
-
-def _refuse_colliding_approved_label(data: dict[str, Any]) -> None:
-    """D1's loader refusal: walk every label-producing template under `open:` (and a stale
-    `close:`'s, FK27) and refuse the whole mapping if any could render the approved label's
-    exact spelling. Exhaustive over the section, not two named entries (FK26) — `open:` ships
-    to the wire unfiltered (g7), so a guard pinned to two names guards a fixed subset."""
-    approved = data.get("approved")
-    if not isinstance(approved, dict):
-        return
-    label = approved.get("label")
-    if not isinstance(label, str) or not label:
-        return
-    for section_name in ("open", "close"):
-        section = data.get(section_name)
-        if not isinstance(section, dict):
-            continue
-        for template in _label_templates(section):
-            if _label_template_can_render(template, label):
-                raise CaseTicketError(
-                    f"case-history mapping's `{section_name}.labels` template {template!r} "
-                    f"could render the approved label {label!r} — refusing to load a mapping "
-                    "that could let an attacker-influenced field approve its own case"
-                )
-
-
 def _load_mapping() -> dict[str, Any]:
     path = _mapping_path()
     if not path.is_file():
@@ -132,7 +79,6 @@ def _load_mapping() -> dict[str, Any]:
         raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
     if not isinstance(data, dict):
         raise CaseTicketError(f"case-history mapping is not a mapping: {path}")
-    _refuse_colliding_approved_label(data)
     return data
 
 
@@ -262,7 +208,7 @@ def signature_label(alert: dict[str, Any]) -> str | None:
 
 
 # --------------------------------------------------------------------------------------------
-# D3 — the comment renderer, and D1's mapping accessors it shares with D4's predicates
+# D3 — the comment renderer and D1's mapping accessors
 # --------------------------------------------------------------------------------------------
 
 # Not a document's own fence: this strips an ATTACKER-PLANTED delimiter from free text (never
@@ -274,8 +220,7 @@ _FENCE_SPLIT = re.compile(r"(?m)^[ \t]*---")  # lint-frontmatter: ok — see com
 
 
 def _resolve_comment_author(mapping: dict[str, Any]) -> str:
-    """§7 R1/FAM-1: fail closed rather than send an unattributable comment. Raised by both the
-    writer's render path and D4's `approval_predicates` — the same section, the same refusal."""
+    """§7 R1/FAM-1: fail closed rather than send an unattributable comment."""
     section = mapping.get("comment")
     if not isinstance(section, dict):
         raise CaseTicketError(
@@ -365,80 +310,62 @@ def unreadable_comment_payload() -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------------------------
-# D4 — the approval screen's predicates, safe by construction (§7 R1)
+# D4 — the release predicate, safe by construction (§7 R1)
 # --------------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
-class ApprovalPredicates:
+class ReleasePredicate:
+    """A case is RELEASED when a person has moved it to the mapping's `released.status` —
+    the lifecycle state the vendor's own store enforces as a closed vocabulary. One question,
+    asked of the ticket alone: the status is compared exactly (the store canonicalises it;
+    nothing here trims, folds or tolerates), and an undecidable ticket — not an object, no
+    string status — reads as UNRELEASED, the direction that serves nothing (FAM-1).
 
-    approved_label: str
-    agent_identities: frozenset[str]
+    There is deliberately no "who wrote this comment" predicate beside it. A comment's
+    `author` is whatever the client that posted it chose to send, so a rule built on it was
+    never sound; the screen serves an unreleased ticket's comments to nobody and a released
+    ticket's comments whole, and the person's close is the one act that moves between them."""
 
-    def is_approved(self, ticket: Any) -> bool:
+    released_status: str
+
+    def is_released(self, ticket: Any) -> bool:
         if not isinstance(ticket, dict):
             return False
-        labels = ticket.get("labels")
-        if not isinstance(labels, list):
-            return False
-        return any(
-            isinstance(lbl, str) and lbl.strip() == self.approved_label for lbl in labels
-        )
-
-    def is_agent_comment(self, comment: Any) -> bool:
-        # FAM-1 (FK15): undecidable — not a dict, no author, or a non-string author — reads as
-        # AGENT-AUTHORED, the protective direction. `is_agent_comment` is a POSITIVE match
-        # against the identity set otherwise (FK23): a third identity (the stub's own `system`
-        # transition stamp, a retired lane's `learning`) is NOT agent-authored.
-        if not isinstance(comment, dict):
-            return True
-        author = comment.get("author")
-        if not isinstance(author, str):
-            return True
-        return author in self.agent_identities
-
-    def as_pair(self) -> tuple[Any, Any]:
-        """The two predicates as a plain pair — O5's own demand: the caller (the query tool)
-        reaches them without ever spelling the vendor tag's own literal in its own source."""
-        return self.is_approved, self.is_agent_comment
+        status = ticket.get("status")
+        return isinstance(status, str) and status == self.released_status
 
 
-def approval_predicates() -> ApprovalPredicates:
-    """§7 R1's downstream consequence: the predicates are SAFE BY CONSTRUCTION — this raises
-    in every unsafe mapping state (FK11-FK19) rather than merely behaving correctly when
-    configured right. The caller (the read screen) is what degrades on a raise; this function
-    never does."""
+def release_predicate() -> ReleasePredicate:
+    """§7 R1's downstream consequence: the predicate is SAFE BY CONSTRUCTION — this raises in
+    every unsafe mapping state rather than merely behaving correctly when configured right.
+    The caller (the read screen) is what degrades on a raise; this function never does.
+
+    The configured status is stripped ONCE, here, so a quoted YAML scalar with stray
+    whitespace configures the same state the ticket carries rather than one nothing can ever
+    reach."""
     mapping = _load_mapping()
-    author = _resolve_comment_author(mapping)
-    _resolve_comment_body_template(mapping)
-    section = mapping.get("comment") or {}
-    aliases = section.get("author_aliases")
-    if aliases is not None and (
-        not isinstance(aliases, list) or not all(isinstance(a, str) for a in aliases)
-    ):
+    section = mapping.get("released")
+    if not isinstance(section, dict):
         raise CaseTicketError(
-            "case-history mapping's `comment.author_aliases` must be a list of strings"
+            "case-history mapping has no `released` section (released.status required)"
         )
-    approved_section = mapping.get("approved")
-    if not isinstance(approved_section, dict):
+    status = section.get("status")
+    if not isinstance(status, str) or not status.strip():
         raise CaseTicketError(
-            "case-history mapping has no `approved` section (approved.label required)"
+            "case-history mapping's `released.status` must be a non-empty string"
         )
-    label = approved_section.get("label")
-    if not isinstance(label, str) or not label:
+    open_status = _dig(mapping, "open.status")
+    if isinstance(open_status, str) and open_status.strip() == status.strip():
         raise CaseTicketError(
-            "case-history mapping's `approved.label` must be a non-empty string"
+            f"case-history mapping's `open.status` and `released.status` are both "
+            f"{status.strip()!r} — every case would open already released"
         )
-    identities = frozenset({author, *(aliases or [])})
-    return ApprovalPredicates(approved_label=label, agent_identities=identities)
+    return ReleasePredicate(released_status=status.strip())
 
 
-def is_approved(ticket: Any) -> bool:
-    return approval_predicates().is_approved(ticket)
-
-
-def is_agent_comment(comment: Any) -> bool:
-    return approval_predicates().is_agent_comment(comment)
+def is_released(ticket: Any) -> bool:
+    return release_predicate().is_released(ticket)
 
 
 # --------------------------------------------------------------------------------------------
