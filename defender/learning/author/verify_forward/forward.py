@@ -1,28 +1,12 @@
 from __future__ import annotations
 
-import json
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 from defender._run_paths import RunPaths
-from defender.learning.core.config import REPO_ROOT
 
 HERE = Path(__file__).resolve().parent
 PROMPT_PATH = HERE / "forward.md"
-
-#: The ticket adapter, invoked as a subprocess for the one `get-ticket` this module makes.
-#: @owns _TICKET_CLI — spelled here since #922. It used to be borrowed from
-#: `learning/tickets/ticket_seeds.py`, which existed to sample closed tickets as benign-actor
-#: seeds; that actor and its sampler went with the old pipeline, and this module was the only
-#: thing still reaching into it — for a path, not for any of its behaviour. One definition,
-#: one reader, at the reader.
-_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_adapter.py"
-_POLICY_FETCH_TIMEOUT = 15
-_NO_CITED_POLICY = (
-    "(no cited covering policy — none was offered, or the store is unreachable)"
-)
 
 
 def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
@@ -55,56 +39,3 @@ def expected_disposition(direction: str, recorded: str) -> str:
     if direction == "benign":
         return "benign"
     return recorded
-
-
-def _cited_case_ids(run_id: str, *, runs_dir: Path) -> list[str]:
-    menu = runs_dir / run_id / "past_tickets.txt"
-    if not menu.is_file():
-        return []
-    ids: list[str] = []
-    for line in menu.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if not s.startswith("- "):
-            continue
-        head = s[2:].split(":", 1)[0].strip()
-        if head:
-            ids.append(head)
-    return ids
-
-
-def _fetch_closed_resolution(case_id: str) -> str | None:
-    cmd = [
-        sys.executable, str(_TICKET_CLI), "get-ticket", case_id,
-        "--require-closed",
-    ]
-    try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=_POLICY_FETCH_TIMEOUT, cwd=str(REPO_ROOT), encoding="utf-8"
-        )
-    except (subprocess.SubprocessError, OSError):
-        return None
-    if proc.returncode != 0:
-        return None
-    try:
-        ticket = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return None
-    res = ticket.get("resolution") if isinstance(ticket, dict) else None
-    return res if isinstance(res, str) and res.strip() else None
-
-
-def load_cited_policy(
-    run_id: str, *, runs_dir: Path, fetch_fn=_fetch_closed_resolution
-) -> str:
-    lines = [
-        f"- {case_id}: {res}"
-        for case_id in _cited_case_ids(run_id, runs_dir=runs_dir)
-        if (res := fetch_fn(case_id))
-    ]
-    if not lines:
-        return _NO_CITED_POLICY
-    return (
-        "Cited covering policies (closed cases; grounded conditions ride in the "
-        "resolution):\n" + "\n".join(lines)
-    )

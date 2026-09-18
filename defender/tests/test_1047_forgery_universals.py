@@ -107,12 +107,12 @@ def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path)
         "the control failed: a HOST-written record no longer moves the grade either, so the "
         "assertions above are not about the forgery")
 
-    control_ticket = S.close_ticket(
+    control_ticket = S.record_ticket(
         S.closed_run_dir(tmp_path / "ticket-clean", disposition="benign"), truncated_by=None)
     salted = S.closed_run_dir(tmp_path / "ticket-salted", disposition="benign")
     S.salt_run_dir(salted, value="aborted")
     (salted / "report.md").write_text(S.report_text("benign"), encoding="utf-8")
-    forged_ticket = S.close_ticket(salted, truncated_by=None)
+    forged_ticket = S.record_ticket(salted, truncated_by=None)
     assert [(c.path.split("/")[-1], c.body) for c in forged_ticket.calls] == \
            [(c.path.split("/")[-1], c.body) for c in control_ticket.calls], (
         "a forgery under the run dir moved what the ticket lane did")
@@ -454,8 +454,8 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
     forged_run = S.closed_run_dir(tmp_path / "ticket-forged", disposition="unresolved")
     S.salt_run_dir(forged_run, value="request-limit")
     (forged_run / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
-    a = S.close_ticket(clean_run, truncated_by="aborted")
-    b = S.close_ticket(forged_run, truncated_by="aborted")
+    a = S.record_ticket(clean_run, truncated_by="aborted")
+    b = S.record_ticket(forged_run, truncated_by="aborted")
     assert [c.path.split("/")[-1] for c in a.calls] == [c.path.split("/")[-1] for c in b.calls]
 
 
@@ -481,9 +481,9 @@ def test_a_near_miss_spelling_of_a_real_exit_class_planted_in_any_box_writable_f
         run_dir = S.closed_run_dir(tmp_path / f"near-ticket-{i}", disposition="benign")
         S.salt_run_dir(run_dir, value=near)
         (run_dir / "report.md").write_text(S.report_text("benign"), encoding="utf-8")
-        fake = S.close_ticket(run_dir, truncated_by=None)
-        assert len(fake.transitions) == 1, (
-            f"{near!r}: a near-miss planted by the box moved the ticket lane's transition")
+        fake = S.record_ticket(run_dir, truncated_by=None)
+        assert len(fake.records) == 1, (
+            f"{near!r}: a near-miss planted by the box moved the ticket lane's record")
         assert fake.notes == [], (
             f"{near!r}: a near-miss planted by the box raised an escalation note")
 

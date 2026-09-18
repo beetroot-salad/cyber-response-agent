@@ -95,42 +95,7 @@ def test_expected_disposition_direction_aware():
 
 
 
-def test_cited_case_ids_parses_menu(tmp_path, monkeypatch):
-    runs = tmp_path / "runs"
-    (runs / "run-B").mkdir(parents=True)
-    (runs / "run-B" / "past_tickets.txt").write_text(
-        "- case-OLD1: benign — nightly scan\n- case-OLD2: benign — maintenance\n\n"
-    )
-    assert vf._cited_case_ids("run-B", runs_dir=runs) == ["case-OLD1", "case-OLD2"]
-
-
-def test_cited_case_ids_empty_when_no_menu(tmp_path, monkeypatch):
-    runs = tmp_path / "runs"
-    (runs / "run-B").mkdir(parents=True)
-    assert vf._cited_case_ids("run-B", runs_dir=runs) == []
-
-
-def test_load_cited_policy_renders_grounded_resolutions(tmp_path, monkeypatch):
-    runs = tmp_path / "runs"
-    (runs / "run-B").mkdir(parents=True)
-    (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
-    out = vf.load_cited_policy(
-        "run-B", runs_dir=runs,
-        fetch_fn=lambda cid: "benign — scan [grounded: identity-confirmed (l-002)]",
-    )
-    assert "case-OLD1" in out
-    assert "grounded: identity-confirmed (l-002)" in out
-
-
-def test_load_cited_policy_neutral_when_unreachable(tmp_path, monkeypatch):
-    runs = tmp_path / "runs"
-    (runs / "run-B").mkdir(parents=True)
-    (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
-    out = vf.load_cited_policy("run-B", runs_dir=runs, fetch_fn=lambda cid: None)
-    assert out == vf._NO_CITED_POLICY
-
-
-def test_load_cited_policy_neutral_when_no_menu(tmp_path, monkeypatch):
-    runs = tmp_path / "runs"
-    (runs / "run-B").mkdir(parents=True)
-    assert vf.load_cited_policy("run-B", runs_dir=runs) == vf._NO_CITED_POLICY
+#: #767 D5 deleted the resolution-decoding lane's read half — `load_cited_policy`,
+#: `_fetch_closed_resolution` and `_cited_case_ids`, keyed on `past_tickets.txt`, which no
+#: non-test code ever wrote (c5) — closing the second model-facing read path into the ticket
+#: store structurally. Their tests retired with them.

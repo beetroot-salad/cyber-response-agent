@@ -849,6 +849,39 @@ def test_a_patch_for_a_staged_system_is_refused_too(tmp_path):
             applier=WorldApplier(patches={"elastic": {"canary-1": {"owner": "worldA"}}}))
 
 
+def test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_refused(tmp_path):
+    """    A `ticket` patch that writes `comments` without moving the case to the released status
+    is refused at construction — the third silent drop, one door further down.
+
+    #767's read screen empties an unreleased case's comments on every ticket response, and it
+    runs AFTER the estate's patch, so such a world's difference is authored, applied (the row
+    reads `patched`, truthfully) and then never served: the family ends as "a declared
+    difference no query could reach" with nothing naming the gate. Positive control: the same
+    patch carrying `status: <released>` builds, because a released case IS served whole."""
+    from defender.scripts.case_history import case_ticket
+
+    released = case_ticket.release_predicate().released_status
+    # The recording adapter body declared under the ticket system's name, so the grant can
+    # name it: which verbs it carries is beside the point here — the refusal is about the
+    # PATCH TABLE, decided before any call is served.
+    adapters = fake_estate(tmp_path)
+    (adapters / "ticket_adapter.py").write_text(_RECORDING_ADAPTER, encoding="utf-8")
+    grant = VerbGrant(role="gather", entries=(*FAKE_GRANT.entries, ("ticket", "health-check", "r")))
+    note = [{"author": "analyst", "body": "the same binary was benign last quarter"}]
+    with pytest.raises(EstateError, match="comments"):
+        world_registry(
+            adapters, grant, tmp_path / "served.jsonl",
+            world=World("w1", touches=("ticket",)),
+            applier=WorldApplier(patches={"ticket": {"SOC-9": {"comments": note}}}))
+    assert not (tmp_path / "served.jsonl").exists(), "a refused world must not have written a row"
+
+    world_registry(
+        adapters, grant, tmp_path / "served.jsonl",
+        world=World("w1", touches=("ticket",)),
+        applier=WorldApplier(
+            patches={"ticket": {"SOC-9": {"comments": note, "status": released}}}))
+
+
 @pytest.mark.parametrize("world_id", ["world A", "W1", "w*1"])
 def test_a_world_a_stager_cannot_name_is_refused_at_construction(tmp_path, world_id):
     """    A world id no staged system could build a corpus name from is refused where the world

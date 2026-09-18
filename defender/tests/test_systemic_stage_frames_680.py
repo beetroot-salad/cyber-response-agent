@@ -63,7 +63,7 @@ from defender.tests._frames680 import (
 
 
 def test_repair_gate_r1_run_findings_shape(tmp_path):
-    """The real `_run_findings` payload captured at `run_verify` orders contract, transcript, lesson, disposition, and policy frames."""
+    """The real `_run_findings` payload captured at `run_verify` orders contract, transcript, lesson, and disposition frames."""
     observation = _findings_prompt(tmp_path)
     assert_producer_shape(observation)
 

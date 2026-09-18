@@ -41,7 +41,7 @@
       "ticket_store": {
         "writers": [
           "defender/scripts/case_history/ticket_writer.py::open_case_ticket",
-          "defender/scripts/case_history/ticket_writer.py::close_case_ticket"
+          "defender/scripts/case_history/ticket_writer.py::record_case_ticket"
         ],
         "readers": [
           "defender/scripts/adapters/ticket_adapter.py::list_tickets",
@@ -51,7 +51,8 @@
         ],
         "grep": [
           "ticket_adapter.py"
-        ]
+        ],
+        "note": "#767 renamed the writer's second call from close_case_ticket (a POST /tickets/{key}/transitions close) to record_case_ticket (a POST /tickets/{key}/comments record) — the host now records its investigation as a comment and never transitions the case; a person CLOSES it, and that close is what releases the case's comments to a later run's gather (the read side keys on `status`, never on a label or a comment's author). The writer's egress still bypasses guard_outbound entirely (it calls transport.docker_exec_curl directly, never confine_read_endpoint), so it is staged nowhere a `staged`-style record would see it (F3). Three test implementors of the duck-typed `ticket_writer=` seam moved with the rename: defender/tests/_spec791.py::SpecTail, defender/tests/test_947_triplet_sibling.py's inline Writer, and the #767 spec's own defender/tests/test_767_run_tail.py::Tail (g10)."
       },
       "wire_log": {
         "writers": [

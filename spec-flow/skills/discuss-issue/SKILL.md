@@ -7,13 +7,15 @@ effort: high
 
 # Discuss issue
 
-Explain the issue, check it against the code, say what in it takes judgement. The thinking is yours; this file only says where to point it.
+Explain the issue to someone who hasn't read it, check it against the code, say what in it takes judgement. The thinking is yours; this file only says where to point it.
 
 Load it first — `gh issue view [issue number] --comments` (empty output is a failed read, not an empty issue; retry with `--json title,body,comments`), or take it from the conversation, a path, or pasted text. Read the comments; some of this may already be settled.
 
-Ground the issue against the code base. Explore it, read it and execute small snippets when relevant. The goal is to run the discussion against the correct model of the code base, less so to nitpick the issue (so try to avoid claims like "The issue says X but it is actually Y").
+Ground the issue against the code base. Explore it, read it and execute small snippets when relevant.
 
-Then it depends on whether "what to discuss" was specified or not. If yes, answer that based on the knowledge you gathered about the code base. If not, explain what the problem is, why it is a problem, and what takes judgement, **plainly**. Ignore the suggested solution or fix the issue proposes; take only the problem statement from there.
+Treat the issue as a problem statement, the goal is to run the discussion against the correct model of the code base, not to nitpick the issue (so try to avoid claims like "The issue says X but it is actually Y" "Finding #N about the issue's claims"). The reader is not familiar with the issue, and shouldn't be, the session is their interaction.
+
+Then it depends on whether "what to discuss" was specified or not. If yes, answer that based on the knowledge you gathered about the code base. If not, explain what the problem is, why it is a problem, and what takes judgement, to someone who isn't familiar with the code base, **plainly**. Ignore the suggested solution or fix the issue proposes; take only the problem statement from there.
 
 ## Meta Note: the issue holds the state
 

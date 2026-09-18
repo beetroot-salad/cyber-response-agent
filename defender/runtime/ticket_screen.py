@@ -89,6 +89,47 @@ def screen_get(
     return payload, 0, ""
 
 
+def _screen_one_ticket(
+    ticket: dict[str, Any], *, is_released: Callable[[Any], bool],
+) -> dict[str, Any]:
+    """#767 D4's per-ticket step: a ticket a person has not yet released serves NO comments;
+    a released one is served whole. The question is asked of the ticket's lifecycle state
+    alone — never of a comment's `author`, which is whatever the posting client chose to
+    send and so cannot tell an agent's note from a person's. Every other field — including a
+    legacy `resolution` (§7 R9) — is left untouched, and the envelope carries no marker
+    anywhere (`d4_no_marker`): a screen filters silently.
+
+    `comments` is emptied whatever its shape when the ticket is unreleased: a non-list value
+    is still text the store handed back, and the only reading that serves nothing is to
+    serve nothing. A ticket carrying no `comments` key at all is left as it is.
+    """
+    if "comments" not in ticket or is_released(ticket):
+        return ticket
+    return {**ticket, "comments": []}
+
+
+def screen_release_get(payload: Any, *, is_released: Callable[[Any], bool]) -> Any:
+    """D4's step for `get-ticket`, applied AFTER the own-case exclusion has already run and
+    answered `0` (`d4_screen_after_own_case`). `payload` here is a single ticket object."""
+    if not isinstance(payload, dict):
+        return payload
+    return _screen_one_ticket(payload, is_released=is_released)
+
+
+def screen_release_list(payload: Any, *, is_released: Callable[[Any], bool]) -> Any:
+    """D4's step for `list-tickets`, applied AFTER the own-case exclusion. `total` is left as
+    the own-case screen restated it — D4 never removes a ticket from the listing, only empties
+    a surviving unreleased ticket's `comments` (N5: an unreleased or undecidable record stays
+    visible for correlation)."""
+    if not (isinstance(payload, dict) and isinstance(payload.get("tickets"), list)):
+        return payload
+    tickets = [
+        _screen_one_ticket(t, is_released=is_released) if isinstance(t, dict) else t
+        for t in payload["tickets"]
+    ]
+    return {**payload, "tickets": tickets}
+
+
 def screen_list(
     payload: Any,
     *,
@@ -121,6 +162,8 @@ __all__ = [
     "TICKET_GET",
     "TICKET_LIST",
     "TICKET_SYSTEM",
+    "screen_release_get",
+    "screen_release_list",
     "screen_get",
     "screen_list",
     "self_case_key",

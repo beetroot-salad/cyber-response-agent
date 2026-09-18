@@ -1,4 +1,13 @@
 schema_version: 2
+# SUPERSEDED IN ONE RESPECT BY #767 (ticket-store approval gate): the host's client has NO
+# transition call. Every arm below that reads "close `unresolved`" / "close off the report" is
+# now the RECORD — one `POST /tickets/{key}/comments` proposing that disposition for a person to
+# close on — and `http-transition` is an access the writer no longer has (the census
+# `test_no_exit_class_transitions_the_ticket` pins it empty on every exit class). The per-exit-
+# class decision (O2), its in-process source (F3 reading A) and the escalation note (F4/F-D/F-K/
+# F-L) stand unchanged; `discharged_by` pointers below were re-aimed at the renamed tests. The
+# one behavioural delta beyond "comment, not close": a run with no exit class and no usable
+# report now records the fixed no-disposition sentence (#767 §7 R10) instead of staying silent.
 design: "1047"  # gh issue #1047 — "the exit class lives where the box cannot write". THE
                 # AUTHORITATIVE TEXT is the issue's intent+design comment as CORRECTED by
                 # `70-resolutions.md` (§7, early invocation: forks F1-F7 all resolved) — the
@@ -333,7 +342,7 @@ demands:
       - "close_case_ticket"
       - "truncated_by.domain.distinguished[request-limit]"
       - "interacts(close_case_ticket->ticket_store)"
-    discharged_by: test_a_request_limit_run_closes_its_ticket_unresolved
+    discharged_by: test_a_request_limit_run_records_unresolved
     seed_docstring: >-
       A run whose exit class is `request-limit` closes its ticket `unresolved` off the host's
       forced report, exactly as it does today.
@@ -352,7 +361,7 @@ demands:
       - "close_case_ticket"
       - "truncated_by.domain.distinguished[retry-exhausted]"
       - "interacts(close_case_ticket->ticket_store)"
-    discharged_by: test_a_retry_exhausted_run_closes_its_ticket_unresolved
+    discharged_by: test_a_retry_exhausted_run_records_unresolved
     seed_docstring: >-
       A run whose exit class is `retry-exhausted` closes its ticket `unresolved` off the host's
       forced report, exactly as it does today.
@@ -365,7 +374,7 @@ demands:
       - "close_case_ticket"
       - "truncated_by.domain.distinguished[budget]"
       - "interacts(close_case_ticket->ticket_store)"
-    discharged_by: test_a_budget_kill_leaves_its_ticket_open_and_makes_no_transition
+    discharged_by: test_a_budget_kill_leaves_its_ticket_open_and_makes_no_call
     seed_docstring: >-
       A run killed by the budget leaves its ticket open and makes no transition call at all — the
       missing report IS the escalation, and that stays true once the lane keys on the exit class.
@@ -378,7 +387,7 @@ demands:
       - "close_case_ticket"
       - "truncated_by.domain.distinguished[store]"
       - "interacts(close_case_ticket->ticket_store)"
-    discharged_by: test_a_store_fault_leaves_its_ticket_open_and_makes_no_transition
+    discharged_by: test_a_store_fault_leaves_its_ticket_open_and_makes_no_call
     seed_docstring: >-
       A run ended by a store fault leaves its ticket open and makes no transition call, as it
       does today.
@@ -397,7 +406,7 @@ demands:
       - "close_case_ticket"
       - "truncated_by.domain.distinguished[None]"
       - "interacts(close_case_ticket->report_md).response"
-    discharged_by: test_a_run_that_was_not_cut_short_still_closes_off_its_report
+    discharged_by: test_a_run_that_was_not_cut_short_still_records_off_its_report
     seed_docstring: >-
       A run with no exit class recorded closes its ticket from the report exactly as it does
       today — the ordinary completed run is untouched by this change.
@@ -426,7 +435,7 @@ demands:
     form: test
     source: "20-demands.md"
     binds: ["close_case_ticket", "interacts(close_case_ticket->report_md).response"]
-    discharged_by: test_a_run_with_no_exit_class_and_no_usable_report_still_leaves_the_ticket_open
+    discharged_by: test_a_run_with_no_exit_class_and_no_usable_report_records_that_and_proposes_nothing
     seed_docstring: >-
       The report-presence branch stays the fallback: a run with no store row and no usable
       report.md leaves its ticket open and writes no receipt, the behaviour
@@ -933,7 +942,7 @@ demands:
       - "ticket_write_json"
       - "interacts(close_case_ticket->ticket_write_json)"
       - "interacts(close_case_ticket->ticket_store)"
-    discharged_by: test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_the_real_close_or_note_call
+    discharged_by: test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_the_real_record_or_note_call
     seed_docstring: >-
       A ticket_write.json forged to claim a prior closure suppresses nothing: the genuine
       close/note call is issued regardless, because nothing in this design reads the receipt back
@@ -1026,7 +1035,7 @@ demands:
       - "close_case_ticket"
       - "truncated_by.domain.distinguished[None]"
       - "interacts(close_case_ticket->report_md).response"
-    discharged_by: test_close_case_ticket_given_no_exit_class
+    discharged_by: test_record_case_ticket_given_no_exit_class
     seed_docstring: >-
       An omitted keyword, a `.get()` miss and an explicit None all collapse to the same row: the
       ticket closes from the report exactly as today. The fallback is intended, not a bug.
@@ -1036,7 +1045,7 @@ demands:
     form: test
     source: "45-dispositions.md §1 premise 45"
     binds: ["close_case_ticket", "truncated_by.domain.distinguished[dead-end]"]
-    discharged_by: test_close_case_ticket_given_an_out_of_vocabulary_string
+    discharged_by: test_record_case_ticket_given_an_out_of_vocabulary_string
     seed_docstring: >-
       `dead-end` — a real vocabulary member with no arm in the per-class table — takes the
       report-driven fallback (F7 resolved).
@@ -1063,7 +1072,7 @@ demands:
       - "interacts(close_case_ticket->run_dir)"
       - "run_dir.access[box-rw-bind]"
       - "interacts(close_case_ticket->ticket_store)"
-    discharged_by: test_no_planted_file_under_the_run_dir_changes_which_transition_close_case_ticket_issues_for_any_exit_class
+    discharged_by: test_no_planted_file_under_the_run_dir_changes_which_comment_record_case_ticket_makes_for_any_exit_class
     seed_docstring: >-
       No file planted anywhere under the run dir changes which transition the ticket lane issues,
       for any exit class — under F3's reading the lane takes no run-dir input at all.
@@ -1721,12 +1730,12 @@ demands:
   - id: ticket_given_an_exit_class_and_a_report_that_disagree        # F-A, the tiebreak
     kind: domain-outcome
     form: test
-    source: "70-resolutions-round2.md fork F-A (human, reading B); premise `test_close_case_ticket_given_truncated_by_and_report_disagreeing`"
+    source: "70-resolutions-round2.md fork F-A (human, reading B); premise `test_record_case_ticket_given_truncated_by_and_report_disagreeing`"
     binds:
       - "close_case_ticket"
       - "interacts(close_case_ticket->truncated_by)"
       - "interacts(close_case_ticket->report_md).response"
-    discharged_by: test_close_case_ticket_given_truncated_by_and_report_disagreeing
+    discharged_by: test_record_case_ticket_given_truncated_by_and_report_disagreeing
     seed_docstring: >-
       When the exit class and the report disagree about whether anything was settled, the RECORD
       decides — checked for every leave-open class, not only for `aborted`: without

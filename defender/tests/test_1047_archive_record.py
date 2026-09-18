@@ -570,8 +570,8 @@ def test_store_stamp_failure_does_not_leak_into_the_sidecar_or_ticket_value(tmp_
     assert S.sidecar_doc(run_dir) == {"truncated_by": "budget", "closed_before_cut": False}, (
         "the sidecar took its value from the store rather than from what the driver observed")
     ticket_run = S.closed_run_dir(tmp_path / "ticket")
-    fake = S.close_ticket(ticket_run, truncated_by=truncated_by)
-    assert fake.transitions == [], (
+    fake = S.record_ticket(ticket_run, truncated_by=truncated_by)
+    assert fake.writes == [], (
         "the ticket lane did not see the exit class the driver observed")
 
 
@@ -682,7 +682,7 @@ def test_archive_episode_still_copies_report_md_verbatim_regardless_of_the_world
     or not, on both a cut-short and a control world in one episode.
 
     R7: `archive_episode` is an unmoved READER of `report_md` while `_grade_world` and
-    `close_case_ticket` both moved (claims h4, h8). If the new write had been folded into the
+    `record_case_ticket` both moved (claims h4, h8). If the new write had been folded into the
     copy list, or the exit class had been allowed to gate the copy, a cut-short world would
     archive with no report at all and the judge's tier-1 reason would change meaning."""
     ep, dirs, _base = _episode_with(tmp_path)
