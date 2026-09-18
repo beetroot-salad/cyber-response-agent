@@ -1,0 +1,686 @@
+"""#903 — the queue-state page: the serializer contract, the renderer, and the writers' stamps.
+
+Written BEFORE the implementation, against the design doc posted on the issue.
+`defender.learning.frontend.serialize_queues` does not exist at this base, so this module
+errors at collection — the expected red — and `build.render_queues` is the second name that
+has to appear for it to go green.
+
+The fixture is ONE temp state root seeded with every writer's exact shape, taken off the
+writers themselves rather than off the doc's prose: `drain.retire`'s nested record,
+`drain._retire_unkeyable`'s flat one, `pitfalls_curator._graveyard_dropped_rows`' nested one
+with no `attempts`, `drain._record_stuck`'s record, `markers.quarantine_marker`'s spec+failed
+marker under BOTH failed dirs, `drains._record_pending_delivery`'s record, and
+`quarantine._manifest`'s tainted manifest. A torn line rides in each sidecar, because a
+tolerant reader that drops one silently is O7's own defect.
+
+Every expectation here is a LITERAL, never rebuilt from the serializer's own output: an
+oracle derived from the thing it checks is a tautology (`test_lessons_frontend.py`'s rule).
+"""
+from __future__ import annotations
+
+import copy
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+
+from defender._io import read_jsonl_rows
+from defender.learning.author import drain
+from defender.learning.author.branch import AuthorBranch
+from defender.learning.core.config import LoopPaths
+from defender.learning.frontend import build, serialize_queues
+from defender.learning.leads import pitfalls_curator
+
+#: A queued row's own content, carrying the one character the embedded JSON must not emit
+#: raw. It rides inside a dead-letter row, i.e. the deepest string the page renders.
+SCRIPT_PAYLOAD = "<script>alert(1)</script>"
+BENIGN_PAYLOAD = "an ordinary lesson title"
+
+#: A physical line no tolerant reader can parse. One per sidecar.
+TORN = '{"finding_id": "torn", '
+
+
+# --------------------------------------------------------------------------------------
+# the writers' exact shapes, as literals
+
+
+#: `drain.retire` — nested under `row`, with `attempts`, stamped by mechanism 3.
+NESTED_STAMPED = {
+    "finding_id": "g-1",
+    "attempts": 3,
+    "deadletter_reason": "the author never took it",
+    "retired_at": "2026-09-10T04:05:06+00:00",
+    "row": {"finding_id": "g-1", "title": SCRIPT_PAYLOAD},
+}
+#: The same writer BEFORE mechanism 3 — an old record, which reads as `when: null`.
+NESTED_UNSTAMPED = {
+    "finding_id": "g-3",
+    "attempts": 2,
+    "deadletter_reason": "the author never took it",
+    "row": {"finding_id": "g-3", "k": "v"},
+}
+#: `drain._retire_unkeyable` — the row SPREAD, no `row` key, no id under the channel's key.
+FLAT_UNSTAMPED = {
+    "run_id": "r9",
+    "note": "no id under finding_id",
+    "attempts": 1,
+    "deadletter_reason": "row carries no value under 'finding_id'",
+}
+FLAT_STAMPED = {
+    "run_id": "r10",
+    "attempts": 2,
+    "deadletter_reason": "row carries no value under 'finding_id'",
+    "retired_at": "2026-09-12T07:08:09+00:00",
+}
+#: `pitfalls_curator._graveyard_dropped_rows` — nested, and NO `attempts` at all (D13).
+CURATOR_DROP = {
+    "pitfall_id": "p-9",
+    "deadletter_reason": "undeclared-system:evil",
+    "row": {"pitfall_id": "p-9", "system": "evil", "occurrences": 2},
+}
+
+#: `drain._record_stuck` — two records, the second stamped by mechanism 3.
+STUCK_FIRST = {
+    "fault_class": "TimeoutError",
+    "row_ids": ["f-1"],
+    "consecutive_ticks": 1,
+    "reason": "the append lock never came free",
+}
+STUCK_LAST = {
+    "fault_class": "BranchError",
+    "row_ids": ["f-1", "f-2"],
+    "consecutive_ticks": 4,
+    "reason": "push rejected, non-fast-forward",
+    "recorded_at": "2026-09-17T12:00:00+00:00",
+}
+
+#: `quarantine._manifest`. `verdict: {}` is the writer's "no scan recorded", kept for
+#: exactly this reader; `cause: null` is a taint with nothing chained behind it.
+TAINT_EARLIER: dict = {
+    "batch_id": "a-earlier",
+    "branch": "learning/lessons/a-earlier",
+    "label": "lessons author",
+    "worktree": "/srv/.worktrees/lessons-a-earlier",
+    "archive": "a-earlier.tar.gz",
+    "quarantined_at": "2026-09-11T08:00:00+00:00",
+    "taint": "symlink escapes the worktree",
+    "cause": None,
+    "verdict": {},
+    "findings": [
+        {"path": "/srv/a", "kind": "symlink", "filemode": "0o777", "nlink": 1,
+         "target": "/etc/passwd", "detail": "escapes the tree"},
+        {"path": "/srv/b", "kind": "hardlink", "filemode": "0o644", "nlink": 2,
+         "target": None, "detail": "outside the tree"},
+    ],
+}
+TAINT_LATER: dict = {
+    "batch_id": "b-later",
+    "branch": "learning/leads/b-later",
+    "label": "lead author",
+    "worktree": "/srv/.worktrees/leads-b-later",
+    "archive": "b-later.tar.gz",
+    "quarantined_at": "2026-09-14T09:10:11+00:00",
+    "taint": "a world-writable file survived the scrub",
+    "cause": "RuntimeError('the batch was already dying')",
+    "verdict": {"scanned": True, "clean": False},
+    "findings": [],
+}
+
+
+# --------------------------------------------------------------------------------------
+# what the contract says the serializer makes of them
+
+
+EXPECTED_FINDINGS_DEADLETTER = [
+    # newest first = file order reversed
+    {"id": None, "reason": "row carries no value under 'finding_id'",
+     "when": "2026-09-12T07:08:09+00:00", "row": {"run_id": "r10"}},
+    {"id": "g-3", "reason": "the author never took it", "when": None,
+     "row": {"finding_id": "g-3", "k": "v"}},
+    {"id": None, "reason": "row carries no value under 'finding_id'", "when": None,
+     "row": {"run_id": "r9", "note": "no id under finding_id"}},
+    {"id": "g-1", "reason": "the author never took it",
+     "when": "2026-09-10T04:05:06+00:00",
+     "row": {"finding_id": "g-1", "title": SCRIPT_PAYLOAD}},
+]
+
+EXPECTED_MARKERS = [
+    # sorted by (queue, identity): "delivery" before "lead_author", whatever the
+    # directories' own walk order is.
+    {"queue": "delivery", "identity": "z-delivery-1",
+     "failed": "unreadable pending-delivery record", "run_dir": None},
+    {"queue": "lead_author", "identity": "run-a",
+     "failed": "unreadable: run_dir is not an absolute path", "run_dir": None},
+    {"queue": "lead_author", "identity": "run-b",
+     "failed": "artifact-missing", "run_dir": "/srv/runs/run-b"},
+]
+
+EXPECTED_DELIVERIES = [
+    # `at` descending — the opposite of these records' filename order, on purpose.
+    {"branch": "learning/leads/b2", "batch_id": "b2", "label": "lead author",
+     "at": "2026-09-16T10:00:00+00:00", "reason": "opening the PR failed"},
+    {"branch": "learning/lessons/b1", "batch_id": "b1", "label": "lessons author",
+     "at": "2026-09-15T10:00:00+00:00", "reason": "push rejected"},
+]
+
+EXPECTED_TAINTED = [
+    # `quarantined_at` descending — again the opposite of filename order.
+    {"batch_id": "b-later", "archive": "b-later.tar.gz",
+     "quarantined_at": "2026-09-14T09:10:11+00:00", "label": "lead author",
+     "taint": "a world-writable file survived the scrub",
+     "cause": "RuntimeError('the batch was already dying')",
+     "verdict": {"scanned": True, "clean": False}, "findings": 0},
+    {"batch_id": "a-earlier", "archive": "a-earlier.tar.gz",
+     "quarantined_at": "2026-09-11T08:00:00+00:00", "label": "lessons author",
+     "taint": "symlink escapes the worktree", "cause": None,
+     "verdict": {}, "findings": 2},
+]
+
+
+# --------------------------------------------------------------------------------------
+# seeding
+
+
+def _write_lines(path: Path, entries: list) -> None:
+    """Seed a JSONL sidecar. A `str` entry is written verbatim, so a torn line is a torn
+    line rather than a JSON-encoded string that happens to look like one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "".join(
+        (e if isinstance(e, str) else json.dumps(e)) + "\n" for e in entries
+    )
+    path.write_text(body, encoding="utf-8")
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+
+def _write_torn_json(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"batch_id": \n', encoding="utf-8")
+
+
+def _seed_findings(paths: LoopPaths) -> None:
+    ch = paths.findings
+    _write_lines(ch.file, [
+        {"finding_id": "f-1", "run_id": "r1", "title": BENIGN_PAYLOAD},
+        {"finding_id": "f-2", "held_reason": "waits on a fact with no writer"},
+        # PRESENCE, not truthiness — `drains._pending_queue_counts`' own rule.
+        {"finding_id": "f-3", "held_reason": ""},
+        # The forward-check bucket's field is NOT a hold: one field, one meaning.
+        {"finding_id": "f-4", "forward_bad_reason": "the corpus moved under it"},
+        TORN,
+    ])
+    _write_lines(drain.graveyard_file(ch), [
+        NESTED_STAMPED, FLAT_UNSTAMPED, NESTED_UNSTAMPED, FLAT_STAMPED, TORN,
+    ])
+    _write_lines(drain.stuck_report_file(ch), [STUCK_FIRST, STUCK_LAST, TORN])
+
+
+def _seed_questioner(paths: LoopPaths) -> None:
+    ch = paths.questioner_findings
+    _write_lines(ch.file, [
+        {"finding_id": "q-1", "subject": "world"},
+        {"finding_id": "q-2", "held_reason": "no source bundle"},
+    ])
+    # EMPTY, not absent: the file exists and holds no record.
+    _write_lines(drain.stuck_report_file(ch), [])
+    # No graveyard file at all — the empty-dead-letters arm.
+
+
+def _seed_pitfalls(paths: LoopPaths) -> None:
+    ch = paths.pitfalls
+    _write_lines(ch.file, [
+        {"pitfall_id": "p-1", "offers_declined": 0},
+        {"pitfall_id": "p-2", "offers_declined": 2},
+        {"pitfall_id": "p-3", "system": "elastic"},
+    ])
+    _write_lines(drain.graveyard_file(ch), [CURATOR_DROP])
+    # No stuck file — `has_stuck_record: false` says the null is structural.
+
+
+def _seed_set_aside(paths: LoopPaths) -> None:
+    lead_failed = paths.author_queue_dir / "failed"
+    _write_json(lead_failed / "run-a.json", {
+        "run_id": "run-a", "failed": "unreadable: run_dir is not an absolute path",
+    })
+    _write_json(lead_failed / "run-b.json", {
+        "run_id": "run-b", "run_dir": "/srv/runs/run-b", "failed": "artifact-missing",
+    })
+    _write_torn_json(lead_failed / "torn.json")
+
+    delivery_failed = paths.pending_delivery_dir / "failed"
+    # `_pending_deliveries` quarantines with an EMPTY spec, so `failed` is the whole record.
+    _write_json(delivery_failed / "z-delivery-1.json", {
+        "failed": "unreadable pending-delivery record",
+    })
+
+    _write_json(paths.pending_delivery_dir / "a-older.json", {
+        "branch": "learning/lessons/b1", "batch_id": "b1", "label": "lessons author",
+        "reason": "push rejected", "at": "2026-09-15T10:00:00+00:00",
+    })
+    _write_json(paths.pending_delivery_dir / "b-newer.json", {
+        "branch": "learning/leads/b2", "batch_id": "b2", "label": "lead author",
+        "reason": "opening the PR failed", "at": "2026-09-16T10:00:00+00:00",
+    })
+    _write_torn_json(paths.pending_delivery_dir / "c-torn.json")
+
+    qdir = AuthorBranch(repo_root=paths.repo_root).quarantine_dir
+    _write_json(qdir / "a-earlier.json", TAINT_EARLIER)
+    _write_json(qdir / "b-later.json", TAINT_LATER)
+    for stem in ("a-earlier", "b-later"):
+        (qdir / f"{stem}.tar.gz").write_bytes(b"")
+    _write_torn_json(qdir / "c-torn.json")
+
+
+@pytest.fixture
+def paths(tmp_path: Path) -> LoopPaths:
+    """A whole state root, seeded from every writer that feeds the page."""
+    out = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+    _seed_findings(out)
+    _seed_questioner(out)
+    _seed_pitfalls(out)
+    _seed_set_aside(out)
+    return out
+
+
+@pytest.fixture
+def view(paths: LoopPaths) -> dict:
+    return serialize_queues.build_view(paths)
+
+
+def _channel(view: dict, name: str) -> dict:
+    match = [ch for ch in view["channels"] if ch["name"] == name]
+    assert match, f"{name} is not in the view: {[c['name'] for c in view['channels']]}"
+    return match[0]
+
+
+# --------------------------------------------------------------------------------------
+# the serializer — O6, O9, O7
+
+
+def test_the_channels_are_the_serializers_own_literal_three_in_order(view):
+    """O6: the page's channel set is a named list in one place, in the order it names them.
+    Derived from `LoopPaths`' attributes or from a config table instead (#922's trap), the
+    order is whatever that other table happens to hold."""
+    assert [ch["name"] for ch in view["channels"]] == [
+        "findings", "questioner_findings", "pitfalls",
+    ]
+
+
+def test_each_channel_carries_its_accent_and_whether_a_stuck_record_exists_for_it(view):
+    """The two per-channel constants that ride beside the name. `has_stuck_record` is
+    structural, not a fact about today's files: it is false for pitfalls, whose lane records
+    no stuck tick at all, and true for the two that do."""
+    accents = {ch["name"]: ch["accent"] for ch in view["channels"]}
+    assert accents == {
+        "findings": "defender",
+        "questioner_findings": "learning",
+        "pitfalls": "oracle",
+    }
+    flags = {ch["name"]: ch["has_stuck_record"] for ch in view["channels"]}
+    assert flags == {
+        "findings": True, "questioner_findings": True, "pitfalls": False,
+    }
+
+
+def test_queue_depth_is_the_readable_rows_of_the_pending_file(view):
+    """O9: the queued count beside the dead letters is what the pending file holds — four
+    readable rows on findings, the torn fifth line excluded, so an empty dead-letter list
+    next to a full queue reads differently from an idle channel."""
+    assert _channel(view, "findings")["depth"] == {"queued": 4}
+    assert _channel(view, "questioner_findings")["depth"] == {"queued": 2}
+    assert _channel(view, "pitfalls")["depth"] == {"queued": 3}
+
+
+def test_unreadable_sums_a_channels_three_sidecars_counting_each_once(view):
+    """O7: a line the tolerant reader cannot parse is COUNTED, not dropped. Findings carries
+    one torn line in each of its pending file, its graveyard and its stuck report — three —
+    and pitfalls, whose sidecars are all clean, carries none."""
+    assert _channel(view, "findings")["unreadable"] == 3
+    assert _channel(view, "questioner_findings")["unreadable"] == 0
+    assert _channel(view, "pitfalls")["unreadable"] == 0
+
+
+# --------------------------------------------------------------------------------------
+# held — O3, per the lane's own marker
+
+
+def test_findings_holds_are_every_row_carrying_held_reason_however_empty(view):
+    """O3, the findings/questioner lane: PRESENCE of `held_reason`, not truthiness. `f-3`
+    carries `held_reason: ""` — a holder that had no wording to give — and a truthiness test
+    reads it as authorable, which is the defect by the one route no gate spells. `f-1` (no
+    marker) and `f-4` (the forward check's own field) are the negative arm."""
+    held = _channel(view, "findings")["held"]
+    assert held["ids"] == ["f-2", "f-3"]
+    assert held["count"] == len(held["ids"])
+
+
+def test_pitfalls_holds_are_rows_the_curator_was_offered_and_declined(view):
+    """O3, the pitfalls lane: its own marker, `offers_declined > 0`. A row at 0 has been
+    offered nothing and a row with no counter at all has never been offered — neither is
+    held, and reading the findings lane's marker here would count all three or none."""
+    held = _channel(view, "pitfalls")["held"]
+    assert held["ids"] == ["p-2"]
+    assert held["count"] == len(held["ids"])
+
+
+def test_questioner_holds_use_the_same_marker_as_findings(view):
+    """The second findings-shaped channel is not a special case: one lane, one marker."""
+    held = _channel(view, "questioner_findings")["held"]
+    assert held == {"count": 1, "ids": ["q-2"]}
+
+
+# --------------------------------------------------------------------------------------
+# dead letters — O1, mechanism 2
+
+
+def test_dead_letters_are_newest_first_and_normalised_field_by_field(view):
+    """O1 and mechanism 2, whole. Both writers' shapes collapse to one record: the nested
+    one keeps its `row` and answers with the id under the channel's key, the flat one has no
+    id and its row is the record minus the three bookkeeping fields. `when` is `retired_at`
+    where a record has one and `null` where it predates mechanism 3, and the whole list is
+    file order reversed."""
+    assert _channel(view, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
+
+
+def test_a_curator_drop_reads_as_a_dead_letter_with_no_attempts_in_the_contract(view):
+    """`_graveyard_dropped_rows` writes `{pitfall_id, deadletter_reason, row}` and no
+    `attempts` at all, so the contract has no slot for one — a record is exactly four fields
+    on every channel, and a reader that reached for `attempts` would find it on two of the
+    three writers' records and not the third."""
+    [entry] = _channel(view, "pitfalls")["deadletter"]
+    assert entry == {
+        "id": "p-9",
+        "reason": "undeclared-system:evil",
+        "when": None,
+        "row": {"pitfall_id": "p-9", "system": "evil", "occurrences": 2},
+    }
+    assert set(entry) == {"id", "reason", "when", "row"}
+
+
+def test_a_channel_with_no_graveyard_file_lists_no_dead_letters(view):
+    """The empty arm is an empty LIST, not a missing key: the card renders "no dead letters"
+    rather than failing on the lookup."""
+    assert _channel(view, "questioner_findings")["deadletter"] == []
+
+
+# --------------------------------------------------------------------------------------
+# stuck — O2, mechanism 4
+
+
+def test_stuck_is_the_last_record_of_the_report_with_its_own_time(view):
+    """O2: the band is the channel's most recent non-retiring fault — the LAST record, not
+    the first and not a fold of both — carried whole, `recorded_at` included. The file is
+    append-only and nothing truncates it, so the band means "last faulted at"."""
+    assert _channel(view, "findings")["stuck"] == STUCK_LAST
+
+
+def test_stuck_is_null_when_the_report_exists_but_holds_no_record(view):
+    """An empty report is no fault, and `has_stuck_record` stays true: this lane records
+    stuck ticks, it just has not had one. Paired with the findings channel above, which has
+    the same flag and a record."""
+    ch = _channel(view, "questioner_findings")
+    assert ch["stuck"] is None
+    assert ch["has_stuck_record"] is True
+
+
+def test_the_pitfalls_lane_has_no_stuck_record_and_says_so_structurally(view):
+    """`stuck: null` on pitfalls is not "no fault yet" — the lane writes no stuck record at
+    all, and `has_stuck_record: false` is what tells the page's band the difference."""
+    ch = _channel(view, "pitfalls")
+    assert ch["stuck"] is None
+    assert ch["has_stuck_record"] is False
+
+
+# --------------------------------------------------------------------------------------
+# set aside — O4, mechanism 6
+
+
+def test_failed_markers_from_both_queue_dirs_are_listed_and_told_apart(view):
+    """O4: `quarantine_marker` writes under its CALLER's dir and it has two callers, so a
+    page reading only the lead-author queue omits every quarantined delivery record. Each row
+    names which queue it came from, its identity, the reason and the run dir it pointed at —
+    `null` for a marker that carried none, which is one of the two ways a marker gets
+    quarantined in the first place. Sorted by `(queue, identity)`."""
+    assert view["quarantine"]["markers"]["rows"] == EXPECTED_MARKERS
+
+
+def test_pending_deliveries_are_listed_newest_first(view):
+    """The "retrying itself" half: a batch committed on a local branch whose push or PR has
+    not landed. Newest first, by `at` — the records' filename order here is the reverse."""
+    assert view["quarantine"]["deliveries"]["rows"] == EXPECTED_DELIVERIES
+
+
+def test_tainted_manifests_are_listed_newest_first_with_the_verdict_kept(view):
+    """The tainted archive, newest first by `quarantined_at`. `verdict: {}` is preserved as
+    the empty dict the writer stored — "no scan recorded", which must not read as a clean
+    scan to the human triaging the directory — and `findings` is the COUNT of what the scrub
+    found, not the list."""
+    assert view["quarantine"]["tainted"]["rows"] == EXPECTED_TAINTED
+
+
+def test_each_set_aside_list_counts_its_own_unreadable_files(view):
+    """O7 again, on the three JSON lists: one torn file in each of the markers dir, the
+    pending-delivery dir and the quarantine dir, counted once per list and never folded into
+    a channel's own count."""
+    q = view["quarantine"]
+    assert q["markers"]["unreadable"] == 1
+    assert q["deliveries"]["unreadable"] == 1
+    assert q["tainted"]["unreadable"] == 1
+    assert [ch["unreadable"] for ch in view["channels"]] == [3, 0, 0]
+
+
+def test_the_taint_cap_defaults_to_ten(view):
+    """Past the cap the writer preserves nothing and only logs, so the page can under-report
+    — which is why the cap is on the page at all."""
+    assert view["quarantine"]["tainted"]["cap"] == 10
+
+
+def test_the_taint_cap_follows_its_environment_variable(paths, monkeypatch):
+    """The same address, moved: the cap is `LEARNING_TAINT_QUARANTINE_MAX`, read where the
+    writer reads it, not a constant copied into the serializer."""
+    monkeypatch.setenv("LEARNING_TAINT_QUARANTINE_MAX", "3")
+    assert serialize_queues.build_view(paths)["quarantine"]["tainted"]["cap"] == 3
+
+
+# --------------------------------------------------------------------------------------
+# the header — O5
+
+
+def test_build_view_says_which_state_root_it_read_and_carries_no_timestamp(view, paths):
+    """`build_view` is pure over the filesystem it was handed: it names the root, and the
+    stamping lives one layer up so a test of the contract is not a test of the clock."""
+    assert view["state_root"] == str(paths.state_root)
+    assert "generated_at" not in view
+
+
+def test_stamped_view_resolves_the_state_root_at_call_time_and_stamps_it(tmp_path, monkeypatch):
+    """O5: the page says which host's state it shows and when it was built. Resolved at CALL
+    time — a module-level constant freezes the state root at import, and the CLI is exactly
+    the caller that must honour one set after it."""
+    root = tmp_path / "late-state"
+    (root / "_pending").mkdir(parents=True)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(root))
+
+    stamped = serialize_queues.stamped_view()
+
+    assert Path(stamped["state_root"]) == root.resolve()
+    assert datetime.fromisoformat(stamped["generated_at"].replace("Z", "+00:00"))
+    assert [ch["name"] for ch in stamped["channels"]] == [
+        "findings", "questioner_findings", "pitfalls",
+    ]
+
+
+# --------------------------------------------------------------------------------------
+# the renderer — mechanism 7
+
+
+def _embedded_data(page: str) -> dict:
+    match = re.search(r"^const DATA = (.*);\s*$", page, re.MULTILINE)
+    assert match, "the page carries no `const DATA = ...;` line"
+    return json.loads(match.group(1))
+
+
+def _rewrite_strings(obj, old: str, new: str):
+    if isinstance(obj, dict):
+        return {k: _rewrite_strings(v, old, new) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_rewrite_strings(v, old, new) for v in obj]
+    if isinstance(obj, str):
+        return obj.replace(old, new)
+    return obj
+
+
+def test_the_page_embeds_the_view_it_was_handed_unchanged(view):
+    """The page is self-contained: everything it renders it carries. Parsed back out of the
+    embedded literal, it must be the view field for field — an escape that mangled a value
+    on the way in would show up here rather than in a browser."""
+    assert _embedded_data(build.render_queues(view)) == view
+
+
+def test_a_row_that_looks_like_a_script_tag_opens_no_script_tag(view):
+    """The security dive's one claim, executed. A dead-letter row carries `<script>` verbatim
+    (alert data is attacker-influenced by definition, and a queue row is alert data's
+    descendant). The page must contain no more script tags than the identical page built from
+    a view with a harmless string in that slot — and must still carry the row's content, or
+    the count would be trivially equal because nothing was rendered."""
+    quiet = _rewrite_strings(copy.deepcopy(view), SCRIPT_PAYLOAD, BENIGN_PAYLOAD)
+    assert SCRIPT_PAYLOAD in json.dumps(view), "the fixture lost its payload"
+    assert SCRIPT_PAYLOAD not in json.dumps(quiet)
+
+    loud_page = build.render_queues(view)
+    quiet_page = build.render_queues(quiet)
+
+    assert loud_page.count("<script") == quiet_page.count("<script")
+    assert loud_page.count("</script") == quiet_page.count("</script")
+    assert SCRIPT_PAYLOAD not in loud_page
+    assert "alert(1)" in loud_page, "the row's own content never reached the page"
+    assert _embedded_data(loud_page) == view
+
+
+def test_the_last_fault_band_is_on_the_page_only_when_a_channel_is_stuck(view):
+    """The band is machinery health, rendered once for the page rather than per card, and it
+    is titled by the record's time — so a page whose channels have all drained cleanly must
+    not offer an operator a fault heading with nothing under it."""
+    calm = copy.deepcopy(view)
+    for channel in calm["channels"]:
+        channel["stuck"] = None
+
+    assert "Last fault" in build.render_queues(view)
+    assert "Last fault" not in build.render_queues(calm)
+
+
+def test_the_two_pages_link_to_each_other(view):
+    """The lessons page and the queue page are one surface; each header names the other."""
+    assert 'href="queues.html"' in build.render({"groups": {}})
+    assert 'href="lessons.html"' in build.render_queues(view)
+
+
+def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths, monkeypatch):
+    """One command builds all four files, on demand — nothing here runs on a drain tick.
+
+    The build writes into the real frontend dir (that is the point), so this restores every
+    one of the four to whatever it found, including "absent"."""
+    frontend = Path(build.__file__).resolve().parent
+    names = ("lessons.json", "lessons.html", "queues.json", "queues.html")
+    before = {
+        n: (frontend / n).read_bytes() if (frontend / n).is_file() else None for n in names
+    }
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(paths.state_root))
+    try:
+        assert build.main() == 0
+        queues = json.loads((frontend / "queues.json").read_text(encoding="utf-8"))
+        assert [ch["name"] for ch in queues["channels"]] == [
+            "findings", "questioner_findings", "pitfalls",
+        ]
+        assert queues["generated_at"]
+        assert Path(queues["state_root"]) == paths.state_root.resolve()
+        assert _embedded_data((frontend / "queues.html").read_text(encoding="utf-8")) == queues
+        assert (frontend / "lessons.json").is_file()
+        assert (frontend / "lessons.html").is_file()
+    finally:
+        for name, blob in before.items():
+            if blob is None:
+                (frontend / name).unlink(missing_ok=True)
+            else:
+                (frontend / name).write_bytes(blob)
+
+
+# --------------------------------------------------------------------------------------
+# O8 — the writers stamp what they write
+
+
+def _stamp(value) -> datetime:
+    """The written stamp, parsed. A record with no stamp fails on the assert; one with a
+    stamp nothing can read fails on the parse."""
+    assert value, f"no timestamp was written: {value!r}"
+    return datetime.fromisoformat(value)
+
+
+@pytest.fixture
+def bare(tmp_path: Path) -> LoopPaths:
+    """State only — every writer below appends beside its own queue and reads no tree."""
+    return LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+
+
+def test_retire_stamps_the_dead_letter_it_writes(bare):
+    """O8, writer 1 of 4. A dead letter with no time is a row a human cannot place against
+    anything else that happened — and `when` is the only column the page can sort on."""
+    ch = bare.findings
+    _write_lines(ch.file, [{"finding_id": "a/0", "run_id": "a"}])
+
+    drain.retire(channel=ch, batch_ids=["a/0"], reason="the ceiling", max_attempts=1)
+
+    [record] = read_jsonl_rows(drain.graveyard_file(ch))
+    assert record["deadletter_reason"] == "the ceiling"
+    assert record["row"] == {"finding_id": "a/0", "run_id": "a"}
+    _stamp(record.get("retired_at"))
+
+
+def test_retiring_an_unkeyable_row_stamps_its_flat_record(bare):
+    """O8, writer 2 of 4 — and the stamp rides on the FLAT shape without giving it a `row`
+    key, since that key is the very thing a reader branches on."""
+    ch = bare.questioner_findings
+    _write_lines(ch.file, [])
+
+    drain._retire_unkeyable(ch, [{"run_id": "r9", "note": "no id here"}], lambda _m: None, 5)
+
+    [record] = read_jsonl_rows(drain.graveyard_file(ch))
+    assert "row" not in record
+    assert record["run_id"] == "r9"
+    assert record["deadletter_reason"] == "row carries no value under 'finding_id'"
+    _stamp(record.get("retired_at"))
+
+
+def test_the_curators_dropped_row_carries_the_time_it_was_dropped(bare):
+    """O8, writer 3 of 4. This writer is the one with no `attempts` to date the record by
+    even loosely, so it is the one a missing stamp costs most."""
+    rows = [{"pitfall_id": "p-9", "system": "evil", "occurrences": 2}]
+
+    pitfalls_curator._graveyard_dropped_rows(bare, rows, ["p-9"])
+
+    [record] = read_jsonl_rows(drain.graveyard_file(bare.pitfalls))
+    assert record["deadletter_reason"] == "undeclared-system:evil"
+    assert record["row"] == rows[0]
+    _stamp(record.get("retired_at"))
+
+
+def test_recording_a_stuck_tick_stamps_when_it_was_recorded(bare):
+    """O8, writer 4 of 4. The stuck file is append-only and nothing clears it, so the band is
+    "last faulted at" and NOT "stuck right now" — without `recorded_at` the page cannot say
+    which of those it is showing."""
+    ch = bare.findings
+
+    drain.record_stuck(ch, TimeoutError("the append lock never came free"), [
+        {"finding_id": "a/0"},
+    ])
+
+    [record] = read_jsonl_rows(drain.stuck_report_file(ch))
+    assert record["fault_class"] == "TimeoutError"
+    assert record["row_ids"] == ["a/0"]
+    assert record["consecutive_ticks"] == 1
+    _stamp(record.get("recorded_at"))
