@@ -205,8 +205,8 @@ def test_d_b8_all_survives_flood_lesson_with_marker_row(tmp_path, capsys):
     cap = capsys.readouterr()
     assert rc == 0
     lines = cap.out.splitlines()
-    assert "ok\tfine\t1" in lines
-    assert "flood\t(malformed lesson — unwindowed count)\t1" in lines
+    assert "ok\tfine\t1\t0" in lines
+    assert "flood\t(malformed lesson — unwindowed count)\t1\t0" in lines
     assert "skipping flood.md" in cap.err
 
 
@@ -271,7 +271,7 @@ def test_d_a1_all_marks_unparseable_created_at_row(tmp_path, capsys):
     unwindowed count (still traces — never 0), and the row does not claim "malformed"."""
     row, _ = _all_row(tmp_path, "name: L\ndescription: real desc\ncreated_at: not-a-date", capsys)
     cols = row.split("\t")
-    assert len(cols) == 3
+    assert len(cols) == 4
     assert cols[2] == "2"
     assert cols[1].startswith("real desc")
     assert "unwindowed" in cols[1]
@@ -284,7 +284,7 @@ def test_d_a2_all_marks_absent_created_at_distinctly(tmp_path, capsys):
     than a garbage one; the marker says "no created_at" instead of echoing a value."""
     row, _ = _all_row(tmp_path, "name: L\ndescription: real desc", capsys)
     cols = row.split("\t")
-    assert len(cols) == 3
+    assert len(cols) == 4
     assert cols[2] == "2"
     assert cols[1].startswith("real desc")
     assert "unwindowed" in cols[1]
@@ -384,11 +384,11 @@ _HOSTILE_CREATED_AT = f"created_at: {_HOSTILE_VALUE}"
 
 def test_d_a9_all_echo_survives_every_line_breaker(tmp_path, capsys):
     """d: a9 (negative + control) — a value carrying every splitlines breaker and a tab
-    forges no extra row and no fourth column in ``--all``; the control is the flattened
+    forges no extra row and no fifth column in ``--all``; the control is the flattened
     value visible in the marker (each breaker → one space), proving the echo happened."""
     row, cap = _all_row(tmp_path, f"name: L\ndescription: d\n{_HOSTILE_CREATED_AT}", capsys)
     assert len(cap.out.splitlines()) == 1
-    assert row.count("\t") == 2
+    assert row.count("\t") == 3
     assert "a b c d e f g h i" in row.split("\t")[1]
 
 
@@ -417,10 +417,11 @@ def test_d_a10_echo_is_clamped_to_80_chars(tmp_path, capsys):
 
 def test_d_a11_windowed_lesson_is_unmarked_everywhere(tmp_path, capsys):
     """d: a11 (positive control) — a parseable created_at gets exactly the old behavior:
-    a plain 3-column row with the WINDOWED count, no marker, no warn, and a header that
+    a plain 4-column row with the WINDOWED count (and no MAIN read — a legacy row is
+    ``unknown`` evidence, #936), no marker, no warn, and a header that
     prints the real window start."""
     row, cap = _all_row(tmp_path, "name: L\ndescription: d\ncreated_at: 2026-06-04", capsys)
-    assert row == "L\td\t1"
+    assert row == "L\td\t1\t0"
     assert cap.err == ""
 
     named = _named(tmp_path, "name: M\ndescription: d\ncreated_at: 2026-06-04", capsys, stem="M")
@@ -454,7 +455,7 @@ def test_d_a12_every_discovered_lesson_appears_exactly_once(tmp_path, capsys):
     assert "malformed lesson" in by_stem["flood"]
     assert "unwindowed" in by_stem["badts"]
     assert "malformed" not in by_stem["badts"]
-    assert by_stem["good"] == "good\tg\t1"
+    assert by_stem["good"] == "good\tg\t1\t0"
 
 
 def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
@@ -480,8 +481,8 @@ def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
     lines = cap.out.splitlines()
     assert len(lines) == 2
     row = lines[1]
-    assert row.count("\t") == 2
-    assert row.split("\t") == ["caseA", "?", "2026-06-05 00:00:00+00:00"]
+    assert row.count("\t") == 3
+    assert row.split("\t") == ["caseA", "?", "2026-06-05 00:00:00+00:00", "unknown"]
     # Positive control on the SAME column: a well-formed disposition still renders, so the
     # `?` above is the hostile value being refused, not the column having gone dead.
     _mk_run(runs, "caseB", disposition="benign",
@@ -498,7 +499,7 @@ def test_d_a14_all_description_survives_every_line_breaker(tmp_path, capsys):
         tmp_path, f"name: L\ndescription: {_HOSTILE_VALUE}\ncreated_at: 2026-06-04", capsys
     )
     assert len(cap.out.splitlines()) == 1
-    assert row.count("\t") == 2
+    assert row.count("\t") == 3
     assert row.split("\t")[1] == "a b c d e f g h i"
 
 
@@ -518,7 +519,7 @@ def test_d_a14b_filename_id_columns_survive_breakers(tmp_path, capsys):
     cap = capsys.readouterr()
     assert rc == 0
     [row] = cap.out.splitlines()
-    assert row.split("\t") == ["st em", "d", "1"]
+    assert row.split("\t") == ["st em", "d", "1", "0"]
 
     rc = tl.main(["st\tem", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
     cap = capsys.readouterr()
@@ -526,4 +527,4 @@ def test_d_a14b_filename_id_columns_survive_breakers(tmp_path, capsys):
     lines = cap.out.splitlines()
     assert len(lines) == 2
     assert lines[0].startswith("# st em — ")
-    assert lines[1].split("\t") == ["case A", "benign", "2026-06-05T00:00:00+00:00"]
+    assert lines[1].split("\t") == ["case A", "benign", "2026-06-05T00:00:00+00:00", "unknown"]

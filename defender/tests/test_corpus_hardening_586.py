@@ -226,4 +226,4 @@ def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
 
     assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
 
-    assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1"]
+    assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1\t0"]

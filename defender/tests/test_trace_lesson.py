@@ -80,7 +80,7 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     assert rc == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines == ["L\ta b c\t0"]
+    assert lines == ["L\ta b c\t0\t0"]
 
 
 def test_in_context_cases_missing_runs_dir_is_empty(tmp_path):
@@ -206,7 +206,7 @@ def test_all_survives_undecodable_report(tmp_path, capsys):
 
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     assert rc == 0
-    assert "L\td\t1" in capsys.readouterr().out.splitlines()
+    assert "L\td\t1\t0" in capsys.readouterr().out.splitlines()
 
 
 
@@ -231,8 +231,8 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
     cap = capsys.readouterr()
     assert rc == 0
     lines = cap.out.splitlines()
-    assert "ok\tfine\t1" in lines
-    assert "broken\t(malformed lesson — unwindowed count)\t1" in lines
+    assert "ok\tfine\t1\t0" in lines
+    assert "broken\t(malformed lesson — unwindowed count)\t1\t0" in lines
     assert "skipping broken.md" in cap.err
 
 
@@ -248,7 +248,7 @@ def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
 
     rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
     assert rc == 0
-    assert capsys.readouterr().out.splitlines() == ["ok\tfine\t0"]
+    assert capsys.readouterr().out.splitlines() == ["ok\tfine\t0\t0"]
 
 
 def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsys):
