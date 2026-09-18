@@ -25,6 +25,15 @@ def quarantine_cap() -> int:
     return env_int(_MAX_ENV, _MAX_DEFAULT)
 
 
+def held_archives(quarantine_dir: Path) -> int:
+    """How many tainted trees the directory holds, BY ARCHIVE — the count `preserve_tainted_tree`
+    checks against the cap, exposed so the queue page (#903) shows the same number. Counting
+    manifests instead under-reports in exactly the failure this module logs: an archive that
+    survived without its manifest still spends a slot. A directory that does not exist holds
+    none; one that cannot be listed raises, and the reader decides what to say about that."""
+    return sum(1 for _ in quarantine_dir.glob("*.tar.gz"))
+
+
 def _archive_tree(wt: Path, dest: Path) -> None:
     """Write `wt` to `dest` as a gzipped tar.
 
@@ -100,7 +109,7 @@ def preserve_tainted_tree(
     archived: Path | None = None
     try:
         quarantine_dir.mkdir(parents=True, exist_ok=True)
-        held = sum(1 for _ in quarantine_dir.glob("*.tar.gz"))
+        held = held_archives(quarantine_dir)
         cap = quarantine_cap()
         if held >= cap:
             _log(

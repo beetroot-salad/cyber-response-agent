@@ -23,6 +23,7 @@ import copy
 import html
 import inspect
 import json
+import os
 import re
 import types
 from datetime import UTC, datetime
@@ -34,7 +35,7 @@ from defender._io import read_jsonl_rows
 from defender.learning.author import drain
 from defender.learning.author.branch import AuthorBranch
 from defender.learning.core import quarantine
-from defender.learning.core.config import LoopPaths
+from defender.learning.core.config import LoopPaths, loop_paths
 from defender.learning.frontend import build, serialize_queues
 from defender.learning.leads import pitfalls_curator
 
@@ -286,7 +287,7 @@ def _seed_set_aside(paths: LoopPaths) -> None:
     })
     _write_torn_json(paths.pending_delivery_dir / "c-torn.json")
 
-    qdir = AuthorBranch(repo_root=paths.repo_root).quarantine_dir
+    qdir = paths.quarantine_dir
     _write_json(qdir / "a-earlier.json", TAINT_EARLIER)
     _write_json(qdir / "b-later.json", TAINT_LATER)
     for stem in ("a-earlier", "b-later"):
@@ -296,16 +297,28 @@ def _seed_set_aside(paths: LoopPaths) -> None:
 
 def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page(tmp_path):
     """The absent member of the ill-formed class: a file that PARSES but carries the wrong
-    type where the reader expects a list, a mapping or a string. A tainted manifest with
-    `findings: 3` and `verdict: "clean"`, a graveyard record whose `row` is a list — each is
-    one degraded row, and the page still lists everything else."""
+    type where the reader expects a list, a mapping, a string or an int. A tainted manifest
+    with `findings: 3` and `verdict: "clean"`, a graveyard record whose `row` is a list, a
+    stuck record whose tick count is prose, a pitfalls row whose decline counter is prose —
+    each is one degraded row, and the page still lists everything else. The contract is the
+    typed boundary: nothing off disk reaches the renderer un-coerced, so the whole page is
+    built here rather than asserted not to raise."""
     paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
     _write_lines(paths.findings.file, [])
     _write_lines(drain.graveyard_file(paths.findings), [
         {"finding_id": "g-list", "deadletter_reason": "r", "row": ["not", "a", "mapping"]},
         {"finding_id": 7, "deadletter_reason": None, "retired_at": 12, "row": {"k": "v"}},
     ])
-    qdir = AuthorBranch(repo_root=paths.repo_root).quarantine_dir
+    _write_lines(drain.stuck_report_file(paths.findings), [
+        {"fault_class": ["X"], "row_ids": "f-1", "consecutive_ticks": "many", "reason": None,
+         "recorded_at": 5},
+    ])
+    _write_lines(paths.pitfalls.file, [
+        {"pitfall_id": "p-prose", "offers_declined": "lots"},
+        {"pitfall_id": "p-bool", "offers_declined": True},
+        {"pitfall_id": "p-real", "offers_declined": 1},
+    ])
+    qdir = paths.quarantine_dir
     _write_json(qdir / "odd.json", {
         "batch_id": "odd", "archive": "odd.tar.gz", "quarantined_at": 20260914,
         "label": ["lead"], "taint": "t", "cause": 5, "verdict": "clean", "findings": 3,
@@ -313,11 +326,18 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
     _write_json(paths.pending_delivery_dir / "odd.json", {"batch_id": "b", "at": 3})
 
     view = serialize_queues.build_view(paths)
+    page = build.render_queues(view)
 
     assert _channel(view, "findings")["deadletter"] == [
         {"id": None, "reason": "", "when": None, "row": {"k": "v"}},
         {"id": "g-list", "reason": "r", "when": None, "row": {"value": ["not", "a", "mapping"]}},
     ]
+    assert _channel(view, "findings")["stuck"] == {
+        "fault_class": "", "row_ids": [], "consecutive_ticks": 0, "reason": "",
+        "recorded_at": None,
+    }
+    assert _channel(view, "pitfalls")["held"] == {"count": 1, "ids": ["p-real"]}
+    assert "0 ticks running" in _rendered(page)
     [taint] = view["quarantine"]["tainted"]["rows"]
     assert taint["findings"] == 0
     assert taint["verdict"] == {}
@@ -342,13 +362,16 @@ def test_an_empty_state_root_reads_as_three_idle_channels_and_nothing_set_aside(
                                ("pitfalls", "oracle", False)):
         assert _channel(view, name) == {
             "name": name, "accent": accent, "has_stuck_record": flag,
+            "hold_means": _channel(view, name)["hold_means"],
             "depth": {"queued": 0}, "unreadable": 0, "held": {"count": 0, "ids": []},
             "deadletter": [], "stuck": None,
         }
+        assert _channel(view, name)["hold_means"]
     assert view["quarantine"] == {
         "markers": {"rows": [], "unreadable": 0},
         "deliveries": {"rows": [], "unreadable": 0},
-        "tainted": {"cap": 10, "rows": [], "unreadable": 0},
+        "tainted": {"dir": str(paths.quarantine_dir), "cap": 10, "held": 0, "rows": [],
+                    "unreadable": 0},
     }
 
 
@@ -472,6 +495,24 @@ def test_questioner_holds_use_the_same_marker_as_findings(view):
     assert held == {"count": 1, "ids": ["q-2"]}
 
 
+def test_each_lane_says_what_its_own_hold_means(view):
+    """The two markers END differently, and the page must not tell an operator one story for
+    both: a findings hold waits on a fact with no writer and nothing retries it; a pitfalls
+    hold is re-offered every tick and retired at the offer ceiling, so "held until a person
+    moves it" there sends the operator to move a row the lane would have retried itself.
+    The wording rides on the channel spec — the same census that owns the marker."""
+    means = {ch["name"]: ch["hold_means"] for ch in view["channels"]}
+    assert means["findings"] == means["questioner_findings"]
+    assert "person" in means["findings"]
+    assert "retries" in means["findings"]
+    assert "person" not in means["pitfalls"]
+    assert "every tick" in means["pitfalls"]
+    assert "ceiling" in means["pitfalls"]
+    body = _rendered(build.render_queues(view))
+    assert f'2 held</b> · {means["findings"]}' in body
+    assert f'1 held</b> · {means["pitfalls"]}' in body
+
+
 # --------------------------------------------------------------------------------------
 # dead letters — O1, mechanism 2
 
@@ -519,6 +560,10 @@ def test_stuck_is_the_last_record_of_the_report_with_its_own_time(view):
     assert _channel(view, "findings")["stuck"] == STUCK_LAST
     # ...and NOT the record with the most ticks, which is the middle one.
     assert _channel(view, "findings")["stuck"]["consecutive_ticks"] == 1
+    # Carried whole BECAUSE the writer's record is already the contract's five typed fields;
+    # `STUCK_FIRST` predates the stamp, so it gains `recorded_at: null` rather than a KeyError.
+    assert set(STUCK_LAST) == {"fault_class", "row_ids", "consecutive_ticks", "reason",
+                               "recorded_at"}
 
 
 def test_stuck_is_null_when_the_report_exists_but_holds_no_record(view):
@@ -588,6 +633,77 @@ def test_each_set_aside_list_counts_its_own_unreadable_files(view):
     assert [ch["unreadable"] for ch in view["channels"]] == [3, 0, 0]
 
 
+def test_held_is_the_writers_count_of_archives_not_of_readable_manifests(paths):
+    """`preserve_tainted_tree` refuses at `held >= cap` counting TARBALLS, and the page must
+    show that number: an archive that survived without its manifest (the writer's own logged
+    failure) and one whose manifest is torn both spend a slot. Counting manifests reads
+    headroom that does not exist in exactly the failure the page exists to show."""
+    qdir = paths.quarantine_dir
+    (qdir / "orphan.tar.gz").write_bytes(b"")          # archive, no manifest
+    (qdir / "c-torn.tar.gz").write_bytes(b"")          # archive, torn manifest (seeded)
+
+    tainted = serialize_queues.build_view(paths)["quarantine"]["tainted"]
+
+    assert len(tainted["rows"]) == 2
+    assert tainted["held"] == 4
+    assert tainted["held"] == quarantine.held_archives(qdir)
+    assert "4 / 10" in _rendered(build.render_queues(serialize_queues.build_view(paths)))
+
+
+def test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_state_root(view, paths):
+    """The tainted list is the one thing on the page that does not move with
+    `DEFENDER_LEARNING_STATE_DIR` — it lives beside the live worktrees, off the repo root — so
+    an operator pointing the page at a copied state dir sees THIS checkout's tainted trees and
+    must be told where they came from."""
+    assert view["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
+    assert paths.quarantine_dir == AuthorBranch(repo_root=paths.repo_root).quarantine_dir
+    assert not str(paths.quarantine_dir).startswith(str(paths.state_root))
+    assert html.escape(str(paths.quarantine_dir), quote=True) in _rendered(build.render_queues(view))
+
+
+def test_the_near_cap_warning_shows_at_two_slots_left_and_never_on_an_empty_directory(paths, monkeypatch):
+    """The `near` class turns the count warm, so it must be a rule the page's own markup can
+    match, and it must mean "two or fewer slots left" — not "cap minus two is at most the
+    count", which at a cap of two is true of nothing at all."""
+    def page_for(cap: int) -> str:
+        monkeypatch.setenv("LEARNING_TAINT_QUARANTINE_MAX", str(cap))
+        return _rendered(build.render_queues(serialize_queues.build_view(paths)))
+
+    assert 'class="cap">2 / 10</span>' in page_for(10)         # eight slots left
+    assert 'class="cap near">2 / 4</span>' in page_for(4)      # two left
+    assert 'class="cap near">2 / 2</span>' in page_for(2)      # full
+    for stem in ("a-earlier", "b-later"):
+        (paths.quarantine_dir / f"{stem}.tar.gz").unlink()
+    assert 'class="cap">0 / 2</span>' in page_for(2)           # empty is never near
+    assert ".q-group h3 .cap.near" in build.QUEUES_CSS
+
+
+def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
+    """The tolerant reader's tolerance extends to the file it cannot OPEN: a sidecar with no
+    read permission is one unreadable on its channel, an unlistable set-aside directory is
+    one unreadable on its list and a `held` of null, and the page is still built."""
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        pytest.skip("permission bits do not bind root")
+    drain.graveyard_file(paths.findings).chmod(0)
+    paths.quarantine_dir.chmod(0)
+    try:
+        view = serialize_queues.build_view(paths)
+        page = build.render_queues(view)
+    finally:
+        paths.quarantine_dir.chmod(0o700)
+        drain.graveyard_file(paths.findings).chmod(0o600)
+
+    findings = _channel(view, "findings")
+    assert findings["deadletter"] == []
+    assert findings["unreadable"] == 2          # the torn pending line + the whole graveyard
+    tainted = view["quarantine"]["tainted"]
+    assert tainted == {"dir": str(paths.quarantine_dir), "cap": 10, "held": None, "rows": [],
+                       "unreadable": 1}
+    assert "? / 10" in _rendered(page)
+    assert "1 unreadable file skipped" in _rendered(page)
+    assert "2 unreadable lines skipped" in _rendered(page)
+
+
 def test_the_taint_cap_defaults_to_ten(view):
     """Past the cap the writer preserves nothing and only logs, so the page can under-report
     — which is why the cap is on the page at all."""
@@ -615,7 +731,12 @@ def test_build_view_says_which_state_root_it_read_and_carries_no_timestamp(view,
 def test_stamped_view_resolves_the_state_root_at_call_time_and_stamps_it(tmp_path, monkeypatch):
     """O5: the page says which host's state it shows and when it was built. Resolved at CALL
     time — a module-level constant freezes the state root at import, and the CLI is exactly
-    the caller that must honour one set after it."""
+    the caller that must honour one set after it.
+
+    The env var moves the STATE root only: the tainted list stays with this checkout's
+    worktrees, which is why the contract names that directory — and why this is the one test
+    that reads it (nothing here asserts on what it holds; `main` and every other test hand
+    their own `LoopPaths`)."""
     root = tmp_path / "late-state"
     (root / "_pending").mkdir(parents=True)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(root))
@@ -624,10 +745,20 @@ def test_stamped_view_resolves_the_state_root_at_call_time_and_stamps_it(tmp_pat
         stamped = serialize_queues.stamped_view()
 
     assert Path(stamped["state_root"]) == root.resolve()
+    assert stamped["quarantine"]["tainted"]["dir"] == str(loop_paths().quarantine_dir)
     clock.check(stamped["generated_at"].replace("Z", "+00:00"))
     assert [ch["name"] for ch in stamped["channels"]] == [
         "findings", "questioner_findings", "pitfalls",
     ]
+
+
+def test_stamped_view_takes_the_paths_it_is_handed(paths):
+    """The seam the CLI and the tests share: handed a `LoopPaths`, nothing is resolved from
+    the environment, so a test's root is the whole input surface."""
+    stamped = serialize_queues.stamped_view(paths)
+    assert stamped["state_root"] == str(paths.state_root)
+    assert stamped["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
+    assert stamped["generated_at"]
 
 
 # --------------------------------------------------------------------------------------
@@ -714,7 +845,8 @@ def test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart(view
     q = view["quarantine"]
     for m in q["markers"]["rows"]:
         assert m["identity"] in body
-        assert html.escape(m["failed"], quote=True) in body
+        # Escaped, with any event-handler attribute split (the untrusted-text escaper's rule).
+        assert html.escape(m["failed"], quote=True).replace("onerror=", "on\u200berror=") in body
     for d in q["deliveries"]["rows"]:
         assert d["branch"] in body
     for t in q["tainted"]["rows"]:
@@ -724,6 +856,11 @@ def test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart(view
     assert "Retrying itself" in body
     assert "2 / 10" in body
     assert "no scan recorded" in body           # a-earlier's verdict is {}
+    # One record per FILE in the set-aside dirs, one per LINE in a channel's sidecars, and
+    # the count says which — an operator grepping a marker dir for torn lines finds files.
+    assert "2 unreadable files skipped" in body  # markers
+    assert "1 unreadable file skipped" in body   # deliveries, tainted
+    assert "3 unreadable lines skipped" in body  # findings
 
 
 def test_the_fault_band_carries_the_class_the_ticks_and_the_time(view):
@@ -743,15 +880,77 @@ def test_every_attacker_influenced_string_reaches_the_page_escaped(view):
     is absent raw and present escaped in the rendered HTML, and a harmless twin proves the
     slot renders at all."""
     body = _rendered(build.render_queues(view))
-    for hostile in (SCRIPT_PAYLOAD, "GitProbeError<b>", "<index.lock>",
-                    "<img src=x onerror=alert(2)>"):
+    for hostile in (SCRIPT_PAYLOAD, "GitProbeError<b>", "<index.lock>"):
         assert hostile not in body, hostile
         assert html.escape(hostile, quote=True) in body, hostile
+    # The marker's text is attacker-influenced, so it takes the run visualizer's escaper for
+    # that class: escaped, AND its `onerror=` split by a zero-width space so nothing that
+    # re-reads the page as plain text sees a live handler.
+    assert "<img src=x onerror=alert(2)>" not in body
+    assert "onerror=" not in body
+    assert "&lt;img src=x on\u200berror=alert(2)&gt;" in body
     # ONE script element: the page's own contract carrier (its `const DATA` line is stripped
     # above, its tag is not), and none opened by content. `<img` has no legitimate twin.
     assert body.count("<script") == 1
     assert body.count("</script") == 1
     assert body.count("<img") == 0
+
+
+def test_content_that_spells_a_placeholder_is_content(view):
+    """The template is filled in ONE pass. Filled by successive replacements, a stuck reason
+    of `${cards}` re-expanded into every card a second time and a row value of
+    `${queues_json}` dumped the whole contract — the host's state-root path included — inside
+    that row's own card. Both reproduced against the first cut."""
+    loud = copy.deepcopy(view)
+    _channel(loud, "findings")["stuck"]["reason"] = "${cards} __CARDS__"
+    _channel(loud, "findings")["deadletter"][0]["row"]["k"] = "${queues_json} __QUEUES_JSON__"
+
+    page = build.render_queues(loud)
+    body = _rendered(page)
+
+    assert body.count('<details class="q-card') == len(view["channels"]) + 1
+    assert page.count('"state_root":') == 1          # the contract is on the page ONCE
+    assert "${cards}" in body
+    assert "${queues_json}" in body
+    assert _embedded_data(page) == loud
+
+
+def test_a_timestamp_is_escaped_once(view):
+    """`_when` slices, the list item escapes — one escape, at the point of writing markup. A
+    date escaped on both sides showed a reader `&amp;lt;b&amp;gt;` where `<b>` was on disk."""
+    odd = copy.deepcopy(view)
+    odd["quarantine"]["tainted"]["rows"][0]["quarantined_at"] = "<b>2026-09-14"
+    odd["quarantine"]["deliveries"]["rows"][0]["at"] = "&2026-09-16"
+    _channel(odd, "findings")["deadletter"][0]["when"] = "<i>2026-09-12"
+
+    body = _rendered(build.render_queues(odd))
+
+    assert "&lt;b&gt;2026-0" in body
+    assert "&amp;lt;" not in body
+    assert "since &amp;2026-09-" in body
+    assert "&amp;amp;" not in body
+    assert "&lt;i&gt;2026-0" in body
+
+
+def test_the_row_is_rendered_by_the_run_visualizers_own_highlighter(view):
+    """One JSON highlighter and one escaper in the tree, not a second copy each: the row's
+    `<pre>` is `visualize_primitives.pretty_json_html`'s output, which classes booleans and
+    nulls the copy dropped, and every attacker-influenced string goes through
+    `esc_untrusted`."""
+    from defender.scripts.visualize import visualize_primitives
+
+    odd = copy.deepcopy(view)
+    _channel(odd, "findings")["deadletter"][0]["row"]["flag"] = True
+    _channel(odd, "findings")["deadletter"][0]["row"]["none"] = None
+    body = _rendered(build.render_queues(odd))
+
+    assert visualize_primitives.pretty_json_html(
+        _channel(odd, "findings")["deadletter"][0]["row"]) in body
+    assert '<span class="j-bool">true</span>' in body
+    assert '<span class="j-null">null</span>' in body
+    assert build.esc_untrusted is visualize_primitives.esc_untrusted
+    assert not hasattr(build, "_esc")
+    assert not hasattr(build, "_json_pretty")
 
 
 def test_the_last_fault_band_is_on_the_page_only_when_a_channel_is_stuck(view):
@@ -772,7 +971,7 @@ def test_the_two_pages_link_to_each_other(view):
     assert 'href="lessons.html"' in build.render_queues(view)
 
 
-def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths, monkeypatch):
+def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths):
     """One command builds all four files, on demand — nothing here runs on a drain tick.
 
     The build writes into the real frontend dir (that is the point), so this restores every
@@ -782,15 +981,18 @@ def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths, monkeypatch
     before = {
         n: (frontend / n).read_bytes() if (frontend / n).is_file() else None for n in names
     }
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(paths.state_root))
     try:
-        assert build.main() == 0
+        assert build.main(paths) == 0
         queues = json.loads((frontend / "queues.json").read_text(encoding="utf-8"))
         assert [ch["name"] for ch in queues["channels"]] == [
             "findings", "questioner_findings", "pitfalls",
         ]
         assert queues["generated_at"]
-        assert Path(queues["state_root"]) == paths.state_root.resolve()
+        assert Path(queues["state_root"]) == paths.state_root
+        # Hermetic: the seeded root's two tainted trees, not whatever this checkout holds.
+        assert [t["batch_id"] for t in queues["quarantine"]["tainted"]["rows"]] == [
+            "b-later", "a-earlier",
+        ]
         assert _embedded_data((frontend / "queues.html").read_text(encoding="utf-8")) == queues
         assert (frontend / "lessons.json").is_file()
         assert (frontend / "lessons.html").is_file()
@@ -907,7 +1109,7 @@ def test_the_channel_list_is_the_serializers_own_literal_and_reads_no_other_tabl
     """O6, structurally: the three names live in one module-level literal in the serializer,
     and the module neither walks `LoopPaths`' attributes nor asks the drain's wake table.
     #922's trap is a serializer whose channel set moves when some other table does."""
-    names = [spec.name for spec, _pick in serialize_queues._CHANNELS]
+    names = [spec.name for spec in serialize_queues._CHANNELS]
     assert names == ["findings", "questioner_findings", "pitfalls"]
     # CODE, not prose: the docstring is allowed to name the other table while explaining
     # why it is not read. Walk the AST for the two ways a module could derive the set.
@@ -926,7 +1128,10 @@ def test_the_taint_cap_is_read_where_the_writer_reads_it():
     """The cap on the page is the writer's own function, not a copy of its env name and
     default: change the writer's default and the page follows without an edit here."""
     assert serialize_queues.quarantine_cap is quarantine.quarantine_cap
+    assert serialize_queues.held_archives is quarantine.held_archives
     assert quarantine.quarantine_cap() == quarantine._MAX_DEFAULT
+    # ...and the writer counts through the same function it exposes.
+    assert "held_archives(quarantine_dir)" in inspect.getsource(quarantine.preserve_tainted_tree)
 
 
 def test_nothing_in_the_tree_still_says_the_graveyard_is_unread():

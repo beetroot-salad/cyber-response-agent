@@ -45,6 +45,11 @@ def provenance_field(id_key: str) -> str:
     return f"source_{id_key}s"
 
 
+#: The quarantine directory's name under `worktree_base`, spelled once for both sides
+#: (`LoopPaths.quarantine_dir` reads it, `AuthorBranch.quarantine_dir` writes under it).
+QUARANTINE_DIRNAME = "quarantine"
+
+
 @dataclass(frozen=True)
 class LoopPaths(DefenderPaths):
     """The loop's paths: every checked-in tree `DefenderPaths` locates, PLUS the mutable
@@ -113,6 +118,15 @@ class LoopPaths(DefenderPaths):
         commit is on a local branch, and the next tick of that lane delivers it before
         serving anything new (#952)."""
         return self.state_root / "_pending_delivery"
+
+    @property
+    def quarantine_dir(self) -> Path:
+        """Where `quarantine.preserve_tainted_tree` archives a tainted worktree: a sibling of
+        the live worktrees, so it follows `worktree_base` and NOT `state_root` — a copied
+        state dir carries none of this host's tainted trees. Named here so every reader of the
+        loop's state (the queue page, #903) takes it off the one `LoopPaths` it was handed,
+        and `AuthorBranch.quarantine_dir` is the same path for the writer's side."""
+        return self.worktree_base / QUARANTINE_DIRNAME
 
     @property
     def pending_file(self) -> Path:

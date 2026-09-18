@@ -7,11 +7,19 @@ A read-only view of the learning loop. Two pages, one build:
 - **queues** (`queues.html`, #903) — the loop's backlog on THIS host: per channel, the rows it
   gave up on (dead letters, with the reason and the row), the last non-retiring fault (the
   stuck record, append-only — so "last fault", never "stuck now"), and the rows held until a
-  person moves them; plus what the drains set aside (markers they could not serve, batches
-  committed but not delivered, tainted worktrees by manifest). Read off the state root
-  (`DEFENDER_LEARNING_STATE_DIR`, else `defender/learning/`), so it is per-host and stale the
-  moment it is built; the header says which root and when. Its contract is
-  `serialize_queues.build_view`, its channel list is that module's own literal (#922's rule).
+  person moves them (or, on the pitfalls lane, re-offered to the curator until the offer
+  ceiling — each lane says what its own hold means); plus what the drains set aside (markers
+  they could not serve, batches committed but not delivered, tainted worktrees). Read off the
+  state root (`DEFENDER_LEARNING_STATE_DIR`, else `defender/learning/`), so it is per-host and
+  stale the moment it is built; the header says which root and when. The one exception is
+  the tainted-worktree list, which lives beside the live worktrees under the REPO root
+  (`.worktrees/quarantine`) and does not move with the state dir — the card names that
+  directory, and its `held / cap` is the writer's own count of archives, so it agrees with
+  the writer's refusal past the cap even when a manifest is missing or torn. Its contract is
+  `serialize_queues.build_view` — the typed boundary: every value off disk is coerced there,
+  and a wrong-typed record degrades to one row, never the page — and its channel list is that
+  module's own literal (#922's rule). `build.main(paths)` / `stamped_view(paths)` take a
+  `LoopPaths` so a test's roots are the whole input surface.
 
 First panel: **lessons** — one corpus the loop still authors, and two it no longer does:
 

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import html
 import json
-import re
 import sys
 from pathlib import Path
+from string import Template
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
@@ -18,10 +17,18 @@ from defender.scripts._venv import reexec_into_venv  # noqa: E402
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
+from defender.learning.core.config import LoopPaths  # noqa: E402
 from defender.learning.frontend import serialize, serialize_queues  # noqa: E402
+from defender.scripts.visualize.visualize_primitives import (  # noqa: E402
+    esc_untrusted,
+    pretty_json_html,
+)
 from defender.scripts.visualize.visualize_run import CSS as RUN_CSS  # noqa: E402
 
 GROUP_STAGE = {"defender": "stage-defender", "actor": "stage-actor", "environment": "stage-oracle"}
+
+#: The header link each page carries to the other — one rule, both pages.
+NAV_CSS = "header.top nav.views { margin-left: auto; font-size: 12px; }\n"
 
 
 LESSONS_CSS = """
@@ -41,7 +48,6 @@ LESSONS_CSS = """
 .controls input[type="search"]:focus { outline: none; border-color: var(--accent); }
 .controls label { font-size: 12px; color: var(--text-dim); display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .controls .spacer { margin-left: auto; }
-header.top nav.views { margin-left: auto; font-size: 12px; }
 
 main.lessons { padding: 20px 24px 80px; max-width: 1400px; margin: 0 auto; }
 section.stage-defender { --accent-group: var(--accent-defender); }
@@ -258,11 +264,9 @@ document.getElementById("hide-stale").addEventListener("change", applyFilters);
 
 QUEUES_CSS = """
 /* ----- Queue-state page (reuses the run-visualizer tokens) ----- */
-header.top nav.views { margin-left: auto; font-size: 12px; }
 html { color-scheme: dark; }
 body { background: var(--bg); }
 main.queues { padding: 20px 24px 80px; max-width: 1100px; margin: 0 auto; }
-section.stage-learning { border-left-color: var(--accent-learning); }
 .q-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .q-card { background: var(--bg-2); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 6px; min-width: 0; }
 .q-card { --card-accent: var(--border); border-left-color: var(--card-accent); }
@@ -282,7 +286,6 @@ section.stage-learning { border-left-color: var(--accent-learning); }
 .qt-val { color: var(--text); }
 .qt-val.n-zero { color: var(--text-dim); }
 .qt-val.n-warn { color: var(--warn); font-weight: 600; }
-.qt-val.n-bad { color: var(--bad); font-weight: 600; }
 .q-held { font-size: 12.5px; color: var(--text-dim); margin: 10px 0 0; }
 .q-held b { color: var(--warn); font-weight: 600; }
 .dl { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
@@ -304,10 +307,10 @@ section.stage-learning { border-left-color: var(--accent-learning); }
 .q-group.q-system { opacity: 0.7; }
 .q-group-head { font-size: 13px; font-weight: 600; color: var(--text-bright); margin: 10px 0 0; }
 .q-group-sub { font-size: 11px; font-weight: 400; color: var(--text-dim); margin-left: 8px; }
-.q-group h3 { margin-top: 12px; }
 .q-group h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); border-bottom: 1px solid var(--border-2); padding-bottom: 4px; margin: 12px 0 6px; }
 .q-group h3 .cap { font-weight: 400; margin-left: 8px; color: var(--text-dim); }
-section.stage h3 .cap.near { color: var(--warn); }
+.q-group h3 .cap.near { color: var(--warn); }
+.q-dir { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; color: var(--text-dim); margin: 0 0 4px; overflow-wrap: anywhere; }
 @media (max-width: 860px) { .q-cards { grid-template-columns: 1fr; } }
 @media (max-width: 700px) {
   main.queues { padding: 16px 16px 60px; }
@@ -330,31 +333,34 @@ QUEUES_PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Learning loop — Queues</title>
-<style>__CSS__</style></head><body id="top">
+<style>${css}</style></head><body id="top">
 <header class="top"><div class="top-row">
   <h1>Learning loop — Queues</h1>
-  <div class="meta">generated __GENERATED__ · __STATE_ROOT__</div>
+  <div class="meta">generated ${generated} · ${state_root}</div>
   <nav class="views"><a href="lessons.html">lessons →</a></nav>
 </div></header>
 <main class="queues">
-__FAULT_BAND__
-<div class="q-cards">__CARDS__</div>
+${fault_band}
+<div class="q-cards">${cards}</div>
 </main>
 <script>
 // The contract this page was rendered from, carried whole so the page stays self-contained
 // and a reader can pull the JSON back out of it (`const DATA = ...;` is the one line).
-const DATA = __QUEUES_JSON__;
+const DATA = ${queues_json};
 </script>
 </body></html>
 """
 
 
-def _esc(value: object) -> str:
-    return html.escape(str(value if value is not None else ""), quote=True)
+# Every value this renderer touches is already the contract's type (`serialize_queues`' rule),
+# so the helpers below take strings and ints and do one thing each: `esc_untrusted` is applied
+# exactly once, at the point a value is written into markup, never to text that is already
+# markup.
 
 
-def _when(value: object) -> str:
-    return _esc(value)[:10] if isinstance(value, str) else ""
+def _when(value: str | None) -> str:
+    """The date of a contract timestamp, as plain text; the caller escapes it."""
+    return value[:10] if value else ""
 
 
 def _num(value: int, warn_at: int | None = None) -> str:
@@ -366,20 +372,10 @@ def _plural(n: int, one: str, many: str) -> str:
     return one if n == 1 else many
 
 
-def _json_pretty(value: object) -> str:
-    """The row, pretty-printed and ESCAPED before any highlighting is stitched in — the
-    highlighter only ever wraps already-safe text."""
-    text = _esc(json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True, default=str))
-    text = re.sub(r'&quot;([^&]+?)&quot;:', r'<span class="j-key">&quot;\1&quot;</span>:', text)
-    text = re.sub(r': &quot;([^\n]*?)&quot;(,?)$', r': <span class="j-str">&quot;\1&quot;</span>\2',
-                  text, flags=re.MULTILINE)
-    text = re.sub(r': (-?\d+(?:\.\d+)?)(,?)$', r': <span class="j-num">\1</span>\2', text,
-                  flags=re.MULTILINE)
-    return text
-
-
-def _unreadable_line(n: int) -> str:
-    return (f'<p class="q-unreadable">{n} unreadable {_plural(n, "line", "lines")} skipped</p>'
+def _unreadable_line(n: int, unit: str) -> str:
+    """`unit` is "line" for a channel (its sidecars are JSONL; a whole sidecar that could not
+    be read counts as one) and "file" for the set-aside lists (one record per file)."""
+    return (f'<p class="q-unreadable">{n} unreadable {_plural(n, unit, unit + "s")} skipped</p>'
             if n else "")
 
 
@@ -400,18 +396,16 @@ def _channel_card(ch: dict) -> str:
     held_html = ""
     if held["count"]:
         held_html = (
-            f'<p class="q-held"><b>{held["count"]} held</b> until a person moves '
-            f'{_plural(held["count"], "it", "them")} · '
-            + ", ".join(_esc(i) for i in held["ids"]) + "</p>"
+            f'<p class="q-held"><b>{held["count"]} held</b> · {esc_untrusted(ch["hold_means"])} · '
+            + ", ".join(esc_untrusted(i) for i in held["ids"]) + "</p>"
         )
     if ch["deadletter"]:
         rows = "".join(
             "<details><summary>"
-            f'<span class="dl-id">{"no id" if e["id"] is None else _esc(e["id"])}</span>'
-            f'<span class="dl-reason">{_esc(e["reason"])}</span>'
-            f'<span class="dl-when">{_when(e["when"])}</span>'
-            f'</summary><div class="body"><pre class="json-pretty">{_json_pretty(e["row"])}</pre>'
-            "</div></details>"
+            f'<span class="dl-id">{"no id" if e["id"] is None else esc_untrusted(e["id"])}</span>'
+            f'<span class="dl-reason">{esc_untrusted(e["reason"])}</span>'
+            f'<span class="dl-when">{esc_untrusted(_when(e["when"]))}</span>'
+            f'</summary><div class="body">{pretty_json_html(e["row"])}</div></details>'
             for e in ch["deadletter"]
         )
         dead_html = f'<div class="dl">{rows}</div>'
@@ -419,8 +413,8 @@ def _channel_card(ch: dict) -> str:
         dead_html = '<div class="empty">No dead letters.</div>'
     stats = _stat("queued", _num(ch["depth"]["queued"])) + _stat("dead", _num(len(ch["deadletter"]), 1))
     return _card(
-        f't-{_esc(ch["accent"])}', _esc(ch["name"]), stats,
-        held_html + dead_html + _unreadable_line(ch["unreadable"]),
+        f't-{esc_untrusted(ch["accent"])}', esc_untrusted(ch["name"]), stats,
+        held_html + dead_html + _unreadable_line(ch["unreadable"], "line"),
         bool(ch["deadletter"]) or held["count"] > 0,
     )
 
@@ -429,29 +423,39 @@ def _list(items: list[str]) -> str:
     return f'<ul class="q-list">{"".join(items)}</ul>' if items else '<div class="empty">None.</div>'
 
 
-def _li(key: object, value: object, tail: str = "") -> str:
-    tail_html = f'<span class="t">{_esc(tail)}</span>' if tail else ""
-    return f'<li><span class="k">{_esc(key)}</span><span class="v">{_esc(value)}{tail_html}</span></li>'
+def _li(key: str, value: str, tail: str = "") -> str:
+    tail_html = f'<span class="t">{esc_untrusted(tail)}</span>' if tail else ""
+    return (f'<li><span class="k">{esc_untrusted(key)}</span>'
+            f'<span class="v">{esc_untrusted(value)}{tail_html}</span></li>')
+
+
+def _cap(tainted: dict) -> str:
+    """`held / cap`, warm once two slots or fewer remain — and never on an empty directory,
+    whatever the cap. `held` is null when the directory could not be listed: "?" then, not a
+    number the writer would not agree with."""
+    held, cap = tainted["held"], tainted["cap"]
+    near = held is not None and held > 0 and cap - held <= 2
+    shown = "?" if held is None else str(held)
+    return f'<span class="cap{" near" if near else ""}">{shown} / {cap}</span>'
 
 
 def _aside_card(q: dict) -> str:
     markers, deliveries, tainted = q["markers"], q["deliveries"], q["tainted"]
-    near = len(tainted["rows"]) >= tainted["cap"] - 2
     needs_person = len(markers["rows"]) + len(tainted["rows"])
     human = (
         '<div class="q-group q-human"><div class="q-group-head">Needs a person '
         '<span class="q-group-sub">nothing retries these</span></div>'
         "<h3>Markers not served</h3>"
         + _list([_li(r["identity"], r["failed"], r["queue"]) for r in markers["rows"]])
-        + _unreadable_line(markers["unreadable"])
-        + f'<h3>Tainted worktrees<span class="cap{" near" if near else ""}">'
-          f'{len(tainted["rows"])} / {tainted["cap"]}</span></h3>'
+        + _unreadable_line(markers["unreadable"], "file")
+        + f"<h3>Tainted worktrees{_cap(tainted)}</h3>"
+        + f'<p class="q-dir">{esc_untrusted(tainted["dir"])}</p>'
         + _list([
             _li(r["batch_id"], r["taint"],
                 _when(r["quarantined_at"]) + ("" if r["verdict"] else " · no scan recorded"))
             for r in tainted["rows"]
         ])
-        + _unreadable_line(tainted["unreadable"])
+        + _unreadable_line(tainted["unreadable"], "file")
         + "</div>"
     )
     system = (
@@ -462,7 +466,7 @@ def _aside_card(q: dict) -> str:
             _li(r["branch"], r["reason"], f'since {_when(r["at"]) or "?"}, retried every tick')
             for r in deliveries["rows"]
         ])
-        + _unreadable_line(deliveries["unreadable"])
+        + _unreadable_line(deliveries["unreadable"], "file")
         + "</div>"
     )
     stats = _stat("needs a person", _num(needs_person, 1)) + _stat("retrying", _num(len(deliveries["rows"])))
@@ -479,12 +483,12 @@ def _fault_band(view: dict) -> str:
         return ""
     rows = "".join(
         '<div class="qf-row">'
-        f'<span class="qf-ch">{_esc(ch["name"])}</span>'
-        f'<span class="qf-class">{_esc(ch["stuck"].get("fault_class"))}</span>'
-        f'<span class="qf-ticks">{_esc(ch["stuck"].get("consecutive_ticks"))} '
-        f'{_plural(int(ch["stuck"].get("consecutive_ticks") or 0), "tick", "ticks")} running</span>'
-        f'<span class="qf-when">{_esc(ch["stuck"].get("recorded_at") or "time unknown")}</span>'
-        f'<span class="qf-reason">{_esc(ch["stuck"].get("reason"))}</span>'
+        f'<span class="qf-ch">{esc_untrusted(ch["name"])}</span>'
+        f'<span class="qf-class">{esc_untrusted(ch["stuck"]["fault_class"])}</span>'
+        f'<span class="qf-ticks">{ch["stuck"]["consecutive_ticks"]} '
+        f'{_plural(ch["stuck"]["consecutive_ticks"], "tick", "ticks")} running</span>'
+        f'<span class="qf-when">{esc_untrusted(ch["stuck"]["recorded_at"] or "time unknown")}</span>'
+        f'<span class="qf-reason">{esc_untrusted(ch["stuck"]["reason"])}</span>'
         "</div>"
         for ch in stuck
     )
@@ -497,30 +501,33 @@ def _fault_band(view: dict) -> str:
 
 def render_queues(view: dict) -> str:
     """The whole page from the contract, RENDERED HERE rather than by a script in the page:
-    every value a person reads goes through `_esc` on this side, where a test can see it, and
-    the page needs no script to show anything."""
+    every value a person reads goes through `esc_untrusted` on this side, where a test can
+    see it, and the page needs no script to show anything. The template is filled in ONE
+    pass, so a value that happens to spell a placeholder is content, never a second
+    substitution."""
     payload = json.dumps(view, ensure_ascii=False).replace("<", "\\u003c")
-    cards = "".join(_channel_card(ch) for ch in view["channels"]) + _aside_card(view["quarantine"])
-    return (
-        QUEUES_PAGE.replace("__CSS__", RUN_CSS + QUEUES_CSS)
-        .replace("__GENERATED__", _esc(view.get("generated_at") or "—"))
-        .replace("__STATE_ROOT__", _esc(view.get("state_root")))
-        .replace("__FAULT_BAND__", _fault_band(view))
-        .replace("__CARDS__", cards)
-        .replace("__QUEUES_JSON__", payload)
+    return Template(QUEUES_PAGE).substitute(
+        css=RUN_CSS + NAV_CSS + QUEUES_CSS,
+        generated=esc_untrusted(view.get("generated_at") or "—"),
+        state_root=esc_untrusted(view["state_root"]),
+        fault_band=_fault_band(view),
+        cards="".join(_channel_card(ch) for ch in view["channels"]) + _aside_card(view["quarantine"]),
+        queues_json=payload,
     )
 
 
 def render(view: dict) -> str:
     payload = json.dumps(view, ensure_ascii=False).replace("<", "\\u003c")
     return (
-        PAGE.replace("__CSS__", RUN_CSS + LESSONS_CSS)
+        PAGE.replace("__CSS__", RUN_CSS + NAV_CSS + LESSONS_CSS)
         .replace("__STAGE_JSON__", json.dumps(GROUP_STAGE))
         .replace("__LESSONS_JSON__", payload)
     )
 
 
-def main() -> int:
+def main(paths: LoopPaths | None = None) -> int:
+    """Both pages, into this directory. `paths` is the queue page's whole input surface — the
+    CLI leaves it None and the state root is resolved at call time; a test hands its own."""
     view = serialize.stamped_view()
 
     json_out = HERE.parent / "lessons.json"
@@ -532,7 +539,7 @@ def main() -> int:
     counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
     print(f"wrote {json_out.relative_to(REPO_ROOT)} + {html_out.relative_to(REPO_ROOT)} — {counts}")
 
-    queues = serialize_queues.stamped_view()
+    queues = serialize_queues.stamped_view(paths)
     q_json = HERE.parent / "queues.json"
     q_json.write_text(serialize_queues.dump_contract(queues), encoding="utf-8")
     q_html = HERE.parent / "queues.html"
