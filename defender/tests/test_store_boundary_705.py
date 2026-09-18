@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._defender_sql import EXIT_OK, EXIT_QUERY_ERROR, run_sql_py
+from defender.tests._defender_sql import EXIT_OK, assert_query_error, run_sql_py
 from defender.tests._session_store_705 import (
     complete_pair,
     make_store,
@@ -321,10 +321,7 @@ def test_every_via_reaching_store_rows_goes_through_the_role_scoped_projection(t
 
     query = f"SELECT * FROM sqlite_scan('{store.path}', 'message')"
     proc = run_sql_py(query, stdin='{"a": 1}\n', cwd=REPO_ROOT)
-    # The query-error code, not merely non-zero: a tool with no duckdb exits before it
-    # reads the query at all, and that would pass `!= 0` while proving nothing.
-    assert proc.returncode == EXIT_QUERY_ERROR, (
-        f"the defender-sql lane resolved a reference to the store file: {proc.stderr!r}")
+    assert_query_error(proc, "the defender-sql lane resolved a reference to the store file")
     assert SECRET not in proc.stdout
 
     control = run_sql_py("SELECT a FROM data", stdin='{"a": 1}\n', cwd=REPO_ROOT)

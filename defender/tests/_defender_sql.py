@@ -25,6 +25,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from defender.tests._by_path import DEFENDER
 
 SQL_PY: Path = DEFENDER / "scripts" / "gather_tools" / "sql.py"
@@ -32,6 +34,15 @@ SQL_PY: Path = DEFENDER / "scripts" / "gather_tools" / "sql.py"
 EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
 EXIT_INPUT_ERROR = 2
+#: `duckdb` missing — the `runtime` extra is not installed. `run_sql_py` turns this into a
+#: skip so the three files that spawn the tool share one policy instead of one skipping and
+#: two failing with a message about the query.
+EXIT_NO_RUNTIME = 69
+
+#: The tool's own prefix on a duckdb refusal — prose `sql.py` owns, not duckdb's. Exit 1 is
+#: also CPython's code for an uncaught exception, so the exit code alone cannot tell a
+#: refusal from a crash; this can, without pinning duckdb's wording (#1057).
+QUERY_ERROR_MARK = "defender-sql: query error:"
 
 
 def run_sql_py(
@@ -43,8 +54,18 @@ def run_sql_py(
 ) -> subprocess.CompletedProcess[str]:
     """`cat <payload> | defender-sql '<query>'` as a lead types it: `args` is the argv after
     the program, `stdin` the payload text. Text mode, UTF-8 both ways, output captured."""
-    return subprocess.run(
+    proc = subprocess.run(
         [sys.executable, str(SQL_PY), *args],
         input=stdin, capture_output=True, text=True, encoding="utf-8",
         timeout=timeout, env=env, cwd=cwd,
     )
+    if proc.returncode == EXIT_NO_RUNTIME:
+        pytest.skip(f"duckdb is not installed in {sys.executable} (the `runtime` extra)")
+    return proc
+
+
+def assert_query_error(proc: subprocess.CompletedProcess[str], why: str) -> None:
+    """duckdb refused the query and the tool reported it — not a crash that also exits 1."""
+    detail = f"{why}: exit {proc.returncode}, stderr {proc.stderr!r}"
+    assert proc.returncode == EXIT_QUERY_ERROR, detail
+    assert QUERY_ERROR_MARK in proc.stderr, detail

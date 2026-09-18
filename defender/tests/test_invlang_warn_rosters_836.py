@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._defender_sql import EXIT_QUERY_ERROR, run_sql_py
+from defender.tests._defender_sql import assert_query_error, run_sql_py
 from defender.tests._invlang_warn_836 import (
     DEFENDER,
     PROLOGUE,
@@ -493,10 +493,7 @@ def test_bash_grant_cannot_construct_a_write_reaching_investigation_md(tmp_path)
         "this test is pinning the wrong boundary"
     )
     proc = run_sql_py(sql, stdin='[{"a": 1}]')
-    # duckdb's refusal, not any non-zero: a tool with no duckdb exits before the statement
-    # is run, and `!= 0` would call that a refusal too.
-    assert proc.returncode == EXIT_QUERY_ERROR, (
-        f"duckdb did not refuse the write-shaped statement: {proc.stderr!r}")
+    assert_query_error(proc, "duckdb did not refuse the write-shaped statement")
     assert inv.read_bytes() == before
 
     # ...and a sanctioned reader on the same lane IS allowed.
