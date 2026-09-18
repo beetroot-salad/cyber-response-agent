@@ -137,7 +137,7 @@ def test_a_no_edit_reducer_tick_holds_its_rows(scene):
     this arm a reducer row would be discarded on the tick it was merely OFFERED, before
     anything was taught, and its queue row is the only record of the mistake that any test
     here demonstrates — the graveyard's unreadness is NOT shown by this suite; it is the
-    clause demand `graveyard_is_still_unread`'s recorded deferral, open until #903 lands.
+    clause demand `graveyard_is_still_unread`'s recorded deferral, discharged by #903's queue page.
 
     Every surface the row could have left through is bound, because a row that vanished
     quietly would satisfy a negative asserted on one of them: the queue HOLDS it, the consumed
@@ -476,7 +476,7 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
 
     These two strings are the human-visible records this lane produces, which is what makes a
     wrong one a live defect rather than a cosmetic one (FK-6). That the graveyard is the only
-    other candidate and is unread until #903 is NOT demonstrated here — it is a deliberate
+    other candidate and reaches a human only through #903's queue page is NOT demonstrated here — it is a deliberate
     prose deferral recorded as the clause demand `graveyard_is_still_unread` (G22, searched),
     named rather than asserted so a reader cannot mistake this suite for its evidence. The four existing test files that assert the message verbatim are
     updated by the same change.

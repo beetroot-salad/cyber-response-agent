@@ -520,7 +520,8 @@ def _pitfalls_commit_message(changed: list[str]) -> str:
     """Names what this tick actually taught (#870 FK-6).
 
     It said "per-system execution.md" unconditionally, which on a reducer-only tick describes
-    a commit that touched no `execution.md` at all — and with the graveyard unread until #903,
+    a commit that touched no `execution.md` at all — and with the graveyard read only by #903's
+    queue page, which a person has to open,
     this string and the operator log are the only human-visible records this lane produces."""
     has_system = any(_is_system_execution_md(p) for p in changed)
     has_reducer = REDUCER_REL in changed
@@ -638,7 +639,8 @@ def _graveyard_dropped_rows(paths, rows: list[dict], dropped_ids: list[str]) -> 
     ids = set(dropped_ids)
     key = paths.pitfalls.id_key
     entries = [
-        {key: r[key], "deadletter_reason": _deadletter_reason(r), "row": r}
+        {key: r[key], "deadletter_reason": _deadletter_reason(r), "row": r,
+         **_author_drain.retirement_stamp()}
         for r in rows if r.get(key) in ids
     ]
     if entries:

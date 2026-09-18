@@ -18,6 +18,13 @@ _MAX_ENV = "LEARNING_TAINT_QUARANTINE_MAX"
 _MAX_DEFAULT = 10
 
 
+def quarantine_cap() -> int:
+    """How many tainted trees the lane will hold — read here by the writer that refuses past
+    it and by the queue page (#903) that shows how close the directory is, so the two never
+    disagree on the number."""
+    return env_int(_MAX_ENV, _MAX_DEFAULT)
+
+
 def _archive_tree(wt: Path, dest: Path) -> None:
     """Write `wt` to `dest` as a gzipped tar.
 
@@ -94,7 +101,7 @@ def preserve_tainted_tree(
     try:
         quarantine_dir.mkdir(parents=True, exist_ok=True)
         held = sum(1 for _ in quarantine_dir.glob("*.tar.gz"))
-        cap = env_int(_MAX_ENV, _MAX_DEFAULT)
+        cap = quarantine_cap()
         if held >= cap:
             _log(
                 f"{label}: {held} quarantined tree(s) already held at "

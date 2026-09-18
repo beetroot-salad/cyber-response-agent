@@ -532,7 +532,7 @@ def _retire_pitfalls_batch(
         # What the class ALONE cost was the diagnosis. A curator that exited rc=124, one that
         # tried to delete a section, and one that wrote outside `defender/skills` all raise
         # `LeadAuthorError` and all filed as the identical four words, so the graveyard — the
-        # only durable record this lane leaves, unread until #903 — could not tell a timed-out
+        # only durable record this lane leaves, read by #903's queue page — could not tell a timed-out
         # spawn from an attempted gutting. The message survived solely in the transient
         # operator log. Truncated, because a reason is a label and a row is not a place to
         # store a traceback.
