@@ -114,7 +114,9 @@ def _row_evidence(row: dict) -> str:
     kind, role = row.get("kind"), row.get("role")
     if kind == LOAD_KIND_PUSH:
         return EVIDENCE_PUSH
-    if kind == LOAD_KIND_READ and role in _ROLES:
+    # `isinstance` BEFORE the membership test: a forged `role` that is a list is unhashable,
+    # and `in` on a set would raise here and cost the whole walk, not just this row.
+    if kind == LOAD_KIND_READ and isinstance(role, str) and role in _ROLES:
         return EVIDENCE_READ if role == AgentRole.MAIN.value else EVIDENCE_INDIRECT
     return EVIDENCE_UNKNOWN
 
