@@ -84,9 +84,10 @@ class CorpusAuthorConfig:
     #: held-report writer; the observation directions leave it unset.
     post_rotate: Callable[..., None] | None = None
     box: Any = None
-    #: #773 M2. The drain-run check, per channel — `None` skips ONLY the verdict step
-    #: (M3.3-4/M4); vouching (M3.2), the explicit-list commit (M5) and the tree-derived
-    #: `committed` recompute (O4/O5) run on EVERY channel regardless.
+    #: #773 M2. The drain-run check, per channel — `None` means every (file, finding) pair
+    #: is EXEMPT without a verifier call, so nothing is ever BAD and the repair spawn never
+    #: fires; vouching (M3.2), the explicit-list commit (M5) and the tree-derived fates
+    #: (O4/O5) run on EVERY channel regardless.
     forward_check: ForwardCheck | None = None
     #: A row this channel's check does not cover — EXEMPT by row kind, never by absence
     #: from any id set (which is ERROR territory, J12's already-shipped bug). Consulted

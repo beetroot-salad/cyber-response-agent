@@ -70,7 +70,7 @@ def _build_curator_agent(tmp_path):
 
 
 def _deps(scene) -> CuratorDeps:
-    return curator_deps(scene, run_verify=lambda *a, **kw: "")
+    return curator_deps(scene)
 
 
 def _tool(agent, name: str):

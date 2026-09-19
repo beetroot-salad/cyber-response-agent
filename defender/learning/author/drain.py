@@ -43,6 +43,7 @@ import json
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+import dataclasses
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
@@ -149,13 +150,17 @@ def _revert_non_md_strays(cfg: CorpusAuthorConfig) -> None:
     file has no citations by construction, so leaving it to the vouching gate converts an
     ordinary cleanup case into a tick-wide fault."""
     for xy, rel in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True):
-        if rel.endswith(".md") or "D" in xy:
-            continue
-        _git.git(["checkout", "-q", "--", rel], cwd=cfg.repo_root, check=False)
-        target = cfg.repo_root / rel
-        tracked = _git.git_ok(["ls-files", "--error-unmatch", "--", rel], cwd=cfg.repo_root)
-        if not tracked and target.is_file():
-            target.unlink()
+        if not rel.endswith(".md") and "D" not in xy:
+            _put_back(cfg.repo_root, rel)
+
+
+def _put_back(repo_root: Path, rel: str) -> None:
+    """Return one path to what HEAD has: checked out if tracked, unlinked if not."""
+    _git.git(["checkout", "-q", "--", rel], cwd=repo_root, check=False)
+    target = repo_root / rel
+    tracked = _git.git_ok(["ls-files", "--error-unmatch", "--", rel], cwd=repo_root)
+    if not tracked and target.is_file():
+        target.unlink()
 
 
 def _assert_no_unmerged(cfg: CorpusAuthorConfig) -> None:
@@ -276,38 +281,16 @@ def retire(
     appender must not hold it open indefinitely either; by hand it passes none."""
     ids = {str(i) for i in batch_ids}
     key = channel.id_key
-    bumped: dict[str, int] = {}
-    survivors: list[dict] = []
-    retired: list[dict] = []
 
     with persist.queue_lock(channel.append_lock, timeout_seconds=timeout_seconds):
-        for row in read_jsonl_rows(channel.file):
-            rid = row.get(key)
-            if not isinstance(rid, str) or rid not in ids:
-                continue
-            attempts = int(row.get(counter_key) or 0) + 1
-            bumped[rid] = attempts
-            rec = dict(row)
-            rec[counter_key] = attempts
-            (retired if attempts >= max_attempts else survivors).append(rec)
-        if retired:
-            append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
-                graveyard_file(channel),
-                [
-                    {
-                        key: rec[key],
-                        # Whichever count reached ITS ceiling, under the slot every channel's
-                        # reader already knows. A row bumped on the other counter too keeps
-                        # that one inside `row`, where it is provenance rather than the verdict.
-                        "attempts": rec[counter_key],
-                        "deadletter_reason": reason,
-                        # Nested rather than spread, so a graveyard entry has ONE shape on
-                        # every channel and is readable without knowing its queue.
-                        "row": {k: v for k, v in rec.items() if k != counter_key},
-                    }
-                    for rec in retired
-                ],
-            )
+        named = [
+            row for row in read_jsonl_rows(channel.file)
+            if isinstance(row.get(key), str) and row[key] in ids
+        ]
+        bumped = _bump_rows(
+            channel, named, counter_key=counter_key, max_attempts=max_attempts, reason=reason,
+        )
+    survivors, retired = bumped.survivors, bumped.retired
 
     persist.rotate_queue_locked(
         pending_file=channel.file,
@@ -319,7 +302,53 @@ def retire(
         commit_sha=None,
         timeout_seconds=timeout_seconds,
     )
-    return RetireOutcome(bumped=bumped, retired=tuple(rec[key] for rec in retired))
+    return RetireOutcome(
+        bumped={rec[key]: rec[counter_key] for rec in [*survivors, *retired]},
+        retired=tuple(rec[key] for rec in retired),
+    )
+
+
+@dataclass(frozen=True)
+class _Bumped:
+    #: the bumped rows still under the ceiling, each carrying its new count.
+    survivors: list[dict]
+    #: the bumped rows at or over the ceiling, already written to the graveyard.
+    retired: list[dict]
+
+
+def _bump_rows(
+    channel: QueueChannel, rows: list[dict], *, counter_key: str, max_attempts: int, reason: str,
+) -> _Bumped:
+    """Bump `counter_key` on every row by one and partition at the ceiling; the rows that
+    crossed it get their graveyard entry here. The one bump-and-partition, shared by the
+    fault retirement (`retire`, `attempts`) and the deferral fold (`deferrals`) — two
+    counters, two ceilings, one primitive."""
+    key = channel.id_key
+    survivors: list[dict] = []
+    retired: list[dict] = []
+    for row in rows:
+        count = int(row.get(counter_key) or 0) + 1
+        rec = {**row, counter_key: count}
+        (retired if count >= max_attempts else survivors).append(rec)
+    if retired:
+        append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
+            graveyard_file(channel),
+            [
+                {
+                    key: rec[key],
+                    # Whichever count reached ITS ceiling, under the slot every channel's
+                    # reader already knows. A row bumped on the other counter too keeps
+                    # that one inside `row`, where it is provenance rather than the verdict.
+                    "attempts": rec[counter_key],
+                    "deadletter_reason": reason,
+                    # Nested rather than spread, so a graveyard entry has ONE shape on
+                    # every channel and is readable without knowing its queue.
+                    "row": {k: v for k, v in rec.items() if k != counter_key},
+                }
+                for rec in retired
+            ],
+        )
+    return _Bumped(survivors=survivors, retired=retired)
 
 
 def run_batch(
@@ -515,248 +544,344 @@ def _capture_pre_state(cfg: CorpusAuthorConfig) -> _PreState:
     )
 
 
-def _run_author_agent(
+# ---------------------------------------------------------------------------
+# The authoring region. ONE truth — the corpus tree as it stands after the last spawn —
+# and everything else computed from it once: which files changed, what each cites, every
+# (file, finding) verdict, which files are approved, what lands in the commit, and what
+# becomes of every row the batch read. A spawn's own account of itself is read for exactly
+# two things (the skip reasons and the commit message) plus one cross-check (an id it
+# CLAIMS to have committed that no file cites is a deferral, not a commit).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Tree:
+    """The corpus after a spawn has been settled (`_settle_tree`): the repo-relative paths
+    whose bytes differ from HEAD, and the paths deleted. The one input every later step
+    reads the corpus through."""
+
+    changed: tuple[str, ...]
+    deleted: tuple[str, ...]
+
+
+def _settle_tree(
+    cfg: CorpusAuthorConfig, state: _PreState, *, honoured_deletions: tuple[str, ...] | None,
+) -> _Tree:
+    """THE post-spawn normaliser, run identically after the curator spawn and after the
+    repair spawn. One body, so the second spawn can never be held to a shorter rule than
+    the first; in order:
+
+    1. a non-`.md` file under the corpus is reverted (§7 FK-5) — it has no citations by
+       construction, so it is a cleanup, not a fault, and it goes BEFORE the stray check
+       that would otherwise refuse the tick over it;
+    2. a change OUTSIDE the corpus (beyond what was already dirty at tick start) refuses
+       the tick — `AuthorError`, so the batch retires under `attempts`;
+    3. an unmerged path under the corpus refuses the tick (§7 FK-33);
+    4. a record byte-identical to HEAD (a mode-only change) is put back — it is not content
+       the check must judge, and left alone it would still be dirty after the commit and
+       wedge the next tick's cleanliness gate;
+    5. a deletion: the curator spawn's are honoured (`honoured_deletions is None`) and ride
+       the commit list (M5/N6); the repair spawn has no delete capability at all, so any
+       deletion beyond the honoured set is restored from the tick-start snapshot.
+
+    Every git read here goes through `_git_read`: a git failure is the host's, not the
+    batch's, and must not spend one of its lives."""
+
+    def settle() -> _Tree:
+        _revert_non_md_strays(cfg)
+        author_shared.assert_no_new_stray(cfg.repo_root, cfg.corpus_dir_rel, state.baseline_stray)
+        _assert_no_unmerged(cfg)
+        changed: list[str] = []
+        deleted: list[str] = []
+        for xy, rel in _changed_corpus_records(cfg):
+            if "D" in xy:
+                deleted.append(rel)
+            elif xy != "??" and _byte_identical_to_head(cfg.repo_root, rel):
+                _git.git(["checkout", "-q", "--", rel], cwd=cfg.repo_root)
+            else:
+                changed.append(rel)
+        if honoured_deletions is not None:
+            unhonoured = sorted(set(deleted) - set(honoured_deletions))
+            _restore_from_snapshot(cfg, state.snapshot, unhonoured)
+            deleted = [rel for rel in deleted if rel in honoured_deletions]
+        return _Tree(changed=tuple(sorted(changed)), deleted=tuple(sorted(deleted)))
+
+    return _git_read("settle tree", settle)
+
+
+@dataclass(frozen=True)
+class _Judged:
+    """One judgement of the tree: every (finding, file) verdict for the CURRENT bytes of the
+    files judged, and what each of those files cites from this batch."""
+
+    #: (finding_id, rel_path) -> its verdict on the file's current bytes — plus, on the
+    #: judgement after a repair, the FK-6 BAD for a citation the repair dropped.
+    pairs: dict[tuple[str, str], PairVerdict]
+    #: rel_path -> the this-batch ids the file's current bytes cite.
+    cites: dict[str, frozenset[str]]
+
+
+#: How many times `_Judgement.judge` will re-read a tree that moved under it before giving
+#: up. Two is the honest need (judge, then confirm nothing moved); the rest is slack for a
+#: concurrent editor that is still writing when the first confirmation runs.
+_JUDGE_ROUNDS = 4
+
+
+@dataclass
+class _Judgement:
+    """The verdict memo for one tick.
+
+    @owns PairVerdict — the ONE constructor of `PairVerdict` instances (GOOD/BAD via
+    `_verdict_for_pair`, EXEMPT via `cfg.exempt` or a channel with no check, and the FK-6
+    dropped-citation BAD).
+
+    Memoised by (file, content digest, finding): the same bytes get the same verdict, so
+    judging the tree again after the repair spawn re-submits exactly the pairs whose bytes
+    moved (§7 FK-7 — an untouched file's verdict is never re-rolled), and a file the repair
+    spawn rewrote back to its pre-repair bytes keeps its pre-repair verdict. `history` holds
+    every verdict ever minted this tick in mint order, which is what a gap record carries
+    (§7 FK-13: the FILE's whole history, sibling findings included)."""
+
+    cfg: CorpusAuthorConfig
+    rows: dict[str, dict]
+    batch: set[str]
+    memo: dict[tuple[str, str, str], PairVerdict] = dataclasses.field(default_factory=dict)
+    history: list[PairVerdict] = dataclasses.field(default_factory=list)
+    #: the check index every `CheckContext` this tick carries is drawn from — one counter,
+    #: so two concurrently-minted checks never share one.
+    counter: itertools.count[int] = dataclasses.field(default_factory=itertools.count)
+
+    def judge(
+        self, files: tuple[str, ...], pass_no: int, *, before: _Judged | None = None,
+    ) -> _Judged:
+        """Judge the tree as it stands: every this-batch id each of `files` cites, on the
+        bytes the file holds NOW. O1 — "the bytes a verdict judged are the bytes that land
+        in HEAD" — is a loop, not a check: after a round the files are read again, and a
+        file that moved while it was being judged is judged again on what it holds now,
+        until a round ends with nothing moved.
+
+        `before` is the judgement the repair spawn was answering. A finding it cited that
+        NO file cites any more had its lesson dropped by the rewrite — §7 FK-6: terminal for
+        that finding, recorded as a BAD on the file that dropped it, and nothing tick-wide
+        about it. The pair rides in `pairs` (so the finding's fate reads it) but not in
+        `cites` (so the file's approval does not)."""
+        field_name = provenance_field(self.cfg.channel.id_key)
+        texts: dict[str, str] = {}
+        for _ in range(_JUDGE_ROUNDS):
+            texts = {rel: _read_or_empty(self.cfg.repo_root / rel) for rel in files}
+            jobs = [
+                (rel, fid, text)
+                for rel, text in texts.items()
+                for fid in sorted(_cited_ids_in(text, field_name) & self.batch)
+                if (rel, _digest(text), fid) not in self.memo
+            ]
+            self.mint(jobs, pass_no)
+            if all(_read_or_empty(self.cfg.repo_root / rel) == text for rel, text in texts.items()):
+                break
+        else:
+            raise AuthorError(
+                f"{self.cfg.corpus_dir_rel} kept changing under the forward check for "
+                f"{_JUDGE_ROUNDS} rounds — refusing to commit bytes no verdict judged"
+            )
+        cites = {
+            rel: frozenset(_cited_ids_in(text, field_name) & self.batch)
+            for rel, text in texts.items()
+        }
+        pairs = {
+            (fid, rel): self.memo[(rel, _digest(texts[rel]), fid)]
+            for rel, ids in cites.items()
+            for fid in ids
+        }
+        if before is not None:
+            cited_now = {fid for ids in cites.values() for fid in ids}
+            for fid, rel in sorted(before.pairs):
+                if fid in cited_now:
+                    continue
+                row = self.rows[fid]
+                dropped = PairVerdict(
+                    rel_path=rel, finding_id=fid, source_id=str(row.get("run_id") or ""),
+                    verdict="BAD",
+                    reasoning="repair rewrite dropped this file's citation of this finding",
+                    lesson_text=texts.get(rel, _read_or_empty(self.cfg.repo_root / rel)),
+                    pass_no=pass_no,
+                )
+                self.history.append(dropped)
+                pairs[(fid, rel)] = dropped
+        return _Judged(pairs=pairs, cites=cites)
+
+    def mint(self, jobs: list[tuple[str, str, str]], pass_no: int) -> None:
+        """Fan the pairs out under `verify_batch_workers()` (the Scale section's own bound)."""
+        if not jobs:
+            return
+
+        def one(job: tuple[str, str, str]) -> PairVerdict:
+            rel, fid, text = job
+            row = self.rows[fid]
+            if self.cfg.exempt(row):
+                verdict, reasoning = "EXEMPT", "exempt: this finding's kind is out of the check's scope"
+            elif self.cfg.forward_check is None:
+                verdict, reasoning = "EXEMPT", "exempt: this channel runs no forward check"
+            else:
+                verdict, reasoning = _verdict_for_pair(
+                    self.cfg, self.counter, rel, row, self.cfg.repo_root / rel, text,
+                )
+            return PairVerdict(
+                rel_path=rel, finding_id=fid, source_id=str(row.get("run_id") or ""),
+                verdict=verdict, reasoning=reasoning, lesson_text=text, pass_no=pass_no,
+            )
+
+        workers = max(1, config.verify_batch_workers())
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for pv in pool.map(one, jobs):
+                self.memo[(pv.rel_path, _digest(pv.lesson_text), pv.finding_id)] = pv
+                self.history.append(pv)
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class _Fates:
+    """Every row the batch read, sorted into exactly one ending (O9's conservation)."""
+
+    #: ids an approved file cites, every citing file approved.
+    committed: list[str]
+    #: id -> the files it cites, for an id whose every pair is BAD (M6's terminal ending).
+    terminal: dict[str, list[str]]
+    #: ids that could not land through no fault of their own (M7).
+    deferred: set[str]
+
+
+def _decide_fates(
+    batch_ids: set[str], judged: _Judged, approved: set[str], claimed_committed: set[str],
+) -> _Fates:
+    """Each batch row's ending, read off the judged tree. An id some file cites takes its
+    fate from its pairs — the curator's buckets are consulted only for an id NO file cites,
+    and there the one thing read off the curator's word is the cross-check: an id it CLAIMS
+    committed with no file behind it is deferred (O4), never consumed. An id in no bucket
+    that no file cites is left queued exactly as it was (C3)."""
+    committed: list[str] = []
+    terminal: dict[str, list[str]] = {}
+    deferred: set[str] = set()
+    for fid in sorted(batch_ids):
+        own = [pv for (f, _rel), pv in judged.pairs.items() if f == fid]
+        if not own:
+            if fid in claimed_committed:
+                deferred.add(fid)
+            continue
+        if all(pv.verdict == "BAD" for pv in own):
+            terminal[fid] = sorted({pv.rel_path for pv in own})
+        elif all(pv.rel_path in approved for pv in own):
+            committed.append(fid)
+        else:
+            # §7 FK-2: cited by files that disagree about approval this tick — neither
+            # committed nor refused, and the drain never guesses between the two.
+            deferred.add(fid)
+    return _Fates(committed=committed, terminal=terminal, deferred=deferred)
+
+
+@dataclass(frozen=True)
+class _BatchOutcome:
+    commit_sha: str | None
+    committed: list[dict]
+    bucket_held: dict[str, list[dict]]
+    bucket_consumed: dict[str, list[dict]]
+    terminal_rows: list[dict]
+    deferred_ids: set[str]
+
+
+def _author_batch(
     cfg: CorpusAuthorConfig,
     to_author: list[dict],
     batch_id: str,
-    baseline_stray: list[str],
+    state: _PreState,
     all_rows: dict[str, dict],
-) -> tuple[dict, dict[str, list[dict]], dict[str, list[dict]], set[str], set[str], itertools.count[int]]:
+) -> _BatchOutcome:
+    """Spawn, settle, judge; if anything is BAD, spawn the repair, settle, judge again; then
+    read every fate off the last judgement and commit what it approved."""
     key = cfg.channel.id_key
+    batch_ids = {row[key] for row in to_author}
+
     result = cfg.invoke_agent(to_author, batch_id, cfg)
-    # §7 FK-5: the stray revert is AUTHORITATIVE and runs FIRST, ahead of even
-    # `verify_agent_state`'s own stray check — a non-`.md` file under the corpus has
-    # no citations by construction, so leaving it for that older, coarser check
-    # turns an ordinary cleanup into a tick-wide fault (the O6 problem by a second
-    # door). Once it is gone, `verify_agent_state` sees a tree with nothing left to
-    # object to on that account.
-    _git_read("stray revert", _revert_non_md_strays, cfg)
+    tree = _settle_tree(cfg, state, honoured_deletions=None)
     _git_read(
-        "agent state", author_shared.verify_agent_state,
-        cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel,
-        cfg.noun, baseline_stray,
+        "agent report", author_shared.verify_agent_report,
+        cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel, cfg.noun,
     )
     author_shared.validate_agent_result_partition(
         result, to_author, id_key=key,
         buckets=tuple(b.name for b in cfg.buckets), noun=cfg.noun,
     )
-    _, bucket_held, bucket_consumed = _project(result, all_rows, cfg)
-    reported_committed_ids = set(author_shared.result_list(result, "committed"))
+    _assert_corpus_attributable(cfg, tree.changed, batch_ids)
 
-    # M3.2 — unconditional vouching over EVERY id this tick read, whatever bucket
-    # the curator reported it under (O5).
-    all_batch_ids = {row[key] for row in to_author}
-    counter = itertools.count()
-    _git_read("unmerged check", _assert_no_unmerged, cfg)
-    _git_read("corpus attribution", _assert_corpus_attributable, cfg, all_batch_ids)
+    judgement = _Judgement(cfg=cfg, rows=all_rows, batch=batch_ids)
+    judged = judgement.judge(tree.changed, pass_no=1)
+    #: every path either spawn left changed — the restore below covers a file the first
+    #: spawn wrote and the repair spawn then removed or replaced with something else.
+    touched = set(tree.changed)
+    bad = [pv for pv in judged.pairs.values() if pv.verdict == "BAD"]
+    if bad:
+        _spawn_repair(cfg, bad, batch_id)
+        tree = _settle_tree(cfg, state, honoured_deletions=tree.deleted)
+        touched |= set(tree.changed)
+        judged = judgement.judge(tree.changed, pass_no=2, before=judged)
 
-    return result, bucket_held, bucket_consumed, reported_committed_ids, all_batch_ids, counter
-
-
-def _merge_pass(
-    pass_result: dict[str, list[PairVerdict]],
-    final: dict[tuple[str, str], PairVerdict],
-    history: dict[str, list[PairVerdict]],
-    by_file_history: dict[str, list[PairVerdict]],
-) -> None:
-    for rel, pvs in pass_result.items():
-        for pv in pvs:
-            history.setdefault(pv.finding_id, []).append(pv)
-            by_file_history.setdefault(rel, []).append(pv)
-            final[(pv.finding_id, rel)] = pv
-
-
-def _run_repair_pass(  # noqa: PLR0913 — one repair round's whole state
-    cfg: CorpusAuthorConfig,
-    bad_pairs: list[PairVerdict],
-    pass1: dict[str, list[PairVerdict]],
-    batch_id: str,
-    snapshot: dict[str, bytes] | None,
-    baseline_stray: list[str],
-    deletion_paths: list[str],
-    all_rows: dict[str, dict],
-    all_batch_ids: set[str],
-    counter: itertools.count[int],
-) -> dict[str, list[PairVerdict]] | None:
-    if cfg.repair_prompt is not None and not cfg.repair_prompt.is_file():
-        raise FatalConfigError(
-            f"repair prompt {cfg.repair_prompt} is not a readable file"
-        )
-    repair_snapshot = _snapshot_corpus(cfg.corpus_dir)
-    cfg.invoke_repair(bad_pairs, batch_id, cfg)
-    _git_read("agent state after repair", _assert_no_new_stray, cfg, baseline_stray)
-    _git_read("stray revert (pass 2)", _revert_non_md_strays, cfg)
-    _git_read("unmerged check (pass 2)", _assert_no_unmerged, cfg)
-    new_deletions = sorted(set(_deleted_corpus_records(cfg)) - set(deletion_paths))
-    if new_deletions:
-        _revert_repair_deletions(cfg, snapshot, new_deletions)
-    changed2 = [rel for _xy, rel in _changed_corpus_records(cfg)]
-    touched2 = sorted(
-        rel for rel in changed2
-        if _current_bytes(cfg, rel) != (repair_snapshot or {}).get(
-            _corpus_relative(cfg, rel)
-        )
+    # M3.4: a file is approved when it cites something from this batch and every citing
+    # pair is GOOD or EXEMPT. A changed file citing nothing (the repair spawn's drive-by,
+    # or its rewrite that dropped every citation) is simply not approved.
+    approved = {
+        rel for rel, ids in judged.cites.items()
+        if ids and all(judged.pairs[(fid, rel)].verdict in ("GOOD", "EXEMPT") for fid in ids)
+    }
+    fates = _decide_fates(
+        batch_ids, judged, approved,
+        claimed_committed=set(author_shared.result_list(result, "committed")),
     )
-    if not touched2:
-        return None
-    fallback = {rel: {pv.finding_id for pv in pass1.get(rel, [])} for rel in touched2}
-    return _run_verdict_pass(
-        cfg, touched2, all_rows, all_batch_ids, counter, 2, fallback_citers=fallback,
-    )
+    # FK-21: every changed-but-unapproved file goes back to its tick-start bytes BEFORE the
+    # commit list is built, so a restore failure can never coexist with a commit.
+    _restore_unapproved_files(cfg, state.snapshot, touched - approved)
 
-
-def _run_verdict_pipeline(  # noqa: PLR0913 — one tick's verdict-pipeline state
-    cfg: CorpusAuthorConfig,
-    changed1: list[str],
-    deletion_paths: list[str],
-    all_rows: dict[str, dict],
-    all_batch_ids: set[str],
-    counter: itertools.count[int],
-    snapshot: dict[str, bytes] | None,
-    baseline_stray: list[str],
-    batch_id: str,
-) -> tuple[
-    dict[tuple[str, str], PairVerdict],
-    dict[str, list[PairVerdict]],
-    dict[str, list[PairVerdict]],
-]:
-    final: dict[tuple[str, str], PairVerdict] = {}
-    history: dict[str, list[PairVerdict]] = {}
-    #: EVERY `PairVerdict` ever minted for a file, across both passes and every
-    #: finding that cites it — a terminal finding's gap record carries this, not
-    #: just its own pairs, so a refusal caused by a SIBLING finding sharing the
-    #: same file (a family-exempt pair beside a BAD one, say) is not lost (§7 FK-13).
-    by_file_history: dict[str, list[PairVerdict]] = {}
-    if cfg.forward_check is None:
-        return final, history, by_file_history
-
-    pass1_texts: dict[str, str] = {}
-    pass1 = _run_verdict_pass(
-        cfg, changed1, all_rows, all_batch_ids, counter, 1, texts_out=pass1_texts,
-    )
-    # O1: "the bytes a verdict judged are the bytes that land in HEAD." A file
-    # that moved AGAIN between being read for this pass and the pass completing
-    # (a concurrent editor, not M4's repair spawn) is re-judged on its current
-    # bytes before anything downstream trusts the first verdict.
-    drifted = sorted(
-        rel for rel in pass1_texts
-        if _read_or_empty(cfg.repo_root / rel) != pass1_texts[rel]
-    )
-    if drifted:
-        redo = _run_verdict_pass(cfg, drifted, all_rows, all_batch_ids, counter, 1)
-        pass1.update(redo)
-
-    _merge_pass(pass1, final, history, by_file_history)
-
-    bad_pairs = [pv for pvs in pass1.values() for pv in pvs if pv.verdict == "BAD"]
-    if bad_pairs:
-        pass2 = _run_repair_pass(
-            cfg, bad_pairs, pass1, batch_id, snapshot, baseline_stray, deletion_paths,
-            all_rows, all_batch_ids, counter,
-        )
-        if pass2 is not None:
-            _merge_pass(pass2, final, history, by_file_history)
-
-    return final, history, by_file_history
-
-
-def _compute_approval(
-    cfg: CorpusAuthorConfig,
-    changed1: list[str],
-    final: dict[tuple[str, str], PairVerdict],
-    all_batch_ids: set[str],
-) -> tuple[set[str], set[str], dict[str, list[str]]]:
-    by_file: dict[str, list[PairVerdict]] = {}
-    for pv in final.values():
-        by_file.setdefault(pv.rel_path, []).append(pv)
-
-    field = provenance_field(cfg.channel.id_key)
-    citing_map: dict[str, list[str]] = {}
-    if cfg.forward_check is None:
-        approved_files = set(changed1)
-        changed_final = set(changed1)
-        for rel in changed_final:
-            cited = _cited_ids(cfg.repo_root / rel, field) & all_batch_ids
-            for fid in cited:
-                citing_map.setdefault(fid, []).append(rel)
-    else:
-        approved_files = {
-            rel for rel, pvs in by_file.items()
-            if all(pv.verdict in ("GOOD", "EXEMPT") for pv in pvs)
-        }
-        changed_final = set(by_file)
-        # Built from the PAIRS the drain actually minted (`final`), not by
-        # re-reading citations off disk: a repair rewrite that dropped a file's
-        # citations (§7 FK-6) still owes its terminal finding a record, and a fresh
-        # disk read would find nothing to attribute it to any more.
-        for fid, rel in final:
-            citing_map.setdefault(fid, []).append(rel)
-    return approved_files, changed_final, citing_map
-
-
-def _classify_reported(  # noqa: PLR0913 — one classification pass's whole state
-    cfg: CorpusAuthorConfig,
-    reported_committed_ids: set[str],
-    citing_map: dict[str, list[str]],
-    approved_files: set[str],
-    final: dict[tuple[str, str], PairVerdict],
-    by_file_history: dict[str, list[PairVerdict]],
-    all_rows: dict[str, dict],
-) -> tuple[list[dict], dict[str, list[PairVerdict]], set[str]]:
-    committed: list[dict] = []
-    terminal_ids: dict[str, list[PairVerdict]] = {}
-    deferred_ids: set[str] = set()
-    for fid in sorted(reported_committed_ids):
-        files = citing_map.get(fid, [])
-        if not files:
-            deferred_ids.add(fid)
-            continue
-        if cfg.forward_check is not None:
-            own_pvs = [final[(fid, rel)] for rel in files if (fid, rel) in final]
-            if own_pvs and all(pv.verdict == "BAD" for pv in own_pvs):
-                # §7 FK-13: the record carries every verdict for the file(s) this
-                # finding cites, not only its own pairs — a sibling finding's
-                # EXEMPT/GOOD pair on the same file is part of why it was refused.
-                terminal_ids[fid] = [
-                    pv for rel in sorted(files) for pv in by_file_history.get(rel, [])
-                ]
-                continue
-        if all(rel in approved_files for rel in files):
-            committed.append({**all_rows[fid], "consumed_category": "consumed_committed"})
-        else:
-            deferred_ids.add(fid)
-    return committed, terminal_ids, deferred_ids
-
-
-def _commit_and_record(  # noqa: PLR0913 — one commit round's whole state
-    cfg: CorpusAuthorConfig,
-    batch_id: str,
-    result: dict,
-    approved_paths: list[str],
-    deletion_paths: list[str],
-    terminal_ids: dict[str, list[PairVerdict]],
-    all_rows: dict[str, dict],
-    key: str,
-) -> tuple[str | None, list[dict]]:
-    # A commit message is required only when something will actually be committed —
-    # `commit_corpus_paths` itself short-circuits on an empty path list without ever
-    # reading it, so a curator that only skipped/deferred this tick (self-reported
-    # `committed=[]`, corpus genuinely clean) needs no message to be well-formed.
     message = (
-        author_shared.commit_message(result, cfg.noun)
-        if approved_paths or deletion_paths else ""
+        author_shared.commit_message(result, cfg.noun) if approved or tree.deleted else ""
     )
-    message = _append_terminal_block(message, sorted(terminal_ids))
+    message = _append_terminal_block(message, sorted(fates.terminal))
     commit_sha = author_shared.commit_corpus_paths(
-        message, cfg, approved_paths, deletion_paths
+        message, cfg, sorted(approved), list(tree.deleted)
     )
 
     terminal_rows: list[dict] = []
-    for fid, pvs in terminal_ids.items():
+    for fid, files in fates.terminal.items():
         row = all_rows[fid]
-        _append_gap_record(cfg, batch_id, row, key, pvs)
+        _append_gap_record(
+            cfg, batch_id, row, key,
+            [pv for pv in judgement.history if pv.rel_path in files],
+        )
         terminal_rows.append({**row, "consumed_category": "consumed_forward_bad"})
-    return commit_sha, terminal_rows
+
+    # The curator's buckets, minus every id the tree already gave a fate.
+    fated = set(fates.committed) | set(fates.terminal) | fates.deferred
+    bucket_held, bucket_consumed = _project(result, all_rows, cfg, exclude=fated)
+    return _BatchOutcome(
+        commit_sha=commit_sha,
+        committed=[
+            {**all_rows[fid], "consumed_category": "consumed_committed"}
+            for fid in fates.committed
+        ],
+        bucket_held=bucket_held,
+        bucket_consumed=bucket_consumed,
+        terminal_rows=terminal_rows,
+        deferred_ids=fates.deferred,
+    )
+
+
+def _spawn_repair(cfg: CorpusAuthorConfig, bad: list[PairVerdict], batch_id: str) -> None:
+    """M4: the one bounded, write-only repair spawn, handed every BAD pair of this tick. A
+    repair prompt that is CONFIGURED but missing is O10's fatal-config path (§7 FK-28);
+    `None` is the shipped default, resolved inside `invoke_repair`."""
+    if cfg.repair_prompt is not None and not cfg.repair_prompt.is_file():
+        raise FatalConfigError(f"repair prompt {cfg.repair_prompt} is not a readable file")
+    cfg.invoke_repair(bad, batch_id, cfg)
 
 
 def _handle_retire(
@@ -786,36 +911,20 @@ def _handle_retire(
 
 
 def _fold_deferrals(
-    cfg: CorpusAuthorConfig, deferred_ids: set[str], all_rows: dict[str, dict], key: str
+    cfg: CorpusAuthorConfig, deferred_ids: set[str], all_rows: dict[str, dict]
 ) -> tuple[list[dict], list[dict]]:
-    # M7 — fold the deferral bump into THIS SAME closing rotation (§7 FK-23): one write, so
-    # a deferred row's incremented counter cannot be lost to a lock-wait timeout between two
-    # separate rotations.
-    # @owns deferrals — the ONE function that increments a queued row's `deferrals` counter.
-    deferred_held: list[dict] = []
-    deferred_graveyard: list[dict] = []
-    deferred_consumed: list[dict] = []
-    for fid in sorted(deferred_ids):
-        row = all_rows[fid]
-        attempts = int(row.get("deferrals") or 0) + 1
-        rec = dict(row)
-        rec["deferrals"] = attempts
-        if attempts >= cfg.max_attempts:
-            deferred_graveyard.append(
-                {
-                    key: rec[key], "attempts": attempts,
-                    "deadletter_reason": DEFERRED_CEILING_REASON,
-                    "row": {k: v for k, v in rec.items() if k != "deferrals"},
-                }
-            )
-            deferred_consumed.append({**rec, "consumed_category": "consumed_retired"})
-        else:
-            deferred_held.append(rec)
-    if deferred_graveyard:
-        append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
-            graveyard_file(cfg.channel), deferred_graveyard,
-        )
-    return deferred_held, deferred_consumed
+    """M7 — the deferral bump, folded into THIS SAME closing rotation (§7 FK-23): one
+    write, so a deferred row's incremented counter cannot be lost to a lock-wait timeout
+    between two separate rotations.
+
+    @owns deferrals — the ONE function that increments a queued row's `deferrals` counter."""
+    bumped = _bump_rows(
+        cfg.channel, [all_rows[fid] for fid in sorted(deferred_ids)],
+        counter_key="deferrals", max_attempts=cfg.max_attempts, reason=DEFERRED_CEILING_REASON,
+    )
+    return bumped.survivors, [
+        {**rec, "consumed_category": "consumed_retired"} for rec in bumped.retired
+    ]
 
 
 def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded rather than global
@@ -831,51 +940,16 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
 ) -> int:
     channel = cfg.channel
     key = channel.id_key
-    commit_sha: str | None = None
-    committed: list[dict] = []
-    bucket_held: dict[str, list[dict]] = {}
-    bucket_consumed: dict[str, list[dict]] = {}
-    terminal_rows: list[dict] = []
-    deferred_ids: set[str] = set()
+    outcome = _BatchOutcome(
+        commit_sha=None, committed=[], bucket_held={}, bucket_consumed={},
+        terminal_rows=[], deferred_ids=set(),
+    )
 
     if to_author:
         _verifier_key_preflight(cfg)
         state = _capture_pre_state(cfg)
         try:
-            (
-                result, bucket_held, bucket_consumed, reported_committed_ids,
-                all_batch_ids, counter,
-            ) = _run_author_agent(cfg, to_author, batch_id, state.baseline_stray, all_rows)
-
-            changed1 = [rel for _xy, rel in _changed_corpus_records(cfg)]
-            # N6/M4: a deletion rides the commit list only when the FIRST spawn made it —
-            # captured here, before the repair spawn (which has no delete capability at
-            # all) ever runs, so a repair-caused deletion is reverted rather than adopted.
-            deletion_paths = _deleted_corpus_records(cfg)
-
-            final, _history, by_file_history = _run_verdict_pipeline(
-                cfg, changed1, deletion_paths, all_rows, all_batch_ids, counter,
-                state.snapshot, state.baseline_stray, batch_id,
-            )
-
-            approved_files, changed_final, citing_map = _compute_approval(
-                cfg, changed1, final, all_batch_ids
-            )
-
-            # FK-21: terminal/unapproved files are restored BEFORE the approved list is
-            # computed for the commit, so a restore failure can never coexist with a commit.
-            _restore_unapproved_files(cfg, state.snapshot, changed_final - approved_files)
-
-            approved_paths = sorted(approved_files)
-            committed, terminal_ids, deferred_ids = _classify_reported(
-                cfg, reported_committed_ids, citing_map, approved_files, final,
-                by_file_history, all_rows,
-            )
-
-            commit_sha, terminal_rows = _commit_and_record(
-                cfg, batch_id, result, approved_paths, deletion_paths, terminal_ids,
-                all_rows, key,
-            )
+            outcome = _author_batch(cfg, to_author, batch_id, state, all_rows)
         except BaseException as e:
             # Cleanup runs for EVERY fault, member or not: a stuck tick leaves the same
             # edits behind a retiring one does, and leaving them wedges the channel. The
@@ -885,11 +959,16 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
                 raise
             return _handle_retire(cfg, e, to_author, key, log)
 
+    committed = outcome.committed
+    bucket_held, bucket_consumed = outcome.bucket_held, outcome.bucket_consumed
+    terminal_rows, deferred_ids = outcome.terminal_rows, outcome.deferred_ids
+    commit_sha = outcome.commit_sha
+
     held_committed, rotated_committed = author_shared.partition_committed(
         committed, hold_committed=hold_committed
     )
 
-    deferred_held, deferred_consumed = _fold_deferrals(cfg, deferred_ids, all_rows, key)
+    deferred_held, deferred_consumed = _fold_deferrals(cfg, deferred_ids, all_rows)
 
     persist.rotate_queue_locked(
         pending_file=channel.file,
@@ -925,11 +1004,6 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
     return 0
 
 
-def _current_bytes(cfg: CorpusAuthorConfig, rel: str) -> bytes | None:
-    target = cfg.repo_root / rel
-    return target.read_bytes() if target.is_file() else None
-
-
 def _corpus_relative(cfg: CorpusAuthorConfig, rel: str) -> str:
     return str((cfg.repo_root / rel).relative_to(cfg.corpus_dir))
 
@@ -959,12 +1033,11 @@ def _restore_unapproved_files(
             write_guarded(target, pre)
 
 
-def _revert_repair_deletions(
+def _restore_from_snapshot(
     cfg: CorpusAuthorConfig, snapshot: dict[str, bytes] | None, rels: list[str],
 ) -> None:
-    """N6/M4: the repair spawn has no delete capability at all — a deletion that appears
-    only after it ran is put back from the TICK-START snapshot (a pre-existing file it had
-    no business removing). A path the snapshot never held (created and then removed inside
+    """N6/M4: a deletion the repair spawn is not allowed to make is put back from the
+    TICK-START snapshot. A path the snapshot never held (created and then removed inside
     this same tick, before repair) is left as it is: there is nothing to restore it to."""
     if snapshot is None:
         return
@@ -976,20 +1049,6 @@ def _revert_repair_deletions(
         target = cfg.corpus_dir / corpus_rel
         guarded_mkdir(target.parent, base=cfg.corpus_dir)
         write_guarded(target, pre)
-
-
-def _assert_no_new_stray(cfg: CorpusAuthorConfig, baseline_stray: list[str]) -> None:
-    """The repair spawn's own out-of-scope guard (M4): re-runs the SAME stray check the
-    first spawn gets, without `verify_agent_state`'s committed/corpus-dirty half — the
-    repair spawn self-reports no AUTHOR_RESULT at all, so that half has nothing to read."""
-    new_stray = sorted(
-        set(author_shared.changes_outside(cfg.repo_root, cfg.corpus_dir_rel)) - set(baseline_stray)
-    )
-    if new_stray:
-        raise AuthorError(
-            f"repair spawn changed files outside {cfg.corpus_dir_rel}*.md: {new_stray}; "
-            "refusing to commit/rotate"
-        )
 
 
 def _append_terminal_block(message: str, terminal_ids: list[str]) -> str:
@@ -1040,27 +1099,16 @@ def _flatten(buckets: tuple[BucketSpec, ...], rows: dict[str, list[dict]]) -> li
 
 
 def _project(
-    result: dict, all_rows: dict[str, dict], cfg: CorpusAuthorConfig
-) -> tuple[list[dict], dict[str, list[dict]], dict[str, list[dict]]]:
+    result: dict, all_rows: dict[str, dict], cfg: CorpusAuthorConfig, *, exclude: set[str],
+) -> tuple[dict[str, list[dict]], dict[str, list[dict]]]:
+    """The curator's held/consumed buckets as queue rows, minus `exclude` — the ids the tree
+    already gave a fate, which outranks anything the curator filed them under. The
+    `committed` bucket is not projected: what committed is read off the tree (O4)."""
     key = cfg.channel.id_key
-    committed: list[dict] = []
     bucket_held: dict[str, list[dict]] = {}
     bucket_consumed: dict[str, list[dict]] = {}
     for bucket in cfg.buckets:
         if bucket.disposition == "committed":
-            for rid in author_shared.result_list(result, bucket.name):
-                # The partition validator vouches for entry SHAPE by bucket NAME, this
-                # projection by DISPOSITION. Name a committed-disposition bucket anything
-                # but "committed" and the two stop agreeing — an unhashable dict would
-                # reach `all_rows.get` as a TypeError instead of an AuthorError.
-                if not isinstance(rid, str):
-                    raise AuthorError(
-                        f"AUTHOR_RESULT {bucket.name} entries must be {key} strings"
-                    )
-                src = all_rows.get(rid)
-                if src is None:
-                    raise AuthorError(f"author committed unknown {key}={rid!r}")
-                committed.append({**src, "consumed_category": "consumed_committed"})
             continue
         rows: list[dict] = []
         for entry in author_shared.result_list(result, bucket.name):
@@ -1068,6 +1116,8 @@ def _project(
             src = all_rows.get(rid)
             if src is None:
                 raise AuthorError(f"author {bucket.name} unknown {key}={rid!r}")
+            if rid in exclude:
+                continue
             rec = dict(src)
             if bucket.disposition == "consumed":
                 rec["consumed_category"] = bucket.name
@@ -1076,32 +1126,28 @@ def _project(
             rows.append(rec)
         target = bucket_consumed if bucket.disposition == "consumed" else bucket_held
         target[bucket.name] = rows
-    return committed, bucket_held, bucket_consumed
+    return bucket_held, bucket_consumed
 
 
-def _assert_corpus_attributable(cfg: CorpusAuthorConfig, ids: set[str]) -> None:
-    """M3.2: every file this tick CHANGED in the corpus must be vouched for by THIS BATCH —
-    a citation of an id this tick actually read, WHATEVER bucket the curator reported that
-    finding under (O5). UNCONDITIONAL (§7's own correction, `drain.py:436-437`/G13): this
-    used to run only `if committed:`; the drain now reads the whole corpus tree on every
-    tick and must have an opinion about every file it changed, not only the self-reported
-    ones.
+def _assert_corpus_attributable(
+    cfg: CorpusAuthorConfig, changed: tuple[str, ...], ids: set[str],
+) -> None:
+    """M3.2: every file the CURATOR spawn changed in the corpus must be vouched for by THIS
+    BATCH — a citation of an id this tick actually read, WHATEVER bucket the curator reported
+    that finding under (O5). Unconditional (§7's own correction, G13): the drain reads the
+    whole corpus tree on every tick and must have an opinion about every file it changed,
+    not only the self-reported ones.
 
-    The HEAD-provenance exemption that used to let an unchanged-citation edit ride for free
-    is GONE (M3.2/C13) — its only lessons-channel use was the BAD-fold revert, which D2
-    replaces outright with a per-file restore.
-
-    The other post-flight cross-check, `verify_agent_state`, is AGGREGATE (committed
-    non-empty ⇔ corpus dirty), one bit for a whole batch, so it misses the MIXED case.
+    This is the FIRST spawn's rule only. After the repair spawn the drain already knows
+    which findings each file owned, so an unvouched file there is refused per file
+    (`_Judgement.judge`'s FK-6 pair, and no approval) rather than per tick.
 
     Attribution is per FILE and by the channel's OWN provenance key. Raising `AuthorError`
     routes through `_undo_agent_edits` -> `_restore_corpus`: the tick unwinds, the batch is
     bumped and stays queued, the tick returns 2."""
-    key = cfg.channel.id_key
-    field = provenance_field(key)
+    field = provenance_field(cfg.channel.id_key)
     unattributed = [
-        rel for _xy, rel in _changed_corpus_records(cfg)
-        if not (_cited_ids(cfg.repo_root / rel, field) & ids)
+        rel for rel in changed if not (_cited_ids(cfg.repo_root / rel, field) & ids)
     ]
     if unattributed:
         raise AuthorError(
@@ -1112,27 +1158,18 @@ def _assert_corpus_attributable(cfg: CorpusAuthorConfig, ids: set[str]) -> None:
 
 
 def _changed_corpus_records(cfg: CorpusAuthorConfig) -> list[tuple[str, str]]:
-    """`(status, repo-relative path)` for the corpus files this tick added or modified.
+    """`(status, repo-relative path)` for everything git reports under the corpus.
 
     The corpus is CLEAN at the top of every tick (`assert_clean_corpus_dir` refuses to
-    author otherwise), so what git reports dirty under it is exactly what this agent call
-    wrote. Deletions are excluded: there is no file left to attribute, and a lesson the
-    curator retired rides M5's own deletion list instead (`_deleted_corpus_records`).
-
-    `no_renames=True` (§7 FK-32): a rename decomposes into its `D`/`A` halves before
-    anything downstream sees it, rather than one `R` record naming two paths.
-
-    A record whose WORKING-TREE bytes are byte-identical to HEAD's is dropped (FK-32's
-    second half): "changed" means content the check must judge, and a mode-only change
-    (a permission bit git tracks but nothing here reads) is not that."""
-    out: list[tuple[str, str]] = []
-    for xy, rel in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True):
-        if "D" in xy:
-            continue
-        if xy != "??" and _byte_identical_to_head(cfg.repo_root, rel):
-            continue
-        out.append((xy, rel))
-    return sorted(out, key=lambda rec: rec[1])
+    author otherwise), so what git reports dirty under it is exactly what this tick's
+    spawns wrote or removed. `no_renames=True` (§7 FK-32): a rename decomposes into its
+    `D`/`A` halves before anything downstream sees it, rather than one `R` record naming
+    two paths. `_settle_tree` is the one reader, and it sorts the records into the changed
+    set, the deletion list, and the mode-only changes it puts back."""
+    return sorted(
+        _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True),
+        key=lambda rec: rec[1],
+    )
 
 
 def _byte_identical_to_head(repo_root: Path, rel: str) -> bool:
@@ -1149,20 +1186,6 @@ def _byte_identical_to_head(repo_root: Path, rel: str) -> bool:
     except OSError:
         return False
     return wt_bytes == head_bytes
-
-
-def _deleted_corpus_records(cfg: CorpusAuthorConfig) -> list[str]:
-    """M5/RF-2: the repo-relative paths this tick DELETED under the corpus — the collector
-    `_changed_corpus_records`'s own `D`-drop (C17) needs, since a curator deletion still
-    rides M5's explicit commit list even though it never needs a voucher (N6)."""
-    return sorted(
-        {
-            rel for xy, rel in _git.git_status(
-                cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True
-            )
-            if "D" in xy
-        }
-    )
 
 
 def _cited_ids(path: Path, field: str) -> set[str]:
@@ -1223,9 +1246,9 @@ def _attempt_pair(
         raise VerdictError(f"forward_check: row's run_id is not a usable string: {source_id!r}")
     if not _resolves_inside_runs_dir(cfg.runs_dir, source_id):
         raise VerdictError(f"forward_check: run_id resolves outside runs_dir: {source_id!r}")
-    # Only ever called from `_run_verdict_pass`, itself only reachable once the caller has
-    # already checked `cfg.forward_check is not None` — narrowed here for mypy, not a new
-    # runtime check.
+    # Only ever called from `_Judgement.mint`, which routes a pair here only once it has
+    # checked `cfg.forward_check is not None` — narrowed here for mypy, not a new runtime
+    # check.
     assert cfg.forward_check is not None
     idx = next(counter)
     ctx = CheckContext(
@@ -1259,80 +1282,6 @@ def _verdict_for_pair(
             return _attempt_pair(cfg, counter, rel, row, path, lesson_text)
         except VerdictError as e2:
             return "BAD", f"{ERROR_PREFIX}{e1}; {e2}"
-
-
-def _run_verdict_pass(
-    cfg: CorpusAuthorConfig,
-    files: list[str],
-    all_rows: dict[str, dict],
-    all_batch_ids: set[str],
-    counter: Any,
-    pass_no: int,
-    *,
-    fallback_citers: dict[str, set[str]] | None = None,
-    texts_out: dict[str, str] | None = None,
-) -> dict[str, list[PairVerdict]]:
-    """One M3.3 verdict pass, fanned out under `verify_batch_workers()` (the Scale
-    section's own bound). Mints one `PairVerdict` per (file, this-batch cited id) pair.
-
-    @owns PairVerdict — the ONE function that constructs `PairVerdict` instances (GOOD/BAD via
-    `_verdict_for_pair`, EXEMPT via `cfg.exempt`, and the FK-6 fallback-BAD synthetic pair).
-
-    `fallback_citers` is M4/§7 FK-6's own escape hatch: on pass 2, a file the repair spawn
-    left with no this-batch citation is NOT a tick-wide `AuthorError` — it is terminal for
-    the finding(s) that cited it in pass 1, and nothing else. `None` (pass 1) means every
-    file here is ALREADY known-vouched (M3.2 raised otherwise), so the branch never fires.
-
-    `texts_out`, when given, records the bytes each file was actually judged on — O1's own
-    "the bytes a verdict judged are the bytes that land in HEAD" needs this to detect a file
-    that moved AGAIN between being read for this pass and this pass completing."""
-    field = provenance_field(cfg.channel.id_key)
-    jobs: list[tuple[str, str, dict, Path, str]] = []
-    results: dict[str, list[PairVerdict]] = {}
-    for rel in files:
-        path = cfg.repo_root / rel
-        lesson_text = _read_or_empty(path)
-        if texts_out is not None:
-            texts_out[rel] = lesson_text
-        cited = _cited_ids(path, field) & all_batch_ids
-        if not cited and fallback_citers is not None:
-            for fid in sorted(fallback_citers.get(rel, ())):
-                row = all_rows.get(fid, {})
-                results.setdefault(rel, []).append(
-                    PairVerdict(
-                        rel_path=rel, finding_id=fid, source_id=str(row.get("run_id") or ""),
-                        verdict="BAD",
-                        reasoning="repair rewrite dropped this file's citations to this batch",
-                        lesson_text=lesson_text, pass_no=pass_no,
-                    )
-                )
-            continue
-        for fid in sorted(cited):
-            jobs.append((rel, fid, all_rows[fid], path, lesson_text))
-
-    if not jobs:
-        return results
-
-    def _one(job: tuple[str, str, dict, Path, str]) -> tuple[str, PairVerdict]:
-        rel, fid, row, path, lesson_text = job
-        if cfg.exempt(row):
-            return rel, PairVerdict(
-                rel_path=rel, finding_id=fid, source_id=str(row.get("run_id") or ""),
-                verdict="EXEMPT",
-                reasoning="exempt: this finding's kind is out of the check's scope",
-                lesson_text=lesson_text, pass_no=pass_no,
-            )
-        verdict, reasoning = _verdict_for_pair(cfg, counter, rel, row, path, lesson_text)
-        return rel, PairVerdict(
-            rel_path=rel, finding_id=fid, source_id=str(row.get("run_id") or ""),
-            verdict=verdict, reasoning=reasoning, lesson_text=lesson_text, pass_no=pass_no,
-        )
-
-    workers = max(1, config.verify_batch_workers())
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for rel, pv in pool.map(_one, jobs):
-            results.setdefault(rel, []).append(pv)
-    return results
 
 
 def build_repair_user_prompt(
@@ -1560,11 +1509,7 @@ def _revert_strays(repo_root: Path, corpus_dir_rel: str, baseline_stray: list[st
     except GitError:
         return
     for rel in strays:
-        _git.git(["checkout", "-q", "--", rel], cwd=repo_root, check=False)
-        target = repo_root / rel
-        tracked = _git.git_ok(["ls-files", "--error-unmatch", "--", rel], cwd=repo_root)
-        if not tracked and target.is_file():
-            target.unlink()
+        _put_back(repo_root, rel)
 
 
 def _restore_corpus(

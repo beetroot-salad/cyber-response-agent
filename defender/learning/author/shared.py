@@ -341,6 +341,15 @@ def verify_agent_state(
     noun: str,
     baseline_stray: list[str],
 ) -> None:
+    """Both post-spawn cross-checks in one call: the tree's scope (`assert_no_new_stray`)
+    and the agent's report against it (`verify_agent_report`)."""
+    assert_no_new_stray(repo_root, corpus_dir_rel, baseline_stray)
+    verify_agent_report(repo_root, result, corpus_dir, corpus_dir_rel, noun)
+
+
+def assert_no_new_stray(repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str]) -> None:
+    """A change outside `<corpus>/*.md` beyond what was already dirty at tick start refuses
+    the tick — the spawn wrote where it was not asked to."""
     new_stray = sorted(
         set(changes_outside(repo_root, corpus_dir_rel)) - set(baseline_stray)
     )
@@ -349,6 +358,14 @@ def verify_agent_state(
             f"agent changed files outside {corpus_dir_rel}*.md: {new_stray}; "
             "refusing to commit/rotate"
         )
+
+
+def verify_agent_report(
+    repo_root: Path, result: dict, corpus_dir: Path, corpus_dir_rel: str, noun: str,
+) -> None:
+    """The agent's self-report against the tree, one bit each way: `committed` non-empty
+    with a clean corpus, or `committed` empty with a dirty one, is a spawn whose word and
+    work disagree, and the tick refuses to start believing the tree on its say-so."""
     committed = result_list(result, "committed")
     corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir)
     if committed and not corpus_dirty:

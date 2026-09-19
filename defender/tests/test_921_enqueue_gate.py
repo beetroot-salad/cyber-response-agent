@@ -740,7 +740,7 @@ def _removed_test_921_a_family_row_answers_exempt_rather_than_error(tmp_path):
     assert queued == frozenset(), "the family row entered the checkable set"
     assert exempt == {str(family["run_id"])}, "the family row is not named exempt"
 
-    deps = S.curator_deps(scene, queued=queued, exempt=exempt, run_verify=_never_verifies)
+    deps = S.curator_deps(scene)
     out = asyncio.run(tool.run_forward_check(
         deps, [tool.Pair(lesson_path=str(lesson), source_id=str(family["run_id"]))]))
 
@@ -773,8 +773,7 @@ def _removed_test_921_a_row_missing_for_any_other_reason_still_errors(tmp_path):
     lesson = scene.corpus / "L1.md"
     lesson.write_text("---\nid: L1\n---\nbody\n", encoding="utf-8")
 
-    deps = S.curator_deps(scene, queued=["some-other-run"], exempt=(),
-                          run_verify=_never_verifies)
+    deps = S.curator_deps(scene)
     out = asyncio.run(tool.run_forward_check(
         deps, [tool.Pair(lesson_path=str(lesson), source_id="run-nobody-queued")]))
 

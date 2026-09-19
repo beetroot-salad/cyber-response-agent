@@ -325,7 +325,8 @@ def _gate_findings(
     if not batch:
         return [], [], []
     # THE SAME PREDICATE THE ROUTE USES, not a second spelling of it. `skips_forward_check`
-    # already decides which rows are family rows for `queued_ids` above; re-deriving
+    # is the channel's `exempt` (M2), the predicate the drain's verdict step keys EXEMPT on;
+    # re-deriving
     # `entry["direction"] == "family"` here gives one rule two homes, and the duplicate-helper
     # gate keys on the symbol NAME, so it is structurally blind to the copy. Widening the family
     # route later would otherwise update one site and leave the other routing as it always did.

@@ -70,7 +70,7 @@ def test_load_run_context_missing_disposition(tmp_path, monkeypatch):
     (runs / "rid" / "investigation.md").write_text("x")
     import yaml
     (runs / "rid" / "source_refs.yaml").write_text(yaml.safe_dump({}))
-    with pytest.raises(SystemExit, match="missing normalized_disposition"):
+    with pytest.raises(vfs.VerdictError, match="missing normalized_disposition"):
         vf.load_run_context("rid", runs_dir=runs)
 
 

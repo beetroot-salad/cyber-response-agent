@@ -59,25 +59,12 @@ def source_bundle(
     return d
 
 
-def curator_deps(  # noqa: PLR0913 — one keyword per axis a curator test may vary; collapsing any two into a struct would make the helper name a shape no case is about
-    scene,
-    *,
-    run_verify=None,
-    check=None,
-    queued=(),
-    corpus: Path | None = None,
-    runs: Path | None = None,
-    pending: Path | None = None,
-    exempt: Sequence[str] = (),
-    box=None,
-) -> CuratorDeps:
+def curator_deps(scene, *, corpus: Path | None = None, box=None) -> CuratorDeps:
     """`CuratorDeps` over the scene, through the real `for_run` entry point.
 
     #773 M1: the forward-check config group `for_run` used to attach is gone — the check
-    moved out of the curator's own spawn entirely, so `run_verify`/`check`/`queued`/
-    `exempt` are accepted and ignored, kept only so callers built for the old shape (the
-    lesson-read suite, which never cared about any of them) still name what they pass.
-    """
+    moved out of the curator's own spawn entirely, so there is nothing left to vary here
+    but the corpus and the box."""
     return CuratorDeps.for_run(
         scene.curdir,
         scene.repo,

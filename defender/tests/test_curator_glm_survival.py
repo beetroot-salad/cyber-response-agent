@@ -338,22 +338,17 @@ def _spawn_curator(**over):
     overrides per case. Mirrors test_lead_author_engine.py's ``_spawn`` over
     ``run_author_stage``. The ``run_author`` DI seam captures the trace anchor without
     running the pydantic-ai graph. Signature per the SEAM INTERFACE CONTRACT (assumed)."""
-    # The env check retired with its corpus (#922); the findings check is the surviving one,
-    # and what this test measures — one trace file per spawn — is the same for either.
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK as _ENV_CHECK
     from defender.learning.author.curator_engine import (
         run_curator_stage,
     )
 
+    # #773 M1: the curator spawn takes no forward-check group any more — the check is the
+    # drain's, and what this test measures (one trace file per spawn) never depended on it.
     kw = dict(
         system_prompt_file=Path("/tmp/curator-prompt.md"),
         batch_id="batch-C",
         user_prompt="u",
         corpus_dir=Path("/tmp/wt/defender/lessons-environment"),
-        check=_ENV_CHECK,
-        runs_dir=Path("/tmp/state/runs"),
-        pending=Path("/tmp/state/_pending/environment_observations.jsonl"),
-        queued_ids=frozenset(),
         repo_root=Path("/tmp/wt"),
         learning_run_dir=Path("/tmp/state/_pending"),
         model="glm-5.3",
