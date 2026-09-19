@@ -116,9 +116,9 @@ lesson about a world could regress. Both curators run inside one drain tick.
 Each worker commits from its own git worktree off `origin/main`, one PR per batch — the loop is
 the sole committer, and spawned agents run no git. Lessons feed back into the runtime three times: at
 PLAN time via `defender-lessons`, on every write that moves the investigation's open set via
-`scripts/lessons/lessons_frontier.py`, and on the compaction fold's frontier row, which re-shows
-the block the whole record matches once the turns that carried earlier ones are folded away
-(`runtime/lessons_push.py`).
+`scripts/lessons/lessons_frontier.py`, and on the compaction fold's frontier row, which carries
+the block the whole document matches at the fold — derived fresh, not a re-show of what the
+folded-away turns carried (`runtime/lessons_push.py`).
 
 **What this replaced (#922).** Until the cutover the loop authored its own material: an actor
 invented a story about the alert, an oracle invented the telemetry that story would have

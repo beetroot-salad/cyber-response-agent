@@ -43,7 +43,6 @@ from ..verb_dispositions import HEALTH_CHECK, grant_for, shipped_dispositions
 from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
-from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
@@ -294,7 +293,7 @@ def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as bui
 
 
 def _compaction_enabled() -> bool:
-    return env_bool("DEFENDER_COMPACTION", False)
+    return compaction.enabled()
 
 
 def _summary_pointers(run_dir: Path) -> dict[str, str]:

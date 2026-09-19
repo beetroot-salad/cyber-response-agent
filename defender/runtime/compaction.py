@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from defender._env import env_bool
+
 if TYPE_CHECKING:
     from defender.skills.invlang.schema import FindingRecord
 
@@ -17,6 +19,15 @@ except Exception:  # pragma: no cover - import guard; absence → always-fallbac
 Message = dict[str, Any]
 
 FRONTIER_SENTINEL = "Settled investigation frontier (completed loops)."
+
+
+def enabled() -> bool:
+    """Whether the store-backed fold is on for this process (`DEFENDER_COMPACTION`). HERE,
+    beside the mechanism, because two callers must agree: the driver folds on it, and the
+    write-return lessons push (`tools/_document._frontier_recall`) withholds its block on the
+    write that advances the fold boundary, since the fold at the next render displaces that
+    return before the model reads it and carries the same block itself (#936)."""
+    return env_bool("DEFENDER_COMPACTION", False)
 
 
 

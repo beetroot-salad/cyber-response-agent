@@ -99,26 +99,35 @@ class LessonExposure:
     lesson_name: str
     evidence: str
     evidence_at: str | None
-    rows: int
 
 
-def exposures(rows: Iterable[dict], *, since: datetime | None = None) -> list[LessonExposure]:
-    """The record READ AS A SET — one `LessonExposure` per lesson name, in first-occurrence
-    order — from rows read as an EVENT log (a row per time a lesson reached an agent; the
-    compaction fold alone writes one per matching lesson per boundary). Every reader that
-    wants "what was in front of the model" asks this, so the judge's view and the trace CLI
-    cannot disagree about it.
+@dataclass(frozen=True)
+class Exposures:
+    """The record READ AS A SET: one `LessonExposure` per lesson name in first-occurrence
+    order, plus the count of rows that named no lesson — a `lesson_name` that is not a string
+    cannot name one, and a reader that dropped such rows silently would state "no lessons"
+    as fact over a record that holds rows."""
+    lessons: list[LessonExposure]
+    unnamed: int
+
+
+def exposures(rows: Iterable[dict], *, since: datetime | None = None) -> Exposures:
+    """`lessons_loaded.jsonl` read as a set, from rows read as an EVENT log (a row per time a
+    lesson reached an agent; the compaction fold alone writes one per matching lesson per
+    boundary). Every reader that wants "what was in front of the model" asks this, so the
+    judge's view and the trace CLI cannot disagree about it.
 
     `since` is the qualifying window: with one, a row whose `ts` is missing, unparseable or
     earlier is not counted at all (a lesson cannot have been in context before it existed —
-    `trace_lesson` passes the lesson's `created_at`). Rows whose `lesson_name` is not a string
-    cannot name a lesson and are dropped. The earliest row of a class is picked by parsed
-    instant, not string order, with unparseable timestamps last among ties.
+    `trace_lesson` passes the lesson's `created_at`). The earliest row of a class is picked by
+    parsed instant, not string order, with unparseable timestamps last among ties.
     """
     by_name: dict[str, list[tuple[str, datetime | None, str | None]]] = {}
+    unnamed = 0
     for row in rows:
         name = row.get("lesson_name")
         if not isinstance(name, str):
+            unnamed += 1
             continue
         ts = parse_iso_utc(row.get("ts"))
         if since is not None and (ts is None or ts < since):
@@ -131,5 +140,5 @@ def exposures(rows: Iterable[dict], *, since: datetime | None = None) -> list[Le
         strongest = max((e for e, _t, _r in seen), key=EVIDENCE_RANK.__getitem__)
         of_class = [(t, r) for e, t, r in seen if e == strongest]
         _t, at = min(of_class, key=lambda q: (q[0] is None, q[0] or _DT_MAX, q[1] or ""))
-        out.append(LessonExposure(name, strongest, at, len(seen)))
-    return out
+        out.append(LessonExposure(name, strongest, at))
+    return Exposures(out, unnamed)

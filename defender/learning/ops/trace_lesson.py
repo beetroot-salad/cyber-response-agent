@@ -136,10 +136,13 @@ def in_context_cases(
         loaded = run_dir / "lessons_loaded.jsonl"
         if not loaded.is_file():
             continue
-        for exposure in exposures(read_jsonl_rows(loaded), since=created_at):
-            if exposure.lesson_name == lesson_name:
-                hits.append(CaseHit(run_dir.name, _report_disposition(run_dir),
-                                    str(exposure.evidence_at), exposure.evidence))
+        # THIS lesson's rows only, before the reader classifies anything: `--all` calls this
+        # once per lesson per run, and classifying every other lesson's rows each time is
+        # N-lessons × rows of work thrown away.
+        mine = (r for r in read_jsonl_rows(loaded) if r.get("lesson_name") == lesson_name)
+        for exposure in exposures(mine, since=created_at).lessons:
+            hits.append(CaseHit(run_dir.name, _report_disposition(run_dir),
+                                str(exposure.evidence_at), exposure.evidence))
     return hits
 
 

@@ -11,30 +11,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from defender.tests._session_store_705 import CLOSED_LOOP_INVLANG
+
 # documents
 
-#: `test_store_driver_705._CLOSED_LOOP_INVLANG`, transcribed rather than imported (importing
-#: a collected module loads it twice in one session — `_lessons_corpus` explains). Loop 1 is
-#: CLOSED with a resolved lead and loop 2 is open, so `compaction.fold_boundary` reads 1 and
-#: `driver._fold_decision` authorizes a fold on the first render.
-CLOSED_LOOP = """```invlang
-:L findings [id|loop|name|target|tests|system|window]
-l-001|1|raw-auth|v-001||elastic|w
-
-:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success
-```
-
-```invlang
-:T close
-loop 1
-```
-
-```invlang
-:L findings [id|loop|name|target|tests|system|window]
-l-005|2|cmdb-ip|v-006||cmdb|w
-```
-"""
+#: `_session_store_705.CLOSED_LOOP_INVLANG`, the one closed-loop document both fold suites
+#: fold on. Loop 1 is CLOSED with a resolved lead and loop 2 is open, so
+#: `compaction.fold_boundary` reads 1 and `driver._fold_decision` authorizes a fold on the
+#: first render.
+CLOSED_LOOP = CLOSED_LOOP_INVLANG
 
 #: A `process` vertex whose class is the bare open marker — the slot `CLASS_LESSON` keys on.
 #: Appended AFTER the loop-2 lead, so it lies past the record cut (see the module docstring).

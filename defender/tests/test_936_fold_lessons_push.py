@@ -277,10 +277,24 @@ def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, 
     assert second.count(FOLD_HEADER) == 1
     assert (rd / "investigation.md").read_text(encoding="utf-8").endswith(SECOND_LOOP), (
         "control: the append that closes loop 2 was refused")
-    # fold 1 (class) + the write that opened loginuid (class, loginuid) + fold 2 (class, loginuid)
+    # fold 1 (class) + fold 2 (class, loginuid). NOT the write that closed loop 2 and opened
+    # loginuid: under compaction its return is displaced by fold 2 at the very next render,
+    # before MAIN reads it, so the lane withholds its block and records nothing — a row there
+    # would say loginuid was in front of MAIN one round before it was, off a return it never
+    # saw. Every push row here is one the model was actually shown.
     assert Counter(r["lesson_name"] for r in _rows(rd)) == Counter(
-        {CLASS_LESSON: 3, LOGINUID_LESSON: 2}), _rows(rd)
+        {CLASS_LESSON: 2, LOGINUID_LESSON: 1}), _rows(rd)
     assert all(r["kind"] == "push" for r in _rows(rd))
+    # the closing write's return is OFF every path after fold 2 (`_append_returns` cannot see
+    # it — which is the point), so it is read straight out of the file
+    returns = [
+        part["content"] for (payload,) in sql(store, "SELECT payload FROM message_payload")
+        for part in json.loads(payload).get("parts", [])
+        if part.get("part_kind") == "tool-return" and part.get("tool_name") == "append_block"
+    ]
+    assert len(returns) == 1, returns
+    assert WRITE_RETURN_HEADER not in str(returns[0]), (
+        "the loop-closing write's return carried a block the fold displaced before MAIN read it")
 
 
 def test_one_frontier_row_and_one_push_row_per_lesson_across_the_rounds_on_a_boundary(

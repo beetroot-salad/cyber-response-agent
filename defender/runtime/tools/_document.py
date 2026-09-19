@@ -16,7 +16,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import TEXT_READ_ERRORS, read_plain, write_guarded
-from .. import permission
+from .. import compaction, permission
 
 # The SAME byte ruler the artifact bounds are measured with — a write tool that reports
 # "bytes" must report the number the gate will judge, not a codepoint count that under-reads it.
@@ -459,6 +459,19 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         if now_frontier == was_frontier:
             return ""
         if now_frontier.is_empty():
+            return ""
+        # WITHHELD ON THE WRITE THAT ADVANCES THE FOLD BOUNDARY, under compaction (#936).
+        # The render that prepares MAIN's next request folds through the loop this write
+        # closed and reparents the frontier row onto the root, so THIS return is off the send
+        # path before the model reads it — a block here is tokens the model never sees and a
+        # `push` row for a lesson that was not in front of it. The frontier row carries the
+        # same top three, derived over the same document, with its own row. `fold_boundary`
+        # advances only on the write completing the pair {`:T close` for loop N, a finding in
+        # a loop past N} with every loop below N already closed — the same decision the driver
+        # makes at the next render (`driver._fold_decision`), asked here of the same bytes.
+        if compaction.enabled() and (
+            compaction.fold_boundary(after) > compaction.fold_boundary(before)
+        ):
             return ""
         # ONE walk for the two frontiers below. `iter_lessons` re-opens and re-YAML-parses
         # every file in the corpus per call, and it is the dominant cost here — the two scores

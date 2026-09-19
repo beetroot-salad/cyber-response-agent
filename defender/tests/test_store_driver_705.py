@@ -44,6 +44,7 @@ from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import circuit_breaker, driver  # noqa: E402
 from defender.tests._session_store_705 import (
+    CLOSED_LOOP_INVLANG,
     FaultStore,
     StoreFault,
     runs_base,
@@ -66,30 +67,6 @@ pytestmark = pytest.mark.e2e
 
 SALT = "0011223344556677"
 
-#: An investigation.md whose loop 1 is CLOSED (`:T close`) with a resolved lead, and whose
-#: loop 2 is still open — `compaction.fold_boundary` reads 1 from it, which is what makes
-#: `driver._fold_decision` authorize a fold. The active loop 2 is what keeps the fold from
-#: swallowing the turn in progress.
-_CLOSED_LOOP_INVLANG = """```invlang
-:L findings [id|loop|name|target|tests|system|window]
-l-001|1|raw-auth|v-001||elastic|w
-
-:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success
-```
-
-```invlang
-:T close
-loop 1
-```
-
-```invlang
-:L findings [id|loop|name|target|tests|system|window]
-l-005|2|cmdb-ip|v-006||cmdb|w
-```
-"""
-
-
 def test_the_closed_loop_fixture_opens_no_slot():
     """Pinned because since #936 the fold's mint walks `defender_dir/lessons` — the CHECKOUT's
     live corpus here, since `drive` plants no tree — and would put real lesson paths into the
@@ -98,7 +75,7 @@ def test_the_closed_loop_fixture_opens_no_slot():
     that wants a matching fold plants its own tree and corpus (`test_936_fold_lessons_push`)."""
     from defender.skills.invlang.frontier import frontier_from_text
 
-    assert frontier_from_text(_CLOSED_LOOP_INVLANG).is_empty(), (
+    assert frontier_from_text(CLOSED_LOOP_INVLANG).is_empty(), (
         "the closed-loop fixture opens a slot; the fold would now match the live lessons corpus")
 
 
@@ -693,7 +670,7 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
     orphan the turns before it."""
     monkeypatch.setenv("DEFENDER_COMPACTION", "1")
     rd = materialize(tmp_path, GOLDEN)
-    (rd / "investigation.md").write_text(_CLOSED_LOOP_INVLANG, encoding="utf-8")
+    (rd / "investigation.md").write_text(CLOSED_LOOP_INVLANG, encoding="utf-8")
     opened: list = []
     drive(rd, run_id="minted",
           main=ReplayFn(_read_alert_turns(rd, 6) + [Turn(text="done")]),

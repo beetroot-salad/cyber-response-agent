@@ -266,7 +266,11 @@ def _render_lessons(lessons: list[dict[str, Any]]) -> str:
     lines = []
     for entry in lessons:
         name = entry.get("lesson_name")
-        head = f"### {name}\n({entry['exposure']})\n" if entry.get("exposure") else f"### {name}\n"
+        # `exposure` is REQUIRED (a KeyError, not a silent omission): the line is what tells
+        # the judge whether the model read the body or saw a description — `None` only for
+        # the unnamed-rows entry, which has no lesson to expose.
+        exposure = entry["exposure"]
+        head = f"### {name}\n({exposure})\n" if exposure is not None else f"### {name}\n"
         if entry.get("body") is not None:
             lines.append(f"{head}{entry['body']}")
         else:
@@ -699,7 +703,8 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     # run kept matching repeated its whole body once per boundary in the judge's prompt; and
     # a row that says `push` means the model saw the description and dimensions, not the body
     # below, which the exposure line beside each lesson now says.
-    for exposure in exposures(lessons_loaded):
+    read = exposures(lessons_loaded)
+    for exposure in read.lessons:
         name = exposure.lesson_name
         # DERIVED FROM THE NAME: `lessons_loaded.jsonl` has exactly one production writer —
         # `runtime/tools/_deps._record_lesson_load` — and it writes `{lesson_name, ts, kind,
@@ -728,6 +733,14 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
                 note = f"unavailable: {path!r} at {commit!r} could not be read"
         lessons.append({"lesson_name": name, "path": path, "body": body, "note": note,
                         "dirty": dirty, "exposure": _exposure_line(exposure)})
+    if read.unnamed:
+        # STATED, not dropped: a row whose name is not a string names no lesson, but a view
+        # that then said "no lessons were loaded" would state an absence as fact over a record
+        # that holds rows — the lie `_render_spread`'s docstring warns about.
+        lessons.append({"lesson_name": f"({read.unnamed} row(s) that named no lesson)",
+                        "path": None, "body": None,
+                        "note": "unavailable: the row's `lesson_name` is not a string",
+                        "dirty": dirty, "exposure": None})
 
     siblings, union_notes = union if union is not None else sibling_union(
         Path(runs_base) if runs_base is not None else None,
@@ -797,8 +810,8 @@ _EXPOSURE_LINES = {
     EVIDENCE_PUSH: "pushed by the runtime: the model saw this lesson's description and "
                    "dimensions, never the body below",
     EVIDENCE_INDIRECT: "reached another agent only, never the model",
-    EVIDENCE_UNKNOWN: "in context, but the record predates the read/push distinction and "
-                      "cannot say which",
+    EVIDENCE_UNKNOWN: "in context, but the row cannot say how — it predates the read/push "
+                      "distinction, or is malformed",
 }
 
 

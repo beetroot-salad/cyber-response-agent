@@ -118,7 +118,8 @@ et al. (feedback-loop debt, which starts accruing once lessons feed back).
    frontier block on a write that moved the open set
    (`scripts/lessons/lessons_frontier.py`), and the #936 frontier block the
    compaction fold's row carries — the same derivation as #919, over the whole
-   record at the moment the fold displaces the turns that showed earlier blocks
+   document (not the cut record) at the moment the fold displaces the turns
+   that showed earlier blocks; derived fresh, not a re-show
    (`runtime/lessons_push.py`).
 
 ## Loop Shape

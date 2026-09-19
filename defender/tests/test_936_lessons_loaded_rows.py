@@ -8,14 +8,20 @@ mint — is `test_936_fold_lessons_push.py`. Obligations by name in each docstri
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 from defender.tests._by_path import load_trace_lesson
 from defender.tests._fold_936 import (
     CLASS_LESSON,
     CLASS_SELECTOR,
+    CLOSED_LOOP,
     EVIDENCE_VOCABULARY,
     FOLDING_DOC,
+    LOGINUID_LESSON,
+    LOGINUID_SELECTOR,
+    OPEN_CLASS_BLOCK,
+    SECOND_LOOP,
     WRITE_RETURN_HEADER,
     _rows,
 )
@@ -89,6 +95,54 @@ def test_a_push_row_names_the_push_and_the_main_role(tmp_path):
     assert [(r["lesson_name"], r.get("kind"), r.get("role")) for r in rows] == [
         ("pushed-936", "push", "main")], rows
     assert "ts" in rows[0]
+
+
+def test_the_write_that_advances_the_fold_boundary_pushes_nothing_under_compaction(
+    tmp_path, monkeypatch,
+):
+    """Under compaction the render that prepares MAIN's next request folds through the loop
+    a write just closed, and that write's return is off the send path before the model reads
+    it — so the write-return lane withholds its block and its rows on exactly that write (the
+    fold's own row carries the same top three, with its own rows). Three writes in sequence:
+    the closed loop 1 + open loop 2 (advances the boundary 0→1; opens no slot, so a control
+    only for "nothing to push either way"), the block that opens `class` (advances nothing:
+    pushes under compaction too), and the block that closes loop 2 and opens `attrs.loginuid`
+    (advances 1→2: pushes with compaction OFF, withheld with it ON)."""
+    from defender.runtime import compaction
+    from defender.runtime.tools import _tool_append_block
+
+    writes = (CLOSED_LOOP, OPEN_CLASS_BLOCK, SECOND_LOOP)
+    doc = ""
+    boundaries = []
+    for w in writes:
+        doc += w
+        boundaries.append(compaction.fold_boundary(doc))
+    assert boundaries == [1, 1, 2], "fixture: only the first and last writes advance the boundary"
+
+    def run(*, compaction_on: bool) -> tuple[list[str], list[dict]]:
+        monkeypatch.setenv("DEFENDER_COMPACTION", "1" if compaction_on else "0")
+        root = tmp_path / ("on" if compaction_on else "off")
+        root.mkdir()
+        deps, run_dir, dfn = _main_deps(root)
+        corpus = dfn / "lessons"
+        corpus.mkdir()
+        _write_lesson(corpus, CLASS_LESSON, nodes=CLASS_SELECTOR)
+        _write_lesson(corpus, LOGINUID_LESSON, nodes=LOGINUID_SELECTOR)
+        return [_tool_append_block(deps, w) for w in writes], _rows(run_dir)
+
+    off, off_rows = run(compaction_on=False)
+    assert WRITE_RETURN_HEADER not in off[0], "control: loop 1 + loop 2 open no slot"
+    assert CLASS_LESSON in off[1], "control: opening `class` pushes"
+    assert LOGINUID_LESSON in off[2], "control: with compaction off the closing write pushes"
+    assert Counter(r["lesson_name"] for r in off_rows) == {CLASS_LESSON: 2, LOGINUID_LESSON: 1}
+
+    on, on_rows = run(compaction_on=True)
+    assert WRITE_RETURN_HEADER not in on[0]
+    assert CLASS_LESSON in on[1], "a slot-opening write that closes no loop still pushes"
+    assert WRITE_RETURN_HEADER in on[1]
+    assert WRITE_RETURN_HEADER not in on[2], on[2]
+    assert LOGINUID_LESSON not in on[2], on[2]
+    assert Counter(r["lesson_name"] for r in on_rows) == {CLASS_LESSON: 1}, on_rows
 
 
 # M4 — a header per push
@@ -312,16 +366,19 @@ def test_exposure_time_is_the_earliest_row_of_the_strongest_class():
         _row("L", ts="2026-06-05T12:00:00+00:00", kind="push", role="main"),
     ]
     got = exposures(rows)
-    assert [(e.lesson_name, e.evidence, e.evidence_at, e.rows) for e in got] == [
-        ("L", "read", "2026-06-05T20:00:00+09:00", 4),
-        ("M", "push", "2026-06-05T10:00:00+00:00", 1),
+    assert [(e.lesson_name, e.evidence, e.evidence_at) for e in got.lessons] == [
+        ("L", "read", "2026-06-05T20:00:00+09:00"),
+        ("M", "push", "2026-06-05T10:00:00+00:00"),
     ]
+    assert got.unnamed == 0
     # the window drops a row entirely, so a stale read cannot lend its class OR its time
     from datetime import UTC, datetime
 
     windowed = exposures(rows, since=datetime(2026, 6, 5, 11, 45, tzinfo=UTC))
-    assert [(e.lesson_name, e.evidence, e.evidence_at) for e in windowed] == [
+    assert [(e.lesson_name, e.evidence, e.evidence_at) for e in windowed.lessons] == [
         ("L", "push", "2026-06-05T12:00:00+00:00")]
+    # a row that names no lesson is COUNTED, never silently dropped — the judge states it
+    assert exposures([{"lesson_name": 123, "ts": "x"}, {"ts": "x"}, _row("L")]).unnamed == 2
 
 
 # O3 — the prose contract
