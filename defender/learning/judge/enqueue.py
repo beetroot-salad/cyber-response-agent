@@ -21,8 +21,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import model_validator
+from pydantic import ValidationError as PydanticValidationError
 
 from defender._io import bind, guarded_mkdir, read_guarded, read_jsonl_rows_report, write_guarded
+from defender._model import model, original_or, unwrap_before
 from defender._run_paths import artifact_dir, artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
@@ -79,122 +82,231 @@ def _questioner_queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
     return _queue_paths_for(loop_paths().questioner_findings, queue_dir)
 
 
+#: Distinguishes "not a key of the row at all" from "present with a falsy/`None` value" — the
+#: two `QueueRow`/`WorldQueueRow` presence screens below are about KEY PRESENCE (`key not in
+#: row`), which a plain `None` default on the field would collapse into "value is None" and
+#: silently accept a row that carries the key with an explicit `None` (#1067 PR5).
+_ABSENT = object()
+
+
+@model
+class QueueRow:
+    """THE rule for what may go on the DEFENDER queue, as the object it guards (#1067 PR5) —
+    was a bare function (`_validate_row`); the same ordered checks now live in the
+    `model_validator` below, carried over verbatim including their comments, so construction
+    itself IS the validation and a rule cannot silently drift from the shape it guards.
+    `from_row` is the entry point: build one and discard it — the appender still writes the
+    RAW dict it was handed (#921 M5's thirteen-key shape), this class exists only to gate it,
+    the same non-goal the function it replaces always had."""
+
+    finding_id: Any = _ABSENT
+    run_id: Any = _ABSENT
+    direction: Any = _ABSENT
+    subject: str | None = None
+    type: str | None = None
+    subject_anchor: str | None = None
+    subject_topic: str | None = None
+    judge_outcome: str | None = None
+    #: Message-prefix context only, never a fact ABOUT the row — carried as a field (not a
+    #: separate argument) because a `mode="before"` validator sees exactly the constructor's
+    #: own kwargs and nothing else.
+    episode_dir: Any = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ordered_checks(cls, data: Any) -> Any:
+        data = unwrap_before(cls, data)
+        episode_dir = data.get("episode_dir")
+        where = f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
+        # `finding_id` FIRST, because `_gate_findings` indexes it FIRST — `fid = entry["finding_id"]`
+        # opens its per-row loop, before `skips_forward_check` and before the deliberate
+        # `entry["run_id"]` probe. A row missing it therefore raises exactly the bare `KeyError` this
+        # guard exists to keep off the queue, one line earlier than the two keys that were listed.
+        for key in ("finding_id", "run_id", "direction"):
+            if data.get(key, _ABSENT) is _ABSENT:
+                raise JudgeRefused(
+                    f"{where}a family finding row is missing {key!r} — a row missing it raises a "
+                    "bare KeyError inside the shared findings gate and stuck-records the whole "
+                    "keyed batch (P6); refused at the appender instead")
+        # `subject` (#1007 O1/M6), NO CASE-FOLD AND NO TRIM — a row bound for the DEFENDER channel
+        # must carry EXACTLY `subject: defender`; a `subject: world` row (or a near-miss, or an
+        # absent one) is refused here, at the last screen before the shared findings gate and the
+        # defender curator.
+        subject = data.get("subject")
+        if subject != SUBJECT_DEFENDER:
+            raise JudgeRefused(
+                f"{where}a row bound for the defender findings channel must carry "
+                f"subject={SUBJECT_DEFENDER!r}, not {subject!r}")
+        # SYMMETRIC WITH `WorldQueueRow`'s own `direction` screen (#1007, claims-adversary
+        # finding): `build_finding_row` derives `direction` from `subject` so the two can never
+        # disagree from the pass's own producer, but this appender also takes rows handed in from
+        # anywhere (its own docstring above) — a hand-fed row whose two fields DO disagree must be
+        # refused here too, not just on the questioner lane, or a `subject: defender` row carrying
+        # `direction: world` would still land on this channel unnoticed.
+        if data.get("direction") == SUBJECT_WORLD:
+            raise JudgeRefused(
+                f"{where}a row bound for the defender findings channel must carry "
+                f"direction={SUBJECT_WORLD!r} nowhere near subject={SUBJECT_DEFENDER!r} — the two "
+                "fields disagree")
+        row_type = data.get("type")
+        # `isinstance` FIRST: `QUEUEABLE_FINDING_TYPES` is a `set`, so an UNHASHABLE value here
+        # (`bucket: [lead-set]` read back off a draw file) raises `TypeError` out of a function whose
+        # whole contract is to answer with this design's refusal — and `enqueue_report`'s
+        # drop-and-name arm catches `JudgeRefused` only, so one unusable finding took the whole
+        # append down. `_vocab.normalized_disposition` names the same hazard for the disposition
+        # vocabulary, and `run._parse_finding` already asks it of the reply's own bucket.
+        if not isinstance(row_type, str) or row_type not in QUEUEABLE_FINDING_TYPES:
+            raise JudgeRefused(
+                f"{where}a family finding row's type={row_type!r} is not one of the queueable "
+                f"finding types {sorted(QUEUEABLE_FINDING_TYPES)}")
+        for key in ("subject_anchor", "subject_topic"):
+            value = data.get(key)
+            if not isinstance(value, str) or is_content_less(value):
+                raise JudgeRefused(
+                    f"{where}a family finding row's {key} must be a non-empty string")
+        outcome = normalized_judge_outcome(data.get("judge_outcome"))
+        if outcome is None:
+            raise JudgeRefused(
+                f"{where}a family finding row's judge_outcome={data.get('judge_outcome')!r} is not "
+                "a member of the judge outcome vocabulary")
+        if outcome in _UNQUEUEABLE_VERDICTS:
+            # AT THE APPENDER, which is where this module's docstring has always said the refusal
+            # is. Only the producer checked it, so a row handed in from anywhere else — and a
+            # producer that stopped checking — put a `discard` row on the shared queue, where
+            # `_gate_family` neither skips nor holds it and the subtraction routes it straight to
+            # the curator. An episode whose whole point is that it must train nothing then trains
+            # something (O7).
+            raise JudgeRefused(
+                f"{where}a family finding row's judge_outcome={outcome!r} is a word the family "
+                "record is the whole artifact for — such an episode is never a defender failure to "
+                "author from, so no row of it may reach the queue (O7)")
+        data["judge_outcome"] = outcome
+        return data
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any], *, episode_dir: Path | None = None) -> QueueRow:
+        """The one call site `_validate_row` now is: extract the fields this gate cares about
+        (everything else on `row` is the appender's business, not this class's — see the class
+        docstring) and let the `model_validator` above raise. `key in row` guards each `.get`
+        so a key genuinely absent from `row` stays `_ABSENT` rather than becoming a spurious
+        `None`, which the presence screen would then wrongly accept.
+
+        `JudgeRefused` is declared `ValueError` (predates #1067), so pydantic wraps it into its
+        own `ValidationError` same as it would a bare `ValueError` — recovered and re-raised via
+        `_model.original_or` so `enqueue_report`'s `except JudgeRefused` arm still catches it
+        (see `_model`'s module docstring)."""
+        fields: dict[str, Any] = {
+            key: row[key] for key in
+            ("finding_id", "run_id", "direction", "subject", "type",
+             "subject_anchor", "subject_topic", "judge_outcome")
+            if key in row
+        }
+        fields["episode_dir"] = episode_dir
+        try:
+            return cls(**fields)
+        except PydanticValidationError as e:
+            raise original_or(e) from e
+
+
 def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
-    """THE rule for what may go on the DEFENDER queue. One function, so the producer below can
-    ask it about a single row (and drop that row alone) while the appender still refuses
-    outright for a caller handing rows in from anywhere else."""
-    where = f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
-    # `finding_id` FIRST, because `_gate_findings` indexes it FIRST — `fid = entry["finding_id"]`
-    # opens its per-row loop, before `skips_forward_check` and before the deliberate
-    # `entry["run_id"]` probe. A row missing it therefore raises exactly the bare `KeyError` this
-    # guard exists to keep off the queue, one line earlier than the two keys that were listed.
-    for key in ("finding_id", "run_id", "direction"):
-        if key not in row:
+    """THE rule for what may go on the DEFENDER queue — `QueueRow` (above) now embodies it; this
+    wrapper is kept as `_add_row`'s uniform `validator=(row, *, episode_dir=None) -> None`
+    contract, so `_validate_row`/`_validate_world_row` still dispatch identically. One function,
+    so the producer below can ask it about a single row (and drop that row alone) while the
+    appender still refuses outright for a caller handing rows in from anywhere else."""
+    QueueRow.from_row(row, episode_dir=episode_dir)
+
+
+@model
+class WorldQueueRow:
+    """THE rule for what may go on the QUESTIONER channel (#1007 M6), as the object it guards
+    (#1067 PR5) — `QueueRow`'s twin, same treatment for the same reason: was a bare function
+    (`_validate_world_row`), now a `model_validator` carrying its ordered checks verbatim. The
+    bucket (`type`) is NEVER gated against `QUEUEABLE_FINDING_TYPES` — R2's open vocabulary —
+    but `pattern`, `holding_system` and `subject` are required here because this appender is
+    the LAST screen: the questioner curator's own gate is idempotency-only (M7)."""
+
+    finding_id: Any = _ABSENT
+    run_id: Any = _ABSENT
+    direction: Any = _ABSENT
+    subject: str | None = None
+    pattern: str | None = None
+    holding_system: str | None = None
+    type: str | None = None
+    subject_anchor: str | None = None
+    subject_topic: str | None = None
+    episode_dir: Any = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ordered_checks(cls, data: Any) -> Any:
+        data = unwrap_before(cls, data)
+        episode_dir = data.get("episode_dir")
+        where = f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
+        for key in ("finding_id", "run_id", "direction"):
+            if data.get(key, _ABSENT) is _ABSENT:
+                raise JudgeRefused(
+                    f"{where}a questioner finding row is missing {key!r} — a row missing it raises "
+                    "a bare KeyError inside the shared drain machinery")
+        if data.get("direction") != SUBJECT_WORLD:
             raise JudgeRefused(
-                f"{where}a family finding row is missing {key!r} — a row missing it raises a "
-                "bare KeyError inside the shared findings gate and stuck-records the whole "
-                "keyed batch (P6); refused at the appender instead")
-    # `subject` (#1007 O1/M6), NO CASE-FOLD AND NO TRIM — a row bound for the DEFENDER channel
-    # must carry EXACTLY `subject: defender`; a `subject: world` row (or a near-miss, or an
-    # absent one) is refused here, at the last screen before the shared findings gate and the
-    # defender curator.
-    subject = row.get("subject")
-    if subject != SUBJECT_DEFENDER:
-        raise JudgeRefused(
-            f"{where}a row bound for the defender findings channel must carry "
-            f"subject={SUBJECT_DEFENDER!r}, not {subject!r}")
-    # SYMMETRIC WITH `_validate_world_row`'s own `direction` screen (#1007, claims-adversary
-    # finding): `build_finding_row` derives `direction` from `subject` so the two can never
-    # disagree from the pass's own producer, but this appender also takes rows handed in from
-    # anywhere (its own docstring above) — a hand-fed row whose two fields DO disagree must be
-    # refused here too, not just on the questioner lane, or a `subject: defender` row carrying
-    # `direction: world` would still land on this channel unnoticed.
-    if row.get("direction") == SUBJECT_WORLD:
-        raise JudgeRefused(
-            f"{where}a row bound for the defender findings channel must carry "
-            f"direction={SUBJECT_WORLD!r} nowhere near subject={SUBJECT_DEFENDER!r} — the two "
-            "fields disagree")
-    row_type = row.get("type")
-    # `isinstance` FIRST: `QUEUEABLE_FINDING_TYPES` is a `set`, so an UNHASHABLE value here
-    # (`bucket: [lead-set]` read back off a draw file) raises `TypeError` out of a function whose
-    # whole contract is to answer with this design's refusal — and `enqueue_report`'s
-    # drop-and-name arm catches `JudgeRefused` only, so one unusable finding took the whole
-    # append down. `_vocab.normalized_disposition` names the same hazard for the disposition
-    # vocabulary, and `run._parse_finding` already asks it of the reply's own bucket.
-    if not isinstance(row_type, str) or row_type not in QUEUEABLE_FINDING_TYPES:
-        raise JudgeRefused(
-            f"{where}a family finding row's type={row_type!r} is not one of the queueable "
-            f"finding types {sorted(QUEUEABLE_FINDING_TYPES)}")
-    for key in ("subject_anchor", "subject_topic"):
-        value = row.get(key)
-        if not isinstance(value, str) or is_content_less(value):
+                f"{where}a row bound for the questioner findings channel must carry "
+                f"direction={SUBJECT_WORLD!r}, not {data.get('direction')!r}")
+        subject = data.get("subject")
+        if subject != SUBJECT_WORLD:
             raise JudgeRefused(
-                f"{where}a family finding row's {key} must be a non-empty string")
-    outcome = normalized_judge_outcome(row.get("judge_outcome"))
-    if outcome is None:
-        raise JudgeRefused(
-            f"{where}a family finding row's judge_outcome={row.get('judge_outcome')!r} is not "
-            "a member of the judge outcome vocabulary")
-    if outcome in _UNQUEUEABLE_VERDICTS:
-        # AT THE APPENDER, which is where this module's docstring has always said the refusal
-        # is. Only the producer checked it, so a row handed in from anywhere else — and a
-        # producer that stopped checking — put a `discard` row on the shared queue, where
-        # `_gate_family` neither skips nor holds it and the subtraction routes it straight to
-        # the curator. An episode whose whole point is that it must train nothing then trains
-        # something (O7).
-        raise JudgeRefused(
-            f"{where}a family finding row's judge_outcome={outcome!r} is a word the family "
-            "record is the whole artifact for — such an episode is never a defender failure to "
-            "author from, so no row of it may reach the queue (O7)")
+                f"{where}a row bound for the questioner findings channel must carry "
+                f"subject={SUBJECT_WORLD!r}, not {subject!r}")
+        for key in ("pattern", "holding_system"):
+            value = data.get(key)
+            if not isinstance(value, str) or is_content_less(value):
+                raise JudgeRefused(
+                    f"{where}a questioner finding row's {key} must be a non-empty string")
+        # `isinstance` ON THE BUCKET, exactly as `QueueRow` does two classes up and for the
+        # same reason. R2's vocabulary is OPEN, not untyped: `_OpenBucketVocabulary` itself admits
+        # "every STRING and nothing else". A bare re-enqueue reads draw YAML off a box-reachable
+        # tree with no `validate_reply` pass, so `bucket: 2024-01-01` arrives as a `datetime.date`
+        # — admitted here, it reaches `json.dumps` INSIDE the queue lock and raises `TypeError`,
+        # a class neither `_add_row` nor `grade_episode`'s conversion set names.
+        row_type = data.get("type")
+        if not isinstance(row_type, str) or is_content_less(row_type):
+            raise JudgeRefused(
+                f"{where}a questioner finding row's type must be a non-empty string, not "
+                f"{type(row_type).__name__}")
+        # AND THE TWO ANCHOR COLUMNS, exactly as `QueueRow` screens them on the defender lane
+        # — the world lane's rows go down the SAME `json.dumps(row)` inside the SAME queue lock. A
+        # bare re-enqueue reads draw YAML with no `validate_reply` pass, so `anchor: 2026-01-01`
+        # arrives as a `datetime.date`: admitted here it raises `TypeError` mid-append, a class
+        # neither `_add_row` nor `grade_episode`'s conversion set names, with the defender rows
+        # already written and no `judge.yaml` to say what was graded.
+        for key in ("subject_anchor", "subject_topic"):
+            value = data.get(key)
+            if not isinstance(value, str) or is_content_less(value):
+                raise JudgeRefused(
+                    f"{where}a questioner finding row's {key} must be a non-empty string")
+        return data
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any], *, episode_dir: Path | None = None) -> WorldQueueRow:
+        """`_validate_world_row`'s one call site — see `QueueRow.from_row`'s docstring, same
+        extract-then-let-the-validator-raise shape, `JudgeRefused`-recovery included."""
+        fields: dict[str, Any] = {
+            key: row[key] for key in
+            ("finding_id", "run_id", "direction", "subject", "pattern", "holding_system",
+             "type", "subject_anchor", "subject_topic")
+            if key in row
+        }
+        fields["episode_dir"] = episode_dir
+        try:
+            return cls(**fields)
+        except PydanticValidationError as e:
+            raise original_or(e) from e
 
 
 def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
-    """THE rule for what may go on the QUESTIONER channel (#1007 M6). The bucket (`type`) is
-    NEVER gated against `QUEUEABLE_FINDING_TYPES` — R2's open vocabulary — but `pattern`,
-    `holding_system` and `subject` are required here because this appender is the LAST screen:
-    the questioner curator's own gate is idempotency-only (M7)."""
-    where = f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
-    for key in ("finding_id", "run_id", "direction"):
-        if key not in row:
-            raise JudgeRefused(
-                f"{where}a questioner finding row is missing {key!r} — a row missing it raises "
-                "a bare KeyError inside the shared drain machinery")
-    if row.get("direction") != SUBJECT_WORLD:
-        raise JudgeRefused(
-            f"{where}a row bound for the questioner findings channel must carry "
-            f"direction={SUBJECT_WORLD!r}, not {row.get('direction')!r}")
-    subject = row.get("subject")
-    if subject != SUBJECT_WORLD:
-        raise JudgeRefused(
-            f"{where}a row bound for the questioner findings channel must carry "
-            f"subject={SUBJECT_WORLD!r}, not {subject!r}")
-    for key in ("pattern", "holding_system"):
-        value = row.get(key)
-        if not isinstance(value, str) or is_content_less(value):
-            raise JudgeRefused(
-                f"{where}a questioner finding row's {key} must be a non-empty string")
-    # `isinstance` ON THE BUCKET, exactly as `_validate_row` does two functions up and for the
-    # same reason. R2's vocabulary is OPEN, not untyped: `_OpenBucketVocabulary` itself admits
-    # "every STRING and nothing else". A bare re-enqueue reads draw YAML off a box-reachable
-    # tree with no `validate_reply` pass, so `bucket: 2024-01-01` arrives as a `datetime.date`
-    # — admitted here, it reaches `json.dumps` INSIDE the queue lock and raises `TypeError`,
-    # a class neither `_add_row` nor `grade_episode`'s conversion set names.
-    row_type = row.get("type")
-    if not isinstance(row_type, str) or is_content_less(row_type):
-        raise JudgeRefused(
-            f"{where}a questioner finding row's type must be a non-empty string, not "
-            f"{type(row_type).__name__}")
-    # AND THE TWO ANCHOR COLUMNS, exactly as `_validate_row` screens them on the defender lane
-    # — the world lane's rows go down the SAME `json.dumps(row)` inside the SAME queue lock. A
-    # bare re-enqueue reads draw YAML with no `validate_reply` pass, so `anchor: 2026-01-01`
-    # arrives as a `datetime.date`: admitted here it raises `TypeError` mid-append, a class
-    # neither `_add_row` nor `grade_episode`'s conversion set names, with the defender rows
-    # already written and no `judge.yaml` to say what was graded.
-    for key in ("subject_anchor", "subject_topic"):
-        value = row.get(key)
-        if not isinstance(value, str) or is_content_less(value):
-            raise JudgeRefused(
-                f"{where}a questioner finding row's {key} must be a non-empty string")
+    """THE rule for what may go on the QUESTIONER channel — `WorldQueueRow` (above) now embodies
+    it; kept as a wrapper for `_add_row`'s uniform `validator=` contract, same as `_validate_row`."""
+    WorldQueueRow.from_row(row, episode_dir=episode_dir)
 
 
 def _append_validated_rows(

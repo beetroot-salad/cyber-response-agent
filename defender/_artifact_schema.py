@@ -111,13 +111,24 @@ def validate_report(proposed_text: str) -> str | None:
     literal `</report>` that would break out of the judge's report block. Only `disposition` is
     required — `case_id`/`confidence` are deliberately unvalidated (the ticket path derives
     case_id from the run dir; confidence is untyped everywhere). Each reason is actionable text
-    the tool lane raises as ModelRetry."""
+    the tool lane raises as ModelRetry.
+
+    Model-facing, batched since #1067 PR5: every check below reads the SAME already-parsed
+    `fm`/`raw`/`proposed_text` and none depends on another's outcome, so a report wrong two
+    ways (say, a missing disposition AND an over-bound frontmatter) names both in the one
+    ModelRetry instead of costing a second retry to learn the second reason. The frontmatter
+    PARSE stays its own gate ahead of all of them — `fm`/`raw` do not exist to check anything
+    against until it succeeds, matching `validate_investigation`'s stricter sequencing below
+    for the same root reason, byte-bound before invlang, kept because that document's schema
+    depends on running the byte check WITHOUT invlang ever seeing oversize text; nothing here
+    shares that hazard, so nothing here keeps the first-fail shape."""
     try:
         fm, raw, _body = split_frontmatter(proposed_text)
     except FrontmatterError as e:
         return f"report.md frontmatter is malformed — fix and rewrite: {e}"
+    problems: list[str] = []
     if _has_duplicate_top_level_key(raw):
-        return (
+        problems.append(
             "report.md frontmatter declares a top-level key more than once — remove the "
             "duplicate and rewrite."
         )
@@ -130,26 +141,28 @@ def validate_report(proposed_text: str) -> str | None:
     # zero-width-laced disposition with actionable retry text. `normalized_disposition` would
     # silently ACCEPT it and write a document no reader can tell from a clean one.
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
-        return (
+        problems.append(
             "report.md frontmatter must carry a top-level `disposition` in "
             f"{sorted(DISPOSITION_ENUM)} (got {disposition!r}) — fix and rewrite."
         )
     if _utf8_len(raw) > REPORT_FRONTMATTER_MAX:
-        return (
+        problems.append(
             f"report.md frontmatter is {_utf8_len(raw)} bytes, over the "
             f"{REPORT_FRONTMATTER_MAX}-byte limit — trim it and rewrite."
         )
     if _utf8_len(proposed_text) > REPORT_FILE_MAX:
-        return (
+        problems.append(
             f"report.md is {_utf8_len(proposed_text)} bytes, over the "
             f"{REPORT_FILE_MAX}-byte limit — trim it and rewrite."
         )
     if REPORT_CLOSE_DELIMITER in proposed_text:
-        return (
+        problems.append(
             f"report.md contains the literal {REPORT_CLOSE_DELIMITER!r} delimiter, which would "
             "break out of the judge's report block — remove it and rewrite."
         )
-    return None
+    if not problems:
+        return None
+    return " ".join(problems)
 
 
 #: Every refusal on this artifact carries it. The model is told its own context IS the file
