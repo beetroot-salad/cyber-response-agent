@@ -1061,10 +1061,12 @@ demands:
     binds: [graveyard, _graveyard_dropped_rows]
     outcome:
       nl: >-
-        Until #903 lands, M9's per-class reasons improve a file nothing in production reads —
-        drain.graveyard_file's own docstring says so — so this round converts a mis-labelled quiet
+        At this round, M9's per-class reasons improved a file nothing in production read —
+        drain.graveyard_file's own docstring said so — so the round converted a mis-labelled quiet
         loss into a correctly-labelled quiet one, not into a visible one. Stated plainly rather
-        than discovered later; O7 stays unmet and is not this round's to close.
+        than discovered later; O7 stayed unmet and was not this round's to close. DISCHARGED by
+        #903: frontend/serialize_queues.py reads every channel's graveyard onto the queue page
+        (test_903_queue_view.py), so the reasons now reach a human.
 
   - id: merged_work_is_not_reopened
     kind: coherence
@@ -1481,8 +1483,8 @@ structure:
       # NAMED, only counted in the closing `({n} undeclared)`; G5 reproduced exactly that (row `s1`
       # retired unnamed). A reducer-only tick is systemless BY CONSTRUCTION, so it contributes
       # nothing to the named-systems text and an operator reading the log cannot tell a reducer
-      # lesson was taught. With O7 (#903) leaving the graveyard unread, this line and the commit
-      # message are the ONLY human-visible records this lane produces.
+      # lesson was taught. Until #903's queue page read the graveyard, this line and the commit
+      # message were the ONLY human-visible records this lane produced.
 
     - id: pitfalls_commit_message
       provenance: design

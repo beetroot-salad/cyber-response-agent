@@ -18,6 +18,26 @@ _MAX_ENV = "LEARNING_TAINT_QUARANTINE_MAX"
 _MAX_DEFAULT = 10
 
 
+def quarantine_cap() -> int:
+    """How many tainted trees the lane will hold — read here by the writer that refuses past
+    it and by the queue page (#903) that shows how close the directory is, so the two never
+    disagree on the number."""
+    return env_int(_MAX_ENV, _MAX_DEFAULT)
+
+
+def held_archives(quarantine_dir: Path) -> int:
+    """How many tainted trees the directory holds, BY ARCHIVE — the count `preserve_tainted_tree`
+    checks against the cap, exposed so the queue page (#903) shows the same number. Counting
+    manifests instead under-reports in exactly the failure this module logs: an archive that
+    survived without its manifest still spends a slot. A directory that does not exist holds
+    none; one that cannot be listed RAISES, and the reader decides what to say about that —
+    `iterdir`, not `glob`, because `Path.glob` swallows a `PermissionError` on the directory
+    and answers "empty", which is the false headroom this count exists to rule out."""
+    if not quarantine_dir.is_dir():
+        return 0
+    return sum(1 for p in quarantine_dir.iterdir() if p.name.endswith(".tar.gz"))
+
+
 def _archive_tree(wt: Path, dest: Path) -> None:
     """Write `wt` to `dest` as a gzipped tar.
 
@@ -93,8 +113,8 @@ def preserve_tainted_tree(
     archived: Path | None = None
     try:
         quarantine_dir.mkdir(parents=True, exist_ok=True)
-        held = sum(1 for _ in quarantine_dir.glob("*.tar.gz"))
-        cap = env_int(_MAX_ENV, _MAX_DEFAULT)
+        held = held_archives(quarantine_dir)
+        cap = quarantine_cap()
         if held >= cap:
             _log(
                 f"{label}: {held} quarantined tree(s) already held at "

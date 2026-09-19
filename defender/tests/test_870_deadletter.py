@@ -11,10 +11,11 @@ simply false of two of the three. A human triaging that file cannot tell an onbo
 an attacker-shaped row.
 
 WHAT THIS SUITE DOES NOT SHOW, stated so it cannot be read out of the prose: nothing here
-demonstrates that `pitfalls.deadletter.jsonl` is unread in production (O7 / #903). That is G22's
-census, recorded as the clause demand `graveyard_is_still_unread` — a deliberate prose deferral,
-which is why M9 converts a mis-labelled quiet loss into a correctly-labelled quiet one rather
-than into a visible one. A guarantee a suite tells you but never exercises is how a claim
+demonstrates that `pitfalls.deadletter.jsonl` reaches a human. At this base it was unread in
+production (O7 / #903) — G22's census, recorded as the clause demand `graveyard_is_still_unread`,
+a deliberate prose deferral — so M9 converted a mis-labelled quiet loss into a correctly-labelled
+quiet one. #903's queue page (`frontend/serialize_queues.py`, `test_903_queue_view.py`) is the
+reader that discharges it; this suite still shows only the labelling. A guarantee a suite tells you but never exercises is how a claim
 outlives its evidence.
 """
 from __future__ import annotations
@@ -194,7 +195,7 @@ def test_a_ceiling_retirement_names_its_exception_class(tmp_path, monkeypatch):
     the class as the WHOLE reason closed the vocabulary and lost the diagnosis: a curator that
     exited rc=124, one that tried to delete a section and one that wrote outside
     `defender/skills` all raise `LeadAuthorError` and all filed as the same four words, in the
-    one durable record this lane leaves — unread until #903, so the operator log the message
+    one durable record this lane leaves — read only by #903's queue page, so the operator log the message
     also reached is long gone by the time anyone looks. So the demand is on the PREFIX, which
     is what a reader groups on and what `REASONS` is closed over, exactly as the undeclared
     class carries its name after the same `:` separator.

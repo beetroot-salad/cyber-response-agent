@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from string import Template
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
@@ -16,10 +17,18 @@ from defender.scripts._venv import reexec_into_venv  # noqa: E402
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
-from defender.learning.frontend import serialize  # noqa: E402
+from defender.learning.core.config import LoopPaths  # noqa: E402
+from defender.learning.frontend import serialize, serialize_queues  # noqa: E402
+from defender.scripts.visualize.visualize_primitives import (  # noqa: E402
+    esc_untrusted,
+    pretty_json_html,
+)
 from defender.scripts.visualize.visualize_run import CSS as RUN_CSS  # noqa: E402
 
 GROUP_STAGE = {"defender": "stage-defender", "actor": "stage-actor", "environment": "stage-oracle"}
+
+#: The header link each page carries to the other — one rule, both pages.
+NAV_CSS = "header.top nav.views { margin-left: auto; font-size: 12px; }\n"
 
 
 LESSONS_CSS = """
@@ -119,6 +128,7 @@ PAGE = """<!doctype html>
 <header class="top"><div class="top-row">
   <h1>Learning loop — Lessons</h1>
   <div class="meta" id="headline"></div>
+  <nav class="views"><a href="queues.html">queues →</a></nav>
 </div></header>
 <div class="controls">
   <input type="search" id="filter" placeholder="Filter by title, description, or metadata…" autocomplete="off">
@@ -246,16 +256,278 @@ document.getElementById("hide-stale").addEventListener("change", applyFilters);
 """
 
 
+# =========================================================================================
+# The queue-state page (#903): what the loop gave up on, parked, or set aside — one host's
+# state root, on demand, beside the lessons page. Same spine (RUN_CSS), same self-contained
+# shape; its contract is `serialize_queues.build_view`.
+# =========================================================================================
+
+QUEUES_CSS = """
+/* ----- Queue-state page (reuses the run-visualizer tokens) ----- */
+html { color-scheme: dark; }
+body { background: var(--bg); }
+main.queues { padding: 20px 24px 80px; max-width: 1100px; margin: 0 auto; }
+.q-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.q-card { background: var(--bg-2); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 6px; min-width: 0; }
+.q-card { --card-accent: var(--border); border-left-color: var(--card-accent); }
+.q-card.t-defender { --card-accent: var(--accent-defender); }
+.q-card.t-learning { --card-accent: var(--accent-learning); }
+.q-card.t-oracle { --card-accent: var(--accent-oracle); }
+.q-card.t-raw { --card-accent: var(--accent-raw); }
+.q-card > summary { display: flex; align-items: baseline; gap: 16px; padding: 10px 14px; cursor: pointer; list-style: none; user-select: none; }
+.q-card > summary::-webkit-details-marker { display: none; }
+.q-card > summary::before { content: "▸"; color: var(--text-dim); font-size: 11px; margin-right: -6px; }
+.q-card[open] > summary::before { content: "▾"; }
+.q-card > summary:hover { background: var(--bg-3); }
+.q-card .qc-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
+.q-card .qc-stats { margin-left: auto; display: flex; gap: 14px; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
+.q-card .qs .qt-key { color: var(--text-dim); margin-right: 5px; }
+.q-card .qc-body { padding: 0 14px 12px; border-top: 1px solid var(--border-2); }
+.qt-val { color: var(--text); }
+.qt-val.n-zero { color: var(--text-dim); }
+.qt-val.n-warn { color: var(--warn); font-weight: 600; }
+.q-held { font-size: 12.5px; color: var(--text-dim); margin: 10px 0 0; }
+.q-held b { color: var(--warn); font-weight: 600; }
+.dl { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.dl details { background: var(--bg-3); border: 1px solid var(--border-2); border-left: 3px solid var(--card-accent); border-radius: 4px; }
+.dl summary { display: grid; grid-template-columns: minmax(140px, 200px) 1fr auto; gap: 12px; align-items: baseline; padding: 6px 12px; cursor: pointer; list-style: none; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; }
+.dl summary::-webkit-details-marker { display: none; }
+.dl summary:hover { background: var(--bg-4); }
+.dl .dl-id { color: var(--code); overflow-wrap: anywhere; }
+.dl .dl-reason { color: var(--text-bright); overflow-wrap: anywhere; }
+.dl .dl-when { color: var(--text-dim); white-space: nowrap; }
+.dl .body { padding: 4px 12px 8px; }
+.dl .body pre { margin: 0; }
+.q-list { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.q-list li { display: grid; grid-template-columns: minmax(140px, 260px) 1fr; gap: 12px; padding: 4px 0; border-bottom: 1px solid var(--border-2); }
+.q-list .k { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--code); overflow-wrap: anywhere; }
+.q-list .v { color: var(--text); overflow-wrap: anywhere; }
+.q-list .v .t { color: var(--text-dim); margin-left: 8px; font-size: 11px; }
+.q-group { margin-top: 12px; padding: 2px 14px 10px; border-radius: 5px; border: 1px solid var(--border-2); border-left: 3px solid var(--card-accent); background: var(--bg-3); }
+.q-group.q-system { opacity: 0.7; }
+.q-group-head { font-size: 13px; font-weight: 600; color: var(--text-bright); margin: 10px 0 0; }
+.q-group-sub { font-size: 11px; font-weight: 400; color: var(--text-dim); margin-left: 8px; }
+.q-group h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); border-bottom: 1px solid var(--border-2); padding-bottom: 4px; margin: 12px 0 6px; }
+.q-group h3 .cap { font-weight: 400; margin-left: 8px; color: var(--text-dim); }
+.q-group h3 .cap.near { color: var(--warn); }
+.q-dir { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; color: var(--text-dim); margin: 0 0 4px; overflow-wrap: anywhere; }
+@media (max-width: 860px) { .q-cards { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+  main.queues { padding: 16px 16px 60px; }
+  .dl summary, .q-list li { grid-template-columns: 1fr; gap: 2px; }
+}
+.q-fault { margin-bottom: 20px; padding: 10px 14px 8px; border-radius: 6px; border: 1px solid var(--bad); background: rgba(248, 81, 73, 0.07); }
+.q-fault .qf-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--bad); font-weight: 600; margin-bottom: 6px; }
+.q-fault .qf-row { display: grid; grid-template-columns: minmax(120px, 180px) minmax(120px, 160px) auto auto 1fr; gap: 12px; align-items: baseline; font-size: 12.5px; padding: 3px 0; }
+.q-fault .qf-ch { font-weight: 600; color: var(--text-bright); }
+.q-fault .qf-class { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--bad); }
+.q-fault .qf-ticks, .q-fault .qf-when { color: var(--text-bright); white-space: nowrap; }
+.q-fault .qf-reason { color: var(--text-dim); overflow-wrap: anywhere; }
+.q-fault .qf-note { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+.q-unreadable { font-size: 11px; color: var(--warn); margin: 8px 0 0; }
+@media (max-width: 700px) { .q-fault .qf-row { grid-template-columns: 1fr; gap: 2px; } }
+"""
+
+
+QUEUES_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning loop — Queues</title>
+<style>${css}</style></head><body id="top">
+<header class="top"><div class="top-row">
+  <h1>Learning loop — Queues</h1>
+  <div class="meta">generated ${generated} · ${state_root}</div>
+  <nav class="views"><a href="lessons.html">lessons →</a></nav>
+</div></header>
+<main class="queues">
+${fault_band}
+<div class="q-cards">${cards}</div>
+</main>
+<script>
+// The contract this page was rendered from, carried whole so the page stays self-contained
+// and a reader can pull the JSON back out of it (`const DATA = ...;` is the one line).
+const DATA = ${queues_json};
+</script>
+</body></html>
+"""
+
+
+# Every value this renderer touches is already the contract's type (`serialize_queues`' rule),
+# so the helpers below take strings and ints and do one thing each: `esc_untrusted` is applied
+# exactly once, at the point a value is written into markup, never to text that is already
+# markup.
+
+
+def _when(value: str | None) -> str:
+    """The date of a contract timestamp, as plain text; the caller escapes it."""
+    return value[:10] if value else ""
+
+
+def _num(value: int, warn_at: int | None = None) -> str:
+    cls = "n-zero" if value == 0 else ("n-warn" if warn_at is not None and value >= warn_at else "")
+    return f'<span class="qt-val{(" " + cls) if cls else ""}">{value}</span>'
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return one if n == 1 else many
+
+
+def _unreadable_line(n: int, unit: str) -> str:
+    """`unit` is "line" for a channel (its sidecars are JSONL; a whole sidecar that could not
+    be read counts as one) and "file" for the set-aside lists (one record per file)."""
+    return (f'<p class="q-unreadable">{n} unreadable {_plural(n, unit, unit + "s")} skipped</p>'
+            if n else "")
+
+
+def _card(cls: str, name: str, stats: str, body: str, open_: bool) -> str:
+    return (
+        f'<details class="q-card {cls}"{" open" if open_ else ""}>'
+        f'<summary><span class="qc-name">{name}</span><span class="qc-stats">{stats}</span></summary>'
+        f'<div class="qc-body">{body}</div></details>'
+    )
+
+
+def _stat(key: str, value_html: str) -> str:
+    return f'<span class="qs"><span class="qt-key">{key}</span>{value_html}</span>'
+
+
+def _channel_card(ch: dict) -> str:
+    held = ch["held"]
+    held_html = ""
+    if held["count"]:
+        held_html = (
+            f'<p class="q-held"><b>{held["count"]} held</b> · {esc_untrusted(ch["hold_means"])} · '
+            + ", ".join(esc_untrusted(i) for i in held["ids"]) + "</p>"
+        )
+    if ch["deadletter"]:
+        rows = "".join(
+            "<details><summary>"
+            f'<span class="dl-id">{"no id" if e["id"] is None else esc_untrusted(e["id"])}</span>'
+            f'<span class="dl-reason">{esc_untrusted(e["reason"])}</span>'
+            f'<span class="dl-when">{esc_untrusted(_when(e["when"]))}</span>'
+            f'</summary><div class="body">{pretty_json_html(e["row"])}</div></details>'
+            for e in ch["deadletter"]
+        )
+        dead_html = f'<div class="dl">{rows}</div>'
+    else:
+        dead_html = '<div class="empty">No dead letters.</div>'
+    stats = _stat("queued", _num(ch["depth"]["queued"])) + _stat("dead", _num(len(ch["deadletter"]), 1))
+    return _card(
+        f't-{esc_untrusted(ch["accent"])}', esc_untrusted(ch["name"]), stats,
+        held_html + dead_html + _unreadable_line(ch["unreadable"], "line"),
+        bool(ch["deadletter"]) or held["count"] > 0,
+    )
+
+
+def _list(items: list[str]) -> str:
+    return f'<ul class="q-list">{"".join(items)}</ul>' if items else '<div class="empty">None.</div>'
+
+
+def _li(key: str, value: str, tail: str = "") -> str:
+    tail_html = f'<span class="t">{esc_untrusted(tail)}</span>' if tail else ""
+    return (f'<li><span class="k">{esc_untrusted(key)}</span>'
+            f'<span class="v">{esc_untrusted(value)}{tail_html}</span></li>')
+
+
+def _cap(tainted: dict) -> str:
+    """`held / cap`, warm once two slots or fewer remain — and never on an empty directory,
+    whatever the cap. `held` is null when the directory could not be listed: "?" then, not a
+    number the writer would not agree with."""
+    held, cap = tainted["held"], tainted["cap"]
+    near = held is not None and held > 0 and cap - held <= 2
+    shown = "?" if held is None else str(held)
+    return f'<span class="cap{" near" if near else ""}">{shown} / {cap}</span>'
+
+
+def _aside_card(q: dict) -> str:
+    markers, deliveries, tainted = q["markers"], q["deliveries"], q["tainted"]
+    needs_person = len(markers["rows"]) + len(tainted["rows"])
+    human = (
+        '<div class="q-group q-human"><div class="q-group-head">Needs a person '
+        '<span class="q-group-sub">nothing retries these</span></div>'
+        "<h3>Markers not served</h3>"
+        + _list([_li(r["identity"], r["failed"], r["queue"]) for r in markers["rows"]])
+        + _unreadable_line(markers["unreadable"], "file")
+        + f"<h3>Tainted worktrees{_cap(tainted)}</h3>"
+        + f'<p class="q-dir">{esc_untrusted(tainted["dir"])}</p>'
+        + _list([
+            _li(r["batch_id"], r["taint"],
+                _when(r["quarantined_at"]) + ("" if r["verdict"] else " · no scan recorded"))
+            for r in tainted["rows"]
+        ])
+        + _unreadable_line(tainted["unreadable"], "file")
+        + "</div>"
+    )
+    system = (
+        '<div class="q-group q-system"><div class="q-group-head">Retrying itself '
+        '<span class="q-group-sub">the lane serves nothing new until this lands</span></div>'
+        "<h3>Committed, not delivered</h3>"
+        + _list([
+            _li(r["branch"], r["reason"], f'since {_when(r["at"]) or "?"}, retried every tick')
+            for r in deliveries["rows"]
+        ])
+        + _unreadable_line(deliveries["unreadable"], "file")
+        + "</div>"
+    )
+    stats = _stat("needs a person", _num(needs_person, 1)) + _stat("retrying", _num(len(deliveries["rows"])))
+    return _card("t-raw", "set aside", stats, human + system, needs_person > 0)
+
+
+def _fault_band(view: dict) -> str:
+    """The machinery-health band, present only when a channel has a stuck record, so a page
+    whose channels all drained cleanly carries no fault heading at all. The stuck file is
+    append-only and nothing clears it, so the band is titled by the record's time: "last
+    fault", never "stuck now"."""
+    stuck = [ch for ch in view["channels"] if ch.get("stuck")]
+    if not stuck:
+        return ""
+    rows = "".join(
+        '<div class="qf-row">'
+        f'<span class="qf-ch">{esc_untrusted(ch["name"])}</span>'
+        f'<span class="qf-class">{esc_untrusted(ch["stuck"]["fault_class"])}</span>'
+        f'<span class="qf-ticks">{ch["stuck"]["consecutive_ticks"]} '
+        f'{_plural(ch["stuck"]["consecutive_ticks"], "tick", "ticks")} running</span>'
+        f'<span class="qf-when">{esc_untrusted(ch["stuck"]["recorded_at"] or "time unknown")}</span>'
+        f'<span class="qf-reason">{esc_untrusted(ch["stuck"]["reason"])}</span>'
+        "</div>"
+        for ch in stuck
+    )
+    return (
+        '<div class="q-fault"><div class="qf-head">Last fault</div>' + rows
+        + '<div class="qf-note">the rows were left queued and retried on the next tick; a '
+          'later clean tick leaves this record in place</div></div>'
+    )
+
+
+def render_queues(view: dict) -> str:
+    """The whole page from the contract, RENDERED HERE rather than by a script in the page:
+    every value a person reads goes through `esc_untrusted` on this side, where a test can
+    see it, and the page needs no script to show anything. The template is filled in ONE
+    pass, so a value that happens to spell a placeholder is content, never a second
+    substitution."""
+    payload = json.dumps(view, ensure_ascii=False).replace("<", "\\u003c")
+    return Template(QUEUES_PAGE).substitute(
+        css=RUN_CSS + NAV_CSS + QUEUES_CSS,
+        generated=esc_untrusted(view.get("generated_at") or "—"),
+        state_root=esc_untrusted(view["state_root"]),
+        fault_band=_fault_band(view),
+        cards="".join(_channel_card(ch) for ch in view["channels"]) + _aside_card(view["quarantine"]),
+        queues_json=payload,
+    )
+
+
 def render(view: dict) -> str:
     payload = json.dumps(view, ensure_ascii=False).replace("<", "\\u003c")
     return (
-        PAGE.replace("__CSS__", RUN_CSS + LESSONS_CSS)
+        PAGE.replace("__CSS__", RUN_CSS + NAV_CSS + LESSONS_CSS)
         .replace("__STAGE_JSON__", json.dumps(GROUP_STAGE))
         .replace("__LESSONS_JSON__", payload)
     )
 
 
-def main() -> int:
+def main(paths: LoopPaths | None = None) -> int:
+    """Both pages, into this directory. `paths` is the queue page's whole input surface — the
+    CLI leaves it None and the state root is resolved at call time; a test hands its own."""
     view = serialize.stamped_view()
 
     json_out = HERE.parent / "lessons.json"
@@ -266,6 +538,14 @@ def main() -> int:
 
     counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
     print(f"wrote {json_out.relative_to(REPO_ROOT)} + {html_out.relative_to(REPO_ROOT)} — {counts}")
+
+    queues = serialize_queues.stamped_view(paths)
+    q_json = HERE.parent / "queues.json"
+    q_json.write_text(serialize_queues.dump_contract(queues), encoding="utf-8")
+    q_html = HERE.parent / "queues.html"
+    q_html.write_text(render_queues(queues), encoding="utf-8")
+    dead = {ch["name"]: len(ch["deadletter"]) for ch in queues["channels"]}
+    print(f"wrote {q_json.relative_to(REPO_ROOT)} + {q_html.relative_to(REPO_ROOT)} — dead letters {dead}")
     return 0
 
 
