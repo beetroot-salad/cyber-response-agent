@@ -741,10 +741,11 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     # for that — but the WORLD lane (mechanical findings, per-world and family model-drawn
     # world findings) is never gated on the defender's own outcome
     # (`test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings`).
+    # The two fields `enqueue_report` reads, as the mapping it also takes (its bare re-enqueue
+    # callers hand it `judge.yaml`'s own dict) — not a second `FamilyGrade`, which would
+    # re-validate and copy every world row a third time just to swap in the episode's word.
     report = enqueue_mod.enqueue_report(
-        episode_dir,
-        family_mod.FamilyGrade(episode_dir=episode_dir, worlds=grade.worlds,
-                               verdict_word=verdict_word, graded_worlds=grade.graded_worlds),
+        episode_dir, {"verdict_word": verdict_word, "worlds": grade.worlds},
         queue_dir=queue_dir, drawn=per_world_draws, family_drawn=family_documents)
     enqueued_rows = report.appended
     queue_malformed_rows = report.queue_malformed_rows

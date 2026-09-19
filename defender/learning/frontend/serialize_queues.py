@@ -41,7 +41,7 @@ from defender.learning.core.config import LoopPaths, QueueChannel, loop_paths
 from defender.learning.core.markers import FAILED_MARKER_DIRNAME
 from defender.learning.core.quarantine import held_archives, quarantine_cap
 from defender.learning.frontend.serialize import _json_safe, dump_contract
-from defender.learning.leads.pitfalls_curator import OFFERS_DECLINED_KEY
+from defender.learning.core.pitfalls_disposition import OFFERS_DECLINED_KEY
 
 __all__ = ["build_view", "stamped_view", "dump_contract"]
 

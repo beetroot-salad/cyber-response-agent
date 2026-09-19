@@ -8,7 +8,7 @@ import subprocess
 import uuid
 from defender._model import model
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 from collections.abc import Callable
 
 from defender.learning.core.config import (
@@ -43,12 +43,8 @@ from defender.learning.core.persist import (
     pitfalls_lane_is_open,
     read_pitfalls,
 )
+from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 from defender.learning.core.quarantine import preserve_tainted_tree
-
-if TYPE_CHECKING:
-    # A type only: every curator module is loaded lazily through `_CURATOR_MODULES`, and
-    # the lessons lane must not pay for the lead-author package's import tree.
-    from defender.learning.leads.pitfalls_curator import PitfallsDisposition
 
 
 class _LeadAuthorRetry(Exception):
@@ -431,35 +427,6 @@ class BatchDisposition:
         )
 
 
-@functools.cache
-def _complete_batch_disposition_schema() -> None:
-    """Resolve `BatchDisposition.pitfalls` against the real `PitfallsDisposition`, once.
-
-    A pydantic dataclass (#1067) builds its validator when the class is DECORATED, and this
-    module names `PitfallsDisposition` only under `TYPE_CHECKING` — the lessons lane must not
-    pay for the lead-author package's import tree, which is the whole point of that guard. So
-    the schema is left incomplete at import and finished here, on the lead-author lane's own
-    entry, where the curator module is imported anyway.
-
-    Deferred rather than dropped: annotating the field `Any` would have turned strict
-    validation off for exactly the value this record exists to carry, and silently. Called
-    from `_drain_lead_author` (the one place a `BatchDisposition` is built) rather than from
-    the curator loader, because a test driving the tick's internals passes its own curator
-    callables and never reaches the loader. `rebuild_dataclass` reads its caller's locals, so
-    the import below is what completes the namespace.
-    """
-    from pydantic.dataclasses import rebuild_dataclass
-
-    from defender.learning.leads.pitfalls_curator import PitfallsDisposition  # noqa: F401 — the name `rebuild_dataclass` resolves the annotation against
-
-    # `cast(Any, ...)`: `@model` is typed as `type[T] -> type[T]` (that is what makes the
-    # decorated class keep its own constructor signature for the type checker), so the
-    # `PydanticDataclass` protocol `rebuild_dataclass` declares is not visible statically —
-    # and pydantic publishes that protocol only from `_internal`, which is not a name to
-    # import.
-    rebuild_dataclass(cast(Any, BatchDisposition))
-
-
 def _drain_lead_author_markers(
     paths: LoopPaths,
     run_lead_author: Callable[..., None],
@@ -607,7 +574,6 @@ def _drain_lead_author(
     box: Any = None,
     lock_wait_seconds: int | None = None,
 ) -> BatchDisposition:
-    _complete_batch_disposition_schema()
     served = _drain_lead_author_markers(paths, run_lead_author, box=box)
     pitfalls = _drain_pitfalls(
         paths, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,

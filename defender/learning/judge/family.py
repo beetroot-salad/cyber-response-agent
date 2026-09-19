@@ -62,8 +62,9 @@ and the world's leads and queries come off `lead_repository.joined`, the canonic
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 import json
-from dataclasses import field, replace
+from dataclasses import field
 from defender._model import model
 from pathlib import Path
 from typing import Any
@@ -406,29 +407,6 @@ def sample_patterns(overlay: Any, *, holding_system: str) -> list[str]:
     section quantify over the same list; spelled at each site, the fallback for a patch-only
     world could change in one and not the other with no test between them."""
     return staged_patterns(overlay) or [holding_system]
-
-
-@model
-class FamilyGrade:
-    """The mechanical pass's own output: per-world rows plus the family's word.
-
-    `worlds` carries EVERY declared non-control world, ungradable ones included (J5: an
-    exclusion has to be traceable on the record). `graded_worlds` names the ones that
-    contributed to `verdict_word`. `world_facts` is what this pass READ, per world it got as
-    far as reading — handed on so the render does not open the same three files again; it is
-    an in-memory by-product of the pass and is not part of `judge.yaml`.
-
-    `measuring_worlds` (#1007) is the subset of `graded_worlds` whose `withheld_reason` is
-    `None` — the ones `verdict_word` is computed over. `withheld_worlds` is graded worlds NOT in
-    that set."""
-
-    episode_dir: Path
-    worlds: list[dict[str, Any]] = field(default_factory=list)
-    verdict_word: str = "undecidable"
-    graded_worlds: frozenset[str] = field(default_factory=frozenset)
-    world_facts: dict[str, WorldFacts] = field(default_factory=dict)
-    measuring_worlds: frozenset[str] = field(default_factory=frozenset)
-    withheld_worlds: frozenset[str] = field(default_factory=frozenset)
 
 
 def raw_manifest(episode_dir: Path) -> dict[str, Any]:
@@ -1137,6 +1115,33 @@ class WorldFacts:
         return frozenset(self.resolutions_by_lead)
 
 
+@model
+class FamilyGrade:
+    """The mechanical pass's own output: per-world rows plus the family's word.
+
+    `worlds` carries EVERY declared non-control world, ungradable ones included (J5: an
+    exclusion has to be traceable on the record). `graded_worlds` names the ones that
+    contributed to `verdict_word`. `world_facts` is what this pass READ, per world it got as
+    far as reading — handed on so the render does not open the same three files again; it is
+    an in-memory by-product of the pass and is not part of `judge.yaml`.
+
+    `measuring_worlds` (#1007) is the subset of `graded_worlds` whose `withheld_reason` is
+    `None` — the ones `verdict_word` is computed over. `withheld_worlds` is graded worlds NOT in
+    that set.
+
+    Defined BELOW `WorldFacts`, which `world_facts` names: a `@model` field is resolved when
+    the class is decorated, and a name defined later in the module leaves the schema to be
+    finished by whichever thread first constructs one."""
+
+    episode_dir: Path
+    worlds: list[dict[str, Any]] = field(default_factory=list)
+    verdict_word: str = "undecidable"
+    graded_worlds: frozenset[str] = field(default_factory=frozenset)
+    world_facts: dict[str, WorldFacts] = field(default_factory=dict)
+    measuring_worlds: frozenset[str] = field(default_factory=frozenset)
+    withheld_worlds: frozenset[str] = field(default_factory=frozenset)
+
+
 def world_ledger_name(label: str, *, episode_token: str) -> str:
     """The one RELATIVE spelling of a world's own served ledger — the name every reader walks
     from the episode bind and every refusal says (#1049) — so its readers cannot drift."""
@@ -1226,7 +1231,8 @@ def read_world_ledger(bound: Bound, label: str, *, episode_token: str,
                               world_token_for(episode_token, label))
 
 
-def read_world_facts(bound: Bound, label: str, *, episode_token: str) -> WorldFacts:
+def read_world_facts(bound: Bound, label: str, *, episode_token: str,
+                     leads: Callable[[], dict[str, JoinedLead]] | None = None) -> WorldFacts:
     """Read one world's archived record: the ledger, the document and the report, once — the
     composition of `read_world_ledger`, `read_investigation_facts` and `read_archived_report`,
     in that order, so the grading path's refusal on a missing ledger comes first exactly as
@@ -1234,9 +1240,18 @@ def read_world_facts(bound: Bound, label: str, *, episode_token: str) -> WorldFa
     says 'ledger') on an ABSENT ledger, report or investigation document: the three standalone
     readers answer absence as a VALUE for a caller with a partial archive to render (the
     episode page); this composition is the grading path's own, which has nothing to hand back
-    for a world it cannot see at all (F-H). `leads` is `{}`: this reader takes a bound reader,
-    never a `Path`, and `leads_by_id` is `lead_repository`'s own surface, left untouched — a
-    caller still holding the world's `Path` fills it in."""
+    for a world it cannot see at all (F-H).
+
+    `leads` is the world's leads read, DEFERRED: this reader takes the bound reader and never
+    a `Path` (#1049), and `leads_by_id` is `lead_repository`'s own surface, left untouched and
+    still `Path`-taking — so a caller that still holds the episode's `Path` hands over the
+    call (`_repository_leads`, the one place a path leaves the bound lane, gated on the
+    bound's own listing), which runs only once the three reads above have passed and whose
+    answer is set on the ONE construction. Deferred rather than taken as a value so the
+    refusal a planted link at `worlds/<label>` earns is still the document read's; set here
+    rather than by `dataclasses.replace` after, because a `@model` record re-validates and
+    copies every container field on a replace, and a served ledger is the largest thing a
+    grading pass holds. `None` leaves `{}`."""
     ledger_name = world_ledger_name(label, episode_token=episode_token)
     ledger_rows, malformed, ledger_read = read_world_ledger(bound, label, episode_token=episode_token)
     if ledger_read.absent:
@@ -1258,6 +1273,8 @@ def read_world_facts(bound: Bound, label: str, *, episode_token: str) -> WorldFa
         resolution_moved=document.resolution_moved,
         resolutions_by_lead=document.resolutions_by_lead,
         unlanded_document_rows=document.unlanded_document_rows,
+        # AFTER the three reads, as the docstring promises the refusal order.
+        leads=leads() if leads is not None else {},
     )
 
 
@@ -1395,13 +1412,15 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0913, PLR0915 — the bound and the
     # artifact that is not there from one that is there and wrong.
     world_bound = bound.under(f"{WORLDS_DIRNAME}/{label}")
     try:
-        facts = read_world_facts(bound, label, episode_token=episode_token)
         # THE ONE PATH LEFT ON THIS LANE: `leads_by_id` is `lead_repository`'s surface, shared
-        # with the live run dir, and it takes the world's directory. The gate is HERE and it is
-        # the bind's own listing: a `worlds/<label>` that is not a real, listable directory
-        # never reaches the repository (the read above has already refused for a link — this
-        # is the same fact asked once more, of the listing, so no reordering can open it).
-        facts = replace(facts, leads=_repository_leads(world_bound, Path(episode_dir), label))
+        # with the live run dir, and it takes the world's directory. The gate is the bind's
+        # own listing (`_repository_leads`): a `worlds/<label>` that is not a real, listable
+        # directory never reaches the repository — and `read_world_facts` runs the call only
+        # after its three reads, which have already refused for a link (this is the same fact
+        # asked once more, of the listing, so no reordering can open it).
+        facts = read_world_facts(
+            bound, label, episode_token=episode_token,
+            leads=lambda: _repository_leads(world_bound, Path(episode_dir), label))
         h_rows = own_h_rows(facts.ledger_rows, holding_system)
         faulted = next((r for r in h_rows if r.get("source") == FAULT), None)
 

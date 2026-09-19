@@ -73,6 +73,64 @@ def test_model_still_passes_a_real_config_key_through():
         v.a = "2"  # type: ignore[assignment]
 
 
+def test_model_refuses_a_keyword_the_class_has_no_field_for():
+    """Stdlib `@dataclass` raised `TypeError` on an unknown keyword; pydantic's own default
+    (`extra="ignore"`) drops it in silence, so a typo in a constructor call — or in a
+    `dataclasses.replace`, which forwards its leftover keys to `__init__` — would have handed
+    back a record that quietly kept its old value. `@model` restores the refusal."""
+    @model(frozen=True)
+    class R:
+        worktree_root: Path
+        worktree_base: Path | None = None
+
+    with pytest.raises(ValidationError, match="unexpected_keyword_argument"):
+        R(worktree_root=Path("/x"), worktree_bsae=Path("/y"))  # type: ignore[call-arg]
+    good = R(worktree_root=Path("/x"))
+    with pytest.raises(ValidationError, match="unexpected_keyword_argument"):
+        replace(good, worktree_bsae=Path("/y"))
+    assert replace(good, worktree_base=Path("/y")).worktree_base == Path("/y")
+
+
+def test_complete_finishes_a_schema_that_names_a_later_class():
+    """Two records naming each other leave the first decorated one incomplete: pydantic then
+    builds its schema on the FIRST construction, from whichever thread gets there. `complete`
+    at module end finishes it at import, and the field validates strictly afterwards."""
+    from defender._model import complete
+
+    @model(frozen=True)
+    class Ctx:
+        check: Chk
+
+    @model(frozen=True)
+    class Chk:
+        name: str
+
+    assert Ctx.__pydantic_complete__ is False
+    assert complete(Ctx) is Ctx
+    assert Ctx.__pydantic_complete__ is True
+    chk = Chk(name="n")
+    assert Ctx(check=chk).check is chk
+    with pytest.raises(ValidationError):
+        Ctx(check="not a check")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("module", "name"), [
+    ("defender.learning.core.drains", "BatchDisposition"),
+    ("defender.learning.author.verify_forward.checks", "CheckContext"),
+    ("defender.learning.judge.family", "FamilyGrade"),
+])
+def test_every_ported_record_with_a_forward_reference_is_complete_at_import(module, name):
+    """The three records whose field names a class the module defines later, or another
+    module owns: `BatchDisposition.pitfalls` (now `core/pitfalls_disposition`, imported at
+    top), `CheckContext.check` (mutually referential with `ForwardCheck`, `complete`d at module
+    end) and `FamilyGrade.world_facts` (moved below `WorldFacts`). Each was left for pydantic
+    to finish on the first construction — for `CheckContext`, inside `_Judgement.mint`'s
+    worker pool, N threads at once with no lock."""
+    import importlib
+
+    assert getattr(importlib.import_module(module), name).__pydantic_complete__ is True
+
+
 # ---------------------------------------------------------------------------------------
 # the branch spec: every mistyped field is a `BranchError`, at construction
 # ---------------------------------------------------------------------------------------
@@ -243,19 +301,30 @@ def test_query_row_hands_back_the_record_it_was_read_from():
     assert row.params is rec["params"]
 
 
-def test_batch_disposition_validates_its_lazily_named_curator_type():
-    """`BatchDisposition.pitfalls` names `PitfallsDisposition` under a `TYPE_CHECKING` guard —
-    the lessons lane must not pay for the lead-author package's import tree — so its pydantic
-    schema is incomplete at import and completed on the lead-author lane's own entry.
+def test_batch_disposition_validates_its_curator_type_without_loading_the_curator():
+    """`BatchDisposition.pitfalls` is typed `PitfallsDisposition`, validated strictly, and the
+    class it names lives in `core/pitfalls_disposition` — NOT the curator module, which the
+    lessons lane must never pay to import. Both halves matter: typed `Any` the record would
+    carry anything, and named under `TYPE_CHECKING` from the curator its schema was left
+    unfinished at import and completed by a frame-introspecting rebuild at the lane's entry."""
+    import subprocess
+    import sys
 
-    Both halves matter: without the completion every tick died with `PydanticUserError: not
-    fully defined`, and with the field typed `Any` instead (the other way to make that error
-    go away) strict validation would be off for exactly the value the record exists to
-    carry."""
+    probe = (
+        "import sys; from defender.learning.core import drains; "
+        "assert drains.BatchDisposition.__pydantic_complete__, 'incomplete at import'; "
+        "assert not [m for m in sys.modules if m.startswith('defender.learning.leads')], "
+        "sorted(m for m in sys.modules if m.startswith('defender.learning.leads'))"
+    )
+    # A fresh interpreter: this process has long since imported the curator for other tests.
+    subprocess.run([sys.executable, "-c", probe], check=True, cwd=Path(__file__).parents[2],
+                   timeout=120)
+
     from defender.learning.core import drains
-    from defender.learning.leads.pitfalls_curator import PitfallsDisposition
+    from defender.learning.core.pitfalls_disposition import PitfallsDisposition
+    from defender.learning.leads import pitfalls_curator
 
-    drains._complete_batch_disposition_schema()
+    assert pitfalls_curator.PitfallsDisposition is PitfallsDisposition
     real = PitfallsDisposition(committed_ids=("c:l-000:0",), sha=None, held_ids=())
     assert drains.BatchDisposition(
         served=[], pitfalls=real, lock_wait_seconds=None).pitfalls is real

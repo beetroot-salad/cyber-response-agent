@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from defender._model import model
+from defender._model import complete, model
 from pathlib import Path
 
 from uuid import uuid4
@@ -40,6 +40,12 @@ class ForwardCheck:
     #: `(verdict, reasoning)` — verdict is GOOD or BAD; EXEMPT is the drain's own, via
     #: `cfg.exempt(row)`, never the check's (M2's own data-model note).
     run: Callable[[CheckContext], tuple[str, str]]
+
+
+# The two records name each other, so whichever is decorated first cannot see the other:
+# `CheckContext.check` is finished here, once, rather than by the first thread to construct
+# one — which is inside `_Judgement.mint`'s worker pool.
+complete(CheckContext)
 
 
 def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) -> tuple[str, str]:
