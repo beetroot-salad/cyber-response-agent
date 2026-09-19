@@ -190,8 +190,13 @@ def _read_spec(claimed: Path) -> tuple[dict | None, str]:
     return spec, ""
 
 
+#: Where `quarantine_marker` parks a request it could not serve, under the CALLER's queue dir
+#: — so there is one such directory per caller, and the queue page (#903) reads them all.
+FAILED_MARKER_DIRNAME = "failed"
+
+
 def quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) -> None:
-    failed_dir = queue_dir / "failed"
+    failed_dir = queue_dir / FAILED_MARKER_DIRNAME
     failed_dir.mkdir(parents=True, exist_ok=True)
     rec = dict(spec)
     rec["failed"] = reason

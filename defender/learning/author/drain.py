@@ -184,9 +184,21 @@ LOCK_ORDER: tuple[str, ...] = ("drain_lock", "repo_lock", "append_lock")
 
 
 def graveyard_file(channel: QueueChannel) -> Path:
-    """The channel's retirement record. Advisory: the queue rewrite is authoritative, and
-    nothing in production reads this back."""
+    """The channel's retirement record. Advisory: the queue rewrite is authoritative. Its one
+    reader is the queue page (`frontend/serialize_queues.py`, #903), which shows every record
+    to a human; nothing in the drains reads it back."""
     return channel.file.with_suffix(".deadletter.jsonl")
+
+
+def retirement_stamp() -> dict[str, str]:
+    """@owns retired_at — when a graveyard record was written, on every writer's record.
+
+    Three writers append dead letters (`_bump_rows` — for `retire` and the deferral fold —,
+    `_retire_unkeyable`, and the pitfalls curator's `_graveyard_dropped_rows`) and none
+    carried a time until #903: the page that
+    reads them can sort on nothing else, and a row a human cannot place against anything else
+    that happened is a row they cannot triage. One spelling, one clock, here."""
+    return {"retired_at": now_iso()}
 
 
 def stuck_report_file(channel: QueueChannel) -> Path:
@@ -341,6 +353,7 @@ def _bump_rows(
                     # that one inside `row`, where it is provenance rather than the verdict.
                     "attempts": rec[counter_key],
                     "deadletter_reason": reason,
+                    **retirement_stamp(),
                     # Nested rather than spread, so a graveyard entry has ONE shape on
                     # every channel and is readable without knowing its queue.
                     "row": {k: v for k, v in rec.items() if k != counter_key},
@@ -1330,7 +1343,7 @@ def _retire_unkeyable(
     append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
         graveyard_file(channel),
         [{**row, "attempts": int(row.get("attempts") or 0) + 1,
-          "deadletter_reason": reason} for row in rows],
+          "deadletter_reason": reason, **retirement_stamp()} for row in rows],
     )
     persist.rotate_queue_locked(
         pending_file=channel.file,
@@ -1418,7 +1431,13 @@ def stuck_record_count(channel: QueueChannel) -> int:
 
 
 def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
-    """The operator signal for a stuck tick. The count is per TICK, not per row — a
+    """@owns recorded_at — the operator signal for a stuck tick, and when it was written.
+
+    The file is append-only and nothing clears it, so the queue page (#903) can only ever say
+    "last faulted at", never "stuck right now" — and without this stamp it could not say
+    which of those it was showing.
+
+    The operator signal for a stuck tick. The count is per TICK, not per row — a
     non-retiring row must stay byte-identical, so the counter cannot live on it the way
     `attempts` does, which is why the last record is read back before appending."""
     fault_class = type(exc).__name__
@@ -1448,6 +1467,7 @@ def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -
             "row_ids": ids,
             "consecutive_ticks": consecutive,
             "reason": str(exc),
+            "recorded_at": now_iso(),
         }],
     )
 

@@ -10,7 +10,7 @@ from defender import _git
 from defender._git import REPO_ROOT, GitError
 from defender._paths import DefenderPaths
 from defender.learning.author.forge import Forge, ForgeError, GhForge
-from defender.learning.core.config import make_logger
+from defender.learning.core.config import QUARANTINE_DIRNAME, make_logger
 from defender.runtime.scrub import verdict_path
 
 _log = make_logger("branch")
@@ -69,7 +69,7 @@ class AuthorBranch:
         archive — the reason to push it out of tree would have been a preserved worktree's
         live symlinks, and a `.tar.gz` has none. `.worktrees/` is already gitignored.
         """
-        return self._worktree_base / "quarantine"
+        return self._worktree_base / QUARANTINE_DIRNAME
 
 
     def branch_name(self, batch_id: str) -> str:

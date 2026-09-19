@@ -265,7 +265,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
     spec rather than a record.
 
     THE DEMAND STATES THAT THE RECORD EXISTS; IT DOES NOT ASSERT THE VIEW THAT READS IT.
-    Re-driving it is #870's amendment and #903's view, neither of which is in this tree — so
+    Re-driving it is #870's amendment and #903's view (`test_903_queue_view.py`), neither exercised here — so
     what is pinned is that the record retains everything a re-drive needs.
     """
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),

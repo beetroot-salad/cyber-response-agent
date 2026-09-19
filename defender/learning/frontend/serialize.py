@@ -20,6 +20,7 @@ from defender.scripts._venv import reexec_into_venv  # noqa: E402
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
+from defender._clock import z_seconds
 from defender._corpus import iter_lessons
 from defender._io import use_utf8_stdio
 
@@ -197,10 +198,8 @@ def build_view(defender_dir: Path = DEFENDER) -> dict:
 
 
 def stamped_view() -> dict:
-    from datetime import datetime
-
     view = build_view()
-    view["generated_at"] = datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    view["generated_at"] = z_seconds(_dt.datetime.now(_dt.UTC))
     return view
 
 
