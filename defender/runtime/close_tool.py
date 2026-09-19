@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -179,7 +179,7 @@ NO_CAUSE = ""
 ArtifactValidator = Callable[[str, str, str | None], str | None]
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class RecommendedLead:
     """One thing the review wants measured before the close can stand.
 
@@ -192,7 +192,7 @@ class RecommendedLead:
     origin: str
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CloseResult:
     """What one close attempt did.
 
@@ -345,7 +345,7 @@ def _record_dict(
     }
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _CloseFields:
     """The scalar fields `_commit` needs beyond `deps`/`disposition`/`record`, bundled so the
     function stays under the arg-count lint."""

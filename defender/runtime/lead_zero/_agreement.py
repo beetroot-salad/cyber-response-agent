@@ -34,7 +34,7 @@ imported at the call, the way the rest of the package reaches the gather machine
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from defender._model import model
 
 from defender._corpus import QueryTemplate, is_established
 from defender.runtime.verb_dispositions import HEALTH_CHECK
@@ -49,7 +49,7 @@ class CorrelationDispatchError(Exception):
     before any prompt is built, naming what disagreed."""
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CorrelationDispatch:
     """Item 3's dispatch identity, derived once at run start from three inputs — the config's
     id, the catalog walk, and the table's holder rows — and CARRIED to the two frames that

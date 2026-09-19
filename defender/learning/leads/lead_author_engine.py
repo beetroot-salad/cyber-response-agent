@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from defender._model import model
 from defender._paths import adapters_under
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
@@ -191,7 +191,7 @@ def _lead_author_write_shape(roots: ResolvedRoots) -> tuple[re.Pattern[str], ...
     )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class LeadAuthorDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.LEAD_AUTHOR

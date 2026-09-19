@@ -28,6 +28,7 @@ import os
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
@@ -198,14 +199,14 @@ def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
 
 def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
     """Safe-by-construction (#536 required-policy): a LeadAuthorDeps built WITHOUT a policy is a
-    TypeError — a writer subtype can't silently inherit the MAIN policy by omission. Positive
+    ValidationError — a writer subtype can't silently inherit the MAIN policy by omission. Positive
     control: for_run supplies the lead-author policy (write_allow non-empty; no data-source reach).
 
     #575: the `adapters` / `raw_reads` capability bits are deleted. Their content — "this agent has
     no data-source reach and no payload address" — is now a fact about the GRANT LIST (the adapter
     capability IS a routed Grant; a raw read IS a shape in `read_allow`), so it is asserted through
     the gate, where it is actually decided, rather than as a declared bit that could disagree."""
-    with pytest.raises(TypeError):
+    with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
         LeadAuthorDeps(run_dir=tmp_path, defender_dir=tmp_path / "defender", run_id="x")
     deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
     assert deps.policy.write_allow  # non-empty

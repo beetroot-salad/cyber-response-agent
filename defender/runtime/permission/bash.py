@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 
 from defender.runtime import bash_exec
@@ -26,7 +26,7 @@ ADAPTER_RETIRED_REASON = (
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class BashDecision(Decision):
 
     pipelines: tuple[bash_exec.Pipeline, ...] | None = None

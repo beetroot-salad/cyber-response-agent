@@ -14,7 +14,8 @@ import math
 import re
 import sqlite3
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -292,7 +293,7 @@ def _finish_connect(conn: sqlite3.Connection) -> None:
 
 # the handle
 
-@dataclass
+@model
 class StoreHandle:
     """One handle, ONE `sqlite3.Connection`, shared by the main agent's session and every
     concurrently-dispatched gather sub-agent's session.

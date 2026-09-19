@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Protocol
+from typing import ClassVar, Protocol, runtime_checkable
 
 from defender.runtime import bash_exec
 from defender.runtime.box_codec import (
@@ -34,6 +34,8 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 
 
+# STDLIB `@dataclass`, not `defender._model.model`: this module is in the box entrypoint's
+# import closure — see `bash_exec._run_box_entrypoint` for the one note on why (#1067).
 @dataclass(frozen=True)
 class BoxSpec:
 
@@ -124,6 +126,22 @@ class BoxExecutor:
             raise BoxFault(f"{e}: {_text(raw.stderr).strip()}") from None
 
     run = run_parsed
+
+
+# `@runtime_checkable` (#1067): `AgentDeps.box` is a STRICT pydantic field typed `BoxLike`, and
+# pydantic validates it by `isinstance(value, BoxLike)`. The only thing production code ever
+# calls on `deps.box` (`runtime/tools/_bash.py`) is `run_parsed(...)` — the real contract was
+# always structural, a concrete `BoxExecutor` was just the one implementation that existed.
+# Typed `BoxExecutor` itself, the field refused every test double that duck-types the box
+# (`run_parsed` alone, no real `transport`/`spec`). Defined HERE, stdlib-only: this module
+# rides into the sandbox (see the note above `BoxSpec`), and a `Protocol` costs it nothing.
+@runtime_checkable
+class BoxLike(Protocol):
+
+    def run_parsed(
+        self, pipelines: Sequence[bash_exec.Pipeline], *,
+        command: str, cwd: Path, timeout: float,
+    ) -> BoxResult: ...
 
 
 def _text(raw: bytes) -> str:

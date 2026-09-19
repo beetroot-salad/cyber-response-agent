@@ -54,7 +54,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping
-from dataclasses import dataclass
+from defender._model import model
 from functools import lru_cache
 from pathlib import Path
 
@@ -116,7 +116,7 @@ class DispositionWarning(UserWarning):
     """
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Disposition:
     """One `(system, verb)` and the roles allowed to call it.
 
@@ -135,7 +135,7 @@ class Disposition:
         return (self.system, self.verb)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CensusGaps:
     """Residue between the walked census and the table, in both directions.
 

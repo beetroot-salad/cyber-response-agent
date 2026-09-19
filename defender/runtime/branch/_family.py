@@ -27,7 +27,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -115,7 +116,7 @@ def is_contradiction(_error: BaseException) -> bool:
 # ---------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ElasticEntry:
     """One base pattern's staged difference: what is added, and what is taken away."""
 
@@ -130,7 +131,7 @@ class ElasticEntry:
     exclude: Any = None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Overlay:
     """A world's difference, as data.
 
@@ -180,11 +181,7 @@ def _parse_patches(raw: Any, where: str) -> dict[str, dict[str, dict[str, Any]]]
         entities: dict[str, dict[str, Any]] = {}
         for entity, fields_ in table.items():
             _check_entity(entity, where, system)
-            if not isinstance(fields_, dict):
-                raise FamilyError(
-                    f"{where}.patches[{system!r}][{entity!r}] must be a mapping of field to "
-                    "value")
-            entities[entity] = dict(fields_)
+            entities[entity] = _checked_fields(fields_, f"{where}.patches[{system!r}][{entity!r}]")
         if entities:
             out[system] = entities
     return out
@@ -203,6 +200,26 @@ def _check_entity(entity: Any, where: str, system: str) -> None:
             f"{where}.patches[{system!r}] names entity {entity!r}, which is outside the entity "
             "domain — an entity is rendered as a KEY, so it may carry only alphanumerics and "
             "'.', '_', '-' after a leading alphanumeric")
+
+
+def _checked_fields(fields_: Any, at: str) -> dict[str, Any]:
+    """One entity's field table, refused as `FamilyError` unless it is a mapping keyed by str.
+
+    The FIELD keys too, not only the entity's: `Overlay.patches` is strictly typed
+    `dict[str, ...]` all the way down (#1067), so a non-string key — YAML 1.1 reads a bare
+    `on:`/`yes:`/`1:` as a bool or an int — would otherwise refuse as pydantic's
+    `ValidationError` out of `Overlay(...)`, a class none of this loader's callers handle,
+    instead of the `FamilyError` naming the field.
+    """
+    if not isinstance(fields_, dict):
+        raise FamilyError(f"{at} must be a mapping of field to value")
+    bad = [k for k in fields_ if not isinstance(k, str)]
+    if bad:
+        raise FamilyError(
+            f"{at} names non-string field(s) {bad!r} — a field is a key in a model-authored "
+            "document, and YAML reads a bare `on`/`yes`/`1` as something other than its "
+            "spelling")
+    return dict(fields_)
 
 
 def _parse_elastic(raw: Any, where: str) -> dict[str, ElasticEntry]:
@@ -268,7 +285,7 @@ def touches_of(overlay: Overlay) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class World:
     """One sibling's declaration: what it is, what it asserts, and how it differs."""
 
@@ -387,7 +404,7 @@ def _check_label_basis(raw: Any, at: str) -> str:
 # ---------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Family:
     """The whole manifest, loaded."""
 
@@ -866,7 +883,7 @@ def world_token_for(episode_token: str, world_label: str) -> str:
     return f"{episode_token}.{world_label}"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ResumeWorld:
     """What a sibling process IS, from the manifest alone.
 

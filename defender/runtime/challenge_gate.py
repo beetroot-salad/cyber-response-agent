@@ -44,7 +44,8 @@ import json
 import sys
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from typing import Any
 
 from defender._env import env_int
@@ -85,7 +86,7 @@ def _shipped_base_request_limit() -> int:
     return driver.DEFAULT_REQUEST_LIMIT
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Bounds:
     """Every bound is INJECTED, never hardcoded at a call site — `EXTRA_TURN_BOUND` is the
     shipped DEFAULT, not a literal restated elsewhere. There is one review pass per close
@@ -130,7 +131,7 @@ def raised_request_limit(bounds: Bounds) -> int:
     return bounds.base_request_limit + bounds.extra_turns
 
 
-@dataclass
+@model
 class ReviewState:
     """The run's per-run mutable review state — lives in exactly ONE mutable container field
     on the frozen `AgentDeps` (`deps.review_state`)."""
@@ -169,14 +170,14 @@ def write_review_record(run_dir, turn: int, record: dict) -> None:
 # Stage invocation: real wall-clock bound, distinguishable timeout/error.
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class StageRequest:
     prompt: str
     salt: str
     timeout: float
 
 
-@dataclass
+@model
 class StageOutcome:
     text: str | None
     #: `None` when the call completed, otherwise a member of `close_tool.FAILURE_KINDS`
@@ -307,7 +308,7 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
         )
 
 
-@dataclass
+@model
 class GateVerdict:
     """One gate attempt's classification.
 
