@@ -67,7 +67,9 @@ import json
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import SkipValidation
 
 from defender._artifact_schema import INVESTIGATION_NAME, REPORT_NAME
 from defender._io import ALIAS_READ_REFUSAL, Bound, bind
@@ -1087,7 +1089,11 @@ class WorldFacts:
     what it read to the caller on `FamilyGrade.world_facts`, and `render.render` takes it as an
     optional input and reads for itself only when nobody has read for it."""
 
-    ledger_rows: list[dict[str, Any]]
+    #: `SkipValidation` (#1067): the served ledger is the largest thing a grading pass holds,
+    #: its rows arrive as the `dict`s the JSONL reader already typed, and `dict[str, Any]`
+    #: checks nothing inside a row — strict validation would only rebuild every row on every
+    #: construction. Kept by identity, as `QueryRow.params` is.
+    ledger_rows: Annotated[list[dict[str, Any]], SkipValidation]
     malformed_rows: int
     investigation_text: str
     #: The report AS `_report.read_report` READ IT — its headline, its reason when there is
@@ -1102,11 +1108,12 @@ class WorldFacts:
     #: evidence the grading pass could not see, and silence about it reads exactly like a world
     #: that had none.
     unlanded_document_rows: tuple[str, ...] = ()
-    #: The world's leads off its OWN queries table and lead files (`leads_by_id`) — `{}` as
-    #: `read_world_facts` itself answers it (#1049: it takes a BOUND reader, never a `Path`,
-    #: and `leads_by_id` is `lead_repository`'s own surface, deliberately untouched and still
-    #: `Path`-taking); a caller that still holds the world's `Path` (`_grade_world`,
-    #: `render.render`) fills this in itself, once, the same way it always has.
+    #: The world's leads off its OWN queries table and lead files (`leads_by_id`) — `{}`
+    #: unless the caller hands `read_world_facts` a `leads` callable (#1049: the reader takes
+    #: a BOUND reader, never a `Path`, and `leads_by_id` is `lead_repository`'s own surface,
+    #: deliberately untouched and still `Path`-taking); a caller that still holds the world's
+    #: `Path` (`_grade_world`, `render.render`) passes the read, which the reader runs after
+    #: its own three and sets here on the one construction.
     leads: dict[str, JoinedLead] = field(default_factory=dict)
 
     @property

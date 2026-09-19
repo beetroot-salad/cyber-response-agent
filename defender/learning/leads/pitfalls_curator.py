@@ -651,11 +651,12 @@ def _graveyard_dropped_rows(paths, rows: list[dict], dropped_ids: list[str]) -> 
 
 #: The tick's success-path consumption and the held rows' offer ceiling live in `core/` beside
 #: the drain that carries them (`pitfalls_disposition` — see its module docstring for why);
-#: re-exported under this module's name so its readers still find them where they look.
+#: the three public names re-exported here so this module's readers still find them where
+#: they look. The ceiling's helper is not: `apply` binds it in `core/`, so a patch of a name
+#: here would not reach it.
 HELD_CEILING_REASON = _disposition.HELD_CEILING_REASON
 OFFERS_DECLINED_KEY = _disposition.OFFERS_DECLINED_KEY
 PitfallsDisposition = _disposition.PitfallsDisposition
-_retire_exhausted_holds = _disposition._retire_exhausted_holds
 
 
 def run_pitfalls(

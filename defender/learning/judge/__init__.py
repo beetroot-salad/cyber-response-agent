@@ -195,12 +195,16 @@ class EpisodeGrade:
 #: `_grade_from_document` re-derives from the rows' own `ungradable`/`withheld_reason` (#1007)
 #: so no top-level list can disagree with what the rows themselves say.
 _DERIVED = frozenset({"episode_dir", "graded_worlds", "withheld_worlds", "measuring_worlds"})
-#: The keys the file may carry, off the class itself. `_grade_from_document` drops a top-level
-#: STRING key outside this set rather than refusing on it (#1025 p8: a record written by a
-#: newer pass renders on an older page, the field shown nowhere) — the READER's tolerance, not
-#: the record's: `@model` refuses an unknown keyword (#1067), so the live pass's own
-#: construction still cannot misspell a field into silence.
-_RECORD_FIELDS = frozenset(f.name for f in dataclass_fields(EpisodeGrade))
+
+
+def _known_keys(record: type, doc: dict[Any, Any]) -> dict[Any, Any]:
+    """`doc` with every STRING key the record's schema does not name dropped (#1025 p8: a
+    record written by a newer pass renders on an older page, the field shown nowhere) — the
+    READER's tolerance, not the record's: `@model` refuses an unknown keyword (#1067), so the
+    live pass's own construction still cannot misspell a field into silence. A non-string
+    key is kept, for the constructor's own `TypeError` (see `_grade_from_document`)."""
+    names = {f.name for f in dataclass_fields(record)}
+    return {k: v for k, v in doc.items() if not isinstance(k, str) or k in names}
 
 
 def _judge_yaml_path(episode_dir: Path) -> Path:
@@ -860,16 +864,17 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
     # is not in `grade_episode`'s conversion set — the bare traceback this comment promises
     # never leaves.
     try:
-        fields = {k: v for k, v in doc.items()
-                  if k not in _DERIVED and not (isinstance(k, str) and k not in _RECORD_FIELDS)}
+        fields = _known_keys(EpisodeGrade, {k: v for k, v in doc.items() if k not in _DERIVED})
         # The stamp is a NESTED strict dataclass, and this is Python-mode validation (the
         # keys are a parsed YAML mapping, not JSON text): a strict nested dataclass admits
         # only an instance of itself — a well-shaped `{outcome, reason}` mapping is refused
         # as `dataclass_exact_type` before its keys are looked at. Built here, under the
         # same refusal; a stamp of the wrong shape (no reason, an int outcome) still lands
-        # as `JudgeRefused` through the `except` below.
+        # as `JudgeRefused` through the `except` below — and a key the stamp's schema does not
+        # name is dropped exactly as a top-level one is, so a stamp a newer pass wrote still
+        # reads.
         if isinstance(fields.get("not_graded"), dict):
-            fields["not_graded"] = NotGradedStamp(**fields["not_graded"])
+            fields["not_graded"] = NotGradedStamp(**_known_keys(NotGradedStamp, fields["not_graded"]))
         record = EpisodeGrade(**fields, episode_dir=episode_dir)
     except (ValidationError, TypeError) as bad:
         raise JudgeRefused(f"{JUDGE_NAME} is not a family grade record: {bad}") from bad

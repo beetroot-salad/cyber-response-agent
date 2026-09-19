@@ -18,8 +18,8 @@ from defender.learning.author import drain as _author_drain
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 
-#: The curator's own log prefix, kept: these lines were the curator's before the move.
-_log = _loop_config.make_logger("lead-author", flush=True)
+#: The lane's own logger: these lines were the curator's before the move.
+_log = _loop_config.lead_author_log
 
 #: The graveyard reason a held reducer row finally retires under. Its own class, beside
 #: `pitfalls_curator._deadletter_reason`'s three and `drains._retire_pitfalls_batch`'

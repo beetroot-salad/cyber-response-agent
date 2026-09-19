@@ -424,6 +424,10 @@ def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:
 
 
 _log = make_logger("loop")
+#: The lead-author lane's ONE logger — every module of the lane, and the disposition the drain
+#: carries for it (`core/pitfalls_disposition`), binds this rather than minting its own, so the
+#: lane's prefix is spelled once and its lines grep as one vocabulary.
+lead_author_log = make_logger("lead-author", flush=True)
 
 
 def source_first_party_key(model: str, *, label: str = "judge") -> None:

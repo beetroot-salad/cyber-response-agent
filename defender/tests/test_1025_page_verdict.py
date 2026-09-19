@@ -1151,6 +1151,26 @@ def test_1025_judge_yaml_carries_a_top_level_field_this_readers_schema_has_never
     assert "NEVER-SEEN-VALUE" not in ep.page.read_text(encoding="utf-8")
 
 
+def test_1025_a_not_graded_stamp_carries_a_field_this_readers_schema_has_never_seen(tmp_path):
+    """The same tolerance one level down: a `not_graded` stamp written by a newer pass with a
+    key this reader's stamp schema does not name still reads as the stamp it is (#1067: the
+    record's classes refuse an unknown keyword, so the reader drops it before constructing),
+    the page byte-identical to the same stamp without the key.
+    """
+    ep = E.sample_episode(tmp_path)
+    doc = E.sample_grade()
+    doc["not_graded"] = {"outcome": "rejected", "reason": "STAMP-REASON"}
+    E.write_judge(ep.dir, doc)
+    render(ep)
+    baseline = ep.page.read_bytes()
+    assert "STAMP-REASON" in ep.page.read_text(encoding="utf-8"), "positive control: the stamp renders"
+    doc["not_graded"]["never_seen_field"] = "NEVER-SEEN-VALUE"
+    E.write_judge(ep.dir, doc)
+    render(ep)
+    assert ep.page.read_bytes() == baseline
+    assert "NEVER-SEEN-VALUE" not in ep.page.read_text(encoding="utf-8")
+
+
 def test_1025_draw_directory_holds_both_1_yaml_and_01_yaml(tmp_path):
     """`01.yaml` is ignored exactly as `draws_on_disk` ignores it (d39); draw 1 is read from
     `1.yaml` once; no error, no extra row.

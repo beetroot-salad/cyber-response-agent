@@ -15,7 +15,7 @@ from defender.learning.leads.path_validation import SKILLS_REL, _porcelain_recor
 
 PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
 
-_log = _loop_config.make_logger("lead-author", flush=True)
+_log = _loop_config.lead_author_log
 
 
 def _spawn_author_agent(

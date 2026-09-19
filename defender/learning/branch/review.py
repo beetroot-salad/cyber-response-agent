@@ -39,9 +39,10 @@ import tempfile
 from collections.abc import Iterator, Sequence
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
+from pydantic import SkipValidation
 
 from defender._io import read_jsonl_rows, read_jsonl_rows_report, write_guarded
 from defender.run_common import DEFENDER_DIR, resolve_runs_base, run_env
@@ -346,8 +347,10 @@ class _Deps:
     #: value that cannot vary between them.
     drifted: frozenset[str]
     #: Every row `base_file` recorded — M1's own selection pool, read once at `review()` scope
-    #: rather than re-read per world.
-    captured_rows: Sequence[dict]
+    #: rather than re-read per world. `SkipValidation` (#1067): the whole capture, as the
+    #: `dict`s the JSONL reader already typed; `dict` checks nothing inside a row, so strict
+    #: validation would only rebuild every row once per review.
+    captured_rows: Annotated[Sequence[dict], SkipValidation]
     #: M1's base-arm memo (F3, F-A(d)): `(system, verb, canonical(params))` -> canonical text,
     #: at EPISODE scope so a key re-asked by three worlds is read from the un-rewritten estate
     #: exactly once. SUCCESSES ONLY — a faulted read is retried for the next world rather than

@@ -125,10 +125,21 @@ def test_every_ported_record_with_a_forward_reference_is_complete_at_import(modu
     top), `CheckContext.check` (mutually referential with `ForwardCheck`, `complete`d at module
     end) and `FamilyGrade.world_facts` (moved below `WorldFacts`). Each was left for pydantic
     to finish on the first construction — for `CheckContext`, inside `_Judgement.mint`'s
-    worker pool, N threads at once with no lock."""
-    import importlib
+    worker pool, N threads at once with no lock.
 
-    assert getattr(importlib.import_module(module), name).__pydantic_complete__ is True
+    IN A FRESH INTERPRETER, because the flag this reads flips to true on the first
+    construction anyway: in this process, any earlier test in the worker that built one of
+    these would make a class left lazily incomplete read as complete, and the fix could be
+    reverted with this arm still green."""
+    import subprocess
+    import sys
+
+    probe = (
+        f"import importlib; cls = getattr(importlib.import_module({module!r}), {name!r}); "
+        "assert cls.__pydantic_complete__ is True, 'left for the first construction to finish'"
+    )
+    subprocess.run([sys.executable, "-c", probe], check=True, cwd=Path(__file__).parents[2],
+                   timeout=120)
 
 
 # ---------------------------------------------------------------------------------------
@@ -312,11 +323,11 @@ def test_batch_disposition_validates_its_curator_type_without_loading_the_curato
 
     probe = (
         "import sys; from defender.learning.core import drains; "
-        "assert drains.BatchDisposition.__pydantic_complete__, 'incomplete at import'; "
         "assert not [m for m in sys.modules if m.startswith('defender.learning.leads')], "
         "sorted(m for m in sys.modules if m.startswith('defender.learning.leads'))"
     )
-    # A fresh interpreter: this process has long since imported the curator for other tests.
+    # A fresh interpreter: this process has long since imported the curator for other tests
+    # (completeness at import is the census above's, in the same fresh-interpreter shape).
     subprocess.run([sys.executable, "-c", probe], check=True, cwd=Path(__file__).parents[2],
                    timeout=120)
 
