@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from defender._model import model
+from typing import TYPE_CHECKING, Annotated, Any
+
+from pydantic import SkipValidation
 
 from defender._env import env_bool
 
@@ -99,7 +101,7 @@ _LEAD_ROW_RE = re.compile(r"l-\S*\|(\d+)\|")
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class FrozenState:
 
     prefix: tuple[Message, ...]
@@ -107,10 +109,18 @@ class FrozenState:
     frozen_through: int
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CompactionStep:
 
-    history: list[Message]
+    #: `SkipValidation` (#1067): pydantic validates a `list[Message]` field by rebuilding the
+    #: list (and, one level in, WOULD rebuild each `dict`), so a plain strict field breaks the
+    #: zero-copy guarantee this carries — `step.history is history` and, deeper,
+    #: `step.history[i] is history[j]` for a reused entry (`test_reuses_within_frozen_loop`).
+    #: Compaction runs on every fold and a run's history can be large; re-copying it on every
+    #: step for a field that is passed straight through, never read field-by-field here, would
+    #: be a real cost for no gained safety. `Message` stays the declared element type for
+    #: static checking — this only turns off the runtime rebuild.
+    history: Annotated[list[Message], SkipValidation]
     state: FrozenState | None
     action: str
     loop: int | None

@@ -27,6 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 pytest.importorskip("pydantic_ai")
 
@@ -50,7 +51,7 @@ def _ident(run_dir: Path) -> dict:
 def test_agent_deps_requires_policy(tmp_path):
     """AgentDeps(run_dir, defender_dir, run_id, salt) with NO policy= -> TypeError
     (the base has no inheritable default to go silently MAIN-shaped)."""
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, ValidationError)):  # 1067: a required/kw-only miss now raises pydantic's ValidationError, not stdlib's TypeError
         tools.AgentDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r",
                         cwd_anchor=tmp_path)
 
@@ -67,7 +68,7 @@ def test_agent_deps_accepts_explicit_policy(tmp_path):
 
 def test_agent_deps_requires_cwd_anchor(tmp_path):
     """AgentDeps cannot silently resolve relative paths against the ambient process cwd."""
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, ValidationError)):  # 1067: a required/kw-only miss now raises pydantic's ValidationError, not stdlib's TypeError
         tools.AgentDeps(
             run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r",
             policy=_MAIN_POLICY,
@@ -77,7 +78,7 @@ def test_agent_deps_requires_cwd_anchor(tmp_path):
 
 
 def test_cwd_anchor_is_keyword_only(tmp_path):
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, ValidationError)):  # 1067: a required/kw-only miss now raises pydantic's ValidationError, not stdlib's TypeError
         tools.AgentDeps(tmp_path, PATHS.defender_dir, "r", "s", tmp_path, policy=_MAIN_POLICY)
 
 
@@ -88,7 +89,7 @@ def test_cwd_anchor_is_keyword_only(tmp_path):
 def test_policy_is_keyword_only(tmp_path):
     """policy is keyword-only: passing it as the 5th POSITIONAL arg -> TypeError. Pins the
     `field(kw_only=True)` shape (matches the _ActorToolScope.read_confine precedent)."""
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, ValidationError)):  # 1067: a required/kw-only miss now raises pydantic's ValidationError, not stdlib's TypeError
         tools.AgentDeps(
             tmp_path, PATHS.defender_dir, "r", "s", _MAIN_POLICY, cwd_anchor=tmp_path)
 
@@ -99,7 +100,7 @@ def test_gather_deps_requires_policy(tmp_path):
     anchored PER-RUN, so gather no longer carries a static default — it inherits the base's required
     kw-only policy (exactly like the per-scope judge/actor), and the unconfined state is
     unconstructable rather than silently inherited."""
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, ValidationError)):  # 1067: a required/kw-only miss now raises pydantic's ValidationError, not stdlib's TypeError
         tools.GatherDeps(**_ident(tmp_path))
 
 

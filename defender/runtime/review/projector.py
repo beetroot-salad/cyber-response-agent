@@ -29,7 +29,7 @@ read by here.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from defender._model import model
 from typing import Any
 
 from defender._untrusted import wrap as _wrap
@@ -105,7 +105,7 @@ class EmptyInvestigation(RuntimeError):
     """
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Projection:
     """One lens's whole input: the lens it was built for, and the rendered user message."""
 

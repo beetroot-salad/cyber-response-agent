@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 
 from .grant import PROGRAMS, Grant, PathShapes
@@ -14,7 +14,7 @@ _DEFAULT_DENY_REASON = (
 )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class AgentPolicy:
 
     bash_allow: tuple[Grant, ...] = ()

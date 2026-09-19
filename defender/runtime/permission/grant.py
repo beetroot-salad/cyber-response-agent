@@ -4,7 +4,8 @@ from __future__ import annotations
 import enum
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
@@ -89,7 +90,7 @@ class Route(enum.Enum):
     PLAIN = "plain"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Grant:
 
     program: str

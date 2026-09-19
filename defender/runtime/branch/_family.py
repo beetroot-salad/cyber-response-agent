@@ -27,7 +27,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -115,7 +116,7 @@ def is_contradiction(_error: BaseException) -> bool:
 # ---------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ElasticEntry:
     """One base pattern's staged difference: what is added, and what is taken away."""
 
@@ -130,7 +131,7 @@ class ElasticEntry:
     exclude: Any = None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Overlay:
     """A world's difference, as data.
 
@@ -268,7 +269,7 @@ def touches_of(overlay: Overlay) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class World:
     """One sibling's declaration: what it is, what it asserts, and how it differs."""
 
@@ -387,7 +388,7 @@ def _check_label_basis(raw: Any, at: str) -> str:
 # ---------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Family:
     """The whole manifest, loaded."""
 
@@ -866,7 +867,7 @@ def world_token_for(episode_token: str, world_label: str) -> str:
     return f"{episode_token}.{world_label}"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ResumeWorld:
     """What a sibling process IS, from the manifest alone.
 

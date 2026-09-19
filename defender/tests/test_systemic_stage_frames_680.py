@@ -100,8 +100,10 @@ def test_main_uses_shared_bash_after_learning_stage_bash_protection_changes(tmp_
 
 
 def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
-    """A synthetic future non-runtime role registered with read+Bash inherits both framing paths by construction; an enum allowlist cannot satisfy this case."""
-    from typing import cast
+    """A non-runtime role registered with read+Bash inherits both framing paths by construction;
+    a per-role table cannot satisfy this case. The role is a real member whose production
+    definition holds no Bash grant at all (#1067: `AgentDefinition.role` is validated as an
+    `AgentRole`, so the earlier `cast(AgentRole, object())` stand-in no longer constructs)."""
     from defender.runtime.agent_definition import (
         AgentDefinition,
         ResolvedRoots,
@@ -119,7 +121,7 @@ def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
     from defender.runtime.tools import AgentDeps
 
     class FutureDeps(AgentDeps):
-        role = cast(AgentRole, object())
+        role = AgentRole.CORPUS_REPAIR
 
     def bash_shapes(roots: ResolvedRoots):
         scope = PathShapes([under(root.resolve(), TREE) for root in roots.read_roots])

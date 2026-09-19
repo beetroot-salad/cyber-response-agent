@@ -21,10 +21,12 @@ Split out of `branch.py` at 1197 lines; imports none of its siblings.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from defender._model import model
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from pydantic import field_validator
 
 
 
@@ -35,7 +37,7 @@ class BranchError(Exception):
     """A branch point that cannot carry a sibling world."""
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class BranchSpec:
     """One resume: which run, which message, and what to say on arrival.
 
@@ -58,6 +60,21 @@ class BranchSpec:
     branch_message_id: int
     continuation_prompt: str
     as_of: datetime
+
+    # #1067: strict validation would otherwise refuse a non-datetime `as_of` as pydantic's
+    # `ValidationError` at construction — before `validate`'s `_refuse_bad_as_of` ever sees
+    # the spec. The refusal stays a `BranchError`, the ONE class `run_investigation`'s
+    # store-setup handler names (any other class escapes it, leaving the sqlite connection
+    # open and the wire log registered). A domain exception raised from a validator
+    # propagates unconverted — `_model`'s documented convention.
+    @field_validator("as_of", mode="before")
+    @classmethod
+    def _as_of_is_a_moment(cls, value: Any) -> Any:
+        if not isinstance(value, datetime):
+            raise BranchError(
+                f"as_of must be a datetime, got {value!r} — a branch point without a moment "
+                "cannot pin the clock its siblings resume into")
+        return value
 
 
 def open_source_store(run_dir: Path) -> Any:

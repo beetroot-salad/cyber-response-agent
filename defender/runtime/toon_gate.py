@@ -18,9 +18,11 @@ control-flow set a tool call must never swallow.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field, replace
-from typing import Any
+from dataclasses import field, replace
+from defender._model import model
+from typing import Any, cast
 
+import pydantic.dataclasses as _pydantic_dataclasses
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import ModelRetry, ToolRetryError
 from pydantic_ai.messages import ToolReturn, ToolReturnPart, is_multi_modal_content
@@ -271,7 +273,7 @@ def _merge_metadata(body_metadata: dict | None, original_value: Any) -> dict:
     return merged
 
 
-@dataclass
+@model
 class _GateWrapperToolset(WrapperToolset[Any]):
     """Stamps every FOREIGN tool's `ToolDefinition.metadata` with the gate's own candidate
     marker, so `wrap_tool_execute` (which only sees a `ToolDefinition`, not the toolset that
@@ -462,3 +464,20 @@ class ToonGateCapability(AbstractCapability[Any]):
         framed = _frame(text, "untrusted")
         metadata = dict(body_metadata) if body_metadata else None
         return framed, metadata, body_content
+
+
+# `_GateWrapperToolset.gate` names `ToonGateCapability`, defined below it — the reverse of
+# `ToonGateCapability.get_wrapper_toolset` naming `_GateWrapperToolset`, which is fine where it
+# sits (a plain runtime call inside a method body, resolved when the method RUNS, long after
+# both classes exist). A strict pydantic dataclass's field annotation resolves at DECORATION
+# time, though, and neither class can move above the other without breaking the other's own
+# forward reference — the cross-reference is mutual. Left alone, `_GateWrapperToolset` stays
+# `__pydantic_complete__ = False` from decoration until its first real construction (which
+# self-heals it, since the whole module has finished importing by then, but leaves a class
+# silently incomplete for a window with no test on it). Rebuilt explicitly, once, right here —
+# the earliest point in the module where both classes exist (#1067).
+# mypy sees `_GateWrapperToolset` through `@model`'s own generic return (`type[T]`, preserving
+# its real identity for every other purpose) rather than pydantic's internal `PydanticDataclass`
+# marker protocol `rebuild_dataclass` asks for by name — a typing-only mismatch; the class is
+# actually one, which the `type[Any]` cast below states rather than papers over.
+_pydantic_dataclasses.rebuild_dataclass(cast("type[Any]", _GateWrapperToolset))

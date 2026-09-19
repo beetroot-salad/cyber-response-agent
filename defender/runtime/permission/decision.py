@@ -1,10 +1,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from defender._model import model
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Decision:
     allow: bool
     reason: str = ""

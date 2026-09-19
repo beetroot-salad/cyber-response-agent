@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..agent_role import AgentRole
 from .anthropic import AnthropicProvider
@@ -82,7 +82,10 @@ def effort_for_role(name: str, role: AgentRole) -> str | None:
 
 def build_for_effort(name: str, effort: str | None) -> BuiltModel:
     p = provider_for(name)
-    return BuiltModel(p.build_model(name), p.settings_for_effort(effort))
+    # `BuiltModel.settings` is `dict[str, Any] | None` (#1067's own comment on that field says
+    # why: a `ModelSettings | None` here is real at runtime, just not the narrower TYPE the
+    # carrier field declares, to keep a provider's own extension keys from being stripped).
+    return BuiltModel(p.build_model(name), cast("dict | None", p.settings_for_effort(effort)))
 
 
 def cache_affinity(

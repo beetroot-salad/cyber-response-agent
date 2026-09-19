@@ -6,12 +6,17 @@ import os
 import stat
 import sys
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass  # stdlib, deliberately — see the note below
 from pathlib import Path
 
 from defender._io import write_guarded
 
 
+# STDLIB `@dataclass`, NOT `defender._model.model` (#1067): this module is in the import
+# closure of the box ENTRYPOINT (`bash_exec._run_box_entrypoint` -> `defender.runtime.box`),
+# which runs INSIDE the sandbox with only the tree on its path — no venv, no pydantic. The
+# `box-native`/`box-dood` CI jobs are the live pin: the port's first attempt failed every
+# box start with `ModuleNotFoundError: No module named 'pydantic'` out of this import.
 @dataclass(frozen=True)
 class Finding:
     """One entry the walk refused, carrying what triage actually runs on.

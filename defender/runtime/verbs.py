@@ -10,7 +10,7 @@ import threading
 import types
 import typing
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from defender._model import model
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Union, get_args, get_origin
@@ -69,7 +69,7 @@ def is_system_name(name: str) -> bool:
 ADAPTER_SUFFIX = "_adapter.py"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class VerbContext:
 
     defender_dir: Path
@@ -394,7 +394,7 @@ DENIED = "DENIED"
 UNDECLARED = "UNDECLARED"
 
 
-@dataclass(frozen=True, eq=False)
+@model(frozen=True, eq=False)
 class RosterRead:
     """One read of an adapters directory, complete: `root`, the directory it was read from;
     `accepted`, every system it declares mapped to the adapter file that dispatches it (the
@@ -415,9 +415,12 @@ class RosterRead:
     because two reads are two reads even when they agree."""
 
     root: Path
-    accepted: Mapping[str, Path]
-    verbs: Mapping[str, frozenset[str]]
-    unparsed: Mapping[str, str]
+    # Typed as the concrete view class, not `Mapping` (#1067): pydantic validates an
+    # abstract `Mapping` by COPYING it into a plain `dict`, which would silently hand every
+    # consumer a writable roster; the concrete class is instance-checked and kept as is.
+    accepted: types.MappingProxyType[str, Path]
+    verbs: types.MappingProxyType[str, frozenset[str]]
+    unparsed: types.MappingProxyType[str, str]
     refused: tuple[str, ...]
 
     def declared_verbs(self, system: str) -> frozenset[str]:
@@ -535,7 +538,7 @@ def read_roster(adapters_dir: Path) -> RosterRead:
         refused=tuple(refused),
     )
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class VerbDecision:
 
     outcome: str

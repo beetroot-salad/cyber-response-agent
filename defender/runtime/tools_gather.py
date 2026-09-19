@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
+from defender._model import model
 from typing import NamedTuple
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,7 @@ from defender.runtime.verb_grant import VerbGrant
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class GatherRequest:
 
     lead_id: str
@@ -89,7 +90,7 @@ def _locator(defender_dir: Path, t: QueryTemplate) -> str:
     return f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class TemplateIndex:
     """The rendered index, and — when it is empty — WHICH of the two emptinesses it is.
 

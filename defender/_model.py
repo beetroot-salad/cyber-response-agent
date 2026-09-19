@@ -85,11 +85,11 @@ def unwrap_before(cls: type, value: Any) -> Any:
 @overload
 def model(cls: type[T]) -> type[T]: ...
 @overload
-def model(cls: None = None, *, frozen: bool = False, strict: bool = True,
+def model(cls: None = None, *, frozen: bool = False, strict: bool = True, eq: bool = True,
          **config_kwargs: Any) -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(field_specifiers=(dataclasses.field,))
 def model(cls: type[T] | None = None, *, frozen: bool = False, strict: bool = True,
-         **config_kwargs: Any) -> Callable[[type[T]], type[T]] | type[T]:
+         eq: bool = True, **config_kwargs: Any) -> Callable[[type[T]], type[T]] | type[T]:
     """The shared boundary-type decorator — see module docstring for the convention it fixes.
 
     Usable bare (`@model`) or with keyword config (`@model(frozen=True)`), matching stdlib
@@ -97,18 +97,21 @@ def model(cls: type[T] | None = None, *, frozen: bool = False, strict: bool = Tr
     data at a boundary pydantic itself validates in Python mode (a tool parameter type — see
     the module docstring's `dataclass_exact_type` note) rather than by our own code handing it
     already-typed values. `arbitrary_types_allowed` is always on (≈227 fields in this tree are
-    typed `Any`/`Callable`/a Protocol/another arbitrary class). Extra `ConfigDict` keys (e.g. a
-    class that wants `validate_assignment=True`) pass through — build the plain `dict` and
-    `cast` it, rather than splat them straight into the `ConfigDict(...)` call, since a
-    `TypedDict` constructor checks each keyword against its known keys and an arbitrary
-    caller-supplied name is not one of them."""
+    typed `Any`/`Callable`/a Protocol/another arbitrary class). `eq` is stdlib `@dataclass`'s
+    own knob, not a `ConfigDict` key (`eq=False` for a class where two equal-content instances
+    must still compare unequal — identity equality, `RosterRead`'s "two reads are two reads").
+    Extra `ConfigDict` keys (e.g. a class that wants `validate_assignment=True`) pass through
+    — build the plain `dict` and `cast` it, rather than splat them straight into the
+    `ConfigDict(...)` call, since a `TypedDict` constructor checks each keyword against its
+    known keys and an arbitrary caller-supplied name is not one of them."""
     config = cast(ConfigDict,
                  {"strict": strict, "arbitrary_types_allowed": True, **config_kwargs})
 
     # Not named `wrap`: `defender._untrusted.wrap` is the tree's one frame primitive, and
     # `test_systemic_stage_frames_680`'s AST census counts every `def wrap` as a second one.
     def decorate(inner_cls: type[T]) -> type[T]:
-        return cast(type[T], _pydantic_dataclass(inner_cls, config=config, frozen=frozen))
+        return cast(type[T],
+                    _pydantic_dataclass(inner_cls, config=config, frozen=frozen, eq=eq))
 
     if cls is not None:
         return decorate(cls)
