@@ -43,9 +43,7 @@ from defender.learning.author.lesson_read import _tool_lesson_read  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CORPUS_AUTHOR_DEF,
     CuratorDeps,
-    ForwardCheckConfig,
 )
-from defender.learning.author.verify_forward.checks import FINDINGS_CHECK  # noqa: E402
 
 # The shipped lesson corpora — the exact-match membership set (MD-6) and the read confine (R4).
 #: The shipped corpora, as the production census reports them. Three until #922 retired the
@@ -126,14 +124,11 @@ def curator_deps(
 ) -> CuratorDeps:
     """A ``CuratorDeps`` through the STABLE ``for_run`` entry point (M9 keeps it as a thin wrapper
     over ``bind``). Drive ``.policy`` through the real gates; the confine / membership / rm
-    corrections surface as the policy's OWN decisions changing under the refactor."""
-    return CuratorDeps.for_run(
-        run_dir,
-        wt,
-        corpus(wt, corpus_name),
-        cfg=ForwardCheckConfig(check=FINDINGS_CHECK, runs_dir=wt / "runs", pending=wt / "_pending" / "findings.jsonl", queued_ids=frozenset()),
-        box=box,
-    )
+    corrections surface as the policy's OWN decisions changing under the refactor.
+
+    #773 M1: `for_run` no longer takes a `cfg=` — the forward-check config slot went with the
+    tool it configured."""
+    return CuratorDeps.for_run(run_dir, wt, corpus(wt, corpus_name), box=box)
 
 
 # Real-gate drivers — the OBSERVABLE channels. One home for each so the four test
@@ -170,10 +165,3 @@ def edit_file(deps, path: str, old: str, new: str) -> str:
 def lesson_read(deps, path: str, part: str = "body", pattern=None) -> str:
     """The lesson_read tool wrapper (raises ModelRetry on a decide_read deny)."""
     return _tool_lesson_read(deps, path, part, pattern)
-
-
-def forward_check_gate(deps, operand: str) -> Path:
-    """The forward_check tool's own lesson gate (``_gate_lesson_path`` → ``decide_write``; raises
-    ModelRetry on deny) — the fourth write-capable lane."""
-    from defender.learning.author.verify_forward.tool import _gate_lesson_path
-    return _gate_lesson_path(deps, operand)

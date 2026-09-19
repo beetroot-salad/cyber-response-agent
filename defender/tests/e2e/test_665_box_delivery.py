@@ -41,9 +41,7 @@ def _curator_for_run(tmp_path, *, box):
     from defender.learning.author.curator_engine import (
         SHIPPED_LESSON_CORPORA,
         CuratorDeps,
-        ForwardCheckConfig,
     )
-    from defender.learning.author.verify_forward.checks import ForwardCheck
 
     repo = tmp_path / "repo"
     dtree = repo / "defender"
@@ -51,12 +49,10 @@ def _curator_for_run(tmp_path, *, box):
         (dtree / name).mkdir(parents=True, exist_ok=True)
     run_dir = tmp_path / "lrd"
     run_dir.mkdir(exist_ok=True)  # both curator helpers may run against one tmp_path
-    check = ForwardCheck(error_prefix="spec", prompt_path=None, run=lambda ctx: "")
     return CuratorDeps.for_run(
         run_dir,
         repo,
         dtree / "lessons",
-        cfg=ForwardCheckConfig(check=check, runs_dir=tmp_path / "runs", pending=tmp_path / "pending.jsonl", queued_ids=frozenset()),
         box=box,
     )
 
@@ -95,9 +91,7 @@ def _curator_for_run_no_box(tmp_path):
     from defender.learning.author.curator_engine import (
         SHIPPED_LESSON_CORPORA,
         CuratorDeps,
-        ForwardCheckConfig,
     )
-    from defender.learning.author.verify_forward.checks import ForwardCheck
 
     repo = tmp_path / "repo"
     dtree = repo / "defender"
@@ -105,12 +99,10 @@ def _curator_for_run_no_box(tmp_path):
         (dtree / name).mkdir(parents=True, exist_ok=True)
     run_dir = tmp_path / "lrd"
     run_dir.mkdir(exist_ok=True)  # both curator helpers may run against one tmp_path
-    check = ForwardCheck(error_prefix="spec", prompt_path=None, run=lambda ctx: "")
     return CuratorDeps.for_run(
         run_dir,
         repo,
         dtree / "lessons",
-        cfg=ForwardCheckConfig(check=check, runs_dir=tmp_path / "runs", pending=tmp_path / "pending.jsonl", queued_ids=frozenset()),
     )
 
 

@@ -858,12 +858,14 @@ def test_the_registered_roster_is_the_size_the_hand_maintained_censuses_claim():
     other censuses are checked against (`test_947_triplet_questioner`'s cross-check reads this
     file for the literal).
 
-    NINE SINCE #1008: #922 took it to eight, the actor, oracle and judge leaving `AgentRole`
+    TEN SINCE #773: #922 took it to eight, the actor, oracle and judge leaving `AgentRole`
     with the definitions they were the only callers of; #1008 then re-added `judge`, bound to
     the FAMILY judge — a different role that wanted the same word, and one that ran under the
-    questioner's definition until the key was free. This number moved with it, which is exactly
-    why it is asserted in more than one place."""
+    questioner's definition until the key was free — taking it to nine. #773 adds a tenth,
+    `CORPUS_REPAIR`: M4's one bounded repair spawn, a fixed, separate definition rather than a
+    per-spawn override of `CORPUS_AUTHOR`'s own (§7 F8), so it needs its own key. This number
+    moves with the roster, which is exactly why it is asserted in more than one place."""
     from defender.agents import QUESTIONER_DEF
 
     assert QUESTIONER_DEF.role is AgentRole.QUESTIONER
-    assert len({role for role in AgentRole}) == 9
+    assert len({role for role in AgentRole}) == 10

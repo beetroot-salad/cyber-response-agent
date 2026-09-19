@@ -1,4 +1,11 @@
 {
   "//": "lint_unanchored_default baseline — a parameter re-defaulted in-body via a self-referential None-coalesce to a named/called fallback (the `x = x if x is not None else DEFAULT` smell: an Optional that's immediately made non-None, with the default knowledge duplicated across call sites). Anchor the default in the signature (`x: T = DEFAULT`) or resolve it once at the boundary. Fingerprint is file:function:param, function qualified by its enclosing classes/defs (no line number). CI fails on a triple absent here. Regenerate: python scripts/lint/lint_unanchored_default.py --update-baseline. Annotate intentional entries; \"\" = un-triaged debt to anchor.",
-  "entries": {}
+  "entries": {
+    "defender/tests/_spec773.py:build_questioner_scene:curator": "#773 locked spec-test harness (write-tests' committed _spec773.py) — a None-default fake-collaborator param the scene builder swaps in per test; out of scope for this PR to edit.",
+    "defender/tests/_spec773.py:build_questioner_scene:keys": "#773 locked spec-test harness — same shape as build_questioner_scene:curator above.",
+    "defender/tests/_spec773.py:build_scene:curator": "#773 locked spec-test harness (write-tests' committed _spec773.py) — a None-default fake-collaborator param the scene builder swaps in per test; out of scope for this PR to edit.",
+    "defender/tests/_spec773.py:build_scene:keys": "#773 locked spec-test harness — same shape as build_scene:curator above.",
+    "defender/tests/_spec773.py:build_scene:repair": "#773 locked spec-test harness — same shape as build_scene:curator above.",
+    "defender/tests/_spec773.py:build_scene:verifier": "#773 locked spec-test harness — same shape as build_scene:curator above."
+  }
 }

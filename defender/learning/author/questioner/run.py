@@ -7,10 +7,11 @@ per-curator corpus scoping) but its own corpus and its own queue channel.
 
 Its pre-author gate is IDEMPOTENCY ONLY (`_gate_questioner`): a world finding has no defender
 ground truth to check disposition against, so the defender gate's `source_refs.yaml`/family
-partition does not apply here at all. It registers NO forward check (N1): there is no defender
-behaviour a world lesson could re-verify against, so `invoke_agent` never wires
-`ForwardCheckConfig`/`FINDINGS_CHECK` — a mechanically-inert one is built by
-`curator_engine.no_forward_check` instead, kept off `verify_forward/checks.py`'s own registry.
+partition does not apply here at all. #773 M2: its config carries no drain-run check at all
+(the base config's own unset default) — there is no defender behaviour a world lesson could
+re-verify against — so the drain's verdict step and repair pass are both skipped for this
+channel; the unconditional file-vs-batch attribution check still runs, same as the sibling
+channel's.
 """
 from __future__ import annotations
 
@@ -89,6 +90,11 @@ def build_questioner_config(
         max_attempts=author_max_attempts(),
         manifest_seed=manifest_seed,
         box=box,
+        # #773 M2/O7: this channel registers no drain-run check at all — the base config's
+        # own unset default is left as-is — because there is no defender behaviour a world
+        # lesson could re-verify against. `exempt` is unreachable while that stays unset,
+        # but is `True` for a channel whose every row is, in spirit, out of scope.
+        exempt=lambda row: True,
     )
 
 
@@ -136,22 +142,9 @@ def build_questioner_user_prompt(
     )
 
 
-def questioner_exempt_ids(findings: list[dict]) -> frozenset[str]:
-    """Every source id in this batch — N1's exemption, spelled the way J12's already is.
-
-    A world finding has no defender verdict to re-verify against, so EVERY row of this batch is
-    exempt from the forward check rather than merely absent from a queued set: absent is what
-    `verify_forward/tool._prepare` answers ERROR for, and the curator prompts' rule for a
-    repeated ERROR is to revert the lesson. Named here, beside the caller that passes it, so a
-    test can drive it — the same reason `lessons/run.forward_exempt_ids` is a function."""
-    return frozenset(str(f["run_id"]) for f in findings if f.get("run_id"))
-
-
 def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfig) -> dict:
-    """N1: no forward check wired — see the module docstring. `curator_engine.no_forward_check`
-    builds an inert forward-check config this function never spells the class name of, with
-    every row of the batch exempt so a spawn that calls the (still-granted) tool anyway is told
-    EXEMPT rather than ERROR."""
+    """N1/#773 M1: no check wired — see the module docstring. The curator writes and
+    self-reports only; there is no tool call and no config to build for it any more."""
     from defender.learning.author import curator_engine
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side queue dir, never a box-writable or model-authored tree; the sibling `lessons/run.py::invoke_agent` makes the same call
@@ -171,9 +164,6 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfi
             salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
-        cfg=curator_engine.no_forward_check(
-            runs_dir=cfg.runs_dir, pending=cfg.channel.file,
-            exempt_ids=questioner_exempt_ids(findings)),
         log=_log,
     )
 

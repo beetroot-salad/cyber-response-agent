@@ -65,8 +65,8 @@ from defender.agents import (  # noqa: E402
 )
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
+    CorpusRepairDeps,
     CuratorDeps,
-    ForwardCheckConfig,
 )
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
@@ -140,13 +140,16 @@ def _curator(env):
     """The curator is the one denylist-free lane; it is `bindable=False`, so its policy comes
     off its own real front door (`CuratorDeps.for_run`), never `bind`."""
     corpus = env.dfn / "lessons"
-    deps = CuratorDeps.for_run(
-        env.run,
-        env.dfn.parent,
-        corpus,
-        cfg=ForwardCheckConfig(check=lambda *a, **k: "GOOD", runs_dir=env.tmp / "runs", pending=env.tmp / "pending", queued_ids=frozenset(), run_verify=lambda *a, **k: "GOOD"),
-        box=None,
-    )
+    deps = CuratorDeps.for_run(env.run, env.dfn.parent, corpus, box=None)
+    return deps.policy
+
+
+def _corpus_repair(env):
+    """#773 M4: the repair spawn's own front door, `CorpusRepairDeps.for_run` — a SEPARATE
+    deps type from the curator's, since `run_stage` resolves the effective definition off
+    `AGENTS[deps_type.role]`."""
+    corpus = env.dfn / "lessons"
+    deps = CorpusRepairDeps.for_run(env.run, env.dfn.parent, corpus, box=None)
     return deps.policy
 
 
@@ -168,6 +171,9 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
         "verifier": compile_policy_for(VERIFY_DEF, run_dir=env.run, defender_dir=env.dfn),
         "lead_author": _lead_author(env),
         "corpus_author": _curator(env),
+        # #773 M4's repair spawn — registered in AGENTS under its own role, so a compiled
+        # policy of its exists whether or not this dict looks at it.
+        "corpus_repair": _corpus_repair(env),
         # #796's review roles. They are here for the same reason every other role is: b3
         # sweeps THIS dict, so a role registered in AGENTS but absent here is a compiled
         # policy the audit never looks at. Their expected shape is the empty one — no bash
@@ -414,11 +420,12 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     # retired for producing nothing the composer could route; #947 added QUESTIONER; #922
     # retired ACTOR, ORACLE and JUDGE with the pipeline they were the only callers of; and
     # #1008 re-added JUDGE, bound to the FAMILY judge, which until then ran under the
-    # questioner's definition. SUPPORT is claimed by two calls and QUESTIONER by four, so
-    # roles and calls have not matched here since #796. This counts registered roles, so a
-    # deliberately added or retired role moves it; what the test checks is the table property
-    # below.
-    assert len(AGENTS) == 9
+    # questioner's definition; #773 added CORPUS_REPAIR, M4's one bounded repair spawn (a
+    # fixed, separate definition rather than a per-spawn override of CORPUS_AUTHOR's own).
+    # SUPPORT is claimed by two calls and QUESTIONER by four, so roles and calls have not
+    # matched here since #796. This counts registered roles, so a deliberately added or
+    # retired role moves it; what the test checks is the table property below.
+    assert len(AGENTS) == 10
     # ...AND `_all_policies` covers every one of them. The count alone does not say so: this
     # dict is hand-enumerated, and its own note says a role registered in AGENTS but absent
     # here is "a compiled policy the audit never looks at" — a2/a4/b3/b8/g1 all sweep THIS,

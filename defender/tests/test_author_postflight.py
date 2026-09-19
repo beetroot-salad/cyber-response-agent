@@ -97,7 +97,15 @@ def test_committed_finding_without_commit_message_aborts(tmp_repo, helpers, monk
     assert not tmp_repo.cfg.channel.consumed.exists()
 
 
-def test_held_forward_bad_stays_in_queue(tmp_repo, helpers, monkeypatch):
+def test_a_stray_forward_bad_bucket_key_aborts(tmp_repo, helpers, monkeypatch):
+    """#773 M1 retires `held_forward_bad` as a curator-reported bucket outright — the check is
+    the drain's own now (`author/drain.py`'s M3 pipeline), never something the curator's
+    self-report selects. §7 FK-29: the AUTHOR_RESULT partition validator explicitly REJECTS
+    any key outside its declared buckets whose value is bucket-shaped (a list of row-like
+    dicts) — including this retired one — rather than silently accepting a stale key.
+    See `tests/test_773_tool_removal.py::test_author_result_carries_an_unrecognized_bucket_key_773`
+    for the full behavior; this test is this module's own regression pin that the old bucket
+    genuinely has no reader left."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-2", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-2/0", run_id="run-2")
@@ -111,17 +119,13 @@ def test_held_forward_bad_stays_in_queue(tmp_repo, helpers, monkeypatch):
         }
 
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
-    assert a.run_batch(cfg=cfg) == 0
+    assert a.run_batch(cfg=cfg) == 2
     pending = [
         json.loads(line)
         for line in tmp_repo.paths.pending_file.read_text().splitlines() if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-2/0"]
-    # The retryable hold's own field — see the note in tests/test_queue_drains_852.py.
-    assert "forward_bad" in pending[0]["forward_bad_reason"]
-    assert "held_reason" not in pending[0]
-    assert tmp_repo.cfg.held_report.is_file()
-    assert "run-2/0" in tmp_repo.cfg.held_report.read_text()
+    assert pending[0].get("attempts") == 1
 
 
 def test_consumed_skip_rotates_out(tmp_repo, helpers, monkeypatch):
@@ -192,26 +196,29 @@ def test_no_commit_but_left_corpus_edits_aborts(tmp_repo, helpers, monkeypatch):
     assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre_pending)
 
 
-def test_agent_result_missing_finding_aborts(tmp_repo, helpers, monkeypatch):
+def test_agent_result_missing_finding_stays_queued_untouched(tmp_repo, helpers, monkeypatch):
+    """#773 C3: a row the curator mentions in NO bucket is left exactly as it was — neither an
+    aborting fault (the validator's old "unseen" completeness check, which #773 drops) nor a
+    counted attempt. It is simply not this tick's business; a later tick may pick it up.
+    `run-6/0`, which the curator DOES place in `consumed_skip`, still rotates out normally."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-6", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-6/0", run_id="run-6")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-6/1", run_id="run-6")
-    pre_pending = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def fake_invoke(findings, batch_id, cfg):
         return {
             "committed": [],
-            "held_forward_bad": [],
             "consumed_skip": [{"finding_id": "run-6/0", "reason": "x"}],
             "commit_message": None,
         }
 
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     rc = a.run_batch(cfg=cfg)
-    assert rc == 2
-    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre_pending
-    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre_pending)
+    assert rc == 0
+    remaining = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
+    assert [r["finding_id"] for r in remaining] == ["run-6/1"]
+    assert "attempts" not in remaining[0]
 
 
 def test_prestaged_stray_does_not_ride_into_lesson_commit(

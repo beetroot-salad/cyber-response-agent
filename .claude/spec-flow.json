@@ -94,6 +94,31 @@
         ],
         "note": "ADDED BY #921's GROUNDING: `evals/harness.py::materialize` is a writer of this sink's shape that no import-following census sees — it `shutil.copy`s a scenario's own findings.jsonl into `<tmp>/defender/learning/_pending/findings.jsonl` and copytrees a `runs/` fixture beside it, then runs the real author against that tree. It is a HARNESS edge, not a loop edge, and it is the reason a row-shape change has a second consumer. Also worth pinning for the next census: the findings channel has ONE gate (`CorpusAuthorConfig.gate`, wired to `learning/author/lessons/run.py::_gate_findings`), called once per tick over EVERY keyed row of findings.jsonl — so two directions in one file share one gate and one batch, and the gate indexes entry['finding_id'|'run_id'|'direction'] directly inside drain's stuck-recording guard, where a missing key takes the whole tick's batch to `<channel>.stuck.jsonl`. UPDATED BY #922: `QUEUEABLE_FINDING_TYPES` is now the ONLY finding-`type` vocabulary left, and `learning/judge/enqueue.py::_validate_row` is its one production consumer. The set it used to be shadowed by — the pipeline judge's document validator in `core/validate.py` — was deleted with that judge."
       },
+      "pending_dir": {
+        "writers": [
+          "defender/learning/judge/enqueue.py::append_rows",
+          "defender/learning/core/persist.py::_rewrite_queue",
+          "defender/learning/author/drain.py::retire",
+          "defender/learning/author/drain.py::_record_stuck",
+          "defender/learning/author/lessons/run.py::write_held_report",
+          "defender/learning/author/shared.py::write_disposition_report"
+        ],
+        "readers": [
+          "defender/learning/author/drain.py::_tick",
+          "defender/learning/core/drains.py::_pending_queue_counts"
+        ],
+        "grep": [
+          "pending_dir",
+          "_pending/",
+          "consumed.jsonl",
+          "findings.deadletter.jsonl",
+          "findings.stuck.jsonl",
+          "findings.held_report.log",
+          "questioner_findings.jsonl",
+          ".findings.lock"
+        ],
+        "note": "DECLARED BY #773's GROUNDING (base 3b4f5797). `learning_queue` above declares the queue FILES; nothing declared the DIRECTORY they and their sidecars live in, which is where #773's M6 gap ledger (`findings.forward_bad.jsonl`) lands. `LoopPaths.pending_dir` is `state_root/\"_pending\"` (learning/core/config.py:71) and `with_repo_root` PRESERVES `state_root` (config.py:63-64), so this root stays HOST-SIDE across the drain's worktree swap and is outside every box mount — that containment is the whole of #773's S5 and a future refactor of `with_repo_root` would silently break it. Today's files: `findings.jsonl` and `consumed.jsonl` (the two channels' queue + consumed ledger, written only by `persist._rewrite_queue`), `findings.deadletter.jsonl` (the graveyard, `drain.retire:215`), `findings.stuck.jsonl` (`drain._record_stuck:781`), `findings.held_report.log` (`lessons/run.write_held_report` -> `shared.write_disposition_report`, THE one writer for both curators), plus the lock files and the `questioner_*` sibling set. ALL THREE existing drain appends here carry the suppression `# lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount` (drain.py:215,667,781); a new appender without it is blocked by CI. `persist.read_pitfalls` is deliberately NOT listed: it reads `paths.pitfalls.file` under `pitfalls_pending_dir`, a different root. `findings.forward_bad.jsonl` is likewise NOT listed and its writer is NOT named, because neither exists until write-code-from-spec builds them — add the writer in the commit that creates it, per this block's own rule that every entry name a symbol that resolves."
+      },
       "session_store": {
         "writers": [
           "defender/runtime/session_store.py::StoreHandle.new_session",
@@ -181,7 +206,8 @@
           "defender/runtime/lead_zero/_capture.py::_record_manual_row",
           "defender/runtime/close_tool.py::_commit",
           "defender/runtime/challenge_gate.py::write_review_record",
-          "defender/runtime/challenge_gate.py::_write_trace_row"
+          "defender/runtime/challenge_gate.py::_write_trace_row",
+          "defender/learning/author/verify_forward/engine.py::_run_verify_pydantic"
         ],
         "readers": [
           "defender/runtime/scrub.py::scrub",
@@ -209,9 +235,10 @@
           "report.md",
           "review_record.",
           "review_trace_path",
-          "wire_logs/review_"
+          "wire_logs/review_",
+          "trace.jsonl"
         ],
-        "note": "Four writers were added after #771's phase-F reconciliation found the same hole in three instruments at once. The driver's fault-exit trace write (`write_text(\"\")` onto the fixed tool_trace.jsonl name observe.write_trace also owns) is one of the two sites that issue reported and was missing from the test census, the write lint's gate list AND this list. The queries-table append is the query tool's SECOND artifact — the payload write was censused, the table was not. The lead-claim hook and the atomic helper are the two the original grep could not see. EVERY ENTRY MUST NAME A SYMBOL THAT RESOLVES: three of the four added here did not (a leading underscore the driver's entry point does not have, an actor id where the code symbol was `_revert_strays`, and a render-lane function renamed at some point), and a resolver following a name that resolves to nothing gets the same answer as one following a row that was never written. This list seeds the next run's census, so a gap here becomes a gap in every downstream instrument. `scrub` stays under readers deliberately: #771's scan verdict is written OUTSIDE the tree it judges (§7 D8), so the walk remains a pure reader of the run dir and the marker belongs to no run-dir writer census. ADDED BY #992's GROUNDING: three writers the list never carried although #796/#923 built them — `close_tool._commit` (report.md, write_guarded mode=replace, the ONLY writer of that file), `challenge_gate.write_review_record` (review_record.{turn}.json, keyed on ReviewState.turns+1 at the committing arms and on turns at the challenged arm) and `challenge_gate._write_trace_row` (wire_logs/review_{role}_trace.jsonl, guarded append, one file per REVIEW_ROLES member). #992 puts `inconclusive` through the gate, so all three now fire on the disposition that used to write only the first two; the readers added are the run-page consumers that split reviewed from unreviewed attempts — `visualize_runtime._was_reviewed` reads that split OFF THE RECORD — `_commit` writes `reviewed: true` on the reviewed site and `false` on the `unresolved` bypass (#992, settled at the merge gate after two inferences broke: keying on the `NO_REVIEW_DISPOSITIONS` constant re-rendered pre-#992 bypasses as reviewed once the set shrank; keying on surviving trace rows rendered any run dir whose traces were relocated or pruned as a bypass). A record with no `reviewed` field is read by the bypass set of its day, frozen in the visualizer."
+        "note": "Four writers were added after #771's phase-F reconciliation found the same hole in three instruments at once. The driver's fault-exit trace write (`write_text(\"\")` onto the fixed tool_trace.jsonl name observe.write_trace also owns) is one of the two sites that issue reported and was missing from the test census, the write lint's gate list AND this list. The queries-table append is the query tool's SECOND artifact — the payload write was censused, the table was not. The lead-claim hook and the atomic helper are the two the original grep could not see. EVERY ENTRY MUST NAME A SYMBOL THAT RESOLVES: three of the four added here did not (a leading underscore the driver's entry point does not have, an actor id where the code symbol was `_revert_strays`, and a render-lane function renamed at some point), and a resolver following a name that resolves to nothing gets the same answer as one following a row that was never written. This list seeds the next run's census, so a gap here becomes a gap in every downstream instrument. `scrub` stays under readers deliberately: #771's scan verdict is written OUTSIDE the tree it judges (§7 D8), so the walk remains a pure reader of the run dir and the marker belongs to no run-dir writer census. ADDED BY #992's GROUNDING: three writers the list never carried although #796/#923 built them — `close_tool._commit` (report.md, write_guarded mode=replace, the ONLY writer of that file), `challenge_gate.write_review_record` (review_record.{turn}.json, keyed on ReviewState.turns+1 at the committing arms and on turns at the challenged arm) and `challenge_gate._write_trace_row` (wire_logs/review_{role}_trace.jsonl, guarded append, one file per REVIEW_ROLES member). #992 puts `inconclusive` through the gate, so all three now fire on the disposition that used to write only the first two; the readers added are the run-page consumers that split reviewed from unreviewed attempts — `visualize_runtime._was_reviewed` reads that split OFF THE RECORD — `_commit` writes `reviewed: true` on the reviewed site and `false` on the `unresolved` bypass (#992, settled at the merge gate after two inferences broke: keying on the `NO_REVIEW_DISPOSITIONS` constant re-rendered pre-#992 bypasses as reviewed once the set shrank; keying on surviving trace rows rendered any run dir whose traces were relocated or pruned as a bypass). A record with no `reviewed` field is read by the bypass set of its day, frozen in the visualizer. ADDED BY #773's GROUNDING (base 3b4f5797): `verify_forward/engine.py::_run_verify_pydantic` is a WRITER of this root and no census ever listed it. The forward check's verifier stage binds `StageContext(learning_run_dir=source_run_dir)` where `source_run_dir = ctx.runs_dir / ctx.source_id` (checks.py:87, engine.py:66), and `_pydantic_stage.run_stage` then writes the whole wire stream to `<run_dir>/wire_logs/<trace_name>` via `observe.stage_trace_path` — with `trace_name = f\"{prefix}.{stem}.{check_index}.trace.jsonl\"` composed at checks.py:59. The consequence #773's design missed: THE RUNS DIR IS A WRITE ROOT, not the read-only one its asset list calls it, the trace's full key is (run_id, lesson_stem, check_index), and nothing in the drain's undo region restores or removes a trace — so an unwound tick leaves verifier traces describing lessons that never existed. `checks.py::_verify` is the symbol that NAMES the path; `_run_verify_pydantic` is the one that binds the root, which is why it is the row here."
       },
       "drain_worktree": {
         "writers": [

@@ -15,7 +15,6 @@ from types import SimpleNamespace
 
 
 
-from defender.learning.author.curator_engine import ForwardCheckConfig  # noqa: E402
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.learning.author import shared as author_shared
 from defender.learning.core import config
@@ -72,7 +71,6 @@ from defender.tests._frames680 import (
 def test_curator_runs_successive_batches_via_its_non_bindable_lifetime(tmp_path):
     """Two real `run_curator_stage` entries use their specialized dependency path and expose distinct tokens on complete model-bound user messages."""
     from defender.learning.author.curator_engine import run_curator_stage
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
 
     repo = tmp_path / "repo"
     corpus = repo / "defender" / "lessons"
@@ -101,10 +99,6 @@ def test_curator_runs_successive_batches_via_its_non_bindable_lifetime(tmp_path)
                 repo_root=repo,
             ),
             corpus_dir=corpus,
-            cfg=ForwardCheckConfig(
-                check=FINDINGS_CHECK, runs_dir=tmp_path / "runs",
-                pending=tmp_path / "pending", queued_ids=frozenset(),
-            ),
             log=lambda _m: None,
             source_key=lambda *_a, **_k: object(),
             run_author=run_author,

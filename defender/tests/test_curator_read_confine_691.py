@@ -21,8 +21,9 @@ RED against HEAD by design. Two mechanisms this file pins:
   what a green #0 must surface, not the incidental unbindable error).
 
 Gate lanes are driven through the shared harness (``read_decision`` → ``decide_read`` roots+shapes,
-``bash_decision`` → ``decide_bash`` cat scope, ``forward_check_gate`` → ``decide_write``); the
-CuratorDeps under test is the STABLE ``for_run`` deps whose ``.policy`` the refactor re-anchors.
+``bash_decision`` → ``decide_bash`` cat scope); the CuratorDeps under test is the STABLE ``for_run``
+deps whose ``.policy`` the refactor re-anchors. (#773 M1 deletes the write-lane's forward-check gate
+entirely — the curator no longer carries a decision function by that name.)
 """
 from __future__ import annotations
 

@@ -236,11 +236,6 @@ async def _prepare_fix_row(ctx: RunContext[AgentDeps], tool_def: Any) -> Any:
 
 
 def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
-    if tools.forward_check:
-        from defender.learning.author.verify_forward.tool import register_forward_check_tool
-
-        register_forward_check_tool(agent)
-
     if tools.lesson_read:
         from defender.learning.author.lesson_read import register_lesson_read_tool
 

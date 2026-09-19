@@ -4,7 +4,7 @@ import contextlib
 import json
 import random
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -202,6 +202,11 @@ def _result_entry_id(bucket: str, entry: Any, id_key: str) -> str:
     return rid
 
 
+#: Fields an AUTHOR_RESULT may carry beyond its declared buckets — advisory prose read
+#: elsewhere (`commit_message`) or left deliberately unread (`observability_gaps`, N3).
+_NON_BUCKET_RESULT_KEYS = frozenset({"commit_message", "observability_gaps"})
+
+
 def validate_agent_result_partition(
     result: dict,
     to_author: list[dict],
@@ -210,6 +215,14 @@ def validate_agent_result_partition(
     buckets: tuple[str, ...],
     noun: str,
 ) -> None:
+    """§7 FK-29: an AUTHOR_RESULT carrying any key outside its declared buckets (plus the
+    non-bucket fields above) fails explicitly — an EXPLICIT reject, not the allow-list this
+    used to be, which would let a stale bucket key (like the retired `held_forward_bad`)
+    through unnoticed once it stops being a recognized bucket.
+
+    A row `to_author` never mentions in ANY bucket is left OUT of this check entirely (C3):
+    it is neither unknown nor incomplete, and the tick's own downstream logic (#773 O5) is
+    what leaves it queued, untouched, whatever bucket the model did or did not use."""
     expected = {row[id_key] for row in to_author}
     occurrences: dict[str, list[str]] = {}
     for bucket in buckets:
@@ -228,9 +241,18 @@ def validate_agent_result_partition(
             f"author result classified {noun} more than once: "
             + json.dumps(repeated, sort_keys=True)
         )
-    unseen = sorted(expected - occurrences.keys())
-    if unseen:
-        raise AuthorError(f"author result missing {noun}: {unseen}")
+    # A stray key is rejected only when its VALUE is bucket-shaped (a list of row-like
+    # dicts) — indistinguishable from a curator naming a bucket that no longer exists (the
+    # retired `held_forward_bad`) or one it invented. A scalar or a list of plain strings in
+    # an unrecognized key is adversarial noise no code reads (O5) — never a bucket a human
+    # would mistake for real, so it is tolerated rather than faulting the tick over it.
+    allowed_keys = set(buckets) | _NON_BUCKET_RESULT_KEYS
+    stray_bucket_keys = sorted(
+        k for k, v in result.items()
+        if k not in allowed_keys and isinstance(v, list) and any(isinstance(e, dict) for e in v)
+    )
+    if stray_bucket_keys:
+        raise AuthorError(f"author result carries unrecognized bucket key(s): {stray_bucket_keys}")
 
 
 def commit_corpus(
@@ -253,6 +275,64 @@ def commit_corpus(
     return _git.git_commit(repo_root, corpus_dir, message, trailers=trailers)
 
 
+def commit_corpus_paths(
+    message: str, cfg: Any, approved_paths: list[str], deletion_paths: list[str],
+) -> str | None:
+    """#773 M5: the drain's own explicit-list commit. A NEW, SEPARATE function — `commit_fn`
+    and `_git.git_commit` are byte-for-byte unchanged and keep their own seams (§7 FK-1);
+    the drain's M5 step calls this directly, never through `cfg.commit_fn`.
+
+    @owns committed_paths — the ONE function that decides which paths land in this tick's
+    corpus commit. Every other consumer of "what this tick committed" reads it off HEAD
+    afterward, never re-derives the list.
+    """
+    paths = sorted(set(approved_paths) | set(deletion_paths))
+    return _git.git_commit_paths(cfg.repo_root, paths, message)
+
+
+def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
+    """The shipped default for `cfg.invoke_repair` (M4): spawns the one bounded repair
+    curator through `curator_engine.CORPUS_REPAIR_DEF`, handing it the drain-built prompt.
+
+    Lazy import, like `lessons_run.invoke_agent`'s own: `curator_engine`/`drain` pull in the
+    pydantic-ai stack, and `drain` importing this module at its own top level means this
+    module cannot import `drain` back at ITS top level without a cycle."""
+    from defender.learning.author import curator_engine
+    from defender.learning.author import drain as _drain
+    from defender.learning.core.config import StageContext, StageWiring, author_request_limit
+
+    cfg.pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side queue dir, mirrors lessons_run.invoke_agent's own call
+    stage_salt = uuid4().hex
+    # The shipped default when `cfg.repair_prompt` is unset (M4's own distinguished `None`
+    # member): a `repair.md` beside this channel's own curator prompt.
+    prompt_path = cfg.repair_prompt if cfg.repair_prompt is not None else (
+        cfg.author_prompt.parent / "repair.md"
+    )
+    return curator_engine.run_repair_stage(
+        wiring=StageWiring.for_batch(
+            prompt_path, cfg.author_model, cfg.author_effort,
+            batch_id=batch_id, label="repair",
+        ),
+        ctx=StageContext(
+            learning_run_dir=cfg.pending_dir,
+            user=_drain.build_repair_user_prompt(pairs, cfg, salt=stage_salt),
+            request_limit=author_request_limit(),
+            wall_clock_timeout=cfg.author_timeout,
+            repo_root=cfg.repo_root,
+            box=cfg.box,
+            salt=stage_salt,
+        ),
+        corpus_dir=cfg.corpus_dir,
+        log=make_repair_logger(cfg),
+    )
+
+
+def make_repair_logger(cfg: Any) -> Callable[[str], None]:
+    from defender.learning.core.config import make_logger
+
+    return make_logger(f"{cfg.log_prefix}.repair")
+
+
 def verify_agent_state(
     repo_root: Path,
     result: dict,
@@ -261,6 +341,15 @@ def verify_agent_state(
     noun: str,
     baseline_stray: list[str],
 ) -> None:
+    """Both post-spawn cross-checks in one call: the tree's scope (`assert_no_new_stray`)
+    and the agent's report against it (`verify_agent_report`)."""
+    assert_no_new_stray(repo_root, corpus_dir_rel, baseline_stray)
+    verify_agent_report(repo_root, result, corpus_dir, corpus_dir_rel, noun)
+
+
+def assert_no_new_stray(repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str]) -> None:
+    """A change outside `<corpus>/*.md` beyond what was already dirty at tick start refuses
+    the tick — the spawn wrote where it was not asked to."""
     new_stray = sorted(
         set(changes_outside(repo_root, corpus_dir_rel)) - set(baseline_stray)
     )
@@ -269,6 +358,14 @@ def verify_agent_state(
             f"agent changed files outside {corpus_dir_rel}*.md: {new_stray}; "
             "refusing to commit/rotate"
         )
+
+
+def verify_agent_report(
+    repo_root: Path, result: dict, corpus_dir: Path, corpus_dir_rel: str, noun: str,
+) -> None:
+    """The agent's self-report against the tree, one bit each way: `committed` non-empty
+    with a clean corpus, or `committed` empty with a dirty one, is a spawn whose word and
+    work disagree, and the tick refuses to start believing the tree on its say-so."""
     committed = result_list(result, "committed")
     corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir)
     if committed and not corpus_dirty:

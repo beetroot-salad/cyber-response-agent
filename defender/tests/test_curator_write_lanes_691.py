@@ -3,7 +3,8 @@
 Executable spec (write-tests phase E), RED against HEAD where it pins a correction. Every test
 drives a REAL gate through the shared harness (`_curator_691_harness`): `write_file`/`edit_file`
 raise `ModelRetry` on a `decide_write` deny and LAND the file on allow; `bash_decision(...).allow`
-is the rm lane; `forward_check_gate` is the fourth write-capable lane. Gate tests build the deps
+is the rm lane. (#773 M1 retired the fourth write-capable lane, `forward_check` — the tool the
+curator called is gone; the drain runs the check itself now.) Gate tests build the deps
 through the stable `for_run` entry point (M9 keeps it); MD-1 drives the binding seam itself.
 
 Corrections pinned here (NOT the refuted behaviour):
@@ -29,7 +30,6 @@ from _curator_691_harness import (  # noqa: E402
     corpus,
     curator_deps,
     edit_file,
-    forward_check_gate,
     lesson_read,
     make_worktree,
     pending_run_dir,
@@ -197,36 +197,31 @@ def test_the_rm_lane_is_scoped_to_the_same_corpus_as_the_write_lane(tmp_path):
     assert not bash_decision(deps, "rm defender/lessons/a.md defender/lessons/b.md").allow  # two paths
 
 
-def test_all_four_write_lanes_deny_a_symlink_out_of_corpus(tmp_path):
+def test_all_write_lanes_deny_a_symlink_out_of_corpus(tmp_path):
     """MD-3 (RG-adv4, the standout): one crafted operand — a symlink under the corpus pointing at a
     sibling corpus, so `defender/lessons/escape/secret.md` RESOLVES out of the corpus — presented to
-    all FOUR write-capable lanes must be DENIED by every one. RED against HEAD: the rm grant never
-    `resolve()`s, so it DELETES the out-of-corpus target (write_file/edit_file/forward_check deny) —
-    the correction is the rm lane `resolve()`s + rechecks containment and all four AGREE. Positive
-    control: an in-corpus operand is ADMITTED by all four."""
+    every write-capable lane must be DENIED by all of them. #773 M1 removed the fourth
+    (`forward_check`, a tool the curator no longer carries at all) — the remaining three are
+    write_file, edit_file and the `rm` bash grant. RED against HEAD: the rm grant never
+    `resolve()`s, so it DELETES the out-of-corpus target (write_file/edit_file deny) — the
+    correction is the rm lane `resolve()`s + rechecks containment and all three AGREE. Positive
+    control: an in-corpus operand is ADMITTED by all three."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     # a symlink inside the corpus pointing at the sibling corpus
     (corpus(wt, "lessons") / "escape").symlink_to(corpus(wt, "lessons-actor"))
     escape = "defender/lessons/escape/secret.md"          # resolves to lessons-actor/secret.md
-    # all four lanes must DENY the escaping operand
+    # every lane must DENY the escaping operand
     with pytest.raises(ModelRetry):
         write_file(deps, escape, "body\n")
     with pytest.raises(ModelRetry):
         edit_file(deps, escape, "", "body\n")
-    with pytest.raises(ModelRetry):
-        forward_check_gate(deps, escape)
     assert not bash_decision(deps, f"rm {escape}").allow   # RED today: the rm grant deletes it
     assert not (corpus(wt, "lessons-actor") / "secret.md").exists()  # the escape wrote nothing
-    # positive control: an in-corpus operand admitted by all four lanes
+    # positive control: an in-corpus operand admitted by every lane
     (corpus(wt, "lessons") / "real.md").write_text("body\n", encoding="utf-8")
     write_file(deps, rel("lessons", "real.md"), "body\n")
     edit_file(deps, rel("lessons", "real.md"), "body\n", "edited\n")
-    # the forward_check lane ADMITS the in-corpus operand: it returns the resolved in-corpus path
-    # (a deny would raise ModelRetry instead), so the returned path is a real observable that fails
-    # if the gate wrongly denied a legitimate in-corpus write.
-    gated = forward_check_gate(deps, rel("lessons", "real.md"))
-    assert gated.resolve() == (corpus(wt, "lessons") / "real.md").resolve()
     assert bash_decision(deps, "rm " + rel("lessons", "real.md")).allow
 
 

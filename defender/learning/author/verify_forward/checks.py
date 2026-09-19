@@ -9,8 +9,10 @@ from defender._untrusted import wrap
 from defender.learning.author.verify_forward import forward
 from defender.learning.author.verify_forward.shared import (
     parse_verdict,
+    reasoning_text,
 )
 from defender.learning.core import config
+from defender.learning.core.config import FatalConfigError
 from defender.learning._prompt import stage_user_message
 
 
@@ -35,19 +37,24 @@ class ForwardCheck:
 
     error_prefix: str
     prompt_path: Path | None
-    run: Callable[[CheckContext], str]
+    #: `(verdict, reasoning)` — verdict is GOOD or BAD; EXEMPT is the drain's own, via
+    #: `cfg.exempt(row)`, never the check's (M2's own data-model note).
+    run: Callable[[CheckContext], tuple[str, str]]
 
 
-def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) -> str:
+def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) -> tuple[str, str]:
     stem = ctx.lesson_path.stem
     prefix = ctx.check.error_prefix
     # `_verify` is the MODEL-BACKED lane, so the check it runs for must carry a prompt.
     # A ForwardCheck may carry `prompt_path=None` — a check whose verdict is mechanical
     # (pure retrieval) — it never reaches here. Checked rather than asserted: `StageWiring`
     # takes a non-optional `Path`, and an assert would be stripped under `python -O`.
+    # `FatalConfigError`, not a bare raise: this is a fatal CONFIGURATION fault (O10, "a
+    # check with no prompt"), never a per-finding verdict — the drain's per-pair retry
+    # handler must let it propagate rather than degrade it to BAD.
     prompt_path = ctx.check.prompt_path
     if prompt_path is None:
-        raise SystemExit(
+        raise FatalConfigError(
             f"{prefix}: this forward-check carries no verifier prompt, so it cannot run the "
             "model-backed verify lane"
         )
@@ -65,10 +72,10 @@ def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) ->
         wall_clock_timeout=config.verifier_timeout(),
         salt=salt,
     )
-    return parse_verdict(raw, error_prefix=prefix)
+    return parse_verdict(raw, error_prefix=prefix), reasoning_text(raw)
 
 
-def _run_findings(ctx: CheckContext, *, salt: str | None = None) -> str:
+def _run_findings(ctx: CheckContext, *, salt: str | None = None) -> tuple[str, str]:
     # #767 D5: the cited-covering-policy prompt section is deleted along with the
     # resolution-decoding lane it read through — `forward.load_cited_policy` keyed on a
     # cross-run citation menu no non-test code writes (c5), so this section was always the
@@ -96,12 +103,12 @@ def skips_forward_check(row: dict) -> bool:
     Its ground truth is `disposition_declared` on the family record, not a `source_refs.yaml`
     it does not have — `forward.expected_disposition`/`load_run_context` resolve a row's
     `run_id` under the RUNS dir, and a family row's `run_id` is an episode id under the
-    EPISODES root, a different tree entirely. Read by `learning.author.lessons.run.
-    invoke_agent` when it builds the batch's `queued_ids`: a family row's id never enters that
-    set, so the model-facing `forward_check` tool call for it returns "not in this batch's
-    queued rows" (`tool._prepare`) rather than reaching `_run_findings` at all — the exemption
-    is a ROUTE, and the model-facing `direction` literal stays `Literal["adversarial",
-    "benign"]`, unwidened."""
+    EPISODES root, a different tree entirely. Wired as the lessons channel's
+    `CorpusAuthorConfig.exempt` (#773 M2): the drain consults it per (file, finding) pair
+    BEFORE any verifier call and mints EXEMPT, so a family row never reaches `_run_findings`
+    at all — the exemption is a ROUTE, and the `direction` literal the check reads stays
+    `Literal["adversarial", "benign"]`, unwidened. `lessons.run._gate_findings` reads the
+    same predicate to route a family row past the disposition gate."""
     return row.get("direction") == "family"
 
 

@@ -50,9 +50,12 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     tick demands the opposite of.
 
     So the intervening success is a tick the agent HOLDS the row back from: it succeeds,
-    rotates, writes the held report, and leaves the row queued and still authorable. That is
-    the one shape in which a row can survive a clean tick and fail again — which is why this
-    runs on the findings channel, the only one with a held bucket."""
+    rotates, and leaves the row queued and still authorable. That is the one shape in which
+    a row can survive a clean tick and fail again. #773 M1 retires the curator's own
+    `held_forward_bad` bucket (the check moved to the drain); the row is held back here the
+    way §773 C3 holds any row the curator mentions in NO bucket at all — untouched, still
+    queued, still authorable next tick — which is the same "clean tick, no reset" shape this
+    test is about."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of(paths, "findings")
     h.write_source_refs(paths, "run-I")
@@ -68,13 +71,11 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     assert h.attempts_of(ch, "run-I/0") == 1
 
     def hold_back(rows, batch_id, cfg):
+        # Mentioned in NEITHER bucket (§773 C3): the row stays queued exactly as it was,
+        # with no counter of any kind bumped — the "clean tick that holds it back" shape.
         return {
             "committed": [],
             "consumed_skip": [],
-            "held_forward_bad": [
-                {"finding_id": r["finding_id"], "reason": "the forward check says no"}
-                for r in rows
-            ],
             "commit_message": "",
         }
 

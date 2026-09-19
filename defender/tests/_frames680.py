@@ -28,7 +28,7 @@ from defender.agents import (
     MAIN_DEF,
 )
 from defender.learning.author import shared as author_shared
-from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
+from defender.learning.author.curator_engine import CuratorDeps
 from defender.learning.author.verify_forward.checks import (
     FINDINGS_CHECK,
     CheckContext,
@@ -391,15 +391,6 @@ def _corpus_author_deps_scene(tmp_path: Path, result: BoxResult):
         run,
         repo,
         corpus,
-        cfg=ForwardCheckConfig(
-            check=FINDINGS_CHECK,
-            runs_dir=tmp_path / "runs",
-            pending=tmp_path / "pending.jsonl",
-            queued_ids=frozenset(),
-            # `*_a` because `_verify` passes the StageWiring POSITIONALLY (#713); a
-            # keyword-only fake would TypeError the moment this scene drove a check.
-            run_verify=lambda *_a, **_kwargs: "VERDICT: GOOD",
-        ),
         box=None,
     )
     deps = replace(deps, box=Box(result))

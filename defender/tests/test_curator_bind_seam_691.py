@@ -1,19 +1,15 @@
 """#691 — the curator binding seam: bind returns a corpus-scoped CuratorDeps, the retained
 roots (M6), the by-name corpus lookup (M1), the named tool-config slot (M4/M5), and for_run as a
-thin wrapper over bind (M9). RED against HEAD by design: ``CORPUS_AUTHOR_DEF.bindable`` is ``False``
-and ``for_run`` bypasses ``bind`` today, so every ``bind_curator`` call raises the current
-not-supported ValueError (or the RunScope/slot field is missing) — each test names the DEMANDED
-observable so a green #0 is what turns it, never an incidental import error.
+thin wrapper over bind (M9).
 
-The seam + gate helpers live in ``_curator_691_harness`` (one home, per the duplicate-helpers
-ratchet). Provisional target symbols that do not exist at HEAD (the ``tool_config`` slot, a
-``ForwardCheckConfig`` split off the five non-corpus fields, the retained ``roots`` field) are
-imported / touched INSIDE the test bodies so ``--collect-only`` stays clean; their absence is the
-red, at run time, not at collection.
+#773 M1 deletes the forward-check tool and its `ForwardCheckConfig` — the slot this module
+proved out is a GENERIC feature of the base `AgentDeps` (unpopulated by the corpus-author role
+now), so the slot-mechanics tests stay, driven against an arbitrary sentinel object rather than
+the retired config class; the tests that were specifically ABOUT the forward-check tool moved
+with it.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import subprocess
 import sys
@@ -31,7 +27,6 @@ from _curator_691_harness import (  # noqa: E402
     corpus,
     curator_deps,
     curator_scope,
-    forward_check_gate,
     make_worktree,
     pending_run_dir,
     rel,
@@ -41,9 +36,7 @@ from defender.agents import AGENTS  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CORPUS_AUTHOR_DEF,
     CuratorDeps,
-    ForwardCheckConfig,
 )
-from defender.learning.author.verify_forward.checks import FINDINGS_CHECK, ForwardCheck  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
@@ -183,23 +176,18 @@ def test_corpus_dir_derivation_is_unchanged_for_the_git_commit_consumer(tmp_path
     assert deps.corpus_dir == wt / "defender" / "lessons"
 
 
-# M4 / M5 — the named tool-config slot: inert-by-default, loud at first use
+# M4 / M5 — the named tool-config slot: inert-by-default, unpopulated by this role since #773
 
 def test_agent_deps_carries_a_named_tool_config_slot(tmp_path):
-    """M4: the five forward-check fields collapse into ONE named ``tool_config`` slot on the base
-    AgentDeps (F51: no corpus in it); forward_check reads its config THROUGH the slot. Drive the
-    seam: attach the config into the slot and forward_check admits an in-corpus operand through it.
-    RED today (bindable + the ForwardCheckConfig/slot are unbuilt)."""
-    from defender.learning.author.curator_engine import ForwardCheckConfig  # provisional (M4)
+    """M4: `tool_config` is a named slot on the base AgentDeps (F51: no corpus in it), that any
+    future tool-scoped role can attach a config into and read back through `replace`. #773 M1
+    retires the forward-check tool that motivated the slot; this drives the slot mechanics alone,
+    with an arbitrary sentinel standing in for whatever a future consumer would attach."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    (corpus(wt, "lessons") / "x.md").write_text("x\n", encoding="utf-8")
-    deps = bind_curator(wt, rd, "lessons")                  # slot UNSET (M5)
-    cfg = ForwardCheckConfig(
-        check=FINDINGS_CHECK, runs_dir=wt / "runs",
-        pending=wt / "_pending" / "f.jsonl", queued_ids=frozenset(), run_verify=lambda **_: "GOOD",
-    )
-    bound = replace(deps, tool_config=cfg)                  # provisional slot name
-    forward_check_gate(bound, rel("lessons", "x.md"))       # reads config through the slot → admits
+    deps = bind_curator(wt, rd, "lessons")                  # slot UNSET, this role's own default
+    sentinel = object()
+    bound = replace(deps, tool_config=sentinel)
+    assert bound.tool_config is sentinel
 
 
 def test_importing_runtime_does_not_import_the_learning_stages():
@@ -222,46 +210,17 @@ def test_importing_runtime_does_not_import_the_learning_stages():
     assert r.returncode == 0, r.stderr
 
 
-def test_forward_check_repacks_the_config_slot_into_check_context(tmp_path):
-    """The config slot's five fields (check, runs_dir, pending, queued_ids, run_verify) are repacked
-    into the CheckContext the forward_check builds — one consumer family (c3/g2), not duplicated. A
-    recording check captures the ctx it is HANDED and every field traces back to the deps."""
-    from defender.learning.author.verify_forward.tool import Pair, run_forward_check
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    captured: dict = {}
-
-    def _rec(ctx):
-        captured["ctx"] = ctx
-        return "GOOD"
-
-    rec_check = ForwardCheck(error_prefix="rec", prompt_path=None, run=_rec)
-    sid = "row-1"
-    deps = CuratorDeps.for_run(
-        rd,
-        wt,
-        corpus(wt, "lessons"),
-        cfg=ForwardCheckConfig(check=rec_check, runs_dir=wt / "runs", pending=wt / "_pending" / "f.jsonl", queued_ids=frozenset({sid})),
-        box=None,
-    )
-    (corpus(wt, "lessons") / "lesson.md").write_text("x\n", encoding="utf-8")
-    asyncio.run(run_forward_check(deps, [Pair(lesson_path=rel("lessons", "lesson.md"), source_id=sid)]))
-    ctx = captured["ctx"]
-    assert ctx.runs_dir == deps.runs_dir
-    assert ctx.pending == deps.pending
-    assert ctx.corpus_dir == deps.corpus_dir
-    assert ctx.run_verify == deps.run_verify
-
-
-def test_forward_check_repeated_calls_see_the_same_compiled_policy(tmp_path):
-    """Every forward_check invocation reads the roots the single bind compiled; nothing re-derives a
-    second root — the same in-corpus operand gates identically on repeated calls, and to the same
-    resolved path (M6)."""
+def test_repeated_binds_see_the_same_compiled_policy(tmp_path):
+    """Repeated binds of the same spawn resolve the SAME roots and the same policy — nothing
+    re-derives a second root per call (M6). The forward-check tool that used to exercise this
+    through its own gate is gone (#773 M1); driven directly on the bind seam instead."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     (corpus(wt, "lessons") / "x.md").write_text("x\n", encoding="utf-8")
-    p1 = forward_check_gate(deps, rel("lessons", "x.md"))
-    p2 = forward_check_gate(deps, rel("lessons", "x.md"))
-    assert p1 == p2 == (corpus(wt, "lessons") / "x.md")
+    p1 = write_file(deps, rel("lessons", "x.md"))
+    p2 = write_file(deps, rel("lessons", "x.md"))
+    assert p1 == p2
+    assert deps.roots is not None
 
 
 def test_spawn_identity_fields_do_not_move_into_the_tool_config_slot(tmp_path):
@@ -282,17 +241,13 @@ def test_spawn_identity_fields_do_not_move_into_the_tool_config_slot(tmp_path):
 
 def test_tool_config_slot_survives_two_successive_replace_calls(tmp_path):
     """The config the slot holds survives two successive replace() calls that change other fields
-    (dep-PO-2): after attaching the config and replacing identity twice, the slot still names the
-    same config object. RED today (the slot is unbuilt)."""
-    from defender.learning.author.curator_engine import ForwardCheckConfig  # provisional (M4)
+    (dep-PO-2): after attaching a config and replacing identity twice, the slot still names the
+    same object."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = bind_curator(wt, rd, "lessons")
-    cfg = ForwardCheckConfig(
-        check=FINDINGS_CHECK, runs_dir=wt / "runs",
-        pending=wt / "_pending" / "f.jsonl", queued_ids=frozenset(), run_verify=lambda **_: "GOOD",
-    )
-    b2 = replace(replace(deps, tool_config=cfg), run_id="a")
-    assert b2.tool_config is cfg
+    sentinel = object()
+    b2 = replace(replace(deps, tool_config=sentinel), run_id="a")
+    assert b2.tool_config is sentinel
 
 
 def test_bind_constructs_a_policy_correct_curator_with_no_tool_config(tmp_path):
@@ -317,17 +272,14 @@ def test_tool_config_slot_unset_across_full_lifecycle(tmp_path):
     assert bash_decision(deps, "cat defender/lessons/x.md").allow   # cat: slot untouched
 
 
-def test_forward_check_raises_a_named_error_when_its_config_is_unset(tmp_path):
-    """M5 (loud-at-first-use): forward_check with its config slot UNSET raises an error that NAMES
-    the missing config/slot — inert until used, then loud (F50 leaves the exception CATEGORY open;
-    the recommended reading is a retryable refusal, so assert the message names the slot). Positive
-    control: with the config SET, the same in-corpus operand is admitted."""
+def test_curator_deps_has_no_forward_check_reader_left_773(tmp_path):
+    """#773 M1: the forward-check tool and its config-slot reader are both gone — the slot stays
+    on the base `AgentDeps` (generic, unpopulated), but `CuratorDeps` itself no longer has any
+    property that reads it. The role's ordinary write lane works exactly as before, slot unset
+    or not."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    (corpus(wt, "lessons") / "x.md").write_text("x\n", encoding="utf-8")
-    unset = bind_curator(wt, rd, "lessons")                # slot unset
-    with pytest.raises(Exception) as exc:  # noqa: PT011 - message asserted below, category deliberately open (F50)
-        forward_check_gate(unset, rel("lessons", "x.md"))
-    assert "config" in str(exc.value).lower() or "forward" in str(exc.value).lower()
-    # positive control: config SET → the same operand admits
-    ok = curator_deps(wt, rd, "lessons")
-    assert forward_check_gate(ok, rel("lessons", "x.md")) == (corpus(wt, "lessons") / "x.md")
+    deps = bind_curator(wt, rd, "lessons")
+    assert deps.tool_config is None
+    assert not hasattr(CuratorDeps, "check")
+    write_file(deps, rel("lessons", "x.md"))
+    assert (corpus(wt, "lessons") / "x.md").read_text() == "body\n"

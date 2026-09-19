@@ -239,33 +239,16 @@ def test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_tok
     positive control for the negatives that assert no SECOND token reaches the run lane: the
     fresh-mint channel demonstrably works, so a clean run-lane sweep is not vacuous."""
     pytest.importorskip("pydantic_ai")
-    from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
+    from defender.learning.author.curator_engine import CuratorDeps
 
     repo = tmp_path / "wt"
     corpus = repo / "defender" / "lessons"
     corpus.mkdir(parents=True)
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    pending = tmp_path / "findings.jsonl"
-    pending.write_text("", encoding="utf-8")
     curdir = tmp_path / "curator-run"
     curdir.mkdir()
 
-    deps = CuratorDeps.for_run(
-        curdir, repo, corpus,
-        cfg=ForwardCheckConfig(
-            check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(),
-        ),
-        box=None,
-    )
-    other = CuratorDeps.for_run(
-        curdir, repo, corpus,
-        cfg=ForwardCheckConfig(
-            check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(),
-        ),
-        box=None,
-    )
+    deps = CuratorDeps.for_run(curdir, repo, corpus, box=None)
+    other = CuratorDeps.for_run(curdir, repo, corpus, box=None)
 
     # Two independently built legs, so this is not vacuous on a single construction: NEITHER
     # carries a salt. #875 removed the field — the per-invocation stage salt is minted by the

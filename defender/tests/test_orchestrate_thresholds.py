@@ -28,7 +28,6 @@ from defender.learning.core.config import (  # type: ignore[import-not-found]
     LoopPaths,
 )
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
-from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]  # noqa: E501
 
 
 
@@ -619,47 +618,32 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
     )
 
 
-def test_881_a_retryable_forward_check_hold_still_counts_as_work(tmp_path, monkeypatch):
-    """#881/O2: subtracting a RETRYABLE hold from the wake gate strands it forever.
+def test_881_a_deferred_row_still_counts_as_work(tmp_path, monkeypatch):
+    """#881/O2, carried into #773's replacement for the retryable forward-check hold.
 
-    Two holders write a "held" row and they do not mean the same thing. The pre-author gate
-    holds a row whose ground truth it cannot read — a fact with no writer left, so the hold
-    never moves and the row is not work. The forward check holds a lesson that would flip a
-    correctly-resolved case — and `_gate_findings` re-admits that row on the very next tick,
-    because the check's verdict depends on a corpus that moves. That row IS work.
-
-    They were one field. Counting on it answered "not work" for both, so a forward-check hold
-    stopped waking the drain the day #881 landed: never retried, never consumed, sitting in
-    the queue invisible — the failure this whole issue is named for, reintroduced by its own
-    fix. `_curator_queue_checks` names this queue as the only wake source, so nothing else
-    can raise them.
-
-    Driven on the real `BucketSpec` the drain projects through, not on a literal, so the two
-    fields cannot drift apart without this failing: if the forward-check bucket is ever
-    pointed back at `held_reason`, the row it stamps stops counting and this goes red.
+    #773 M1/M6/M7 retire the old `held_forward_bad` bucket outright: a lesson the drain's own
+    check refuses is now either TERMINAL (`consumed_forward_bad`, rotated off the queue
+    entirely — no longer a "held" row at all) or DEFERRED (M7's own bounded `deferrals`
+    counter, re-queued with no `held_reason` stamped). Only the second shape is still a
+    queued row the wake gate must count as work — `test_773_deferral.py`'s own
+    `test_drain_ticks_own_loop_continuation_is_unaffected_by_the_new_row_fields_773` pins
+    this through the real drain tick; this is the wake-gate-only version of the same claim,
+    driven directly against `_pending_queue_counts`/`_has_curator_work`.
 
     The PAIRED CONTROL is a permanent hold on the same address in the same queue: it must
     still count zero, or "count everything" would satisfy the first half.
     """
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     paths = LoopPaths(repo_root=tmp_path)
-    forward_bucket = next(
-        b for b in lessons_run.FINDINGS_BUCKETS if b.name == "held_forward_bad"
-    )
-    assert forward_bucket.reason_field != "held_reason", (
-        "the forward check stamps the permanent hold's field again, so every lesson it "
-        "rejects is subtracted from the wake gate and never retried"
-    )
-    stamped = {forward_bucket.reason_field: forward_bucket.formatter("flips a resolved case")}
 
-    _seed_queue(paths, [_row(f"fb/{i}", **stamped) for i in range(5)])
+    _seed_queue(paths, [_row(f"fb/{i}", deferrals=1) for i in range(5)])
     assert drains._pending_queue_counts(paths.pending_file)[0] == 5, (
-        "a forward-check hold was subtracted from the wake gate; the next tick would have "
-        "re-admitted it, so it is work and the drain must still wake for it"
+        "a deferred row was subtracted from the wake gate; the next tick may still land it, "
+        "so it is work and the drain must still wake for it"
     )
     assert drains._has_curator_work(paths) is True, (
-        "five retryable holds left the wake gate shut, so they are never retried and never "
-        "consumed — queued and invisible"
+        "five deferred rows left the wake gate shut, so they are never retried — queued and "
+        "invisible"
     )
 
     # The control: the permanent hold on the same address still counts for nothing.

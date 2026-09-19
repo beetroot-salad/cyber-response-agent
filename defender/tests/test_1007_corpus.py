@@ -91,8 +91,14 @@ class TwoLaneRecorder:
             return
         from defender.learning.author.lessons import run as lessons_run
 
+        # #773: the drain's own verifier-key preflight runs ahead of the first curator
+        # spawn (O10) — this class fakes only the CURATOR's model (`invoke_agent`), so the
+        # verifier's key source is faked too, or a host with no real key configured
+        # (CI) would fail here on a scenario that was never about key sourcing at all.
         cfg = dataclasses.replace(
-            lessons_run.build_author_config(paths, box=box), invoke_agent=self._agent)
+            lessons_run.build_author_config(paths, box=box), invoke_agent=self._agent,
+            source_key=lambda model, *, label=None: None,
+        )
         lessons_run.run_batch(paths=paths, cfg=cfg, hold_committed=True, box=box)
 
     @property
@@ -181,17 +187,15 @@ def test_the_questioner_curator_registers_no_forward_check(tmp_path):
     """The questioner curator registers NO forward check.
 
     Observably true: the forward-check registry still holds exactly the one findings check it
-    holds today, and the questioner config declares no check of its own. A forward check
-    re-runs the JUDGE against a candidate lesson to see whether the finding still fires; there
-    is no defender behaviour for a world lesson to change, so the check would compare a lesson
-    against a verdict it has no bearing on.
+    holds today, and the questioner config declares no check of its own. #773 moved the check
+    out of the curator's own tool call entirely — it is the DRAIN's own per-channel config now
+    (`CorpusAuthorConfig.forward_check`), never a tool the model calls — so the absence is
+    observable on the config the questioner builds, not on `invoke_agent`'s source.
 
-    What failure looks like: a second check is registered for symmetry. Every questioner lesson
+    What failure looks like: a second check is wired for symmetry. Every questioner lesson
     then pays a model call to be measured against a question it does not answer, and the
     results gate a corpus on noise.
     """
-    import inspect
-
     checks = W.mod("learning.author.verify_forward.checks")
     curator = W.mod("learning.author.questioner.run")
 
@@ -199,13 +203,10 @@ def test_the_questioner_curator_registers_no_forward_check(tmp_path):
                   if isinstance(value, checks.ForwardCheck)]
     assert registered == ["FINDINGS_CHECK"], (
         f"the forward-check registry holds {registered}; the questioner corpus added one")
-    # The check is wired at the curator's own `invoke_agent`, not declared as a config field,
-    # so that frame is where the absence is observable.
-    source = inspect.getsource(curator.invoke_agent)
-    for wired in ("FINDINGS_CHECK", "ForwardCheckConfig"):
-        assert wired not in source, (
-            f"the questioner curator wires {wired} — a world lesson has no defender verdict "
-            "for a forward check to re-run against")
+    cfg = curator.build_questioner_config(D.make_paths(tmp_path))
+    assert cfg.forward_check is None, (
+        "the questioner config wires a forward check — a world lesson has no defender "
+        "verdict for one to re-run against")
 
 
 def test_the_defender_curator_still_registers_findings_check(tmp_path):
@@ -218,14 +219,13 @@ def test_the_defender_curator_still_registers_findings_check(tmp_path):
     What failure looks like: the check registry is refactored to be per-corpus while adding the
     second corpus, and the one check that exists is dropped in the move.
     """
-    import inspect
-
     checks = W.mod("learning.author.verify_forward.checks")
     lessons_run = W.mod("learning.author.lessons.run")
 
     assert getattr(checks, "FINDINGS_CHECK", None) is not None, (
         "the incumbent findings forward check is gone")
-    assert "FINDINGS_CHECK" in inspect.getsource(lessons_run.invoke_agent), (
+    cfg = lessons_run.build_author_config(D.make_paths(tmp_path))
+    assert cfg.forward_check is checks.FINDINGS_CHECK, (
         "the defender curator stopped wiring its forward check — the regression gate every "
         "lesson edit passes through")
 

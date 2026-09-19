@@ -24,18 +24,29 @@ def test_parse_verdict_bad():
     assert vfs.parse_verdict("blah\nVERDICT: BAD", error_prefix=_PREFIX) == "BAD"
 
 
-def test_parse_verdict_takes_last_when_multiple():
+def test_parse_verdict_conflicting_lines_raise():
+    """#773 §7 FK-11: more than one DISTINCT verdict line is a reply from which no single
+    verdict can be read — never resolved by picking the last one (the old behavior this test
+    replaces), since that would commit a lesson on a verdict the verifier itself
+    contradicted."""
     text = "VERDICT: GOOD\nmore reasoning\nVERDICT: BAD\n"
+    with pytest.raises(vfs.VerdictError, match="conflicting"):
+        vfs.parse_verdict(text, error_prefix=_PREFIX)
+
+
+def test_parse_verdict_repeated_identical_lines_still_parse():
+    """The companion positive control: the SAME verdict repeated is not a conflict."""
+    text = "VERDICT: BAD\nmore reasoning\nVERDICT: BAD\n"
     assert vfs.parse_verdict(text, error_prefix=_PREFIX) == "BAD"
 
 
 def test_parse_verdict_missing_raises():
-    with pytest.raises(SystemExit, match="no VERDICT line"):
+    with pytest.raises(vfs.VerdictError, match="no VERDICT line"):
         vfs.parse_verdict("just reasoning, no verdict", error_prefix=_PREFIX)
 
 
 def test_parse_verdict_unrecognized_raises():
-    with pytest.raises(SystemExit, match="unrecognized"):
+    with pytest.raises(vfs.VerdictError, match="unrecognized"):
         vfs.parse_verdict("VERDICT: MAYBE", error_prefix=_PREFIX)
 
 
@@ -59,7 +70,7 @@ def test_load_run_context_missing_disposition(tmp_path, monkeypatch):
     (runs / "rid" / "investigation.md").write_text("x")
     import yaml
     (runs / "rid" / "source_refs.yaml").write_text(yaml.safe_dump({}))
-    with pytest.raises(SystemExit, match="missing normalized_disposition"):
+    with pytest.raises(vfs.VerdictError, match="missing normalized_disposition"):
         vf.load_run_context("rid", runs_dir=runs)
 
 

@@ -62,6 +62,12 @@ class AuthorConfig(CorpusAuthorConfig):
 def build_author_config(
     paths: LoopPaths = DEFAULT_PATHS, *, manifest_seed: str | None = None, box: Any = None,
 ) -> AuthorConfig:
+    from defender.learning.author import shared as _shared
+    from defender.learning.author.verify_forward.checks import (
+        FINDINGS_CHECK,
+        skips_forward_check,
+    )
+
     return AuthorConfig(
         repo_root=paths.repo_root,
         corpus_dir=paths.lessons_dir,
@@ -86,6 +92,11 @@ def build_author_config(
         post_rotate=_write_held_report_after_rotate,
         manifest_seed=manifest_seed,
         box=box,
+        # #773 M2: the lessons channel's own drain-run check.
+        forward_check=FINDINGS_CHECK,
+        exempt=skips_forward_check,
+        repair_prompt=paths.learning_dir / "author" / "lessons" / "repair.md",
+        invoke_repair=_shared.invoke_repair,
     )
 
 
@@ -125,8 +136,10 @@ def build_user_prompt(
 
 
 def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
+    """#773 M1: the curator writes and never checks — no `ForwardCheckConfig`, no
+    `forward_check` tool. The drain runs the check itself, between `_project` and the
+    commit; this spawn's only job is to author the batch and self-report."""
     from defender.learning.author import curator_engine
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     stage_salt = uuid.uuid4().hex
@@ -145,58 +158,8 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
-        cfg=curator_engine.ForwardCheckConfig(
-            check=FINDINGS_CHECK,
-            runs_dir=cfg.runs_dir,
-            pending=cfg.channel.file,
-            # J12: a family row's id never enters the queued set the model may forward_check —
-            # its ground truth is the family record, not a source_refs.yaml under runs_dir.
-            queued_ids=forward_checkable_ids(findings),
-            exempt_ids=forward_exempt_ids(findings),
-        ),
         log=_log,
     )
-
-
-
-def forward_checkable_ids(findings: list[dict]) -> frozenset[str]:
-    """The run ids the model may name in a `forward_check` call for this batch.
-
-    J12: a family row's id never enters it — its ground truth is the family record, not a
-    `source_refs.yaml` under the runs dir — so the model-facing tool answers "not in this
-    batch's queued rows" for it rather than reaching the check at all. A NAMED function rather
-    than a comprehension inlined into the config, because it is the route the exemption IS: a
-    test can drive this and fail when the filter is removed, which a test that re-derives the
-    same comprehension against its own data cannot."""
-    from defender.learning.author.verify_forward.checks import skips_forward_check
-
-    return frozenset(
-        str(f["run_id"]) for f in findings
-        if f.get("run_id") and not skips_forward_check(f)
-    )
-
-
-def forward_exempt_ids(findings: list[dict]) -> frozenset[str]:
-    """The run ids this batch exempts from the forward check, by the ROW'S OWN KIND.
-
-    The complement of `forward_checkable_ids` over the rows that HAVE a run id, and the other
-    half of J12's exemption. Keeping a family row's id out of the checkable set was the whole
-    of the route before, which meant the exemption arrived at the model as "not in this batch's
-    queued rows" — an ERROR, and the prompt reverts a file whose check errors twice. Named
-    here beside its complement so the two cannot come to disagree about which rows are exempt.
-    """
-    from defender.learning.author.verify_forward.checks import skips_forward_check
-
-    return frozenset(
-        str(f["run_id"]) for f in findings
-        if f.get("run_id") and skips_forward_check(f)
-    )
-
-
-def _forward_bad_reason(reason: str) -> str:
-    """The held-reason prefix the forward-check bucket writes. A named function rather
-    than an inline lambda so no module-level assignment carries an interpolated string."""
-    return f"forward_bad: {reason}"
 
 
 FINDINGS_BUCKETS: tuple[BucketSpec, ...] = (
@@ -204,20 +167,6 @@ FINDINGS_BUCKETS: tuple[BucketSpec, ...] = (
     BucketSpec(
         name="consumed_skip", disposition="consumed", reason_field="skip_reason",
         formatter=str,
-    ),
-    # The one genuinely direction-specific bucket: a lesson the forward check says would
-    # flip a correctly-resolved case is HELD, not consumed.
-    #
-    # ITS OWN FIELD, not `held_reason`. This hold is RETRYABLE — `_gate_findings` re-admits
-    # the row on the next tick, and the forward check gets another verdict once the corpus
-    # has moved — while a `held_reason` hold waits on a fact that has no writer and never
-    # moves. #881/O2 made `held_reason` the wake gate's "not work" marker, and with one field
-    # carrying both meanings that gate stopped waking for these rows: never retried, never
-    # consumed, sitting in the queue invisible. One field, one meaning; the prefix stays for
-    # an operator reading the row.
-    BucketSpec(
-        name="held_forward_bad", disposition="held", reason_field="forward_bad_reason",
-        formatter=_forward_bad_reason,
     ),
 )
 
@@ -230,28 +179,33 @@ def write_held_report(
     cfg: AuthorConfig,
     *,
     batch_id: str,
-    held_forward_bad: list[dict],
+    forward_bad_terminal: list[dict],
+    deferred: list[dict],
     skipped: list[dict],
     gate_held: list[dict],
 ) -> None:
-    """The lessons channel's three decline reasons, as the labels its report line carries.
+    """The lessons channel's four decline reasons, as the labels its report line carries.
 
-    The ownership tag that stood here — claiming the `gate_held` id list as this function's own
-    field — is gone with the thing it claimed: the line is now composed by
-    `shared.write_disposition_report`, which both curators call and which derives every
-    `<label>_ids` key from the caller's own group names. What this function owns is WHICH labels
-    the lessons channel reports, not the spelling of the keys.
+    The line is composed by `shared.write_disposition_report`, which both curators call and
+    which derives every `<label>_ids` key from the caller's own group names. What this
+    function owns is WHICH labels the lessons channel reports, not the spelling of the keys.
 
-    THREE REASONS UNDER THREE LABELS, never merged: a `forward_bad` hold is the forward
-    check's verdict on a lesson the agent wrote, a skip is terminal, and a `gate_held` row
-    never reached the agent at all and will be held again on every tick until a human moves
+    #773 M6/M7 replace the old retryable `forward_bad` hold with TWO new groups:
+    `forward_bad_terminal` (a finding whose lesson stayed BAD after D1's one repair attempt
+    — consumed, never re-queued by this drain, its full account in the gap ledger) and
+    `deferred` (a finding that could not land through no fault of its own — bounded, still
+    queued, §7 FK-16 carries only its id and count). `skipped` is terminal, and a `gate_held`
+    row never reached the agent at all and will be held again every tick until a human moves
     it (#881/O3). An operator reading one label for another reads the wrong recovery.
 
-    Nothing is written when the tick held and skipped nothing: a report that gains a line per
-    tick names nothing."""
+    Nothing is written when the tick declined nothing: a report that gains a line per tick
+    names nothing."""
     _shared.write_disposition_report(
         cfg.held_report, cfg.pending_dir, batch_id=batch_id,
-        groups={"forward_bad": held_forward_bad, "skipped": skipped, "gate_held": gate_held},
+        groups={
+            "forward_bad_terminal": forward_bad_terminal, "deferred": deferred,
+            "skipped": skipped, "gate_held": gate_held,
+        },
     )
 
 
@@ -278,7 +232,8 @@ def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
     write_held_report(
         cfg,
         batch_id=outcome.batch_id,
-        held_forward_bad=outcome.held.get("held_forward_bad", []),
+        forward_bad_terminal=outcome.held.get("forward_bad_terminal", []),
+        deferred=outcome.held.get("deferred", []),
         skipped=outcome.consumed.get("consumed_skip", []),
         gate_held=outcome.gate_held,
     )
@@ -370,7 +325,8 @@ def _gate_findings(
     if not batch:
         return [], [], []
     # THE SAME PREDICATE THE ROUTE USES, not a second spelling of it. `skips_forward_check`
-    # already decides which rows are family rows for `queued_ids` above; re-deriving
+    # is the channel's `exempt` (M2), the predicate the drain's verdict step keys EXEMPT on;
+    # re-deriving
     # `entry["direction"] == "family"` here gives one rule two homes, and the duplicate-helper
     # gate keys on the symbol NAME, so it is structurally blind to the copy. Widening the family
     # route later would otherwise update one site and leave the other routing as it always did.
@@ -411,7 +367,14 @@ def _gate_findings(
                 kind, rec = routed
                 (consumed_idempotent if kind == "consumed" else held).append(rec)
             continue
-        disp = disposition_for(cfg, entry["run_id"])
+        run_id = entry.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            # #773 O1: a row with no `run_id` at all has no ground truth to gate ON here —
+            # holding it forever would give an operator no signal at all. It falls through
+            # to `to_author` untouched; M3.3's own per-pair handler is where an uncheckable
+            # pair meets its disposition (retry once, then a NAMED, gap-ledgered BAD).
+            continue
+        disp = disposition_for(cfg, run_id)
         direction = entry["direction"]
         if not _has_confident_ground_truth(direction, disp):
             rec = dict(entry)

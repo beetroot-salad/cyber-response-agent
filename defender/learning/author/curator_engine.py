@@ -9,14 +9,10 @@ from typing import Any, ClassVar
 
 from uuid import uuid4
 
-from pydantic_ai.exceptions import ModelRetry
-
 from defender._text import is_content_less
 from defender._untrusted import wrap
 from defender.hooks.record_lesson_load import LESSON_CORPORA as _LESSON_CORPORA
 from defender.learning.author import shared as _shared
-from defender.learning.author.verify_forward.checks import ForwardCheck
-from defender.learning.author.verify_forward.engine import _run_verify_pydantic
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning._pydantic_stage import run_stage
@@ -78,7 +74,15 @@ _CORPUS_AUTHOR_DENY_REASON = (
     "Blocked: the lesson curator writes and edits .md lessons under its OWN corpus only. It reads the "
     "corpus (cat, or `cat <file> | grep <pattern>`), takes its inventory from the corpus manifest, "
     "and rm's a single draft it promotes or discards — no WRITES outside the corpus, and no "
-    "arbitrary shell. Forward-check with the forward_check tool."
+    "arbitrary shell."
+)
+
+_CORPUS_REPAIR_DENY_REASON = (
+    "Blocked: the repair spawn rewrites the lesson file(s) the forward check refused (one "
+    "spawn covers every BAD pair this tick, however many files that spans), keeping their "
+    "citations — write only, no bash, no rm. Its whole input is the BAD pair(s) it was "
+    "handed (each file's current text and the verifier's reasoning); the drain re-checks "
+    "whatever it writes."
 )
 
 
@@ -124,62 +128,6 @@ def _corpus_author_write_shapes(roots: ResolvedRoots) -> tuple[re.Pattern[str], 
 
 
 @dataclass(frozen=True)
-class ForwardCheckConfig:
-    """The curator's per-spawn forward-check inputs, carried in the base
-    `AgentDeps.tool_config` slot. Carries NO corpus — `corpus_dir` stays derived off `roots`
-    and read directly off `deps`, never duplicated here."""
-
-    check: ForwardCheck
-    runs_dir: Path
-    pending: Path
-    queued_ids: frozenset[str]
-    #: Rows whose KIND the forward check does not cover — exempt, which is not the same fact
-    #: as absent from `queued_ids`. Kept as its own set so the tool can answer EXEMPT for the
-    #: first and ERROR for the second; collapsed, an exemption reads as a failed check and the
-    #: curator prompt reverts the lesson it just wrote.
-    exempt_ids: frozenset[str] = frozenset()
-    run_verify: Callable[..., str] = _run_verify_pydantic
-
-
-def _refuse_forward_check(ctx: Any) -> str:
-    """#1007 N1/M7: the questioner curator's own `run` — reached only if a spawn calls the
-    `forward_check` tool anyway. There is no defender behaviour a world lesson could re-verify
-    against, so this refuses loudly rather than approving silently."""
-    prefix = ctx.check.error_prefix
-    raise SystemExit(
-        f"{prefix}: this corpus carries no defender verdict for a forward check to re-run "
-        "against — the questioner curator registers none")
-
-
-def no_forward_check(
-    *, runs_dir: Path, pending: Path, exempt_ids: frozenset[str] = frozenset(),
-) -> ForwardCheckConfig:
-    """A `ForwardCheckConfig` for a curator direction that registers NO forward check (#1007
-    N1/M7): `queued_ids` is empty, EVERY row of the batch is `exempt_ids`, and the check itself
-    refuses if ever reached. Built here rather than inline at each such curator, so a direction
-    with nothing to verify against never has to spell the class its own `invoke_agent` is read
-    for the absence of (`test_the_questioner_curator_registers_no_forward_check` scans that
-    source for `ForwardCheckConfig`/`FINDINGS_CHECK` literally) — and never registered as a
-    module-level `ForwardCheck` in `verify_forward/checks.py`, which is the census that test
-    also reads.
-
-    THE BATCH'S OWN IDS GO IN `exempt_ids`, and that is the whole point of the parameter.
-    `verify_forward/tool._prepare` answers ERROR for a `source_id` absent from BOTH sets, and
-    the curator prompts' rule for a repeated ERROR is to revert the lesson — which is J12's
-    already-shipped bug, whose fix (`lessons/run.forward_exempt_ids`) exists precisely because
-    "keep the id out of `queued_ids`" is not how a row is exempted. Left empty, a direction
-    that registers NO check would tell every spawn that every lesson it wrote failed to verify,
-    and the spawn's remedy is to delete its own work. The tool IS granted to this role
-    (`CORPUS_AUTHOR_DEF.tools`), so "the model never calls it" is not a guarantee this frame
-    may lean on."""
-    check = ForwardCheck(
-        error_prefix="questioner_curator", prompt_path=None, run=_refuse_forward_check)
-    return ForwardCheckConfig(
-        check=check, runs_dir=runs_dir, pending=pending,
-        queued_ids=frozenset(), exempt_ids=exempt_ids)
-
-
-@dataclass(frozen=True)
 class CuratorDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.CORPUS_AUTHOR
@@ -190,48 +138,14 @@ class CuratorDeps(AgentDeps):
         assert self.roots.corpus_dir is not None
         return self.roots.corpus_dir
 
-    def _forward_check_config(self) -> ForwardCheckConfig:
-        if self.tool_config is None:
-            raise ModelRetry(
-                "forward_check: this curator spawn's tool_config is not set — bind() leaves it "
-                "unset by default (M5); attach a ForwardCheckConfig before calling forward_check."
-            )
-        return self.tool_config
-
-    @property
-    def check(self) -> ForwardCheck:
-        return self._forward_check_config().check
-
-    @property
-    def runs_dir(self) -> Path:
-        return self._forward_check_config().runs_dir
-
-    @property
-    def pending(self) -> Path:
-        return self._forward_check_config().pending
-
-    @property
-    def queued_ids(self) -> frozenset[str]:
-        return self._forward_check_config().queued_ids
-
-    @property
-    def exempt_ids(self) -> frozenset[str]:
-        return self._forward_check_config().exempt_ids
-
-    @property
-    def run_verify(self) -> Callable[..., str]:
-        return self._forward_check_config().run_verify
-
     @classmethod
-    def for_run(
-        cls, run_dir: Path, repo_root: Path, corpus_dir: Path,
-        *, cfg: ForwardCheckConfig, box: Any,
-    ) -> CuratorDeps:
+    def for_run(cls, run_dir: Path, repo_root: Path, corpus_dir: Path, *, box: Any) -> CuratorDeps:
         """A thin wrapper over `bind`: resolves the corpus NAME off `corpus_dir`'s basename,
-        binds through the one seam, then attaches the forward-check config (built by
-        `run_curator_stage`) into the base `tool_config` slot. `box` is REQUIRED — a loud
-        TypeError at construction beats a silent inert default that deadens the curator's
-        bash lane."""
+        binds through the one seam. `box` is REQUIRED — a loud TypeError at construction beats
+        a silent inert default that deadens the curator's bash lane.
+
+        M1: no forward-check config is attached here any more — the check moved out of the
+        curator's hands entirely, and `tool_config` stays at `bind`'s own unset default."""
         defender_dir = repo_root / "defender"
         scope = RunScope(
             corpus_name=corpus_dir.name,
@@ -244,14 +158,46 @@ class CuratorDeps(AgentDeps):
             box=box,
         )
         assert isinstance(deps, CuratorDeps)
-        return replace(deps, tool_config=cfg)
+        return deps
+
+
+@dataclass(frozen=True)
+class CorpusRepairDeps(AgentDeps):
+    """M4's repair spawn — a SEPARATE deps type from `CuratorDeps`, because `run_stage`
+    resolves the effective `AgentDefinition` off `AGENTS[deps_type.role]`
+    (`_pydantic_stage.build_stage_agent`), not off whatever definition `bind` was called
+    with — so the restricted toolset only actually applies if the role differs too."""
+
+    role: ClassVar[AgentRole] = AgentRole.CORPUS_REPAIR
+
+    @property
+    def corpus_dir(self) -> Path:
+        assert self.roots is not None
+        assert self.roots.corpus_dir is not None
+        return self.roots.corpus_dir
+
+    @classmethod
+    def for_run(cls, run_dir: Path, repo_root: Path, corpus_dir: Path, *, box: Any) -> CorpusRepairDeps:
+        defender_dir = repo_root / "defender"
+        scope = RunScope(
+            corpus_name=corpus_dir.name,
+            read_confine=tuple(
+                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
+            ),
+        )
+        deps = bind(
+            CORPUS_REPAIR_DEF, run_dir, scope=scope, defender_dir=defender_dir,
+            box=box,
+        )
+        assert isinstance(deps, CorpusRepairDeps)
+        return deps
 
 
 CORPUS_AUTHOR_DEF = AgentDefinition(
     role=AgentRole.CORPUS_AUTHOR,
     model=config.author_model,
     effort=config.author_effort(),
-    tools=ToolSet(bash=True, write=True, forward_check=True, lesson_read=True),
+    tools=ToolSet(bash=True, write=True, lesson_read=True),
     bash_shapes=(_corpus_author_grants,),
     write_shapes=(_corpus_author_write_shapes,),
     deps_cls=CuratorDeps,
@@ -272,7 +218,6 @@ def _run_curator_pydantic(
     ctx: StageContext,
     *,
     corpus_dir: Path,
-    cfg: ForwardCheckConfig,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """Both limits vary per spawn here, so the caller owns the whole context."""
@@ -285,12 +230,7 @@ def _run_curator_pydantic(
         raise ValueError(
             "curator stage needs ctx.repo_root: it binds a corpus off the repo tree"
         )
-    deps = CuratorDeps.for_run(
-        ctx.learning_run_dir, repo_root, corpus_dir,
-        # No `salt=`: `bind` does not take one. The stage salt's one live reader is
-        # `run_curator_stage` below.
-        cfg=cfg, box=ctx.box,
-    )
+    deps = CuratorDeps.for_run(ctx.learning_run_dir, repo_root, corpus_dir, box=ctx.box)
     return run_stage(
         stage="curator",
         wiring=wiring, ctx=ctx, deps=deps,
@@ -303,16 +243,19 @@ def run_curator_stage(
     wiring: StageWiring,
     ctx: StageContext,
     corpus_dir: Path,
-    cfg: ForwardCheckConfig,
     log: Callable[[str], None],
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_curator_pydantic,
 ) -> dict:
     """`wiring` is the spawn's prompt/model/effort/trace/label/batch, `ctx` its roots, user
-    prompt and two env-backed limits; `cfg` is the forward-check group, built by the caller.
+    prompt and two env-backed limits.
 
     Every model/effort/limit/timeout knob is caller-supplied with no default here: each is
-    env-backed and differs per corpus, so a default evaluated at import would freeze it."""
+    env-backed and differs per corpus, so a default evaluated at import would freeze it.
+
+    M1: the verifier-key preflight this used to run for the check it no longer carries has
+    moved to the drain, before the first curator spawn (O10) — this function sources only
+    the AUTHOR's own key, as it always did."""
     # ONE batch identity, read off the wiring that already derived `trace_name` and `label`
     # from it. Taking it a second time as a parameter would let the log line, the AuthorError
     # and the trace filename name different batches with nothing asserting they agree. A
@@ -335,16 +278,11 @@ def run_curator_stage(
             stage_salt, wrap(user_prompt, "lesson_rows", stage_salt)
         )
     source_key(wiring.model, label="curator")
-    if cfg.check.prompt_path is not None and (
-        providers.provider_for(config.verifier_model()).api_key_var
-        != providers.provider_for(wiring.model).api_key_var
-    ):
-        source_key(config.verifier_model(), label=f"verify:{cfg.check.error_prefix}")
     try:
         text = run_author(
             wiring,
             replace(ctx, user=user_prompt, salt=stage_salt),
-            corpus_dir=corpus_dir, cfg=cfg,
+            corpus_dir=corpus_dir,
         )
     except RunUnprocessable as e:
         raise AuthorError(f"curator ({batch_id}) did not complete: {e}") from e
@@ -361,3 +299,73 @@ def run_curator_stage(
         raise AuthorError(
             f"curator ({batch_id}) AUTHOR_RESULT JSON invalid: {e}\n{body}"
         ) from e
+
+
+CORPUS_REPAIR_DEF = AgentDefinition(
+    role=AgentRole.CORPUS_REPAIR,
+    model=config.author_model,
+    effort=config.author_effort(),
+    tools=ToolSet(write=True, lesson_read=True),
+    write_shapes=(_corpus_author_write_shapes,),
+    deps_cls=CorpusRepairDeps,
+    requires_confine=True,
+    requires_explicit_tree=True,
+    anchors_on_tree=True,
+    requires_corpus=True,
+    read_allow_override=PathShapes(),
+    deny_reason=_CORPUS_REPAIR_DENY_REASON,
+)
+
+
+def _run_repair_pydantic(
+    wiring: StageWiring,
+    ctx: StageContext,
+    *,
+    corpus_dir: Path,
+    make_model: MakeModel = providers.build_for_effort,
+) -> str:
+    repo_root = ctx.repo_root
+    if repo_root is None:
+        raise ValueError(
+            "repair stage needs ctx.repo_root: it binds a corpus off the repo tree"
+        )
+    deps = CorpusRepairDeps.for_run(ctx.learning_run_dir, repo_root, corpus_dir, box=ctx.box)
+    return run_stage(
+        stage="repair", wiring=wiring, ctx=ctx, deps=deps,
+        make_model=make_model, require_output=False,
+    )
+
+
+def run_repair_stage(
+    *,
+    wiring: StageWiring,
+    ctx: StageContext,
+    corpus_dir: Path,
+    log: Callable[[str], None],
+    run_repair: Callable[..., str] = _run_repair_pydantic,
+) -> dict:
+    """M4's one bounded repair spawn: same shape as `run_curator_stage`, minus the
+    AUTHOR_RESULT parsing — the drain re-checks whatever the spawn wrote by re-reading the
+    tree (M3 pass 2), never by trusting what this function returns."""
+    batch_id = wiring.batch_id
+    if batch_id is None:
+        raise ValueError(
+            "repair stage needs a wiring built by StageWiring.for_batch"
+        )
+    log(
+        f"spawn repair {batch_id} in-process (model={wiring.model}, "
+        f"effort={wiring.effort}, timeout={ctx.wall_clock_timeout}s)"
+    )
+    stage_salt = ctx.salt if ctx.salt is not None else uuid4().hex
+    user_prompt = ctx.user
+    if f"<run-{stage_salt}-" not in user_prompt:
+        user_prompt = stage_user_message(
+            stage_salt, wrap(user_prompt, "repair_pairs", stage_salt)
+        )
+    try:
+        text = run_repair(
+            wiring, replace(ctx, user=user_prompt, salt=stage_salt), corpus_dir=corpus_dir,
+        )
+    except RunUnprocessable as e:
+        raise AuthorError(f"repair ({batch_id}) did not complete: {e}") from e
+    return {"text": text}

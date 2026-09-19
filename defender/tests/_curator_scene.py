@@ -22,8 +22,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 
-from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
-from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
+from defender.learning.author.curator_engine import CuratorDeps
 
 
 def curator_scene(tmp_path: Path, *, extra_corpora: Sequence[str] = ()) -> SimpleNamespace:
@@ -60,36 +59,16 @@ def source_bundle(
     return d
 
 
-def curator_deps(  # noqa: PLR0913 — one keyword per axis a curator test may vary; collapsing any two into a struct would make the helper name a shape no case is about
-    scene,
-    *,
-    run_verify,
-    check=None,
-    queued=(),
-    corpus: Path | None = None,
-    runs: Path | None = None,
-    pending: Path | None = None,
-    exempt: Sequence[str] = (),
-    box=None,
-) -> CuratorDeps:
+def curator_deps(scene, *, corpus: Path | None = None, box=None) -> CuratorDeps:
     """`CuratorDeps` over the scene, through the real `for_run` entry point.
 
-    Every override defaults to the scene's own path so a caller names only the axis its
-    test varies; `run_verify` has no default because a check that does not say what it
-    verifies with is the one mistake this helper must not make silent.
-    """
+    #773 M1: the forward-check config group `for_run` used to attach is gone — the check
+    moved out of the curator's own spawn entirely, so there is nothing left to vary here
+    but the corpus and the box."""
     return CuratorDeps.for_run(
         scene.curdir,
         scene.repo,
         corpus if corpus is not None else scene.corpus,
-        cfg=ForwardCheckConfig(
-            check=check if check is not None else FINDINGS_CHECK,
-            runs_dir=runs if runs is not None else scene.runs,
-            pending=pending if pending is not None else scene.pending,
-            queued_ids=frozenset(queued),
-            exempt_ids=frozenset(exempt),
-            run_verify=run_verify,
-        ),
         box=box,
     )
 

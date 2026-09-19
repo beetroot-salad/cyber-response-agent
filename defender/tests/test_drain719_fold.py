@@ -287,7 +287,7 @@ def test_no_tracked_non_python_file_still_names_a_deleted_symbol(tmp_path: Path)
         if path.suffix in (".py", ".pyc") or not path.is_file():
             continue
         rel = str(path.relative_to(root))
-        if rel.startswith(".spec-flow/") or "spec_graph_719" in rel:
+        if rel.startswith(".spec-flow/") or rel.startswith("spec-flow/specs/") or "spec_graph_719" in rel:
             continue  # the spec's own frontier record, which is about the deletion
         text = path.read_text(encoding="utf-8", errors="replace")
         hits = sorted(s for s in doomed if re.search(rf"\b{re.escape(s)}\b", text))

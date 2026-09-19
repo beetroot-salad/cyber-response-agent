@@ -675,18 +675,18 @@ def test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws(tmp_path
 def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
     """J12, settled with the human: a `direction: family` row is EXEMPT from the lessons
     forward check, whose ground truth for it is `disposition_declared` on the family record
-    rather than a `source_refs.yaml` it does not have — and the model-facing direction literal
-    is NOT widened, because the check is not kept for this direction.
+    rather than a `source_refs.yaml` it does not have.
 
-    Three consumers break on a family row as originally specified, and all three are downstream
-    of the gate the design stops at: `verify_forward._run_findings` resolves the row's source
-    through `runs_dir/<source_id>` and raises `SystemExit`; `forward.expected_disposition` reads
-    the `source_refs.yaml` D6 says a family row does not have; `verify_forward/tool.py` types
-    the direction as `Literal["adversarial", "benign"]`. A `survived` family row is AUTHORED
-    into a lesson — that is D6's whole point — and the authoring path is the one that breaks.
+    #773 M1 moves the check out of the curator's own tool call entirely — the drain now runs
+    it itself, and `cfg.exempt(row)` (wired to this exact predicate on the lessons channel,
+    `CorpusAuthorConfig.exempt is skips_forward_check`) is where the exemption is consulted;
+    there is no more model-facing tool, no `queued_ids` route and no `forward_checkable_ids`
+    derivation to pin separately (see `tests/test_773_verdict_pass.py`'s
+    `test_a_file_cited_only_by_a_family_finding_commits_on_exempt_773` for the exemption
+    driven through a real tick). What survives here is the predicate itself.
 
-    Positive control: an adversarial row in the same corpus still runs the forward check, so the
-    exemption is a route rather than the check's removal.
+    Positive control: an adversarial row does NOT skip the check, so the exemption is a route
+    rather than the check's removal.
     """
     checks = J.mod("learning.author.verify_forward.checks")
     paths = D.make_paths(tmp_path)
@@ -697,33 +697,13 @@ def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
         D.finding_row("run-adv/0", run_id="run-adv")) is False, (
         "the exemption swallowed the adversarial direction's check as well")
 
-    tool_source = (J.mod("run_common").DEFENDER_DIR / "learning" / "author" /
-                   "verify_forward" / "tool.py").read_text(encoding="utf-8")
-    assert '"family"' not in tool_source, (
-        "the model-facing direction literal was widened; J12 keeps the family direction out of "
-        "the check rather than teaching the check about it")
-
-    # AND THE EXEMPTION IS A ROUTE, not a runtime type check inside
-    # `forward.expected_disposition`. That function is typed `(str, str) -> str` and its one
-    # caller feeds it from a reader typed `-> tuple[str, str]`, so a guard inside it would
-    # defend against a call no code makes while putting the property in a second place that can
-    # disagree with `skips_forward_check` above.
-    #
-    # DRIVEN THROUGH PRODUCTION'S OWN DERIVATION, `lessons.run.forward_checkable_ids` — the
-    # function `invoke_agent` builds `ForwardCheckConfig.queued_ids` from. Re-deriving that
-    # comprehension inside the test instead would pin nothing: removing the filter from the
-    # production expression would leave the test green, because the test would still be
-    # filtering its own copy.
     lessons_run = J.mod("learning.author.lessons.run")
-    queued = lessons_run.forward_checkable_ids([
-        _family_row(),
-        D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial"),
-    ])
-    assert queued == {"run-adv"}, (
-        f"the family row entered the set the model may forward_check: {sorted(queued)}")
+    paths2 = D.make_paths(tmp_path / "cfg")
+    cfg = lessons_run.build_author_config(paths2)
+    assert cfg.exempt is checks.skips_forward_check
 
 
-def test_921_a_family_row_answers_exempt_rather_than_error(tmp_path):
+def _removed_test_921_a_family_row_answers_exempt_rather_than_error(tmp_path):
     """The J12 exemption reaches the model as EXEMPT, not as a check that broke.
 
     The exemption was implemented as a ROUTE — a family row's id is kept out of `queued_ids` —
@@ -735,6 +715,10 @@ def test_921_a_family_row_answers_exempt_rather_than_error(tmp_path):
     Driven through the real tool over real `CuratorDeps`, because what was wrong is the VERDICT
     the tool renders — a test asserting on `skips_forward_check` alone never sees it, and the
     committed one did not.
+
+    #773 M1 deletes the model-facing `forward_check` tool this test drove — the check is the
+    drain's own now. Left as an unreachable (renamed, un-prefixed-`test_`) function rather
+    than deleted outright, so the historical reasoning above stays attached to its code.
     """
     import asyncio
 
@@ -756,7 +740,7 @@ def test_921_a_family_row_answers_exempt_rather_than_error(tmp_path):
     assert queued == frozenset(), "the family row entered the checkable set"
     assert exempt == {str(family["run_id"])}, "the family row is not named exempt"
 
-    deps = S.curator_deps(scene, queued=queued, exempt=exempt, run_verify=_never_verifies)
+    deps = S.curator_deps(scene)
     out = asyncio.run(tool.run_forward_check(
         deps, [tool.Pair(lesson_path=str(lesson), source_id=str(family["run_id"]))]))
 
@@ -766,12 +750,19 @@ def test_921_a_family_row_answers_exempt_rather_than_error(tmp_path):
         f"an exempt pair was also counted as good, bad or errored: {out!r}")
 
 
-def test_921_a_row_missing_for_any_other_reason_still_errors(tmp_path):
+def _removed_test_921_a_row_missing_for_any_other_reason_still_errors(tmp_path):
     """EXEMPT is keyed on the row's KIND, never on absence from the queued set.
 
     Collapsing the two would answer "nothing to do here" for a row that went missing through a
     real fault, and the batch would stop hearing about it — the opposite of what the queued-set
     check is for. The positive control for the test above.
+
+    #773 M1 deletes the model-facing tool (`queued_ids`, `Pair`, `run_forward_check`) this
+    drove; the property survives, driven differently, at
+    `tests/test_773_inputs.py::test_queue_row_direction_is_an_unrecognized_value_773` (GL1:
+    `skips_forward_check` is one equality test on `direction`, so a row missing for any OTHER
+    reason is never accidentally exempted). Left unreachable rather than deleted so the
+    reasoning above stays attached to its code.
     """
     import asyncio
 
@@ -782,8 +773,7 @@ def test_921_a_row_missing_for_any_other_reason_still_errors(tmp_path):
     lesson = scene.corpus / "L1.md"
     lesson.write_text("---\nid: L1\n---\nbody\n", encoding="utf-8")
 
-    deps = S.curator_deps(scene, queued=["some-other-run"], exempt=(),
-                          run_verify=_never_verifies)
+    deps = S.curator_deps(scene)
     out = asyncio.run(tool.run_forward_check(
         deps, [tool.Pair(lesson_path=str(lesson), source_id="run-nobody-queued")]))
 
