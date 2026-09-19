@@ -3,11 +3,11 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from defender._io import TEXT_READ_ERRORS, read_text_utf8
+from defender._model import model
 
 
 #: A lesson's BOOKKEEPING keys — provenance, not content.
@@ -22,7 +22,7 @@ PROVENANCE_KEYS = frozenset(
 )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Lesson:
 
     path: Path
@@ -64,7 +64,7 @@ _HEADING_RE = re.compile(r"^## (.+)$")
 _FENCE_RE = re.compile(r"^(?:```|~~~)")
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class QueryTemplate:
 
     path: Path

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import errno
 import fcntl
 import json
@@ -13,6 +12,8 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePath
 from typing import Any
+
+from defender._model import model
 
 TEXT_READ_ERRORS: tuple[type[Exception], ...] = (OSError, UnicodeDecodeError)
 """What reading a text file can raise: unreadable (``OSError``) or undecodable
@@ -234,7 +235,7 @@ def _parse_name(name: str | PurePath) -> tuple[str, tuple[str, ...]]:
     return spelling, parts
 
 
-@dataclasses.dataclass(frozen=True)
+@model(frozen=True)
 class _Read:
     """What every `bind`ed reader's answer carries: `name`, the relative name AS THE CALLER
     SPELLED IT (never the root; `""` for the root itself), `absent` (nothing at the name) and
@@ -253,7 +254,7 @@ class _Read:
         return f"{self.name}: {self.reason}" if self.name else self.reason
 
 
-@dataclasses.dataclass(frozen=True)
+@model(frozen=True)
 class RecordRead(_Read):
     """A `bind`ed reader's answer to a file, in exactly one of three states: present (`text` a
     `str`, possibly empty), absent (`absent=True`) or refused (`reason`)."""
@@ -267,7 +268,7 @@ class RecordRead(_Read):
 ENTRY_FILE, ENTRY_DIR, ENTRY_OTHER = "file", "dir", "other"
 
 
-@dataclasses.dataclass(frozen=True)
+@model(frozen=True)
 class EntriesRead(_Read):
     """A `bind`ed reader's answer to "what is IN this directory" (`Bound.entries`), in the same
     three states `RecordRead` has: present (`entries` a mapping of each entry's own name to
