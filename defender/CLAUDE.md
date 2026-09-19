@@ -19,7 +19,7 @@
 | **the judge** | `learning/judge/` — grades an archived episode (`gradable\|discard\|corpus-contradiction`) and enqueues its findings. Holds its own deny-all role since #1008 — one such role per package, so the branch package's comparator stays under the questioner's |
 | **the curators** / **authors** | `learning/author/` — fold queued findings into lessons. TWO of them since #1007, one per queue channel and one per corpus: `author/lessons/` folds DEFENDER findings into `defender/lessons/`, gated by the **forward-check** (`author/verify_forward/`); `author/questioner/` folds WORLD findings — observations about the instrument, not the investigation — into `defender/lessons-questioner/`, with no forward check (there is no defender behaviour a world lesson could regress) and an idempotency-only gate. Both run in one drain tick, one commit, one PR |
 | **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
-| **lessons** | `defender/lessons/` — authored by the loop, retrieved by two pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, and the `append_block`/`fix_row` block keyed on the invlang frontier (`scripts/lessons/lessons_frontier.py`, #919). Grep, no index |
+| **lessons** | `defender/lessons/` — authored by the loop, retrieved by three pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, the `append_block`/`fix_row` block keyed on the invlang frontier (`scripts/lessons/lessons_frontier.py`, #919), and the same frontier block on the compaction fold's row (`runtime/lessons_push.py`, #936). Grep, no index |
 | **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
 | **the frontend** / **the visualizations** | rendered HTML, not a web app: `scripts/visualize/` emits `runtime.html` (the run's one page — alert, report card, phases, metrics, review gate, leads and transcript) per run and `learning.html` (the branch episode's one page — verdict, worlds, findings, stages and leads, rendered from the episode dir alone after `judge.yaml`); `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
 | **evals** | `defender/evals/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric (the frozen-actor replay and the judge A/B are retired); see `evals/README.md` |
@@ -114,9 +114,11 @@ the **questioner curator** into `defender/lessons-questioner/`, which the questi
 it authors the next family. That corpus has no forward check: there is no defender behaviour a
 lesson about a world could regress. Both curators run inside one drain tick.
 Each worker commits from its own git worktree off `origin/main`, one PR per batch — the loop is
-the sole committer, and spawned agents run no git. Lessons feed back into the runtime twice: at
-PLAN time via `defender-lessons`, and on every write that moves the investigation's open set via
-`scripts/lessons/lessons_frontier.py`.
+the sole committer, and spawned agents run no git. Lessons feed back into the runtime three times: at
+PLAN time via `defender-lessons`, on every write that moves the investigation's open set via
+`scripts/lessons/lessons_frontier.py`, and on the compaction fold's frontier row, which carries
+the block the whole document matches at the fold — derived fresh, not a re-show of what the
+folded-away turns carried (`runtime/lessons_push.py`).
 
 **What this replaced (#922).** Until the cutover the loop authored its own material: an actor
 invented a story about the alert, an oracle invented the telemetry that story would have

@@ -69,6 +69,35 @@ from pydantic_ai.messages import (  # noqa: E402
 DEFENDER = Path(__file__).resolve().parents[1]
 
 
+#: An investigation.md whose loop 1 is CLOSED (`:T close`) with a resolved lead, and whose
+#: loop 2 is still open — `compaction.fold_boundary` reads 1 from it, which is what makes
+#: `driver._fold_decision` authorize a fold. The active loop 2 is what keeps the fold from
+#: swallowing the turn in progress. HERE, in the helper both fold suites already import
+#: (`test_store_driver_705`, `test_936_fold_lessons_push` via `_fold_936`), so the two fold
+#: on ONE document — a transcribed copy let them drift while claiming to share a fixture.
+#: OPENS NO SLOT, and `test_store_driver_705` pins that: the fold's mint walks
+#: `defender_dir/lessons`, which for a `drive` that plants no tree is the checkout's live
+#: corpus.
+CLOSED_LOOP_INVLANG = """```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|raw-auth|v-001||elastic|w
+
+:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success
+```
+
+```invlang
+:T close
+loop 1
+```
+
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-005|2|cmdb-ip|v-006||cmdb|w
+```
+"""
+
+
 # the two new targets, imported per test
 
 def store_mod():

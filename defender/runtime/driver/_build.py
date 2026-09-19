@@ -11,13 +11,14 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 
 
 from .. import compaction
+from .. import lessons_push
 from .. import observe
 from .. import permission
 from .. import providers
@@ -42,7 +43,6 @@ from ..verb_dispositions import HEALTH_CHECK, grant_for, shipped_dispositions
 from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
-from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
@@ -293,7 +293,7 @@ def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as bui
 
 
 def _compaction_enabled() -> bool:
-    return env_bool("DEFENDER_COMPACTION", False)
+    return compaction.enabled()
 
 
 def _summary_pointers(run_dir: Path) -> dict[str, str]:
@@ -303,8 +303,17 @@ def _summary_pointers(run_dir: Path) -> dict[str, str]:
     return {p.stem: str(p) for p in sorted(d.glob("*.md"))}
 
 
-def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
-    """WHEN to fold, and what the frontier carries — `None` for "not yet".
+class _FoldDecision(NamedTuple):
+    #: The LOOP number (see `_fold_decision`) and the whole document at decision time. What
+    #: the frontier row CARRIES — the record cut from the document, plus the lessons block the
+    #: document matches — is composed by `_fold_composer` at mint only, not here on every render.
+    boundary: int
+    document: str
+
+
+def _fold_decision(run_dir: Path) -> _FoldDecision | None:
+    """WHEN to fold — `None` for "not yet". What the frontier carries is `_fold_composer`'s,
+    built at mint only.
 
     `compaction.fold_boundary` is the highest CONTIGUOUS closed investigation loop that
     produced a resolved lead, and `0` until one closes. That gate is the whole policy —
@@ -320,7 +329,22 @@ def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
     fold_through = compaction.fold_boundary(inv_text)
     if fold_through <= 0:
         return None
-    return fold_through, compaction.frontier_text(inv_text, fold_through)
+    return _FoldDecision(fold_through, inv_text)
+
+
+def _fold_composer(deps: AgentDeps, decision: _FoldDecision) -> selection.Composer:
+    """The frontier row's text, composed ONLY at mint (#936): the mint primitive calls this
+    on its append path and never on a reuse round, so the record is cut once per boundary,
+    the corpus walked once, and the push recorded once, right after the row landed. The row
+    carries the record (`compaction.frontier_text`) and the lessons block the FULL document
+    matches — the fold displaces every turn before the boundary, the write returns that
+    carried earlier blocks go with them, and nothing else would re-push them; and the record
+    itself may be cut before the slot a lesson keys on (`_frontier_through`), which is why the
+    block keys on the document and not on the record."""
+    def compose():
+        record = compaction.frontier_text(decision.document, decision.boundary)
+        return lessons_push.compose_fold(deps, record, decision.document)
+    return compose
 
 
 def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation injector rides this seam
@@ -387,8 +411,8 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
         decision = _fold_decision(ctx.deps.run_dir) if fold else None
         return selection.render(
             store, session_id, messages, agent_id="main", fold=decision is not None,
-            boundary=decision[0] if decision else None,
-            text=decision[1] if decision else None,
+            boundary=decision.boundary if decision else None,
+            text=_fold_composer(ctx.deps, decision) if decision else None,
             run_step=int(getattr(ctx, "run_step", 0) or 0),
             # The latency of the request this render is PREPARING cannot be known here;
             # `_log_request` measures it and patches this same pending stamp before the

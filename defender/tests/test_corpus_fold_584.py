@@ -671,7 +671,7 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 
     lines = [ln for ln in captured.out.splitlines() if ln.strip()]
     assert [ln.split("\t")[0] for ln in lines] == ["alpha", "beta", "undecodable", "unfenced"]
-    assert all(len(ln.split("\t")) == 3 for ln in lines)
+    assert all(len(ln.split("\t")) == 4 for ln in lines)
     marker_rows = [ln for ln in lines if "(malformed lesson" in ln]
     assert [ln.split("\t")[0] for ln in marker_rows] == ["undecodable", "unfenced"]
     assert "_TEMPLATE" not in captured.out
@@ -734,8 +734,9 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
 
     A lesson ``foo-bar.md`` whose frontmatter says ``name: foo_bar`` (stem != fm name), plus a run
     whose ``lessons_loaded.jsonl`` cites lesson_name ``foo-bar``. ``--all`` prints
-    ``foo-bar\\t<desc>\\t1`` — the STEM in column 1 and the case COUNTED in column 3. Under an
-    ``fm["name"]`` fold the line reads ``foo_bar\\t<desc>\\t0``: both columns wrong, and the count
+    ``foo-bar\\t<desc>\\t1\\t0`` — the STEM in column 1 and the case COUNTED in column 3 (column 4
+    is #936's MAIN-read count; a legacy row is ``unknown`` evidence, so 0). Under an
+    ``fm["name"]`` fold the line reads ``foo_bar\\t<desc>\\t0\\t0``: both columns wrong, and the count
     silently zero.
 
     Rejected: asserting column 1 only — the name can be right while the join key threaded into
@@ -753,7 +754,7 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
             loads=[{"lesson_name": "foo-bar", "ts": "2026-06-05T00:00:00+00:00"}])
 
     assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
-    assert capsys.readouterr().out.splitlines() == ["foo-bar\td\t1"]
+    assert capsys.readouterr().out.splitlines() == ["foo-bar\td\t1\t0"]
 
 
 def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):

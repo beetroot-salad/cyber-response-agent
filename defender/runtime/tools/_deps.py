@@ -27,6 +27,7 @@ from defender.scripts.gather_tools.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
 from defender.hooks.record_lesson_load import (
+    LOAD_KINDS as _LOAD_KINDS,
     RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
     lesson_name as _lesson_name,
 )
@@ -213,13 +214,28 @@ class GatherDeps(AgentDeps):
 
 
 def _record_lesson_load(
-    deps: AgentDeps, path: Path, corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
+    deps: AgentDeps, path: Path, corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA, *, kind: str,
 ) -> None:
+    """The ONE writer of `lessons_loaded.jsonl` — a row per lesson that reached an agent.
+
+    @owns kind — `hooks.record_lesson_load.LOAD_KIND_READ` when the model chose to open the
+    lesson (`_gated_read`), `LOAD_KIND_PUSH` when the runtime put it in front of MAIN without
+    a read (the write-return recall and the compaction fold, both through
+    `runtime/lessons_push.record`). Required and keyword-only: a default would let a new
+    call site record a push as a read, or the reverse, with nothing in the diff saying so.
+    @owns role — the calling deps' `AgentRole` value, so a row says WHICH agent the lesson
+    reached: a GATHER read and a MAIN read used to write the same row (#936).
+
+    Legacy rows carry neither key; `learning/ops/trace_lesson.py` reads them as `unknown`
+    rather than assuming a read.
+    """
+    if kind not in _LOAD_KINDS:
+        raise ValueError(f"lessons_loaded row kind must be one of {sorted(_LOAD_KINDS)}: {kind!r}")
     name = _lesson_name(str(path), corpora)
     if name is None:
         return
     try:
-        row = {"lesson_name": name, "ts": now_iso()}
+        row = {"lesson_name": name, "ts": now_iso(), "kind": kind, "role": deps.role.value}
         write_guarded(deps.run_dir / "lessons_loaded.jsonl", json.dumps(row) + "\n", mode="append")
     except Exception:  # noqa: BLE001 — best-effort observability
         pass

@@ -241,8 +241,9 @@ SECTION_TITLES: dict[str, str] = {
              "resolutions)",
     "coverage": "VIEW 2 — COVERAGE (what this world asked on the family's holding system)",
     "siblings": "VIEW 3 — SIBLING TRIALS OF THIS SAME ALERT",
-    "lessons": "VIEW 4 — LESSONS LOADED INTO THIS WORLD (name, path, and the body at its "
-               "recorded commit)",
+    "lessons": "VIEW 4 — LESSONS THAT REACHED THIS WORLD (name, how it reached the model — "
+               "read, or pushed as a description only — and the body at its recorded commit "
+               "for you to grade against, whether or not the model read it)",
     "spread": "TRIAL SPREAD (the dispositions those sibling trials reached, tallied)",
     "document": "THE GRADED WORLD'S OWN investigation.md",
     "report": "THE GRADED WORLD'S OWN report.md",
