@@ -1,7 +1,13 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+# `typing_extensions.TypedDict`, not stdlib: pydantic's dataclass schema generation for a
+# TypedDict-typed field requires it on Python <3.12 (`defender/pyproject.toml`'s own comment on
+# the `typing-extensions` dependency has the PydanticUserError this avoids) — every dataclass in
+# the tree porting to `defender._model.model` (#1067) that carries one of these types on a field
+# (`corpus.Companion.body: CompanionBody`, `parser._project._Projector.hypotheses_by_id`, ...)
+# depends on this import, not just the `typing.TypedDict` spelling stdlib also offers.
+from typing_extensions import TypedDict
 
 AttributesMap = dict[str, str]
 

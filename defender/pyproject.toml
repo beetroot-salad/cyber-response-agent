@@ -11,6 +11,14 @@ dependencies = [
     # catching up to a fact, not a new pull. Core, not the `runtime` extra: a learning-loop /
     # CI install that skips `runtime` needs it too.
     "pydantic>=2",
+    # Pydantic's dataclass schema generation for a `TypedDict`-typed field (`invlang/schema.py`'s
+    # `CompanionBody`, `HypothesisRecord`, ...) requires `typing_extensions.TypedDict` on Python
+    # <3.12 — stdlib `typing.TypedDict` raises `PydanticUserError` at class-definition time,
+    # since it lacks introspection pydantic's schema builder needs before 3.12. `requires-python`
+    # above floors at 3.11, so this is load-bearing, not a style pick. Already an undeclared
+    # transitive pull via pydantic itself; declared here so an install cannot lose it under a
+    # future pydantic that drops the transitive dependency.
+    "typing-extensions>=4.12",
 ]
 
 [project.optional-dependencies]
