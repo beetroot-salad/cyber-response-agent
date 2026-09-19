@@ -1008,8 +1008,8 @@ def test_the_migration_runs_as_the_committed_command_over_a_cases_dir(tmp_path):
     # exactly 2 files (the untouched cmdb lookup is not one of them).
     payload_count = re.search(r"(\d+)\s*ES\|QL payload", proc.stdout)
     file_count = re.search(r"(\d+)\s*file", proc.stdout)
-    assert payload_count and file_count, (
-        f"stdout doesn't name a payload count and a file count: {proc.stdout!r}")
+    assert payload_count, f"stdout doesn't name a payload count: {proc.stdout!r}"
+    assert file_count, f"stdout doesn't name a file count: {proc.stdout!r}"
     assert payload_count.group(1) == "3", (
         f"expected 3 payload(s) rewritten, stdout said {payload_count.group(1)}: "
         f"{proc.stdout!r}")
@@ -1035,9 +1035,11 @@ def test_the_migration_runs_as_the_committed_command_over_a_cases_dir(tmp_path):
     assert second.returncode == 0, f"{second.stdout}\n{second.stderr}"
     second_payloads = re.search(r"(\d+)\s*ES\|QL payload", second.stdout)
     second_files = re.search(r"(\d+)\s*file", second.stdout)
-    assert second_payloads and second_payloads.group(1) == "0", (
+    assert second_payloads, f"stdout doesn't name a payload count: {second.stdout!r}"
+    assert second_files, f"stdout doesn't name a file count: {second.stdout!r}"
+    assert second_payloads.group(1) == "0", (
         f"a second run over an already-migrated tree should report 0 payloads: "
         f"{second.stdout!r}")
-    assert second_files and second_files.group(1) == "0", (
+    assert second_files.group(1) == "0", (
         f"a second run over an already-migrated tree should report 0 files: "
         f"{second.stdout!r}")
