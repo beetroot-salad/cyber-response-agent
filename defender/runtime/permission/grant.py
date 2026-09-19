@@ -155,6 +155,7 @@ STDIN_VIEWERS = ("wc", "tail", "head", "grep")
 
 
 __all__ = [
+    "Compiled",
     "PathShapes",
     "OPENS_NOTHING",
     "PROGRAMS",
