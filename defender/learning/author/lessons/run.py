@@ -47,7 +47,8 @@ class AuthorConfig(CorpusAuthorConfig):
     fields only this drain has — the held report, the manifest seed the lessons prompt
     takes, and the env-backed model knobs.
 
-    Lock topology is not carried as config here — the roles are fields on `QueueChannel`."""
+    Lock topology is not carried as config here (#719) — the roles are fields on
+    `QueueChannel`."""
 
     held_report: Path
     manifest_seed: str | None = None
