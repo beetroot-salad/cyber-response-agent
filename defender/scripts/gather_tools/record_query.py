@@ -9,7 +9,6 @@ import re
 import shlex
 import sys
 from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +16,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
+from defender._model import model
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
@@ -744,7 +744,7 @@ turn chooses freely. 2000 is far above any real reduce (~60 chars) and far below
 could crowd a prompt."""
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class RepeatTrip:
     """One trip of the repeat guard: the earliest matching row's seq, and this call's
     1-based occurrence number (`== threshold` at a trip)."""
@@ -753,7 +753,7 @@ class RepeatTrip:
     occurrence: int
 
 
-@dataclass(frozen=True, kw_only=True)
+@model(frozen=True, kw_only=True)
 class RejectionBudgetTrip:
     """One trip of the per-lead rejection budget: this call's 1-based `occurrence` among the
     lead's above-guard agent-fixable rejections, and the `budget` it reached.

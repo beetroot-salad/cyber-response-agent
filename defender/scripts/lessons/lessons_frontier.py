@@ -26,26 +26,32 @@ truthful selector to write, and a birth-time gate would only buy fabricated ones
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import field, replace
 from pathlib import Path
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._corpus import PROVENANCE_KEYS
-from defender.scripts.lessons._lessons_common import (
-    as_list,
-    iter_lessons,
-    reexec_into_venv,
-    resolve_corpus,
-    use_utf8_stdio,
-)
+# Imported straight off `_venv`, not via `_lessons_common`: `_lessons_common` now pulls in
+# `_corpus`/`_io`, which since #1067 import the pydantic-backed `_model` decorator — a `defender.*`
+# import the reexec guard below must run BEFORE, exactly the rule `reexec_into_venv`'s own
+# docstring states for `run.py`/`loop.py`. Importing it through `_lessons_common` would resolve
+# pydantic on the bare interpreter this guard exists to route around.
+from defender.scripts._venv import reexec_into_venv
 
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
 import argparse
 
+from defender._corpus import PROVENANCE_KEYS
+from defender._model import model
+from defender.scripts.lessons._lessons_common import (
+    as_list,
+    iter_lessons,
+    resolve_corpus,
+    use_utf8_stdio,
+)
 from defender.skills.invlang.frontier import (
     Frontier,
     HeldFact,
@@ -148,7 +154,7 @@ REL_WEIGHT = 1
 AUTH_KIND_WEIGHT = 1
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Hit:
     #: `frontmatter` is `compare=False` because it is a dict: the frozen default would
     #: advertise a `__hash__` over it that raises the moment anyone puts a `Hit` in a set.
@@ -162,7 +168,7 @@ class Hit:
     matched: str
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _NodeSelector:
     type: str
     class_pattern: str
@@ -199,7 +205,7 @@ class _NodeSelector:
         return ATTR_SLOT_WEIGHT if self.slot.startswith(ATTR_PREFIX) else UNIVERSAL_SLOT_WEIGHT
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _EdgeSelector:
     rel: str
     auth_kind: str
@@ -223,7 +229,7 @@ class _EdgeSelector:
         )
 
 
-@dataclass
+@model
 class _Selectors:
     nodes: list[_NodeSelector] = field(default_factory=list)
     edges: list[_EdgeSelector] = field(default_factory=list)
