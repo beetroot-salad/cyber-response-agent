@@ -56,106 +56,106 @@
         ],
         "row_count": 20,
         "values": [
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "@timestamp": "2026-07-05T19:19:53.000Z",
-            "user.name": null,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          }
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            "2026-07-05T19:19:53.000Z",
+            null,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ]
         ]
       }
     },

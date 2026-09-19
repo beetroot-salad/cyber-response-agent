@@ -32,18 +32,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 5,
-            "url.original": "/",
-            "source.ip": "172.18.0.12",
-            "user_agent.original": "curl/8.5.0"
-          },
-          {
-            "count": 5,
-            "url.original": "/",
-            "source.ip": "172.18.0.13",
-            "user_agent.original": "curl/7.81.0"
-          }
+          [
+            5,
+            "/",
+            "172.18.0.12",
+            "curl/8.5.0"
+          ],
+          [
+            5,
+            "/",
+            "172.18.0.13",
+            "curl/7.81.0"
+          ]
         ]
       }
     },
@@ -77,18 +77,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 5,
-            "url.original": "/",
-            "source.ip": "172.18.0.12",
-            "user_agent.original": "curl/8.5.0"
-          },
-          {
-            "count": 5,
-            "url.original": "/",
-            "source.ip": "172.18.0.13",
-            "user_agent.original": "curl/7.81.0"
-          }
+          [
+            5,
+            "/",
+            "172.18.0.12",
+            "curl/8.5.0"
+          ],
+          [
+            5,
+            "/",
+            "172.18.0.13",
+            "curl/7.81.0"
+          ]
         ]
       }
     },
@@ -122,18 +122,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 6,
-            "url.original": "/",
-            "source.ip": "172.18.0.24",
-            "user_agent.original": "curl/7.81.0"
-          },
-          {
-            "count": 6,
-            "url.original": "/",
-            "source.ip": "172.18.0.25",
-            "user_agent.original": "curl/8.5.0"
-          }
+          [
+            6,
+            "/",
+            "172.18.0.24",
+            "curl/7.81.0"
+          ],
+          [
+            6,
+            "/",
+            "172.18.0.25",
+            "curl/8.5.0"
+          ]
         ]
       }
     }

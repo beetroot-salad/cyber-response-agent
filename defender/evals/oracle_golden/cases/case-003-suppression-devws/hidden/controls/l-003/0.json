@@ -42,18 +42,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "accepted": 6,
-            "failed": 0,
-            "source.ip": "172.18.0.14",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 0,
-            "failed": 72,
-            "source.ip": "172.18.0.6",
-            "user.name": "svc.reports"
-          }
+          [
+            6,
+            0,
+            "172.18.0.14",
+            "svc.config-mgmt"
+          ],
+          [
+            0,
+            72,
+            "172.18.0.6",
+            "svc.reports"
+          ]
         ]
       }
     },

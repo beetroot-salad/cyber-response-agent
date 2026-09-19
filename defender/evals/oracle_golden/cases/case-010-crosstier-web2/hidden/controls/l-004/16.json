@@ -24,26 +24,26 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "count": 14187,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "count": 13200,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "count": 450,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.ben]"
-          },
-          {
-            "count": 307,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.chen]"
-          },
-          {
-            "count": 230,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.alice]"
-          }
+          [
+            14187,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            13200,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            450,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.ben]"
+          ],
+          [
+            307,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.chen]"
+          ],
+          [
+            230,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.alice]"
+          ]
         ]
       }
     },
@@ -69,26 +69,26 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "count": 16856,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "count": 15771,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "count": 438,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.ben]"
-          },
-          {
-            "count": 380,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.chen]"
-          },
-          {
-            "count": 267,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.alice]"
-          }
+          [
+            16856,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            15771,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            438,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.ben]"
+          ],
+          [
+            380,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.chen]"
+          ],
+          [
+            267,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.alice]"
+          ]
         ]
       }
     },
@@ -114,26 +114,26 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "count": 20296,
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "count": 19044,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "count": 614,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.ben]"
-          },
-          {
-            "count": 348,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.chen]"
-          },
-          {
-            "count": 290,
-            "message": "pam_unix(sudo:auth): auth could not identify password for [sre.alice]"
-          }
+          [
+            20296,
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            19044,
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            614,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.ben]"
+          ],
+          [
+            348,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.chen]"
+          ],
+          [
+            290,
+            "pam_unix(sudo:auth): auth could not identify password for [sre.alice]"
+          ]
         ]
       }
     }

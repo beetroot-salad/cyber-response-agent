@@ -36,104 +36,104 @@
         ],
         "row_count": 14,
         "values": [
-          {
-            "events": 740,
-            "first_seen": "2026-07-12T19:25:04.000Z",
-            "last_seen": "2026-07-12T20:24:58.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "nginx.access"
-          },
-          {
-            "events": 720,
-            "first_seen": "2026-07-12T19:25:00.437Z",
-            "last_seen": "2026-07-12T20:24:58.383Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 166,
-            "first_seen": "2026-07-12T19:25:04.000Z",
-            "last_seen": "2026-07-12T20:22:18.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 107,
-            "first_seen": "2026-07-12T19:27:44.809Z",
-            "last_seen": "2026-07-12T20:22:34.751Z",
-            "host.name": "jump-box-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 63,
-            "first_seen": "2026-07-12T19:30:41.000Z",
-            "last_seen": "2026-07-12T20:21:18.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 46,
-            "first_seen": "2026-07-12T19:25:12.872Z",
-            "last_seen": "2026-07-12T20:18:39.403Z",
-            "host.name": "office-ws-2",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 26,
-            "first_seen": "2026-07-12T19:29:37.995Z",
-            "last_seen": "2026-07-12T20:17:54.162Z",
-            "host.name": "config-mgmt-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 12,
-            "first_seen": "2026-07-12T19:26:08.198Z",
-            "last_seen": "2026-07-12T20:15:22.195Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 4,
-            "first_seen": "2026-07-12T19:32:21.727Z",
-            "last_seen": "2026-07-12T20:22:11.954Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "elastic_agent.filebeat"
-          },
-          {
-            "events": 2,
-            "first_seen": "2026-07-12T20:17:01.000Z",
-            "last_seen": "2026-07-12T20:17:01.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-12T20:17:01.551Z",
-            "last_seen": "2026-07-12T20:17:01.551Z",
-            "host.name": "office-ws-2",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-12T20:17:01.135Z",
-            "last_seen": "2026-07-12T20:17:01.135Z",
-            "host.name": "jump-box-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-12T20:17:01.000Z",
-            "last_seen": "2026-07-12T20:17:01.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-12T20:17:01.295Z",
-            "last_seen": "2026-07-12T20:17:01.295Z",
-            "host.name": "config-mgmt-1",
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            740,
+            "2026-07-12T19:25:04.000Z",
+            "2026-07-12T20:24:58.000Z",
+            "web-1",
+            "nginx.access"
+          ],
+          [
+            720,
+            "2026-07-12T19:25:00.437Z",
+            "2026-07-12T20:24:58.383Z",
+            "web-1",
+            "elastic_agent.metricbeat"
+          ],
+          [
+            166,
+            "2026-07-12T19:25:04.000Z",
+            "2026-07-12T20:22:18.000Z",
+            "web-1",
+            "system.auth"
+          ],
+          [
+            107,
+            "2026-07-12T19:27:44.809Z",
+            "2026-07-12T20:22:34.751Z",
+            "jump-box-1",
+            "system.auth"
+          ],
+          [
+            63,
+            "2026-07-12T19:30:41.000Z",
+            "2026-07-12T20:21:18.000Z",
+            "office-ws-1",
+            "system.auth"
+          ],
+          [
+            46,
+            "2026-07-12T19:25:12.872Z",
+            "2026-07-12T20:18:39.403Z",
+            "office-ws-2",
+            "system.auth"
+          ],
+          [
+            26,
+            "2026-07-12T19:29:37.995Z",
+            "2026-07-12T20:17:54.162Z",
+            "config-mgmt-1",
+            "system.auth"
+          ],
+          [
+            12,
+            "2026-07-12T19:26:08.198Z",
+            "2026-07-12T20:15:22.195Z",
+            "web-1",
+            "elastic_agent"
+          ],
+          [
+            4,
+            "2026-07-12T19:32:21.727Z",
+            "2026-07-12T20:22:11.954Z",
+            "web-1",
+            "elastic_agent.filebeat"
+          ],
+          [
+            2,
+            "2026-07-12T20:17:01.000Z",
+            "2026-07-12T20:17:01.000Z",
+            "web-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-12T20:17:01.551Z",
+            "2026-07-12T20:17:01.551Z",
+            "office-ws-2",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-12T20:17:01.135Z",
+            "2026-07-12T20:17:01.135Z",
+            "jump-box-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-12T20:17:01.000Z",
+            "2026-07-12T20:17:01.000Z",
+            "office-ws-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-12T20:17:01.295Z",
+            "2026-07-12T20:17:01.295Z",
+            "config-mgmt-1",
+            "system.syslog"
+          ]
         ]
       }
     },
@@ -171,104 +171,104 @@
         ],
         "row_count": 14,
         "values": [
-          {
-            "events": 744,
-            "first_seen": "2026-07-05T19:25:08.000Z",
-            "last_seen": "2026-07-05T20:24:58.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "nginx.access"
-          },
-          {
-            "events": 720,
-            "first_seen": "2026-07-05T19:25:00.436Z",
-            "last_seen": "2026-07-05T20:24:58.384Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 260,
-            "first_seen": "2026-07-05T19:26:52.000Z",
-            "last_seen": "2026-07-05T20:21:38.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 103,
-            "first_seen": "2026-07-05T19:25:02.939Z",
-            "last_seen": "2026-07-05T20:17:10.479Z",
-            "host.name": "jump-box-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 59,
-            "first_seen": "2026-07-05T19:28:52.000Z",
-            "last_seen": "2026-07-05T20:17:01.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 48,
-            "first_seen": "2026-07-05T19:25:19.081Z",
-            "last_seen": "2026-07-05T20:24:07.062Z",
-            "host.name": "office-ws-2",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 32,
-            "first_seen": "2026-07-05T19:29:07.668Z",
-            "last_seen": "2026-07-05T20:24:17.172Z",
-            "host.name": "config-mgmt-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-07-05T19:38:12.769Z",
-            "last_seen": "2026-07-05T20:20:23.215Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 2,
-            "first_seen": "2026-07-05T20:17:01.000Z",
-            "last_seen": "2026-07-05T20:17:01.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 2,
-            "first_seen": "2026-07-05T20:17:06.663Z",
-            "last_seen": "2026-07-05T20:22:11.701Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "elastic_agent.filebeat"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-05T20:17:01.057Z",
-            "last_seen": "2026-07-05T20:17:01.057Z",
-            "host.name": "office-ws-2",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-05T20:17:01.566Z",
-            "last_seen": "2026-07-05T20:17:01.566Z",
-            "host.name": "jump-box-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-05T20:17:01.000Z",
-            "last_seen": "2026-07-05T20:17:01.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-05T20:17:01.782Z",
-            "last_seen": "2026-07-05T20:17:01.782Z",
-            "host.name": "config-mgmt-1",
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            744,
+            "2026-07-05T19:25:08.000Z",
+            "2026-07-05T20:24:58.000Z",
+            "web-1",
+            "nginx.access"
+          ],
+          [
+            720,
+            "2026-07-05T19:25:00.436Z",
+            "2026-07-05T20:24:58.384Z",
+            "web-1",
+            "elastic_agent.metricbeat"
+          ],
+          [
+            260,
+            "2026-07-05T19:26:52.000Z",
+            "2026-07-05T20:21:38.000Z",
+            "web-1",
+            "system.auth"
+          ],
+          [
+            103,
+            "2026-07-05T19:25:02.939Z",
+            "2026-07-05T20:17:10.479Z",
+            "jump-box-1",
+            "system.auth"
+          ],
+          [
+            59,
+            "2026-07-05T19:28:52.000Z",
+            "2026-07-05T20:17:01.000Z",
+            "office-ws-1",
+            "system.auth"
+          ],
+          [
+            48,
+            "2026-07-05T19:25:19.081Z",
+            "2026-07-05T20:24:07.062Z",
+            "office-ws-2",
+            "system.auth"
+          ],
+          [
+            32,
+            "2026-07-05T19:29:07.668Z",
+            "2026-07-05T20:24:17.172Z",
+            "config-mgmt-1",
+            "system.auth"
+          ],
+          [
+            14,
+            "2026-07-05T19:38:12.769Z",
+            "2026-07-05T20:20:23.215Z",
+            "web-1",
+            "elastic_agent"
+          ],
+          [
+            2,
+            "2026-07-05T20:17:01.000Z",
+            "2026-07-05T20:17:01.000Z",
+            "web-1",
+            "system.syslog"
+          ],
+          [
+            2,
+            "2026-07-05T20:17:06.663Z",
+            "2026-07-05T20:22:11.701Z",
+            "web-1",
+            "elastic_agent.filebeat"
+          ],
+          [
+            1,
+            "2026-07-05T20:17:01.057Z",
+            "2026-07-05T20:17:01.057Z",
+            "office-ws-2",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-05T20:17:01.566Z",
+            "2026-07-05T20:17:01.566Z",
+            "jump-box-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-05T20:17:01.000Z",
+            "2026-07-05T20:17:01.000Z",
+            "office-ws-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-05T20:17:01.782Z",
+            "2026-07-05T20:17:01.782Z",
+            "config-mgmt-1",
+            "system.syslog"
+          ]
         ]
       }
     },
@@ -306,83 +306,83 @@
         ],
         "row_count": 11,
         "values": [
-          {
-            "events": 758,
-            "first_seen": "2026-06-28T19:25:00.000Z",
-            "last_seen": "2026-06-28T20:24:50.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "nginx.access"
-          },
-          {
-            "events": 242,
-            "first_seen": "2026-06-28T19:25:37.000Z",
-            "last_seen": "2026-06-28T20:24:43.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 72,
-            "first_seen": "2026-06-28T19:26:28.095Z",
-            "last_seen": "2026-06-28T20:22:10.332Z",
-            "host.name": "jump-box-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 65,
-            "first_seen": "2026-06-28T19:27:28.000Z",
-            "last_seen": "2026-06-28T20:24:55.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 59,
-            "first_seen": "2026-06-28T19:27:04.048Z",
-            "last_seen": "2026-06-28T20:23:41.069Z",
-            "host.name": "office-ws-2",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 38,
-            "first_seen": "2026-06-28T19:35:13.634Z",
-            "last_seen": "2026-06-28T20:24:55.380Z",
-            "host.name": "config-mgmt-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 2,
-            "first_seen": "2026-06-28T20:17:01.000Z",
-            "last_seen": "2026-06-28T20:17:01.000Z",
-            "host.name": "web-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-06-28T20:17:01.764Z",
-            "last_seen": "2026-06-28T20:17:01.764Z",
-            "host.name": "jump-box-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-06-28T20:17:01.000Z",
-            "last_seen": "2026-06-28T20:17:01.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-06-28T20:17:01.960Z",
-            "last_seen": "2026-06-28T20:17:01.960Z",
-            "host.name": "office-ws-2",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-06-28T20:17:01.596Z",
-            "last_seen": "2026-06-28T20:17:01.596Z",
-            "host.name": "config-mgmt-1",
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            758,
+            "2026-06-28T19:25:00.000Z",
+            "2026-06-28T20:24:50.000Z",
+            "web-1",
+            "nginx.access"
+          ],
+          [
+            242,
+            "2026-06-28T19:25:37.000Z",
+            "2026-06-28T20:24:43.000Z",
+            "web-1",
+            "system.auth"
+          ],
+          [
+            72,
+            "2026-06-28T19:26:28.095Z",
+            "2026-06-28T20:22:10.332Z",
+            "jump-box-1",
+            "system.auth"
+          ],
+          [
+            65,
+            "2026-06-28T19:27:28.000Z",
+            "2026-06-28T20:24:55.000Z",
+            "office-ws-1",
+            "system.auth"
+          ],
+          [
+            59,
+            "2026-06-28T19:27:04.048Z",
+            "2026-06-28T20:23:41.069Z",
+            "office-ws-2",
+            "system.auth"
+          ],
+          [
+            38,
+            "2026-06-28T19:35:13.634Z",
+            "2026-06-28T20:24:55.380Z",
+            "config-mgmt-1",
+            "system.auth"
+          ],
+          [
+            2,
+            "2026-06-28T20:17:01.000Z",
+            "2026-06-28T20:17:01.000Z",
+            "web-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-06-28T20:17:01.764Z",
+            "2026-06-28T20:17:01.764Z",
+            "jump-box-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-06-28T20:17:01.000Z",
+            "2026-06-28T20:17:01.000Z",
+            "office-ws-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-06-28T20:17:01.960Z",
+            "2026-06-28T20:17:01.960Z",
+            "office-ws-2",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-06-28T20:17:01.596Z",
+            "2026-06-28T20:17:01.596Z",
+            "config-mgmt-1",
+            "system.syslog"
+          ]
         ]
       }
     }

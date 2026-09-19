@@ -44,42 +44,42 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "alerts": 2,
-            "first_seen": "2026-07-12T19:41:46.056Z",
-            "last_seen": "2026-07-12T19:56:45.992Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": null
-          },
-          {
-            "alerts": 2,
-            "first_seen": "2026-07-12T19:41:46.052Z",
-            "last_seen": "2026-07-12T19:56:45.991Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "jump-box-1"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-12T19:56:45.990Z",
-            "last_seen": "2026-07-12T19:56:45.990Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "office-ws-2"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-12T19:41:46.051Z",
-            "last_seen": "2026-07-12T19:41:46.051Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "office-ws-1"
-          }
+          [
+            2,
+            "2026-07-12T19:41:46.056Z",
+            "2026-07-12T19:56:45.992Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            null
+          ],
+          [
+            2,
+            "2026-07-12T19:41:46.052Z",
+            "2026-07-12T19:56:45.991Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "jump-box-1"
+          ],
+          [
+            1,
+            "2026-07-12T19:56:45.990Z",
+            "2026-07-12T19:56:45.990Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "office-ws-2"
+          ],
+          [
+            1,
+            "2026-07-12T19:41:46.051Z",
+            "2026-07-12T19:41:46.051Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "office-ws-1"
+          ]
         ]
       }
     },
@@ -169,33 +169,33 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "alerts": 1,
-            "first_seen": "2026-06-28T20:35:39.072Z",
-            "last_seen": "2026-06-28T20:35:39.072Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "office-ws-2"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-06-28T20:35:39.073Z",
-            "last_seen": "2026-06-28T20:35:39.073Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "jump-box-1"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-06-28T20:35:39.079Z",
-            "last_seen": "2026-06-28T20:35:39.079Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": null
-          }
+          [
+            1,
+            "2026-06-28T20:35:39.072Z",
+            "2026-06-28T20:35:39.072Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "office-ws-2"
+          ],
+          [
+            1,
+            "2026-06-28T20:35:39.073Z",
+            "2026-06-28T20:35:39.073Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "jump-box-1"
+          ],
+          [
+            1,
+            "2026-06-28T20:35:39.079Z",
+            "2026-06-28T20:35:39.079Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            null
+          ]
         ]
       }
     }

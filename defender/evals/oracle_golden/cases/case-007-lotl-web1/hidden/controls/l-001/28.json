@@ -28,56 +28,56 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "events": 536,
-            "falco.output_fields.container.id": "a36492b5172b",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 363,
-            "falco.output_fields.container.id": "ed96a85a7480",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 239,
-            "falco.output_fields.container.id": "e1dc89faaa8b",
-            "falco.output_fields.proc.name": "tini"
-          },
-          {
-            "events": 214,
-            "falco.output_fields.container.id": "1df4bcd65ee4",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 205,
-            "falco.output_fields.container.id": "922f03f16a11",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 205,
-            "falco.output_fields.container.id": "ffbff1299702",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 189,
-            "falco.output_fields.container.id": "d8fb0192a17f",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 186,
-            "falco.output_fields.container.id": "2c1e2ec93d17",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 172,
-            "falco.output_fields.container.id": "d1daf6f3b7c6",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 13,
-            "falco.output_fields.container.id": "host",
-            "falco.output_fields.proc.name": "sshd"
-          }
+          [
+            536,
+            "a36492b5172b",
+            "sshd"
+          ],
+          [
+            363,
+            "ed96a85a7480",
+            "sshd"
+          ],
+          [
+            239,
+            "e1dc89faaa8b",
+            "tini"
+          ],
+          [
+            214,
+            "1df4bcd65ee4",
+            "sshd"
+          ],
+          [
+            205,
+            "922f03f16a11",
+            "sshd"
+          ],
+          [
+            205,
+            "ffbff1299702",
+            "sshd"
+          ],
+          [
+            189,
+            "d8fb0192a17f",
+            "sshd"
+          ],
+          [
+            186,
+            "2c1e2ec93d17",
+            "sshd"
+          ],
+          [
+            172,
+            "d1daf6f3b7c6",
+            "sshd"
+          ],
+          [
+            13,
+            "host",
+            "sshd"
+          ]
         ]
       }
     },
@@ -107,56 +107,56 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "events": 608,
-            "falco.output_fields.container.id": "a36492b5172b",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 470,
-            "falco.output_fields.container.id": "ed96a85a7480",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 316,
-            "falco.output_fields.container.id": "ffbff1299702",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 238,
-            "falco.output_fields.container.id": "e1dc89faaa8b",
-            "falco.output_fields.proc.name": "tini"
-          },
-          {
-            "events": 231,
-            "falco.output_fields.container.id": "922f03f16a11",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 213,
-            "falco.output_fields.container.id": "d8fb0192a17f",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 210,
-            "falco.output_fields.container.id": "d1daf6f3b7c6",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 210,
-            "falco.output_fields.container.id": "2c1e2ec93d17",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 195,
-            "falco.output_fields.container.id": "1df4bcd65ee4",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 141,
-            "falco.output_fields.container.id": "host",
-            "falco.output_fields.proc.name": "sshd"
-          }
+          [
+            608,
+            "a36492b5172b",
+            "sshd"
+          ],
+          [
+            470,
+            "ed96a85a7480",
+            "sshd"
+          ],
+          [
+            316,
+            "ffbff1299702",
+            "sshd"
+          ],
+          [
+            238,
+            "e1dc89faaa8b",
+            "tini"
+          ],
+          [
+            231,
+            "922f03f16a11",
+            "sshd"
+          ],
+          [
+            213,
+            "d8fb0192a17f",
+            "sshd"
+          ],
+          [
+            210,
+            "d1daf6f3b7c6",
+            "sshd"
+          ],
+          [
+            210,
+            "2c1e2ec93d17",
+            "sshd"
+          ],
+          [
+            195,
+            "1df4bcd65ee4",
+            "sshd"
+          ],
+          [
+            141,
+            "host",
+            "sshd"
+          ]
         ]
       }
     },
@@ -186,56 +186,56 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "events": 498,
-            "falco.output_fields.container.id": "a36492b5172b",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 366,
-            "falco.output_fields.container.id": "ed96a85a7480",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 259,
-            "falco.output_fields.container.id": "ffbff1299702",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 239,
-            "falco.output_fields.container.id": "e1dc89faaa8b",
-            "falco.output_fields.proc.name": "tini"
-          },
-          {
-            "events": 234,
-            "falco.output_fields.container.id": "d8fb0192a17f",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 222,
-            "falco.output_fields.container.id": "1df4bcd65ee4",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 217,
-            "falco.output_fields.container.id": "2c1e2ec93d17",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 194,
-            "falco.output_fields.container.id": "922f03f16a11",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 180,
-            "falco.output_fields.container.id": "d1daf6f3b7c6",
-            "falco.output_fields.proc.name": "sshd"
-          },
-          {
-            "events": 167,
-            "falco.output_fields.container.id": "host",
-            "falco.output_fields.proc.name": "sshd"
-          }
+          [
+            498,
+            "a36492b5172b",
+            "sshd"
+          ],
+          [
+            366,
+            "ed96a85a7480",
+            "sshd"
+          ],
+          [
+            259,
+            "ffbff1299702",
+            "sshd"
+          ],
+          [
+            239,
+            "e1dc89faaa8b",
+            "tini"
+          ],
+          [
+            234,
+            "d8fb0192a17f",
+            "sshd"
+          ],
+          [
+            222,
+            "1df4bcd65ee4",
+            "sshd"
+          ],
+          [
+            217,
+            "2c1e2ec93d17",
+            "sshd"
+          ],
+          [
+            194,
+            "922f03f16a11",
+            "sshd"
+          ],
+          [
+            180,
+            "d1daf6f3b7c6",
+            "sshd"
+          ],
+          [
+            167,
+            "host",
+            "sshd"
+          ]
         ]
       }
     }

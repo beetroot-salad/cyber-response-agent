@@ -24,10 +24,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 4,
-            "loggerName": "org.keycloak.events.jpa.JpaEventStoreProvider"
-          }
+          [
+            4,
+            "org.keycloak.events.jpa.JpaEventStoreProvider"
+          ]
         ]
       }
     },
@@ -53,10 +53,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 5,
-            "loggerName": "org.keycloak.events.jpa.JpaEventStoreProvider"
-          }
+          [
+            5,
+            "org.keycloak.events.jpa.JpaEventStoreProvider"
+          ]
         ]
       }
     },
@@ -82,10 +82,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 5,
-            "loggerName": "org.keycloak.events.jpa.JpaEventStoreProvider"
-          }
+          [
+            5,
+            "org.keycloak.events.jpa.JpaEventStoreProvider"
+          ]
         ]
       }
     }

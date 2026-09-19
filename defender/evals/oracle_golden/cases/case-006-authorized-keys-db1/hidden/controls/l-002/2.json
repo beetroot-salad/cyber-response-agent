@@ -48,36 +48,36 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "total": 504,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-07-12T18:39:40.000Z",
-            "last_seen": "2026-07-12T19:34:52.000Z",
-            "event.action": null,
-            "event.outcome": null
-          },
-          {
-            "total": 84,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-07-12T18:42:08.000Z",
-            "last_seen": "2026-07-12T19:34:52.000Z",
-            "event.action": "logged-off",
-            "event.outcome": null
-          },
-          {
-            "total": 84,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-07-12T18:42:08.000Z",
-            "last_seen": "2026-07-12T19:34:52.000Z",
-            "event.action": "logged-on",
-            "event.outcome": null
-          }
+          [
+            504,
+            0,
+            0,
+            0,
+            "2026-07-12T18:39:40.000Z",
+            "2026-07-12T19:34:52.000Z",
+            null,
+            null
+          ],
+          [
+            84,
+            0,
+            0,
+            0,
+            "2026-07-12T18:42:08.000Z",
+            "2026-07-12T19:34:52.000Z",
+            "logged-off",
+            null
+          ],
+          [
+            84,
+            0,
+            0,
+            0,
+            "2026-07-12T18:42:08.000Z",
+            "2026-07-12T19:34:52.000Z",
+            "logged-on",
+            null
+          ]
         ]
       }
     },
@@ -127,36 +127,36 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "total": 658,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-07-05T18:36:17.000Z",
-            "last_seen": "2026-07-05T19:32:03.000Z",
-            "event.action": null,
-            "event.outcome": null
-          },
-          {
-            "total": 91,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-07-05T18:36:17.000Z",
-            "last_seen": "2026-07-05T19:31:54.000Z",
-            "event.action": "logged-off",
-            "event.outcome": null
-          },
-          {
-            "total": 91,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-07-05T18:36:17.000Z",
-            "last_seen": "2026-07-05T19:31:54.000Z",
-            "event.action": "logged-on",
-            "event.outcome": null
-          }
+          [
+            658,
+            0,
+            0,
+            0,
+            "2026-07-05T18:36:17.000Z",
+            "2026-07-05T19:32:03.000Z",
+            null,
+            null
+          ],
+          [
+            91,
+            0,
+            0,
+            0,
+            "2026-07-05T18:36:17.000Z",
+            "2026-07-05T19:31:54.000Z",
+            "logged-off",
+            null
+          ],
+          [
+            91,
+            0,
+            0,
+            0,
+            "2026-07-05T18:36:17.000Z",
+            "2026-07-05T19:31:54.000Z",
+            "logged-on",
+            null
+          ]
         ]
       }
     },
@@ -206,36 +206,36 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "total": 592,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-06-28T18:37:41.000Z",
-            "last_seen": "2026-06-28T19:35:22.000Z",
-            "event.action": null,
-            "event.outcome": null
-          },
-          {
-            "total": 136,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-06-28T18:37:41.000Z",
-            "last_seen": "2026-06-28T19:29:58.000Z",
-            "event.action": "logged-off",
-            "event.outcome": null
-          },
-          {
-            "total": 136,
-            "with_outcome": 0,
-            "success": 0,
-            "failure": 0,
-            "first_seen": "2026-06-28T18:37:41.000Z",
-            "last_seen": "2026-06-28T19:29:58.000Z",
-            "event.action": "logged-on",
-            "event.outcome": null
-          }
+          [
+            592,
+            0,
+            0,
+            0,
+            "2026-06-28T18:37:41.000Z",
+            "2026-06-28T19:35:22.000Z",
+            null,
+            null
+          ],
+          [
+            136,
+            0,
+            0,
+            0,
+            "2026-06-28T18:37:41.000Z",
+            "2026-06-28T19:29:58.000Z",
+            "logged-off",
+            null
+          ],
+          [
+            136,
+            0,
+            0,
+            0,
+            "2026-06-28T18:37:41.000Z",
+            "2026-06-28T19:29:58.000Z",
+            "logged-on",
+            null
+          ]
         ]
       }
     }

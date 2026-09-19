@@ -54,15 +54,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 6,
-            "failed": 0,
-            "first_seen": "2026-07-12T11:01:53.000Z",
-            "last_seen": "2026-07-12T11:01:53.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben"
-          }
+          [
+            6,
+            0,
+            "2026-07-12T11:01:53.000Z",
+            "2026-07-12T11:01:53.000Z",
+            "password",
+            "172.18.0.17",
+            "sre.ben"
+          ]
         ]
       }
     },
@@ -108,15 +108,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 6,
-            "failed": 0,
-            "first_seen": "2026-07-05T11:37:05.000Z",
-            "last_seen": "2026-07-05T11:37:05.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben"
-          }
+          [
+            6,
+            0,
+            "2026-07-05T11:37:05.000Z",
+            "2026-07-05T11:37:05.000Z",
+            "password",
+            "172.18.0.17",
+            "sre.ben"
+          ]
         ]
       }
     }

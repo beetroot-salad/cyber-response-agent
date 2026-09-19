@@ -34,10 +34,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben"
-          }
+          [
+            "172.18.0.17",
+            "sre.ben"
+          ]
         ]
       }
     },
@@ -86,10 +86,10 @@
       ],
       "row_count": 1,
       "values": [
-        {
-          "source.ip": null,
-          "user.name": null
-        }
+        [
+          null,
+          null
+        ]
       ]
     }
   }

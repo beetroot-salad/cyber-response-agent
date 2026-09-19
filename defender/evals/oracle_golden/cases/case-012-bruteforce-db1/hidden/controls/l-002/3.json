@@ -48,96 +48,96 @@
         ],
         "row_count": 9,
         "values": [
-          {
-            "accepted": 40,
-            "failed": 0,
-            "first_seen": "2026-07-13T09:17:34.000Z",
-            "last_seen": "2026-07-13T10:12:36.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.17",
-            "host.name": "web-1",
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 0,
-            "failed": 96,
-            "first_seen": "2026-07-13T09:18:26.000Z",
-            "last_seen": "2026-07-13T09:47:46.000Z",
-            "auth_method": "other",
-            "source.ip": "172.18.0.6",
-            "host.name": "web-1",
-            "user.name": "svc.reports"
-          },
-          {
-            "accepted": 0,
-            "failed": 96,
-            "first_seen": "2026-07-13T09:18:28.000Z",
-            "last_seen": "2026-07-13T09:47:48.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.6",
-            "host.name": "web-1",
-            "user.name": "svc.reports"
-          },
-          {
-            "accepted": 0,
-            "failed": 48,
-            "first_seen": "2026-07-13T09:23:35.000Z",
-            "last_seen": "2026-07-13T09:23:49.000Z",
-            "auth_method": "other",
-            "source.ip": "172.18.0.8",
-            "host.name": "web-1",
-            "user.name": "svc.reports"
-          },
-          {
-            "accepted": 0,
-            "failed": 48,
-            "first_seen": "2026-07-13T09:23:37.000Z",
-            "last_seen": "2026-07-13T09:23:51.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.8",
-            "host.name": "web-1",
-            "user.name": "svc.reports"
-          },
-          {
-            "accepted": 8,
-            "failed": 0,
-            "first_seen": "2026-07-13T09:36:54.000Z",
-            "last_seen": "2026-07-13T09:36:54.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.17",
-            "host.name": "db-1",
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 8,
-            "failed": 0,
-            "first_seen": "2026-07-13T09:37:41.000Z",
-            "last_seen": "2026-07-13T09:37:41.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.17",
-            "host.name": "db-1",
-            "user.name": "sre.chen"
-          },
-          {
-            "accepted": 24,
-            "failed": 0,
-            "first_seen": "2026-07-13T09:37:49.000Z",
-            "last_seen": "2026-07-13T09:57:50.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.17",
-            "host.name": "web-2",
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 16,
-            "failed": 0,
-            "first_seen": "2026-07-13T09:52:38.000Z",
-            "last_seen": "2026-07-13T10:04:22.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.17",
-            "host.name": "web-2",
-            "user.name": "sre.chen"
-          }
+          [
+            40,
+            0,
+            "2026-07-13T09:17:34.000Z",
+            "2026-07-13T10:12:36.000Z",
+            "password",
+            "172.18.0.17",
+            "web-1",
+            "sre.ben"
+          ],
+          [
+            0,
+            96,
+            "2026-07-13T09:18:26.000Z",
+            "2026-07-13T09:47:46.000Z",
+            "other",
+            "172.18.0.6",
+            "web-1",
+            "svc.reports"
+          ],
+          [
+            0,
+            96,
+            "2026-07-13T09:18:28.000Z",
+            "2026-07-13T09:47:48.000Z",
+            "password",
+            "172.18.0.6",
+            "web-1",
+            "svc.reports"
+          ],
+          [
+            0,
+            48,
+            "2026-07-13T09:23:35.000Z",
+            "2026-07-13T09:23:49.000Z",
+            "other",
+            "172.18.0.8",
+            "web-1",
+            "svc.reports"
+          ],
+          [
+            0,
+            48,
+            "2026-07-13T09:23:37.000Z",
+            "2026-07-13T09:23:51.000Z",
+            "password",
+            "172.18.0.8",
+            "web-1",
+            "svc.reports"
+          ],
+          [
+            8,
+            0,
+            "2026-07-13T09:36:54.000Z",
+            "2026-07-13T09:36:54.000Z",
+            "password",
+            "172.18.0.17",
+            "db-1",
+            "sre.ben"
+          ],
+          [
+            8,
+            0,
+            "2026-07-13T09:37:41.000Z",
+            "2026-07-13T09:37:41.000Z",
+            "password",
+            "172.18.0.17",
+            "db-1",
+            "sre.chen"
+          ],
+          [
+            24,
+            0,
+            "2026-07-13T09:37:49.000Z",
+            "2026-07-13T09:57:50.000Z",
+            "password",
+            "172.18.0.17",
+            "web-2",
+            "sre.ben"
+          ],
+          [
+            16,
+            0,
+            "2026-07-13T09:52:38.000Z",
+            "2026-07-13T10:04:22.000Z",
+            "password",
+            "172.18.0.17",
+            "web-2",
+            "sre.chen"
+          ]
         ]
       }
     },
@@ -187,66 +187,66 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "accepted": 56,
-            "failed": 0,
-            "first_seen": "2026-07-06T09:23:09.000Z",
-            "last_seen": "2026-07-06T10:13:12.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.14",
-            "host.name": "web-1",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 56,
-            "failed": 0,
-            "first_seen": "2026-07-06T09:23:10.000Z",
-            "last_seen": "2026-07-06T10:13:13.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.14",
-            "host.name": "web-2",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 56,
-            "failed": 0,
-            "first_seen": "2026-07-06T09:23:10.000Z",
-            "last_seen": "2026-07-06T10:13:13.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.14",
-            "host.name": "db-1",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 56,
-            "failed": 0,
-            "first_seen": "2026-07-06T09:23:10.584Z",
-            "last_seen": "2026-07-06T10:13:13.687Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.14",
-            "host.name": "jump-box-1",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 8,
-            "failed": 0,
-            "first_seen": "2026-07-06T09:57:37.476Z",
-            "last_seen": "2026-07-06T09:57:37.476Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.23",
-            "host.name": "jump-box-1",
-            "user.name": "dev.ethan"
-          },
-          {
-            "accepted": 8,
-            "failed": 0,
-            "first_seen": "2026-07-06T10:02:04.691Z",
-            "last_seen": "2026-07-06T10:02:04.691Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.23",
-            "host.name": "jump-box-1",
-            "user.name": "dev.fatima"
-          }
+          [
+            56,
+            0,
+            "2026-07-06T09:23:09.000Z",
+            "2026-07-06T10:13:12.000Z",
+            "password",
+            "172.18.0.14",
+            "web-1",
+            "svc.config-mgmt"
+          ],
+          [
+            56,
+            0,
+            "2026-07-06T09:23:10.000Z",
+            "2026-07-06T10:13:13.000Z",
+            "password",
+            "172.18.0.14",
+            "web-2",
+            "svc.config-mgmt"
+          ],
+          [
+            56,
+            0,
+            "2026-07-06T09:23:10.000Z",
+            "2026-07-06T10:13:13.000Z",
+            "password",
+            "172.18.0.14",
+            "db-1",
+            "svc.config-mgmt"
+          ],
+          [
+            56,
+            0,
+            "2026-07-06T09:23:10.584Z",
+            "2026-07-06T10:13:13.687Z",
+            "password",
+            "172.18.0.14",
+            "jump-box-1",
+            "svc.config-mgmt"
+          ],
+          [
+            8,
+            0,
+            "2026-07-06T09:57:37.476Z",
+            "2026-07-06T09:57:37.476Z",
+            "password",
+            "172.18.0.23",
+            "jump-box-1",
+            "dev.ethan"
+          ],
+          [
+            8,
+            0,
+            "2026-07-06T10:02:04.691Z",
+            "2026-07-06T10:02:04.691Z",
+            "password",
+            "172.18.0.23",
+            "jump-box-1",
+            "dev.fatima"
+          ]
         ]
       }
     },
@@ -296,196 +296,196 @@
         ],
         "row_count": 19,
         "values": [
-          {
-            "accepted": 18,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:15:43.000Z",
-            "last_seen": "2026-06-29T09:40:01.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.21",
-            "host.name": "db-1",
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 27,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:20:42.000Z",
-            "last_seen": "2026-06-29T09:58:16.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.21",
-            "host.name": "web-1",
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 27,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:21:24.818Z",
-            "last_seen": "2026-06-29T09:53:01.937Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.15",
-            "host.name": "jump-box-1",
-            "user.name": "dev.fatima"
-          },
-          {
-            "accepted": 0,
-            "failed": 54,
-            "first_seen": "2026-06-29T09:38:57.412Z",
-            "last_seen": "2026-06-29T10:00:13.052Z",
-            "auth_method": "other",
-            "source.ip": "172.18.0.15",
-            "host.name": "jump-box-1",
-            "user.name": "dev.ethan"
-          },
-          {
-            "accepted": 18,
-            "failed": 54,
-            "first_seen": "2026-06-29T09:38:59.411Z",
-            "last_seen": "2026-06-29T10:00:15.794Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.15",
-            "host.name": "jump-box-1",
-            "user.name": "dev.ethan"
-          },
-          {
-            "accepted": 27,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:40:57.000Z",
-            "last_seen": "2026-06-29T10:00:58.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.21",
-            "host.name": "web-2",
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 0,
-            "failed": 54,
-            "first_seen": "2026-06-29T09:45:33.000Z",
-            "last_seen": "2026-06-29T09:45:52.000Z",
-            "auth_method": "other",
-            "source.ip": "172.18.0.11",
-            "host.name": "web-2",
-            "user.name": "svc.reports"
-          },
-          {
-            "accepted": 0,
-            "failed": 54,
-            "first_seen": "2026-06-29T09:45:35.000Z",
-            "last_seen": "2026-06-29T09:45:54.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.11",
-            "host.name": "web-2",
-            "user.name": "svc.reports"
-          },
-          {
-            "accepted": 27,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:51:40.000Z",
-            "last_seen": "2026-06-29T10:02:34.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.20",
-            "host.name": "web-2",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 27,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:51:40.000Z",
-            "last_seen": "2026-06-29T10:02:33.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.20",
-            "host.name": "web-1",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 27,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:51:41.000Z",
-            "last_seen": "2026-06-29T10:02:34.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.20",
-            "host.name": "db-1",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 27,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:51:41.542Z",
-            "last_seen": "2026-06-29T10:02:34.771Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.20",
-            "host.name": "jump-box-1",
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 9,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:52:42.000Z",
-            "last_seen": "2026-06-29T09:52:42.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.21",
-            "host.name": "web-1",
-            "user.name": "sre.chen"
-          },
-          {
-            "accepted": 9,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:52:42.000Z",
-            "last_seen": "2026-06-29T09:52:42.000Z",
-            "auth_method": "password",
-            "source.ip": null,
-            "host.name": "web-1",
-            "user.name": null
-          },
-          {
-            "accepted": 9,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:52:42.000Z",
-            "last_seen": "2026-06-29T09:52:42.000Z",
-            "auth_method": "other",
-            "source.ip": null,
-            "host.name": "web-1",
-            "user.name": null
-          },
-          {
-            "accepted": 9,
-            "failed": 0,
-            "first_seen": "2026-06-29T09:55:03.238Z",
-            "last_seen": "2026-06-29T09:55:03.238Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.15",
-            "host.name": "jump-box-1",
-            "user.name": "dev.hira"
-          },
-          {
-            "accepted": 9,
-            "failed": 0,
-            "first_seen": "2026-06-29T10:07:18.000Z",
-            "last_seen": "2026-06-29T10:07:18.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.21",
-            "host.name": "web-2",
-            "user.name": "sre.chen"
-          },
-          {
-            "accepted": 0,
-            "failed": 54,
-            "first_seen": "2026-06-29T10:13:36.000Z",
-            "last_seen": "2026-06-29T10:13:51.000Z",
-            "auth_method": "other",
-            "source.ip": "172.18.0.10",
-            "host.name": "web-1",
-            "user.name": "svc.reports"
-          },
-          {
-            "accepted": 0,
-            "failed": 54,
-            "first_seen": "2026-06-29T10:13:38.000Z",
-            "last_seen": "2026-06-29T10:13:53.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.10",
-            "host.name": "web-1",
-            "user.name": "svc.reports"
-          }
+          [
+            18,
+            0,
+            "2026-06-29T09:15:43.000Z",
+            "2026-06-29T09:40:01.000Z",
+            "password",
+            "172.18.0.21",
+            "db-1",
+            "sre.ben"
+          ],
+          [
+            27,
+            0,
+            "2026-06-29T09:20:42.000Z",
+            "2026-06-29T09:58:16.000Z",
+            "password",
+            "172.18.0.21",
+            "web-1",
+            "sre.ben"
+          ],
+          [
+            27,
+            0,
+            "2026-06-29T09:21:24.818Z",
+            "2026-06-29T09:53:01.937Z",
+            "password",
+            "172.18.0.15",
+            "jump-box-1",
+            "dev.fatima"
+          ],
+          [
+            0,
+            54,
+            "2026-06-29T09:38:57.412Z",
+            "2026-06-29T10:00:13.052Z",
+            "other",
+            "172.18.0.15",
+            "jump-box-1",
+            "dev.ethan"
+          ],
+          [
+            18,
+            54,
+            "2026-06-29T09:38:59.411Z",
+            "2026-06-29T10:00:15.794Z",
+            "password",
+            "172.18.0.15",
+            "jump-box-1",
+            "dev.ethan"
+          ],
+          [
+            27,
+            0,
+            "2026-06-29T09:40:57.000Z",
+            "2026-06-29T10:00:58.000Z",
+            "password",
+            "172.18.0.21",
+            "web-2",
+            "sre.ben"
+          ],
+          [
+            0,
+            54,
+            "2026-06-29T09:45:33.000Z",
+            "2026-06-29T09:45:52.000Z",
+            "other",
+            "172.18.0.11",
+            "web-2",
+            "svc.reports"
+          ],
+          [
+            0,
+            54,
+            "2026-06-29T09:45:35.000Z",
+            "2026-06-29T09:45:54.000Z",
+            "password",
+            "172.18.0.11",
+            "web-2",
+            "svc.reports"
+          ],
+          [
+            27,
+            0,
+            "2026-06-29T09:51:40.000Z",
+            "2026-06-29T10:02:34.000Z",
+            "password",
+            "172.18.0.20",
+            "web-2",
+            "svc.config-mgmt"
+          ],
+          [
+            27,
+            0,
+            "2026-06-29T09:51:40.000Z",
+            "2026-06-29T10:02:33.000Z",
+            "password",
+            "172.18.0.20",
+            "web-1",
+            "svc.config-mgmt"
+          ],
+          [
+            27,
+            0,
+            "2026-06-29T09:51:41.000Z",
+            "2026-06-29T10:02:34.000Z",
+            "password",
+            "172.18.0.20",
+            "db-1",
+            "svc.config-mgmt"
+          ],
+          [
+            27,
+            0,
+            "2026-06-29T09:51:41.542Z",
+            "2026-06-29T10:02:34.771Z",
+            "password",
+            "172.18.0.20",
+            "jump-box-1",
+            "svc.config-mgmt"
+          ],
+          [
+            9,
+            0,
+            "2026-06-29T09:52:42.000Z",
+            "2026-06-29T09:52:42.000Z",
+            "password",
+            "172.18.0.21",
+            "web-1",
+            "sre.chen"
+          ],
+          [
+            9,
+            0,
+            "2026-06-29T09:52:42.000Z",
+            "2026-06-29T09:52:42.000Z",
+            "password",
+            null,
+            "web-1",
+            null
+          ],
+          [
+            9,
+            0,
+            "2026-06-29T09:52:42.000Z",
+            "2026-06-29T09:52:42.000Z",
+            "other",
+            null,
+            "web-1",
+            null
+          ],
+          [
+            9,
+            0,
+            "2026-06-29T09:55:03.238Z",
+            "2026-06-29T09:55:03.238Z",
+            "password",
+            "172.18.0.15",
+            "jump-box-1",
+            "dev.hira"
+          ],
+          [
+            9,
+            0,
+            "2026-06-29T10:07:18.000Z",
+            "2026-06-29T10:07:18.000Z",
+            "password",
+            "172.18.0.21",
+            "web-2",
+            "sre.chen"
+          ],
+          [
+            0,
+            54,
+            "2026-06-29T10:13:36.000Z",
+            "2026-06-29T10:13:51.000Z",
+            "other",
+            "172.18.0.10",
+            "web-1",
+            "svc.reports"
+          ],
+          [
+            0,
+            54,
+            "2026-06-29T10:13:38.000Z",
+            "2026-06-29T10:13:53.000Z",
+            "password",
+            "172.18.0.10",
+            "web-1",
+            "svc.reports"
+          ]
         ]
       }
     }

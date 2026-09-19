@@ -159,14 +159,14 @@
       ],
       "row_count": 1,
       "values": [
-        {
-          "_id": "AZ-jAP43CigTi6XiiWh3",
-          "@timestamp": "2026-07-27T09:56:07.000Z",
-          "host.name": "db-1",
-          "user.name": "root",
-          "event.outcome": "failure",
-          "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.16  user=root"
-        }
+        [
+          "AZ-jAP43CigTi6XiiWh3",
+          "2026-07-27T09:56:07.000Z",
+          "db-1",
+          "root",
+          "failure",
+          "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.16  user=root"
+        ]
       ]
     }
   }

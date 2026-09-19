@@ -24,18 +24,18 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "requests": 193324,
-            "user_agent.original": "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
-          },
-          {
-            "requests": 8425,
-            "user_agent.original": "curl/7.81.0"
-          },
-          {
-            "requests": 2054,
-            "user_agent.original": "curl/8.5.0"
-          }
+          [
+            193324,
+            "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
+          ],
+          [
+            8425,
+            "curl/7.81.0"
+          ],
+          [
+            2054,
+            "curl/8.5.0"
+          ]
         ]
       }
     },
@@ -61,18 +61,18 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "requests": 241920,
-            "user_agent.original": "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
-          },
-          {
-            "requests": 10592,
-            "user_agent.original": "curl/7.81.0"
-          },
-          {
-            "requests": 2672,
-            "user_agent.original": "curl/8.5.0"
-          }
+          [
+            241920,
+            "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
+          ],
+          [
+            10592,
+            "curl/7.81.0"
+          ],
+          [
+            2672,
+            "curl/8.5.0"
+          ]
         ]
       }
     },
@@ -98,18 +98,18 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "requests": 262090,
-            "user_agent.original": "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
-          },
-          {
-            "requests": 11327,
-            "user_agent.original": "curl/7.81.0"
-          },
-          {
-            "requests": 2651,
-            "user_agent.original": "curl/8.5.0"
-          }
+          [
+            262090,
+            "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
+          ],
+          [
+            11327,
+            "curl/7.81.0"
+          ],
+          [
+            2651,
+            "curl/8.5.0"
+          ]
         ]
       }
     }

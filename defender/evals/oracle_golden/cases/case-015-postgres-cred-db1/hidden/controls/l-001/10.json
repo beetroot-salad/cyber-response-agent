@@ -40,46 +40,46 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-07-06T21:02:27.160Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-07-06T21:02:27.160Z",
-            "log.level": "DETAIL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-07-06T21:02:27.160Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-07-06T21:02:27.160Z",
-            "log.level": "DETAIL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-07-06T21:02:27.159Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          }
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-07-06T21:02:27.160Z",
+            "FATAL",
+            "root"
+          ],
+          [
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "root",
+            "db-1",
+            "2026-07-06T21:02:27.160Z",
+            "DETAIL",
+            "root"
+          ],
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-07-06T21:02:27.160Z",
+            "FATAL",
+            "root"
+          ],
+          [
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "root",
+            "db-1",
+            "2026-07-06T21:02:27.160Z",
+            "DETAIL",
+            "root"
+          ],
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-07-06T21:02:27.159Z",
+            "FATAL",
+            "root"
+          ]
         ]
       }
     },
@@ -121,46 +121,46 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-29T21:02:23.774Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-29T21:02:23.774Z",
-            "log.level": "DETAIL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-29T21:02:23.774Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-29T21:02:23.774Z",
-            "log.level": "DETAIL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-29T21:02:23.774Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          }
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-06-29T21:02:23.774Z",
+            "FATAL",
+            "root"
+          ],
+          [
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "root",
+            "db-1",
+            "2026-06-29T21:02:23.774Z",
+            "DETAIL",
+            "root"
+          ],
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-06-29T21:02:23.774Z",
+            "FATAL",
+            "root"
+          ],
+          [
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "root",
+            "db-1",
+            "2026-06-29T21:02:23.774Z",
+            "DETAIL",
+            "root"
+          ],
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-06-29T21:02:23.774Z",
+            "FATAL",
+            "root"
+          ]
         ]
       }
     },
@@ -202,46 +202,46 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-22T21:02:23.772Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-22T21:02:23.772Z",
-            "log.level": "DETAIL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-22T21:02:23.772Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-22T21:02:23.772Z",
-            "log.level": "DETAIL",
-            "postgresql.log.database": "root"
-          },
-          {
-            "message": "password authentication failed for user \"root\"",
-            "user.name": "root",
-            "host.name": "db-1",
-            "@timestamp": "2026-06-22T21:02:23.766Z",
-            "log.level": "FATAL",
-            "postgresql.log.database": "root"
-          }
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-06-22T21:02:23.772Z",
+            "FATAL",
+            "root"
+          ],
+          [
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "root",
+            "db-1",
+            "2026-06-22T21:02:23.772Z",
+            "DETAIL",
+            "root"
+          ],
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-06-22T21:02:23.772Z",
+            "FATAL",
+            "root"
+          ],
+          [
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "root",
+            "db-1",
+            "2026-06-22T21:02:23.772Z",
+            "DETAIL",
+            "root"
+          ],
+          [
+            "password authentication failed for user \"root\"",
+            "root",
+            "db-1",
+            "2026-06-22T21:02:23.766Z",
+            "FATAL",
+            "root"
+          ]
         ]
       }
     }

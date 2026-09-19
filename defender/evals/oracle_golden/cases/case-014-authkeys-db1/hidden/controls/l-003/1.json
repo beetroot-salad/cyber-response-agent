@@ -48,46 +48,46 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "events": 44,
-            "first_seen": "2026-07-06T19:49:38.316Z",
-            "last_seen": "2026-07-06T20:48:40.976Z",
-            "rule": "Unexpected UDP Traffic",
-            "proc": "sshd",
-            "cmdline": "sshd -D -R",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 88,
-            "first_seen": "2026-07-06T19:49:38.316Z",
-            "last_seen": "2026-07-06T20:48:40.976Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "cmdline": "sshd",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 6,
-            "first_seen": "2026-07-06T19:57:51.413Z",
-            "last_seen": "2026-07-06T20:46:05.953Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "cmdline": "curl -sf -o /dev/null http://127.0.0.1/",
-            "parent": "bash",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 6,
-            "first_seen": "2026-07-06T19:57:51.414Z",
-            "last_seen": "2026-07-06T20:46:05.953Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "cmdline": "nc -z 127.0.0.1 22",
-            "parent": "runuser",
-            "container": "a36492b5172b"
-          }
+          [
+            44,
+            "2026-07-06T19:49:38.316Z",
+            "2026-07-06T20:48:40.976Z",
+            "Unexpected UDP Traffic",
+            "sshd",
+            "sshd -D -R",
+            "sshd",
+            "a36492b5172b"
+          ],
+          [
+            88,
+            "2026-07-06T19:49:38.316Z",
+            "2026-07-06T20:48:40.976Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "sshd",
+            "a36492b5172b"
+          ],
+          [
+            6,
+            "2026-07-06T19:57:51.413Z",
+            "2026-07-06T20:46:05.953Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "curl -sf -o /dev/null http://127.0.0.1/",
+            "bash",
+            "a36492b5172b"
+          ],
+          [
+            6,
+            "2026-07-06T19:57:51.414Z",
+            "2026-07-06T20:46:05.953Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "nc -z 127.0.0.1 22",
+            "runuser",
+            "a36492b5172b"
+          ]
         ]
       }
     },
@@ -137,46 +137,46 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "events": 7,
-            "first_seen": "2026-06-29T19:51:14.506Z",
-            "last_seen": "2026-06-29T20:45:50.300Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "cmdline": "curl -sf -o /dev/null http://127.0.0.1/",
-            "parent": "bash",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 34,
-            "first_seen": "2026-06-29T19:51:14.507Z",
-            "last_seen": "2026-06-29T20:48:54.349Z",
-            "rule": "Unexpected UDP Traffic",
-            "proc": "sshd",
-            "cmdline": "sshd -D -R",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 7,
-            "first_seen": "2026-06-29T19:51:14.507Z",
-            "last_seen": "2026-06-29T20:45:50.300Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "cmdline": "nc -z 127.0.0.1 22",
-            "parent": "runuser",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 68,
-            "first_seen": "2026-06-29T19:51:14.507Z",
-            "last_seen": "2026-06-29T20:48:54.349Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "cmdline": "sshd",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          }
+          [
+            7,
+            "2026-06-29T19:51:14.506Z",
+            "2026-06-29T20:45:50.300Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "curl -sf -o /dev/null http://127.0.0.1/",
+            "bash",
+            "a36492b5172b"
+          ],
+          [
+            34,
+            "2026-06-29T19:51:14.507Z",
+            "2026-06-29T20:48:54.349Z",
+            "Unexpected UDP Traffic",
+            "sshd",
+            "sshd -D -R",
+            "sshd",
+            "a36492b5172b"
+          ],
+          [
+            7,
+            "2026-06-29T19:51:14.507Z",
+            "2026-06-29T20:45:50.300Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "nc -z 127.0.0.1 22",
+            "runuser",
+            "a36492b5172b"
+          ],
+          [
+            68,
+            "2026-06-29T19:51:14.507Z",
+            "2026-06-29T20:48:54.349Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "sshd",
+            "a36492b5172b"
+          ]
         ]
       }
     },
@@ -226,46 +226,46 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "events": 100,
-            "first_seen": "2026-06-22T19:52:07.206Z",
-            "last_seen": "2026-06-22T20:48:24.037Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "cmdline": "sshd",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 51,
-            "first_seen": "2026-06-22T19:52:07.207Z",
-            "last_seen": "2026-06-22T20:48:24.037Z",
-            "rule": "Unexpected UDP Traffic",
-            "proc": "sshd",
-            "cmdline": "sshd -D -R",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 9,
-            "first_seen": "2026-06-22T19:53:29.227Z",
-            "last_seen": "2026-06-22T20:46:17.012Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "cmdline": "nc -z 127.0.0.1 22",
-            "parent": "runuser",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 9,
-            "first_seen": "2026-06-22T19:53:29.227Z",
-            "last_seen": "2026-06-22T20:46:17.012Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "cmdline": "curl -sf -o /dev/null http://127.0.0.1/",
-            "parent": "bash",
-            "container": "a36492b5172b"
-          }
+          [
+            100,
+            "2026-06-22T19:52:07.206Z",
+            "2026-06-22T20:48:24.037Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "sshd",
+            "a36492b5172b"
+          ],
+          [
+            51,
+            "2026-06-22T19:52:07.207Z",
+            "2026-06-22T20:48:24.037Z",
+            "Unexpected UDP Traffic",
+            "sshd",
+            "sshd -D -R",
+            "sshd",
+            "a36492b5172b"
+          ],
+          [
+            9,
+            "2026-06-22T19:53:29.227Z",
+            "2026-06-22T20:46:17.012Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "nc -z 127.0.0.1 22",
+            "runuser",
+            "a36492b5172b"
+          ],
+          [
+            9,
+            "2026-06-22T19:53:29.227Z",
+            "2026-06-22T20:46:17.012Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "curl -sf -o /dev/null http://127.0.0.1/",
+            "bash",
+            "a36492b5172b"
+          ]
         ]
       }
     }

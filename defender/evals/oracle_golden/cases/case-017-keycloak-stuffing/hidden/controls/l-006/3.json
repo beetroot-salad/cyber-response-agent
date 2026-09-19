@@ -32,72 +32,72 @@
         ],
         "row_count": 11,
         "values": [
-          {
-            "events": 386,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:14:50.037Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container"
-          },
-          {
-            "events": 360,
-            "first_seen": "2026-07-07T06:15:23.358Z",
-            "last_seen": "2026-07-07T07:14:40.032Z",
-            "rule": "BPF Program Not Profiled"
-          },
-          {
-            "events": 257,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:14:50.037Z",
-            "rule": "Unexpected UDP Traffic"
-          },
-          {
-            "events": 245,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:14:50.037Z",
-            "rule": "Launch Suspicious Network Tool in Container"
-          },
-          {
-            "events": 120,
-            "first_seen": "2026-07-07T06:15:16.356Z",
-            "last_seen": "2026-07-07T07:14:22.027Z",
-            "rule": "Drop and execute new binary in container"
-          },
-          {
-            "events": 99,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:14:19.025Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container"
-          },
-          {
-            "events": 60,
-            "first_seen": "2026-07-07T06:15:23.362Z",
-            "last_seen": "2026-07-07T07:14:40.032Z",
-            "rule": "Launch Sensitive Mount Container"
-          },
-          {
-            "events": 33,
-            "first_seen": "2026-07-07T06:25:01.475Z",
-            "last_seen": "2026-07-07T06:51:38.790Z",
-            "rule": "Launch Package Management Process in Container"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-07-07T06:25:02.477Z",
-            "last_seen": "2026-07-07T06:25:17.480Z",
-            "rule": "Read environment variable from /proc files"
-          },
-          {
-            "events": 9,
-            "first_seen": "2026-07-07T06:16:10.371Z",
-            "last_seen": "2026-07-07T06:16:10.371Z",
-            "rule": "Read sensitive file untrusted"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-07T06:16:10.371Z",
-            "last_seen": "2026-07-07T06:16:10.371Z",
-            "rule": "User mgmt binaries"
-          }
+          [
+            386,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:14:50.037Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container"
+          ],
+          [
+            360,
+            "2026-07-07T06:15:23.358Z",
+            "2026-07-07T07:14:40.032Z",
+            "BPF Program Not Profiled"
+          ],
+          [
+            257,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:14:50.037Z",
+            "Unexpected UDP Traffic"
+          ],
+          [
+            245,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:14:50.037Z",
+            "Launch Suspicious Network Tool in Container"
+          ],
+          [
+            120,
+            "2026-07-07T06:15:16.356Z",
+            "2026-07-07T07:14:22.027Z",
+            "Drop and execute new binary in container"
+          ],
+          [
+            99,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:14:19.025Z",
+            "Launch Ingress Remote File Copy Tools in Container"
+          ],
+          [
+            60,
+            "2026-07-07T06:15:23.362Z",
+            "2026-07-07T07:14:40.032Z",
+            "Launch Sensitive Mount Container"
+          ],
+          [
+            33,
+            "2026-07-07T06:25:01.475Z",
+            "2026-07-07T06:51:38.790Z",
+            "Launch Package Management Process in Container"
+          ],
+          [
+            10,
+            "2026-07-07T06:25:02.477Z",
+            "2026-07-07T06:25:17.480Z",
+            "Read environment variable from /proc files"
+          ],
+          [
+            9,
+            "2026-07-07T06:16:10.371Z",
+            "2026-07-07T06:16:10.371Z",
+            "Read sensitive file untrusted"
+          ],
+          [
+            1,
+            "2026-07-07T06:16:10.371Z",
+            "2026-07-07T06:16:10.371Z",
+            "User mgmt binaries"
+          ]
         ]
       }
     },
@@ -131,54 +131,54 @@
         ],
         "row_count": 8,
         "values": [
-          {
-            "events": 394,
-            "first_seen": "2026-06-30T06:15:57.551Z",
-            "last_seen": "2026-06-30T07:14:59.427Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container"
-          },
-          {
-            "events": 300,
-            "first_seen": "2026-06-30T06:15:32.547Z",
-            "last_seen": "2026-06-30T07:14:56.424Z",
-            "rule": "BPF Program Not Profiled"
-          },
-          {
-            "events": 267,
-            "first_seen": "2026-06-30T06:15:32.548Z",
-            "last_seen": "2026-06-30T07:14:59.427Z",
-            "rule": "Unexpected UDP Traffic"
-          },
-          {
-            "events": 202,
-            "first_seen": "2026-06-30T06:15:57.550Z",
-            "last_seen": "2026-06-30T07:14:59.426Z",
-            "rule": "Launch Suspicious Network Tool in Container"
-          },
-          {
-            "events": 120,
-            "first_seen": "2026-06-30T06:15:18.541Z",
-            "last_seen": "2026-06-30T07:14:34.413Z",
-            "rule": "Drop and execute new binary in container"
-          },
-          {
-            "events": 112,
-            "first_seen": "2026-06-30T06:15:25.544Z",
-            "last_seen": "2026-06-30T07:13:59.408Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container"
-          },
-          {
-            "events": 60,
-            "first_seen": "2026-06-30T06:15:32.548Z",
-            "last_seen": "2026-06-30T07:14:56.425Z",
-            "rule": "Launch Sensitive Mount Container"
-          },
-          {
-            "events": 33,
-            "first_seen": "2026-06-30T06:25:03.673Z",
-            "last_seen": "2026-06-30T06:53:50.103Z",
-            "rule": "Launch Package Management Process in Container"
-          }
+          [
+            394,
+            "2026-06-30T06:15:57.551Z",
+            "2026-06-30T07:14:59.427Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container"
+          ],
+          [
+            300,
+            "2026-06-30T06:15:32.547Z",
+            "2026-06-30T07:14:56.424Z",
+            "BPF Program Not Profiled"
+          ],
+          [
+            267,
+            "2026-06-30T06:15:32.548Z",
+            "2026-06-30T07:14:59.427Z",
+            "Unexpected UDP Traffic"
+          ],
+          [
+            202,
+            "2026-06-30T06:15:57.550Z",
+            "2026-06-30T07:14:59.426Z",
+            "Launch Suspicious Network Tool in Container"
+          ],
+          [
+            120,
+            "2026-06-30T06:15:18.541Z",
+            "2026-06-30T07:14:34.413Z",
+            "Drop and execute new binary in container"
+          ],
+          [
+            112,
+            "2026-06-30T06:15:25.544Z",
+            "2026-06-30T07:13:59.408Z",
+            "Launch Ingress Remote File Copy Tools in Container"
+          ],
+          [
+            60,
+            "2026-06-30T06:15:32.548Z",
+            "2026-06-30T07:14:56.425Z",
+            "Launch Sensitive Mount Container"
+          ],
+          [
+            33,
+            "2026-06-30T06:25:03.673Z",
+            "2026-06-30T06:53:50.103Z",
+            "Launch Package Management Process in Container"
+          ]
         ]
       }
     },
@@ -212,60 +212,60 @@
         ],
         "row_count": 9,
         "values": [
-          {
-            "events": 380,
-            "first_seen": "2026-06-23T06:15:33.954Z",
-            "last_seen": "2026-06-23T07:14:56.849Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container"
-          },
-          {
-            "events": 300,
-            "first_seen": "2026-06-23T06:15:33.955Z",
-            "last_seen": "2026-06-23T07:14:56.849Z",
-            "rule": "Unexpected UDP Traffic"
-          },
-          {
-            "events": 295,
-            "first_seen": "2026-06-23T06:15:55.961Z",
-            "last_seen": "2026-06-23T07:14:21.844Z",
-            "rule": "BPF Program Not Profiled"
-          },
-          {
-            "events": 278,
-            "first_seen": "2026-06-23T06:15:33.954Z",
-            "last_seen": "2026-06-23T07:14:56.849Z",
-            "rule": "Launch Suspicious Network Tool in Container"
-          },
-          {
-            "events": 120,
-            "first_seen": "2026-06-23T06:15:40.957Z",
-            "last_seen": "2026-06-23T07:14:56.848Z",
-            "rule": "Drop and execute new binary in container"
-          },
-          {
-            "events": 97,
-            "first_seen": "2026-06-23T06:15:33.954Z",
-            "last_seen": "2026-06-23T07:14:56.848Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container"
-          },
-          {
-            "events": 59,
-            "first_seen": "2026-06-23T06:15:55.962Z",
-            "last_seen": "2026-06-23T07:14:21.845Z",
-            "rule": "Launch Sensitive Mount Container"
-          },
-          {
-            "events": 36,
-            "first_seen": "2026-06-23T06:23:36.070Z",
-            "last_seen": "2026-06-23T06:51:48.494Z",
-            "rule": "Read sensitive file untrusted"
-          },
-          {
-            "events": 33,
-            "first_seen": "2026-06-23T06:25:01.088Z",
-            "last_seen": "2026-06-23T06:53:47.550Z",
-            "rule": "Launch Package Management Process in Container"
-          }
+          [
+            380,
+            "2026-06-23T06:15:33.954Z",
+            "2026-06-23T07:14:56.849Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container"
+          ],
+          [
+            300,
+            "2026-06-23T06:15:33.955Z",
+            "2026-06-23T07:14:56.849Z",
+            "Unexpected UDP Traffic"
+          ],
+          [
+            295,
+            "2026-06-23T06:15:55.961Z",
+            "2026-06-23T07:14:21.844Z",
+            "BPF Program Not Profiled"
+          ],
+          [
+            278,
+            "2026-06-23T06:15:33.954Z",
+            "2026-06-23T07:14:56.849Z",
+            "Launch Suspicious Network Tool in Container"
+          ],
+          [
+            120,
+            "2026-06-23T06:15:40.957Z",
+            "2026-06-23T07:14:56.848Z",
+            "Drop and execute new binary in container"
+          ],
+          [
+            97,
+            "2026-06-23T06:15:33.954Z",
+            "2026-06-23T07:14:56.848Z",
+            "Launch Ingress Remote File Copy Tools in Container"
+          ],
+          [
+            59,
+            "2026-06-23T06:15:55.962Z",
+            "2026-06-23T07:14:21.845Z",
+            "Launch Sensitive Mount Container"
+          ],
+          [
+            36,
+            "2026-06-23T06:23:36.070Z",
+            "2026-06-23T06:51:48.494Z",
+            "Read sensitive file untrusted"
+          ],
+          [
+            33,
+            "2026-06-23T06:25:01.088Z",
+            "2026-06-23T06:53:47.550Z",
+            "Launch Package Management Process in Container"
+          ]
         ]
       }
     }

@@ -34,38 +34,38 @@
         ],
         "row_count": 8,
         "values": [
-          {
-            "host.name": "dev-ws-1",
-            "_index": ".ds-logs-system.auth-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "dev-ws-1",
-            "_index": ".ds-logs-system.syslog-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "jump-box-1",
-            "_index": ".ds-logs-system.auth-default-2026.06.23-000003"
-          },
-          {
-            "host.name": "jump-box-1",
-            "_index": ".ds-logs-system.syslog-default-2026.06.23-000003"
-          },
-          {
-            "host.name": "office-ws-1",
-            "_index": ".ds-logs-system.auth-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "office-ws-1",
-            "_index": ".ds-logs-system.syslog-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "scanner-1",
-            "_index": ".ds-logs-system.auth-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "scanner-1",
-            "_index": ".ds-logs-system.syslog-default-2026.07.25-000004"
-          }
+          [
+            "dev-ws-1",
+            ".ds-logs-system.auth-default-2026.07.25-000004"
+          ],
+          [
+            "dev-ws-1",
+            ".ds-logs-system.syslog-default-2026.07.25-000004"
+          ],
+          [
+            "jump-box-1",
+            ".ds-logs-system.auth-default-2026.06.23-000003"
+          ],
+          [
+            "jump-box-1",
+            ".ds-logs-system.syslog-default-2026.06.23-000003"
+          ],
+          [
+            "office-ws-1",
+            ".ds-logs-system.auth-default-2026.07.25-000004"
+          ],
+          [
+            "office-ws-1",
+            ".ds-logs-system.syslog-default-2026.07.25-000004"
+          ],
+          [
+            "scanner-1",
+            ".ds-logs-system.auth-default-2026.07.25-000004"
+          ],
+          [
+            "scanner-1",
+            ".ds-logs-system.syslog-default-2026.07.25-000004"
+          ]
         ]
       }
     },
@@ -91,38 +91,38 @@
         ],
         "row_count": 8,
         "values": [
-          {
-            "host.name": "dev-ws-1",
-            "_index": ".ds-logs-system.auth-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "dev-ws-1",
-            "_index": ".ds-logs-system.syslog-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "jump-box-1",
-            "_index": ".ds-logs-system.auth-default-2026.06.23-000003"
-          },
-          {
-            "host.name": "jump-box-1",
-            "_index": ".ds-logs-system.syslog-default-2026.06.23-000003"
-          },
-          {
-            "host.name": "office-ws-1",
-            "_index": ".ds-logs-system.auth-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "office-ws-1",
-            "_index": ".ds-logs-system.syslog-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "scanner-1",
-            "_index": ".ds-logs-system.auth-default-2026.07.25-000004"
-          },
-          {
-            "host.name": "scanner-1",
-            "_index": ".ds-logs-system.syslog-default-2026.07.25-000004"
-          }
+          [
+            "dev-ws-1",
+            ".ds-logs-system.auth-default-2026.07.25-000004"
+          ],
+          [
+            "dev-ws-1",
+            ".ds-logs-system.syslog-default-2026.07.25-000004"
+          ],
+          [
+            "jump-box-1",
+            ".ds-logs-system.auth-default-2026.06.23-000003"
+          ],
+          [
+            "jump-box-1",
+            ".ds-logs-system.syslog-default-2026.06.23-000003"
+          ],
+          [
+            "office-ws-1",
+            ".ds-logs-system.auth-default-2026.07.25-000004"
+          ],
+          [
+            "office-ws-1",
+            ".ds-logs-system.syslog-default-2026.07.25-000004"
+          ],
+          [
+            "scanner-1",
+            ".ds-logs-system.auth-default-2026.07.25-000004"
+          ],
+          [
+            "scanner-1",
+            ".ds-logs-system.syslog-default-2026.07.25-000004"
+          ]
         ]
       }
     }
@@ -147,14 +147,14 @@
       ],
       "row_count": 2,
       "values": [
-        {
-          "host.name": "db-1",
-          "_index": ".ds-logs-system.auth-default-2026.07.25-000004"
-        },
-        {
-          "host.name": "office-ws-1",
-          "_index": ".ds-logs-elastic_agent.metricbeat-default-2026.07.25-000004"
-        }
+        [
+          "db-1",
+          ".ds-logs-system.auth-default-2026.07.25-000004"
+        ],
+        [
+          "office-ws-1",
+          ".ds-logs-elastic_agent.metricbeat-default-2026.07.25-000004"
+        ]
       ]
     }
   }

@@ -38,456 +38,456 @@
         ],
         "row_count": 90,
         "values": [
-          {
-            "count": 53,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.7"
-          },
-          {
-            "count": 53,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.3"
-          },
-          {
-            "count": 53,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.22"
-          },
-          {
-            "count": 53,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.9"
-          },
-          {
-            "count": 53,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.13"
-          },
-          {
-            "count": 21,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.20"
-          },
-          {
-            "count": 21,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "count": 21,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.7"
-          },
-          {
-            "count": 21,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.8"
-          },
-          {
-            "count": 21,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "count": 20,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.10"
-          },
-          {
-            "count": 20,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.24"
-          },
-          {
-            "count": 20,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "count": 20,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "count": 20,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "count": 20,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.19"
-          },
-          {
-            "count": 127,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.15"
-          },
-          {
-            "count": 127,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "count": 127,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "count": 127,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "count": 127,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.21"
-          },
-          {
-            "count": 127,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.24"
-          },
-          {
-            "count": 154,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "count": 77,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.20"
-          },
-          {
-            "count": 77,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "count": 77,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.25"
-          },
-          {
-            "count": 77,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.4"
-          },
-          {
-            "count": 127,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "count": 127,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.3"
-          },
-          {
-            "count": 127,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.17"
-          },
-          {
-            "count": 127,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "count": 127,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.19"
-          },
-          {
-            "count": 127,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.13"
-          },
-          {
-            "count": 61,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.2"
-          },
-          {
-            "count": 61,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.22"
-          },
-          {
-            "count": 61,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.13"
-          },
-          {
-            "count": 61,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.15"
-          },
-          {
-            "count": 61,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "count": 120,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "count": 60,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.25"
-          },
-          {
-            "count": 60,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.5"
-          },
-          {
-            "count": 60,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "count": 60,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.9"
-          },
-          {
-            "count": 30,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.18"
-          },
-          {
-            "count": 30,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.17"
-          },
-          {
-            "count": 30,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.22"
-          },
-          {
-            "count": 30,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "count": 30,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.20"
-          },
-          {
-            "count": 30,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.9"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c07:4eff:fe76:b57b"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "2a01:4f8:1c1b:8c96::1"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "178.105.170.226"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "172.18.0.1"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "172.17.0.1"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::fc3f:d3ff:fe2c:2205"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::f465:1cff:fe61:98e4"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::e8d8:72ff:fe0b:23d3"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d8a2:1eff:febd:a370"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d847:c9ff:fe0b:efd7"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c463:93ff:fe60:991d"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ac39:a2ff:fe1a:96ca"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ccc:9eff:fe70:ea7b"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::a464:feff:fe44:3143"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9000:8ff:fec4:93b6"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7c01:7eff:fe0f:9a51"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7053:83ff:fe7c:b5f2"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::6030:64ff:fe18:438f"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::34d6:47ff:fe77:8f4e"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::30a5:baff:fe8a:8dc5"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::3063:b1ff:fe7a:a51a"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::2c3d:c5ff:fe1b:37c6"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::242d:93ff:feb6:fcb8"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::20ad:e6ff:febd:eb0a"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::68ea:e3ff:fe36:193a"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::18e7:adff:fe07:826"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::1822:b6ff:fead:d33a"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::181b:46ff:fe8e:9732"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9c68:e8ff:fe13:bb8b"
-          },
-          {
-            "count": 62,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::cd5:56ff:fe8c:ae2e"
-          },
-          {
-            "count": 182,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "count": 91,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.3"
-          },
-          {
-            "count": 91,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.18"
-          },
-          {
-            "count": 91,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.22"
-          },
-          {
-            "count": 91,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.2"
-          },
-          {
-            "count": 75,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.5"
-          },
-          {
-            "count": 75,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "count": 75,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.8"
-          },
-          {
-            "count": 75,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "count": 75,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.19"
-          },
-          {
-            "count": 75,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.13"
-          }
+          [
+            53,
+            "canary-1",
+            "172.18.0.7"
+          ],
+          [
+            53,
+            "canary-1",
+            "172.18.0.3"
+          ],
+          [
+            53,
+            "canary-1",
+            "172.18.0.22"
+          ],
+          [
+            53,
+            "canary-1",
+            "172.18.0.9"
+          ],
+          [
+            53,
+            "canary-1",
+            "172.18.0.13"
+          ],
+          [
+            21,
+            "ci-1",
+            "172.18.0.20"
+          ],
+          [
+            21,
+            "ci-1",
+            "172.18.0.16"
+          ],
+          [
+            21,
+            "ci-1",
+            "172.18.0.7"
+          ],
+          [
+            21,
+            "ci-1",
+            "172.18.0.8"
+          ],
+          [
+            21,
+            "ci-1",
+            "172.18.0.14"
+          ],
+          [
+            20,
+            "config-mgmt-1",
+            "172.18.0.10"
+          ],
+          [
+            20,
+            "config-mgmt-1",
+            "172.18.0.24"
+          ],
+          [
+            20,
+            "config-mgmt-1",
+            "172.18.0.14"
+          ],
+          [
+            20,
+            "config-mgmt-1",
+            "172.18.0.23"
+          ],
+          [
+            20,
+            "config-mgmt-1",
+            "172.18.0.6"
+          ],
+          [
+            20,
+            "config-mgmt-1",
+            "172.18.0.19"
+          ],
+          [
+            127,
+            "db-1",
+            "172.18.0.15"
+          ],
+          [
+            127,
+            "db-1",
+            "172.18.0.12"
+          ],
+          [
+            127,
+            "db-1",
+            "172.18.0.16"
+          ],
+          [
+            127,
+            "db-1",
+            "172.18.0.23"
+          ],
+          [
+            127,
+            "db-1",
+            "172.18.0.21"
+          ],
+          [
+            127,
+            "db-1",
+            "172.18.0.24"
+          ],
+          [
+            154,
+            "dev-ws-1",
+            "172.18.0.23"
+          ],
+          [
+            77,
+            "dev-ws-1",
+            "172.18.0.20"
+          ],
+          [
+            77,
+            "dev-ws-1",
+            "172.18.0.11"
+          ],
+          [
+            77,
+            "dev-ws-1",
+            "172.18.0.25"
+          ],
+          [
+            77,
+            "dev-ws-1",
+            "172.18.0.4"
+          ],
+          [
+            127,
+            "jump-box-1",
+            "172.18.0.6"
+          ],
+          [
+            127,
+            "jump-box-1",
+            "172.18.0.3"
+          ],
+          [
+            127,
+            "jump-box-1",
+            "172.18.0.17"
+          ],
+          [
+            127,
+            "jump-box-1",
+            "172.18.0.11"
+          ],
+          [
+            127,
+            "jump-box-1",
+            "172.18.0.19"
+          ],
+          [
+            127,
+            "jump-box-1",
+            "172.18.0.13"
+          ],
+          [
+            61,
+            "office-ws-1",
+            "172.18.0.2"
+          ],
+          [
+            61,
+            "office-ws-1",
+            "172.18.0.22"
+          ],
+          [
+            61,
+            "office-ws-1",
+            "172.18.0.13"
+          ],
+          [
+            61,
+            "office-ws-1",
+            "172.18.0.15"
+          ],
+          [
+            61,
+            "office-ws-1",
+            "172.18.0.11"
+          ],
+          [
+            120,
+            "office-ws-2",
+            "172.18.0.12"
+          ],
+          [
+            60,
+            "office-ws-2",
+            "172.18.0.25"
+          ],
+          [
+            60,
+            "office-ws-2",
+            "172.18.0.5"
+          ],
+          [
+            60,
+            "office-ws-2",
+            "172.18.0.6"
+          ],
+          [
+            60,
+            "office-ws-2",
+            "172.18.0.9"
+          ],
+          [
+            30,
+            "scanner-1",
+            "172.18.0.18"
+          ],
+          [
+            30,
+            "scanner-1",
+            "172.18.0.17"
+          ],
+          [
+            30,
+            "scanner-1",
+            "172.18.0.22"
+          ],
+          [
+            30,
+            "scanner-1",
+            "172.18.0.11"
+          ],
+          [
+            30,
+            "scanner-1",
+            "172.18.0.20"
+          ],
+          [
+            30,
+            "scanner-1",
+            "172.18.0.9"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::c07:4eff:fe76:b57b"
+          ],
+          [
+            62,
+            "soc-playground",
+            "2a01:4f8:1c1b:8c96::1"
+          ],
+          [
+            62,
+            "soc-playground",
+            "178.105.170.226"
+          ],
+          [
+            62,
+            "soc-playground",
+            "172.18.0.1"
+          ],
+          [
+            62,
+            "soc-playground",
+            "172.17.0.1"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::fc3f:d3ff:fe2c:2205"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::f465:1cff:fe61:98e4"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::e8d8:72ff:fe0b:23d3"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::d8a2:1eff:febd:a370"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::d847:c9ff:fe0b:efd7"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::c463:93ff:fe60:991d"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::ac39:a2ff:fe1a:96ca"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::ccc:9eff:fe70:ea7b"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::a464:feff:fe44:3143"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::9000:8ff:fec4:93b6"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::7c01:7eff:fe0f:9a51"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::7053:83ff:fe7c:b5f2"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::6030:64ff:fe18:438f"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::34d6:47ff:fe77:8f4e"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::30a5:baff:fe8a:8dc5"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::3063:b1ff:fe7a:a51a"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::2c3d:c5ff:fe1b:37c6"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::242d:93ff:feb6:fcb8"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::20ad:e6ff:febd:eb0a"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::68ea:e3ff:fe36:193a"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::18e7:adff:fe07:826"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::1822:b6ff:fead:d33a"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::181b:46ff:fe8e:9732"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::9c68:e8ff:fe13:bb8b"
+          ],
+          [
+            62,
+            "soc-playground",
+            "fe80::cd5:56ff:fe8c:ae2e"
+          ],
+          [
+            182,
+            "web-1",
+            "172.18.0.6"
+          ],
+          [
+            91,
+            "web-1",
+            "172.18.0.3"
+          ],
+          [
+            91,
+            "web-1",
+            "172.18.0.18"
+          ],
+          [
+            91,
+            "web-1",
+            "172.18.0.22"
+          ],
+          [
+            91,
+            "web-1",
+            "172.18.0.2"
+          ],
+          [
+            75,
+            "web-2",
+            "172.18.0.5"
+          ],
+          [
+            75,
+            "web-2",
+            "172.18.0.14"
+          ],
+          [
+            75,
+            "web-2",
+            "172.18.0.8"
+          ],
+          [
+            75,
+            "web-2",
+            "172.18.0.16"
+          ],
+          [
+            75,
+            "web-2",
+            "172.18.0.19"
+          ],
+          [
+            75,
+            "web-2",
+            "172.18.0.13"
+          ]
         ]
       }
     },
@@ -517,451 +517,451 @@
         ],
         "row_count": 89,
         "values": [
-          {
-            "count": 63,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.7"
-          },
-          {
-            "count": 63,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.3"
-          },
-          {
-            "count": 63,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.9"
-          },
-          {
-            "count": 63,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.13"
-          },
-          {
-            "count": 63,
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.22"
-          },
-          {
-            "count": 15,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.7"
-          },
-          {
-            "count": 15,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.8"
-          },
-          {
-            "count": 15,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.20"
-          },
-          {
-            "count": 15,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "count": 15,
-            "host.name": "ci-1",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "count": 32,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "count": 32,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.10"
-          },
-          {
-            "count": 32,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "count": 32,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.19"
-          },
-          {
-            "count": 32,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "count": 32,
-            "host.name": "config-mgmt-1",
-            "host.ip": "172.18.0.24"
-          },
-          {
-            "count": 128,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.15"
-          },
-          {
-            "count": 128,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "count": 128,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.21"
-          },
-          {
-            "count": 128,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.24"
-          },
-          {
-            "count": 128,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "count": 128,
-            "host.name": "db-1",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "count": 202,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "count": 101,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.4"
-          },
-          {
-            "count": 101,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "count": 101,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.25"
-          },
-          {
-            "count": 101,
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.20"
-          },
-          {
-            "count": 93,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "count": 93,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "count": 93,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.19"
-          },
-          {
-            "count": 93,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.3"
-          },
-          {
-            "count": 93,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.17"
-          },
-          {
-            "count": 93,
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.13"
-          },
-          {
-            "count": 118,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.15"
-          },
-          {
-            "count": 59,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "count": 59,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.2"
-          },
-          {
-            "count": 59,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.13"
-          },
-          {
-            "count": 59,
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.22"
-          },
-          {
-            "count": 114,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "count": 57,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "count": 57,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.25"
-          },
-          {
-            "count": 57,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.5"
-          },
-          {
-            "count": 57,
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.9"
-          },
-          {
-            "count": 16,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.17"
-          },
-          {
-            "count": 16,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.18"
-          },
-          {
-            "count": 16,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.22"
-          },
-          {
-            "count": 16,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.20"
-          },
-          {
-            "count": 16,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.9"
-          },
-          {
-            "count": 16,
-            "host.name": "scanner-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c07:4eff:fe76:b57b"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "2a01:4f8:1c1b:8c96::1"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "178.105.170.226"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "172.18.0.1"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "172.17.0.1"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::fc3f:d3ff:fe2c:2205"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::e8d8:72ff:fe0b:23d3"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::f465:1cff:fe61:98e4"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c463:93ff:fe60:991d"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d8a2:1eff:febd:a370"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d847:c9ff:fe0b:efd7"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ac39:a2ff:fe1a:96ca"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ccc:9eff:fe70:ea7b"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9c68:e8ff:fe13:bb8b"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9000:8ff:fec4:93b6"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7c01:7eff:fe0f:9a51"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7053:83ff:fe7c:b5f2"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::68ea:e3ff:fe36:193a"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::34d6:47ff:fe77:8f4e"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::30a5:baff:fe8a:8dc5"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::3063:b1ff:fe7a:a51a"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::242d:93ff:feb6:fcb8"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::20ad:e6ff:febd:eb0a"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::18e7:adff:fe07:826"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::74fe:98ff:fe8f:9120"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::1822:b6ff:fead:d33a"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::181b:46ff:fe8e:9732"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::cd5:56ff:fe8c:ae2e"
-          },
-          {
-            "count": 14,
-            "host.name": "soc-playground",
-            "host.ip": "fe80::a464:feff:fe44:3143"
-          },
-          {
-            "count": 330,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "count": 165,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.3"
-          },
-          {
-            "count": 165,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.22"
-          },
-          {
-            "count": 165,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.18"
-          },
-          {
-            "count": 165,
-            "host.name": "web-1",
-            "host.ip": "172.18.0.2"
-          },
-          {
-            "count": 119,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.5"
-          },
-          {
-            "count": 119,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "count": 119,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.8"
-          },
-          {
-            "count": 119,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.19"
-          },
-          {
-            "count": 119,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.13"
-          },
-          {
-            "count": 119,
-            "host.name": "web-2",
-            "host.ip": "172.18.0.16"
-          }
+          [
+            63,
+            "canary-1",
+            "172.18.0.7"
+          ],
+          [
+            63,
+            "canary-1",
+            "172.18.0.3"
+          ],
+          [
+            63,
+            "canary-1",
+            "172.18.0.9"
+          ],
+          [
+            63,
+            "canary-1",
+            "172.18.0.13"
+          ],
+          [
+            63,
+            "canary-1",
+            "172.18.0.22"
+          ],
+          [
+            15,
+            "ci-1",
+            "172.18.0.7"
+          ],
+          [
+            15,
+            "ci-1",
+            "172.18.0.8"
+          ],
+          [
+            15,
+            "ci-1",
+            "172.18.0.20"
+          ],
+          [
+            15,
+            "ci-1",
+            "172.18.0.16"
+          ],
+          [
+            15,
+            "ci-1",
+            "172.18.0.14"
+          ],
+          [
+            32,
+            "config-mgmt-1",
+            "172.18.0.23"
+          ],
+          [
+            32,
+            "config-mgmt-1",
+            "172.18.0.10"
+          ],
+          [
+            32,
+            "config-mgmt-1",
+            "172.18.0.14"
+          ],
+          [
+            32,
+            "config-mgmt-1",
+            "172.18.0.19"
+          ],
+          [
+            32,
+            "config-mgmt-1",
+            "172.18.0.6"
+          ],
+          [
+            32,
+            "config-mgmt-1",
+            "172.18.0.24"
+          ],
+          [
+            128,
+            "db-1",
+            "172.18.0.15"
+          ],
+          [
+            128,
+            "db-1",
+            "172.18.0.23"
+          ],
+          [
+            128,
+            "db-1",
+            "172.18.0.21"
+          ],
+          [
+            128,
+            "db-1",
+            "172.18.0.24"
+          ],
+          [
+            128,
+            "db-1",
+            "172.18.0.12"
+          ],
+          [
+            128,
+            "db-1",
+            "172.18.0.16"
+          ],
+          [
+            202,
+            "dev-ws-1",
+            "172.18.0.23"
+          ],
+          [
+            101,
+            "dev-ws-1",
+            "172.18.0.4"
+          ],
+          [
+            101,
+            "dev-ws-1",
+            "172.18.0.11"
+          ],
+          [
+            101,
+            "dev-ws-1",
+            "172.18.0.25"
+          ],
+          [
+            101,
+            "dev-ws-1",
+            "172.18.0.20"
+          ],
+          [
+            93,
+            "jump-box-1",
+            "172.18.0.6"
+          ],
+          [
+            93,
+            "jump-box-1",
+            "172.18.0.11"
+          ],
+          [
+            93,
+            "jump-box-1",
+            "172.18.0.19"
+          ],
+          [
+            93,
+            "jump-box-1",
+            "172.18.0.3"
+          ],
+          [
+            93,
+            "jump-box-1",
+            "172.18.0.17"
+          ],
+          [
+            93,
+            "jump-box-1",
+            "172.18.0.13"
+          ],
+          [
+            118,
+            "office-ws-1",
+            "172.18.0.15"
+          ],
+          [
+            59,
+            "office-ws-1",
+            "172.18.0.11"
+          ],
+          [
+            59,
+            "office-ws-1",
+            "172.18.0.2"
+          ],
+          [
+            59,
+            "office-ws-1",
+            "172.18.0.13"
+          ],
+          [
+            59,
+            "office-ws-1",
+            "172.18.0.22"
+          ],
+          [
+            114,
+            "office-ws-2",
+            "172.18.0.12"
+          ],
+          [
+            57,
+            "office-ws-2",
+            "172.18.0.6"
+          ],
+          [
+            57,
+            "office-ws-2",
+            "172.18.0.25"
+          ],
+          [
+            57,
+            "office-ws-2",
+            "172.18.0.5"
+          ],
+          [
+            57,
+            "office-ws-2",
+            "172.18.0.9"
+          ],
+          [
+            16,
+            "scanner-1",
+            "172.18.0.17"
+          ],
+          [
+            16,
+            "scanner-1",
+            "172.18.0.18"
+          ],
+          [
+            16,
+            "scanner-1",
+            "172.18.0.22"
+          ],
+          [
+            16,
+            "scanner-1",
+            "172.18.0.20"
+          ],
+          [
+            16,
+            "scanner-1",
+            "172.18.0.9"
+          ],
+          [
+            16,
+            "scanner-1",
+            "172.18.0.11"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::c07:4eff:fe76:b57b"
+          ],
+          [
+            14,
+            "soc-playground",
+            "2a01:4f8:1c1b:8c96::1"
+          ],
+          [
+            14,
+            "soc-playground",
+            "178.105.170.226"
+          ],
+          [
+            14,
+            "soc-playground",
+            "172.18.0.1"
+          ],
+          [
+            14,
+            "soc-playground",
+            "172.17.0.1"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::fc3f:d3ff:fe2c:2205"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::e8d8:72ff:fe0b:23d3"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::f465:1cff:fe61:98e4"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::c463:93ff:fe60:991d"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::d8a2:1eff:febd:a370"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::d847:c9ff:fe0b:efd7"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::ac39:a2ff:fe1a:96ca"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::ccc:9eff:fe70:ea7b"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::9c68:e8ff:fe13:bb8b"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::9000:8ff:fec4:93b6"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::7c01:7eff:fe0f:9a51"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::7053:83ff:fe7c:b5f2"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::68ea:e3ff:fe36:193a"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::34d6:47ff:fe77:8f4e"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::30a5:baff:fe8a:8dc5"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::3063:b1ff:fe7a:a51a"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::242d:93ff:feb6:fcb8"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::20ad:e6ff:febd:eb0a"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::18e7:adff:fe07:826"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::74fe:98ff:fe8f:9120"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::1822:b6ff:fead:d33a"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::181b:46ff:fe8e:9732"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::cd5:56ff:fe8c:ae2e"
+          ],
+          [
+            14,
+            "soc-playground",
+            "fe80::a464:feff:fe44:3143"
+          ],
+          [
+            330,
+            "web-1",
+            "172.18.0.6"
+          ],
+          [
+            165,
+            "web-1",
+            "172.18.0.3"
+          ],
+          [
+            165,
+            "web-1",
+            "172.18.0.22"
+          ],
+          [
+            165,
+            "web-1",
+            "172.18.0.18"
+          ],
+          [
+            165,
+            "web-1",
+            "172.18.0.2"
+          ],
+          [
+            119,
+            "web-2",
+            "172.18.0.5"
+          ],
+          [
+            119,
+            "web-2",
+            "172.18.0.14"
+          ],
+          [
+            119,
+            "web-2",
+            "172.18.0.8"
+          ],
+          [
+            119,
+            "web-2",
+            "172.18.0.19"
+          ],
+          [
+            119,
+            "web-2",
+            "172.18.0.13"
+          ],
+          [
+            119,
+            "web-2",
+            "172.18.0.16"
+          ]
         ]
       }
     }
@@ -990,26 +990,26 @@
       ],
       "row_count": 4,
       "values": [
-        {
-          "count": 2,
-          "host.name": "ci-1",
-          "host.ip": "172.18.0.7"
-        },
-        {
-          "count": 21,
-          "host.name": "db-1",
-          "host.ip": "172.18.0.12"
-        },
-        {
-          "count": 3,
-          "host.name": "jump-box-1",
-          "host.ip": "172.18.0.13"
-        },
-        {
-          "count": 4,
-          "host.name": "web-1",
-          "host.ip": "172.18.0.6"
-        }
+        [
+          2,
+          "ci-1",
+          "172.18.0.7"
+        ],
+        [
+          21,
+          "db-1",
+          "172.18.0.12"
+        ],
+        [
+          3,
+          "jump-box-1",
+          "172.18.0.13"
+        ],
+        [
+          4,
+          "web-1",
+          "172.18.0.6"
+        ]
       ]
     }
   }
