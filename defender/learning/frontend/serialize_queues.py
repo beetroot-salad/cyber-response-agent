@@ -194,11 +194,12 @@ def _json_files(directory: Path) -> tuple[list[tuple[Path, dict]], int]:
 
     A file that does not decode, or decodes to something other than a mapping, is one
     unreadable — the same tolerance the sidecar reader gives a torn line. A directory that
-    cannot be listed is one unreadable and no files."""
+    cannot be listed is one unreadable and no files — listed with `iterdir`, because
+    `Path.glob` swallows the `PermissionError` and answers "empty"."""
     try:
         if not directory.is_dir():
             return [], 0
-        found = sorted(directory.glob("*.json"))
+        found = sorted(p for p in directory.iterdir() if p.name.endswith(".json"))
     except OSError:
         return [], 1
     out: list[tuple[Path, dict]] = []
