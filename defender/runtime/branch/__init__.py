@@ -15,7 +15,7 @@ hydrating the fork it just opened; the symmetry is exact rather than approximate
 
 The turn-N branch: forking a run from a message in an earlier one.
 
-Split into three modules when this file reached 1197 lines:
+Split into three modules:
 
   * `_spec`     — what a branch request IS, and opening the store it reads from.
   * `_frontier` — reading the source run: where the fences end, which leads existed,

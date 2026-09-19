@@ -1,7 +1,6 @@
 """The investigation loop: drive one alert end to end.
 
-What it takes to BUILD a run was split out of this module when it reached 1221 lines,
-leaving the loop itself:
+What it takes to BUILD a run was split out of this module, leaving the loop itself:
 
   * `_prompts` — the opening prompt and the per-turn user message, including the resume.
   * `_budget`  — the spend ceiling, the short-circuit, and the hooks that account a call.

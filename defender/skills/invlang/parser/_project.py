@@ -1,7 +1,6 @@
 """The projector: walks blocks and accumulates them into the finished companion body.
 
-Split out of `parser.py` (#god-file), where it was a 993-line class inside a 2128-line
-module. It sits at the top of the layering and imports both the tokenizer and the row
+It sits at the top of the layering and imports both the tokenizer and the row
 builders."""
 
 

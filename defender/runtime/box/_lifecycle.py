@@ -1,7 +1,7 @@
 """Start, stop, scrub — and the faults each step can raise.
 
-Split out of `box.py` at 1077 lines. The sentinel planting and mount checks live here
-because they are steps of starting a box, not properties of one.
+The sentinel planting and mount checks live here because they are steps of starting a
+box, not properties of one.
 """
 from __future__ import annotations
 

@@ -1,8 +1,7 @@
 """One row of one block type, projected into one typed record.
 
 Every function here is pure: `(Block, row) -> record`, raising `RowError` for a row it
-cannot read. Split out of `parser.py` (#god-file); imports the tokenizer, never the
-projector."""
+cannot read. Imports the tokenizer, never the projector."""
 
 
 from __future__ import annotations

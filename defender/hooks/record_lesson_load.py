@@ -8,10 +8,7 @@ from pathlib import Path
 from defender._clock import parse_iso_utc
 from defender.runtime.agent_role import AgentRole
 
-#: Every corpus the AUTHOR side may touch. It was a proper superset of the runtime's set while
-#: the old pipeline shipped: `lessons-actor` and `lessons-environment` held the actor- and
-#: environment-side observations, written by two curators the deleted judge was the sole
-#: producer for. Both retired with it (#922), so the two sets coincide today.
+#: Every corpus the AUTHOR side may touch.
 #:
 #: KEPT AS TWO NAMES rather than collapsed to one. They answer different questions — what a
 #: curator may read and write, versus what the runtime agent loads at PLAN — and a single

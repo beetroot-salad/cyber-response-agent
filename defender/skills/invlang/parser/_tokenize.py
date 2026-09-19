@@ -1,6 +1,6 @@
 """The invlang tokenizer: which bytes of a document are invlang content, and how they cut into blocks and rows.
 
-Split out of `parser.py` (#god-file). The layering runs one way — this module knows
+The layering runs one way — this module knows
 nothing of records or of the projector; both import from here."""
 
 

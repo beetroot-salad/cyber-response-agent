@@ -107,11 +107,7 @@ def normalized_disposition(value: object) -> str | None:
     so a value that only becomes a member after something strips or folds it is answered
     exactly as a value that was never a member at all: `None`, same as `NOT_A_MEMBER`, same as
     every reader's own "I could not read this run" path — never coerced into the member it
-    resembles and never handed downstream as a clean answer. Before this change the zero-width
-    strip lived here, and it COERCED: `malicious` with a zero-width space inside it read back
-    as `malicious`, a committed close no reader could tell from a clean one. The write gates
-    never used that coercion (each is exact and denies a laced value with retry text — an
-    author is still there to ask); this reader now agrees with them.
+    resembles and never handed downstream as a clean answer.
 
     A non-`str` value (a YAML list, an int) is rejected before the enum test rather than fed to
     it — `DISPOSITION_ENUM` is a set, so an unhashable value would raise `TypeError` out of
