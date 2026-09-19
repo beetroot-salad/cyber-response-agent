@@ -26,7 +26,10 @@ PROVENANCE_KEYS = frozenset(
 class Lesson:
 
     path: Path
-    fm: dict[str, Any]
+    #: Keys `Any`, not `str`, for the reason `_report.ReportRead.frontmatter` gives: the
+    #: mapping as YAML built it, and `iter_lessons`' warn-and-skip catches `FrontmatterError`,
+    #: not the `ValidationError` a `str` claim would raise here (#1067).
+    fm: dict[Any, Any]
     raw: str
     body: str
 

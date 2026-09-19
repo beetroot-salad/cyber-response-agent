@@ -359,8 +359,9 @@ def test_the_budget_trip_carries_integers_and_nothing_else():
     # happened, which the arm below says it must never do. `ValidationError`, not the stdlib
     # `TypeError`, since #1067 put the trip on the pydantic decorator — the refusal is the
     # property, its class is the decorator's.
-    with pytest.raises(ValidationError, match="positional"):
+    with pytest.raises(ValidationError) as refused:
         RejectionBudgetTrip(REJECTION_BUDGET, REJECTION_BUDGET)  # type: ignore[misc]
+    assert {e["type"] for e in refused.value.errors()} >= {"unexpected_positional_argument"}
 
     # NOT `trip != RepeatTrip(...)`: two distinct dataclasses never compare equal (each
     # `__eq__` returns `NotImplemented` and Python falls back to identity), so that assertion

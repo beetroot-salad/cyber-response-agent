@@ -5,8 +5,9 @@ from __future__ import annotations
 # TypedDict-typed field requires it on Python <3.12 (`defender/pyproject.toml`'s own comment on
 # the `typing-extensions` dependency has the PydanticUserError this avoids) — every dataclass in
 # the tree porting to `defender._model.model` (#1067) that carries one of these types on a field
-# (`corpus.Companion.body: CompanionBody`, `parser._project._Projector.hypotheses_by_id`, ...)
-# depends on this import, not just the `typing.TypedDict` spelling stdlib also offers.
+# (`corpus.Companion.body: CompanionBody` — even under `SkipValidation`, which still builds the
+# serialization schema) depends on this import, not just the `typing.TypedDict` spelling stdlib
+# also offers. The parser's `_Projector` also holds these, but stayed on stdlib `@dataclass`.
 from typing_extensions import TypedDict
 
 AttributesMap = dict[str, str]

@@ -67,7 +67,12 @@ class ReportRead:
 
     disposition: str | None
     reason: str | None
-    frontmatter: Mapping[str, Any]
+    #: Keys `Any`, not `str`: this is the mapping AS YAML BUILT IT, and YAML builds `on:` as
+    #: `True`, a bare date as a `date`, `1:` as an `int`. The report write gate accepts those
+    #: (`test_permission_report_629` pins that a `1:`/`"1":` pair and a date key both commit),
+    #: so a `str` claim here — which `@model` CHECKS (#1067) — would turn a reader documented
+    #: "never raises" into a `ValidationError` over a file the gate let through.
+    frontmatter: Mapping[Any, Any]
     body: str
     text: str
     #: Was there nothing at the name at all (#1049)? `False` for every reader that predates the

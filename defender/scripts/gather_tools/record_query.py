@@ -18,7 +18,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
 from defender._model import model
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
-from defender._text import as_str, is_content_less
+from defender._text import as_int, as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 
 _ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
@@ -843,11 +843,10 @@ def _trip(
     occurrence = len(matches) + 1
     if occurrence < threshold:
         return None
-    # `bool` excluded as `payload_view._int` excludes it: the table is bytes in the box's rw
-    # bind, and a planted `"seq": true` is an `int` to `isinstance` that `RepeatTrip.first_seq`
-    # (strict since #1067) would refuse — a trip turned into a `ValidationError`.
-    seqs = [m["seq"] for m in matches
-            if isinstance(m.get("seq"), int) and not isinstance(m["seq"], bool)]
+    # `as_int`, not `isinstance(_, int)`: the table is bytes in the box's rw bind, and a planted
+    # `"seq": true` is an `int` to `isinstance` that `RepeatTrip.first_seq` (strict since #1067)
+    # would refuse — a trip turned into a `ValidationError`.
+    seqs = [seq for m in matches if (seq := as_int(m.get("seq"))) is not None]
     return RepeatTrip(first_seq=min(seqs) if seqs else None, occurrence=occurrence)
 
 

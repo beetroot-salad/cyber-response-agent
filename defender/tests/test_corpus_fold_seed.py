@@ -175,7 +175,6 @@ def test_c1_lessons_common_reexports_the_same_object():
     common = importlib.import_module("defender.scripts.lessons._lessons_common")
     assert "reexec_into_venv" not in common.__all__
     assert not hasattr(common, "reexec_into_venv")
-    common = importlib.import_module("defender.scripts.lessons._lessons_common")
     corpus_mod = importlib.import_module("defender._corpus")
     assert common.iter_lessons is corpus_mod.iter_lessons
     assert "iter_lessons" in common.__all__

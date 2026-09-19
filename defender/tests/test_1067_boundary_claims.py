@@ -1,76 +1,75 @@
 """Review hardening for the #1067 remainder port (found in review on PR #1075).
 
-Three places where a PRODUCER already declared the type of what it hands out and never checked
-it. Under stdlib `@dataclass` the records built from those values carried the lie in silence;
-under `@model` each record checks its fields, so the lie surfaced as a `ValidationError` out of
-readers documented to tolerate malformed input. The fix each time is at the producer — one check
-where the claim is made — not a loosened annotation on the record or a wrapper at each consumer:
+Three places where a value's declared type and its actual provenance disagreed. Under stdlib
+`@dataclass` the records built from those values carried the disagreement in silence; under
+`@model` each record checks its fields, so it surfaced as a `ValidationError` out of readers
+documented to tolerate malformed input. Each fix is at the one place the claim is made:
 
-1. `_frontmatter.split_frontmatter` returns `dict[str, Any]` but only checked "is a mapping". YAML
-   hands a mapping non-string keys freely (`on:` is `True` under YAML 1.1, a bare date is a `date`),
-   and `ReportRead.frontmatter` / `Lesson.fm` now refuse them. The parser refuses them first, as the
-   `FrontmatterError` every frontmatter reader already handles.
+1. `ReportRead.frontmatter` and `Lesson.fm` claimed `str` keys, but they hold the mapping AS
+   YAML BUILT IT — `on:` is `True` under YAML 1.1, a bare date is a `date` — and the report write
+   gate accepts such keys by test (`test_permission_report_629`: a `1:`/`"1":` pair and a date key
+   both commit). The claim was the lie; the fields now say `Any`, and the readers stay total.
 2. `oracle_golden.judge.load_lead_inputs` did `safe_load(...) or {}` and called it a `dict`; a
-   list-rooted `environment.yaml` reached `LeadInputs.environment_notes: dict`.
+   list-rooted `environment.yaml` reached `LeadInputs.environment_notes: dict`. Refused at the
+   load, naming the file.
 3. `record_query.repeat_trip` kept `seq` values that pass `isinstance(_, int)` — which a `bool`
-   does — and `RepeatTrip.first_seq: int | None` refuses `True`.
+   does — and `RepeatTrip.first_seq: int | None` refuses `True`. `_text.as_int` is now the one
+   spelling of "an int that is not a bool", beside `as_str`.
 """
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 
 import pytest
 
 from defender._corpus import iter_lessons
-from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._report import parse_report_text
+from defender._text import as_int
 from defender.evals.oracle_golden import judge
 from defender.scripts.gather_tools import record_query as rq
 from defender.tests.test_826_deferred_defects import LEAD, _row
 
-
-@pytest.mark.parametrize(("key", "spelled"), [
-    ("on", "True"),                  # YAML 1.1 bool
-    ("2024-01-01", "datetime.date"),  # timestamp scalar
-    ("1", "1"),                       # int
-])
-def test_frontmatter_refuses_a_non_string_key_as_a_frontmatter_error(key, spelled):
-    """The parser's own `dict[str, Any]` claim, enforced where it is made. Refused as
-    `FrontmatterError` — the class every reader already treats as "malformed frontmatter" —
-    and the message names the offending key so the author can quote it."""
-    with pytest.raises(FrontmatterError, match="non-string key") as info:
-        split_frontmatter(f"---\ndisposition: benign\n{key}: x\n---\nbody\n")
-    assert spelled in str(info.value)
-    # A quoted key is a string and parses; the check is on the KEY TYPE, not the spelling.
-    fm, _raw, _body = split_frontmatter(f"---\n'{key}': x\n---\nbody\n")
-    assert fm == {key: "x"}
+#: The keys YAML 1.1 builds as something other than `str`, each paired with what it builds.
+_ODD_KEYS = (("on", True), ("2024-01-01", datetime.date(2024, 1, 1)), ("1", 1))
 
 
-def test_read_report_stays_total_over_a_non_string_frontmatter_key():
-    """`parse_report_text` is documented "never raises". A report whose frontmatter carries a
-    date key (it passes `validate_report`, which checks only `disposition`) must come back as a
-    no-headline read with the reason, not as a `ValidationError` from `ReportRead`."""
-    text = "---\ndisposition: benign\n2024-01-01: x\n---\nbody\n"
+@pytest.mark.parametrize(("spelled", "built"), _ODD_KEYS)
+def test_read_report_stays_total_over_a_non_string_frontmatter_key(spelled, built):
+    """`parse_report_text` is documented "never raises", and the write gate lets these keys
+    through — so the read must hand back the headline and the mapping as YAML built it, not a
+    `ValidationError` from `ReportRead`'s constructor."""
+    text = f"---\ndisposition: benign\n{spelled}: x\n---\nbody\n"
     read = parse_report_text(text)
-    assert read.disposition is None
-    assert read.reason is not None
-    assert "non-string key" in read.reason
+    assert read.disposition == "benign"
+    assert read.reason is None
+    assert read.frontmatter[built] == "x"
     assert read.text == text
 
 
-def test_iter_lessons_warn_skips_a_lesson_with_a_non_string_key(tmp_path, capsys):
-    """One bad lesson costs that row and never the walk (#584's contract): a date-keyed lesson
-    is warn-skipped BY NAME alongside its well-formed sibling, and reaches `on_skip`."""
+@pytest.mark.parametrize(("spelled", "built"), _ODD_KEYS)
+def test_iter_lessons_yields_a_lesson_with_a_non_string_key(spelled, built, tmp_path, capsys):
+    """The walk's contract is one bad file costs that row and never the walk (#584) — and a
+    non-string key is not even a bad file to the parser, so the lesson is YIELDED, its mapping
+    as YAML built it, with nothing on stderr."""
     d = tmp_path / "lessons"
     d.mkdir()
     (d / "good.md").write_text("---\nname: good\n---\nbody\n")
-    (d / "dated.md").write_text("---\nname: dated\n2024-05-01: rotated\n---\nbody\n")
-    skipped: list[Path] = []
-    yielded = [lesson.path.name for lesson in iter_lessons(d, on_skip=skipped.append)]
-    assert yielded == ["good.md"]
-    assert [p.name for p in skipped] == ["dated.md"]
-    assert "dated.md" in capsys.readouterr().err
+    (d / "odd.md").write_text(f"---\nname: odd\n{spelled}: rotated\n---\nbody\n")
+    yielded = list(iter_lessons(d))
+    assert [lesson.path.name for lesson in yielded] == ["good.md", "odd.md"]
+    assert yielded[1].fm[built] == "rotated"
+    assert capsys.readouterr().err == ""
+
+
+def test_as_int_is_an_int_that_is_not_a_bool():
+    assert as_int(3) == 3
+    assert as_int(0) == 0
+    assert as_int(True) is None
+    assert as_int(False) is None
+    assert as_int("3") is None
+    assert as_int(None) is None
 
 
 def test_repeat_trip_ignores_a_boolean_seq_instead_of_refusing():

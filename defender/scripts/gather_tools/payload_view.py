@@ -26,6 +26,7 @@ from typing import Any
 from defender._clock import parse_iso_utc
 from defender._env import env_int
 from defender._model import model
+from defender._text import as_int
 
 #: The in-context ceiling for ONE captured payload. 8 KB because in the recorded corpus only SIEM
 #: payloads exceed it — identity profiles, host records, tickets, package and key listings pass
@@ -99,8 +100,7 @@ def _dumps(value: Any) -> str:
 
 
 def _int(obj: dict, key: str) -> int | None:
-    v = obj.get(key)
-    return v if isinstance(v, int) and not isinstance(v, bool) else None
+    return as_int(obj.get(key))
 
 
 def _lists(obj: dict) -> list[list]:
