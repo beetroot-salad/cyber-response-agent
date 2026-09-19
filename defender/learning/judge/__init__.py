@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
-from dataclasses import field
+from dataclasses import field, fields as dataclass_fields
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -195,6 +195,12 @@ class EpisodeGrade:
 #: `_grade_from_document` re-derives from the rows' own `ungradable`/`withheld_reason` (#1007)
 #: so no top-level list can disagree with what the rows themselves say.
 _DERIVED = frozenset({"episode_dir", "graded_worlds", "withheld_worlds", "measuring_worlds"})
+#: The keys the file may carry, off the class itself. `_grade_from_document` drops a top-level
+#: STRING key outside this set rather than refusing on it (#1025 p8: a record written by a
+#: newer pass renders on an older page, the field shown nowhere) — the READER's tolerance, not
+#: the record's: `@model` refuses an unknown keyword (#1067), so the live pass's own
+#: construction still cannot misspell a field into silence.
+_RECORD_FIELDS = frozenset(f.name for f in dataclass_fields(EpisodeGrade))
 
 
 def _judge_yaml_path(episode_dir: Path) -> Path:
@@ -854,7 +860,8 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
     # is not in `grade_episode`'s conversion set — the bare traceback this comment promises
     # never leaves.
     try:
-        fields = {k: v for k, v in doc.items() if k not in _DERIVED}
+        fields = {k: v for k, v in doc.items()
+                  if k not in _DERIVED and not (isinstance(k, str) and k not in _RECORD_FIELDS)}
         # The stamp is a NESTED strict dataclass, and this is Python-mode validation (the
         # keys are a parsed YAML mapping, not JSON text): a strict nested dataclass admits
         # only an instance of itself — a well-shaped `{outcome, reason}` mapping is refused
