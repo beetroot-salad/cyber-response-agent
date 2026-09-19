@@ -48,7 +48,8 @@ fixtures behind it, not a side effect of reading the env twice.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -100,7 +101,7 @@ _JUDGE_DENY_REASON = (
 )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class JudgeDeps:
     """Frozen, and carrying NOTHING but its role — zero fields, on purpose.
 
@@ -262,7 +263,7 @@ def _normalize_reply_outcome(value: Any) -> str | None:
     return outcome if outcome in _REPLY_OUTCOME_ENUM else None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Finding:
     bucket: str
     subject: str
@@ -280,7 +281,7 @@ class Finding:
     world: str | None = None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class JudgeReply:
     episode_outcome: str
     noise_floor_note: str

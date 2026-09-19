@@ -37,7 +37,7 @@ import json
 import shutil
 import tempfile
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -193,7 +193,7 @@ def verb_context(episode_dir: Path) -> VerbContext:
         defender_dir=DEFENDER_DIR, run_dir=episode_dir, env=env, capture=None)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Replay:
     """One replayed call: the payload the world would have been served, and its canonical text.
 
@@ -330,7 +330,7 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
     return record
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Deps:
     """One world's collaborators, threaded as a value rather than as six parameters."""
 

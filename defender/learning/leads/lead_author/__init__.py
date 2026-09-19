@@ -16,7 +16,7 @@ import argparse
 import functools
 import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -158,7 +158,7 @@ DoneSink = Callable[[str | None], None]
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class LeadAuthorDeps:
     paths: _loop_config.LoopPaths
     #: The UNION (adapter glob ∪ committed marker) resolved ONCE at the boundary — before the

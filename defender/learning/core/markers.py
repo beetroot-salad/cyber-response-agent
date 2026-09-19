@@ -4,7 +4,7 @@ import contextlib
 import json
 import os
 from collections.abc import Iterator
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 
 from defender._io import write_atomic
@@ -90,7 +90,7 @@ def marker_identity(spec: dict, marker: Path) -> str:
     return marker.stem
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ClaimedMarker:
     """One request this pass owns: already moved out of the queue, read, and servable."""
 

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import datetime as _dt
 from collections.abc import Callable
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 
 from defender._clock import z_seconds
@@ -77,7 +77,7 @@ def _str_list(value: object) -> list[str]:
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _ChannelSpec:
     name: str
     #: The run-visualizer accent the card takes (`.q-card.t-<accent>` in the page's CSS).

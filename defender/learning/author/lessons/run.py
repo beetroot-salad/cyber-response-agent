@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import sys
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,7 @@ AuthorError = _shared.AuthorError
 _LOG_PREFIX = "author"
 
 
-@dataclass(frozen=True, kw_only=True)
+@model(frozen=True, kw_only=True)
 class AuthorConfig(CorpusAuthorConfig):
     """The lessons curator's drain config: the shared corpus-author core plus the three
     fields only this drain has — the held report, the manifest seed the lessons prompt

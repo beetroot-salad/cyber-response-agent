@@ -5,7 +5,7 @@ import difflib
 import re
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from defender._model import model
 from functools import partial
 from pathlib import Path
 
@@ -716,7 +716,7 @@ def _retire_exhausted_holds(
     return len(outcome.retired)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class PitfallsDisposition:
     """What one curation tick consumes from the pitfalls queue ONCE its commit has landed —
     the rows the corpus edit taught (`committed_ids`, rotated to `consumed_committed` under

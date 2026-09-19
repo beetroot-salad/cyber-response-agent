@@ -218,3 +218,88 @@ def test_grant_pattern_refuses_a_bare_string():
         AgentPolicy(write_allow=("/tmp/x",))  # type: ignore[arg-type]
     shape = re.compile("z")
     assert AgentPolicy(write_allow=(shape,)).write_allow[0] is shape
+
+
+# ---------------------------------------------------------------------------------------
+# PR 3 — defender/learning/
+# ---------------------------------------------------------------------------------------
+
+
+def test_query_row_hands_back_the_record_it_was_read_from():
+    """`QueryRow.record()` is "the parsed JSON record, byte-for-byte what
+    `record_query.lead_rows` hands the guard live, never a re-projection of the typed fields"
+    (#1017 C16), and its docstring makes "`params` is the same object" part of that promise.
+    A validated `dict` field is REBUILT on every construction, which turns both into copies
+    in silence — the typed view then IS the re-projection the distinction exists to refuse."""
+    from defender.learning.lead_repository import QueryRow
+
+    rec = {"lead_id": "l-001", "params": {"host": "h1"}}
+    row = QueryRow(
+        lead_id="l-001", seq=1, system="cmdb", verb="get-host", query_id="cmdb.get-host",
+        params=rec["params"], raw_command="c", exit_code=0, error_class=None,
+        payload_status="ok", payload_digest="d", raw_ref=None, _record=rec,
+    )
+    assert row.record() is rec
+    assert row.params is rec["params"]
+
+
+def test_batch_disposition_validates_its_lazily_named_curator_type():
+    """`BatchDisposition.pitfalls` names `PitfallsDisposition` under a `TYPE_CHECKING` guard —
+    the lessons lane must not pay for the lead-author package's import tree — so its pydantic
+    schema is incomplete at import and completed on the lead-author lane's own entry.
+
+    Both halves matter: without the completion every tick died with `PydanticUserError: not
+    fully defined`, and with the field typed `Any` instead (the other way to make that error
+    go away) strict validation would be off for exactly the value the record exists to
+    carry."""
+    from defender.learning.core import drains
+    from defender.learning.leads.pitfalls_curator import PitfallsDisposition
+
+    drains._complete_batch_disposition_schema()
+    real = PitfallsDisposition(committed_ids=("c:l-000:0",), sha=None, held_ids=())
+    assert drains.BatchDisposition(
+        served=[], pitfalls=real, lock_wait_seconds=None).pitfalls is real
+    assert drains.BatchDisposition(
+        served=[], pitfalls=None, lock_wait_seconds=None).pitfalls is None
+    with pytest.raises(ValidationError):
+        drains.BatchDisposition(
+            served=[], pitfalls="a disposition", lock_wait_seconds=None)  # type: ignore[arg-type]
+
+
+def test_author_branch_accepts_any_structural_forge():
+    """`AuthorBranch.forge` is typed `Forge | None`, and `arbitrary_types_allowed` validates a
+    class annotation with `isinstance` — which a plain `Protocol` refuses to be the second
+    argument of (`SchemaError: 'cls' must be valid as the first argument to 'isinstance'`).
+    `@runtime_checkable` is what keeps the structural contract usable as a field type: the
+    production `GhForge` and the drain's own doubles both reach the field as themselves, and
+    an object holding none of the three methods still does not."""
+    from defender.learning.author.branch import AuthorBranch
+    from defender.learning.author.forge import GhForge
+
+    class _Forge:
+        def list_open_prs(self, head_prefix): return []
+        def list_prs_for_head(self, head): return []
+        def open_pr(self, *, base, head, title, body): return "url"
+
+    double = _Forge()
+    assert AuthorBranch(forge=double).forge is double
+    gh = GhForge()
+    assert AuthorBranch(forge=gh).forge is gh
+    with pytest.raises(ValidationError):
+        AuthorBranch(forge=object())  # type: ignore[arg-type]
+
+
+def test_drain_judgement_resolves_its_counter_annotation():
+    """`itertools.count` is generic to a type checker and a plain class at runtime, where
+    `itertools.count[int]` raises `TypeError: not subscriptable` — and a pydantic dataclass
+    evaluates its field annotations at DECORATION time, which `from __future__ import
+    annotations` no longer hides. The whole `author.drain` import tree (the drain, both
+    curators' runners, the queue page) failed to load until the alias split the two
+    readings, and the field must still reach pydantic as the real class."""
+    import itertools
+
+    from defender.learning.author.drain import _Judgement
+
+    counter = _Judgement.__pydantic_fields__["counter"]
+    assert counter.annotation is itertools.count
+    assert counter.default_factory is itertools.count

@@ -48,7 +48,7 @@ from __future__ import annotations
 import argparse
 import functools
 import sys
-from dataclasses import dataclass
+from defender._model import model
 from datetime import date, datetime, UTC
 from pathlib import Path
 
@@ -96,7 +96,7 @@ def _parse_dt(raw) -> datetime | None:
     return parse_iso_utc(raw)
 
 
-@dataclass
+@model
 class CaseHit:
     case_id: str
     disposition: str

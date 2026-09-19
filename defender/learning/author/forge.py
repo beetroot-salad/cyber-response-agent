@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from defender._git import REPO_ROOT
 
@@ -13,6 +13,12 @@ class ForgeError(Exception):
     pass
 
 
+# `@runtime_checkable` (#1067): `AuthorBranch.forge` is typed `Forge | None`, and a strict
+# pydantic dataclass validates an arbitrary class annotation with `isinstance` — which a plain
+# `Protocol` refuses to be the second argument of. The structural contract is unchanged (the
+# check is by method NAME, not by signature); what it buys is that the production `GhForge` and
+# every test double alike reach the field as themselves.
+@runtime_checkable
 class Forge(Protocol):
 
     def list_open_prs(self, head_prefix: str) -> list[dict]:
@@ -25,7 +31,7 @@ class Forge(Protocol):
         ...
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class GhForge:
 
     cwd: Path = REPO_ROOT

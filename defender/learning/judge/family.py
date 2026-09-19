@@ -63,7 +63,8 @@ from __future__ import annotations
 
 import contextlib
 import json
-from dataclasses import dataclass, field, replace
+from dataclasses import field, replace
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -281,7 +282,7 @@ def _review_measured_reachability(review: dict[str, Any]) -> bool:
     return any(key in block for block in blocks for key in _M1_REACHABILITY_KEYS)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ReachabilityFacts:
     """O2's three executed facts, read off ONE world's review block and validated against
     their own bool|null domain — never coerced (#1007, `test_a_non_boolean_reachable_by_capture
@@ -407,7 +408,7 @@ def sample_patterns(overlay: Any, *, holding_system: str) -> list[str]:
     return staged_patterns(overlay) or [holding_system]
 
 
-@dataclass
+@model
 class FamilyGrade:
     """The mechanical pass's own output: per-world rows plus the family's word.
 
@@ -1098,7 +1099,7 @@ def _check_gather_summaries(world: Bound, *, label: str, referenced_leads: froze
             "refusing rather than grading on a thinner view than it appears to have")
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class WorldFacts:
     """One world's archived record, read ONCE per grading pass.
 
@@ -1177,7 +1178,7 @@ def read_archived_report(bound: Bound, name: str) -> ReportRead:
     return parse_report_text(rec.text)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class InvestigationFacts:
     """What one world's archived `investigation.md` says on its own — the half of `WorldFacts`
     that needs no ledger. Its own read (`read_investigation_facts`) because the two records

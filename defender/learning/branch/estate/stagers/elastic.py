@@ -50,7 +50,7 @@ queries is the GATHER subagent, whose deps carry no clock and whose prompt rende
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from defender._model import model
 from typing import Any
 
 from defender.scripts.adapters.confinement import (
@@ -154,7 +154,7 @@ class StagingError(AdapterFault):
     exit_code = USAGE_EXIT_CODE
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _FromClause:
     """One ES|QL query's leading `FROM`, split into the parts a retarget needs.
 

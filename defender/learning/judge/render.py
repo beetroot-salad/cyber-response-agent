@@ -19,7 +19,8 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass, field, replace
+from dataclasses import field, replace
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +77,7 @@ def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
     return git_show_file(cwd, rev, path)
 
 
-@dataclass
+@model
 class JudgeInput:
     """The judge's whole rendered input for one (world, pass). Never stored — derived fresh
     on every `render()` call from the archive, the runs base and the checkout."""

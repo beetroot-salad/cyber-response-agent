@@ -23,7 +23,8 @@ model across SIBLINGS, and these calls all happen in the launcher.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +89,7 @@ def model_seam(episode_dir: Path) -> Any:
     return invoke
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class EpisodeAdapters:
     """The review's read side: one registry and one context, plus one per-world VIEW of both.
 
