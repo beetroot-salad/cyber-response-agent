@@ -317,6 +317,12 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
         {"pitfall_id": "p-prose", "offers_declined": "lots"},
         {"pitfall_id": "p-bool", "offers_declined": True},
         {"pitfall_id": "p-real", "offers_declined": 1},
+        # Held, with no usable id: COUNTED (the wake gate counts it) but not named.
+        {"pitfall_id": 7, "offers_declined": 3},
+    ])
+    _write_lines(drain.graveyard_file(paths.pitfalls), [
+        # `json.loads` accepts a bare NaN; the contract must not write one back.
+        '{"pitfall_id": "p-nan", "deadletter_reason": "r", "row": {"pitfall_id": "p-nan", "score": NaN}}',
     ])
     qdir = paths.quarantine_dir
     _write_json(qdir / "odd.json", {
@@ -336,8 +342,12 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
         "fault_class": "", "row_ids": [], "consecutive_ticks": 0, "reason": "",
         "recorded_at": None,
     }
-    assert _channel(view, "pitfalls")["held"] == {"count": 1, "ids": ["p-real"]}
+    assert _channel(view, "pitfalls")["held"] == {"count": 2, "ids": ["p-real"]}
+    assert _channel(view, "pitfalls")["deadletter"][0]["row"] == {"pitfall_id": "p-nan", "score": None}
+    assert "NaN" not in serialize_queues.dump_contract(view)
+    json.loads(serialize_queues.dump_contract(view))            # strict: no bare NaN
     assert "0 ticks running" in _rendered(page)
+    assert "2 held" in _rendered(page)
     [taint] = view["quarantine"]["tainted"]["rows"]
     assert taint["findings"] == 0
     assert taint["verdict"] == {}

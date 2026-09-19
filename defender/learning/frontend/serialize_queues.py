@@ -40,7 +40,7 @@ from defender.learning.author import drain
 from defender.learning.core.config import LoopPaths, QueueChannel, loop_paths
 from defender.learning.core.markers import FAILED_MARKER_DIRNAME
 from defender.learning.core.quarantine import held_archives, quarantine_cap
-from defender.learning.frontend.serialize import dump_contract
+from defender.learning.frontend.serialize import _json_safe, dump_contract
 from defender.learning.leads.pitfalls_curator import OFFERS_DECLINED_KEY
 
 __all__ = ["build_view", "stamped_view", "dump_contract"]
@@ -133,7 +133,11 @@ def _dead_letter(record: dict, id_key: str) -> dict:
         "id": _opt_str(rid),
         "reason": _str(record.get("deadletter_reason")),
         "when": _opt_str(record.get("retired_at")),
-        "row": row if isinstance(row, dict) else {"value": row},
+        # The row is the one untyped mapping in the contract, carried as the writer stored
+        # it — through the lessons serializer's JSON-safety pass, because `json.loads` accepts
+        # a bare `NaN` and `json.dumps` would write it back, and one such value in one row
+        # makes `queues.json` unreadable to every strict reader.
+        "row": _json_safe(row if isinstance(row, dict) else {"value": row}),
     }
 
 
@@ -160,8 +164,11 @@ def _rows(path: Path) -> tuple[list[dict], int]:
 
 def _channel_view(spec: _ChannelSpec, channel: QueueChannel) -> dict:
     rows, unreadable = _rows(channel.file)
-    held_ids = [r[channel.id_key] for r in rows
-                if spec.is_held(r) and isinstance(r.get(channel.id_key), str)]
+    # COUNT by the lane's marker alone — the rule `drains._pending_queue_counts` applies, so
+    # the page's number is the wake gate's — and list the ids that are strings. A held row
+    # with no usable id is held all the same; it is counted and simply not named.
+    held_rows = [r for r in rows if spec.is_held(r)]
+    held_ids = [r[channel.id_key] for r in held_rows if isinstance(r.get(channel.id_key), str)]
     graveyard, dead_unreadable = _rows(drain.graveyard_file(channel))
     unreadable += dead_unreadable
     stuck: dict | None = None
@@ -176,7 +183,7 @@ def _channel_view(spec: _ChannelSpec, channel: QueueChannel) -> dict:
         "hold_means": spec.hold_means,
         "depth": {"queued": len(rows)},
         "unreadable": unreadable,
-        "held": {"count": len(held_ids), "ids": held_ids},
+        "held": {"count": len(held_rows), "ids": held_ids},
         "deadletter": [_dead_letter(rec, channel.id_key) for rec in reversed(graveyard)],
         "stuck": stuck,
     }
