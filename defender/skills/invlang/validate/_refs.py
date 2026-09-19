@@ -1,6 +1,6 @@
 """Does every id a row cites resolve to something the document declares?
 
-One family of `validate.py`'s rules, split out at 4038 lines: lead references, hypothesis
+One family of `validate.py`'s rules: lead references, hypothesis
 references, prediction and commitment citations, and the id namespaces that keep a token
 in no namespace from reaching no rule at all.
 """

@@ -73,9 +73,7 @@ class GrammarError(ValueError):
 # importing the learning config would let a change there silently re-tag every committed
 # score.
 #
-# THE ENV VARS ARE THE SAME TWO NAMES. This note used to end by denying that — calling the two
-# readers coincidental namesakes — which was wrong, and wrong in the direction that costs
-# someone a day. `JUDGE_MODEL` and `JUDGE_EFFORT` are read here AND by
+# THE ENV VARS ARE THE SAME TWO NAMES. `JUDGE_MODEL` and `JUDGE_EFFORT` are read here AND by
 # `learning/core/config.py`, with different defaults, so setting either for this harness also
 # retargets the family judge — and, since #1008 registered that judge, aborts every ordinary
 # investigation at `run.py`'s all-roles preflight if the value names a model no provider

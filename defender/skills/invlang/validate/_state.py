@@ -1,6 +1,6 @@
 """Attribute updates, the effective vertex state they build, and the slots left open.
 
-One family of `validate.py`'s rules, split out at 4038 lines. This is the only family
+One family of `validate.py`'s rules. This is the only family
 that DERIVES a value the rest of the system reads — `effective_vertex_state` — rather
 than only answering yes or no about the text.
 

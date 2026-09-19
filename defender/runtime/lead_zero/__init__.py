@@ -11,7 +11,7 @@ returned block as one more ORIENT section.
 
 Turn-zero leads: the work the harness does before the model's first request.
 
-Split into four modules when this file reached 1215 lines:
+Split into four modules:
 
   * `_spec`    — the ids, statuses and field names turn-zero work is written against.
   * `_capture` — issuing a call and recording what came back, including the budget

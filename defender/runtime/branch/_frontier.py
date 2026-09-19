@@ -16,7 +16,7 @@ hydrating the fork it just opened; the symmetry is exact rather than approximate
 Reading the source run: where the fences end, which leads existed, what the clock said.
 
 Every function here is a QUESTION about the run being branched from, and answers it
-without writing anything. Split out of `branch.py` at 1197 lines.
+without writing anything.
 """
 
 from __future__ import annotations

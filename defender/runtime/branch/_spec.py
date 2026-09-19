@@ -15,7 +15,7 @@ hydrating the fork it just opened; the symmetry is exact rather than approximate
 
 What a branch request IS, and opening the store it reads from.
 
-Split out of `branch.py` at 1197 lines; imports none of its siblings.
+Imports none of its siblings.
 """
 
 from __future__ import annotations

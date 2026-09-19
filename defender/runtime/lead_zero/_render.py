@@ -11,9 +11,8 @@ returned block as one more ORIENT section.
 
 Turning captured documents into the section the model reads.
 
-Split out of `lead_zero.py` at 1215 lines. Everything here is elision and ordering: what
-to show, in what order, and how to say a thing was not available without asserting an
-absence the backend never confirmed.
+Everything here is elision and ordering: what to show, in what order, and how to say a
+thing was not available without asserting an absence the backend never confirmed.
 """
 from __future__ import annotations
 

@@ -1,8 +1,7 @@
 """The composition roots: which model, which grants, which tools each role gets.
 
-Split out of `driver.py` at 1221 lines. Every function here is a build site — the
-parameter counts are wide on purpose, because a build is where the configuration and the
-injection seams meet.
+Every function here is a build site — the parameter counts are wide on purpose, because a
+build is where the configuration and the injection seams meet.
 """
 from __future__ import annotations
 

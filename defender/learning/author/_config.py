@@ -46,11 +46,7 @@ class CorpusAuthorConfig:
 
     `kw_only` because the subclasses add their own required fields and the base ends in one
     that has a default — otherwise every extension field would need a default too, purely
-    for dataclass field ordering.
-
-    A prohibition against unifying the two drains once stood here; #719 reversed it. Their
-    gates, rotations, locks and id fields really do differ — each difference became a field
-    rather than a reason to keep two copies of the batch driver."""
+    for dataclass field ordering."""
 
     repo_root: Path
     runs_dir: Path

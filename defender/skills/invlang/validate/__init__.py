@@ -1,7 +1,6 @@
 """The invlang validator's public face.
 
-The rules themselves live in seven modules, layered one way and split out of this one
-when it reached 4038 lines. Each holds one family, and each imports only from the
+The rules themselves live in seven modules, layered one way. Each holds one family, and each imports only from the
 families above it in this list:
 
   * `_diag`   — the `Diagnostic`/`Locus` types, the severity vocabulary, and the

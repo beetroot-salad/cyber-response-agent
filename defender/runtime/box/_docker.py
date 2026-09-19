@@ -1,7 +1,6 @@
 """Talking to the daemon: naming, env, status, reaping, and which mounts are shared.
 
-Split out of `box.py` at 1077 lines. Every call to `docker` in the runtime goes through
-here.
+Every call to `docker` in the runtime goes through here.
 """
 from __future__ import annotations
 

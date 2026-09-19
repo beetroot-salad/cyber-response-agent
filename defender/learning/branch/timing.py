@@ -50,7 +50,6 @@ TIMING_NAME = "timing.json"
 
 
 def timing_path(episode_dir: Path) -> Path:
-    """Where the record lives under `episode_dir`."""
     return Path(episode_dir) / TIMING_NAME
 
 

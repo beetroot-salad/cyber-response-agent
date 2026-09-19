@@ -38,12 +38,9 @@ from defender.learning.core.validate import (  # noqa: E402
 
 #: THE TWO AUTHORING STAGES AND THE NAMES THEIR CALLERS ALREADY IMPORT FROM HERE.
 #:
-#: This module is a facade, and #922 is most of it leaving. It used to re-export the per-case
-#: cycle (`run_one`, `learn_drain`), the four stage entry points, both judge wirings, the
-#: subagent protocol, the judge/oracle document validators and the four queue appenders —
-#: every one of which was the old pipeline's, and every one of which is deleted. What is left
-#: is what still has a caller: the two drains, the CLI, and the handful of helpers other
-#: packages read through this name rather than reaching into `core/`.
+#: This module is a facade: what is exported is what still has a caller — the two drains,
+#: the CLI, and the handful of helpers other packages read through this name rather than
+#: reaching into `core/`.
 __all__ = [
     "DEFAULT_PATHS", "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
     "author_drain", "lead_author_drain",

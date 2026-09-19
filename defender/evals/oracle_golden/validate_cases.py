@@ -663,12 +663,6 @@ def main(argv: list[str] | None = None) -> int:
     for case_dir in case_dirs:
         problems += check_case(case_dir, by_id, known)
     problems += check_held_out_ledger(cases)
-    # `check_replay_boundary` retired with `replay.py` (#922). It asserted that the oracle
-    # replay driver sourced every input from `oracle_visible/` and never from `hidden/` — the
-    # file-level boundary that kept a projection from peeking at the ground truth it was scored
-    # against. The driver and the oracle it drove are deleted; the golden cases, their ledger
-    # and every check below are unaffected, because they are about the CASES rather than about
-    # the thing that replayed them. Restore it with the estate replay harness that replaces it.
     problems += check_known_defects(ns.cases_dir, known)
 
     if not ns.quiet:

@@ -1,7 +1,7 @@
 """History and weight: what the document already committed, and what a move is allowed to
 say about it.
 
-One family of `validate.py`'s rules, split out at 4038 lines: the append-only comparison
+One family of `validate.py`'s rules: the append-only comparison
 against the committed baseline, the provenance a strong move owes, and which of a
 hypothesis' predictions the run actually settled.
 """
