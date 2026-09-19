@@ -13,7 +13,9 @@ from collections.abc import Callable, Mapping
 from defender._model import model
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
+from typing import Annotated, Any, Union, get_args, get_origin
+
+from pydantic import SkipValidation
 
 from .verb_grant import GrantError, VerbGrant
 
@@ -74,7 +76,11 @@ class VerbContext:
 
     defender_dir: Path
     run_dir: Path
-    env: Mapping[str, str]
+    #: `SkipValidation` (#1067): pydantic validates an abstract `Mapping` by copying it into a
+    #: plain writable `dict`, so a read-only `MappingProxyType` or the live `os.environ` a
+    #: caller handed in would be swapped for a mutable snapshot on every `query` call — the
+    #: same copy `RosterRead` was exempted from. The annotation stays for static checking.
+    env: Annotated[Mapping[str, str], SkipValidation]
     capture: Any = None
     #: Which branched world this call is being served for, when it is being served for one.
     #: `None` is the ordinary run and the base world alike — both read the corpus itself.

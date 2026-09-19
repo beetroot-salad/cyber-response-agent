@@ -6,7 +6,9 @@ import time
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
+
+from pydantic import SkipValidation
 
 if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays lazy
     pass
@@ -122,14 +124,19 @@ class AgentDeps:
     #: constructing a real one with a fake `transport`. See `BoxLike`'s own comment.
     box: box_mod.BoxLike = field(kw_only=True, default_factory=box_mod.BoxExecutor)
     budget_started_monotonic: float = field(kw_only=True, default_factory=time.monotonic)
-    authored_paths: set[Path] = field(
+    #: `SkipValidation` on this and `review_state` (#1067): each is THE ONE mutable container
+    #: a frozen deps carries, and `dataclasses.replace(deps, ...)` — the driver's sub-agent
+    #: deps, `LeadStop`'s copy — has to hand the SAME object to the copy, or the turn count,
+    #: the raised asks and the authored paths fork silently between the two. A validated
+    #: `set[Path]`/`dict` field is rebuilt on every construction, which is exactly that fork.
+    authored_paths: Annotated[set[Path], SkipValidation] = field(
         kw_only=True, default_factory=set, compare=False, repr=False
     )
     #: The gate's per-run mutable state (turn count, raised-lead ids, the terminal-close
     #: flag) — ONE mutable container, following the `authored_paths` precedent, since
     #: `AgentDeps` is frozen and cannot carry a plain int counter.
     #: `defender.runtime.challenge_gate.ReviewState.of(deps)` owns what lives inside it.
-    review_state: dict = field(
+    review_state: Annotated[dict, SkipValidation] = field(
         kw_only=True, default_factory=dict, compare=False, repr=False
     )
     roots: ResolvedRoots | None = field(kw_only=True, default=None)

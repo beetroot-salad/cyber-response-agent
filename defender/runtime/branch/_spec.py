@@ -21,12 +21,12 @@ Split out of `branch.py` at 1197 lines; imports none of its siblings.
 from __future__ import annotations
 
 import json
-from defender._model import model
+from defender._model import model, unwrap_before
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import field_validator
+from pydantic import model_validator
 
 
 
@@ -61,20 +61,43 @@ class BranchSpec:
     continuation_prompt: str
     as_of: datetime
 
-    # #1067: strict validation would otherwise refuse a non-datetime `as_of` as pydantic's
-    # `ValidationError` at construction — before `validate`'s `_refuse_bad_as_of` ever sees
-    # the spec. The refusal stays a `BranchError`, the ONE class `run_investigation`'s
-    # store-setup handler names (any other class escapes it, leaving the sqlite connection
-    # open and the wire log registered). A domain exception raised from a validator
-    # propagates unconverted — `_model`'s documented convention.
-    @field_validator("as_of", mode="before")
+    # #1067: strict validation refuses a mistyped field at CONSTRUCTION, as pydantic's
+    # `ValidationError` — a class none of this spec's callers name. `learning/branch/cli.py`
+    # builds the spec inside `except BranchError → LauncherRefused`, and `run_investigation`'s
+    # store-setup handler names `BranchError` alone (any other class escapes it, leaving the
+    # sqlite connection open and the wire log registered). So EVERY field's type is checked
+    # here first, ahead of pydantic's own check, and refused as `BranchError`; a domain
+    # exception raised from a validator propagates unconverted — `_model`'s documented
+    # convention. `bool` is excluded from `int` because it is an `int` that names no message,
+    # and pydantic's strict `int` would admit it.
+    @model_validator(mode="before")
     @classmethod
-    def _as_of_is_a_moment(cls, value: Any) -> Any:
-        if not isinstance(value, datetime):
-            raise BranchError(
-                f"as_of must be a datetime, got {value!r} — a branch point without a moment "
-                "cannot pin the clock its siblings resume into")
-        return value
+    def _fields_are_typed(cls, value: Any) -> Any:
+        given = unwrap_before(cls, value)
+        if not isinstance(given, dict):
+            return given
+        for name, expected, why in _FIELD_TYPES:
+            if name not in given:
+                continue  # pydantic names the missing field itself
+            got = given[name]
+            if not isinstance(got, expected) or (expected is int and isinstance(got, bool)):
+                raise BranchError(
+                    f"{name} must be {'an' if expected is int else 'a'} {expected.__name__}, "
+                    f"got {got!r} — {why}")
+        return given
+
+
+#: Each field's required runtime type, and what a wrongly-typed one would have meant.
+_FIELD_TYPES: tuple[tuple[str, type, str], ...] = (
+    ("source_run_dir", Path,
+     "a spelling of a path is not the path the store is opened from"),
+    ("branch_message_id", int,
+     "a branch point is a message id this run's own store holds, not a spelling of one"),
+    ("continuation_prompt", str,
+     "the prompt is part of the measured instrument and has to be the text that was sent"),
+    ("as_of", datetime,
+     "a branch point without a moment cannot pin the clock its siblings resume into"),
+)
 
 
 def open_source_store(run_dir: Path) -> Any:

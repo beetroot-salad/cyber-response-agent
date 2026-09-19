@@ -5,7 +5,7 @@ import re
 from defender._model import model
 from pathlib import Path
 
-from .grant import PROGRAMS, Grant, PathShapes
+from .grant import PROGRAMS, Compiled, Grant, PathShapes
 from ..verb_grant import DENY_ALL, VerbGrant
 
 _DEFAULT_DENY_REASON = (
@@ -21,7 +21,7 @@ class AgentPolicy:
     read_allow: PathShapes = PathShapes()
     read_roots: tuple[Path, ...] = ()
     read_confine: tuple[Path, ...] = ()
-    write_allow: tuple[re.Pattern[str], ...] = ()
+    write_allow: tuple[Compiled, ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON
     budget_enforced: bool = False
     verb_allow: VerbGrant = DENY_ALL

@@ -75,6 +75,14 @@ def unwrap_before(cls: type, value: Any) -> Any:
     return merged
 
 
+#: The `ConfigDict` keys, read off the TypedDict itself so the refusal in `model` tracks the
+#: installed pydantic rather than a hand-kept copy.
+_CONFIG_KEYS: frozenset[str] = frozenset(ConfigDict.__annotations__)
+#: The stdlib `@dataclass` knobs `model` forwards by name (the refusal names them).
+_STDLIB_KNOBS: frozenset[str] = frozenset(
+    {"frozen", "eq", "order", "unsafe_hash", "repr", "kw_only", "slots"})
+
+
 # Two `@overload`s, not one signature: `T` appears only in the RETURN of the keyword-config
 # form (`@model(frozen=True)` — no `cls` argument to solve it from), and mypy resolves a
 # typevar it cannot solve from that call's own arguments to `Never` rather than leaving it open
@@ -86,10 +94,14 @@ def unwrap_before(cls: type, value: Any) -> Any:
 def model(cls: type[T]) -> type[T]: ...
 @overload
 def model(cls: None = None, *, frozen: bool = False, strict: bool = True, eq: bool = True,
+         order: bool = False, unsafe_hash: bool = False, repr: bool = True,
+         kw_only: bool = False, slots: bool = False,
          **config_kwargs: Any) -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(field_specifiers=(dataclasses.field,))
-def model(cls: type[T] | None = None, *, frozen: bool = False, strict: bool = True,
-         eq: bool = True, **config_kwargs: Any) -> Callable[[type[T]], type[T]] | type[T]:
+def model(cls: type[T] | None = None, *, frozen: bool = False, strict: bool = True,  # noqa: PLR0913 — one keyword per stdlib `@dataclass` knob, each forwarded by name
+         eq: bool = True, order: bool = False, unsafe_hash: bool = False, repr: bool = True,
+         kw_only: bool = False, slots: bool = False,
+         **config_kwargs: Any) -> Callable[[type[T]], type[T]] | type[T]:
     """The shared boundary-type decorator — see module docstring for the convention it fixes.
 
     Usable bare (`@model`) or with keyword config (`@model(frozen=True)`), matching stdlib
@@ -97,13 +109,25 @@ def model(cls: type[T] | None = None, *, frozen: bool = False, strict: bool = Tr
     data at a boundary pydantic itself validates in Python mode (a tool parameter type — see
     the module docstring's `dataclass_exact_type` note) rather than by our own code handing it
     already-typed values. `arbitrary_types_allowed` is always on (≈227 fields in this tree are
-    typed `Any`/`Callable`/a Protocol/another arbitrary class). `eq` is stdlib `@dataclass`'s
-    own knob, not a `ConfigDict` key (`eq=False` for a class where two equal-content instances
-    must still compare unequal — identity equality, `RosterRead`'s "two reads are two reads").
-    Extra `ConfigDict` keys (e.g. a class that wants `validate_assignment=True`) pass through
-    — build the plain `dict` and `cast` it, rather than splat them straight into the
+    typed `Any`/`Callable`/a Protocol/another arbitrary class).
+
+    The stdlib `@dataclass` knobs — `frozen`, `eq`, `order`, `unsafe_hash`, `repr`, `kw_only`,
+    `slots` — are each named here and forwarded to the pydantic decorator BY NAME, because
+    they are not `ConfigDict` keys: splatted into the config instead, pydantic ignores them
+    without a word, and `@model(frozen=True, kw_only=True)` would build a positional
+    constructor (`eq=False` is the one already in use — identity equality, `RosterRead`'s "two
+    reads are two reads"). Everything else in `**config_kwargs` must be a real `ConfigDict`
+    key (e.g. `validate_assignment=True`) and is refused otherwise, so a knob this list does
+    not carry (`init`, which pydantic only accepts as `False`, or a typo) cannot vanish the
+    same way. The plain `dict` is built and `cast` rather than splatted straight into the
     `ConfigDict(...)` call, since a `TypedDict` constructor checks each keyword against its
     known keys and an arbitrary caller-supplied name is not one of them."""
+    unknown = sorted(set(config_kwargs) - _CONFIG_KEYS)
+    if unknown:
+        raise TypeError(
+            f"@model got {unknown} — not a stdlib @dataclass knob this decorator forwards "
+            f"({sorted(_STDLIB_KNOBS)}) and not a pydantic ConfigDict key, so pydantic would "
+            "have ignored it in silence")
     config = cast(ConfigDict,
                  {"strict": strict, "arbitrary_types_allowed": True, **config_kwargs})
 
@@ -111,7 +135,9 @@ def model(cls: type[T] | None = None, *, frozen: bool = False, strict: bool = Tr
     # `test_systemic_stage_frames_680`'s AST census counts every `def wrap` as a second one.
     def decorate(inner_cls: type[T]) -> type[T]:
         return cast(type[T],
-                    _pydantic_dataclass(inner_cls, config=config, frozen=frozen, eq=eq))
+                    _pydantic_dataclass(inner_cls, config=config, frozen=frozen, eq=eq,
+                                        order=order, unsafe_hash=unsafe_hash, repr=repr,
+                                        kw_only=kw_only, slots=slots))
 
     if cls is not None:
         return decorate(cls)

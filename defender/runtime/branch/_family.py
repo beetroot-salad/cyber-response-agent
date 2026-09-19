@@ -181,11 +181,7 @@ def _parse_patches(raw: Any, where: str) -> dict[str, dict[str, dict[str, Any]]]
         entities: dict[str, dict[str, Any]] = {}
         for entity, fields_ in table.items():
             _check_entity(entity, where, system)
-            if not isinstance(fields_, dict):
-                raise FamilyError(
-                    f"{where}.patches[{system!r}][{entity!r}] must be a mapping of field to "
-                    "value")
-            entities[entity] = dict(fields_)
+            entities[entity] = _checked_fields(fields_, f"{where}.patches[{system!r}][{entity!r}]")
         if entities:
             out[system] = entities
     return out
@@ -204,6 +200,26 @@ def _check_entity(entity: Any, where: str, system: str) -> None:
             f"{where}.patches[{system!r}] names entity {entity!r}, which is outside the entity "
             "domain — an entity is rendered as a KEY, so it may carry only alphanumerics and "
             "'.', '_', '-' after a leading alphanumeric")
+
+
+def _checked_fields(fields_: Any, at: str) -> dict[str, Any]:
+    """One entity's field table, refused as `FamilyError` unless it is a mapping keyed by str.
+
+    The FIELD keys too, not only the entity's: `Overlay.patches` is strictly typed
+    `dict[str, ...]` all the way down (#1067), so a non-string key — YAML 1.1 reads a bare
+    `on:`/`yes:`/`1:` as a bool or an int — would otherwise refuse as pydantic's
+    `ValidationError` out of `Overlay(...)`, a class none of this loader's callers handle,
+    instead of the `FamilyError` naming the field.
+    """
+    if not isinstance(fields_, dict):
+        raise FamilyError(f"{at} must be a mapping of field to value")
+    bad = [k for k in fields_ if not isinstance(k, str)]
+    if bad:
+        raise FamilyError(
+            f"{at} names non-string field(s) {bad!r} — a field is a key in a model-authored "
+            "document, and YAML reads a bare `on`/`yes`/`1` as something other than its "
+            "spelling")
+    return dict(fields_)
 
 
 def _parse_elastic(raw: Any, where: str) -> dict[str, ElasticEntry]:

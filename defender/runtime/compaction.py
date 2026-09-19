@@ -104,7 +104,13 @@ _LEAD_ROW_RE = re.compile(r"l-\S*\|(\d+)\|")
 @model(frozen=True)
 class FrozenState:
 
-    prefix: tuple[Message, ...]
+    #: `SkipValidation` for the same reason `CompactionStep.history` carries it (below): the
+    #: prefix holds the orientation message BY IDENTITY (`_build_prefix` takes it straight
+    #: from `history[orientation_index]`), and a validated `tuple[Message, ...]` is rebuilt
+    #: element by element, each `dict` shallow-copied — so every "reused" step would re-send
+    #: copies, and an edit to the live orientation message would never show through the
+    #: frozen prefix.
+    prefix: Annotated[tuple[Message, ...], SkipValidation]
     freeze_index: int
     frozen_through: int
 

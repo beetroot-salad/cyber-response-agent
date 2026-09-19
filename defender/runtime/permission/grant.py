@@ -7,6 +7,9 @@ from collections.abc import Callable
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
+from typing import Annotated, Any
+
+from pydantic import BeforeValidator
 
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.runtime import gnu_flags
@@ -75,6 +78,24 @@ SEG = r"[\w.@=+-]+"
 TREE = rf"{SEG}(?:/{SEG})*"
 
 
+def _already_compiled(value: Any) -> Any:
+    # A bare `str` is refused, not compiled: pydantic's `re.Pattern` schema compiles a string
+    # even under `strict=True`, so without this the "no coercion" guarantee `_model` documents
+    # would not hold for the gate's own patterns — a path or shape string handed where a
+    # `program_shape(...)`/`under(...)` result was meant would become a live regex with its
+    # metacharacters unescaped, where it used to fail at the first `.match`.
+    if not isinstance(value, re.Pattern):
+        raise ValueError(
+            f"a grant pattern must be a compiled re.Pattern, got {type(value).__name__} "
+            f"{value!r} — compile it (`program_shape`, `under`, `re.compile`) at the site that "
+            "knows what is being escaped")
+    return value
+
+
+#: A compiled pattern field on a gate record: `re.Pattern[str]` that refuses a bare string.
+Compiled = Annotated[re.Pattern[str], BeforeValidator(_already_compiled)]
+
+
 class PathShapes(tuple[re.Pattern[str], ...]):
 
     __slots__ = ()
@@ -94,7 +115,7 @@ class Route(enum.Enum):
 class Grant:
 
     program: str
-    pattern: re.Pattern[str]
+    pattern: Compiled
     scope: PathShapes = PathShapes()
     route: Route = Route.PLAIN
     pins_path: bool = field(default=False)
