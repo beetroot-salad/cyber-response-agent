@@ -83,10 +83,14 @@ API
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -96,7 +100,19 @@ from defender.evals.oracle_golden import migrate_esql_encoding as MIGRATE
 
 DEFENDER_DIR = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = DEFENDER_DIR / "evals" / "oracle_golden"
+CASES_DIR = GOLDEN_DIR / "cases"
 MIGRATION_SCRIPT = GOLDEN_DIR / "migrate_esql_encoding.py"
+REPO_ROOT = DEFENDER_DIR.parent
+
+#: main's tip immediately before #1054's migration landed — the commit the design doc's own
+#: fixture-provenance comments already cite ("copied verbatim from the tree as it stood at
+#: 3249dffb"). The one anchor in this module that is NOT self-referential: every other O2
+#: check compares the migration's output to a fixture THIS FILE built, or to a re-zip of
+#: whatever is on disk NOW — either of which a transform that corrupts the corpus
+#: consistently with itself (a reversed cell order, a silent truncation to `values: []`)
+#: would satisfy just as well. This doesn't: it reads the dict-row bytes git actually has
+#: for this ref, independent of whatever `migrate_tree` did to the tree since.
+PRE_MIGRATION_REF = "3249dffb"
 
 
 # ---------------------------------------------------------------------------------
@@ -346,6 +362,46 @@ def test_a_row_whose_keys_are_not_the_columns_is_refused_not_guessed(why, rows):
         MIGRATE.to_columnar(payload)
 
 
+def test_a_mix_of_dict_and_already_positional_rows_migrates_only_the_dict_ones():
+    """Adversary finding (Hole 6, #1054). The obvious-but-wrong implementation decides a
+    WHOLE payload's fate from `values[0]` alone: if the first row happens to already be a
+    list, it assumes every row is and returns the payload untouched. That is exactly the
+    shape a partially-applied hand edit or an interrupted `controls.py` rerun leaves behind
+    — one row already positional, the rest still dict-row — and a first-row-only check
+    would silently pass it straight through with its dict row uncorrected. Each row must be
+    judged on its own."""
+    payload = real_observed_payload()
+    dict_row = payload["values"][0]
+    already_positional = [dict_row[name] for name in _names(payload)]
+    payload["values"] = [already_positional, dict_row]
+
+    migrated = MIGRATE.to_columnar(payload)
+
+    assert migrated["values"] == [already_positional, already_positional]
+
+
+def test_a_positional_row_of_the_wrong_width_is_refused_not_waved_through():
+    """Adversary finding (Hole 6, #1054). A row that is already a list is not automatically
+    'already migrated' — a truncated or corrupted rewrite is ALSO a list, just the wrong
+    length, and a check that only asks 'is this a list?' would wave it through unexamined.
+    Refuse it exactly as a malformed dict row is refused."""
+    payload = real_observed_payload()
+    payload["values"] = [[431, None]]  # 2 cells; this payload names 3 columns
+
+    with pytest.raises(ValueError, match="(?i)column"):
+        MIGRATE.to_columnar(payload)
+
+
+def test_a_row_that_is_neither_a_dict_nor_a_list_is_refused():
+    """A payload with a `values` entry of some third shape (a bare scalar, `null`) is not a
+    row this transform can classify as dict or positional — refuse it rather than guess."""
+    payload = real_observed_payload()
+    payload["values"] = [None]
+
+    with pytest.raises(ValueError, match="(?i)column"):
+        MIGRATE.to_columnar(payload)
+
+
 def test_an_empty_esql_payload_is_returned_exactly_as_it_is():
     """c9. `values: []` reads identically in both encodings, so rewriting one would be a
     diff hunk with no content — 471 of them. The payload comes back equal, and still
@@ -438,6 +494,25 @@ def test_a_file_with_nothing_to_migrate_comes_out_byte_identical(what, text, tmp
     assert MIGRATE.migrate_file(positive_control) == 1
     assert positive_control.read_bytes() != control_before, (
         "the positive control was not rewritten either — the negative above is vacuous")
+
+
+def test_a_file_with_nothing_to_migrate_is_never_reopened_for_writing(tmp_path):
+    """O3, stronger than byte-equality (adversary finding, Hole 3, #1054): an implementation
+    that unconditionally re-serializes every file and happens to reproduce the same bytes
+    would also pass a byte-equality check, but it still performed a real write — an mtime
+    bump, a moment where a concurrent reader sees a truncated file, an unnecessary fsync on
+    957 files instead of 482. 'Nothing to migrate' has to be decided BEFORE opening the file
+    to write, not verified after the fact by comparing bytes."""
+    untouched = tmp_path / "untouched.json"
+    untouched.write_text(REAL_CMDB_TEXT, encoding="utf-8")
+    old = 1_700_000_000
+    os.utime(untouched, ns=(old * 1_000_000_000, old * 1_000_000_000))
+    before_mtime = untouched.stat().st_mtime_ns
+
+    assert MIGRATE.migrate_file(untouched) == 0
+    assert untouched.stat().st_mtime_ns == before_mtime, (
+        "the file's mtime moved even though nothing needed migrating — it was reopened for "
+        "writing rather than recognised up front as having nothing to do")
 
 
 def test_a_zero_byte_payload_file_is_skipped_rather_than_parsed(tmp_path):
@@ -666,6 +741,76 @@ def test_the_only_files_the_run_rewrote_are_the_ones_carrying_dict_rows(migrated
         f"Unexpected: {sorted(set(moved) - set(PLANTED))[:5]}")
 
 
+@pytest.fixture(scope="module")
+def pre_migration_cases_dir(tmp_path_factory):
+    """The real `cases/` tree exactly as `git` has it at `PRE_MIGRATION_REF` — the one
+    fixture in this module that is NOT derived from anything `migrate_tree` or this test
+    file itself produced. `git archive` rather than `git show` per file: one subprocess for
+    the whole subtree instead of 482."""
+    root = tmp_path_factory.mktemp("pre1054")
+    rel = "defender/evals/oracle_golden/cases"
+    archive = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "archive", PRE_MIGRATION_REF, "--", rel],
+        capture_output=True, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        tar.extractall(root)  # noqa: S202 — a `git archive` of this repo's own history
+    return root / rel
+
+
+def test_every_committed_payload_rezips_to_its_pre_migration_dict_rows(pre_migration_cases_dir):
+    """O2, anchored to git history rather than to anything this test module or the migration
+    produced (adversary finding, Hole 1, #1054 — the headline one).
+
+    Every other O2 check in this module either compares the migration's output to an
+    embedded fixture literal, or — for the whole-tree checks above — to a re-zip of
+    whatever `migrate_tree` itself just wrote, read back off the SAME run. A transform that
+    corrupts the corpus consistently with itself (every cell written in reversed column
+    order; every payload's rows silently replaced with `values: []` while `row_count` is
+    left untouched) satisfies both of those, because neither ever consults a byte that
+    predates the run under test.
+
+    This does: for every ES|QL payload under the COMMITTED `cases/` tree today, re-zipping
+    its (now positional) `values` by `columns[].name` must reproduce EXACTLY the dict rows
+    `git` has for that same file and position at `PRE_MIGRATION_REF` — before this PR's
+    migration ever ran. `row_count == len(values)` is checked independently too, which alone
+    would catch a payload silently emptied.
+    """
+    checked = 0
+    for path in sorted(CASES_DIR.glob("*/hidden/**/*.json")):
+        raw = path.read_bytes()
+        if not raw.strip():
+            continue
+        rel = path.relative_to(CASES_DIR)
+        before_path = pre_migration_cases_dir / rel
+        if not before_path.exists():
+            continue  # a file this PR did not touch, and that pre-dates PRE_MIGRATION_REF too
+        before_raw = before_path.read_bytes()
+        if not before_raw.strip():
+            continue
+
+        now_payloads = list(_esql_payloads_anywhere(json.loads(raw)))
+        before_payloads = list(_esql_payloads_anywhere(json.loads(before_raw)))
+        assert len(now_payloads) == len(before_payloads), (
+            f"{rel}: the number of ES|QL payloads in this file changed")
+
+        for now_p, before_p in zip(now_payloads, before_payloads, strict=True):
+            assert now_p["query"] == before_p["query"], rel
+            assert now_p["columns"] == before_p["columns"], rel
+            assert now_p["row_count"] == before_p["row_count"], rel
+            assert now_p["row_count"] == len(now_p["values"]), (
+                f"{rel}: row_count no longer matches len(values) — a row was silently "
+                "dropped or added")
+            assert _to_dict_rows(now_p)["values"] == before_p["values"], (
+                f"{rel}: re-zipping the committed payload does not reproduce its "
+                f"pre-{PRE_MIGRATION_REF} dict rows — the migration lost or corrupted data")
+            checked += 1
+
+    assert checked >= 898, (
+        f"only checked {checked} payload(s) against git history; expected the full "
+        "898-payload census this issue counted — a shrunk count here would itself be a sign "
+        "of lost data")
+
+
 # =================================================================================
 # O4 — nothing is re-scored, and the provenance gap is written down
 # =================================================================================
@@ -734,10 +879,21 @@ def test_the_audits_readme_records_the_reencoding_under_the_unchanged_tag():
     labelled from dict rows, and a cache hit does not protect them because they have none.
     """
     text = (GOLDEN_DIR / "audits" / "README.md").read_text(encoding="utf-8")
-    headings = [i for i, line in enumerate(text.splitlines())
+    lines = text.splitlines()
+    headings = [i for i, line in enumerate(lines)
                 if line.startswith("## ") and UNCHANGED_JUDGE_TAG in line]
     assert headings, "the calibration section this note belongs under is gone"
-    note = "\n".join(text.splitlines()[headings[0]:])
+    start = headings[0]
+    # Bounded to THIS section, not "to end of file" (adversary finding, Hole 4, #1054): a
+    # note filed under a LATER `##` heading — the verdict-selfagreement section, say — would
+    # still satisfy a to-EOF slice, but it would not be "under the `47d6044a` section" as M3
+    # asks.
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+               len(lines))
+    section = "\n".join(lines[start:end])
+    # An HTML comment is invisible in rendered Markdown, so content that exists only inside
+    # one does not count as the note being "written down" (adversary finding, Hole 4).
+    note = re.sub(r"<!--.*?-->", "", section, flags=re.S)
 
     assert "1054" in note, "the note does not cite the issue that re-encoded the corpus"
     assert "re-encod" in note.lower(), (
@@ -770,10 +926,22 @@ def test_the_judge_cache_key_comment_points_at_the_accepted_encoding_mix():
     assert comment, "no comment block above MODEL_LEAD_FIELDS"
     assert "labelled from a different input shape than its siblings" in comment, (
         "the comment this note attaches to has moved — re-anchor the note, do not drop it")
+    lowered = comment.lower()
     assert "1054" in comment, (
         "the cache-key comment does not name the accepted encoding change (#1054)")
-    assert "encod" in comment.lower(), (
-        "the cache-key comment does not say what changed about the corpus")
+    # A comment containing "1054" and "encod" alone is satisfied by a sentence that states
+    # the OPPOSITE of what happened (adversary finding, Hole 4, #1054: "#1054 left the
+    # corpus encoding alone" contains both tokens). Require it actually say the corpus was
+    # RE-encoded, and name the shape — not just gesture at "encoding" in the abstract.
+    assert "re-encod" in lowered, (
+        "the cache-key comment does not say the corpus was RE-encoded (as opposed to, say, "
+        "left alone) — it must state what happened, not just mention 'encoding'")
+    assert "positional" in lowered or "columnar" in lowered, (
+        "the cache-key comment does not name the shape the corpus was re-encoded to")
+    for case_id in UNCACHED_CASES:
+        assert case_id in comment, (
+            f"the cache-key comment does not name {case_id}, one of the two leads with no "
+            "label cache under this tag")
 
 
 def test_the_readme_says_hidden_payloads_are_positional_and_what_enforces_it():
@@ -781,16 +949,32 @@ def test_the_readme_says_hidden_payloads_are_positional_and_what_enforces_it():
     After #1054 that is `esql_payload`'s positional form, and the reason it stays that way
     is the guard in `tests/evals/test_controls.py` — a reader who does not know the guard
     exists is a reader who hand-edits a payload back to dict rows."""
-    text = (GOLDEN_DIR / "README.md").read_text(encoding="utf-8")
-    lowered = text.lower()
+    raw = (GOLDEN_DIR / "README.md").read_text(encoding="utf-8")
+    # Strip HTML comments (invisible in rendered Markdown) before looking for content.
+    text = re.sub(r"<!--.*?-->", "", raw, flags=re.S)
 
     assert "esql_payload" in text, (
         "the README does not name the shaper that defines the corpus encoding")
-    assert "positional" in lowered or "columnar" in lowered, (
+    assert "positional" in text.lower() or "columnar" in text.lower(), (
         "the README does not say what shape `hidden/` ES|QL payloads are in")
     assert ("test_the_corpus_speaks_the_SAME_esql_encoding_production_does" in text
             or "test_controls" in text), (
         "the README does not say what keeps the corpus in that shape")
+
+    # Adversary finding (Hole 4, #1054): three scattered tokens, each satisfying one
+    # assertion above from an unrelated corner of the file (a footer, a stray comment), is
+    # not the same as ONE sentence saying "hidden/ payloads are positional and this test
+    # enforces it". Require all three signals to co-occur in a single paragraph.
+    paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
+    hit = [p for p in paragraphs
+           if "esql_payload" in p
+           and ("positional" in p.lower() or "columnar" in p.lower())
+           and ("test_the_corpus_speaks_the_SAME_esql_encoding_production_does" in p
+                or "test_controls" in p)]
+    assert hit, (
+        "no single paragraph of the README names esql_payload, says the hidden/ payload "
+        "shape, AND names what enforces it — three tokens scattered across the file is not "
+        "the same as a sentence saying so")
 
 
 # =================================================================================
@@ -817,8 +1001,20 @@ def test_the_migration_runs_as_the_committed_command_over_a_cases_dir(tmp_path):
         capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
-    assert any(ch.isdigit() for ch in proc.stdout), (
-        f"the migration printed no count of what it rewrote: {proc.stdout!r}")
+    # Adversary finding (Hole 5, #1054): "prints a count" was satisfied by a fixed string
+    # that happened to contain a digit (the issue number). Pin the ACTUAL numbers: this
+    # fixture has exactly 3 payloads to migrate (the observed file's 1, plus the record's
+    # controls[1] and attack_contribution — controls[2]'s `values: []` doesn't count) across
+    # exactly 2 files (the untouched cmdb lookup is not one of them).
+    payload_count = re.search(r"(\d+)\s*ES\|QL payload", proc.stdout)
+    file_count = re.search(r"(\d+)\s*file", proc.stdout)
+    assert payload_count and file_count, (
+        f"stdout doesn't name a payload count and a file count: {proc.stdout!r}")
+    assert payload_count.group(1) == "3", (
+        f"expected 3 payload(s) rewritten, stdout said {payload_count.group(1)}: "
+        f"{proc.stdout!r}")
+    assert file_count.group(1) == "2", (
+        f"expected 2 file(s) rewritten, stdout said {file_count.group(1)}: {proc.stdout!r}")
 
     migrated_observed = json.loads(observed.read_text(encoding="utf-8"))
     assert migrated_observed["values"] == EXPECTED_POSITIONAL_ROWS
@@ -832,3 +1028,16 @@ def test_the_migration_runs_as_the_committed_command_over_a_cases_dir(tmp_path):
 
     assert untouched.read_text(encoding="utf-8") == REAL_CMDB_TEXT, (
         "the run rewrote a file with no ES|QL payload in it")
+
+    second = subprocess.run(
+        [sys.executable, str(MIGRATION_SCRIPT), "--cases-dir", str(cases)],
+        capture_output=True, text=True, encoding="utf-8", check=False)
+    assert second.returncode == 0, f"{second.stdout}\n{second.stderr}"
+    second_payloads = re.search(r"(\d+)\s*ES\|QL payload", second.stdout)
+    second_files = re.search(r"(\d+)\s*file", second.stdout)
+    assert second_payloads and second_payloads.group(1) == "0", (
+        f"a second run over an already-migrated tree should report 0 payloads: "
+        f"{second.stdout!r}")
+    assert second_files and second_files.group(1) == "0", (
+        f"a second run over an already-migrated tree should report 0 files: "
+        f"{second.stdout!r}")
