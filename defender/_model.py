@@ -28,7 +28,10 @@ raises `dataclass_exact_type` on a plain `{"a": 1, "b": 2}` even though every fi
 enforce), but `pydantic_ai`'s tool-call path validates in Python mode whenever a provider hands
 back already-parsed args (`tool_manager._validate_tool_args`: str args go through
 `validate_json`, anything else through `validate_python`) — so a strict dataclass used as a
-tool's parameter type can refuse a real, well-typed model call. Pass `strict=False` for a class
+tool's parameter type can refuse a real, well-typed model call. The same applies to OUR OWN
+read-back sites that build a record from a parsed YAML/JSON `dict` (`judge._grade_from_document`
+and its nested `NotGradedStamp`): a nested strict record must be constructed first from its
+mapping, or its owner passes `strict=False`. Pass `strict=False` for a class
 instantiated FROM external data at a boundary like that one; every other still-typed check on
 its fields still runs, lax mode only adds the ordinary coercions (a numeric string into an
 `int`, and the like), never `int` where `str` is declared. (Verified directly against this
@@ -102,9 +105,11 @@ def model(cls: type[T] | None = None, *, frozen: bool = False, strict: bool = Tr
     config = cast(ConfigDict,
                  {"strict": strict, "arbitrary_types_allowed": True, **config_kwargs})
 
-    def wrap(inner_cls: type[T]) -> type[T]:
+    # Not named `wrap`: `defender._untrusted.wrap` is the tree's one frame primitive, and
+    # `test_systemic_stage_frames_680`'s AST census counts every `def wrap` as a second one.
+    def decorate(inner_cls: type[T]) -> type[T]:
         return cast(type[T], _pydantic_dataclass(inner_cls, config=config, frozen=frozen))
 
     if cls is not None:
-        return wrap(cls)
-    return wrap
+        return decorate(cls)
+    return decorate

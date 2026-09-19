@@ -853,8 +853,16 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
     # is not in `grade_episode`'s conversion set — the bare traceback this comment promises
     # never leaves.
     try:
-        record = EpisodeGrade(
-            **{k: v for k, v in doc.items() if k not in _DERIVED}, episode_dir=episode_dir)
+        fields = {k: v for k, v in doc.items() if k not in _DERIVED}
+        # The stamp is a NESTED strict dataclass, and this is Python-mode validation (the
+        # keys are a parsed YAML mapping, not JSON text): a strict nested dataclass admits
+        # only an instance of itself — a well-shaped `{outcome, reason}` mapping is refused
+        # as `dataclass_exact_type` before its keys are looked at. Built here, under the
+        # same refusal; a stamp of the wrong shape (no reason, an int outcome) still lands
+        # as `JudgeRefused` through the `except` below.
+        if isinstance(fields.get("not_graded"), dict):
+            fields["not_graded"] = NotGradedStamp(**fields["not_graded"])
+        record = EpisodeGrade(**fields, episode_dir=episode_dir)
     except (ValidationError, TypeError) as bad:
         raise JudgeRefused(f"{JUDGE_NAME} is not a family grade record: {bad}") from bad
     graded = frozenset(r["world"] for r in record.worlds if family_mod.is_gradable_row(r))
