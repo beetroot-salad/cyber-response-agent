@@ -54,15 +54,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "alerts": 47,
-            "first_seen": "2026-07-12T10:31:44.054Z",
-            "last_seen": "2026-07-12T11:56:46.783Z",
-            "rule": "v2 Falco: suspicious network tool in container",
-            "rule_id": "v2-falco-suspicious-network-tool",
-            "severity": "medium",
-            "host.name": "soc-playground"
-          }
+          [
+            47,
+            "2026-07-12T10:31:44.054Z",
+            "2026-07-12T11:56:46.783Z",
+            "v2 Falco: suspicious network tool in container",
+            "v2-falco-suspicious-network-tool",
+            "medium",
+            "soc-playground"
+          ]
         ]
       }
     },
@@ -108,15 +108,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "alerts": 61,
-            "first_seen": "2026-07-05T10:31:38.909Z",
-            "last_seen": "2026-07-05T11:56:38.716Z",
-            "rule": "v2 Falco: suspicious network tool in container",
-            "rule_id": "v2-falco-suspicious-network-tool",
-            "severity": "medium",
-            "host.name": "soc-playground"
-          }
+          [
+            61,
+            "2026-07-05T10:31:38.909Z",
+            "2026-07-05T11:56:38.716Z",
+            "v2 Falco: suspicious network tool in container",
+            "v2-falco-suspicious-network-tool",
+            "medium",
+            "soc-playground"
+          ]
         ]
       }
     }

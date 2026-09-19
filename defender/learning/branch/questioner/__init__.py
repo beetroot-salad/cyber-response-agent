@@ -296,7 +296,6 @@ def _questioner_lessons_section(lessons: Any, *, stageable_patterns: Sequence[st
 def _capture_sections(*, leads: Any, alert: Any, frontier: str,
                       corpus_samples: Any = None, lessons: Any = None,
                       stageable_patterns: Sequence[str] = ()) -> _Capture:
-    """The captured inputs, rendered."""
     return _Capture(
         leads=titled_section("The joined leads at the branch point", leads),
         alert=titled_section("The alert this investigation started from", alert),

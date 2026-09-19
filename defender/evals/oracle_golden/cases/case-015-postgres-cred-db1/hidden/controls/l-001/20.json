@@ -40,38 +40,38 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "count": 392,
-            "first_seen": "2026-07-06T20:03:17.000Z",
-            "last_seen": "2026-07-06T21:01:31.000Z",
-            "event.action": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "count": 8,
-            "first_seen": "2026-07-06T20:08:48.000Z",
-            "last_seen": "2026-07-06T20:09:04.000Z",
-            "event.action": "logged-on",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "count": 8,
-            "first_seen": "2026-07-06T20:08:48.000Z",
-            "last_seen": "2026-07-06T20:09:04.000Z",
-            "event.action": "logged-off",
-            "user.name": "svc.config-mgmt",
-            "source.ip": null
-          },
-          {
-            "count": 8,
-            "first_seen": "2026-07-06T20:08:48.000Z",
-            "last_seen": "2026-07-06T20:09:04.000Z",
-            "event.action": "ssh_login",
-            "user.name": "svc.config-mgmt",
-            "source.ip": "172.18.0.14"
-          }
+          [
+            392,
+            "2026-07-06T20:03:17.000Z",
+            "2026-07-06T21:01:31.000Z",
+            null,
+            null,
+            null
+          ],
+          [
+            8,
+            "2026-07-06T20:08:48.000Z",
+            "2026-07-06T20:09:04.000Z",
+            "logged-on",
+            "",
+            null
+          ],
+          [
+            8,
+            "2026-07-06T20:08:48.000Z",
+            "2026-07-06T20:09:04.000Z",
+            "logged-off",
+            "svc.config-mgmt",
+            null
+          ],
+          [
+            8,
+            "2026-07-06T20:08:48.000Z",
+            "2026-07-06T20:09:04.000Z",
+            "ssh_login",
+            "svc.config-mgmt",
+            "172.18.0.14"
+          ]
         ]
       }
     },
@@ -113,14 +113,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 360,
-            "first_seen": "2026-06-29T20:02:38.000Z",
-            "last_seen": "2026-06-29T21:00:10.000Z",
-            "event.action": null,
-            "user.name": null,
-            "source.ip": null
-          }
+          [
+            360,
+            "2026-06-29T20:02:38.000Z",
+            "2026-06-29T21:00:10.000Z",
+            null,
+            null,
+            null
+          ]
         ]
       }
     },
@@ -162,38 +162,38 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "count": 500,
-            "first_seen": "2026-06-22T20:04:00.000Z",
-            "last_seen": "2026-06-22T20:58:55.000Z",
-            "event.action": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "count": 5,
-            "first_seen": "2026-06-22T20:25:48.000Z",
-            "last_seen": "2026-06-22T20:25:48.000Z",
-            "event.action": "logged-on",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "count": 5,
-            "first_seen": "2026-06-22T20:25:48.000Z",
-            "last_seen": "2026-06-22T20:25:48.000Z",
-            "event.action": "logged-off",
-            "user.name": "sre.chen",
-            "source.ip": null
-          },
-          {
-            "count": 5,
-            "first_seen": "2026-06-22T20:25:48.000Z",
-            "last_seen": "2026-06-22T20:25:48.000Z",
-            "event.action": "ssh_login",
-            "user.name": "sre.chen",
-            "source.ip": "172.18.0.21"
-          }
+          [
+            500,
+            "2026-06-22T20:04:00.000Z",
+            "2026-06-22T20:58:55.000Z",
+            null,
+            null,
+            null
+          ],
+          [
+            5,
+            "2026-06-22T20:25:48.000Z",
+            "2026-06-22T20:25:48.000Z",
+            "logged-on",
+            "",
+            null
+          ],
+          [
+            5,
+            "2026-06-22T20:25:48.000Z",
+            "2026-06-22T20:25:48.000Z",
+            "logged-off",
+            "sre.chen",
+            null
+          ],
+          [
+            5,
+            "2026-06-22T20:25:48.000Z",
+            "2026-06-22T20:25:48.000Z",
+            "ssh_login",
+            "sre.chen",
+            "172.18.0.21"
+          ]
         ]
       }
     }

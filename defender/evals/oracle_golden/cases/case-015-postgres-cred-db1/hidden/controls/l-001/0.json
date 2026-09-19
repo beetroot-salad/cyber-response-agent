@@ -56,18 +56,18 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total_events": 11520,
-            "auth_fail_count": 5760,
-            "fatal_count": 0,
-            "connection_count": 0,
-            "auth_ok_count": 0,
-            "select_count": 0,
-            "statement_count": 0,
-            "first_seen": "2026-07-06T20:02:37.159Z",
-            "last_seen": "2026-07-06T21:02:27.160Z",
-            "host.name": "db-1"
-          }
+          [
+            11520,
+            5760,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "2026-07-06T20:02:37.159Z",
+            "2026-07-06T21:02:27.160Z",
+            "db-1"
+          ]
         ]
       }
     },
@@ -125,18 +125,18 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total_events": 14400,
-            "auth_fail_count": 7200,
-            "fatal_count": 0,
-            "connection_count": 0,
-            "auth_ok_count": 0,
-            "select_count": 0,
-            "statement_count": 0,
-            "first_seen": "2026-06-29T20:02:33.764Z",
-            "last_seen": "2026-06-29T21:02:23.774Z",
-            "host.name": "db-1"
-          }
+          [
+            14400,
+            7200,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "2026-06-29T20:02:33.764Z",
+            "2026-06-29T21:02:23.774Z",
+            "db-1"
+          ]
         ]
       }
     },
@@ -194,18 +194,18 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total_events": 14400,
-            "auth_fail_count": 7200,
-            "fatal_count": 0,
-            "connection_count": 0,
-            "auth_ok_count": 0,
-            "select_count": 0,
-            "statement_count": 0,
-            "first_seen": "2026-06-22T20:02:33.761Z",
-            "last_seen": "2026-06-22T21:02:23.772Z",
-            "host.name": "db-1"
-          }
+          [
+            14400,
+            7200,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "2026-06-22T20:02:33.761Z",
+            "2026-06-22T21:02:23.772Z",
+            "db-1"
+          ]
         ]
       }
     }

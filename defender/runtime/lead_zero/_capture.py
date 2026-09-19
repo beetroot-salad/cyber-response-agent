@@ -12,7 +12,7 @@ returned block as one more ORIENT section.
 Issuing a turn-zero call, and recording what came back.
 
 The budget gate, the per-run call ledger, and the declaring `:L findings` row a harness
-lead must own before it may write anything. Split out of `lead_zero.py` at 1215 lines.
+lead must own before it may write anything.
 """
 from __future__ import annotations
 
@@ -54,8 +54,6 @@ class LeadZeroResult:
     status: str
 
 
-# small sync/async bridge
-
 def _run_sync(coro: Any) -> Any:
     """Run an async coroutine from a SYNCHRONOUS caller, whether or not an event loop is
     already running on this thread. `resolve_lead_zero` is a synchronous entry point called
@@ -71,8 +69,6 @@ def _run_sync(coro: Any) -> Any:
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
         return ex.submit(asyncio.run, coro).result()
 
-
-# sanitizing wrap-delimiter shapes (K1 round 2 + F4)
 
 def _sanitize(text: Any) -> str:
     """Neutralize any `<run-…-…>`-shaped delimiter, and any markdown code-fence run, in
@@ -95,8 +91,6 @@ def _sanitize(text: Any) -> str:
     text = _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
     return _FENCE_RUN.sub(lambda m: "ˋ" * len(m.group(0)), text)
 
-
-# deps for routing through the real QueryCapture (K7/d10)
 
 @model(frozen=True)
 class _CaptureDeps:
@@ -315,8 +309,6 @@ def _build_deps(run_dir: Path, defender_dir: Path, run_id: str, lead_id: str) ->
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, lead_id=lead_id,
     )
 
-
-# budget chaining (K23)
 
 def _budget_gate(run_dir: Path, limits: dict) -> None:
     """Unconditional, not gated on `DEFENDER_BUDGET_ENFORCE`: lead-0 is harness pre-turn work,

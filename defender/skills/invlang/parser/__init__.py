@@ -1,7 +1,6 @@
 """The invlang parser's public face.
 
-The parsing itself lives in three modules, layered one way and split out of this one
-when it reached 2128 lines:
+The parsing itself lives in three modules, layered one way:
 
   * `_tokenize` — which bytes of a document are invlang content, and how they cut into
     blocks and rows. Knows nothing of records or of the projector.

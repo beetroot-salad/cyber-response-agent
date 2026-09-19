@@ -11,7 +11,7 @@ returned block as one more ORIENT section.
 
 The vocabulary turn-zero work is written against: lead ids, statuses, field names.
 
-Split out of `lead_zero.py` at 1215 lines; imports none of its siblings.
+Imports none of its siblings.
 """
 from __future__ import annotations
 

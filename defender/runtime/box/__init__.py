@@ -1,6 +1,6 @@
 """The sandbox the agent's commands run in.
 
-Split into four modules when this file reached 1077 lines:
+Split into four modules:
 
   * `_spec`      — what a box IS: the request, the mounts, the executor, and the two
                        transports that carry a command to one.

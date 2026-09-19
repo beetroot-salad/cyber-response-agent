@@ -20,9 +20,9 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "failures": 336
-          }
+          [
+            336
+          ]
         ]
       }
     },
@@ -44,9 +44,9 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "failures": 504
-          }
+          [
+            504
+          ]
         ]
       }
     },
@@ -68,9 +68,9 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "failures": 432
-          }
+          [
+            432
+          ]
         ]
       }
     }

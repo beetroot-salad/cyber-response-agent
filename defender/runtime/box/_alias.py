@@ -1,8 +1,7 @@
 """The alias-ban probe: refuse a box whose shell could rename a banned program back into
 reach.
 
-Split out of `box.py` at 1077 lines. This gate fails CLOSED — an inconclusive probe is a
-refusal, not a pass.
+This gate fails CLOSED — an inconclusive probe is a refusal, not a pass.
 """
 from __future__ import annotations
 

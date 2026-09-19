@@ -1,6 +1,6 @@
 """What a disposition costs.
 
-One family of `validate.py`'s rules, split out at 4038 lines: benign grounding, the
+One family of `validate.py`'s rules: benign grounding, the
 false-positive gate, the screen's structure, and the severity ceiling. A conclusion that
 has not paid its price is refused here.
 """

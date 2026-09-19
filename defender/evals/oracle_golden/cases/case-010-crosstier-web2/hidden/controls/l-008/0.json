@@ -40,14 +40,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 7,
-            "first_seen": "2026-07-12T19:41:05.000Z",
-            "last_seen": "2026-07-12T19:41:05.000Z",
-            "user.name": "svc.config-mgmt",
-            "source.ip": "172.18.0.14",
-            "auth_method": "password"
-          }
+          [
+            7,
+            "2026-07-12T19:41:05.000Z",
+            "2026-07-12T19:41:05.000Z",
+            "svc.config-mgmt",
+            "172.18.0.14",
+            "password"
+          ]
         ]
       }
     },
@@ -89,30 +89,30 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "accepted": 21,
-            "first_seen": "2026-07-05T19:42:10.000Z",
-            "last_seen": "2026-07-05T19:42:10.000Z",
-            "user.name": null,
-            "source.ip": null,
-            "auth_method": "password"
-          },
-          {
-            "accepted": 21,
-            "first_seen": "2026-07-05T19:42:10.000Z",
-            "last_seen": "2026-07-05T19:42:10.000Z",
-            "user.name": null,
-            "source.ip": null,
-            "auth_method": "other"
-          },
-          {
-            "accepted": 7,
-            "first_seen": "2026-07-05T19:42:09.000Z",
-            "last_seen": "2026-07-05T19:42:09.000Z",
-            "user.name": "svc.deploy",
-            "source.ip": "172.18.0.20",
-            "auth_method": "password"
-          }
+          [
+            21,
+            "2026-07-05T19:42:10.000Z",
+            "2026-07-05T19:42:10.000Z",
+            null,
+            null,
+            "password"
+          ],
+          [
+            21,
+            "2026-07-05T19:42:10.000Z",
+            "2026-07-05T19:42:10.000Z",
+            null,
+            null,
+            "other"
+          ],
+          [
+            7,
+            "2026-07-05T19:42:09.000Z",
+            "2026-07-05T19:42:09.000Z",
+            "svc.deploy",
+            "172.18.0.20",
+            "password"
+          ]
         ]
       }
     },
@@ -154,14 +154,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 8,
-            "first_seen": "2026-06-28T20:22:09.000Z",
-            "last_seen": "2026-06-28T20:22:09.000Z",
-            "user.name": "svc.config-mgmt",
-            "source.ip": "172.18.0.20",
-            "auth_method": "password"
-          }
+          [
+            8,
+            "2026-06-28T20:22:09.000Z",
+            "2026-06-28T20:22:09.000Z",
+            "svc.config-mgmt",
+            "172.18.0.20",
+            "password"
+          ]
         ]
       }
     }

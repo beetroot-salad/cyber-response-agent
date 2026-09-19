@@ -69,7 +69,7 @@ def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
     scene = curator_scene(tmp_path)
     (scene.corpus / "curated-936.md").write_text(
         "---\nname: curated-936\n---\nlesson body\n", encoding="utf-8")
-    deps = curator_deps(scene, run_verify=lambda *a, **kw: "")
+    deps = curator_deps(scene)
     assert deps.role is AgentRole.CORPUS_AUTHOR, "control: the deps are the curator's"
 
     assert "lesson body" in _tool_lesson_read(deps, "defender/lessons/curated-936.md")

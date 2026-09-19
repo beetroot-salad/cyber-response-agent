@@ -24,14 +24,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "requests": 193324,
-            "url.path": "/nginx_status"
-          },
-          {
-            "requests": 10479,
-            "url.path": "/"
-          }
+          [
+            193324,
+            "/nginx_status"
+          ],
+          [
+            10479,
+            "/"
+          ]
         ]
       }
     },
@@ -57,14 +57,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "requests": 241920,
-            "url.path": "/nginx_status"
-          },
-          {
-            "requests": 13264,
-            "url.path": "/"
-          }
+          [
+            241920,
+            "/nginx_status"
+          ],
+          [
+            13264,
+            "/"
+          ]
         ]
       }
     },
@@ -90,14 +90,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "requests": 262090,
-            "url.path": "/nginx_status"
-          },
-          {
-            "requests": 13978,
-            "url.path": "/"
-          }
+          [
+            262090,
+            "/nginx_status"
+          ],
+          [
+            13978,
+            "/"
+          ]
         ]
       }
     }

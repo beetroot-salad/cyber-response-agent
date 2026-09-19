@@ -36,27 +36,27 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "count": 259,
-            "host.name": "office-ws-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 5,
-            "host.name": "office-ws-1",
-            "source.ip": "172.18.0.14",
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 4,
-            "host.name": "office-ws-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            259,
+            "office-ws-1",
+            null,
+            "172.18.0.21",
+            "system.auth"
+          ],
+          [
+            5,
+            "office-ws-1",
+            "172.18.0.14",
+            "172.18.0.21",
+            "system.auth"
+          ],
+          [
+            4,
+            "office-ws-1",
+            null,
+            "172.18.0.21",
+            "system.syslog"
+          ]
         ]
       }
     },
@@ -94,76 +94,76 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "count": 2915,
-            "host.name": null,
-            "source.ip": "172.18.0.21",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.connection"
-          },
-          {
-            "count": 2843,
-            "host.name": null,
-            "source.ip": "172.18.0.21",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.ssl"
-          },
-          {
-            "count": 1440,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "count": 569,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 330,
-            "host.name": "office-ws-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 91,
-            "host.name": "jump-box-1",
-            "source.ip": "172.18.0.15",
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 72,
-            "host.name": null,
-            "source.ip": "172.18.0.21",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.ssh"
-          },
-          {
-            "count": 42,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "count": 10,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "elastic_agent.filebeat"
-          },
-          {
-            "count": 4,
-            "host.name": "office-ws-1",
-            "source.ip": "172.18.0.20",
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            2915,
+            null,
+            "172.18.0.21",
+            null,
+            "zeek.connection"
+          ],
+          [
+            2843,
+            null,
+            "172.18.0.21",
+            null,
+            "zeek.ssl"
+          ],
+          [
+            1440,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "elastic_agent.metricbeat"
+          ],
+          [
+            569,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "system.auth"
+          ],
+          [
+            330,
+            "office-ws-1",
+            null,
+            "172.18.0.21",
+            "system.auth"
+          ],
+          [
+            91,
+            "jump-box-1",
+            "172.18.0.15",
+            "172.18.0.21",
+            "system.auth"
+          ],
+          [
+            72,
+            null,
+            "172.18.0.21",
+            null,
+            "zeek.ssh"
+          ],
+          [
+            42,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "elastic_agent"
+          ],
+          [
+            10,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "elastic_agent.filebeat"
+          ],
+          [
+            4,
+            "office-ws-1",
+            "172.18.0.20",
+            "172.18.0.21",
+            "system.auth"
+          ]
         ]
       }
     },
@@ -201,76 +201,76 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "count": 2895,
-            "host.name": null,
-            "source.ip": "172.18.0.21",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.connection"
-          },
-          {
-            "count": 2847,
-            "host.name": null,
-            "source.ip": "172.18.0.21",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.ssl"
-          },
-          {
-            "count": 1440,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "count": 423,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 287,
-            "host.name": "office-ws-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 48,
-            "host.name": "jump-box-1",
-            "source.ip": "172.18.0.15",
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 48,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "count": 48,
-            "host.name": null,
-            "source.ip": "172.18.0.21",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.ssh"
-          },
-          {
-            "count": 10,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "elastic_agent.filebeat"
-          },
-          {
-            "count": 4,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.21",
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            2895,
+            null,
+            "172.18.0.21",
+            null,
+            "zeek.connection"
+          ],
+          [
+            2847,
+            null,
+            "172.18.0.21",
+            null,
+            "zeek.ssl"
+          ],
+          [
+            1440,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "elastic_agent.metricbeat"
+          ],
+          [
+            423,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "system.auth"
+          ],
+          [
+            287,
+            "office-ws-1",
+            null,
+            "172.18.0.21",
+            "system.auth"
+          ],
+          [
+            48,
+            "jump-box-1",
+            "172.18.0.15",
+            "172.18.0.21",
+            "system.auth"
+          ],
+          [
+            48,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "elastic_agent"
+          ],
+          [
+            48,
+            null,
+            "172.18.0.21",
+            null,
+            "zeek.ssh"
+          ],
+          [
+            10,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "elastic_agent.filebeat"
+          ],
+          [
+            4,
+            "jump-box-1",
+            null,
+            "172.18.0.21",
+            "system.syslog"
+          ]
         ]
       }
     }

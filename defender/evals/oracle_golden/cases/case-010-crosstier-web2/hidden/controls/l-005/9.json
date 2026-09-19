@@ -36,356 +36,356 @@
         ],
         "row_count": 50,
         "values": [
-          {
-            "events": 18595,
-            "first_seen": "2026-07-12T19:36:22.366Z",
-            "last_seen": "2026-07-12T20:36:21.670Z",
-            "host.name": null,
-            "host.ip": null
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7c01:7eff:fe0f:9a51"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::20ad:e6ff:febd:eb0a"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::6030:64ff:fe18:438f"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7053:83ff:fe7c:b5f2"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::18e7:adff:fe07:826"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::2c3d:c5ff:fe1b:37c6"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::3063:b1ff:fe7a:a51a"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d847:c9ff:fe0b:efd7"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "172.17.0.1"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::242d:93ff:feb6:fcb8"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "2a01:4f8:1c1b:8c96::1"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c07:4eff:fe76:b57b"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::68ea:e3ff:fe36:193a"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::cd5:56ff:fe8c:ae2e"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "178.105.170.226"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::fc3f:d3ff:fe2c:2205"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::a464:feff:fe44:3143"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c463:93ff:fe60:991d"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9000:8ff:fec4:93b6"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::30a5:baff:fe8a:8dc5"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "172.18.0.1"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::34d6:47ff:fe77:8f4e"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ccc:9eff:fe70:ea7b"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::f465:1cff:fe61:98e4"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::181b:46ff:fe8e:9732"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::e8d8:72ff:fe0b:23d3"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ac39:a2ff:fe1a:96ca"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9c68:e8ff:fe13:bb8b"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d8a2:1eff:febd:a370"
-          },
-          {
-            "events": 4951,
-            "first_seen": "2026-07-12T19:36:22.829Z",
-            "last_seen": "2026-07-12T20:36:21.506Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::1822:b6ff:fead:d33a"
-          },
-          {
-            "events": 4804,
-            "first_seen": "2026-07-12T19:36:24.069Z",
-            "last_seen": "2026-07-12T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.15"
-          },
-          {
-            "events": 2990,
-            "first_seen": "2026-07-12T19:36:27.159Z",
-            "last_seen": "2026-07-12T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.24"
-          },
-          {
-            "events": 2990,
-            "first_seen": "2026-07-12T19:36:27.159Z",
-            "last_seen": "2026-07-12T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "events": 2990,
-            "first_seen": "2026-07-12T19:36:27.159Z",
-            "last_seen": "2026-07-12T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "events": 2990,
-            "first_seen": "2026-07-12T19:36:27.159Z",
-            "last_seen": "2026-07-12T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "events": 2990,
-            "first_seen": "2026-07-12T19:36:27.159Z",
-            "last_seen": "2026-07-12T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.21"
-          },
-          {
-            "events": 2990,
-            "first_seen": "2026-07-12T19:36:27.159Z",
-            "last_seen": "2026-07-12T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.5"
-          },
-          {
-            "events": 1638,
-            "first_seen": "2026-07-12T19:36:28.000Z",
-            "last_seen": "2026-07-12T20:36:20.436Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "events": 1209,
-            "first_seen": "2026-07-12T19:36:28.000Z",
-            "last_seen": "2026-07-12T20:36:19.507Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.8"
-          },
-          {
-            "events": 906,
-            "first_seen": "2026-07-12T19:36:28.000Z",
-            "last_seen": "2026-07-12T20:36:18.000Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.18"
-          },
-          {
-            "events": 590,
-            "first_seen": "2026-07-12T19:36:24.424Z",
-            "last_seen": "2026-07-12T20:36:14.425Z",
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.17"
-          },
-          {
-            "events": 536,
-            "first_seen": "2026-07-12T19:36:30.328Z",
-            "last_seen": "2026-07-12T20:36:20.328Z",
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "events": 475,
-            "first_seen": "2026-07-12T19:36:28.000Z",
-            "last_seen": "2026-07-12T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "events": 475,
-            "first_seen": "2026-07-12T19:36:28.000Z",
-            "last_seen": "2026-07-12T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.19"
-          },
-          {
-            "events": 475,
-            "first_seen": "2026-07-12T19:36:28.000Z",
-            "last_seen": "2026-07-12T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "events": 475,
-            "first_seen": "2026-07-12T19:36:28.000Z",
-            "last_seen": "2026-07-12T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "events": 475,
-            "first_seen": "2026-07-12T19:36:28.000Z",
-            "last_seen": "2026-07-12T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.13"
-          },
-          {
-            "events": 474,
-            "first_seen": "2026-07-12T19:36:29.753Z",
-            "last_seen": "2026-07-12T20:36:19.754Z",
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "events": 465,
-            "first_seen": "2026-07-12T19:36:27.002Z",
-            "last_seen": "2026-07-12T20:36:17.002Z",
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.3"
-          }
+          [
+            18595,
+            "2026-07-12T19:36:22.366Z",
+            "2026-07-12T20:36:21.670Z",
+            null,
+            null
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::7c01:7eff:fe0f:9a51"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::20ad:e6ff:febd:eb0a"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::6030:64ff:fe18:438f"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::7053:83ff:fe7c:b5f2"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::18e7:adff:fe07:826"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::2c3d:c5ff:fe1b:37c6"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::3063:b1ff:fe7a:a51a"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::d847:c9ff:fe0b:efd7"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "172.17.0.1"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::242d:93ff:feb6:fcb8"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "2a01:4f8:1c1b:8c96::1"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::c07:4eff:fe76:b57b"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::68ea:e3ff:fe36:193a"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::cd5:56ff:fe8c:ae2e"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "178.105.170.226"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::fc3f:d3ff:fe2c:2205"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::a464:feff:fe44:3143"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::c463:93ff:fe60:991d"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::9000:8ff:fec4:93b6"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::30a5:baff:fe8a:8dc5"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "172.18.0.1"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::34d6:47ff:fe77:8f4e"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::ccc:9eff:fe70:ea7b"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::f465:1cff:fe61:98e4"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::181b:46ff:fe8e:9732"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::e8d8:72ff:fe0b:23d3"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::ac39:a2ff:fe1a:96ca"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::9c68:e8ff:fe13:bb8b"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::d8a2:1eff:febd:a370"
+          ],
+          [
+            4951,
+            "2026-07-12T19:36:22.829Z",
+            "2026-07-12T20:36:21.506Z",
+            "soc-playground",
+            "fe80::1822:b6ff:fead:d33a"
+          ],
+          [
+            4804,
+            "2026-07-12T19:36:24.069Z",
+            "2026-07-12T20:36:17.160Z",
+            "db-1",
+            "172.18.0.15"
+          ],
+          [
+            2990,
+            "2026-07-12T19:36:27.159Z",
+            "2026-07-12T20:36:17.160Z",
+            "db-1",
+            "172.18.0.24"
+          ],
+          [
+            2990,
+            "2026-07-12T19:36:27.159Z",
+            "2026-07-12T20:36:17.160Z",
+            "db-1",
+            "172.18.0.23"
+          ],
+          [
+            2990,
+            "2026-07-12T19:36:27.159Z",
+            "2026-07-12T20:36:17.160Z",
+            "db-1",
+            "172.18.0.12"
+          ],
+          [
+            2990,
+            "2026-07-12T19:36:27.159Z",
+            "2026-07-12T20:36:17.160Z",
+            "db-1",
+            "172.18.0.16"
+          ],
+          [
+            2990,
+            "2026-07-12T19:36:27.159Z",
+            "2026-07-12T20:36:17.160Z",
+            "db-1",
+            "172.18.0.21"
+          ],
+          [
+            2990,
+            "2026-07-12T19:36:27.159Z",
+            "2026-07-12T20:36:17.160Z",
+            "db-1",
+            "172.18.0.5"
+          ],
+          [
+            1638,
+            "2026-07-12T19:36:28.000Z",
+            "2026-07-12T20:36:20.436Z",
+            "web-1",
+            "172.18.0.6"
+          ],
+          [
+            1209,
+            "2026-07-12T19:36:28.000Z",
+            "2026-07-12T20:36:19.507Z",
+            "web-2",
+            "172.18.0.8"
+          ],
+          [
+            906,
+            "2026-07-12T19:36:28.000Z",
+            "2026-07-12T20:36:18.000Z",
+            "web-1",
+            "172.18.0.18"
+          ],
+          [
+            590,
+            "2026-07-12T19:36:24.424Z",
+            "2026-07-12T20:36:14.425Z",
+            "jump-box-1",
+            "172.18.0.17"
+          ],
+          [
+            536,
+            "2026-07-12T19:36:30.328Z",
+            "2026-07-12T20:36:20.328Z",
+            "dev-ws-1",
+            "172.18.0.23"
+          ],
+          [
+            475,
+            "2026-07-12T19:36:28.000Z",
+            "2026-07-12T20:36:18.000Z",
+            "web-2",
+            "172.18.0.16"
+          ],
+          [
+            475,
+            "2026-07-12T19:36:28.000Z",
+            "2026-07-12T20:36:18.000Z",
+            "web-2",
+            "172.18.0.19"
+          ],
+          [
+            475,
+            "2026-07-12T19:36:28.000Z",
+            "2026-07-12T20:36:18.000Z",
+            "web-2",
+            "172.18.0.14"
+          ],
+          [
+            475,
+            "2026-07-12T19:36:28.000Z",
+            "2026-07-12T20:36:18.000Z",
+            "web-2",
+            "172.18.0.12"
+          ],
+          [
+            475,
+            "2026-07-12T19:36:28.000Z",
+            "2026-07-12T20:36:18.000Z",
+            "web-2",
+            "172.18.0.13"
+          ],
+          [
+            474,
+            "2026-07-12T19:36:29.753Z",
+            "2026-07-12T20:36:19.754Z",
+            "office-ws-2",
+            "172.18.0.12"
+          ],
+          [
+            465,
+            "2026-07-12T19:36:27.002Z",
+            "2026-07-12T20:36:17.002Z",
+            "canary-1",
+            "172.18.0.3"
+          ]
         ]
       }
     },
@@ -423,356 +423,356 @@
         ],
         "row_count": 50,
         "values": [
-          {
-            "events": 19418,
-            "first_seen": "2026-07-05T19:36:22.498Z",
-            "last_seen": "2026-07-05T20:36:20.705Z",
-            "host.name": null,
-            "host.ip": null
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::3063:b1ff:fe7a:a51a"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::242d:93ff:feb6:fcb8"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7053:83ff:fe7c:b5f2"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::30a5:baff:fe8a:8dc5"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9c68:e8ff:fe13:bb8b"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7c01:7eff:fe0f:9a51"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ac39:a2ff:fe1a:96ca"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::74fe:98ff:fe8f:9120"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "172.18.0.1"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9000:8ff:fec4:93b6"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::34d6:47ff:fe77:8f4e"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::a464:feff:fe44:3143"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d847:c9ff:fe0b:efd7"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::68ea:e3ff:fe36:193a"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::f465:1cff:fe61:98e4"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::fc3f:d3ff:fe2c:2205"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c07:4eff:fe76:b57b"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::e8d8:72ff:fe0b:23d3"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "172.17.0.1"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c463:93ff:fe60:991d"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "178.105.170.226"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "2a01:4f8:1c1b:8c96::1"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d8a2:1eff:febd:a370"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ccc:9eff:fe70:ea7b"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::cd5:56ff:fe8c:ae2e"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::181b:46ff:fe8e:9732"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::1822:b6ff:fead:d33a"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::18e7:adff:fe07:826"
-          },
-          {
-            "events": 5498,
-            "first_seen": "2026-07-05T19:36:22.036Z",
-            "last_seen": "2026-07-05T20:36:21.773Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::20ad:e6ff:febd:eb0a"
-          },
-          {
-            "events": 4793,
-            "first_seen": "2026-07-05T19:36:24.070Z",
-            "last_seen": "2026-07-05T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.15"
-          },
-          {
-            "events": 2975,
-            "first_seen": "2026-07-05T19:36:27.159Z",
-            "last_seen": "2026-07-05T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "events": 2975,
-            "first_seen": "2026-07-05T19:36:27.159Z",
-            "last_seen": "2026-07-05T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "events": 2975,
-            "first_seen": "2026-07-05T19:36:27.159Z",
-            "last_seen": "2026-07-05T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.21"
-          },
-          {
-            "events": 2975,
-            "first_seen": "2026-07-05T19:36:27.159Z",
-            "last_seen": "2026-07-05T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.24"
-          },
-          {
-            "events": 2975,
-            "first_seen": "2026-07-05T19:36:27.159Z",
-            "last_seen": "2026-07-05T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.5"
-          },
-          {
-            "events": 2975,
-            "first_seen": "2026-07-05T19:36:27.159Z",
-            "last_seen": "2026-07-05T20:36:17.160Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "events": 1736,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:20.437Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "events": 1222,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:19.507Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.8"
-          },
-          {
-            "events": 996,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:18.000Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.18"
-          },
-          {
-            "events": 556,
-            "first_seen": "2026-07-05T19:36:24.424Z",
-            "last_seen": "2026-07-05T20:36:14.425Z",
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.17"
-          },
-          {
-            "events": 556,
-            "first_seen": "2026-07-05T19:36:22.035Z",
-            "last_seen": "2026-07-05T20:36:20.328Z",
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "events": 518,
-            "first_seen": "2026-07-05T19:43:43.608Z",
-            "last_seen": "2026-07-05T19:48:40.683Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::7c34:10ff:fe02:218e"
-          },
-          {
-            "events": 498,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:18.000Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.2"
-          },
-          {
-            "events": 494,
-            "first_seen": "2026-07-05T19:36:29.754Z",
-            "last_seen": "2026-07-05T20:36:19.753Z",
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "events": 476,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "events": 476,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.19"
-          },
-          {
-            "events": 476,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "events": 476,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "events": 476,
-            "first_seen": "2026-07-05T19:36:28.000Z",
-            "last_seen": "2026-07-05T20:36:18.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.13"
-          }
+          [
+            19418,
+            "2026-07-05T19:36:22.498Z",
+            "2026-07-05T20:36:20.705Z",
+            null,
+            null
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::3063:b1ff:fe7a:a51a"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::242d:93ff:feb6:fcb8"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::7053:83ff:fe7c:b5f2"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::30a5:baff:fe8a:8dc5"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::9c68:e8ff:fe13:bb8b"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::7c01:7eff:fe0f:9a51"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::ac39:a2ff:fe1a:96ca"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::74fe:98ff:fe8f:9120"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "172.18.0.1"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::9000:8ff:fec4:93b6"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::34d6:47ff:fe77:8f4e"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::a464:feff:fe44:3143"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::d847:c9ff:fe0b:efd7"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::68ea:e3ff:fe36:193a"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::f465:1cff:fe61:98e4"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::fc3f:d3ff:fe2c:2205"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::c07:4eff:fe76:b57b"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::e8d8:72ff:fe0b:23d3"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "172.17.0.1"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::c463:93ff:fe60:991d"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "178.105.170.226"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "2a01:4f8:1c1b:8c96::1"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::d8a2:1eff:febd:a370"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::ccc:9eff:fe70:ea7b"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::cd5:56ff:fe8c:ae2e"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::181b:46ff:fe8e:9732"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::1822:b6ff:fead:d33a"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::18e7:adff:fe07:826"
+          ],
+          [
+            5498,
+            "2026-07-05T19:36:22.036Z",
+            "2026-07-05T20:36:21.773Z",
+            "soc-playground",
+            "fe80::20ad:e6ff:febd:eb0a"
+          ],
+          [
+            4793,
+            "2026-07-05T19:36:24.070Z",
+            "2026-07-05T20:36:17.160Z",
+            "db-1",
+            "172.18.0.15"
+          ],
+          [
+            2975,
+            "2026-07-05T19:36:27.159Z",
+            "2026-07-05T20:36:17.160Z",
+            "db-1",
+            "172.18.0.12"
+          ],
+          [
+            2975,
+            "2026-07-05T19:36:27.159Z",
+            "2026-07-05T20:36:17.160Z",
+            "db-1",
+            "172.18.0.16"
+          ],
+          [
+            2975,
+            "2026-07-05T19:36:27.159Z",
+            "2026-07-05T20:36:17.160Z",
+            "db-1",
+            "172.18.0.21"
+          ],
+          [
+            2975,
+            "2026-07-05T19:36:27.159Z",
+            "2026-07-05T20:36:17.160Z",
+            "db-1",
+            "172.18.0.24"
+          ],
+          [
+            2975,
+            "2026-07-05T19:36:27.159Z",
+            "2026-07-05T20:36:17.160Z",
+            "db-1",
+            "172.18.0.5"
+          ],
+          [
+            2975,
+            "2026-07-05T19:36:27.159Z",
+            "2026-07-05T20:36:17.160Z",
+            "db-1",
+            "172.18.0.23"
+          ],
+          [
+            1736,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:20.437Z",
+            "web-1",
+            "172.18.0.6"
+          ],
+          [
+            1222,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:19.507Z",
+            "web-2",
+            "172.18.0.8"
+          ],
+          [
+            996,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:18.000Z",
+            "web-1",
+            "172.18.0.18"
+          ],
+          [
+            556,
+            "2026-07-05T19:36:24.424Z",
+            "2026-07-05T20:36:14.425Z",
+            "jump-box-1",
+            "172.18.0.17"
+          ],
+          [
+            556,
+            "2026-07-05T19:36:22.035Z",
+            "2026-07-05T20:36:20.328Z",
+            "dev-ws-1",
+            "172.18.0.23"
+          ],
+          [
+            518,
+            "2026-07-05T19:43:43.608Z",
+            "2026-07-05T19:48:40.683Z",
+            "soc-playground",
+            "fe80::7c34:10ff:fe02:218e"
+          ],
+          [
+            498,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:18.000Z",
+            "web-1",
+            "172.18.0.2"
+          ],
+          [
+            494,
+            "2026-07-05T19:36:29.754Z",
+            "2026-07-05T20:36:19.753Z",
+            "office-ws-2",
+            "172.18.0.12"
+          ],
+          [
+            476,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:18.000Z",
+            "web-2",
+            "172.18.0.16"
+          ],
+          [
+            476,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:18.000Z",
+            "web-2",
+            "172.18.0.19"
+          ],
+          [
+            476,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:18.000Z",
+            "web-2",
+            "172.18.0.12"
+          ],
+          [
+            476,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:18.000Z",
+            "web-2",
+            "172.18.0.14"
+          ],
+          [
+            476,
+            "2026-07-05T19:36:28.000Z",
+            "2026-07-05T20:36:18.000Z",
+            "web-2",
+            "172.18.0.13"
+          ]
         ]
       }
     },
@@ -810,356 +810,356 @@
         ],
         "row_count": 50,
         "values": [
-          {
-            "events": 19459,
-            "first_seen": "2026-06-28T19:36:22.557Z",
-            "last_seen": "2026-06-28T20:36:20.497Z",
-            "host.name": null,
-            "host.ip": null
-          },
-          {
-            "events": 4816,
-            "first_seen": "2026-06-28T19:36:23.764Z",
-            "last_seen": "2026-06-28T20:36:21.163Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.18"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::f045:42ff:feda:8157"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::5476:17ff:fee7:149"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::5cfd:bff:fe4d:4a96"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::446c:62ff:feaa:f0cb"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::e0f0:18ff:fe54:f903"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "172.17.0.1"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c860:c7ff:feef:9438"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::18fa:a6ff:feb5:b801"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::5450:6bff:fe99:847f"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::ccff:16ff:fe05:c01c"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "2a01:4f8:1c1b:8c96::1"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::f0f3:26ff:fe23:12d6"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::a0d3:c5ff:fe75:d18c"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::44e4:9dff:fe6f:48b5"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::43:6cff:fe14:f0c0"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "172.18.0.1"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::6068:74ff:fe12:29c9"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "178.105.170.226"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::f4e0:1ff:feb4:9f76"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::cce3:cfff:fe25:fb38"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::9000:8ff:fe60:6307"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::485a:34ff:fed9:9f7f"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::8c17:84ff:fe55:628c"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::60d5:2aff:fe97:15c6"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::4822:5aff:fe4b:d571"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::c79:ddff:fe21:ab25"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::74ab:6cff:febb:43f2"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::6811:97ff:fe76:6e4b"
-          },
-          {
-            "events": 4583,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:21.560Z",
-            "host.name": "soc-playground",
-            "host.ip": "fe80::d460:6dff:fe1a:4bd0"
-          },
-          {
-            "events": 2998,
-            "first_seen": "2026-06-28T19:36:23.764Z",
-            "last_seen": "2026-06-28T20:36:13.771Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.16"
-          },
-          {
-            "events": 2998,
-            "first_seen": "2026-06-28T19:36:23.764Z",
-            "last_seen": "2026-06-28T20:36:13.771Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.12"
-          },
-          {
-            "events": 2998,
-            "first_seen": "2026-06-28T19:36:23.764Z",
-            "last_seen": "2026-06-28T20:36:13.771Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.5"
-          },
-          {
-            "events": 2998,
-            "first_seen": "2026-06-28T19:36:23.764Z",
-            "last_seen": "2026-06-28T20:36:13.771Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.23"
-          },
-          {
-            "events": 2998,
-            "first_seen": "2026-06-28T19:36:23.764Z",
-            "last_seen": "2026-06-28T20:36:13.771Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.15"
-          },
-          {
-            "events": 2998,
-            "first_seen": "2026-06-28T19:36:23.764Z",
-            "last_seen": "2026-06-28T20:36:13.771Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.24"
-          },
-          {
-            "events": 2998,
-            "first_seen": "2026-06-28T19:36:23.764Z",
-            "last_seen": "2026-06-28T20:36:13.771Z",
-            "host.name": "db-1",
-            "host.ip": "172.18.0.21"
-          },
-          {
-            "events": 1231,
-            "first_seen": "2026-06-28T19:36:23.554Z",
-            "last_seen": "2026-06-28T20:36:20.204Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.11"
-          },
-          {
-            "events": 1174,
-            "first_seen": "2026-06-28T19:36:22.989Z",
-            "last_seen": "2026-06-28T20:36:17.844Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.10"
-          },
-          {
-            "events": 990,
-            "first_seen": "2026-06-28T19:36:30.000Z",
-            "last_seen": "2026-06-28T20:36:20.000Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.18"
-          },
-          {
-            "events": 990,
-            "first_seen": "2026-06-28T19:36:30.000Z",
-            "last_seen": "2026-06-28T20:36:20.000Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.6"
-          },
-          {
-            "events": 495,
-            "first_seen": "2026-06-28T19:36:30.000Z",
-            "last_seen": "2026-06-28T20:36:20.000Z",
-            "host.name": "web-1",
-            "host.ip": "172.18.0.2"
-          },
-          {
-            "events": 489,
-            "first_seen": "2026-06-28T19:36:24.425Z",
-            "last_seen": "2026-06-28T20:36:14.421Z",
-            "host.name": "office-ws-2",
-            "host.ip": "172.18.0.25"
-          },
-          {
-            "events": 466,
-            "first_seen": "2026-06-28T19:36:23.130Z",
-            "last_seen": "2026-06-28T20:36:13.128Z",
-            "host.name": "canary-1",
-            "host.ip": "172.18.0.17"
-          },
-          {
-            "events": 458,
-            "first_seen": "2026-06-28T19:36:23.144Z",
-            "last_seen": "2026-06-28T20:36:13.146Z",
-            "host.name": "jump-box-1",
-            "host.ip": "172.18.0.21"
-          },
-          {
-            "events": 444,
-            "first_seen": "2026-06-28T19:36:31.852Z",
-            "last_seen": "2026-06-28T20:36:21.852Z",
-            "host.name": "dev-ws-1",
-            "host.ip": "172.18.0.15"
-          },
-          {
-            "events": 443,
-            "first_seen": "2026-06-28T19:36:31.396Z",
-            "last_seen": "2026-06-28T20:36:21.395Z",
-            "host.name": "office-ws-1",
-            "host.ip": "172.18.0.24"
-          },
-          {
-            "events": 442,
-            "first_seen": "2026-06-28T19:36:27.000Z",
-            "last_seen": "2026-06-28T20:36:17.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.14"
-          },
-          {
-            "events": 442,
-            "first_seen": "2026-06-28T19:36:27.000Z",
-            "last_seen": "2026-06-28T20:36:17.000Z",
-            "host.name": "web-2",
-            "host.ip": "172.18.0.13"
-          }
+          [
+            19459,
+            "2026-06-28T19:36:22.557Z",
+            "2026-06-28T20:36:20.497Z",
+            null,
+            null
+          ],
+          [
+            4816,
+            "2026-06-28T19:36:23.764Z",
+            "2026-06-28T20:36:21.163Z",
+            "db-1",
+            "172.18.0.18"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::f045:42ff:feda:8157"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::5476:17ff:fee7:149"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::5cfd:bff:fe4d:4a96"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::446c:62ff:feaa:f0cb"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::e0f0:18ff:fe54:f903"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "172.17.0.1"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::c860:c7ff:feef:9438"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::18fa:a6ff:feb5:b801"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::5450:6bff:fe99:847f"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::ccff:16ff:fe05:c01c"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "2a01:4f8:1c1b:8c96::1"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::f0f3:26ff:fe23:12d6"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::a0d3:c5ff:fe75:d18c"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::44e4:9dff:fe6f:48b5"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::43:6cff:fe14:f0c0"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "172.18.0.1"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::6068:74ff:fe12:29c9"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "178.105.170.226"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::f4e0:1ff:feb4:9f76"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::cce3:cfff:fe25:fb38"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::9000:8ff:fe60:6307"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::485a:34ff:fed9:9f7f"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::8c17:84ff:fe55:628c"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::60d5:2aff:fe97:15c6"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::4822:5aff:fe4b:d571"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::c79:ddff:fe21:ab25"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::74ab:6cff:febb:43f2"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::6811:97ff:fe76:6e4b"
+          ],
+          [
+            4583,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:21.560Z",
+            "soc-playground",
+            "fe80::d460:6dff:fe1a:4bd0"
+          ],
+          [
+            2998,
+            "2026-06-28T19:36:23.764Z",
+            "2026-06-28T20:36:13.771Z",
+            "db-1",
+            "172.18.0.16"
+          ],
+          [
+            2998,
+            "2026-06-28T19:36:23.764Z",
+            "2026-06-28T20:36:13.771Z",
+            "db-1",
+            "172.18.0.12"
+          ],
+          [
+            2998,
+            "2026-06-28T19:36:23.764Z",
+            "2026-06-28T20:36:13.771Z",
+            "db-1",
+            "172.18.0.5"
+          ],
+          [
+            2998,
+            "2026-06-28T19:36:23.764Z",
+            "2026-06-28T20:36:13.771Z",
+            "db-1",
+            "172.18.0.23"
+          ],
+          [
+            2998,
+            "2026-06-28T19:36:23.764Z",
+            "2026-06-28T20:36:13.771Z",
+            "db-1",
+            "172.18.0.15"
+          ],
+          [
+            2998,
+            "2026-06-28T19:36:23.764Z",
+            "2026-06-28T20:36:13.771Z",
+            "db-1",
+            "172.18.0.24"
+          ],
+          [
+            2998,
+            "2026-06-28T19:36:23.764Z",
+            "2026-06-28T20:36:13.771Z",
+            "db-1",
+            "172.18.0.21"
+          ],
+          [
+            1231,
+            "2026-06-28T19:36:23.554Z",
+            "2026-06-28T20:36:20.204Z",
+            "web-1",
+            "172.18.0.11"
+          ],
+          [
+            1174,
+            "2026-06-28T19:36:22.989Z",
+            "2026-06-28T20:36:17.844Z",
+            "web-2",
+            "172.18.0.10"
+          ],
+          [
+            990,
+            "2026-06-28T19:36:30.000Z",
+            "2026-06-28T20:36:20.000Z",
+            "web-1",
+            "172.18.0.18"
+          ],
+          [
+            990,
+            "2026-06-28T19:36:30.000Z",
+            "2026-06-28T20:36:20.000Z",
+            "web-1",
+            "172.18.0.6"
+          ],
+          [
+            495,
+            "2026-06-28T19:36:30.000Z",
+            "2026-06-28T20:36:20.000Z",
+            "web-1",
+            "172.18.0.2"
+          ],
+          [
+            489,
+            "2026-06-28T19:36:24.425Z",
+            "2026-06-28T20:36:14.421Z",
+            "office-ws-2",
+            "172.18.0.25"
+          ],
+          [
+            466,
+            "2026-06-28T19:36:23.130Z",
+            "2026-06-28T20:36:13.128Z",
+            "canary-1",
+            "172.18.0.17"
+          ],
+          [
+            458,
+            "2026-06-28T19:36:23.144Z",
+            "2026-06-28T20:36:13.146Z",
+            "jump-box-1",
+            "172.18.0.21"
+          ],
+          [
+            444,
+            "2026-06-28T19:36:31.852Z",
+            "2026-06-28T20:36:21.852Z",
+            "dev-ws-1",
+            "172.18.0.15"
+          ],
+          [
+            443,
+            "2026-06-28T19:36:31.396Z",
+            "2026-06-28T20:36:21.395Z",
+            "office-ws-1",
+            "172.18.0.24"
+          ],
+          [
+            442,
+            "2026-06-28T19:36:27.000Z",
+            "2026-06-28T20:36:17.000Z",
+            "web-2",
+            "172.18.0.14"
+          ],
+          [
+            442,
+            "2026-06-28T19:36:27.000Z",
+            "2026-06-28T20:36:17.000Z",
+            "web-2",
+            "172.18.0.13"
+          ]
         ]
       }
     }
@@ -1196,83 +1196,83 @@
       ],
       "row_count": 11,
       "values": [
-        {
-          "events": 52,
-          "first_seen": "2026-07-26T20:06:02.774Z",
-          "last_seen": "2026-07-26T20:06:40.517Z",
-          "host.name": "db-1",
-          "host.ip": "172.18.0.5"
-        },
-        {
-          "events": 30,
-          "first_seen": "2026-07-26T20:06:04.000Z",
-          "last_seen": "2026-07-26T20:06:40.000Z",
-          "host.name": "web-2",
-          "host.ip": "172.18.0.12"
-        },
-        {
-          "events": 12,
-          "first_seen": "2026-07-26T20:06:08.000Z",
-          "last_seen": "2026-07-26T20:06:40.189Z",
-          "host.name": "web-1",
-          "host.ip": "172.18.0.18"
-        },
-        {
-          "events": 7,
-          "first_seen": "2026-07-26T20:06:11.992Z",
-          "last_seen": "2026-07-26T20:06:41.991Z",
-          "host.name": "jump-box-1",
-          "host.ip": "172.18.0.17"
-        },
-        {
-          "events": 5,
-          "first_seen": "2026-07-26T20:06:11.755Z",
-          "last_seen": "2026-07-26T20:06:41.756Z",
-          "host.name": "dev-ws-1",
-          "host.ip": "172.18.0.3"
-        },
-        {
-          "events": 5,
-          "first_seen": "2026-07-26T20:06:05.153Z",
-          "last_seen": "2026-07-26T20:06:35.153Z",
-          "host.name": "canary-1",
-          "host.ip": "172.18.0.22"
-        },
-        {
-          "events": 5,
-          "first_seen": "2026-07-26T20:06:05.649Z",
-          "last_seen": "2026-07-26T20:06:35.648Z",
-          "host.name": "scanner-1",
-          "host.ip": "172.18.0.16"
-        },
-        {
-          "events": 4,
-          "first_seen": "2026-07-26T20:06:04.398Z",
-          "last_seen": "2026-07-26T20:06:34.398Z",
-          "host.name": "office-ws-2",
-          "host.ip": "172.18.0.24"
-        },
-        {
-          "events": 4,
-          "first_seen": "2026-07-26T20:06:09.105Z",
-          "last_seen": "2026-07-26T20:06:39.102Z",
-          "host.name": "office-ws-1",
-          "host.ip": "172.18.0.6"
-        },
-        {
-          "events": 4,
-          "first_seen": "2026-07-26T20:06:05.166Z",
-          "last_seen": "2026-07-26T20:06:35.165Z",
-          "host.name": "config-mgmt-1",
-          "host.ip": "172.18.0.23"
-        },
-        {
-          "events": 4,
-          "first_seen": "2026-07-26T20:06:11.381Z",
-          "last_seen": "2026-07-26T20:06:41.377Z",
-          "host.name": "ci-1",
-          "host.ip": "172.18.0.13"
-        }
+        [
+          52,
+          "2026-07-26T20:06:02.774Z",
+          "2026-07-26T20:06:40.517Z",
+          "db-1",
+          "172.18.0.5"
+        ],
+        [
+          30,
+          "2026-07-26T20:06:04.000Z",
+          "2026-07-26T20:06:40.000Z",
+          "web-2",
+          "172.18.0.12"
+        ],
+        [
+          12,
+          "2026-07-26T20:06:08.000Z",
+          "2026-07-26T20:06:40.189Z",
+          "web-1",
+          "172.18.0.18"
+        ],
+        [
+          7,
+          "2026-07-26T20:06:11.992Z",
+          "2026-07-26T20:06:41.991Z",
+          "jump-box-1",
+          "172.18.0.17"
+        ],
+        [
+          5,
+          "2026-07-26T20:06:11.755Z",
+          "2026-07-26T20:06:41.756Z",
+          "dev-ws-1",
+          "172.18.0.3"
+        ],
+        [
+          5,
+          "2026-07-26T20:06:05.153Z",
+          "2026-07-26T20:06:35.153Z",
+          "canary-1",
+          "172.18.0.22"
+        ],
+        [
+          5,
+          "2026-07-26T20:06:05.649Z",
+          "2026-07-26T20:06:35.648Z",
+          "scanner-1",
+          "172.18.0.16"
+        ],
+        [
+          4,
+          "2026-07-26T20:06:04.398Z",
+          "2026-07-26T20:06:34.398Z",
+          "office-ws-2",
+          "172.18.0.24"
+        ],
+        [
+          4,
+          "2026-07-26T20:06:09.105Z",
+          "2026-07-26T20:06:39.102Z",
+          "office-ws-1",
+          "172.18.0.6"
+        ],
+        [
+          4,
+          "2026-07-26T20:06:05.166Z",
+          "2026-07-26T20:06:35.165Z",
+          "config-mgmt-1",
+          "172.18.0.23"
+        ],
+        [
+          4,
+          "2026-07-26T20:06:11.381Z",
+          "2026-07-26T20:06:41.377Z",
+          "ci-1",
+          "172.18.0.13"
+        ]
       ]
     }
   }

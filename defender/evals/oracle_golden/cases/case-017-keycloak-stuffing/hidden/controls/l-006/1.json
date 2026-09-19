@@ -44,303 +44,303 @@
         ],
         "row_count": 33,
         "values": [
-          {
-            "events": 96,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:14:50.037Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 94,
-            "first_seen": "2026-07-07T06:15:13.354Z",
-            "last_seen": "2026-07-07T07:10:46.992Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "7e76d1cea7c4"
-          },
-          {
-            "events": 66,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:14:37.031Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 60,
-            "first_seen": "2026-07-07T06:15:16.356Z",
-            "last_seen": "2026-07-07T07:14:22.027Z",
-            "rule": "Drop and execute new binary in container",
-            "proc": "openssl",
-            "parent": "sh",
-            "container": "58ffe39dd54f"
-          },
-          {
-            "events": 60,
-            "first_seen": "2026-07-07T06:15:16.356Z",
-            "last_seen": "2026-07-07T07:14:22.027Z",
-            "rule": "Drop and execute new binary in container",
-            "proc": "curl",
-            "parent": "sh",
-            "container": "58ffe39dd54f"
-          },
-          {
-            "events": 48,
-            "first_seen": "2026-07-07T06:17:46.395Z",
-            "last_seen": "2026-07-07T07:12:21.008Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 46,
-            "first_seen": "2026-07-07T06:16:32.379Z",
-            "last_seen": "2026-07-07T07:11:01.994Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 38,
-            "first_seen": "2026-07-07T06:17:07.383Z",
-            "last_seen": "2026-07-07T07:09:04.971Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 36,
-            "first_seen": "2026-07-07T06:18:16.402Z",
-            "last_seen": "2026-07-07T07:14:47.035Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "d8fb0192a17f"
-          },
-          {
-            "events": 34,
-            "first_seen": "2026-07-07T06:15:13.354Z",
-            "last_seen": "2026-07-07T07:13:44.022Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 22,
-            "first_seen": "2026-07-07T06:15:26.363Z",
-            "last_seen": "2026-07-07T07:14:19.026Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 20,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:12:14.005Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 20,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:12:14.005Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 16,
-            "first_seen": "2026-07-07T06:17:46.395Z",
-            "last_seen": "2026-07-07T07:12:21.008Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "45388dd0bf3a"
-          },
-          {
-            "events": 16,
-            "first_seen": "2026-07-07T06:17:31.392Z",
-            "last_seen": "2026-07-07T07:09:54.982Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "d8fb0192a17f"
-          },
-          {
-            "events": 16,
-            "first_seen": "2026-07-07T06:18:42.407Z",
-            "last_seen": "2026-07-07T07:07:32.956Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-07-07T06:15:44.367Z",
-            "last_seen": "2026-07-07T07:13:44.022Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-07-07T06:16:32.379Z",
-            "last_seen": "2026-07-07T07:11:01.994Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-07-07T06:16:32.379Z",
-            "last_seen": "2026-07-07T07:11:01.994Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-07-07T06:15:06.351Z",
-            "last_seen": "2026-07-07T07:14:37.031Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 13,
-            "first_seen": "2026-07-07T06:18:26.405Z",
-            "last_seen": "2026-07-07T06:55:03.824Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "c58bf05facac"
-          },
-          {
-            "events": 13,
-            "first_seen": "2026-07-07T06:15:41.365Z",
-            "last_seen": "2026-07-07T07:12:14.006Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "d8fb0192a17f"
-          },
-          {
-            "events": 12,
-            "first_seen": "2026-07-07T06:15:44.367Z",
-            "last_seen": "2026-07-07T07:13:44.022Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-07-07T06:17:07.383Z",
-            "last_seen": "2026-07-07T07:09:04.971Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-07-07T06:17:07.383Z",
-            "last_seen": "2026-07-07T07:09:04.971Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 8,
-            "first_seen": "2026-07-07T06:17:46.395Z",
-            "last_seen": "2026-07-07T07:03:28.914Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 8,
-            "first_seen": "2026-07-07T06:17:46.394Z",
-            "last_seen": "2026-07-07T07:03:28.914Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 8,
-            "first_seen": "2026-07-07T06:15:26.363Z",
-            "last_seen": "2026-07-07T07:14:19.025Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 8,
-            "first_seen": "2026-07-07T06:28:58.518Z",
-            "last_seen": "2026-07-07T07:14:50.037Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 7,
-            "first_seen": "2026-07-07T06:15:26.363Z",
-            "last_seen": "2026-07-07T07:14:19.025Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 6,
-            "first_seen": "2026-07-07T06:26:17.489Z",
-            "last_seen": "2026-07-07T07:13:11.015Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 2,
-            "first_seen": "2026-07-07T06:20:33.432Z",
-            "last_seen": "2026-07-07T06:30:46.543Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "runuser",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-07T07:04:35.923Z",
-            "last_seen": "2026-07-07T07:04:35.923Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "runuser",
-            "container": "922f03f16a11"
-          }
+          [
+            96,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:14:50.037Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "a36492b5172b"
+          ],
+          [
+            94,
+            "2026-07-07T06:15:13.354Z",
+            "2026-07-07T07:10:46.992Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "7e76d1cea7c4"
+          ],
+          [
+            66,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:14:37.031Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "ed96a85a7480"
+          ],
+          [
+            60,
+            "2026-07-07T06:15:16.356Z",
+            "2026-07-07T07:14:22.027Z",
+            "Drop and execute new binary in container",
+            "openssl",
+            "sh",
+            "58ffe39dd54f"
+          ],
+          [
+            60,
+            "2026-07-07T06:15:16.356Z",
+            "2026-07-07T07:14:22.027Z",
+            "Drop and execute new binary in container",
+            "curl",
+            "sh",
+            "58ffe39dd54f"
+          ],
+          [
+            48,
+            "2026-07-07T06:17:46.395Z",
+            "2026-07-07T07:12:21.008Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "d1daf6f3b7c6"
+          ],
+          [
+            46,
+            "2026-07-07T06:16:32.379Z",
+            "2026-07-07T07:11:01.994Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "1df4bcd65ee4"
+          ],
+          [
+            38,
+            "2026-07-07T06:17:07.383Z",
+            "2026-07-07T07:09:04.971Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "ffbff1299702"
+          ],
+          [
+            36,
+            "2026-07-07T06:18:16.402Z",
+            "2026-07-07T07:14:47.035Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "d8fb0192a17f"
+          ],
+          [
+            34,
+            "2026-07-07T06:15:13.354Z",
+            "2026-07-07T07:13:44.022Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "2c1e2ec93d17"
+          ],
+          [
+            22,
+            "2026-07-07T06:15:26.363Z",
+            "2026-07-07T07:14:19.026Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "922f03f16a11"
+          ],
+          [
+            20,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:12:14.005Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "a36492b5172b"
+          ],
+          [
+            20,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:12:14.005Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "a36492b5172b"
+          ],
+          [
+            16,
+            "2026-07-07T06:17:46.395Z",
+            "2026-07-07T07:12:21.008Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "45388dd0bf3a"
+          ],
+          [
+            16,
+            "2026-07-07T06:17:31.392Z",
+            "2026-07-07T07:09:54.982Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "d8fb0192a17f"
+          ],
+          [
+            16,
+            "2026-07-07T06:18:42.407Z",
+            "2026-07-07T07:07:32.956Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "ed96a85a7480"
+          ],
+          [
+            14,
+            "2026-07-07T06:15:44.367Z",
+            "2026-07-07T07:13:44.022Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "2c1e2ec93d17"
+          ],
+          [
+            14,
+            "2026-07-07T06:16:32.379Z",
+            "2026-07-07T07:11:01.994Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "1df4bcd65ee4"
+          ],
+          [
+            14,
+            "2026-07-07T06:16:32.379Z",
+            "2026-07-07T07:11:01.994Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "1df4bcd65ee4"
+          ],
+          [
+            14,
+            "2026-07-07T06:15:06.351Z",
+            "2026-07-07T07:14:37.031Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "ffbff1299702"
+          ],
+          [
+            13,
+            "2026-07-07T06:18:26.405Z",
+            "2026-07-07T06:55:03.824Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "c58bf05facac"
+          ],
+          [
+            13,
+            "2026-07-07T06:15:41.365Z",
+            "2026-07-07T07:12:14.006Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "d8fb0192a17f"
+          ],
+          [
+            12,
+            "2026-07-07T06:15:44.367Z",
+            "2026-07-07T07:13:44.022Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "2c1e2ec93d17"
+          ],
+          [
+            10,
+            "2026-07-07T06:17:07.383Z",
+            "2026-07-07T07:09:04.971Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "ffbff1299702"
+          ],
+          [
+            10,
+            "2026-07-07T06:17:07.383Z",
+            "2026-07-07T07:09:04.971Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "ffbff1299702"
+          ],
+          [
+            8,
+            "2026-07-07T06:17:46.395Z",
+            "2026-07-07T07:03:28.914Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "ed96a85a7480"
+          ],
+          [
+            8,
+            "2026-07-07T06:17:46.394Z",
+            "2026-07-07T07:03:28.914Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "ed96a85a7480"
+          ],
+          [
+            8,
+            "2026-07-07T06:15:26.363Z",
+            "2026-07-07T07:14:19.025Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "922f03f16a11"
+          ],
+          [
+            8,
+            "2026-07-07T06:28:58.518Z",
+            "2026-07-07T07:14:50.037Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "d1daf6f3b7c6"
+          ],
+          [
+            7,
+            "2026-07-07T06:15:26.363Z",
+            "2026-07-07T07:14:19.025Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "922f03f16a11"
+          ],
+          [
+            6,
+            "2026-07-07T06:26:17.489Z",
+            "2026-07-07T07:13:11.015Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "d1daf6f3b7c6"
+          ],
+          [
+            2,
+            "2026-07-07T06:20:33.432Z",
+            "2026-07-07T06:30:46.543Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "runuser",
+            "2c1e2ec93d17"
+          ],
+          [
+            1,
+            "2026-07-07T07:04:35.923Z",
+            "2026-07-07T07:04:35.923Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "runuser",
+            "922f03f16a11"
+          ]
         ]
       }
     },
@@ -386,294 +386,294 @@
         ],
         "row_count": 32,
         "values": [
-          {
-            "events": 78,
-            "first_seen": "2026-06-30T06:16:22.555Z",
-            "last_seen": "2026-06-30T07:11:14.376Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 76,
-            "first_seen": "2026-06-30T06:15:57.551Z",
-            "last_seen": "2026-06-30T07:12:04.385Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 60,
-            "first_seen": "2026-06-30T06:15:18.541Z",
-            "last_seen": "2026-06-30T07:14:34.413Z",
-            "rule": "Drop and execute new binary in container",
-            "proc": "openssl",
-            "parent": "sh",
-            "container": "58ffe39dd54f"
-          },
-          {
-            "events": 60,
-            "first_seen": "2026-06-30T06:15:18.541Z",
-            "last_seen": "2026-06-30T07:14:34.413Z",
-            "rule": "Drop and execute new binary in container",
-            "proc": "curl",
-            "parent": "sh",
-            "container": "58ffe39dd54f"
-          },
-          {
-            "events": 56,
-            "first_seen": "2026-06-30T06:19:09.585Z",
-            "last_seen": "2026-06-30T07:13:59.408Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 55,
-            "first_seen": "2026-06-30T06:21:15.619Z",
-            "last_seen": "2026-06-30T07:01:14.231Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "7e76d1cea7c4"
-          },
-          {
-            "events": 52,
-            "first_seen": "2026-06-30T06:23:09.644Z",
-            "last_seen": "2026-06-30T07:14:59.427Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 38,
-            "first_seen": "2026-06-30T06:21:09.614Z",
-            "last_seen": "2026-06-30T07:14:49.418Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "d8fb0192a17f"
-          },
-          {
-            "events": 36,
-            "first_seen": "2026-06-30T06:21:09.615Z",
-            "last_seen": "2026-06-30T07:12:07.387Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 30,
-            "first_seen": "2026-06-30T06:29:25.734Z",
-            "last_seen": "2026-06-30T07:12:44.396Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 28,
-            "first_seen": "2026-06-30T06:21:09.615Z",
-            "last_seen": "2026-06-30T07:12:14.390Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 19,
-            "first_seen": "2026-06-30T06:21:12.616Z",
-            "last_seen": "2026-06-30T07:14:59.426Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "45388dd0bf3a"
-          },
-          {
-            "events": 18,
-            "first_seen": "2026-06-30T06:15:57.551Z",
-            "last_seen": "2026-06-30T07:10:20.361Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 18,
-            "first_seen": "2026-06-30T06:19:38.592Z",
-            "last_seen": "2026-06-30T07:13:59.408Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 18,
-            "first_seen": "2026-06-30T06:19:38.591Z",
-            "last_seen": "2026-06-30T07:13:59.408Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 15,
-            "first_seen": "2026-06-30T06:18:16.574Z",
-            "last_seen": "2026-06-30T07:09:30.353Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 15,
-            "first_seen": "2026-06-30T06:19:45.595Z",
-            "last_seen": "2026-06-30T07:12:44.395Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 15,
-            "first_seen": "2026-06-30T06:18:16.574Z",
-            "last_seen": "2026-06-30T07:09:30.352Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-06-30T06:15:25.544Z",
-            "last_seen": "2026-06-30T07:07:49.325Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "d8fb0192a17f"
-          },
-          {
-            "events": 13,
-            "first_seen": "2026-06-30T06:21:09.614Z",
-            "last_seen": "2026-06-30T07:14:49.417Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 11,
-            "first_seen": "2026-06-30T06:19:45.595Z",
-            "last_seen": "2026-06-30T07:12:44.395Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 11,
-            "first_seen": "2026-06-30T06:18:34.580Z",
-            "last_seen": "2026-06-30T07:14:56.423Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "c58bf05facac"
-          },
-          {
-            "events": 11,
-            "first_seen": "2026-06-30T06:16:22.555Z",
-            "last_seen": "2026-06-30T07:11:14.375Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 11,
-            "first_seen": "2026-06-30T06:15:57.551Z",
-            "last_seen": "2026-06-30T07:00:53.224Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "d8fb0192a17f"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-06-30T06:20:34.609Z",
-            "last_seen": "2026-06-30T07:10:34.367Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-06-30T06:20:34.609Z",
-            "last_seen": "2026-06-30T07:10:34.366Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-06-30T06:15:57.550Z",
-            "last_seen": "2026-06-30T07:12:04.385Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-06-30T06:24:48.671Z",
-            "last_seen": "2026-06-30T07:12:07.387Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-06-30T06:24:48.670Z",
-            "last_seen": "2026-06-30T07:12:07.387Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 8,
-            "first_seen": "2026-06-30T06:21:09.615Z",
-            "last_seen": "2026-06-30T07:12:14.390Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 8,
-            "first_seen": "2026-06-30T06:21:09.615Z",
-            "last_seen": "2026-06-30T07:12:14.389Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 4,
-            "first_seen": "2026-06-30T06:25:18.678Z",
-            "last_seen": "2026-06-30T07:08:28.337Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "runuser",
-            "container": "2c1e2ec93d17"
-          }
+          [
+            78,
+            "2026-06-30T06:16:22.555Z",
+            "2026-06-30T07:11:14.376Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "ed96a85a7480"
+          ],
+          [
+            76,
+            "2026-06-30T06:15:57.551Z",
+            "2026-06-30T07:12:04.385Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "a36492b5172b"
+          ],
+          [
+            60,
+            "2026-06-30T06:15:18.541Z",
+            "2026-06-30T07:14:34.413Z",
+            "Drop and execute new binary in container",
+            "openssl",
+            "sh",
+            "58ffe39dd54f"
+          ],
+          [
+            60,
+            "2026-06-30T06:15:18.541Z",
+            "2026-06-30T07:14:34.413Z",
+            "Drop and execute new binary in container",
+            "curl",
+            "sh",
+            "58ffe39dd54f"
+          ],
+          [
+            56,
+            "2026-06-30T06:19:09.585Z",
+            "2026-06-30T07:13:59.408Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "ffbff1299702"
+          ],
+          [
+            55,
+            "2026-06-30T06:21:15.619Z",
+            "2026-06-30T07:01:14.231Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "7e76d1cea7c4"
+          ],
+          [
+            52,
+            "2026-06-30T06:23:09.644Z",
+            "2026-06-30T07:14:59.427Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "d1daf6f3b7c6"
+          ],
+          [
+            38,
+            "2026-06-30T06:21:09.614Z",
+            "2026-06-30T07:14:49.418Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "d8fb0192a17f"
+          ],
+          [
+            36,
+            "2026-06-30T06:21:09.615Z",
+            "2026-06-30T07:12:07.387Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "1df4bcd65ee4"
+          ],
+          [
+            30,
+            "2026-06-30T06:29:25.734Z",
+            "2026-06-30T07:12:44.396Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "2c1e2ec93d17"
+          ],
+          [
+            28,
+            "2026-06-30T06:21:09.615Z",
+            "2026-06-30T07:12:14.390Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "922f03f16a11"
+          ],
+          [
+            19,
+            "2026-06-30T06:21:12.616Z",
+            "2026-06-30T07:14:59.426Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "45388dd0bf3a"
+          ],
+          [
+            18,
+            "2026-06-30T06:15:57.551Z",
+            "2026-06-30T07:10:20.361Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "d1daf6f3b7c6"
+          ],
+          [
+            18,
+            "2026-06-30T06:19:38.592Z",
+            "2026-06-30T07:13:59.408Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "ffbff1299702"
+          ],
+          [
+            18,
+            "2026-06-30T06:19:38.591Z",
+            "2026-06-30T07:13:59.408Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "ffbff1299702"
+          ],
+          [
+            15,
+            "2026-06-30T06:18:16.574Z",
+            "2026-06-30T07:09:30.353Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "ed96a85a7480"
+          ],
+          [
+            15,
+            "2026-06-30T06:19:45.595Z",
+            "2026-06-30T07:12:44.395Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "2c1e2ec93d17"
+          ],
+          [
+            15,
+            "2026-06-30T06:18:16.574Z",
+            "2026-06-30T07:09:30.352Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "ed96a85a7480"
+          ],
+          [
+            14,
+            "2026-06-30T06:15:25.544Z",
+            "2026-06-30T07:07:49.325Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "d8fb0192a17f"
+          ],
+          [
+            13,
+            "2026-06-30T06:21:09.614Z",
+            "2026-06-30T07:14:49.417Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "ed96a85a7480"
+          ],
+          [
+            11,
+            "2026-06-30T06:19:45.595Z",
+            "2026-06-30T07:12:44.395Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "2c1e2ec93d17"
+          ],
+          [
+            11,
+            "2026-06-30T06:18:34.580Z",
+            "2026-06-30T07:14:56.423Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "c58bf05facac"
+          ],
+          [
+            11,
+            "2026-06-30T06:16:22.555Z",
+            "2026-06-30T07:11:14.375Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "ffbff1299702"
+          ],
+          [
+            11,
+            "2026-06-30T06:15:57.551Z",
+            "2026-06-30T07:00:53.224Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "d8fb0192a17f"
+          ],
+          [
+            10,
+            "2026-06-30T06:20:34.609Z",
+            "2026-06-30T07:10:34.367Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "a36492b5172b"
+          ],
+          [
+            10,
+            "2026-06-30T06:20:34.609Z",
+            "2026-06-30T07:10:34.366Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "a36492b5172b"
+          ],
+          [
+            10,
+            "2026-06-30T06:15:57.550Z",
+            "2026-06-30T07:12:04.385Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "d1daf6f3b7c6"
+          ],
+          [
+            10,
+            "2026-06-30T06:24:48.671Z",
+            "2026-06-30T07:12:07.387Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "1df4bcd65ee4"
+          ],
+          [
+            10,
+            "2026-06-30T06:24:48.670Z",
+            "2026-06-30T07:12:07.387Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "1df4bcd65ee4"
+          ],
+          [
+            8,
+            "2026-06-30T06:21:09.615Z",
+            "2026-06-30T07:12:14.390Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "922f03f16a11"
+          ],
+          [
+            8,
+            "2026-06-30T06:21:09.615Z",
+            "2026-06-30T07:12:14.389Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "922f03f16a11"
+          ],
+          [
+            4,
+            "2026-06-30T06:25:18.678Z",
+            "2026-06-30T07:08:28.337Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "runuser",
+            "2c1e2ec93d17"
+          ]
         ]
       }
     },
@@ -719,285 +719,285 @@
         ],
         "row_count": 31,
         "values": [
-          {
-            "events": 132,
-            "first_seen": "2026-06-23T06:19:10.005Z",
-            "last_seen": "2026-06-23T07:10:10.791Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "7e76d1cea7c4"
-          },
-          {
-            "events": 86,
-            "first_seen": "2026-06-23T06:17:17.975Z",
-            "last_seen": "2026-06-23T07:11:46.813Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 62,
-            "first_seen": "2026-06-23T06:17:18.976Z",
-            "last_seen": "2026-06-23T07:09:05.779Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 60,
-            "first_seen": "2026-06-23T06:15:40.957Z",
-            "last_seen": "2026-06-23T07:14:56.848Z",
-            "rule": "Drop and execute new binary in container",
-            "proc": "openssl",
-            "parent": "sh",
-            "container": "58ffe39dd54f"
-          },
-          {
-            "events": 60,
-            "first_seen": "2026-06-23T06:15:40.957Z",
-            "last_seen": "2026-06-23T07:14:56.848Z",
-            "rule": "Drop and execute new binary in container",
-            "proc": "curl",
-            "parent": "sh",
-            "container": "58ffe39dd54f"
-          },
-          {
-            "events": 48,
-            "first_seen": "2026-06-23T06:19:52.013Z",
-            "last_seen": "2026-06-23T07:14:56.849Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 44,
-            "first_seen": "2026-06-23T06:18:25.991Z",
-            "last_seen": "2026-06-23T07:13:56.839Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "d8fb0192a17f"
-          },
-          {
-            "events": 42,
-            "first_seen": "2026-06-23T06:19:10.005Z",
-            "last_seen": "2026-06-23T07:12:49.825Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 38,
-            "first_seen": "2026-06-23T06:15:33.954Z",
-            "last_seen": "2026-06-23T07:14:21.844Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "sshd",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 34,
-            "first_seen": "2026-06-23T06:17:10.972Z",
-            "last_seen": "2026-06-23T07:12:14.819Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 26,
-            "first_seen": "2026-06-23T06:18:55.998Z",
-            "last_seen": "2026-06-23T07:04:05.699Z",
-            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
-            "proc": "sshd",
-            "parent": "<NA>",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 17,
-            "first_seen": "2026-06-23T06:25:32.095Z",
-            "last_seen": "2026-06-23T07:10:20.797Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "c58bf05facac"
-          },
-          {
-            "events": 15,
-            "first_seen": "2026-06-23T06:19:52.013Z",
-            "last_seen": "2026-06-23T07:14:56.848Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 15,
-            "first_seen": "2026-06-23T06:19:52.013Z",
-            "last_seen": "2026-06-23T07:14:56.848Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 15,
-            "first_seen": "2026-06-23T06:19:03.003Z",
-            "last_seen": "2026-06-23T07:11:46.812Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-06-23T06:18:25.991Z",
-            "last_seen": "2026-06-23T06:57:53.609Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-06-23T06:18:25.991Z",
-            "last_seen": "2026-06-23T06:57:53.609Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "a36492b5172b"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-06-23T06:17:18.975Z",
-            "last_seen": "2026-06-23T07:08:19.764Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "ffbff1299702"
-          },
-          {
-            "events": 13,
-            "first_seen": "2026-06-23T06:29:50.169Z",
-            "last_seen": "2026-06-23T07:09:05.778Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 13,
-            "first_seen": "2026-06-23T06:17:10.971Z",
-            "last_seen": "2026-06-23T07:09:55.788Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "d8fb0192a17f"
-          },
-          {
-            "events": 13,
-            "first_seen": "2026-06-23T06:29:50.169Z",
-            "last_seen": "2026-06-23T07:09:05.778Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 12,
-            "first_seen": "2026-06-23T06:15:33.954Z",
-            "last_seen": "2026-06-23T07:14:21.843Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 12,
-            "first_seen": "2026-06-23T06:15:33.954Z",
-            "last_seen": "2026-06-23T07:14:21.843Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "1df4bcd65ee4"
-          },
-          {
-            "events": 11,
-            "first_seen": "2026-06-23T06:17:10.971Z",
-            "last_seen": "2026-06-23T07:12:14.819Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 11,
-            "first_seen": "2026-06-23T06:17:10.972Z",
-            "last_seen": "2026-06-23T07:12:14.819Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "2c1e2ec93d17"
-          },
-          {
-            "events": 11,
-            "first_seen": "2026-06-23T06:17:17.974Z",
-            "last_seen": "2026-06-23T07:14:56.849Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "ed96a85a7480"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-06-23T06:19:10.005Z",
-            "last_seen": "2026-06-23T07:05:56.733Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "d1daf6f3b7c6"
-          },
-          {
-            "events": 9,
-            "first_seen": "2026-06-23T06:18:55.998Z",
-            "last_seen": "2026-06-23T07:04:05.698Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "runuser",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 9,
-            "first_seen": "2026-06-23T06:18:55.998Z",
-            "last_seen": "2026-06-23T07:04:05.698Z",
-            "rule": "Launch Ingress Remote File Copy Tools in Container",
-            "proc": "curl",
-            "parent": "bash",
-            "container": "922f03f16a11"
-          },
-          {
-            "events": 9,
-            "first_seen": "2026-06-23T06:18:25.990Z",
-            "last_seen": "2026-06-23T07:04:53.708Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "45388dd0bf3a"
-          },
-          {
-            "events": 6,
-            "first_seen": "2026-06-23T06:20:44.020Z",
-            "last_seen": "2026-06-23T07:11:21.808Z",
-            "rule": "Launch Suspicious Network Tool in Container",
-            "proc": "nc",
-            "parent": "bash",
-            "container": "d8fb0192a17f"
-          }
+          [
+            132,
+            "2026-06-23T06:19:10.005Z",
+            "2026-06-23T07:10:10.791Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "7e76d1cea7c4"
+          ],
+          [
+            86,
+            "2026-06-23T06:17:17.975Z",
+            "2026-06-23T07:11:46.813Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "a36492b5172b"
+          ],
+          [
+            62,
+            "2026-06-23T06:17:18.976Z",
+            "2026-06-23T07:09:05.779Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "ed96a85a7480"
+          ],
+          [
+            60,
+            "2026-06-23T06:15:40.957Z",
+            "2026-06-23T07:14:56.848Z",
+            "Drop and execute new binary in container",
+            "openssl",
+            "sh",
+            "58ffe39dd54f"
+          ],
+          [
+            60,
+            "2026-06-23T06:15:40.957Z",
+            "2026-06-23T07:14:56.848Z",
+            "Drop and execute new binary in container",
+            "curl",
+            "sh",
+            "58ffe39dd54f"
+          ],
+          [
+            48,
+            "2026-06-23T06:19:52.013Z",
+            "2026-06-23T07:14:56.849Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "ffbff1299702"
+          ],
+          [
+            44,
+            "2026-06-23T06:18:25.991Z",
+            "2026-06-23T07:13:56.839Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "d8fb0192a17f"
+          ],
+          [
+            42,
+            "2026-06-23T06:19:10.005Z",
+            "2026-06-23T07:12:49.825Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "d1daf6f3b7c6"
+          ],
+          [
+            38,
+            "2026-06-23T06:15:33.954Z",
+            "2026-06-23T07:14:21.844Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "sshd",
+            "1df4bcd65ee4"
+          ],
+          [
+            34,
+            "2026-06-23T06:17:10.972Z",
+            "2026-06-23T07:12:14.819Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "2c1e2ec93d17"
+          ],
+          [
+            26,
+            "2026-06-23T06:18:55.998Z",
+            "2026-06-23T07:04:05.699Z",
+            "Redirect STDOUT/STDIN to Network Connection in Container",
+            "sshd",
+            "<NA>",
+            "922f03f16a11"
+          ],
+          [
+            17,
+            "2026-06-23T06:25:32.095Z",
+            "2026-06-23T07:10:20.797Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "c58bf05facac"
+          ],
+          [
+            15,
+            "2026-06-23T06:19:52.013Z",
+            "2026-06-23T07:14:56.848Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "ffbff1299702"
+          ],
+          [
+            15,
+            "2026-06-23T06:19:52.013Z",
+            "2026-06-23T07:14:56.848Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "ffbff1299702"
+          ],
+          [
+            15,
+            "2026-06-23T06:19:03.003Z",
+            "2026-06-23T07:11:46.812Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "d1daf6f3b7c6"
+          ],
+          [
+            14,
+            "2026-06-23T06:18:25.991Z",
+            "2026-06-23T06:57:53.609Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "a36492b5172b"
+          ],
+          [
+            14,
+            "2026-06-23T06:18:25.991Z",
+            "2026-06-23T06:57:53.609Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "a36492b5172b"
+          ],
+          [
+            14,
+            "2026-06-23T06:17:18.975Z",
+            "2026-06-23T07:08:19.764Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "ffbff1299702"
+          ],
+          [
+            13,
+            "2026-06-23T06:29:50.169Z",
+            "2026-06-23T07:09:05.778Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "ed96a85a7480"
+          ],
+          [
+            13,
+            "2026-06-23T06:17:10.971Z",
+            "2026-06-23T07:09:55.788Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "d8fb0192a17f"
+          ],
+          [
+            13,
+            "2026-06-23T06:29:50.169Z",
+            "2026-06-23T07:09:05.778Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "ed96a85a7480"
+          ],
+          [
+            12,
+            "2026-06-23T06:15:33.954Z",
+            "2026-06-23T07:14:21.843Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "1df4bcd65ee4"
+          ],
+          [
+            12,
+            "2026-06-23T06:15:33.954Z",
+            "2026-06-23T07:14:21.843Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "1df4bcd65ee4"
+          ],
+          [
+            11,
+            "2026-06-23T06:17:10.971Z",
+            "2026-06-23T07:12:14.819Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "2c1e2ec93d17"
+          ],
+          [
+            11,
+            "2026-06-23T06:17:10.972Z",
+            "2026-06-23T07:12:14.819Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "2c1e2ec93d17"
+          ],
+          [
+            11,
+            "2026-06-23T06:17:17.974Z",
+            "2026-06-23T07:14:56.849Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "ed96a85a7480"
+          ],
+          [
+            10,
+            "2026-06-23T06:19:10.005Z",
+            "2026-06-23T07:05:56.733Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "d1daf6f3b7c6"
+          ],
+          [
+            9,
+            "2026-06-23T06:18:55.998Z",
+            "2026-06-23T07:04:05.698Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "runuser",
+            "922f03f16a11"
+          ],
+          [
+            9,
+            "2026-06-23T06:18:55.998Z",
+            "2026-06-23T07:04:05.698Z",
+            "Launch Ingress Remote File Copy Tools in Container",
+            "curl",
+            "bash",
+            "922f03f16a11"
+          ],
+          [
+            9,
+            "2026-06-23T06:18:25.990Z",
+            "2026-06-23T07:04:53.708Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "45388dd0bf3a"
+          ],
+          [
+            6,
+            "2026-06-23T06:20:44.020Z",
+            "2026-06-23T07:11:21.808Z",
+            "Launch Suspicious Network Tool in Container",
+            "nc",
+            "bash",
+            "d8fb0192a17f"
+          ]
         ]
       }
     }

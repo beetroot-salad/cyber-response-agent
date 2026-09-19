@@ -1,9 +1,8 @@
 """What a box IS: the request, the mounts, the executor, and the transports that carry a
 command to one.
 
-Split out of `box.py` at 1077 lines. The two transports live here rather than with the
-lifecycle because `BoxExecutor` discriminates on the docker one, and the protocol they
-implement is declared here.
+The two transports live here rather than with the lifecycle because `BoxExecutor`
+discriminates on the docker one, and the protocol they implement is declared here.
 """
 from __future__ import annotations
 

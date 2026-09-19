@@ -48,56 +48,56 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "events": 504,
-            "first_seen": "2026-07-12T18:39:40.000Z",
-            "last_seen": "2026-07-12T19:34:52.000Z",
-            "event_action": null,
-            "process": "sshd",
-            "user": null,
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 77,
-            "first_seen": "2026-07-12T18:42:08.000Z",
-            "last_seen": "2026-07-12T19:34:52.000Z",
-            "event_action": "logged-on",
-            "process": "runuser",
-            "user": "",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 77,
-            "first_seen": "2026-07-12T18:42:08.000Z",
-            "last_seen": "2026-07-12T19:34:52.000Z",
-            "event_action": "logged-off",
-            "process": "runuser",
-            "user": "svc.monitoring",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 7,
-            "first_seen": "2026-07-12T19:17:01.000Z",
-            "last_seen": "2026-07-12T19:17:01.000Z",
-            "event_action": "logged-off",
-            "process": "CRON",
-            "user": "root",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 7,
-            "first_seen": "2026-07-12T19:17:01.000Z",
-            "last_seen": "2026-07-12T19:17:01.000Z",
-            "event_action": "logged-on",
-            "process": "CRON",
-            "user": "",
-            "ssh_method": null,
-            "ssh_event": null
-          }
+          [
+            504,
+            "2026-07-12T18:39:40.000Z",
+            "2026-07-12T19:34:52.000Z",
+            null,
+            "sshd",
+            null,
+            null,
+            null
+          ],
+          [
+            77,
+            "2026-07-12T18:42:08.000Z",
+            "2026-07-12T19:34:52.000Z",
+            "logged-on",
+            "runuser",
+            "",
+            null,
+            null
+          ],
+          [
+            77,
+            "2026-07-12T18:42:08.000Z",
+            "2026-07-12T19:34:52.000Z",
+            "logged-off",
+            "runuser",
+            "svc.monitoring",
+            null,
+            null
+          ],
+          [
+            7,
+            "2026-07-12T19:17:01.000Z",
+            "2026-07-12T19:17:01.000Z",
+            "logged-off",
+            "CRON",
+            "root",
+            null,
+            null
+          ],
+          [
+            7,
+            "2026-07-12T19:17:01.000Z",
+            "2026-07-12T19:17:01.000Z",
+            "logged-on",
+            "CRON",
+            "",
+            null,
+            null
+          ]
         ]
       }
     },
@@ -147,56 +147,56 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "events": 658,
-            "first_seen": "2026-07-05T18:36:17.000Z",
-            "last_seen": "2026-07-05T19:32:03.000Z",
-            "event_action": null,
-            "process": "sshd",
-            "user": null,
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 84,
-            "first_seen": "2026-07-05T18:36:17.000Z",
-            "last_seen": "2026-07-05T19:31:54.000Z",
-            "event_action": "logged-off",
-            "process": "runuser",
-            "user": "svc.monitoring",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 84,
-            "first_seen": "2026-07-05T18:36:17.000Z",
-            "last_seen": "2026-07-05T19:31:54.000Z",
-            "event_action": "logged-on",
-            "process": "runuser",
-            "user": "",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 7,
-            "first_seen": "2026-07-05T19:17:01.000Z",
-            "last_seen": "2026-07-05T19:17:01.000Z",
-            "event_action": "logged-off",
-            "process": "CRON",
-            "user": "root",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 7,
-            "first_seen": "2026-07-05T19:17:01.000Z",
-            "last_seen": "2026-07-05T19:17:01.000Z",
-            "event_action": "logged-on",
-            "process": "CRON",
-            "user": "",
-            "ssh_method": null,
-            "ssh_event": null
-          }
+          [
+            658,
+            "2026-07-05T18:36:17.000Z",
+            "2026-07-05T19:32:03.000Z",
+            null,
+            "sshd",
+            null,
+            null,
+            null
+          ],
+          [
+            84,
+            "2026-07-05T18:36:17.000Z",
+            "2026-07-05T19:31:54.000Z",
+            "logged-off",
+            "runuser",
+            "svc.monitoring",
+            null,
+            null
+          ],
+          [
+            84,
+            "2026-07-05T18:36:17.000Z",
+            "2026-07-05T19:31:54.000Z",
+            "logged-on",
+            "runuser",
+            "",
+            null,
+            null
+          ],
+          [
+            7,
+            "2026-07-05T19:17:01.000Z",
+            "2026-07-05T19:17:01.000Z",
+            "logged-off",
+            "CRON",
+            "root",
+            null,
+            null
+          ],
+          [
+            7,
+            "2026-07-05T19:17:01.000Z",
+            "2026-07-05T19:17:01.000Z",
+            "logged-on",
+            "CRON",
+            "",
+            null,
+            null
+          ]
         ]
       }
     },
@@ -246,56 +246,56 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "events": 592,
-            "first_seen": "2026-06-28T18:37:41.000Z",
-            "last_seen": "2026-06-28T19:35:22.000Z",
-            "event_action": null,
-            "process": "sshd",
-            "user": null,
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 128,
-            "first_seen": "2026-06-28T18:37:41.000Z",
-            "last_seen": "2026-06-28T19:29:58.000Z",
-            "event_action": "logged-off",
-            "process": "runuser",
-            "user": "svc.monitoring",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 128,
-            "first_seen": "2026-06-28T18:37:41.000Z",
-            "last_seen": "2026-06-28T19:29:58.000Z",
-            "event_action": "logged-on",
-            "process": "runuser",
-            "user": "",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 8,
-            "first_seen": "2026-06-28T19:17:01.000Z",
-            "last_seen": "2026-06-28T19:17:01.000Z",
-            "event_action": "logged-off",
-            "process": "CRON",
-            "user": "root",
-            "ssh_method": null,
-            "ssh_event": null
-          },
-          {
-            "events": 8,
-            "first_seen": "2026-06-28T19:17:01.000Z",
-            "last_seen": "2026-06-28T19:17:01.000Z",
-            "event_action": "logged-on",
-            "process": "CRON",
-            "user": "",
-            "ssh_method": null,
-            "ssh_event": null
-          }
+          [
+            592,
+            "2026-06-28T18:37:41.000Z",
+            "2026-06-28T19:35:22.000Z",
+            null,
+            "sshd",
+            null,
+            null,
+            null
+          ],
+          [
+            128,
+            "2026-06-28T18:37:41.000Z",
+            "2026-06-28T19:29:58.000Z",
+            "logged-off",
+            "runuser",
+            "svc.monitoring",
+            null,
+            null
+          ],
+          [
+            128,
+            "2026-06-28T18:37:41.000Z",
+            "2026-06-28T19:29:58.000Z",
+            "logged-on",
+            "runuser",
+            "",
+            null,
+            null
+          ],
+          [
+            8,
+            "2026-06-28T19:17:01.000Z",
+            "2026-06-28T19:17:01.000Z",
+            "logged-off",
+            "CRON",
+            "root",
+            null,
+            null
+          ],
+          [
+            8,
+            "2026-06-28T19:17:01.000Z",
+            "2026-06-28T19:17:01.000Z",
+            "logged-on",
+            "CRON",
+            "",
+            null,
+            null
+          ]
         ]
       }
     }

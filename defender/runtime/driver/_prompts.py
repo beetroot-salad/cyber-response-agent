@@ -1,7 +1,7 @@
 """What the model is actually shown: the opening prompt, and the message each turn opens with.
 
-Split out of `driver.py` at 1221 lines. Nothing here builds an agent or spends a budget —
-it only assembles text, which is what makes the resume's substitution testable on its own.
+Nothing here builds an agent or spends a budget — it only assembles text, which is what
+makes the resume's substitution testable on its own.
 """
 from __future__ import annotations
 

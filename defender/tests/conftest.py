@@ -10,11 +10,35 @@ files copied in. The fixture builds one ``LoopPaths(repo_root=tmp)`` and an
 from __future__ import annotations
 
 import ctypes
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+
+#: What `-n auto` means off CI when nothing else says. xdist's own answer is "one worker per
+#: core", which is right for a runner that owns the box and wrong on a developer machine that
+#: several sessions share: each worker sits at hundreds of MB once the runtime-loop replay
+#: files have run through it, and a few concurrent `-n auto` runs at one-worker-per-core
+#: exhaust the machine. The devcontainer already declares `PYTEST_XDIST_AUTO_NUM_WORKERS` for
+#: this, and that variable still wins wherever it is set — this hook is the fallback for the
+#: shells it does not reach (a container that predates the compose change, a shell that never
+#: sourced the profile). Only `auto` is redefined: `-n logical` and `-n N` are untouched, a run
+#: without `-n` stays in-process, and CI keeps xdist's per-core count since the runner owns
+#: its cores. `optionalhook` so a run with xdist unloaded (`-p no:xdist`) does not trip
+#: pluggy's unknown-hook check.
+_LOCAL_AUTO_WORKERS = 4
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    if os.environ.get("CI") or os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS"):
+        return None
+    if config.option.numprocesses != "auto":
+        return None
+    return _LOCAL_AUTO_WORKERS
 
 
 REAL_REPO = Path(__file__).resolve().parents[2]

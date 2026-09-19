@@ -24,10 +24,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 46080,
-            "data_stream.dataset": "postgresql.log"
-          }
+          [
+            46080,
+            "postgresql.log"
+          ]
         ]
       }
     },
@@ -53,10 +53,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 57600,
-            "data_stream.dataset": "postgresql.log"
-          }
+          [
+            57600,
+            "postgresql.log"
+          ]
         ]
       }
     },
@@ -82,10 +82,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 57600,
-            "data_stream.dataset": "postgresql.log"
-          }
+          [
+            57600,
+            "postgresql.log"
+          ]
         ]
       }
     }

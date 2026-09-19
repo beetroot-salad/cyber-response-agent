@@ -24,10 +24,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 72087,
-            "host.name": "soc-playground"
-          }
+          [
+            72087,
+            "soc-playground"
+          ]
         ]
       }
     },
@@ -53,10 +53,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 73229,
-            "host.name": "soc-playground"
-          }
+          [
+            73229,
+            "soc-playground"
+          ]
         ]
       }
     },
@@ -82,10 +82,10 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 68926,
-            "host.name": "soc-playground"
-          }
+          [
+            68926,
+            "soc-playground"
+          ]
         ]
       }
     }

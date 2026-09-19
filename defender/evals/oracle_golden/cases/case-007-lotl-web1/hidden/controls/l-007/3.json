@@ -40,14 +40,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total": 567,
-            "with_outcome": 7,
-            "with_message": 567,
-            "first_seen": "2026-07-12T19:04:25.000Z",
-            "last_seen": "2026-07-12T20:01:27.000Z",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            567,
+            7,
+            567,
+            "2026-07-12T19:04:25.000Z",
+            "2026-07-12T20:01:27.000Z",
+            "system.auth"
+          ]
         ]
       }
     },
@@ -89,14 +89,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total": 959,
-            "with_outcome": 182,
-            "with_message": 959,
-            "first_seen": "2026-07-05T19:03:01.000Z",
-            "last_seen": "2026-07-05T20:01:37.000Z",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            959,
+            182,
+            959,
+            "2026-07-05T19:03:01.000Z",
+            "2026-07-05T20:01:37.000Z",
+            "system.auth"
+          ]
         ]
       }
     },
@@ -138,14 +138,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total": 760,
-            "with_outcome": 0,
-            "with_message": 760,
-            "first_seen": "2026-06-28T19:04:51.000Z",
-            "last_seen": "2026-06-28T20:00:28.000Z",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            760,
+            0,
+            760,
+            "2026-06-28T19:04:51.000Z",
+            "2026-06-28T20:00:28.000Z",
+            "system.auth"
+          ]
         ]
       }
     }

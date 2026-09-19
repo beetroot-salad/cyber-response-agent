@@ -44,105 +44,105 @@
         ],
         "row_count": 11,
         "values": [
-          {
-            "alerts": 201,
-            "first_seen": "2026-07-12T19:36:46.066Z",
-            "last_seen": "2026-07-12T20:31:45.977Z",
-            "rule": "v2 Falco: suspicious network tool in container",
-            "rule_id": "v2-falco-suspicious-network-tool",
-            "severity": "medium",
-            "host.name": "soc-playground"
-          },
-          {
-            "alerts": 7,
-            "first_seen": "2026-07-12T19:36:46.083Z",
-            "last_seen": "2026-07-12T20:31:45.999Z",
-            "rule": "v2 internal port-scan burst",
-            "rule_id": "v2-internal-port-scan",
-            "severity": "medium",
-            "host.name": null
-          },
-          {
-            "alerts": 5,
-            "first_seen": "2026-07-12T20:11:36.948Z",
-            "last_seen": "2026-07-12T20:11:36.954Z",
-            "rule": "v2 sshd success after failures",
-            "rule_id": "v2-sshd-success-after-failures",
-            "severity": "high",
-            "host.name": "jump-box-1"
-          },
-          {
-            "alerts": 5,
-            "first_seen": "2026-07-12T19:41:37.009Z",
-            "last_seen": "2026-07-12T19:41:37.014Z",
-            "rule": "v2 sshd success after failures",
-            "rule_id": "v2-sshd-success-after-failures",
-            "severity": "high",
-            "host.name": "web-2"
-          },
-          {
-            "alerts": 3,
-            "first_seen": "2026-07-12T19:41:31.030Z",
-            "last_seen": "2026-07-12T20:36:30.880Z",
-            "rule": "v2 sudo activity burst",
-            "rule_id": "v2-off-hours-sudo",
-            "severity": "medium",
-            "host.name": "soc-playground"
-          },
-          {
-            "alerts": 2,
-            "first_seen": "2026-07-12T19:41:46.052Z",
-            "last_seen": "2026-07-12T19:56:45.991Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "jump-box-1"
-          },
-          {
-            "alerts": 2,
-            "first_seen": "2026-07-12T19:41:46.056Z",
-            "last_seen": "2026-07-12T19:56:45.992Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": null
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-12T20:11:36.961Z",
-            "last_seen": "2026-07-12T20:11:36.961Z",
-            "rule": "v2 sshd failed-auth burst",
-            "rule_id": "v2-sshd-failed-auth-burst",
-            "severity": "medium",
-            "host.name": "jump-box-1"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-12T19:56:45.990Z",
-            "last_seen": "2026-07-12T19:56:45.990Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "office-ws-2"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-12T19:41:46.152Z",
-            "last_seen": "2026-07-12T19:41:46.152Z",
-            "rule": "v2 bulk SSH success from single source",
-            "rule_id": "v2-bulk-ssh-success",
-            "severity": "medium",
-            "host.name": null
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-12T19:41:46.051Z",
-            "last_seen": "2026-07-12T19:41:46.051Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "office-ws-1"
-          }
+          [
+            201,
+            "2026-07-12T19:36:46.066Z",
+            "2026-07-12T20:31:45.977Z",
+            "v2 Falco: suspicious network tool in container",
+            "v2-falco-suspicious-network-tool",
+            "medium",
+            "soc-playground"
+          ],
+          [
+            7,
+            "2026-07-12T19:36:46.083Z",
+            "2026-07-12T20:31:45.999Z",
+            "v2 internal port-scan burst",
+            "v2-internal-port-scan",
+            "medium",
+            null
+          ],
+          [
+            5,
+            "2026-07-12T20:11:36.948Z",
+            "2026-07-12T20:11:36.954Z",
+            "v2 sshd success after failures",
+            "v2-sshd-success-after-failures",
+            "high",
+            "jump-box-1"
+          ],
+          [
+            5,
+            "2026-07-12T19:41:37.009Z",
+            "2026-07-12T19:41:37.014Z",
+            "v2 sshd success after failures",
+            "v2-sshd-success-after-failures",
+            "high",
+            "web-2"
+          ],
+          [
+            3,
+            "2026-07-12T19:41:31.030Z",
+            "2026-07-12T20:36:30.880Z",
+            "v2 sudo activity burst",
+            "v2-off-hours-sudo",
+            "medium",
+            "soc-playground"
+          ],
+          [
+            2,
+            "2026-07-12T19:41:46.052Z",
+            "2026-07-12T19:56:45.991Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "jump-box-1"
+          ],
+          [
+            2,
+            "2026-07-12T19:41:46.056Z",
+            "2026-07-12T19:56:45.992Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            null
+          ],
+          [
+            1,
+            "2026-07-12T20:11:36.961Z",
+            "2026-07-12T20:11:36.961Z",
+            "v2 sshd failed-auth burst",
+            "v2-sshd-failed-auth-burst",
+            "medium",
+            "jump-box-1"
+          ],
+          [
+            1,
+            "2026-07-12T19:56:45.990Z",
+            "2026-07-12T19:56:45.990Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "office-ws-2"
+          ],
+          [
+            1,
+            "2026-07-12T19:41:46.152Z",
+            "2026-07-12T19:41:46.152Z",
+            "v2 bulk SSH success from single source",
+            "v2-bulk-ssh-success",
+            "medium",
+            null
+          ],
+          [
+            1,
+            "2026-07-12T19:41:46.051Z",
+            "2026-07-12T19:41:46.051Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "office-ws-1"
+          ]
         ]
       }
     },
@@ -188,60 +188,60 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "alerts": 270,
-            "first_seen": "2026-07-05T19:41:40.939Z",
-            "last_seen": "2026-07-05T20:36:40.788Z",
-            "rule": "v2 Falco: suspicious network tool in container",
-            "rule_id": "v2-falco-suspicious-network-tool",
-            "severity": "medium",
-            "host.name": "soc-playground"
-          },
-          {
-            "alerts": 6,
-            "first_seen": "2026-07-05T19:41:41.078Z",
-            "last_seen": "2026-07-05T20:31:40.806Z",
-            "rule": "v2 internal port-scan burst",
-            "rule_id": "v2-internal-port-scan",
-            "severity": "medium",
-            "host.name": null
-          },
-          {
-            "alerts": 5,
-            "first_seen": "2026-07-05T19:46:22.828Z",
-            "last_seen": "2026-07-05T19:46:22.836Z",
-            "rule": "v2 sshd success after failures",
-            "rule_id": "v2-sshd-success-after-failures",
-            "severity": "high",
-            "host.name": "web-1"
-          },
-          {
-            "alerts": 2,
-            "first_seen": "2026-07-05T19:46:28.803Z",
-            "last_seen": "2026-07-05T19:51:28.790Z",
-            "rule": "v2 sudo activity burst",
-            "rule_id": "v2-off-hours-sudo",
-            "severity": "medium",
-            "host.name": "soc-playground"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-05T19:56:40.979Z",
-            "last_seen": "2026-07-05T19:56:40.979Z",
-            "rule": "v2 bulk SSH success from single source",
-            "rule_id": "v2-bulk-ssh-success",
-            "severity": "medium",
-            "host.name": null
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-05T19:41:22.859Z",
-            "last_seen": "2026-07-05T19:41:22.859Z",
-            "rule": "v2 sshd failed-auth burst",
-            "rule_id": "v2-sshd-failed-auth-burst",
-            "severity": "medium",
-            "host.name": "web-1"
-          }
+          [
+            270,
+            "2026-07-05T19:41:40.939Z",
+            "2026-07-05T20:36:40.788Z",
+            "v2 Falco: suspicious network tool in container",
+            "v2-falco-suspicious-network-tool",
+            "medium",
+            "soc-playground"
+          ],
+          [
+            6,
+            "2026-07-05T19:41:41.078Z",
+            "2026-07-05T20:31:40.806Z",
+            "v2 internal port-scan burst",
+            "v2-internal-port-scan",
+            "medium",
+            null
+          ],
+          [
+            5,
+            "2026-07-05T19:46:22.828Z",
+            "2026-07-05T19:46:22.836Z",
+            "v2 sshd success after failures",
+            "v2-sshd-success-after-failures",
+            "high",
+            "web-1"
+          ],
+          [
+            2,
+            "2026-07-05T19:46:28.803Z",
+            "2026-07-05T19:51:28.790Z",
+            "v2 sudo activity burst",
+            "v2-off-hours-sudo",
+            "medium",
+            "soc-playground"
+          ],
+          [
+            1,
+            "2026-07-05T19:56:40.979Z",
+            "2026-07-05T19:56:40.979Z",
+            "v2 bulk SSH success from single source",
+            "v2-bulk-ssh-success",
+            "medium",
+            null
+          ],
+          [
+            1,
+            "2026-07-05T19:41:22.859Z",
+            "2026-07-05T19:41:22.859Z",
+            "v2 sshd failed-auth burst",
+            "v2-sshd-failed-auth-burst",
+            "medium",
+            "web-1"
+          ]
         ]
       }
     },
@@ -287,87 +287,87 @@
         ],
         "row_count": 9,
         "values": [
-          {
-            "alerts": 204,
-            "first_seen": "2026-06-28T19:37:57.076Z",
-            "last_seen": "2026-06-28T20:32:57.143Z",
-            "rule": "v2 Falco: suspicious network tool in container",
-            "rule_id": "v2-falco-suspicious-network-tool",
-            "severity": "medium",
-            "host.name": "soc-playground"
-          },
-          {
-            "alerts": 6,
-            "first_seen": "2026-06-28T19:37:57.113Z",
-            "last_seen": "2026-06-28T20:27:57.062Z",
-            "rule": "v2 internal port-scan burst",
-            "rule_id": "v2-internal-port-scan",
-            "severity": "medium",
-            "host.name": null
-          },
-          {
-            "alerts": 5,
-            "first_seen": "2026-06-28T20:35:36.105Z",
-            "last_seen": "2026-06-28T20:35:36.122Z",
-            "rule": "v2 sshd success after failures",
-            "rule_id": "v2-sshd-success-after-failures",
-            "severity": "high",
-            "host.name": "jump-box-1"
-          },
-          {
-            "alerts": 2,
-            "first_seen": "2026-06-28T19:55:39.082Z",
-            "last_seen": "2026-06-28T20:35:39.160Z",
-            "rule": "v2 sudo activity burst",
-            "rule_id": "v2-off-hours-sudo",
-            "severity": "medium",
-            "host.name": "soc-playground"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-06-28T20:35:39.079Z",
-            "last_seen": "2026-06-28T20:35:39.079Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": null
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-06-28T20:35:39.072Z",
-            "last_seen": "2026-06-28T20:35:39.072Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "office-ws-2"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-06-28T20:35:36.127Z",
-            "last_seen": "2026-06-28T20:35:36.127Z",
-            "rule": "v2 sshd failed-auth burst",
-            "rule_id": "v2-sshd-failed-auth-burst",
-            "severity": "medium",
-            "host.name": "jump-box-1"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-06-28T20:35:39.073Z",
-            "last_seen": "2026-06-28T20:35:39.073Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "jump-box-1"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-06-28T20:25:39.083Z",
-            "last_seen": "2026-06-28T20:25:39.083Z",
-            "rule": "v2 bulk SSH success from single source",
-            "rule_id": "v2-bulk-ssh-success",
-            "severity": "medium",
-            "host.name": null
-          }
+          [
+            204,
+            "2026-06-28T19:37:57.076Z",
+            "2026-06-28T20:32:57.143Z",
+            "v2 Falco: suspicious network tool in container",
+            "v2-falco-suspicious-network-tool",
+            "medium",
+            "soc-playground"
+          ],
+          [
+            6,
+            "2026-06-28T19:37:57.113Z",
+            "2026-06-28T20:27:57.062Z",
+            "v2 internal port-scan burst",
+            "v2-internal-port-scan",
+            "medium",
+            null
+          ],
+          [
+            5,
+            "2026-06-28T20:35:36.105Z",
+            "2026-06-28T20:35:36.122Z",
+            "v2 sshd success after failures",
+            "v2-sshd-success-after-failures",
+            "high",
+            "jump-box-1"
+          ],
+          [
+            2,
+            "2026-06-28T19:55:39.082Z",
+            "2026-06-28T20:35:39.160Z",
+            "v2 sudo activity burst",
+            "v2-off-hours-sudo",
+            "medium",
+            "soc-playground"
+          ],
+          [
+            1,
+            "2026-06-28T20:35:39.079Z",
+            "2026-06-28T20:35:39.079Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            null
+          ],
+          [
+            1,
+            "2026-06-28T20:35:39.072Z",
+            "2026-06-28T20:35:39.072Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "office-ws-2"
+          ],
+          [
+            1,
+            "2026-06-28T20:35:36.127Z",
+            "2026-06-28T20:35:36.127Z",
+            "v2 sshd failed-auth burst",
+            "v2-sshd-failed-auth-burst",
+            "medium",
+            "jump-box-1"
+          ],
+          [
+            1,
+            "2026-06-28T20:35:39.073Z",
+            "2026-06-28T20:35:39.073Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "jump-box-1"
+          ],
+          [
+            1,
+            "2026-06-28T20:25:39.083Z",
+            "2026-06-28T20:25:39.083Z",
+            "v2 bulk SSH success from single source",
+            "v2-bulk-ssh-success",
+            "medium",
+            null
+          ]
         ]
       }
     }

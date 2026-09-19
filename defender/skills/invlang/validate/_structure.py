@@ -1,6 +1,6 @@
 """The SHAPE of a row, and the closed vocabularies its cells may draw from.
 
-One family of `validate.py`'s rules, split out at 4038 lines. Where `_refs` asks whether
+One family of `validate.py`'s rules. Where `_refs` asks whether
 a cited id resolves, these rules ask whether the row carrying it is filled in at all.
 """
 from __future__ import annotations

@@ -40,22 +40,22 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "failures": 42,
-            "first_seen": "2026-07-12T19:32:17.000Z",
-            "last_seen": "2026-07-12T19:32:32.000Z",
-            "source.ip": "172.18.0.8",
-            "user.name": "svc.reports",
-            "auth_method": "other"
-          },
-          {
-            "failures": 42,
-            "first_seen": "2026-07-12T19:32:19.000Z",
-            "last_seen": "2026-07-12T19:32:33.000Z",
-            "source.ip": "172.18.0.8",
-            "user.name": "svc.reports",
-            "auth_method": "password"
-          }
+          [
+            42,
+            "2026-07-12T19:32:17.000Z",
+            "2026-07-12T19:32:32.000Z",
+            "172.18.0.8",
+            "svc.reports",
+            "other"
+          ],
+          [
+            42,
+            "2026-07-12T19:32:19.000Z",
+            "2026-07-12T19:32:33.000Z",
+            "172.18.0.8",
+            "svc.reports",
+            "password"
+          ]
         ]
       }
     },
@@ -97,22 +97,22 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "failures": 42,
-            "first_seen": "2026-07-05T19:31:42.000Z",
-            "last_seen": "2026-07-05T19:31:58.000Z",
-            "source.ip": "172.18.0.6",
-            "user.name": "svc.reports",
-            "auth_method": "other"
-          },
-          {
-            "failures": 42,
-            "first_seen": "2026-07-05T19:31:44.000Z",
-            "last_seen": "2026-07-05T19:32:00.000Z",
-            "source.ip": "172.18.0.6",
-            "user.name": "svc.reports",
-            "auth_method": "password"
-          }
+          [
+            42,
+            "2026-07-05T19:31:42.000Z",
+            "2026-07-05T19:31:58.000Z",
+            "172.18.0.6",
+            "svc.reports",
+            "other"
+          ],
+          [
+            42,
+            "2026-07-05T19:31:44.000Z",
+            "2026-07-05T19:32:00.000Z",
+            "172.18.0.6",
+            "svc.reports",
+            "password"
+          ]
         ]
       }
     },

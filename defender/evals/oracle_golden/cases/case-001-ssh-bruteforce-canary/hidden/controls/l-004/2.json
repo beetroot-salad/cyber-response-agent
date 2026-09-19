@@ -46,83 +46,83 @@
         ],
         "row_count": 11,
         "values": [
-          {
-            "events": 2880,
-            "first_seen": "2026-07-11T07:17:17.158Z",
-            "last_seen": "2026-07-11T08:17:07.160Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "postgresql.log"
-          },
-          {
-            "events": 1800,
-            "first_seen": "2026-07-11T07:17:14.070Z",
-            "last_seen": "2026-07-11T08:17:07.160Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 1282,
-            "first_seen": "2026-07-11T07:17:14.889Z",
-            "last_seen": "2026-07-11T08:17:07.161Z",
-            "host.name": null,
-            "data_stream.dataset": "zeek.connection"
-          },
-          {
-            "events": 1243,
-            "first_seen": "2026-07-11T07:17:14.889Z",
-            "last_seen": "2026-07-11T08:17:07.162Z",
-            "host.name": null,
-            "data_stream.dataset": "zeek.ssl"
-          },
-          {
-            "events": 114,
-            "first_seen": "2026-07-11T07:30:05.000Z",
-            "last_seen": "2026-07-11T08:17:01.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 92,
-            "first_seen": "2026-07-11T07:17:24.000Z",
-            "last_seen": "2026-07-11T08:17:01.000Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 31,
-            "first_seen": "2026-07-11T07:17:24.946Z",
-            "last_seen": "2026-07-11T08:15:45.294Z",
-            "host.name": null,
-            "data_stream.dataset": "zeek.ssh"
-          },
-          {
-            "events": 10,
-            "first_seen": "2026-07-11T07:22:57.039Z",
-            "last_seen": "2026-07-11T08:04:16.326Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 4,
-            "first_seen": "2026-07-11T07:22:09.752Z",
-            "last_seen": "2026-07-11T08:17:05.037Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "elastic_agent.filebeat"
-          },
-          {
-            "events": 2,
-            "first_seen": "2026-07-11T08:17:01.000Z",
-            "last_seen": "2026-07-11T08:17:01.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-11T08:17:01.000Z",
-            "last_seen": "2026-07-11T08:17:01.000Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            2880,
+            "2026-07-11T07:17:17.158Z",
+            "2026-07-11T08:17:07.160Z",
+            "db-1",
+            "postgresql.log"
+          ],
+          [
+            1800,
+            "2026-07-11T07:17:14.070Z",
+            "2026-07-11T08:17:07.160Z",
+            "db-1",
+            "elastic_agent.metricbeat"
+          ],
+          [
+            1282,
+            "2026-07-11T07:17:14.889Z",
+            "2026-07-11T08:17:07.161Z",
+            null,
+            "zeek.connection"
+          ],
+          [
+            1243,
+            "2026-07-11T07:17:14.889Z",
+            "2026-07-11T08:17:07.162Z",
+            null,
+            "zeek.ssl"
+          ],
+          [
+            114,
+            "2026-07-11T07:30:05.000Z",
+            "2026-07-11T08:17:01.000Z",
+            "office-ws-1",
+            "system.auth"
+          ],
+          [
+            92,
+            "2026-07-11T07:17:24.000Z",
+            "2026-07-11T08:17:01.000Z",
+            "db-1",
+            "system.auth"
+          ],
+          [
+            31,
+            "2026-07-11T07:17:24.946Z",
+            "2026-07-11T08:15:45.294Z",
+            null,
+            "zeek.ssh"
+          ],
+          [
+            10,
+            "2026-07-11T07:22:57.039Z",
+            "2026-07-11T08:04:16.326Z",
+            "db-1",
+            "elastic_agent"
+          ],
+          [
+            4,
+            "2026-07-11T07:22:09.752Z",
+            "2026-07-11T08:17:05.037Z",
+            "db-1",
+            "elastic_agent.filebeat"
+          ],
+          [
+            2,
+            "2026-07-11T08:17:01.000Z",
+            "2026-07-11T08:17:01.000Z",
+            "office-ws-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-11T08:17:01.000Z",
+            "2026-07-11T08:17:01.000Z",
+            "db-1",
+            "system.syslog"
+          ]
         ]
       }
     },
@@ -160,83 +160,83 @@
         ],
         "row_count": 11,
         "values": [
-          {
-            "events": 2880,
-            "first_seen": "2026-07-04T07:17:17.165Z",
-            "last_seen": "2026-07-04T08:17:07.159Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "postgresql.log"
-          },
-          {
-            "events": 1800,
-            "first_seen": "2026-07-04T07:17:14.070Z",
-            "last_seen": "2026-07-04T08:17:07.159Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 1256,
-            "first_seen": "2026-07-04T07:17:11.492Z",
-            "last_seen": "2026-07-04T08:17:05.061Z",
-            "host.name": null,
-            "data_stream.dataset": "zeek.connection"
-          },
-          {
-            "events": 1211,
-            "first_seen": "2026-07-04T07:17:11.493Z",
-            "last_seen": "2026-07-04T08:17:05.061Z",
-            "host.name": null,
-            "data_stream.dataset": "zeek.ssl"
-          },
-          {
-            "events": 148,
-            "first_seen": "2026-07-04T07:17:56.000Z",
-            "last_seen": "2026-07-04T08:17:01.000Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 126,
-            "first_seen": "2026-07-04T07:19:58.000Z",
-            "last_seen": "2026-07-04T08:17:01.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 33,
-            "first_seen": "2026-07-04T07:17:56.921Z",
-            "last_seen": "2026-07-04T08:16:53.458Z",
-            "host.name": null,
-            "data_stream.dataset": "zeek.ssh"
-          },
-          {
-            "events": 14,
-            "first_seen": "2026-07-04T07:18:21.356Z",
-            "last_seen": "2026-07-04T08:15:59.427Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 2,
-            "first_seen": "2026-07-04T07:22:07.369Z",
-            "last_seen": "2026-07-04T08:17:02.669Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "elastic_agent.filebeat"
-          },
-          {
-            "events": 2,
-            "first_seen": "2026-07-04T08:17:01.000Z",
-            "last_seen": "2026-07-04T08:17:01.000Z",
-            "host.name": "office-ws-1",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 1,
-            "first_seen": "2026-07-04T08:17:01.000Z",
-            "last_seen": "2026-07-04T08:17:01.000Z",
-            "host.name": "db-1",
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            2880,
+            "2026-07-04T07:17:17.165Z",
+            "2026-07-04T08:17:07.159Z",
+            "db-1",
+            "postgresql.log"
+          ],
+          [
+            1800,
+            "2026-07-04T07:17:14.070Z",
+            "2026-07-04T08:17:07.159Z",
+            "db-1",
+            "elastic_agent.metricbeat"
+          ],
+          [
+            1256,
+            "2026-07-04T07:17:11.492Z",
+            "2026-07-04T08:17:05.061Z",
+            null,
+            "zeek.connection"
+          ],
+          [
+            1211,
+            "2026-07-04T07:17:11.493Z",
+            "2026-07-04T08:17:05.061Z",
+            null,
+            "zeek.ssl"
+          ],
+          [
+            148,
+            "2026-07-04T07:17:56.000Z",
+            "2026-07-04T08:17:01.000Z",
+            "db-1",
+            "system.auth"
+          ],
+          [
+            126,
+            "2026-07-04T07:19:58.000Z",
+            "2026-07-04T08:17:01.000Z",
+            "office-ws-1",
+            "system.auth"
+          ],
+          [
+            33,
+            "2026-07-04T07:17:56.921Z",
+            "2026-07-04T08:16:53.458Z",
+            null,
+            "zeek.ssh"
+          ],
+          [
+            14,
+            "2026-07-04T07:18:21.356Z",
+            "2026-07-04T08:15:59.427Z",
+            "db-1",
+            "elastic_agent"
+          ],
+          [
+            2,
+            "2026-07-04T07:22:07.369Z",
+            "2026-07-04T08:17:02.669Z",
+            "db-1",
+            "elastic_agent.filebeat"
+          ],
+          [
+            2,
+            "2026-07-04T08:17:01.000Z",
+            "2026-07-04T08:17:01.000Z",
+            "office-ws-1",
+            "system.syslog"
+          ],
+          [
+            1,
+            "2026-07-04T08:17:01.000Z",
+            "2026-07-04T08:17:01.000Z",
+            "db-1",
+            "system.syslog"
+          ]
         ]
       }
     }
@@ -273,48 +273,48 @@
       ],
       "row_count": 6,
       "values": [
-        {
-          "events": 288,
-          "first_seen": "2026-07-25T07:45:35.000Z",
-          "last_seen": "2026-07-25T07:48:39.000Z",
-          "host.name": "canary-1",
-          "data_stream.dataset": "system.auth"
-        },
-        {
-          "events": 81,
-          "first_seen": "2026-07-25T07:45:35.516Z",
-          "last_seen": "2026-07-25T07:48:37.064Z",
-          "host.name": null,
-          "data_stream.dataset": "zeek.connection"
-        },
-        {
-          "events": 48,
-          "first_seen": "2026-07-25T07:45:35.517Z",
-          "last_seen": "2026-07-25T07:48:37.065Z",
-          "host.name": null,
-          "data_stream.dataset": "zeek.ssh"
-        },
-        {
-          "events": 33,
-          "first_seen": "2026-07-25T07:45:38.595Z",
-          "last_seen": "2026-07-25T07:48:34.915Z",
-          "host.name": null,
-          "data_stream.dataset": "zeek.ssl"
-        },
-        {
-          "events": 19,
-          "first_seen": "2026-07-25T07:45:38.594Z",
-          "last_seen": "2026-07-25T07:48:38.593Z",
-          "host.name": "office-ws-1",
-          "data_stream.dataset": "elastic_agent.metricbeat"
-        },
-        {
-          "events": 1,
-          "first_seen": "2026-07-25T07:46:57.525Z",
-          "last_seen": "2026-07-25T07:46:57.525Z",
-          "host.name": "office-ws-1",
-          "data_stream.dataset": "elastic_agent.filebeat"
-        }
+        [
+          288,
+          "2026-07-25T07:45:35.000Z",
+          "2026-07-25T07:48:39.000Z",
+          "canary-1",
+          "system.auth"
+        ],
+        [
+          81,
+          "2026-07-25T07:45:35.516Z",
+          "2026-07-25T07:48:37.064Z",
+          null,
+          "zeek.connection"
+        ],
+        [
+          48,
+          "2026-07-25T07:45:35.517Z",
+          "2026-07-25T07:48:37.065Z",
+          null,
+          "zeek.ssh"
+        ],
+        [
+          33,
+          "2026-07-25T07:45:38.595Z",
+          "2026-07-25T07:48:34.915Z",
+          null,
+          "zeek.ssl"
+        ],
+        [
+          19,
+          "2026-07-25T07:45:38.594Z",
+          "2026-07-25T07:48:38.593Z",
+          "office-ws-1",
+          "elastic_agent.metricbeat"
+        ],
+        [
+          1,
+          "2026-07-25T07:46:57.525Z",
+          "2026-07-25T07:46:57.525Z",
+          "office-ws-1",
+          "elastic_agent.filebeat"
+        ]
       ]
     }
   }

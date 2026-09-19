@@ -1,8 +1,7 @@
 """The spend ceiling: what a call costs, when the run stops, and who records it.
 
-Split out of `driver.py` at 1221 lines. The hooks assembled here are the only place a
-request is accounted, which is why a harness dispatch that bypasses them has to account
-itself.
+The hooks assembled here are the only place a request is accounted, which is why a
+harness dispatch that bypasses them has to account itself.
 """
 from __future__ import annotations
 

@@ -11,9 +11,9 @@ returned block as one more ORIENT section.
 
 The two turn-zero items themselves: ancestor resolution, and correlation.
 
-Split out of `lead_zero.py` at 1215 lines. `_resolve_item1` is the one function in the
-tree that suppresses all three complexity limits at once, and its own comment says why —
-keeping it here rather than in the facade is what makes that visible.
+`_resolve_item1` is the one function in the tree that suppresses all three complexity
+limits at once, and its own comment says why — keeping it here rather than in the facade
+is what makes that visible.
 """
 from __future__ import annotations
 

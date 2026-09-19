@@ -50,14 +50,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 6,
-            "failed": 0,
-            "first_seen": "2026-07-11T09:47:08.297Z",
-            "last_seen": "2026-07-11T09:47:08.297Z",
-            "source.ip": "172.18.0.14",
-            "user.name": "svc.config-mgmt"
-          }
+          [
+            6,
+            0,
+            "2026-07-11T09:47:08.297Z",
+            "2026-07-11T09:47:08.297Z",
+            "172.18.0.14",
+            "svc.config-mgmt"
+          ]
         ]
       }
     },

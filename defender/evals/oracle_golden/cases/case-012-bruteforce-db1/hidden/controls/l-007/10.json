@@ -24,14 +24,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "events": 21082,
-            "event.outcome": null
-          },
-          {
-            "events": 484,
-            "event.outcome": "success"
-          }
+          [
+            21082,
+            null
+          ],
+          [
+            484,
+            "success"
+          ]
         ]
       }
     },
@@ -57,18 +57,18 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "events": 21033,
-            "event.outcome": null
-          },
-          {
-            "events": 572,
-            "event.outcome": "success"
-          },
-          {
-            "events": 12,
-            "event.outcome": "failure"
-          }
+          [
+            21033,
+            null
+          ],
+          [
+            572,
+            "success"
+          ],
+          [
+            12,
+            "failure"
+          ]
         ]
       }
     },
@@ -94,14 +94,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "events": 20956,
-            "event.outcome": null
-          },
-          {
-            "events": 488,
-            "event.outcome": "success"
-          }
+          [
+            20956,
+            null
+          ],
+          [
+            488,
+            "success"
+          ]
         ]
       }
     }
