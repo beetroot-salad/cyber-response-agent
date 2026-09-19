@@ -39,12 +39,10 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._tsv import flatten_cell
-# Imported straight off `_venv`, not via `_lessons_common`: `_lessons_common` now pulls in
-# `_corpus`/`_io`, which since #1067 import the pydantic-backed `_model` decorator — a `defender.*`
-# import the reexec guard below must run BEFORE, exactly the rule `reexec_into_venv`'s own
-# docstring states for `run.py`/`loop.py`. Importing it through `_lessons_common` would resolve
-# pydantic on the bare interpreter this guard exists to route around.
+# The one `defender.*` import allowed above the guard: `_venv` is stdlib-only by contract, and
+# every other module in the tree may resolve pydantic (#1067) or PyYAML at import — packages the
+# bare interpreter this script is first launched under does not have.
+# `test_corpus_fold_seed.test_c2c` pins that ordering for every script that calls the guard.
 from defender.scripts._venv import reexec_into_venv
 
 if __name__ == "__main__":
@@ -54,6 +52,7 @@ import argparse
 import re
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender._tsv import flatten_cell
 from defender.scripts.lessons._lessons_common import as_list, iter_lessons, use_utf8_stdio
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

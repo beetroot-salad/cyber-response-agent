@@ -25,6 +25,20 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str, str]:
         raise FrontmatterError(f"frontmatter is not valid YAML: {e}") from e
     if not isinstance(fm, dict):
         raise FrontmatterError("frontmatter is not a YAML mapping")
+    # The `dict[str, Any]` this returns is a claim every frontmatter-carrying record in the
+    # tree (`_report.ReportRead.frontmatter`, `_corpus.Lesson.fm`, ...) types its field by, and
+    # since #1067 those records CHECK it. YAML gives a mapping non-string keys freely — `on:`
+    # is `True` under YAML 1.1, a bare `2024-01-01:` is a `date`, `1:` an `int` — and each is
+    # an authoring slip in a document meant for humans, so it is refused HERE, as the same
+    # `FrontmatterError` a malformed fence raises: `read_report` turns that into a no-headline
+    # read and `iter_lessons` warns and skips the file, exactly as they do for any other
+    # malformed frontmatter, instead of a `ValidationError` escaping a reader documented never
+    # to raise.
+    odd = [k for k in fm if not isinstance(k, str)]
+    if odd:
+        raise FrontmatterError(
+            f"frontmatter has non-string key(s) {odd!r} — a YAML bool/date/number where a "
+            "field name belongs (quote it if it is meant literally)")
     nl = text.find("\n", end + 1)
     body = text[nl + 1:].strip() if nl != -1 else ""
     return fm, raw, body

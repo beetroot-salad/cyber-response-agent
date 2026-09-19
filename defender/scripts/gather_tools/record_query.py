@@ -843,7 +843,11 @@ def _trip(
     occurrence = len(matches) + 1
     if occurrence < threshold:
         return None
-    seqs = [m["seq"] for m in matches if isinstance(m.get("seq"), int)]
+    # `bool` excluded as `payload_view._int` excludes it: the table is bytes in the box's rw
+    # bind, and a planted `"seq": true` is an `int` to `isinstance` that `RepeatTrip.first_seq`
+    # (strict since #1067) would refuse — a trip turned into a `ValidationError`.
+    seqs = [m["seq"] for m in matches
+            if isinstance(m.get("seq"), int) and not isinstance(m["seq"], bool)]
     return RepeatTrip(first_seq=min(seqs) if seqs else None, occurrence=occurrence)
 
 

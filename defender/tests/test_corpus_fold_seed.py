@@ -6,9 +6,11 @@ Three parts, and each has a distinct red:
 (a) RELOCATE ``iter_lessons`` to ``defender/_corpus.py``, re-exported from
     ``scripts/lessons/_lessons_common.py``. The load-bearing constraint is the **pre-venv import
     contract**: the actor runs the pinned lesson scripts as ``python3 <script>`` on its bash lane
-    under SYSTEM python, and they import ``_lessons_common`` at module scope *before*
-    ``reexec_into_venv`` swaps the interpreter — so the new module must import cleanly with NO
-    PyYAML. Nothing pins that today; it is prose in a docstring. Reds with ``ModuleNotFoundError``.
+    under SYSTEM python, which has neither PyYAML nor pydantic, and each script re-execs into
+    ``defender/.venv`` with ``reexec_into_venv``. Until #1067 that was held by keeping ``_corpus``
+    itself import-pure; since #1067 every record module resolves pydantic at import, so the
+    contract is an ORDERING one instead — the guard runs before any ``defender.*`` import other
+    than the stdlib-only module the guard lives in (``test_c2c``).
 
 (b) FOLD the duplicate corpus walk in ``learning/author/shared.py`` onto ``iter_lessons``. The #559
     demands (M1-M8b, M10, P1-P4 in ``test_curator_manifest.py``) are CHARACTERIZATION for this fold:
@@ -144,23 +146,11 @@ def test_d0_empty_corpus_is_the_empty_string_exactly(tmp_path):
 
 
 
-class _BlockYaml:
-    """A meta_path finder that makes ``import yaml`` fail — the bare-system-python3 lane, where the
-    actor's pinned lesson scripts import ``_lessons_common`` before re-execing into the venv."""
-
-    def find_spec(self, name, path=None, target=None):
-        if name == "yaml" or name.startswith("yaml."):
-            raise ImportError("No module named 'yaml' (masked: the bare-python3 lane has no PyYAML)")
-        return None
-
-
-
-
 def test_c2b_positive_control_iter_lessons_parses_under_the_venv(tmp_path):
-    """demand: c2b — the positive control for the masked-import test above. With PyYAML present (the
-    venv lane), ``defender._corpus.iter_lessons`` actually parses a lesson's frontmatter: the lazy
-    import fires and yields real data. Without this, ``test_c2`` would stay green against a module
-    that imports cleanly because it does nothing at all.
+    """demand: c2b — with PyYAML present (the venv lane), ``defender._corpus.iter_lessons`` actually
+    parses a lesson's frontmatter and yields real data. Originally the positive control for a
+    masked-``yaml`` import test that #1067 retired (see ``test_c2c``); the behaviour it pins stands
+    on its own.
 
     #584 SUPERSEDES the 2-tuple destructure this test used to do: ``iter_lessons`` now yields a
     frozen ``Lesson`` dataclass. The property pinned here — the lazy parser import really fires —
@@ -179,7 +169,12 @@ def test_c1_lessons_common_reexports_the_same_object():
     Identity, not equality: a wrapper would let the two drift back apart, which is the exact failure
     this issue exists to close — the duplicate walk drifted and the ``UnicodeDecodeError`` hole had to
     be fixed twice. ``__all__`` also carries the ``lint_vulture`` suppression for a re-exported name
-    with no local use (the ``reexec_into_venv`` re-export sets the precedent)."""
+    with no local use. ``reexec_into_venv`` is deliberately NOT among the re-exports: this module
+    resolves pydantic at import (via ``_corpus``/``_io``), so fetching the guard from here would
+    already have imported what the guard routes around (``test_c2c``)."""
+    common = importlib.import_module("defender.scripts.lessons._lessons_common")
+    assert "reexec_into_venv" not in common.__all__
+    assert not hasattr(common, "reexec_into_venv")
     common = importlib.import_module("defender.scripts.lessons._lessons_common")
     corpus_mod = importlib.import_module("defender._corpus")
     assert common.iter_lessons is corpus_mod.iter_lessons
@@ -217,35 +212,69 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth()
         "derived from the caller's own path (that is the depth lock)")
 
 
-def test_c2c_corpus_module_top_level_imports_are_import_safe():
-    """demand: c2, static half — walk ``defender/_corpus.py``'s MODULE-LEVEL import statements and
-    assert none of them names a module that requires the venv (``yaml``, or any ``defender._*`` module
-    that itself imports yaml at top — ``defender._frontmatter`` above all).
+#: The module the guard lives in — the ONE ``defender.*`` import a script may make before calling it.
+_VENV_MODULE = "defender.scripts._venv"
 
-    The complement to the meta_path mask: the mask can pass for the wrong reason if a future
-    transitive path happens not to be exercised at import time. This asserts the PROPERTY on the
-    source, and it names the frontmatter module explicitly because that is the import the fold is
-    tempted to hoist to the top."""
-    tree = ast.parse((DEFENDER / "_corpus.py").read_text())
-    banned = {"yaml", "defender._frontmatter"}
-    top_level = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
-    named: list[str] = []
-    for node in top_level:
+
+def _module_imports(stmt: ast.stmt) -> list[str]:
+    """Every module name a statement imports, recursing into ``if``/``try`` bodies (a guarded
+    ``sys.path`` insert and the guard's own ``if __name__`` block are both compound statements)."""
+    names: list[str] = []
+    for node in ast.walk(stmt):
         if isinstance(node, ast.Import):
-            named += [a.name for a in node.names]
-        elif node.module and node.level == 0:
-            named.append(node.module)
-    assert not (banned & set(named)), f"module-top venv-only import in _corpus.py: {named}"
+            names += [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.append(node.module)
+    return names
 
 
+def _calls_reexec(stmt: ast.stmt) -> bool:
+    return any(isinstance(n, ast.Call) and ast.unparse(n.func) == "reexec_into_venv"
+               for n in ast.walk(stmt))
 
 
+def _guarded_scripts() -> list[Path]:
+    return sorted(p for p in DEFENDER.rglob("*.py")
+                  if "tests" not in p.parts and ".venv" not in p.parts
+                  and p != DEFENDER / "scripts" / "_venv.py"
+                  and "reexec_into_venv(" in p.read_text(encoding="utf-8"))
 
 
+def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
+    """demand: c2, static half, as #1067 reshaped it — in EVERY script that calls ``reexec_into_venv``,
+    no ``defender.*`` module other than the one the guard lives in is imported at module scope
+    before the statement that calls it; and that module itself imports only the stdlib.
 
+    Before #1067 this test asserted that ``_corpus.py`` imported no venv-only module at its top,
+    because the lesson scripts imported ``_lessons_common`` (and so ``_corpus``) BEFORE the guard.
+    Pydantic-backed records made that unholdable for every record module at once, and the two
+    scripts were reordered to import the guard first — the shape ``learning/frontend/build.py``
+    and ``serialize.py`` already had. This pins THAT rule, for all of them, so an import hoisted
+    back above the guard (the pre-#1067 shape of ``lessons_fm.py``/``lessons_frontier.py``) reds
+    here rather than as ``ModuleNotFoundError: pydantic`` on a venv-less box. Reported per file so
+    a violation names the import that moved."""
+    venv_tree = ast.parse((DEFENDER / "scripts" / "_venv.py").read_text(encoding="utf-8"))
+    non_stdlib = [m for stmt in venv_tree.body for m in _module_imports(stmt)
+                  if m.split(".")[0] not in sys.stdlib_module_names]
+    assert not non_stdlib, f"{_VENV_MODULE} must stay stdlib-only, imports {non_stdlib}"
 
-
-
+    scripts = _guarded_scripts()
+    assert {p.name for p in scripts} >= {"lessons_fm.py", "lessons_frontier.py", "build.py",
+                                          "serialize.py"}, scripts
+    early: dict[str, list[str]] = {}
+    for script in scripts:
+        tree = ast.parse(script.read_text(encoding="utf-8"))
+        before_guard: list[str] = []
+        for stmt in tree.body:
+            if _calls_reexec(stmt):
+                break
+            before_guard += [m for m in _module_imports(stmt)
+                             if m.startswith("defender") and m != _VENV_MODULE]
+        else:
+            pytest.fail(f"{script}: mentions reexec_into_venv but never calls it at module scope")
+        if before_guard:
+            early[str(script.relative_to(REPO_ROOT))] = before_guard
+    assert not early, f"defender.* imports above the venv guard: {early}"
 
 
 def test_c5b_iter_lessons_yields_in_full_path_order(tmp_path):

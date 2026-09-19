@@ -256,6 +256,15 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
 
     sample_path = case_dir / "oracle_visible" / "samples" / f"{lead_id}.txt"
     env_path = case_dir / "environment.yaml"
+    # A mapping by contract — `validate_cases.check_environment` reads `capture_environment`
+    # and `unstable_identifiers.columns` off it — and `LeadInputs.environment_notes: dict`
+    # checks that since #1067. A list- or scalar-rooted file is refused here, naming the file,
+    # rather than as a `ValidationError` from the record's constructor a few lines down.
+    environment_notes = yaml.safe_load(env_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(environment_notes, dict):
+        raise ValueError(
+            f"{env_path}: environment.yaml must be a YAML mapping, "
+            f"got {type(environment_notes).__name__}")
     return LeadInputs(
         case_id=case_dir.name,
         lead_id=lead_id,
@@ -263,7 +272,7 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
         sample=sample_path.read_text(encoding="utf-8") if sample_path.exists() else "",
         observed=observed,
         baseline=baseline,
-        environment_notes=yaml.safe_load(env_path.read_text(encoding="utf-8")) or {},
+        environment_notes=environment_notes,
         story=(case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8"),
     )
 

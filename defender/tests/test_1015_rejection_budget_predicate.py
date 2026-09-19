@@ -39,6 +39,7 @@ import dataclasses
 import inspect
 
 import pytest
+from pydantic import ValidationError
 
 from defender.runtime.circuit_breaker import (
     AGENT_FIXABLE_ERROR_CLASS,
@@ -355,8 +356,10 @@ def test_the_budget_trip_carries_integers_and_nothing_else():
     # EQUAL — so no fixture built at the budget can see it. It diverges only where the `>=`
     # rule admits `occurrence > budget`, and there the transposition makes
     # `rejection_budget_dead_end_reason` report the allowance instead of the rejections that
-    # happened, which the arm below says it must never do.
-    with pytest.raises(TypeError):
+    # happened, which the arm below says it must never do. `ValidationError`, not the stdlib
+    # `TypeError`, since #1067 put the trip on the pydantic decorator — the refusal is the
+    # property, its class is the decorator's.
+    with pytest.raises(ValidationError, match="positional"):
         RejectionBudgetTrip(REJECTION_BUDGET, REJECTION_BUDGET)  # type: ignore[misc]
 
     # NOT `trip != RepeatTrip(...)`: two distinct dataclasses never compare equal (each

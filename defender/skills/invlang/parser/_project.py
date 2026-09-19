@@ -8,12 +8,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from dataclasses import field
-from typing import Annotated, Any, TypeVar, cast
-
-from pydantic import SkipValidation
-
-from defender._model import model
+from dataclasses import dataclass, field
+from typing import Any, TypeVar, cast
 
 from .._cells import (
     _has_unbalanced_quote,
@@ -75,21 +71,18 @@ from ._rows import (
 _RowT = TypeVar("_RowT")
 
 
-@model
+# Stdlib `@dataclass`, not `@model`, by #1067's own rule for the invlang parser: this is not a
+# boundary type but the parser's mutable scratch object — every field is an accumulator its
+# methods fill in one entry at a time (`hypotheses_by_id` holds `HypothesisRecord` TypedDicts
+# that legitimately have none of their required keys yet mid-projection), constructed exactly
+# once as `_Projector()` and never from external data, so a constructor-time check has nothing
+# to check and a pydantic import here buys the parser nothing.
+@dataclass
 class _Projector:
 
     out: dict[str, Any] = field(default_factory=dict)
     warnings: list[ParseWarning] = field(default_factory=list)
-    #: `SkipValidation`, same reason `corpus.Companion.body` carries it (#1067 PR 4):
-    #: `HypothesisRecord` is a `TypedDict` written incrementally, one field at a time, across
-    #: many projector methods (`hyp.setdefault("predictions", []).append(...)`, `_attach_hyp_sub_rows`
-    #: above) — an intermediate value legitimately has none of its "required" keys yet, and
-    #: pydantic re-validating the mapping on every field access/append would both refuse those
-    #: intermediate states and rebuild the dict pydantic copies a plain `Mapping` into (the same
-    #: identity concern PR 2 hit on `RosterRead`'s `MappingProxyType` fields).
-    hypotheses_by_id: Annotated[dict[str, HypothesisRecord], SkipValidation] = field(
-        default_factory=dict
-    )
+    hypotheses_by_id: dict[str, HypothesisRecord] = field(default_factory=dict)
     #: Ids the `:H hypothesize.hypotheses` table declares. The table outranks a lead's
     #: `new_hypotheses` in `hypotheses_by_id` regardless of document order, because that is
     #: the precedence `_walkers.all_hypotheses` applies on the read side.
