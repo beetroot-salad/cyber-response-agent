@@ -27,13 +27,13 @@ from dataclasses import field
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import AfterValidator, ConfigDict, TypeAdapter, ValidationError
-from pydantic.dataclasses import dataclass
+from pydantic import AfterValidator, TypeAdapter, ValidationError
 
 
 # `JudgeRefused` lives in `_errors.py`, its own module, so every submodule below can import it
 # without a package-`__init__` import cycle; re-exported here as the ONE class object every
 # caller — including `_triplet_947.refusals()`'s `sym("learning.judge", "JudgeRefused")` — sees.
+from defender._model import model  # noqa: E402
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._io import Bound, bind, guarded_mkdir, write_guarded  # noqa: E402
@@ -94,7 +94,7 @@ def _judge_cap() -> int:
     return env_int(CAP_KNOB, 20000)
 
 
-@dataclass
+@model
 class NotGradedStamp:
     """Why the pass declined to grade an episode: the review's outcome word and its reason."""
 
@@ -119,16 +119,17 @@ def _rows_name_their_world(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-@dataclass(config=ConfigDict(strict=True))
+@model
 class EpisodeGrade:
     """`grade_episode`'s return value — the same shape `judge.yaml` is written as.
 
     THE SCHEMA OF THE RECORD, in both directions: `_write_judge_yaml` dumps this class and
     `_grade_from_document` constructs it from the file's keys, so the field list is spelled
-    here and nowhere else. A pydantic dataclass, STRICT: every construction — the live pass's
-    and the read-back's alike — validates each field by type, with no coercion (`"3"` is not
-    an `int`, a list is not a `frozenset`), and a document of the wrong shape is a
-    `ValidationError` at the constructor rather than a value of the wrong type in a field.
+    here and nowhere else. A pydantic dataclass, STRICT (`defender._model.model`): every
+    construction — the live pass's and the read-back's alike — validates each field by type,
+    with no coercion (`"3"` is not an `int`, a list is not a `frozenset`), and a document of
+    the wrong shape is a `ValidationError` at the constructor rather than a value of the wrong
+    type in a field.
     `episode_dir` and the three `frozenset` fields are DERIVED — never written, re-computed
     from the rows on every read (`_DERIVED`).
     """
