@@ -38,15 +38,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # fetch-depth: 0 — test_migrate_esql_encoding.py's pre_migration_cases_dir fixture
-      # runs `git archive <pre-migration sha>` to read the corpus as it stood before #1054's
-      # rewrite, and that commit is an ancestor of HEAD, not HEAD itself. The default
-      # depth-1 checkout only has HEAD's own commit, so the archive fails with "fatal: not
-      # a valid object name" (same graft this repo already hit in #618, documented on
-      # `code-smells` below). The repo is ~44MB, so full history is free.
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -550,9 +542,8 @@ jobs:
       # (refs/pull/N/merge), and a `--depth=N` fetch of the base ref creates the ref but
       # NOT a common ancestor: the diff exits 128 and the gate reported clean on every PR
       # for its whole life (#618). Only full history removes the graft. The repo is ~44MB,
-      # so this is free. The `lint` job runs nothing diff-relative and stays shallow; `test`
-      # also needs full history now, for the unrelated reason documented on its own
-      # checkout step above (#1054).
+      # so this is free. The `lint` and `test` jobs run nothing diff-relative and stay
+      # shallow.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0

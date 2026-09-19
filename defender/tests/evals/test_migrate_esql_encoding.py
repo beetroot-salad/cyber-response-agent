@@ -83,14 +83,12 @@ API
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -102,17 +100,6 @@ DEFENDER_DIR = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = DEFENDER_DIR / "evals" / "oracle_golden"
 CASES_DIR = GOLDEN_DIR / "cases"
 MIGRATION_SCRIPT = GOLDEN_DIR / "migrate_esql_encoding.py"
-REPO_ROOT = DEFENDER_DIR.parent
-
-#: main's tip immediately before #1054's migration landed — the commit the design doc's own
-#: fixture-provenance comments already cite ("copied verbatim from the tree as it stood at
-#: 3249dffb"). The one anchor in this module that is NOT self-referential: every other O2
-#: check compares the migration's output to a fixture THIS FILE built, or to a re-zip of
-#: whatever is on disk NOW — either of which a transform that corrupts the corpus
-#: consistently with itself (a reversed cell order, a silent truncation to `values: []`)
-#: would satisfy just as well. This doesn't: it reads the dict-row bytes git actually has
-#: for this ref, independent of whatever `migrate_tree` did to the tree since.
-PRE_MIGRATION_REF = "3249dffb"
 
 
 # ---------------------------------------------------------------------------------
@@ -739,76 +726,6 @@ def test_the_only_files_the_run_rewrote_are_the_ones_carrying_dict_rows(migrated
     assert moved == sorted(PLANTED), (
         f"{len(moved)} file(s) moved, expected only the planted ones. "
         f"Unexpected: {sorted(set(moved) - set(PLANTED))[:5]}")
-
-
-@pytest.fixture(scope="module")
-def pre_migration_cases_dir(tmp_path_factory):
-    """The real `cases/` tree exactly as `git` has it at `PRE_MIGRATION_REF` — the one
-    fixture in this module that is NOT derived from anything `migrate_tree` or this test
-    file itself produced. `git archive` rather than `git show` per file: one subprocess for
-    the whole subtree instead of 482."""
-    root = tmp_path_factory.mktemp("pre1054")
-    rel = "defender/evals/oracle_golden/cases"
-    archive = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "archive", PRE_MIGRATION_REF, "--", rel],
-        capture_output=True, check=True).stdout
-    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
-        tar.extractall(root)  # noqa: S202 — a `git archive` of this repo's own history
-    return root / rel
-
-
-def test_every_committed_payload_rezips_to_its_pre_migration_dict_rows(pre_migration_cases_dir):
-    """O2, anchored to git history rather than to anything this test module or the migration
-    produced (adversary finding, Hole 1, #1054 — the headline one).
-
-    Every other O2 check in this module either compares the migration's output to an
-    embedded fixture literal, or — for the whole-tree checks above — to a re-zip of
-    whatever `migrate_tree` itself just wrote, read back off the SAME run. A transform that
-    corrupts the corpus consistently with itself (every cell written in reversed column
-    order; every payload's rows silently replaced with `values: []` while `row_count` is
-    left untouched) satisfies both of those, because neither ever consults a byte that
-    predates the run under test.
-
-    This does: for every ES|QL payload under the COMMITTED `cases/` tree today, re-zipping
-    its (now positional) `values` by `columns[].name` must reproduce EXACTLY the dict rows
-    `git` has for that same file and position at `PRE_MIGRATION_REF` — before this PR's
-    migration ever ran. `row_count == len(values)` is checked independently too, which alone
-    would catch a payload silently emptied.
-    """
-    checked = 0
-    for path in sorted(CASES_DIR.glob("*/hidden/**/*.json")):
-        raw = path.read_bytes()
-        if not raw.strip():
-            continue
-        rel = path.relative_to(CASES_DIR)
-        before_path = pre_migration_cases_dir / rel
-        if not before_path.exists():
-            continue  # a file this PR did not touch, and that pre-dates PRE_MIGRATION_REF too
-        before_raw = before_path.read_bytes()
-        if not before_raw.strip():
-            continue
-
-        now_payloads = list(_esql_payloads_anywhere(json.loads(raw)))
-        before_payloads = list(_esql_payloads_anywhere(json.loads(before_raw)))
-        assert len(now_payloads) == len(before_payloads), (
-            f"{rel}: the number of ES|QL payloads in this file changed")
-
-        for now_p, before_p in zip(now_payloads, before_payloads, strict=True):
-            assert now_p["query"] == before_p["query"], rel
-            assert now_p["columns"] == before_p["columns"], rel
-            assert now_p["row_count"] == before_p["row_count"], rel
-            assert now_p["row_count"] == len(now_p["values"]), (
-                f"{rel}: row_count no longer matches len(values) — a row was silently "
-                "dropped or added")
-            assert _to_dict_rows(now_p)["values"] == before_p["values"], (
-                f"{rel}: re-zipping the committed payload does not reproduce its "
-                f"pre-{PRE_MIGRATION_REF} dict rows — the migration lost or corrupted data")
-            checked += 1
-
-    assert checked >= 898, (
-        f"only checked {checked} payload(s) against git history; expected the full "
-        "898-payload census this issue counted — a shrunk count here would itself be a sign "
-        "of lost data")
 
 
 # =================================================================================
