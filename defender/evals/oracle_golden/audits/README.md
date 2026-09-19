@@ -57,6 +57,23 @@ about, and a thin baseline is exactly the condition under which it is hard to se
 abstention is the judge declining to call it from two live control hours, one of them
 empty. Re-measure before deciding who was right.
 
+### 2026-09-19 — corpus re-encoded, tag unchanged (#1054)
+
+`hidden/`'s ES|QL payloads were re-encoded from #842's pre-migration dict-row form to
+production's positional form (`migrate_esql_encoding.py`), losslessly and with no other
+byte moved. The tag was deliberately left unchanged, and nothing under it was re-scored:
+folding the encoding into `tag_suffix` would invalidate all 15 committed
+label caches, this calibration and the verdict pass below, and the 6 held-out ledger
+entries, all of which only a hand-run LLM sweep can regenerate, for a distinction nothing
+downstream consumes today.
+
+That leaves one accepted gap, named rather than hidden: `case-006-authorized-keys-db1` and
+`case-007-lotl-web1` have a corpus but no entry in this tag's label cache. If either is ever
+labelled, its leads will be the first ever measured from the positional form under a tag
+whose other 85 leads were measured from dict rows — the exact mixing the cache-key comment
+above `judge.py::MODEL_LEAD_FIELDS` warns about, now a real instance of it rather than a
+hypothetical one.
+
 ## `verdict-selfagreement_judge-claude-opus-5-high_47d6044a` — 2026-07-27
 
 The verdict pass, `audit_judge.py --pass verdict --repeats 5`. It has no hand-labelled

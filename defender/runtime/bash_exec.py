@@ -626,6 +626,13 @@ def run_parsed(
 
 
 def _run_box_entrypoint() -> int:
+    """The process that runs INSIDE the sandbox, with only the tree on its path — no venv, no
+    pydantic. Every module in its import closure (`defender.runtime.box` and what that pulls
+    in: `box/_spec.py`, `box_codec.py`, `scrub.py`) therefore stays on STDLIB `@dataclass`,
+    never `defender._model.model` (#1067). The `box-native`/`box-dood` CI jobs are the live
+    pin: the port's first attempt failed every box start with `ModuleNotFoundError: No module
+    named 'pydantic'` out of that import. This is the one home for that rule; the three
+    modules carry a pointer here."""
     from defender.runtime import box
 
     frame = sys.stdin.buffer.read()

@@ -44,15 +44,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 0,
-            "total_dest_bytes": null,
-            "total_src_bytes": null,
-            "max_dest_bytes": null,
-            "max_src_bytes": null,
-            "min_ts": null,
-            "max_ts": null
-          }
+          [
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
         ]
       }
     },
@@ -98,15 +98,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 0,
-            "total_dest_bytes": null,
-            "total_src_bytes": null,
-            "max_dest_bytes": null,
-            "max_src_bytes": null,
-            "min_ts": null,
-            "max_ts": null
-          }
+          [
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
         ]
       }
     },
@@ -152,15 +152,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "count": 0,
-            "total_dest_bytes": null,
-            "total_src_bytes": null,
-            "max_dest_bytes": null,
-            "max_src_bytes": null,
-            "min_ts": null,
-            "max_ts": null
-          }
+          [
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
         ]
       }
     }

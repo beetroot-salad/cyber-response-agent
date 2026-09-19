@@ -1,8 +1,7 @@
 """The validator's own vocabulary: what a finding IS, and the one check over the whole
 document surface rather than over any parsed row.
 
-The base of the validator's layering — split out of `validate.py` when it reached 4038
-lines. Imports none of its siblings; every other family imports from here.
+The base of the validator's layering. Imports none of its siblings; every other family imports from here.
 """
 from __future__ import annotations
 

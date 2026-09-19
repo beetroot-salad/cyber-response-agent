@@ -42,24 +42,24 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "count": 6,
-            "first_seen": "2026-07-12T11:01:53.000Z",
-            "last_seen": "2026-07-12T11:01:53.000Z",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
-          },
-          {
-            "count": 6,
-            "first_seen": "2026-07-12T09:08:37.000Z",
-            "last_seen": "2026-07-12T09:08:37.000Z",
-            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 50932 ssh2"
-          },
-          {
-            "count": 6,
-            "first_seen": "2026-07-12T11:58:23.000Z",
-            "last_seen": "2026-07-12T11:58:23.000Z",
-            "message": "Accepted password for sre.alice from 172.18.0.17 port 44278 ssh2"
-          }
+          [
+            6,
+            "2026-07-12T11:01:53.000Z",
+            "2026-07-12T11:01:53.000Z",
+            "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          ],
+          [
+            6,
+            "2026-07-12T09:08:37.000Z",
+            "2026-07-12T09:08:37.000Z",
+            "Accepted password for svc.config-mgmt from 172.18.0.14 port 50932 ssh2"
+          ],
+          [
+            6,
+            "2026-07-12T11:58:23.000Z",
+            "2026-07-12T11:58:23.000Z",
+            "Accepted password for sre.alice from 172.18.0.17 port 44278 ssh2"
+          ]
         ]
       }
     },
@@ -93,18 +93,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 6,
-            "first_seen": "2026-07-05T11:37:05.000Z",
-            "last_seen": "2026-07-05T11:37:05.000Z",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
-          },
-          {
-            "count": 6,
-            "first_seen": "2026-07-05T11:44:35.000Z",
-            "last_seen": "2026-07-05T11:44:35.000Z",
-            "message": "Accepted password for sre.chen from 172.18.0.17 port 36644 ssh2"
-          }
+          [
+            6,
+            "2026-07-05T11:37:05.000Z",
+            "2026-07-05T11:37:05.000Z",
+            "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          ],
+          [
+            6,
+            "2026-07-05T11:44:35.000Z",
+            "2026-07-05T11:44:35.000Z",
+            "Accepted password for sre.chen from 172.18.0.17 port 36644 ssh2"
+          ]
         ]
       }
     }

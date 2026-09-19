@@ -46,48 +46,48 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "@timestamp": "2026-07-12T11:01:53.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-12T11:01:53.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-12T11:01:53.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-12T11:01:53.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-12T11:01:53.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-12T11:01:53.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
-          }
+          [
+            "2026-07-12T11:01:53.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          ],
+          [
+            "2026-07-12T11:01:53.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          ],
+          [
+            "2026-07-12T11:01:53.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          ],
+          [
+            "2026-07-12T11:01:53.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          ],
+          [
+            "2026-07-12T11:01:53.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          ],
+          [
+            "2026-07-12T11:01:53.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          ]
         ]
       }
     },
@@ -125,48 +125,48 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "@timestamp": "2026-07-05T11:37:05.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-05T11:37:05.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-05T11:37:05.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-05T11:37:05.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-05T11:37:05.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
-          },
-          {
-            "@timestamp": "2026-07-05T11:37:05.000Z",
-            "event.outcome": "success",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.ben",
-            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
-          }
+          [
+            "2026-07-05T11:37:05.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          ],
+          [
+            "2026-07-05T11:37:05.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          ],
+          [
+            "2026-07-05T11:37:05.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          ],
+          [
+            "2026-07-05T11:37:05.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          ],
+          [
+            "2026-07-05T11:37:05.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          ],
+          [
+            "2026-07-05T11:37:05.000Z",
+            "success",
+            "172.18.0.17",
+            "sre.ben",
+            "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          ]
         ]
       }
     }

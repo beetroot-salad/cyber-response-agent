@@ -11,12 +11,7 @@ from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 from defender.runtime.review_roles import COMPOSER_DEF, SUPPORT_DEF
 
 # A definition in this registry is what compiles a role's policy, so a registered role with no
-# caller is a compiled grant nothing claims — retire the definition with the stage. #922 is that
-# rule applied at scale: the actor, oracle and judge definitions went with the pipeline they
-# were the only callers of, and their enum keys went with them (`agent_role.py`) rather than
-# staying behind as three names nothing answers to. `judge` RETURNED in #1008 under a different
-# owner — the family judge, which until then ran on the questioner's definition — which is the
-# same rule read forwards: the key came back with a caller, not ahead of one.
+# caller is a compiled grant nothing claims — retire the definition with the stage.
 #
 # The review side is ONE lens role plus the composer: SUPPORT is claimed by two calls (the
 # support lens and its ablation), so there are two definitions and three calls. The questioner

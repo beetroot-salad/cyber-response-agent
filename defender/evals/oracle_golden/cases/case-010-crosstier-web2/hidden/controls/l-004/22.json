@@ -32,12 +32,12 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 0,
-            "failed": 0,
-            "first_seen": null,
-            "last_seen": null
-          }
+          [
+            0,
+            0,
+            null,
+            null
+          ]
         ]
       }
     },
@@ -71,12 +71,12 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 0,
-            "failed": 0,
-            "first_seen": null,
-            "last_seen": null
-          }
+          [
+            0,
+            0,
+            null,
+            null
+          ]
         ]
       }
     },
@@ -110,12 +110,12 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 0,
-            "failed": 0,
-            "first_seen": null,
-            "last_seen": null
-          }
+          [
+            0,
+            0,
+            null,
+            null
+          ]
         ]
       }
     }

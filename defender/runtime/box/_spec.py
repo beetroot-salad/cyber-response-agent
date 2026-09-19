@@ -1,9 +1,8 @@
 """What a box IS: the request, the mounts, the executor, and the transports that carry a
 command to one.
 
-Split out of `box.py` at 1077 lines. The two transports live here rather than with the
-lifecycle because `BoxExecutor` discriminates on the docker one, and the protocol they
-implement is declared here.
+The two transports live here rather than with the lifecycle because `BoxExecutor`
+discriminates on the docker one, and the protocol they implement is declared here.
 """
 from __future__ import annotations
 
@@ -35,11 +34,8 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 
 
-# STDLIB `@dataclass`, NOT `defender._model.model` (#1067): this module is in the import
-# closure of the box ENTRYPOINT (`bash_exec._run_box_entrypoint` -> `defender.runtime.box`),
-# which runs INSIDE the sandbox with only the tree on its path — no venv, no pydantic. The
-# `box-native`/`box-dood` CI jobs are the live pin: the port's first attempt failed every
-# box start with `ModuleNotFoundError: No module named 'pydantic'` out of this import.
+# STDLIB `@dataclass`, not `defender._model.model`: this module is in the box entrypoint's
+# import closure — see `bash_exec._run_box_entrypoint` for the one note on why (#1067).
 @dataclass(frozen=True)
 class BoxSpec:
 

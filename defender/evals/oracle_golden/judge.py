@@ -73,9 +73,7 @@ class GrammarError(ValueError):
 # importing the learning config would let a change there silently re-tag every committed
 # score.
 #
-# THE ENV VARS ARE THE SAME TWO NAMES. This note used to end by denying that — calling the two
-# readers coincidental namesakes — which was wrong, and wrong in the direction that costs
-# someone a day. `JUDGE_MODEL` and `JUDGE_EFFORT` are read here AND by
+# THE ENV VARS ARE THE SAME TWO NAMES. `JUDGE_MODEL` and `JUDGE_EFFORT` are read here AND by
 # `learning/core/config.py`, with different defaults, so setting either for this harness also
 # retargets the family judge — and, since #1008 registered that judge, aborts every ordinary
 # investigation at `run.py`'s all-roles preflight if the value names a model no provider
@@ -215,6 +213,12 @@ def load_case_leads(case_dir: Path) -> list[dict]:
 #: would be labelled from a different input shape than its siblings under one tag. `seq` is
 #: exactly such a field — the queries-table key pairing a control with its observed payload,
 #: of no use to the judge.
+#:
+#: #1054 is an accepted, deliberate instance of exactly that: `hidden/`'s ES|QL payloads
+#: were re-encoded to production's positional shape under an unchanged tag, so two cases
+#: with no label cache (`case-006-authorized-keys-db1`, `case-007-lotl-web1`) would be
+#: labelled from a different encoding than the other 85 leads under this tag. See
+#: `audits/README.md`'s 2026-09-19 note.
 MODEL_LEAD_FIELDS = ("lead_id", "goal", "what_to_summarize", "queries")
 MODEL_QUERY_FIELDS = ("query_id", "params")
 

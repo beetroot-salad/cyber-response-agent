@@ -18,7 +18,7 @@ control-flow set a tool call must never swallow.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import field, replace
+from dataclasses import replace
 from defender._model import model
 from typing import Any, cast
 
@@ -285,7 +285,10 @@ class _GateWrapperToolset(WrapperToolset[Any]):
     build time). Anything else is foreign by default, unless it carries the owned marker
     `mark_owned` sets."""
 
-    gate: ToonGateCapability = field(default=None)  # type: ignore[assignment]
+    #: REQUIRED (#1067): a `None` default would slip past strict validation at construction
+    #: only to be re-passed explicitly — and refused — by every `dataclasses.replace(self, ...)`
+    #: `WrapperToolset` performs (`for_run`, `for_run_step`, `visit_and_replace`).
+    gate: ToonGateCapability
 
     async def get_tools(self, ctx):  # noqa: ANN001
         tools = await self.wrapped.get_tools(ctx)

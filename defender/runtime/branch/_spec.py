@@ -15,16 +15,17 @@ hydrating the fork it just opened; the symmetry is exact rather than approximate
 
 What a branch request IS, and opening the store it reads from.
 
-Split out of `branch.py` at 1197 lines; imports none of its siblings.
+Imports none of its siblings.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from defender._model import model, unwrap_before
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 from pydantic import model_validator
 
@@ -68,36 +69,61 @@ class BranchSpec:
     # sqlite connection open and the wire log registered). So EVERY field's type is checked
     # here first, ahead of pydantic's own check, and refused as `BranchError`; a domain
     # exception raised from a validator propagates unconverted — `_model`'s documented
-    # convention. `bool` is excluded from `int` because it is an `int` that names no message,
-    # and pydantic's strict `int` would admit it.
+    # convention. `bool` is excluded from `int` for the same reason: pydantic's strict `int`
+    # refuses `True` too, but as `ValidationError`, and this arm exists to name the class the
+    # handlers catch for an `int` that names no message.
     @model_validator(mode="before")
     @classmethod
     def _fields_are_typed(cls, value: Any) -> Any:
         given = unwrap_before(cls, value)
         if not isinstance(given, dict):
             return given
-        for name, expected, why in _FIELD_TYPES:
+        for name, expected in _FIELD_TYPES.items():
             if name not in given:
                 continue  # pydantic names the missing field itself
             got = given[name]
             if not isinstance(got, expected) or (expected is int and isinstance(got, bool)):
                 raise BranchError(
                     f"{name} must be {'an' if expected is int else 'a'} {expected.__name__}, "
-                    f"got {got!r} — {why}")
+                    f"got {got!r} — {_WHY[name]}")
         return given
 
 
-#: Each field's required runtime type, and what a wrongly-typed one would have meant.
-_FIELD_TYPES: tuple[tuple[str, type, str], ...] = (
-    ("source_run_dir", Path,
-     "a spelling of a path is not the path the store is opened from"),
-    ("branch_message_id", int,
-     "a branch point is a message id this run's own store holds, not a spelling of one"),
-    ("continuation_prompt", str,
-     "the prompt is part of the measured instrument and has to be the text that was sent"),
-    ("as_of", datetime,
-     "a branch point without a moment cannot pin the clock its siblings resume into"),
-)
+#: What a wrongly-typed value of each field would have meant — the one part of the refusal
+#: that is hand-written. The TYPES are read off the class, so a field added to `BranchSpec`
+#: without a line here fails at import (`_field_types` below) rather than silently reopening
+#: the `ValidationError` escape the validator closes.
+_WHY: dict[str, str] = {
+    "source_run_dir": "a spelling of a path is not the path the store is opened from",
+    "branch_message_id":
+        "a branch point is a message id this run's own store holds, not a spelling of one",
+    "continuation_prompt":
+        "the prompt is part of the measured instrument and has to be the text that was sent",
+    "as_of": "a branch point without a moment cannot pin the clock its siblings resume into",
+}
+
+
+def _field_types() -> dict[str, type]:
+    """`BranchSpec`'s field name -> the runtime class its annotation names, resolved once.
+
+    Every field is a plain class today; a union or generic would need its own `isinstance`
+    arm, so one arriving here is refused at import rather than mis-checked.
+    """
+    hints = get_type_hints(BranchSpec)
+    out: dict[str, type] = {}
+    for f in dataclasses.fields(BranchSpec):
+        hint = hints[f.name]
+        if not isinstance(hint, type):
+            raise TypeError(f"BranchSpec.{f.name} is annotated {hint!r}, which the "
+                            "before-validator cannot isinstance-check — add an arm for it")
+        if f.name not in _WHY:
+            raise KeyError(f"BranchSpec.{f.name} has no entry in _WHY — say what a "
+                           "wrongly-typed value would have meant")
+        out[f.name] = hint
+    return out
+
+
+_FIELD_TYPES = _field_types()
 
 
 def open_source_store(run_dir: Path) -> Any:

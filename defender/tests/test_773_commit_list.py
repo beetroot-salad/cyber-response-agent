@@ -354,17 +354,21 @@ def test_the_commit_step_reads_author_result_only_for_skip_reasons_and_commit_me
     """A NEGATIVE demand: the commit step reads AUTHOR_RESULT for exactly two things — the
     `consumed_skip` reasons and the `commit_message` — and for nothing else.
 
-    Driven by making every OTHER field of the result useless: the `committed` bucket is
-    empty and a `held_forward_bad` bucket is absent, yet the well-cited file is still
-    checked and committed off the tree. Positive control on the same address: the two fields
-    that ARE read do reach their sinks — the skip reason onto the rotated row and the
-    message into `git log`."""
+    Driven by making every OTHER field of the result useless: `committed` omits "a" (only
+    "skip" rides the bucket, harmlessly, since it is filed under `consumed_skip` instead) and
+    a `held_forward_bad` bucket is absent, yet the well-cited file "a" is still checked and
+    committed off the tree rather than off the bucket's own say-so. `committed` still has to
+    stay HONEST about the tree overall (non-empty, corpus genuinely dirty) — the pre-existing
+    bidirectional self-report/tree cross-check (§7 FK-3) is a separate, earlier gate this test
+    is not about; `test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773` covers
+    it. Positive control on the same address: the two fields that ARE read do reach their
+    sinks — the skip reason onto the rotated row and the message into `git log`."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("a", run_id="a"), S.finding_row("skip", run_id="skip")],
         curator=S.FakeCurator(
             writes={"l1.md": S.lesson("a")},
-            committed=[],
+            committed=["a"],
             consumed_skip=[{"finding_id": "skip", "reason": "already taught"}],
             commit_message="the curator's own prose",
         ),
@@ -520,7 +524,7 @@ def test_git_status_reports_a_rename_pair_or_a_mode_or_name_only_change_773(tmp_
     )
     assert sc.run() == 0
     assert sc.verifier.pairs_seen == [("new.md", "f1")]
-    assert sorted(sc.head_files()) == [OLD, "defender/lessons/new.md"]
+    assert sorted(sc.head_files()) == ["defender/lessons/new.md", OLD]
     assert sc.head_text(OLD) is None
 
 

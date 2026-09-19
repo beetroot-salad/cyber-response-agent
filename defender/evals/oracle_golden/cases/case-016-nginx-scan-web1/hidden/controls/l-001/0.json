@@ -52,39 +52,39 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "requests": 1080,
-            "first_seen": "2026-07-07T05:47:38.000Z",
-            "last_seen": "2026-07-07T06:47:28.000Z",
-            "host.name": "web-1",
-            "source.ip": "127.0.0.1",
-            "path": "/nginx_status",
-            "method": "GET",
-            "status": 404,
-            "user_agent": "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
-          },
-          {
-            "requests": 21,
-            "first_seen": "2026-07-07T05:50:47.000Z",
-            "last_seen": "2026-07-07T06:44:07.000Z",
-            "host.name": "web-1",
-            "source.ip": "127.0.0.1",
-            "path": "/",
-            "method": "GET",
-            "status": 200,
-            "user_agent": "curl/7.81.0"
-          },
-          {
-            "requests": 6,
-            "first_seen": "2026-07-07T06:20:33.000Z",
-            "last_seen": "2026-07-07T06:30:45.000Z",
-            "host.name": "web-1",
-            "source.ip": "172.18.0.13",
-            "path": "/",
-            "method": "GET",
-            "status": 200,
-            "user_agent": "curl/7.81.0"
-          }
+          [
+            1080,
+            "2026-07-07T05:47:38.000Z",
+            "2026-07-07T06:47:28.000Z",
+            "web-1",
+            "127.0.0.1",
+            "/nginx_status",
+            "GET",
+            404,
+            "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
+          ],
+          [
+            21,
+            "2026-07-07T05:50:47.000Z",
+            "2026-07-07T06:44:07.000Z",
+            "web-1",
+            "127.0.0.1",
+            "/",
+            "GET",
+            200,
+            "curl/7.81.0"
+          ],
+          [
+            6,
+            "2026-07-07T06:20:33.000Z",
+            "2026-07-07T06:30:45.000Z",
+            "web-1",
+            "172.18.0.13",
+            "/",
+            "GET",
+            200,
+            "curl/7.81.0"
+          ]
         ]
       }
     },
@@ -138,39 +138,39 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "requests": 1440,
-            "first_seen": "2026-06-30T05:47:40.000Z",
-            "last_seen": "2026-06-30T06:47:30.000Z",
-            "host.name": "web-1",
-            "source.ip": "127.0.0.1",
-            "path": "/nginx_status",
-            "method": "GET",
-            "status": 404,
-            "user_agent": "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
-          },
-          {
-            "requests": 72,
-            "first_seen": "2026-06-30T05:48:48.000Z",
-            "last_seen": "2026-06-30T06:42:21.000Z",
-            "host.name": "web-1",
-            "source.ip": "127.0.0.1",
-            "path": "/",
-            "method": "GET",
-            "status": 200,
-            "user_agent": "curl/7.81.0"
-          },
-          {
-            "requests": 8,
-            "first_seen": "2026-06-30T06:04:36.000Z",
-            "last_seen": "2026-06-30T06:25:10.000Z",
-            "host.name": "web-1",
-            "source.ip": "172.18.0.24",
-            "path": "/",
-            "method": "GET",
-            "status": 200,
-            "user_agent": "curl/7.81.0"
-          }
+          [
+            1440,
+            "2026-06-30T05:47:40.000Z",
+            "2026-06-30T06:47:30.000Z",
+            "web-1",
+            "127.0.0.1",
+            "/nginx_status",
+            "GET",
+            404,
+            "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
+          ],
+          [
+            72,
+            "2026-06-30T05:48:48.000Z",
+            "2026-06-30T06:42:21.000Z",
+            "web-1",
+            "127.0.0.1",
+            "/",
+            "GET",
+            200,
+            "curl/7.81.0"
+          ],
+          [
+            8,
+            "2026-06-30T06:04:36.000Z",
+            "2026-06-30T06:25:10.000Z",
+            "web-1",
+            "172.18.0.24",
+            "/",
+            "GET",
+            200,
+            "curl/7.81.0"
+          ]
         ]
       }
     },
@@ -224,39 +224,39 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "requests": 1440,
-            "first_seen": "2026-06-23T05:47:40.000Z",
-            "last_seen": "2026-06-23T06:47:30.000Z",
-            "host.name": "web-1",
-            "source.ip": "127.0.0.1",
-            "path": "/nginx_status",
-            "method": "GET",
-            "status": 404,
-            "user_agent": "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
-          },
-          {
-            "requests": 36,
-            "first_seen": "2026-06-23T06:02:35.000Z",
-            "last_seen": "2026-06-23T06:46:53.000Z",
-            "host.name": "web-1",
-            "source.ip": "127.0.0.1",
-            "path": "/",
-            "method": "GET",
-            "status": 200,
-            "user_agent": "curl/7.81.0"
-          },
-          {
-            "requests": 4,
-            "first_seen": "2026-06-23T05:51:15.000Z",
-            "last_seen": "2026-06-23T05:51:15.000Z",
-            "host.name": "web-1",
-            "source.ip": "172.18.0.24",
-            "path": "/",
-            "method": "GET",
-            "status": 200,
-            "user_agent": "curl/7.81.0"
-          }
+          [
+            1440,
+            "2026-06-23T05:47:40.000Z",
+            "2026-06-23T06:47:30.000Z",
+            "web-1",
+            "127.0.0.1",
+            "/nginx_status",
+            "GET",
+            404,
+            "Elastic-Metricbeat/9.3.3 (linux; amd64; d701429ed4d31b447788fa652f0ce3bcc14d5ac9; 2026-04-01 12:25:28 +0000 UTC)"
+          ],
+          [
+            36,
+            "2026-06-23T06:02:35.000Z",
+            "2026-06-23T06:46:53.000Z",
+            "web-1",
+            "127.0.0.1",
+            "/",
+            "GET",
+            200,
+            "curl/7.81.0"
+          ],
+          [
+            4,
+            "2026-06-23T05:51:15.000Z",
+            "2026-06-23T05:51:15.000Z",
+            "web-1",
+            "172.18.0.24",
+            "/",
+            "GET",
+            200,
+            "curl/7.81.0"
+          ]
         ]
       }
     }

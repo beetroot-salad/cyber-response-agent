@@ -15,9 +15,8 @@ hydrating the fork it just opened; the symmetry is exact rather than approximate
 
 Writing the sibling: the inherited prefix, the evidence, the lead directories.
 
-The write half of the branch, split out of `branch.py` at 1197 lines. A valid source does
-not guarantee a valid prefix, which is why the seeding path meets the artifact schema like
-every other writer.
+The write half of the branch. A valid source does not guarantee a valid prefix, which is
+why the seeding path meets the artifact schema like every other writer.
 """
 
 from __future__ import annotations

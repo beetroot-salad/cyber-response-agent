@@ -3,17 +3,17 @@ from __future__ import annotations
 from defender._model import model
 from typing import TYPE_CHECKING, Any, Protocol
 
-# `Model` a REAL import, not `TYPE_CHECKING`-only (#1067): `BuiltModel` is a strict pydantic
-# dataclass now, and pydantic resolves a field's annotation at DECORATION time — a name only
-# bound under `TYPE_CHECKING` (False at runtime) leaves the class silently
-# `__pydantic_complete__ = False` rather than raising there, and the failure surfaces instead
-# at the class's first REAL construction (`PydanticUserError: ... not fully defined`), far from
-# this file. `Model` is a real class, isinstance-safe either way. `ModelSettings` stays
-# `TYPE_CHECKING`-only, same as `AgentRole` — see `BuiltModel.settings`'s own comment for why it
-# is deliberately NOT this field's real runtime type.
-from pydantic_ai.models import Model
-
+# `Model` is `TYPE_CHECKING`-only, like every other pydantic_ai name in this package: this
+# module is on the import path of the runtime-free install (`run_common.run_env`,
+# `learning.core.config.source_first_party_key` both import `providers`), and a module-scope
+# `from pydantic_ai ...` would make that install fail at import. `BuiltModel.model` is
+# therefore typed `Any` at runtime rather than `Model` (#1067): a strict pydantic field
+# annotated with a name bound only under `TYPE_CHECKING` leaves the class silently
+# `__pydantic_complete__ = False`, failing at its first real construction far from here. The
+# class is a pure carrier to `Agent(...)` and never calls anything on the field, so nothing
+# is lost — `build_model`'s return type still says `Model` for the reader.
 if TYPE_CHECKING:
+    from pydantic_ai.models import Model
     from pydantic_ai.settings import ModelSettings
 
     from ..agent_role import AgentRole
@@ -22,7 +22,8 @@ if TYPE_CHECKING:
 @model(frozen=True)
 class BuiltModel:
 
-    model: Model
+    #: A `pydantic_ai.models.Model` — `Any` for the reason the module comment gives.
+    model: Any
     #: `dict[str, Any]`, never the real `ModelSettings` (#1067): `ModelSettings` is a
     #: `TypedDict`, and pydantic validates a `TypedDict` field by its OWN declared keys —
     #: dropping any key the TypedDict does not name. A provider-specific settings dict (an

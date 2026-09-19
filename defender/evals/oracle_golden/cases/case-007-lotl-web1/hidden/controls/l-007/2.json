@@ -44,15 +44,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 7,
-            "failed": 0,
-            "first_seen": "2026-07-12T19:41:05.000Z",
-            "last_seen": "2026-07-12T19:41:05.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.14",
-            "user.name": "svc.config-mgmt"
-          }
+          [
+            7,
+            0,
+            "2026-07-12T19:41:05.000Z",
+            "2026-07-12T19:41:05.000Z",
+            "password",
+            "172.18.0.14",
+            "svc.config-mgmt"
+          ]
         ]
       }
     },
@@ -98,51 +98,51 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "accepted": 42,
-            "failed": 0,
-            "first_seen": "2026-07-05T19:19:53.000Z",
-            "last_seen": "2026-07-05T19:42:09.000Z",
-            "auth_method": "other",
-            "source.ip": null,
-            "user.name": null
-          },
-          {
-            "accepted": 42,
-            "failed": 0,
-            "first_seen": "2026-07-05T19:19:53.000Z",
-            "last_seen": "2026-07-05T19:42:09.000Z",
-            "auth_method": "password",
-            "source.ip": null,
-            "user.name": null
-          },
-          {
-            "accepted": 14,
-            "failed": 0,
-            "first_seen": "2026-07-05T19:19:52.000Z",
-            "last_seen": "2026-07-05T19:42:09.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.20",
-            "user.name": "svc.deploy"
-          },
-          {
-            "accepted": 0,
-            "failed": 42,
-            "first_seen": "2026-07-05T19:39:47.000Z",
-            "last_seen": "2026-07-05T19:40:01.000Z",
-            "auth_method": "other",
-            "source.ip": "172.18.0.6",
-            "user.name": "svc.reports"
-          },
-          {
-            "accepted": 0,
-            "failed": 42,
-            "first_seen": "2026-07-05T19:39:49.000Z",
-            "last_seen": "2026-07-05T19:40:04.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.6",
-            "user.name": "svc.reports"
-          }
+          [
+            42,
+            0,
+            "2026-07-05T19:19:53.000Z",
+            "2026-07-05T19:42:09.000Z",
+            "other",
+            null,
+            null
+          ],
+          [
+            42,
+            0,
+            "2026-07-05T19:19:53.000Z",
+            "2026-07-05T19:42:09.000Z",
+            "password",
+            null,
+            null
+          ],
+          [
+            14,
+            0,
+            "2026-07-05T19:19:52.000Z",
+            "2026-07-05T19:42:09.000Z",
+            "password",
+            "172.18.0.20",
+            "svc.deploy"
+          ],
+          [
+            0,
+            42,
+            "2026-07-05T19:39:47.000Z",
+            "2026-07-05T19:40:01.000Z",
+            "other",
+            "172.18.0.6",
+            "svc.reports"
+          ],
+          [
+            0,
+            42,
+            "2026-07-05T19:39:49.000Z",
+            "2026-07-05T19:40:04.000Z",
+            "password",
+            "172.18.0.6",
+            "svc.reports"
+          ]
         ]
       }
     },

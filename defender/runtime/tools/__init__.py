@@ -1,7 +1,6 @@
 """The agent's tool surface: what a role may call, and the wiring that registers it.
 
-The tool bodies live in four modules, layered one way and split out of this one when it
-reached 1503 lines:
+The tool bodies live in four modules, layered one way:
 
   * `_deps`     — `AgentDeps`/`GatherDeps`, the objects every tool is handed, plus the
                   read caps and result formatting they share.

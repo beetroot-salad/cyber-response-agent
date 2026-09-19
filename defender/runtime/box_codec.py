@@ -7,11 +7,8 @@ from dataclasses import dataclass  # stdlib, deliberately — see the note below
 
 from defender.runtime import bash_exec
 
-# STDLIB `@dataclass`, NOT `defender._model.model` (#1067): this module is in the import
-# closure of the box ENTRYPOINT (`bash_exec._run_box_entrypoint` -> `defender.runtime.box`),
-# which runs INSIDE the sandbox with only the tree on its path — no venv, no pydantic. The
-# `box-native`/`box-dood` CI jobs are the live pin: the port's first attempt failed every
-# box start with `ModuleNotFoundError: No module named 'pydantic'` out of this import.
+# STDLIB `@dataclass`, not `defender._model.model`: this module is in the box entrypoint's
+# import closure — see `bash_exec._run_box_entrypoint` for the one note on why (#1067).
 
 
 class BoxFault(Exception):

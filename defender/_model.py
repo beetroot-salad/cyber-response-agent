@@ -95,12 +95,28 @@ def complete(cls: type[T]) -> type[T]:
 def unwrap_before(cls: type, value: Any) -> Any:
     """A `mode="before"` validator's raw input, as the single `dict` of field name -> value a
     `BaseModel` validator would see — `value` unchanged when it is not an `ArgsKwargs` at all
-    (a re-validation, or a caller passing a mapping directly)."""
+    (a re-validation, or a caller passing a mapping directly).
+
+    Arity is checked HERE, because a before-validator that returns a `dict` has replaced the
+    `ArgsKwargs` pydantic would otherwise have checked itself: a surplus positional would be
+    dropped on the floor, and a keyword naming a field a positional already filled would win
+    over it in silence — a caller mis-ordering the positional form would get a record with
+    the wrong value in it rather than the refusal the class promises. Both raise `TypeError`,
+    the class stdlib `@dataclass` raises for the same two mistakes.
+    """
     if not isinstance(value, ArgsKwargs):
         return value
-    names = [f.name for f in dataclasses.fields(cls)]
-    merged = dict(zip(names, value.args, strict=False))
-    merged.update(value.kwargs or {})
+    positional = [f.name for f in dataclasses.fields(cls) if f.init and not f.kw_only]
+    if len(value.args) > len(positional):
+        raise TypeError(
+            f"{cls.__name__} takes {len(positional)} positional argument(s) but "
+            f"{len(value.args)} were given")
+    merged = dict(zip(positional, value.args, strict=False))
+    kwargs = value.kwargs or {}
+    twice = sorted(set(merged) & set(kwargs))
+    if twice:
+        raise TypeError(f"{cls.__name__} got multiple values for argument(s) {twice}")
+    merged.update(kwargs)
     return merged
 
 

@@ -36,146 +36,146 @@
         ],
         "row_count": 20,
         "values": [
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:04:25.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:06:11.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:06:11.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:06:11.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:06:11.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:06:11.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-12T19:06:11.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          }
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:04:25.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:06:11.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:06:11.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:06:11.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:06:11.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-12T19:06:11.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-12T19:06:11.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ]
         ]
       }
     },
@@ -213,146 +213,146 @@
         ],
         "row_count": 20,
         "values": [
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:01.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:58.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:58.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:58.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:58.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:58.000Z",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
-            "event.outcome": null,
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-07-05T19:03:58.000Z",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
-            "event.outcome": null,
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          }
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:01.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:58.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:58.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:58.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:58.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ],
+          [
+            "2026-07-05T19:03:58.000Z",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            null,
+            "",
+            null
+          ],
+          [
+            "2026-07-05T19:03:58.000Z",
+            "pam_unix(runuser:session): session closed for user svc.monitoring",
+            null,
+            "svc.monitoring",
+            null
+          ]
         ]
       }
     },
@@ -390,146 +390,146 @@
         ],
         "row_count": 20,
         "values": [
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "Connection closed by 172.18.0.9 port 36338",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "Connection closed by 172.18.0.9 port 36338",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "Connection closed by 172.18.0.9 port 36338",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "Connection closed by 172.18.0.9 port 36338",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "Connection closed by 172.18.0.9 port 36338",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "Connection closed by 172.18.0.9 port 36338",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "Connection closed by 172.18.0.9 port 36338",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:51.000Z",
-            "message": "Connection closed by 172.18.0.9 port 36338",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:59.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:59.000Z",
-            "message": "Connection closed by 172.18.0.9 port 57408",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:59.000Z",
-            "message": "error: kex_exchange_identification: Connection closed by remote host",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "@timestamp": "2026-06-28T19:04:59.000Z",
-            "message": "Connection closed by 172.18.0.9 port 57408",
-            "event.outcome": null,
-            "user.name": null,
-            "source.ip": null
-          }
+          [
+            "2026-06-28T19:04:51.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "Connection closed by 172.18.0.9 port 36338",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "Connection closed by 172.18.0.9 port 36338",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "Connection closed by 172.18.0.9 port 36338",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "Connection closed by 172.18.0.9 port 36338",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "Connection closed by 172.18.0.9 port 36338",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "Connection closed by 172.18.0.9 port 36338",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "Connection closed by 172.18.0.9 port 36338",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:51.000Z",
+            "Connection closed by 172.18.0.9 port 36338",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:59.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:59.000Z",
+            "Connection closed by 172.18.0.9 port 57408",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:59.000Z",
+            "error: kex_exchange_identification: Connection closed by remote host",
+            null,
+            null,
+            null
+          ],
+          [
+            "2026-06-28T19:04:59.000Z",
+            "Connection closed by 172.18.0.9 port 57408",
+            null,
+            null,
+            null
+          ]
         ]
       }
     }

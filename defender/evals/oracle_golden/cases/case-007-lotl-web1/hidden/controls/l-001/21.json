@@ -32,66 +32,66 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "events": 189,
-            "process.name": "runuser",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "events": 154,
-            "process.name": "runuser",
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "events": 147,
-            "process.name": "sshd",
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "events": 35,
-            "process.name": "runuser",
-            "user.name": "svc.reports",
-            "source.ip": null
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "user.name": "svc.config-mgmt",
-            "source.ip": null
-          },
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "user.name": "root",
-            "source.ip": null
-          },
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "user.name": "svc.config-mgmt",
-            "source.ip": "172.18.0.14"
-          }
+          [
+            189,
+            "runuser",
+            "",
+            null
+          ],
+          [
+            154,
+            "runuser",
+            "svc.monitoring",
+            null
+          ],
+          [
+            147,
+            "sshd",
+            null,
+            null
+          ],
+          [
+            35,
+            "runuser",
+            "svc.reports",
+            null
+          ],
+          [
+            7,
+            "sshd",
+            "",
+            null
+          ],
+          [
+            7,
+            "sshd",
+            "svc.config-mgmt",
+            null
+          ],
+          [
+            7,
+            "CRON",
+            "root",
+            null
+          ],
+          [
+            7,
+            "CRON",
+            "",
+            null
+          ],
+          [
+            7,
+            "CRON",
+            null,
+            null
+          ],
+          [
+            7,
+            "sshd",
+            "svc.config-mgmt",
+            "172.18.0.14"
+          ]
         ]
       }
     },
@@ -125,78 +125,78 @@
         ],
         "row_count": 12,
         "values": [
-          {
-            "events": 336,
-            "process.name": "sshd",
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "events": 175,
-            "process.name": "runuser",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "events": 126,
-            "process.name": "sudo",
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "events": 119,
-            "process.name": "runuser",
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "events": 84,
-            "process.name": "sshd",
-            "user.name": "svc.reports",
-            "source.ip": "172.18.0.6"
-          },
-          {
-            "events": 56,
-            "process.name": "runuser",
-            "user.name": "svc.reports",
-            "source.ip": null
-          },
-          {
-            "events": 14,
-            "process.name": "sshd",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "events": 14,
-            "process.name": "sshd",
-            "user.name": "svc.deploy",
-            "source.ip": null
-          },
-          {
-            "events": 14,
-            "process.name": "sshd",
-            "user.name": "svc.deploy",
-            "source.ip": "172.18.0.20"
-          },
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "user.name": "root",
-            "source.ip": null
-          },
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "user.name": null,
-            "source.ip": null
-          }
+          [
+            336,
+            "sshd",
+            null,
+            null
+          ],
+          [
+            175,
+            "runuser",
+            "",
+            null
+          ],
+          [
+            126,
+            "sudo",
+            null,
+            null
+          ],
+          [
+            119,
+            "runuser",
+            "svc.monitoring",
+            null
+          ],
+          [
+            84,
+            "sshd",
+            "svc.reports",
+            "172.18.0.6"
+          ],
+          [
+            56,
+            "runuser",
+            "svc.reports",
+            null
+          ],
+          [
+            14,
+            "sshd",
+            "",
+            null
+          ],
+          [
+            14,
+            "sshd",
+            "svc.deploy",
+            null
+          ],
+          [
+            14,
+            "sshd",
+            "svc.deploy",
+            "172.18.0.20"
+          ],
+          [
+            7,
+            "CRON",
+            "root",
+            null
+          ],
+          [
+            7,
+            "CRON",
+            "",
+            null
+          ],
+          [
+            7,
+            "CRON",
+            null,
+            null
+          ]
         ]
       }
     },
@@ -230,48 +230,48 @@
         ],
         "row_count": 7,
         "values": [
-          {
-            "events": 304,
-            "process.name": "sshd",
-            "user.name": null,
-            "source.ip": null
-          },
-          {
-            "events": 216,
-            "process.name": "runuser",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "events": 136,
-            "process.name": "runuser",
-            "user.name": "svc.monitoring",
-            "source.ip": null
-          },
-          {
-            "events": 80,
-            "process.name": "runuser",
-            "user.name": "svc.reports",
-            "source.ip": null
-          },
-          {
-            "events": 8,
-            "process.name": "CRON",
-            "user.name": "",
-            "source.ip": null
-          },
-          {
-            "events": 8,
-            "process.name": "CRON",
-            "user.name": "root",
-            "source.ip": null
-          },
-          {
-            "events": 8,
-            "process.name": "CRON",
-            "user.name": null,
-            "source.ip": null
-          }
+          [
+            304,
+            "sshd",
+            null,
+            null
+          ],
+          [
+            216,
+            "runuser",
+            "",
+            null
+          ],
+          [
+            136,
+            "runuser",
+            "svc.monitoring",
+            null
+          ],
+          [
+            80,
+            "runuser",
+            "svc.reports",
+            null
+          ],
+          [
+            8,
+            "CRON",
+            "",
+            null
+          ],
+          [
+            8,
+            "CRON",
+            "root",
+            null
+          ],
+          [
+            8,
+            "CRON",
+            null,
+            null
+          ]
         ]
       }
     }

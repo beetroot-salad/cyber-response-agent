@@ -31,6 +31,30 @@ def _orphan_tick(tmp_path, **kw):
     )
 
 
+def _defer_again(sc, filler_id: str) -> int:
+    """Reseed the queue with whatever is pending plus a fresh, disposable finding, and drive
+    one more tick over `orphan` riding uncited alongside it.
+
+    `verify_agent_report` (the drain's pre-existing, unrelated-to-M7 self-report/tree
+    cross-check, §7 FK-3) refuses a `committed` claim outright when NOTHING in the corpus
+    changed this tick — so a retry batch containing `orphan` alone, with the curator writing
+    nothing, is not a shape M7's per-id deferral ever gets to see; it is caught one gate
+    earlier as a lying report. `_orphan_tick`'s own FIRST tick avoids this because `a`'s
+    lesson keeps the corpus genuinely dirty while `orphan` rides along uncited — this helper
+    keeps every RETRY tick in that same mixed shape by seeding one throwaway finding the
+    curator legitimately writes and commits each time, so `orphan` alone is never the tick's
+    entire story."""
+    filler = S.finding_row(filler_id, run_id=filler_id)
+    # `finding_row`'s default `direction="adversarial"` wants `benign` on the source run —
+    # `build_scene`'s own auto-seeding rule (`_spec773.py`), mirrored here since this finding
+    # is seeded straight onto the channel rather than through `build_scene`.
+    S.write_source_refs(sc.paths, filler_id, "benign")
+    S.seed(sc.channel, [*sc.pending(), filler])
+    sc.curator.writes = {f"{filler_id}.md": S.lesson(filler_id)}
+    sc.curator.committed = ["orphan", filler_id]
+    return sc.run()
+
+
 def _hold_append_lock(store: dict):
     """Grab the queue's append lock the moment the curator spawn runs.
 
@@ -64,10 +88,7 @@ def test_a_deferred_row_bumps_the_deferrals_counter_and_graveyards_at_the_ceilin
     assert sc.run() == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
 
-    S.seed(sc.channel, [r for r in sc.pending()])
-    sc.curator.committed = ["orphan"]
-    sc.curator.writes = {}
-    assert sc.run() == 0
+    assert _defer_again(sc, "filler1") == 0
     assert "orphan" not in sc.pending_by_id()
     assert [r["finding_id"] for r in sc.graveyard()] == ["orphan"]
 
@@ -216,10 +237,7 @@ def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
         authorable, held = drains._pending_queue_counts(sc.channel.file)
         assert authorable >= 1, "a deferred row must still read as work to the wake gate"
         assert held == 0, "a deferred row is not a permanent hold"
-        S.seed(sc.channel, sc.pending())
-        sc.curator.writes = {}
-        sc.curator.committed = ["orphan"]
-        sc.run()
+        _defer_again(sc, f"filler{ticks}")
         ticks += 1
     assert ticks <= 3
     assert "orphan" not in sc.pending_by_id()
@@ -489,10 +507,7 @@ def test_a_tick_that_both_defers_a_row_and_closes_its_rotation_773(tmp_path):
     assert sc.run() == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
 
-    S.seed(sc.channel, sc.pending())
-    sc.curator.committed = ["orphan"]
-    sc.curator.writes = {}
-    assert sc.run() == 0
+    assert _defer_again(sc, "filler1") == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 2
 
 
@@ -598,8 +613,12 @@ def test_repo_lock_wait_exceeded_specifically_on_the_deferral_bump_773(tmp_path)
         held["holder"].__exit__()
     assert "deferrals" not in sc.pending_by_id()["orphan"]
 
+    # "a" already landed (its lesson reached HEAD before the timeout unwound the queue
+    # rotation), so the retried batch never hands it to the curator — `_defer_again` reads
+    # whatever is genuinely still pending (both rows; "a" resolves pre-consumed off the tree)
+    # and adds the filler that keeps the corpus honestly dirty for `orphan`'s own deferral.
     sc.curator.also = None
-    assert sc.run() == 0
+    assert _defer_again(sc, "filler1") == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
 
 

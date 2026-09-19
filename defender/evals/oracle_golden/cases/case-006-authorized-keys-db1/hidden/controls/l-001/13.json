@@ -28,11 +28,11 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 3001,
-            "host.name": "soc-playground",
-            "data_stream.dataset": "falco.alerts"
-          }
+          [
+            3001,
+            "soc-playground",
+            "falco.alerts"
+          ]
         ]
       }
     },
@@ -62,11 +62,11 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 3069,
-            "host.name": "soc-playground",
-            "data_stream.dataset": "falco.alerts"
-          }
+          [
+            3069,
+            "soc-playground",
+            "falco.alerts"
+          ]
         ]
       }
     },
@@ -96,11 +96,11 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 2744,
-            "host.name": "soc-playground",
-            "data_stream.dataset": "falco.alerts"
-          }
+          [
+            2744,
+            "soc-playground",
+            "falco.alerts"
+          ]
         ]
       }
     }

@@ -129,22 +129,22 @@
       ],
       "row_count": 2,
       "values": [
-        {
-          "accepted": 0,
-          "failed": 144,
-          "first_seen": "2026-07-25T07:45:35.000Z",
-          "last_seen": "2026-07-25T07:48:37.000Z",
-          "host.name": "canary-1",
-          "auth_method": "other"
-        },
-        {
-          "accepted": 0,
-          "failed": 144,
-          "first_seen": "2026-07-25T07:45:37.000Z",
-          "last_seen": "2026-07-25T07:48:39.000Z",
-          "host.name": "canary-1",
-          "auth_method": "password"
-        }
+        [
+          0,
+          144,
+          "2026-07-25T07:45:35.000Z",
+          "2026-07-25T07:48:37.000Z",
+          "canary-1",
+          "other"
+        ],
+        [
+          0,
+          144,
+          "2026-07-25T07:45:37.000Z",
+          "2026-07-25T07:48:39.000Z",
+          "canary-1",
+          "password"
+        ]
       ]
     }
   }

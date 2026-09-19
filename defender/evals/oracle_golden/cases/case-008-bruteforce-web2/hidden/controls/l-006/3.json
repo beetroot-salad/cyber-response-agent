@@ -80,22 +80,22 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "events": 84,
-            "first_seen": "2026-07-05T19:31:42.000Z",
-            "last_seen": "2026-07-05T19:32:00.000Z",
-            "host.name": "web-2",
-            "event.outcome": "failure",
-            "process.name": "sshd"
-          },
-          {
-            "events": 84,
-            "first_seen": "2026-07-05T19:39:47.000Z",
-            "last_seen": "2026-07-05T19:40:04.000Z",
-            "host.name": "web-1",
-            "event.outcome": "failure",
-            "process.name": "sshd"
-          }
+          [
+            84,
+            "2026-07-05T19:31:42.000Z",
+            "2026-07-05T19:32:00.000Z",
+            "web-2",
+            "failure",
+            "sshd"
+          ],
+          [
+            84,
+            "2026-07-05T19:39:47.000Z",
+            "2026-07-05T19:40:04.000Z",
+            "web-1",
+            "failure",
+            "sshd"
+          ]
         ]
       }
     },

@@ -7,6 +7,11 @@ timestamp literals and in NOTHING else.
 
 Pure only — no ES calls here. `run_esql` and `window_is_live` are I/O and are
 exercised by running the tool against the live stack.
+
+The last section (#1054) reads the committed corpus off disk, which is still pure in the
+sense that matters: it is the one place that can hold "what this module writes and what
+`cases/*/hidden/` holds are the same encoding", and the shape pins beside it are the
+other half of that statement.
 """
 from __future__ import annotations
 
@@ -315,6 +320,168 @@ def test_a_column_the_probe_did_not_project_is_not_a_zero():
     mismatched = CONTROLS.esql_payload("q", {"columns": [{"name": "other", "type": "long"}],
                                              "values": [[7]]})
     assert CONTROLS.named_cell(mismatched, "total") is None, "read a cell it cannot name"
+
+
+# ...and ONE encoding on disk, not two (#1054). The tests above pin the shape this module
+# PRODUCES; these pin the shape the committed corpus HOLDS, which is the same invariant
+# seen from the other end. #842 moved production to the wire's positional rows and routed
+# this module's writer through `esql_payload`, but the 957 files under `cases/*/hidden/`
+# were never migrated — so following `known_defects.yaml`'s own repair note ("re-run
+# `controls.py` for this case") regenerates the controls half columnar while the observed
+# half stays dict-row, and `judge.load_lead_inputs` assembles both into ONE prompt. The
+# migration is `evals/oracle_golden/migrate_esql_encoding.py`; this is what stops the tree
+# drifting back.
+
+CASES_DIR = Path(CONTROLS.__file__).resolve().parent / "cases"
+
+#: An ES|QL payload is the dict carrying ALL FOUR of these. Nothing else in `hidden/`
+#: carries `columns` and `values` at all — the lookup responses (cmdb host records,
+#: identity users, threat-intel verdicts, bare lists, `_note`/`params` stubs) are foreign
+#: shapes the judge already reads as such.
+_ESQL_PAYLOAD_KEYS = ("query", "columns", "row_count", "values")
+
+
+def _esql_payloads_in(doc):
+    """Every ES|QL payload ANYWHERE in a document, found by shape.
+
+    Recursive, and classified on the four keys rather than read off a list of the places
+    payloads are known to sit (the observed root, `controls[i].payload`,
+    `attack_contribution.payload`). The enumerated sweep is precisely the blind spot that
+    produced #1054: it is correct until someone adds a fourth position, and then it is
+    silently correct about nothing. A payload that moves must still be found.
+    """
+    if isinstance(doc, dict):
+        if all(key in doc for key in _ESQL_PAYLOAD_KEYS):
+            yield doc
+        for value in doc.values():
+            yield from _esql_payloads_in(value)
+    elif isinstance(doc, list):
+        for value in doc:
+            yield from _esql_payloads_in(value)
+
+
+def _rows_that_are_not_positional(cases_dir: Path) -> tuple[list[str], int]:
+    """`(offending files, payloads examined)` over every JSON document under `hidden/`.
+
+    A row is positional when it is a list exactly `len(columns)` long — cell `i` named by
+    `columns[i]`, which is what `esql_payload` emits and what `named_cell` reads back. A
+    row that is a dict is the pre-#842 form. Zero-byte files are recorded capture
+    failures and carry no rows either way.
+    """
+    offenders: list[str] = []
+    examined = 0
+    for path in sorted(cases_dir.glob("*/hidden/**/*.json")):
+        raw = path.read_bytes()
+        if not raw.strip():
+            continue
+        rel = str(path.relative_to(cases_dir))
+        for payload in _esql_payloads_in(json.loads(raw)):
+            examined += 1
+            width = len(payload["columns"])
+            if any(not isinstance(row, list) or len(row) != width
+                   for row in payload["values"]) and rel not in offenders:
+                offenders.append(rel)
+    return offenders, examined
+
+
+def test_the_corpus_speaks_the_SAME_esql_encoding_production_does():
+    """The corpus the judge reads holds ONE ES|QL encoding, and it is the one
+    `esql_payload` produces.
+
+    Not a style rule. `judge.load_lead_inputs` builds a single label prompt from
+    `hidden/observed/<lead>/<seq>.json` and `hidden/controls/<lead>/<seq>.json`; if those
+    two halves disagree, the LLM is handed the same measurement written two ways inside
+    one `<observed>`/`<baseline>` pair and has to reconcile that itself — under a judge
+    tag that hashes only the two prompt files and so records nothing about it. Nothing
+    mechanical breaks: `_bounded` slices `values` positionally either way and
+    `validate_cases.py` reads query strings, not rows. The exposure is the prompt, which
+    is why a test is the only thing that can hold it.
+
+    The sweep is by SHAPE and recursive on purpose — see `_esql_payloads_in`.
+    """
+    offenders, examined = _rows_that_are_not_positional(CASES_DIR)
+
+    assert examined > 0, (
+        f"swept {CASES_DIR} and found no ES|QL payload at all — this guard would pass "
+        f"over an empty tree, which is not the same fact as a uniform one")
+    assert offenders == [], (
+        f"{len(offenders)} file(s) under hidden/ still carry pre-#842 dict rows, so a "
+        f"judge prompt built from them mixes two encodings: {offenders[:5]}"
+        + (f" (+{len(offenders) - 5} more)" if len(offenders) > 5 else ""))
+
+
+def _case_file(root: Path, rel: str, doc) -> Path:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return path
+
+
+# A real payload's shape, after `case-012-bruteforce-db1/hidden/observed/l-007/8.json`:
+# dotted column names, a `null` cell, more than one row.
+_COLUMNS = [{"name": "events", "type": "long"},
+            {"name": "event.outcome", "type": "keyword"},
+            {"name": "data_stream.dataset", "type": "keyword"}]
+_POSITIONAL = {"query": "FROM logs-system.auth-*\n| STATS events = COUNT(*)",
+               "columns": _COLUMNS, "row_count": 2,
+               "values": [[431, None, "system.auth"], [24, "failure", "system.auth"]]}
+_DICT_ROWS = {**_POSITIONAL,
+              "values": [{"events": 431, "event.outcome": None,
+                          "data_stream.dataset": "system.auth"},
+                         {"events": 24, "event.outcome": "failure",
+                          "data_stream.dataset": "system.auth"}]}
+
+
+def test_the_corpus_encoding_guard_fails_on_one_hand_reverted_payload(tmp_path):
+    """The guard above proves nothing unless it can fail, and over a migrated tree it is
+    green whether it looked at anything or not. So: the same sweep over two trees that
+    differ in exactly one payload's encoding, and it must separate them.
+
+    The `values: []` payload in both trees is the control for the other direction — an
+    empty payload is identical in either encoding, and a guard that flagged it would fail
+    on the 471 already-correct payloads on disk.
+    """
+    empty = {**_POSITIONAL, "row_count": 0, "values": []}
+
+    migrated = tmp_path / "migrated"
+    _case_file(migrated, "case-x/hidden/observed/l-001/0.json", _POSITIONAL)
+    _case_file(migrated, "case-x/hidden/observed/l-001/1.json", empty)
+    assert _rows_that_are_not_positional(migrated) == ([], 2)
+
+    reverted = tmp_path / "reverted"
+    _case_file(reverted, "case-x/hidden/observed/l-001/0.json", _DICT_ROWS)
+    _case_file(reverted, "case-x/hidden/observed/l-001/1.json", empty)
+    offenders, examined = _rows_that_are_not_positional(reverted)
+    assert examined == 2, "the empty payload must still be counted as examined"
+    assert offenders == ["case-x/hidden/observed/l-001/0.json"]
+
+
+def test_the_corpus_encoding_guard_sees_a_payload_no_one_enumerated(tmp_path):
+    """The second half of why the sweep recurses. A control record's dict-row payload can
+    sit somewhere no census has listed — here under a key beside `payload` — and a sweep
+    walking `record["controls"][i]["payload"]` and `record["attack_contribution"]
+    ["payload"]` would pass over it while the judge's YAML dump still showed the judge two
+    encodings. Paired with the enumerated positions in the same record, which are already
+    positional, so the nested one is the only thing this can be detecting."""
+    record = {
+        "lead_id": "l-005", "seq": 3,
+        "controls": [
+            {"name": "C-7d", "window": ["a", "b"], "query": "q",
+             "live": False, "payload": None},
+            {"name": "C-14d", "window": ["a", "b"], "query": "q", "live": True,
+             "payload": _POSITIONAL,
+             # a position no enumerated sweep has ever visited
+             "re_measured": {"at": "2026-08-01", "payload": _DICT_ROWS}},
+        ],
+        "attack_contribution": {"window": ["a", "b"], "query": "q",
+                                "payload": _POSITIONAL},
+    }
+    root = tmp_path / "tree"
+    _case_file(root, "case-x/hidden/controls/l-005/3.json", record)
+
+    offenders, examined = _rows_that_are_not_positional(root)
+    assert examined == 3, "the recursive walk must reach all three payloads"
+    assert offenders == ["case-x/hidden/controls/l-005/3.json"]
 
 
 # A control is keyed by the QUERIES TABLE's seq, the same number its observed payload

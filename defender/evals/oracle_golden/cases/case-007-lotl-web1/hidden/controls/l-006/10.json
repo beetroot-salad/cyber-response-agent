@@ -24,62 +24,62 @@
         ],
         "row_count": 14,
         "values": [
-          {
-            "count": 444,
-            "falco.output_fields.container.id": "host"
-          },
-          {
-            "count": 145,
-            "falco.output_fields.container.id": "a36492b5172b"
-          },
-          {
-            "count": 121,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "count": 118,
-            "falco.output_fields.container.id": "58ffe39dd54f"
-          },
-          {
-            "count": 91,
-            "falco.output_fields.container.id": "1df4bcd65ee4"
-          },
-          {
-            "count": 89,
-            "falco.output_fields.container.id": "ffbff1299702"
-          },
-          {
-            "count": 89,
-            "falco.output_fields.container.id": "7e76d1cea7c4"
-          },
-          {
-            "count": 83,
-            "falco.output_fields.container.id": "2c1e2ec93d17"
-          },
-          {
-            "count": 78,
-            "falco.output_fields.container.id": "d1daf6f3b7c6"
-          },
-          {
-            "count": 67,
-            "falco.output_fields.container.id": "922f03f16a11"
-          },
-          {
-            "count": 60,
-            "falco.output_fields.container.id": "e1dc89faaa8b"
-          },
-          {
-            "count": 52,
-            "falco.output_fields.container.id": "d8fb0192a17f"
-          },
-          {
-            "count": 14,
-            "falco.output_fields.container.id": "c58bf05facac"
-          },
-          {
-            "count": 8,
-            "falco.output_fields.container.id": "45388dd0bf3a"
-          }
+          [
+            444,
+            "host"
+          ],
+          [
+            145,
+            "a36492b5172b"
+          ],
+          [
+            121,
+            "ed96a85a7480"
+          ],
+          [
+            118,
+            "58ffe39dd54f"
+          ],
+          [
+            91,
+            "1df4bcd65ee4"
+          ],
+          [
+            89,
+            "ffbff1299702"
+          ],
+          [
+            89,
+            "7e76d1cea7c4"
+          ],
+          [
+            83,
+            "2c1e2ec93d17"
+          ],
+          [
+            78,
+            "d1daf6f3b7c6"
+          ],
+          [
+            67,
+            "922f03f16a11"
+          ],
+          [
+            60,
+            "e1dc89faaa8b"
+          ],
+          [
+            52,
+            "d8fb0192a17f"
+          ],
+          [
+            14,
+            "c58bf05facac"
+          ],
+          [
+            8,
+            "45388dd0bf3a"
+          ]
         ]
       }
     },
@@ -105,62 +105,62 @@
         ],
         "row_count": 14,
         "values": [
-          {
-            "count": 468,
-            "falco.output_fields.container.id": "host"
-          },
-          {
-            "count": 159,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "count": 148,
-            "falco.output_fields.container.id": "a36492b5172b"
-          },
-          {
-            "count": 129,
-            "falco.output_fields.container.id": "7e76d1cea7c4"
-          },
-          {
-            "count": 120,
-            "falco.output_fields.container.id": "58ffe39dd54f"
-          },
-          {
-            "count": 111,
-            "falco.output_fields.container.id": "ffbff1299702"
-          },
-          {
-            "count": 101,
-            "falco.output_fields.container.id": "d8fb0192a17f"
-          },
-          {
-            "count": 98,
-            "falco.output_fields.container.id": "d1daf6f3b7c6"
-          },
-          {
-            "count": 72,
-            "falco.output_fields.container.id": "922f03f16a11"
-          },
-          {
-            "count": 65,
-            "falco.output_fields.container.id": "2c1e2ec93d17"
-          },
-          {
-            "count": 60,
-            "falco.output_fields.container.id": "e1dc89faaa8b"
-          },
-          {
-            "count": 45,
-            "falco.output_fields.container.id": "1df4bcd65ee4"
-          },
-          {
-            "count": 18,
-            "falco.output_fields.container.id": "45388dd0bf3a"
-          },
-          {
-            "count": 13,
-            "falco.output_fields.container.id": "c58bf05facac"
-          }
+          [
+            468,
+            "host"
+          ],
+          [
+            159,
+            "ed96a85a7480"
+          ],
+          [
+            148,
+            "a36492b5172b"
+          ],
+          [
+            129,
+            "7e76d1cea7c4"
+          ],
+          [
+            120,
+            "58ffe39dd54f"
+          ],
+          [
+            111,
+            "ffbff1299702"
+          ],
+          [
+            101,
+            "d8fb0192a17f"
+          ],
+          [
+            98,
+            "d1daf6f3b7c6"
+          ],
+          [
+            72,
+            "922f03f16a11"
+          ],
+          [
+            65,
+            "2c1e2ec93d17"
+          ],
+          [
+            60,
+            "e1dc89faaa8b"
+          ],
+          [
+            45,
+            "1df4bcd65ee4"
+          ],
+          [
+            18,
+            "45388dd0bf3a"
+          ],
+          [
+            13,
+            "c58bf05facac"
+          ]
         ]
       }
     },
@@ -186,62 +186,62 @@
         ],
         "row_count": 14,
         "values": [
-          {
-            "count": 360,
-            "falco.output_fields.container.id": "host"
-          },
-          {
-            "count": 136,
-            "falco.output_fields.container.id": "a36492b5172b"
-          },
-          {
-            "count": 125,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "count": 118,
-            "falco.output_fields.container.id": "58ffe39dd54f"
-          },
-          {
-            "count": 99,
-            "falco.output_fields.container.id": "1df4bcd65ee4"
-          },
-          {
-            "count": 94,
-            "falco.output_fields.container.id": "ffbff1299702"
-          },
-          {
-            "count": 89,
-            "falco.output_fields.container.id": "922f03f16a11"
-          },
-          {
-            "count": 74,
-            "falco.output_fields.container.id": "d8fb0192a17f"
-          },
-          {
-            "count": 61,
-            "falco.output_fields.container.id": "2c1e2ec93d17"
-          },
-          {
-            "count": 61,
-            "falco.output_fields.container.id": "7e76d1cea7c4"
-          },
-          {
-            "count": 60,
-            "falco.output_fields.container.id": "e1dc89faaa8b"
-          },
-          {
-            "count": 52,
-            "falco.output_fields.container.id": "d1daf6f3b7c6"
-          },
-          {
-            "count": 17,
-            "falco.output_fields.container.id": "45388dd0bf3a"
-          },
-          {
-            "count": 16,
-            "falco.output_fields.container.id": "c58bf05facac"
-          }
+          [
+            360,
+            "host"
+          ],
+          [
+            136,
+            "a36492b5172b"
+          ],
+          [
+            125,
+            "ed96a85a7480"
+          ],
+          [
+            118,
+            "58ffe39dd54f"
+          ],
+          [
+            99,
+            "1df4bcd65ee4"
+          ],
+          [
+            94,
+            "ffbff1299702"
+          ],
+          [
+            89,
+            "922f03f16a11"
+          ],
+          [
+            74,
+            "d8fb0192a17f"
+          ],
+          [
+            61,
+            "2c1e2ec93d17"
+          ],
+          [
+            61,
+            "7e76d1cea7c4"
+          ],
+          [
+            60,
+            "e1dc89faaa8b"
+          ],
+          [
+            52,
+            "d1daf6f3b7c6"
+          ],
+          [
+            17,
+            "45388dd0bf3a"
+          ],
+          [
+            16,
+            "c58bf05facac"
+          ]
         ]
       }
     }

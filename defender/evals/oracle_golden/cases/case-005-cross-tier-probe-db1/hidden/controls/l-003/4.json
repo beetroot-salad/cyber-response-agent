@@ -50,22 +50,22 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "alerts": 10,
-            "first_seen": "2026-07-12T10:31:44.112Z",
-            "last_seen": "2026-07-12T11:56:43.822Z",
-            "rule": "v2 internal port-scan burst",
-            "rule_id": "v2-internal-port-scan",
-            "severity": "medium"
-          },
-          {
-            "alerts": 2,
-            "first_seen": "2026-07-12T10:56:44.023Z",
-            "last_seen": "2026-07-12T11:51:43.815Z",
-            "rule": "v2 bulk SSH success from single source",
-            "rule_id": "v2-bulk-ssh-success",
-            "severity": "medium"
-          }
+          [
+            10,
+            "2026-07-12T10:31:44.112Z",
+            "2026-07-12T11:56:43.822Z",
+            "v2 internal port-scan burst",
+            "v2-internal-port-scan",
+            "medium"
+          ],
+          [
+            2,
+            "2026-07-12T10:56:44.023Z",
+            "2026-07-12T11:51:43.815Z",
+            "v2 bulk SSH success from single source",
+            "v2-bulk-ssh-success",
+            "medium"
+          ]
         ]
       }
     },
@@ -107,22 +107,22 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "alerts": 8,
-            "first_seen": "2026-07-05T10:41:41.955Z",
-            "last_seen": "2026-07-05T11:56:41.745Z",
-            "rule": "v2 internal port-scan burst",
-            "rule_id": "v2-internal-port-scan",
-            "severity": "medium"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-05T11:26:41.811Z",
-            "last_seen": "2026-07-05T11:26:41.811Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high"
-          }
+          [
+            8,
+            "2026-07-05T10:41:41.955Z",
+            "2026-07-05T11:56:41.745Z",
+            "v2 internal port-scan burst",
+            "v2-internal-port-scan",
+            "medium"
+          ],
+          [
+            1,
+            "2026-07-05T11:26:41.811Z",
+            "2026-07-05T11:26:41.811Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high"
+          ]
         ]
       }
     }

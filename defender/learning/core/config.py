@@ -139,9 +139,8 @@ class LoopPaths(DefenderPaths):
         name, kept because the live-run appender (`persist.append_findings`) reaches it
         off `paths` rather than off a channel.
 
-        A prohibition against folding the two lock roles into the channel once stood here;
-        #719 reversed it. The roles are still distinct — they are now two FIELDS on
-        `QueueChannel`, so a channel's lock topology reads off one object."""
+        The two lock roles are distinct — they are two FIELDS on `QueueChannel` (#719), so a
+        channel's lock topology reads off one object."""
         return self.pending_dir / ".findings.lock"
 
     @property
@@ -160,15 +159,12 @@ class LoopPaths(DefenderPaths):
 
     @property
     def questioner_findings(self) -> QueueChannel:
-        """The second queue channel (#1007 M6): `subject: world` rows, questioner-authored.
+        """The second queue channel: `subject: world` rows, questioner-authored.
 
-        SHARES `drain_lock` WITH `findings` (write-tests' R1 correction over the design doc's
-        own "its own drain_lock" — the incumbent `drain_lock` is `_pending/.lock`, a
-        DIRECTORY-level fixed path, so a channel declaring "its own" at the same pending dir
-        resolves to the same file anyway; spelling it explicitly here is what keeps two
-        curators from holding one worktree at once, which a genuinely separate lock would give
-        up for nothing). Its OWN `append_lock` and `consumed` file, so an appender on one
-        channel never blocks the other."""
+        SHARES `drain_lock` WITH `findings` — `drain_lock` is `_pending/.lock`, a
+        DIRECTORY-level fixed path; spelling it explicitly here is what keeps two curators
+        from holding one worktree at once. Its OWN `append_lock` and `consumed` file, so an
+        appender on one channel never blocks the other."""
         return QueueChannel(
             file=self.questioner_findings_file,
             consumed=self.pending_dir / "questioner_consumed.jsonl",
@@ -207,18 +203,15 @@ def loop_paths() -> LoopPaths:
 LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
 
-#: The four buckets the retired pipeline judge minted. It is gone, and with it the reply
-#: validator that was the only membership test over these four alone — so what survives is
-#: their contribution to `QUEUEABLE_FINDING_TYPES`, the set the findings queue accepts. Kept
-#: as its own name rather than folded into that union: the four are the buckets a lesson can
-#: be authored FROM, and the family bucket below is not one of them.
+#: The four buckets a lesson can be authored FROM. Kept as its own name rather than folded
+#: into `QUEUEABLE_FINDING_TYPES`: the family bucket below is not one of them.
 PIPELINE_FINDING_TYPES = {
     "lead-set",
     "lead-quality",
     "analyze-discipline",
     "observability",
 }
-#: #921's fourth mechanical bucket: a resolution moved past the branch's fence and the verdict
+#: The fourth mechanical bucket: a resolution moved past the branch's fence and the verdict
 #: still disagreed with the declared disposition. Produced ONLY by the family judge's own
 #: appender (`learning/judge/enqueue.py`) — which is why it joins what the queue accepts and
 #: is kept apart from the four above.

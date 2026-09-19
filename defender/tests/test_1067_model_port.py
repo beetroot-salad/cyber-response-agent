@@ -372,3 +372,71 @@ def test_drain_judgement_resolves_its_counter_annotation():
     counter = _Judgement.__pydantic_fields__["counter"]
     assert counter.annotation is itertools.count
     assert counter.default_factory is itertools.count
+
+
+# ---------------------------------------------------------------------------------------
+# the second review pass
+# ---------------------------------------------------------------------------------------
+
+
+def test_unwrap_before_keeps_pydantics_arity_checks():
+    """A before-validator that returns a `dict` has replaced the `ArgsKwargs` pydantic would
+    have checked itself, so the helper checks arity: a surplus positional and a keyword
+    naming a field a positional already filled are both refused, as stdlib does."""
+    from defender.runtime.branch import BranchSpec
+
+    with pytest.raises(TypeError, match="takes 4 positional argument"):
+        BranchSpec(Path("/x"), 3, "go", datetime(2026, 1, 1, tzinfo=UTC), "EXTRA")  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match=r"multiple values for argument\(s\) \['branch_message_id'\]"):
+        BranchSpec(Path("/x"), 3, "go", datetime(2026, 1, 1, tzinfo=UTC), branch_message_id=99)  # type: ignore[call-arg]
+
+
+def test_branch_spec_field_types_are_read_off_the_class():
+    """The before-validator's table is derived from the annotations, so a field added to the
+    spec cannot be missed by it; only the per-field reason is hand-kept, and a field without
+    one refuses at import."""
+    from defender.runtime.branch import _spec
+
+    expected = {"source_run_dir": Path, "branch_message_id": int,
+                "continuation_prompt": str, "as_of": datetime}
+    assert expected == _spec._FIELD_TYPES
+    assert set(_spec._WHY) == set(_spec._FIELD_TYPES)
+
+
+def test_providers_imports_without_pydantic_ai():
+    """`defender.runtime.providers` is on the runtime-free install's import path
+    (`run_common.run_env`, `learning.core.config.source_first_party_key`), so no module in
+    it may import `pydantic_ai` at module scope."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys\n"
+        "class _Block:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name == 'pydantic_ai' or name.startswith('pydantic_ai.'):\n"
+        "            raise ModuleNotFoundError(name)\n"
+        "sys.meta_path.insert(0, _Block())\n"
+        "from defender.runtime import providers\n"
+        "from defender.runtime.providers.base import BuiltModel\n"
+        "print(BuiltModel(model=object(), settings=None) is not None)\n"
+    )
+    from defender._paths import PATHS
+
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=False, cwd=str(PATHS.repo_root))
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "True"
+
+
+def test_gate_wrapper_toolset_survives_replace():
+    """`WrapperToolset` rebuilds itself through `dataclasses.replace(self, ...)` on every
+    `for_run`/`for_run_step`, re-passing every field explicitly — so a field whose default
+    the strict type refuses is constructible once and unusable after. The gate is required."""
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai.toolsets import FunctionToolset
+
+    from defender.runtime.toon_gate import _GateWrapperToolset
+
+    with pytest.raises(ValidationError):
+        _GateWrapperToolset(wrapped=FunctionToolset())  # type: ignore[call-arg]

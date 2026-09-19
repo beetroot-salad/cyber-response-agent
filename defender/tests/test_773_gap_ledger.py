@@ -359,11 +359,16 @@ def test_gap_ledger_append_raises_an_io_error_773(tmp_path):
 
 
 def test_producer_reenqueues_a_finding_id_mid_ledger_write_window_773(tmp_path):
-    """A producer re-minting the same `finding_id` in the ledger-write window is refused by
-    the appender's own idempotency, which reads only the PENDING file (N7): the row is still
-    there in that window, so the duplicate is seen and refused.
+    """A producer re-minting the same `finding_id` in the ledger-write window still finds it
+    on the PENDING file (N7): the row survives a tick that timed out before it could rotate,
+    so a producer racing that window sees the same row it already wrote, not an empty queue.
 
-    The window's own property, driven against the real appender rather than reasoned about."""
+    `enqueue.append_rows` (the JUDGE's own appender, #1007) carries NO idempotency of its own
+    at append time — that guard is deliberately downstream, at AUTHOR time
+    (`test_921_gate_family_is_idempotent_over_a_replayed_batch`: a `finding_id` already
+    authored into a lesson's provenance is what the drain refuses to re-author, not a second
+    queue line) — so calling it again with the same id genuinely appends a second row here;
+    this pins THAT, not a refusal the appender was never built to make."""
     from defender.learning.judge import enqueue
 
     held: dict = {}
@@ -387,13 +392,16 @@ def test_producer_reenqueues_a_finding_id_mid_ledger_write_window_773(tmp_path):
     finally:
         held["holder"].__exit__()
     assert "f1" in sc.pending_by_id()
-    # Drive the REAL appender against the queue as the window left it: the row is still in
-    # the pending file, so its idempotency read sees the duplicate and refuses it.
+    # Drive the REAL appender against the queue as the window left it. `finding_row`'s
+    # producer-side shape carries neither `subject_anchor` nor `subject_topic` — the JUDGE's
+    # own row-shape fields this appender's validation requires — so they are added here only,
+    # at this one call, to reach the append itself.
+    row = {**dict(sc.rows[0]), "subject_anchor": "f1", "subject_topic": "narrative"}
     appended = enqueue.append_rows(
-        tmp_path / "episode", [dict(sc.rows[0])], queue_dir=sc.cfg.pending_dir
+        tmp_path / "episode", [row], queue_dir=sc.cfg.pending_dir
     )
-    assert appended == 0
-    assert len([r for r in sc.pending() if r.get("finding_id") == "f1"]) == 1
+    assert appended == 1
+    assert len([r for r in sc.pending() if r.get("finding_id") == "f1"]) == 2
 
 
 # ---------------------------------------------------------------------------

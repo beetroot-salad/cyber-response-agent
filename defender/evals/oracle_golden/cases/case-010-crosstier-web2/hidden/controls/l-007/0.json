@@ -44,15 +44,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "alerts": 5,
-            "first_seen": "2026-07-12T19:41:37.009Z",
-            "last_seen": "2026-07-12T19:41:37.014Z",
-            "rule": "v2 sshd success after failures",
-            "rule_id": "v2-sshd-success-after-failures",
-            "severity": "high",
-            "host.name": "web-2"
-          }
+          [
+            5,
+            "2026-07-12T19:41:37.009Z",
+            "2026-07-12T19:41:37.014Z",
+            "v2 sshd success after failures",
+            "v2-sshd-success-after-failures",
+            "high",
+            "web-2"
+          ]
         ]
       }
     },

@@ -28,21 +28,21 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "events": 28756,
-            "event.outcome": null,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 1010,
-            "event.outcome": "success",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 996,
-            "event.outcome": "failure",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            28756,
+            null,
+            "system.auth"
+          ],
+          [
+            1010,
+            "success",
+            "system.auth"
+          ],
+          [
+            996,
+            "failure",
+            "system.auth"
+          ]
         ]
       }
     },
@@ -72,21 +72,21 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "events": 29475,
-            "event.outcome": null,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 1853,
-            "event.outcome": "success",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 852,
-            "event.outcome": "failure",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            29475,
+            null,
+            "system.auth"
+          ],
+          [
+            1853,
+            "success",
+            "system.auth"
+          ],
+          [
+            852,
+            "failure",
+            "system.auth"
+          ]
         ]
       }
     },
@@ -116,21 +116,21 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "events": 29255,
-            "event.outcome": null,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 1337,
-            "event.outcome": "success",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 984,
-            "event.outcome": "failure",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            29255,
+            null,
+            "system.auth"
+          ],
+          [
+            1337,
+            "success",
+            "system.auth"
+          ],
+          [
+            984,
+            "failure",
+            "system.auth"
+          ]
         ]
       }
     }

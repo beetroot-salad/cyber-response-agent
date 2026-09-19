@@ -48,36 +48,36 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "@timestamp": "2026-07-07T06:32:34.567Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u elastic-agent -n 10",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-07-07T06:32:34.567Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n ss -tnlp",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-07-07T06:32:34.567Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          }
+          [
+            "2026-07-07T06:32:34.567Z",
+            "root",
+            null,
+            null,
+            "sudo -n journalctl -u elastic-agent -n 10",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-07-07T06:32:34.567Z",
+            "root",
+            null,
+            null,
+            "sudo -n ss -tnlp",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-07-07T06:32:34.567Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ]
         ]
       }
     },
@@ -127,136 +127,136 @@
         ],
         "row_count": 13,
         "values": [
-          {
-            "@timestamp": "2026-06-30T06:19:09.586Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "sshd",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ffbff1299702"
-          },
-          {
-            "@timestamp": "2026-06-30T06:23:41.655Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u elastic-agent -n 10",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:23:41.655Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:23:41.655Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n ss -tnlp",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:33:48.802Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u elastic-agent -n 10",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:33:48.802Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n ss -tnlp",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:33:48.802Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:34:07.808Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:34:07.809Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n ss -tnlp",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:34:07.809Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u elastic-agent -n 10",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:37:23.860Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n ss -tnlp",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:37:23.860Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u elastic-agent -n 10",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-30T06:37:23.860Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          }
+          [
+            "2026-06-30T06:19:09.586Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "sshd",
+            null,
+            "ffbff1299702"
+          ],
+          [
+            "2026-06-30T06:23:41.655Z",
+            "root",
+            null,
+            null,
+            "sudo -n journalctl -u elastic-agent -n 10",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:23:41.655Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:23:41.655Z",
+            "root",
+            null,
+            null,
+            "sudo -n ss -tnlp",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:33:48.802Z",
+            "root",
+            null,
+            null,
+            "sudo -n journalctl -u elastic-agent -n 10",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:33:48.802Z",
+            "root",
+            null,
+            null,
+            "sudo -n ss -tnlp",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:33:48.802Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:34:07.808Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:34:07.809Z",
+            "root",
+            null,
+            null,
+            "sudo -n ss -tnlp",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:34:07.809Z",
+            "root",
+            null,
+            null,
+            "sudo -n journalctl -u elastic-agent -n 10",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:37:23.860Z",
+            "root",
+            null,
+            null,
+            "sudo -n ss -tnlp",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:37:23.860Z",
+            "root",
+            null,
+            null,
+            "sudo -n journalctl -u elastic-agent -n 10",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-30T06:37:23.860Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ]
         ]
       }
     },
@@ -306,106 +306,106 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "@timestamp": "2026-06-23T06:39:44.309Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T06:39:44.310Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u elastic-agent -n 10",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T06:39:44.310Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n ss -tnlp",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T06:45:06.380Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T06:45:06.380Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u elastic-agent -n 10",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T06:45:06.380Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n ss -tnlp",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T06:57:01.599Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T06:57:01.599Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u elastic-agent -n 10",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T06:57:01.600Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n ss -tnlp",
-            "falco.output_fields.proc.pname": "bash",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "ed96a85a7480"
-          },
-          {
-            "@timestamp": "2026-06-23T07:05:18.718Z",
-            "falco.output_fields.user.name": "root",
-            "falco.output_fields.user.uid": null,
-            "falco.output_fields.proc.name": null,
-            "falco.output_fields.proc.cmdline": "sudo -n systemctl status elastic-agent",
-            "falco.output_fields.proc.pname": "sshd",
-            "falco.output_fields.proc.tty": null,
-            "falco.output_fields.container.id": "d8fb0192a17f"
-          }
+          [
+            "2026-06-23T06:39:44.309Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T06:39:44.310Z",
+            "root",
+            null,
+            null,
+            "sudo -n journalctl -u elastic-agent -n 10",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T06:39:44.310Z",
+            "root",
+            null,
+            null,
+            "sudo -n ss -tnlp",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T06:45:06.380Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T06:45:06.380Z",
+            "root",
+            null,
+            null,
+            "sudo -n journalctl -u elastic-agent -n 10",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T06:45:06.380Z",
+            "root",
+            null,
+            null,
+            "sudo -n ss -tnlp",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T06:57:01.599Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T06:57:01.599Z",
+            "root",
+            null,
+            null,
+            "sudo -n journalctl -u elastic-agent -n 10",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T06:57:01.600Z",
+            "root",
+            null,
+            null,
+            "sudo -n ss -tnlp",
+            "bash",
+            null,
+            "ed96a85a7480"
+          ],
+          [
+            "2026-06-23T07:05:18.718Z",
+            "root",
+            null,
+            null,
+            "sudo -n systemctl status elastic-agent",
+            "sshd",
+            null,
+            "d8fb0192a17f"
+          ]
         ]
       }
     }

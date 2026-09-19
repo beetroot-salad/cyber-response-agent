@@ -1,6 +1,6 @@
 """The three closure gates, which are one sentence over three namespaces.
 
-The last family of `validate.py`'s rules, split out at 4038 lines, and the top of the
+The last family of `validate.py`'s rules, and the top of the
 layering: every other family is imported from here. Each gate is only safe to run once
 its `deferred_*` table is projected, which is why `diagnose` runs them together and last.
 """

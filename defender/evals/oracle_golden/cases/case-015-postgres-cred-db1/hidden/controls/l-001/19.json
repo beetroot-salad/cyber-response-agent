@@ -36,76 +36,76 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "count": 2471,
-            "host.name": null,
-            "source.ip": "172.18.0.3",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.ssl"
-          },
-          {
-            "count": 2471,
-            "host.name": null,
-            "source.ip": "172.18.0.3",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.connection"
-          },
-          {
-            "count": 1440,
-            "host.name": "canary-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "count": 485,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 255,
-            "host.name": "canary-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 92,
-            "host.name": "config-mgmt-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 58,
-            "host.name": "jump-box-1",
-            "source.ip": "172.18.0.23",
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 48,
-            "host.name": "canary-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "count": 36,
-            "host.name": "canary-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "elastic_agent.filebeat"
-          },
-          {
-            "count": 5,
-            "host.name": "jump-box-1",
-            "source.ip": "172.18.0.14",
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            2471,
+            null,
+            "172.18.0.3",
+            null,
+            "zeek.ssl"
+          ],
+          [
+            2471,
+            null,
+            "172.18.0.3",
+            null,
+            "zeek.connection"
+          ],
+          [
+            1440,
+            "canary-1",
+            null,
+            "172.18.0.3",
+            "elastic_agent.metricbeat"
+          ],
+          [
+            485,
+            "jump-box-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            255,
+            "canary-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            92,
+            "config-mgmt-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            58,
+            "jump-box-1",
+            "172.18.0.23",
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            48,
+            "canary-1",
+            null,
+            "172.18.0.3",
+            "elastic_agent"
+          ],
+          [
+            36,
+            "canary-1",
+            null,
+            "172.18.0.3",
+            "elastic_agent.filebeat"
+          ],
+          [
+            5,
+            "jump-box-1",
+            "172.18.0.14",
+            "172.18.0.3",
+            "system.auth"
+          ]
         ]
       }
     },
@@ -143,76 +143,76 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "count": 569,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 268,
-            "host.name": "canary-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 239,
-            "host.name": null,
-            "source.ip": "172.18.0.3",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.http"
-          },
-          {
-            "count": 239,
-            "host.name": null,
-            "source.ip": "172.18.0.3",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.connection"
-          },
-          {
-            "count": 118,
-            "host.name": "config-mgmt-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 91,
-            "host.name": "jump-box-1",
-            "source.ip": "172.18.0.15",
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 4,
-            "host.name": "jump-box-1",
-            "source.ip": "172.18.0.20",
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 4,
-            "host.name": "config-mgmt-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "count": 4,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "count": 4,
-            "host.name": "canary-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            569,
+            "jump-box-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            268,
+            "canary-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            239,
+            null,
+            "172.18.0.3",
+            null,
+            "zeek.http"
+          ],
+          [
+            239,
+            null,
+            "172.18.0.3",
+            null,
+            "zeek.connection"
+          ],
+          [
+            118,
+            "config-mgmt-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            91,
+            "jump-box-1",
+            "172.18.0.15",
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            4,
+            "jump-box-1",
+            "172.18.0.20",
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            4,
+            "config-mgmt-1",
+            null,
+            "172.18.0.3",
+            "system.syslog"
+          ],
+          [
+            4,
+            "jump-box-1",
+            null,
+            "172.18.0.3",
+            "system.syslog"
+          ],
+          [
+            4,
+            "canary-1",
+            null,
+            "172.18.0.3",
+            "system.syslog"
+          ]
         ]
       }
     },
@@ -250,76 +250,76 @@
         ],
         "row_count": 10,
         "values": [
-          {
-            "count": 423,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 273,
-            "host.name": "canary-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 240,
-            "host.name": null,
-            "source.ip": "172.18.0.3",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.http"
-          },
-          {
-            "count": 240,
-            "host.name": null,
-            "source.ip": "172.18.0.3",
-            "host.ip": null,
-            "data_stream.dataset": "zeek.connection"
-          },
-          {
-            "count": 110,
-            "host.name": "config-mgmt-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 48,
-            "host.name": "jump-box-1",
-            "source.ip": "172.18.0.15",
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "count": 4,
-            "host.name": "canary-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "count": 4,
-            "host.name": "jump-box-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "count": 4,
-            "host.name": "config-mgmt-1",
-            "source.ip": null,
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "count": 1,
-            "host.name": "jump-box-1",
-            "source.ip": "172.18.0.20",
-            "host.ip": "172.18.0.3",
-            "data_stream.dataset": "system.auth"
-          }
+          [
+            423,
+            "jump-box-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            273,
+            "canary-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            240,
+            null,
+            "172.18.0.3",
+            null,
+            "zeek.http"
+          ],
+          [
+            240,
+            null,
+            "172.18.0.3",
+            null,
+            "zeek.connection"
+          ],
+          [
+            110,
+            "config-mgmt-1",
+            null,
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            48,
+            "jump-box-1",
+            "172.18.0.15",
+            "172.18.0.3",
+            "system.auth"
+          ],
+          [
+            4,
+            "canary-1",
+            null,
+            "172.18.0.3",
+            "system.syslog"
+          ],
+          [
+            4,
+            "jump-box-1",
+            null,
+            "172.18.0.3",
+            "system.syslog"
+          ],
+          [
+            4,
+            "config-mgmt-1",
+            null,
+            "172.18.0.3",
+            "system.syslog"
+          ],
+          [
+            1,
+            "jump-box-1",
+            "172.18.0.20",
+            "172.18.0.3",
+            "system.auth"
+          ]
         ]
       }
     }
