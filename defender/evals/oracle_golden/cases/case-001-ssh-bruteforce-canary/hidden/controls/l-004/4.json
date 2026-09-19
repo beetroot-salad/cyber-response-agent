@@ -117,13 +117,13 @@
       ],
       "row_count": 1,
       "values": [
-        {
-          "events": 48,
-          "first_seen": "2026-07-25T07:45:35.517Z",
-          "last_seen": "2026-07-25T07:48:37.065Z",
-          "zeek.ssh.client": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
-          "destination.ip": "172.18.0.9"
-        }
+        [
+          48,
+          "2026-07-25T07:45:35.517Z",
+          "2026-07-25T07:48:37.065Z",
+          "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+          "172.18.0.9"
+        ]
       ]
     }
   }

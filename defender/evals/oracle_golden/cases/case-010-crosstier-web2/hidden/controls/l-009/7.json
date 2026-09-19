@@ -44,48 +44,48 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "@timestamp": "2026-07-12T19:41:37.009Z",
-            "kibana.alert.rule.name": "v2 sshd success after failures",
-            "kibana.alert.reason": "authentication event with process sshd, source 172.18.0.8 by svc.reports on web-2 created high alert v2 sshd success after failures.",
-            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
-            "kibana.alert.ancestors.id": "AZ9X0ZBwbysvOEFBDT46",
-            "kibana.alert.ancestors.index": ".ds-logs-system.auth-default-2026.06.23-000003",
-            "kibana.alert.ancestors.depth": 0
-          },
-          {
-            "@timestamp": "2026-07-12T19:41:37.009Z",
-            "kibana.alert.rule.name": "v2 sshd success after failures",
-            "kibana.alert.reason": "authentication event with process sshd, source 172.18.0.8:58298, by svc.reports on web-2 created high alert v2 sshd success after failures.",
-            "message": "Failed password for svc.reports from 172.18.0.8 port 58298 ssh2",
-            "kibana.alert.ancestors.id": "AZ9X0ZBwbysvOEFBDT44",
-            "kibana.alert.ancestors.index": ".ds-logs-system.auth-default-2026.06.23-000003",
-            "kibana.alert.ancestors.depth": 0
-          },
-          {
-            "@timestamp": "2026-07-12T19:41:37.010Z",
-            "kibana.alert.rule.name": "v2 sshd success after failures",
-            "kibana.alert.reason": "authentication event with process sshd, source 172.18.0.8:58304, by svc.reports on web-2 created high alert v2 sshd success after failures.",
-            "message": "Failed password for svc.reports from 172.18.0.8 port 58304 ssh2",
-            "kibana.alert.ancestors.id": "AZ9X0ZBwbysvOEFBDT47",
-            "kibana.alert.ancestors.index": ".ds-logs-system.auth-default-2026.06.23-000003",
-            "kibana.alert.ancestors.depth": 0
-          },
-          {
-            "@timestamp": "2026-07-12T19:41:37.010Z",
-            "kibana.alert.rule.name": "v2 sshd success after failures",
-            "kibana.alert.reason": "authentication, session event with process sshd, source 172.18.0.14:42584, by svc.config-mgmt on web-2 created high alert v2 sshd success after failures.",
-            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2",
-            "kibana.alert.ancestors.id": "AZ9X2ZBwbysvOEEoINSs",
-            "kibana.alert.ancestors.index": ".ds-logs-system.auth-default-2026.06.23-000003",
-            "kibana.alert.ancestors.depth": 0
-          },
-          {
-            "@timestamp": "2026-07-12T19:41:37.014Z",
-            "kibana.alert.rule.name": "v2 sshd success after failures",
-            "kibana.alert.reason": "authentication event with process sshd, on web-2 created high alert v2 sshd success after failures.",
-            "message": null,
-            "kibana.alert.ancestors.id": [
+          [
+            "2026-07-12T19:41:37.009Z",
+            "v2 sshd success after failures",
+            "authentication event with process sshd, source 172.18.0.8 by svc.reports on web-2 created high alert v2 sshd success after failures.",
+            "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "AZ9X0ZBwbysvOEFBDT46",
+            ".ds-logs-system.auth-default-2026.06.23-000003",
+            0
+          ],
+          [
+            "2026-07-12T19:41:37.009Z",
+            "v2 sshd success after failures",
+            "authentication event with process sshd, source 172.18.0.8:58298, by svc.reports on web-2 created high alert v2 sshd success after failures.",
+            "Failed password for svc.reports from 172.18.0.8 port 58298 ssh2",
+            "AZ9X0ZBwbysvOEFBDT44",
+            ".ds-logs-system.auth-default-2026.06.23-000003",
+            0
+          ],
+          [
+            "2026-07-12T19:41:37.010Z",
+            "v2 sshd success after failures",
+            "authentication event with process sshd, source 172.18.0.8:58304, by svc.reports on web-2 created high alert v2 sshd success after failures.",
+            "Failed password for svc.reports from 172.18.0.8 port 58304 ssh2",
+            "AZ9X0ZBwbysvOEFBDT47",
+            ".ds-logs-system.auth-default-2026.06.23-000003",
+            0
+          ],
+          [
+            "2026-07-12T19:41:37.010Z",
+            "v2 sshd success after failures",
+            "authentication, session event with process sshd, source 172.18.0.14:42584, by svc.config-mgmt on web-2 created high alert v2 sshd success after failures.",
+            "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2",
+            "AZ9X2ZBwbysvOEEoINSs",
+            ".ds-logs-system.auth-default-2026.06.23-000003",
+            0
+          ],
+          [
+            "2026-07-12T19:41:37.014Z",
+            "v2 sshd success after failures",
+            "authentication event with process sshd, on web-2 created high alert v2 sshd success after failures.",
+            null,
+            [
               "5bf9f2924e86fbff71755044693814a19fa2660f1964094a23cabfffb736a204",
               "7ec838d5c381c7e4deb9e54cbb22fd3fa06775fcf1ee9097c66e9c57fcbd2d4e",
               "AZ9X0ZBwbysvOEFBDT44",
@@ -95,11 +95,11 @@
               "ae0bd19c68ae9c63651735aed3de631b7f70d689a017c8b8e59159c63f920f23",
               "c3c9a7adfc2b7c042d09241ad53807546e094b0f3c042136c4779cfa036d3076"
             ],
-            "kibana.alert.ancestors.index": [
+            [
               "",
               ".ds-logs-system.auth-default-2026.06.23-000003"
             ],
-            "kibana.alert.ancestors.depth": [
+            [
               0,
               0,
               0,
@@ -109,7 +109,7 @@
               1,
               1
             ]
-          }
+          ]
         ]
       }
     },

@@ -28,106 +28,106 @@
         ],
         "row_count": 20,
         "values": [
-          {
-            "events": 154,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
-          },
-          {
-            "events": 154,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
-          },
-          {
-            "events": 63,
-            "process.name": "sshd",
-            "message": "error: kex_exchange_identification: Connection closed by remote host"
-          },
-          {
-            "events": 35,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
-          },
-          {
-            "events": 35,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session closed for user svc.reports"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Received disconnect from 172.18.0.14 port 49772:11: disconnected by user"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 49772 ssh2"
-          },
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.17 port 51468"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.17 port 33184"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.14 port 42524"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Disconnected from user svc.config-mgmt 172.18.0.14 port 49772"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.20 port 50570"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.17 port 38884"
-          },
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.22 port 40062"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.20 port 44430"
-          }
+          [
+            154,
+            "runuser",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          ],
+          [
+            154,
+            "runuser",
+            "pam_unix(runuser:session): session closed for user svc.monitoring"
+          ],
+          [
+            63,
+            "sshd",
+            "error: kex_exchange_identification: Connection closed by remote host"
+          ],
+          [
+            35,
+            "runuser",
+            "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          ],
+          [
+            35,
+            "runuser",
+            "pam_unix(runuser:session): session closed for user svc.reports"
+          ],
+          [
+            7,
+            "sshd",
+            "Received disconnect from 172.18.0.14 port 49772:11: disconnected by user"
+          ],
+          [
+            7,
+            "sshd",
+            "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          ],
+          [
+            7,
+            "sshd",
+            "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)"
+          ],
+          [
+            7,
+            "sshd",
+            "Accepted password for svc.config-mgmt from 172.18.0.14 port 49772 ssh2"
+          ],
+          [
+            7,
+            "CRON",
+            "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.17 port 51468"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.17 port 33184"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.14 port 42524"
+          ],
+          [
+            7,
+            "sshd",
+            "Disconnected from user svc.config-mgmt 172.18.0.14 port 49772"
+          ],
+          [
+            7,
+            "sshd",
+            "pam_unix(sshd:session): session closed for user svc.config-mgmt"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.20 port 50570"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.17 port 38884"
+          ],
+          [
+            7,
+            "CRON",
+            "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.22 port 40062"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.20 port 44430"
+          ]
         ]
       }
     },
@@ -157,106 +157,106 @@
         ],
         "row_count": 20,
         "values": [
-          {
-            "events": 126,
-            "process.name": "sshd",
-            "message": "error: kex_exchange_identification: Connection closed by remote host"
-          },
-          {
-            "events": 119,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
-          },
-          {
-            "events": 119,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
-          },
-          {
-            "events": 56,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session closed for user svc.reports"
-          },
-          {
-            "events": 56,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
-          },
-          {
-            "events": 42,
-            "process.name": "sudo",
-            "message": "pam_unix(sudo:auth): conversation failed"
-          },
-          {
-            "events": 42,
-            "process.name": "sudo",
-            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
-          },
-          {
-            "events": 42,
-            "process.name": "sshd",
-            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.6  user=svc.reports"
-          },
-          {
-            "events": 14,
-            "process.name": "sshd",
-            "message": "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory"
-          },
-          {
-            "events": 14,
-            "process.name": "sshd",
-            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)"
-          },
-          {
-            "events": 14,
-            "process.name": "sudo",
-            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=journalctl -u nginx -n 5"
-          },
-          {
-            "events": 14,
-            "process.name": "sshd",
-            "message": "pam_unix(sshd:session): session closed for user svc.deploy"
-          },
-          {
-            "events": 14,
-            "process.name": "sudo",
-            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=systemctl restart nginx"
-          },
-          {
-            "events": 14,
-            "process.name": "sudo",
-            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=/usr/bin/curl -fsS http://web-1/ -o /tmp/deploy.tgz"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.17 port 56562"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Accepted password for svc.deploy from 172.18.0.20 port 38838 ssh2"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Disconnected from user svc.deploy 172.18.0.20 port 38838"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.17 port 57850"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Received disconnect from 172.18.0.20 port 38838:11: disconnected by user"
-          },
-          {
-            "events": 7,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.22 port 59428"
-          }
+          [
+            126,
+            "sshd",
+            "error: kex_exchange_identification: Connection closed by remote host"
+          ],
+          [
+            119,
+            "runuser",
+            "pam_unix(runuser:session): session closed for user svc.monitoring"
+          ],
+          [
+            119,
+            "runuser",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          ],
+          [
+            56,
+            "runuser",
+            "pam_unix(runuser:session): session closed for user svc.reports"
+          ],
+          [
+            56,
+            "runuser",
+            "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          ],
+          [
+            42,
+            "sudo",
+            "pam_unix(sudo:auth): conversation failed"
+          ],
+          [
+            42,
+            "sudo",
+            "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          ],
+          [
+            42,
+            "sshd",
+            "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.6  user=svc.reports"
+          ],
+          [
+            14,
+            "sshd",
+            "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          ],
+          [
+            14,
+            "sshd",
+            "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)"
+          ],
+          [
+            14,
+            "sudo",
+            "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=journalctl -u nginx -n 5"
+          ],
+          [
+            14,
+            "sshd",
+            "pam_unix(sshd:session): session closed for user svc.deploy"
+          ],
+          [
+            14,
+            "sudo",
+            "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=systemctl restart nginx"
+          ],
+          [
+            14,
+            "sudo",
+            "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=/usr/bin/curl -fsS http://web-1/ -o /tmp/deploy.tgz"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.17 port 56562"
+          ],
+          [
+            7,
+            "sshd",
+            "Accepted password for svc.deploy from 172.18.0.20 port 38838 ssh2"
+          ],
+          [
+            7,
+            "sshd",
+            "Disconnected from user svc.deploy 172.18.0.20 port 38838"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.17 port 57850"
+          ],
+          [
+            7,
+            "sshd",
+            "Received disconnect from 172.18.0.20 port 38838:11: disconnected by user"
+          ],
+          [
+            7,
+            "sshd",
+            "Connection closed by 172.18.0.22 port 59428"
+          ]
         ]
       }
     },
@@ -286,106 +286,106 @@
         ],
         "row_count": 20,
         "values": [
-          {
-            "events": 152,
-            "process.name": "sshd",
-            "message": "error: kex_exchange_identification: Connection closed by remote host"
-          },
-          {
-            "events": 136,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
-          },
-          {
-            "events": 136,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
-          },
-          {
-            "events": 80,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session closed for user svc.reports"
-          },
-          {
-            "events": 80,
-            "process.name": "runuser",
-            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.9 port 55560"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.19 port 47622"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.9 port 45634"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.19 port 35994"
-          },
-          {
-            "events": 8,
-            "process.name": "CRON",
-            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.9 port 46062"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.9 port 48230"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.21 port 49016"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.21 port 45298"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.21 port 49334"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.19 port 39366"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.21 port 34232"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.9 port 34546"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.20 port 57074"
-          },
-          {
-            "events": 8,
-            "process.name": "sshd",
-            "message": "Connection closed by 172.18.0.20 port 58498"
-          }
+          [
+            152,
+            "sshd",
+            "error: kex_exchange_identification: Connection closed by remote host"
+          ],
+          [
+            136,
+            "runuser",
+            "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          ],
+          [
+            136,
+            "runuser",
+            "pam_unix(runuser:session): session closed for user svc.monitoring"
+          ],
+          [
+            80,
+            "runuser",
+            "pam_unix(runuser:session): session closed for user svc.reports"
+          ],
+          [
+            80,
+            "runuser",
+            "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.9 port 55560"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.19 port 47622"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.9 port 45634"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.19 port 35994"
+          ],
+          [
+            8,
+            "CRON",
+            "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.9 port 46062"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.9 port 48230"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.21 port 49016"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.21 port 45298"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.21 port 49334"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.19 port 39366"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.21 port 34232"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.9 port 34546"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.20 port 57074"
+          ],
+          [
+            8,
+            "sshd",
+            "Connection closed by 172.18.0.20 port 58498"
+          ]
         ]
       }
     }

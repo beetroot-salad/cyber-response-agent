@@ -32,18 +32,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "total": 7,
-            "first_seen": "2026-07-12T17:40:02.000Z",
-            "last_seen": "2026-07-12T17:40:02.000Z",
-            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 47286 ssh2"
-          },
-          {
-            "total": 7,
-            "first_seen": "2026-07-12T19:41:06.000Z",
-            "last_seen": "2026-07-12T19:41:06.000Z",
-            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 57020 ssh2"
-          }
+          [
+            7,
+            "2026-07-12T17:40:02.000Z",
+            "2026-07-12T17:40:02.000Z",
+            "Accepted password for svc.config-mgmt from 172.18.0.14 port 47286 ssh2"
+          ],
+          [
+            7,
+            "2026-07-12T19:41:06.000Z",
+            "2026-07-12T19:41:06.000Z",
+            "Accepted password for svc.config-mgmt from 172.18.0.14 port 57020 ssh2"
+          ]
         ]
       }
     },
@@ -77,12 +77,12 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total": 7,
-            "first_seen": "2026-07-05T17:24:01.000Z",
-            "last_seen": "2026-07-05T17:24:01.000Z",
-            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 37772 ssh2"
-          }
+          [
+            7,
+            "2026-07-05T17:24:01.000Z",
+            "2026-07-05T17:24:01.000Z",
+            "Accepted password for svc.config-mgmt from 172.18.0.14 port 37772 ssh2"
+          ]
         ]
       }
     },
@@ -116,12 +116,12 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total": 8,
-            "first_seen": "2026-06-28T20:22:09.000Z",
-            "last_seen": "2026-06-28T20:22:09.000Z",
-            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 50540 ssh2"
-          }
+          [
+            8,
+            "2026-06-28T20:22:09.000Z",
+            "2026-06-28T20:22:09.000Z",
+            "Accepted password for svc.config-mgmt from 172.18.0.20 port 50540 ssh2"
+          ]
         ]
       }
     }

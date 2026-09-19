@@ -48,16 +48,16 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 7,
-            "failed": 0,
-            "first_seen": "2026-07-12T19:41:05.000Z",
-            "last_seen": "2026-07-12T19:41:05.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.14",
-            "host.name": "web-2",
-            "user.name": "svc.config-mgmt"
-          }
+          [
+            7,
+            0,
+            "2026-07-12T19:41:05.000Z",
+            "2026-07-12T19:41:05.000Z",
+            "password",
+            "172.18.0.14",
+            "web-2",
+            "svc.config-mgmt"
+          ]
         ]
       }
     },
@@ -107,36 +107,36 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "accepted": 21,
-            "failed": 0,
-            "first_seen": "2026-07-05T19:42:10.000Z",
-            "last_seen": "2026-07-05T19:42:10.000Z",
-            "auth_method": "password",
-            "source.ip": null,
-            "host.name": "web-2",
-            "user.name": null
-          },
-          {
-            "accepted": 21,
-            "failed": 0,
-            "first_seen": "2026-07-05T19:42:10.000Z",
-            "last_seen": "2026-07-05T19:42:10.000Z",
-            "auth_method": "other",
-            "source.ip": null,
-            "host.name": "web-2",
-            "user.name": null
-          },
-          {
-            "accepted": 7,
-            "failed": 0,
-            "first_seen": "2026-07-05T19:42:09.000Z",
-            "last_seen": "2026-07-05T19:42:09.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.20",
-            "host.name": "web-2",
-            "user.name": "svc.deploy"
-          }
+          [
+            21,
+            0,
+            "2026-07-05T19:42:10.000Z",
+            "2026-07-05T19:42:10.000Z",
+            "password",
+            null,
+            "web-2",
+            null
+          ],
+          [
+            21,
+            0,
+            "2026-07-05T19:42:10.000Z",
+            "2026-07-05T19:42:10.000Z",
+            "other",
+            null,
+            "web-2",
+            null
+          ],
+          [
+            7,
+            0,
+            "2026-07-05T19:42:09.000Z",
+            "2026-07-05T19:42:09.000Z",
+            "password",
+            "172.18.0.20",
+            "web-2",
+            "svc.deploy"
+          ]
         ]
       }
     },
@@ -186,16 +186,16 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 8,
-            "failed": 0,
-            "first_seen": "2026-06-28T20:22:09.000Z",
-            "last_seen": "2026-06-28T20:22:09.000Z",
-            "auth_method": "password",
-            "source.ip": "172.18.0.20",
-            "host.name": "web-2",
-            "user.name": "svc.config-mgmt"
-          }
+          [
+            8,
+            0,
+            "2026-06-28T20:22:09.000Z",
+            "2026-06-28T20:22:09.000Z",
+            "password",
+            "172.18.0.20",
+            "web-2",
+            "svc.config-mgmt"
+          ]
         ]
       }
     }

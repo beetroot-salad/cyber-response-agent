@@ -32,30 +32,30 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "events": 1800,
-            "url.path": "/nginx_status",
-            "http.response.status_code": 404,
-            "source.ip": "127.0.0.1"
-          },
-          {
-            "events": 45,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "127.0.0.1"
-          },
-          {
-            "events": 5,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "172.18.0.12"
-          },
-          {
-            "events": 5,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "172.18.0.13"
-          }
+          [
+            1800,
+            "/nginx_status",
+            404,
+            "127.0.0.1"
+          ],
+          [
+            45,
+            "/",
+            200,
+            "127.0.0.1"
+          ],
+          [
+            5,
+            "/",
+            200,
+            "172.18.0.12"
+          ],
+          [
+            5,
+            "/",
+            200,
+            "172.18.0.13"
+          ]
         ]
       }
     },
@@ -89,30 +89,30 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "events": 1800,
-            "url.path": "/nginx_status",
-            "http.response.status_code": 404,
-            "source.ip": "127.0.0.1"
-          },
-          {
-            "events": 40,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "127.0.0.1"
-          },
-          {
-            "events": 5,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "172.18.0.12"
-          },
-          {
-            "events": 5,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "172.18.0.13"
-          }
+          [
+            1800,
+            "/nginx_status",
+            404,
+            "127.0.0.1"
+          ],
+          [
+            40,
+            "/",
+            200,
+            "127.0.0.1"
+          ],
+          [
+            5,
+            "/",
+            200,
+            "172.18.0.12"
+          ],
+          [
+            5,
+            "/",
+            200,
+            "172.18.0.13"
+          ]
         ]
       }
     },
@@ -146,30 +146,30 @@
         ],
         "row_count": 4,
         "values": [
-          {
-            "events": 2160,
-            "url.path": "/nginx_status",
-            "http.response.status_code": 404,
-            "source.ip": "127.0.0.1"
-          },
-          {
-            "events": 78,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "127.0.0.1"
-          },
-          {
-            "events": 6,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "172.18.0.24"
-          },
-          {
-            "events": 6,
-            "url.path": "/",
-            "http.response.status_code": 200,
-            "source.ip": "172.18.0.25"
-          }
+          [
+            2160,
+            "/nginx_status",
+            404,
+            "127.0.0.1"
+          ],
+          [
+            78,
+            "/",
+            200,
+            "127.0.0.1"
+          ],
+          [
+            6,
+            "/",
+            200,
+            "172.18.0.24"
+          ],
+          [
+            6,
+            "/",
+            200,
+            "172.18.0.25"
+          ]
         ]
       }
     }

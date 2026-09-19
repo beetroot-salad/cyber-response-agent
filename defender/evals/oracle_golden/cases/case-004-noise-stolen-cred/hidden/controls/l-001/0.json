@@ -54,15 +54,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "accepted": 6,
-            "failed": 0,
-            "first_seen": "2026-07-11T10:33:19.000Z",
-            "last_seen": "2026-07-11T10:33:19.000Z",
-            "source.ip": "172.18.0.17",
-            "user.name": "sre.alice",
-            "auth_method": "password"
-          }
+          [
+            6,
+            0,
+            "2026-07-11T10:33:19.000Z",
+            "2026-07-11T10:33:19.000Z",
+            "172.18.0.17",
+            "sre.alice",
+            "password"
+          ]
         ]
       }
     },

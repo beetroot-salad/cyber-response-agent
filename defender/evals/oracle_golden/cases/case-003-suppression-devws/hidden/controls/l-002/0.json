@@ -34,26 +34,26 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "events": 444,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 360,
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 12,
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 6,
-            "data_stream.dataset": "elastic_agent.filebeat"
-          },
-          {
-            "events": 6,
-            "data_stream.dataset": "system.syslog"
-          }
+          [
+            444,
+            "system.auth"
+          ],
+          [
+            360,
+            "elastic_agent.metricbeat"
+          ],
+          [
+            12,
+            "elastic_agent"
+          ],
+          [
+            6,
+            "elastic_agent.filebeat"
+          ],
+          [
+            6,
+            "system.syslog"
+          ]
         ]
       }
     },
@@ -79,26 +79,26 @@
         ],
         "row_count": 5,
         "values": [
-          {
-            "events": 528,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 360,
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 14,
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 6,
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 4,
-            "data_stream.dataset": "elastic_agent.filebeat"
-          }
+          [
+            528,
+            "system.auth"
+          ],
+          [
+            360,
+            "elastic_agent.metricbeat"
+          ],
+          [
+            14,
+            "elastic_agent"
+          ],
+          [
+            6,
+            "system.syslog"
+          ],
+          [
+            4,
+            "elastic_agent.filebeat"
+          ]
         ]
       }
     }

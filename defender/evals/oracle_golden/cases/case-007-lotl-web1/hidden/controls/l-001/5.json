@@ -24,30 +24,30 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "events": 1855,
-            "data_stream.dataset": "nginx.access"
-          },
-          {
-            "events": 720,
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 567,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 12,
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 7,
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 4,
-            "data_stream.dataset": "elastic_agent.filebeat"
-          }
+          [
+            1855,
+            "nginx.access"
+          ],
+          [
+            720,
+            "elastic_agent.metricbeat"
+          ],
+          [
+            567,
+            "system.auth"
+          ],
+          [
+            12,
+            "elastic_agent"
+          ],
+          [
+            7,
+            "system.syslog"
+          ],
+          [
+            4,
+            "elastic_agent.filebeat"
+          ]
         ]
       }
     },
@@ -73,30 +73,30 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "events": 1850,
-            "data_stream.dataset": "nginx.access"
-          },
-          {
-            "events": 959,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 720,
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 16,
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 7,
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 2,
-            "data_stream.dataset": "elastic_agent.filebeat"
-          }
+          [
+            1850,
+            "nginx.access"
+          ],
+          [
+            959,
+            "system.auth"
+          ],
+          [
+            720,
+            "elastic_agent.metricbeat"
+          ],
+          [
+            16,
+            "elastic_agent"
+          ],
+          [
+            7,
+            "system.syslog"
+          ],
+          [
+            2,
+            "elastic_agent.filebeat"
+          ]
         ]
       }
     },
@@ -122,30 +122,30 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "events": 2250,
-            "data_stream.dataset": "nginx.access"
-          },
-          {
-            "events": 760,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 720,
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 12,
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 8,
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 4,
-            "data_stream.dataset": "elastic_agent.filebeat"
-          }
+          [
+            2250,
+            "nginx.access"
+          ],
+          [
+            760,
+            "system.auth"
+          ],
+          [
+            720,
+            "elastic_agent.metricbeat"
+          ],
+          [
+            12,
+            "elastic_agent"
+          ],
+          [
+            8,
+            "system.syslog"
+          ],
+          [
+            4,
+            "elastic_agent.filebeat"
+          ]
         ]
       }
     }

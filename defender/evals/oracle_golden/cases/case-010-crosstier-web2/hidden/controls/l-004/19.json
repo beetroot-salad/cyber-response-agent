@@ -48,14 +48,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 6708,
-            "host.name": "web-1"
-          },
-          {
-            "count": 4968,
-            "host.name": "web-2"
-          }
+          [
+            6708,
+            "web-1"
+          ],
+          [
+            4968,
+            "web-2"
+          ]
         ]
       }
     },
@@ -81,14 +81,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 15888,
-            "host.name": "web-1"
-          },
-          {
-            "count": 13608,
-            "host.name": "web-2"
-          }
+          [
+            15888,
+            "web-1"
+          ],
+          [
+            13608,
+            "web-2"
+          ]
         ]
       }
     }

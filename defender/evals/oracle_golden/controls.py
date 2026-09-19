@@ -17,7 +17,7 @@ Split deliberately in two:
     and `extract_alert.py` use.
 
 Payloads are emitted in the SAME shape the production `esql` verb stores
-(`{query, columns, row_count, values}`), so `label.py` compares attack-window and
+(`{query, columns, row_count, values}`), so `judge.py` compares attack-window and
 control payloads like with like rather than reconciling two formats.
 
 Usage:
@@ -308,7 +308,7 @@ def run_esql(query: str, *, timeout: int = 180) -> dict:
     if "error" in resp:
         raise RuntimeError(f"ES|QL error: {json.dumps(resp['error'])[:400]}")
     # Through the ADAPTER's own shaper, not a second copy of it: two producers of one
-    # promised shape drift, and `label.py` would then compare an attack window in one
+    # promised shape drift, and `judge.py` would then compare an attack window in one
     # encoding against its controls in the other.
     return esql_payload(query, resp)
 

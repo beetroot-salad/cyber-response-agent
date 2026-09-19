@@ -40,14 +40,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "event_count": 7,
-            "first_seen": "2026-07-12T19:41:05.000Z",
-            "last_seen": "2026-07-12T19:41:05.000Z",
-            "data_stream.dataset": "system.auth",
-            "user.name": "svc.config-mgmt",
-            "source.ip": "172.18.0.14"
-          }
+          [
+            7,
+            "2026-07-12T19:41:05.000Z",
+            "2026-07-12T19:41:05.000Z",
+            "system.auth",
+            "svc.config-mgmt",
+            "172.18.0.14"
+          ]
         ]
       }
     },
@@ -89,14 +89,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "event_count": 7,
-            "first_seen": "2026-07-05T19:42:09.000Z",
-            "last_seen": "2026-07-05T19:42:09.000Z",
-            "data_stream.dataset": "system.auth",
-            "user.name": "svc.deploy",
-            "source.ip": "172.18.0.20"
-          }
+          [
+            7,
+            "2026-07-05T19:42:09.000Z",
+            "2026-07-05T19:42:09.000Z",
+            "system.auth",
+            "svc.deploy",
+            "172.18.0.20"
+          ]
         ]
       }
     },
@@ -138,14 +138,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "event_count": 8,
-            "first_seen": "2026-06-28T20:22:09.000Z",
-            "last_seen": "2026-06-28T20:22:09.000Z",
-            "data_stream.dataset": "system.auth",
-            "user.name": "svc.config-mgmt",
-            "source.ip": "172.18.0.20"
-          }
+          [
+            8,
+            "2026-06-28T20:22:09.000Z",
+            "2026-06-28T20:22:09.000Z",
+            "system.auth",
+            "svc.config-mgmt",
+            "172.18.0.20"
+          ]
         ]
       }
     }

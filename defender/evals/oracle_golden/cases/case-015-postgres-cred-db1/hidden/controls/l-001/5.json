@@ -24,14 +24,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 23040,
-            "msg_prefix": "Role \"root\" does not exist.\n\tConnection "
-          },
-          {
-            "count": 23040,
-            "msg_prefix": "password authentication failed for user "
-          }
+          [
+            23040,
+            "Role \"root\" does not exist.\n\tConnection "
+          ],
+          [
+            23040,
+            "password authentication failed for user "
+          ]
         ]
       }
     },
@@ -57,14 +57,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 28800,
-            "msg_prefix": "Role \"root\" does not exist.\n\tConnection "
-          },
-          {
-            "count": 28800,
-            "msg_prefix": "password authentication failed for user "
-          }
+          [
+            28800,
+            "Role \"root\" does not exist.\n\tConnection "
+          ],
+          [
+            28800,
+            "password authentication failed for user "
+          ]
         ]
       }
     },
@@ -90,14 +90,14 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "count": 28800,
-            "msg_prefix": "Role \"root\" does not exist.\n\tConnection "
-          },
-          {
-            "count": 28800,
-            "msg_prefix": "password authentication failed for user "
-          }
+          [
+            28800,
+            "Role \"root\" does not exist.\n\tConnection "
+          ],
+          [
+            28800,
+            "password authentication failed for user "
+          ]
         ]
       }
     }

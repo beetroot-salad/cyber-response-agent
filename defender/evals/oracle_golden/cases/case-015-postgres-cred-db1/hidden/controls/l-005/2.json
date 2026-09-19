@@ -32,18 +32,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "cnt": 5760,
-            "first_seen": "2026-07-06T20:02:37.159Z",
-            "last_seen": "2026-07-06T21:02:27.160Z",
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
-          },
-          {
-            "cnt": 5760,
-            "first_seen": "2026-07-06T20:02:37.159Z",
-            "last_seen": "2026-07-06T21:02:27.160Z",
-            "message": "password authentication failed for user \"root\""
-          }
+          [
+            5760,
+            "2026-07-06T20:02:37.159Z",
+            "2026-07-06T21:02:27.160Z",
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+          ],
+          [
+            5760,
+            "2026-07-06T20:02:37.159Z",
+            "2026-07-06T21:02:27.160Z",
+            "password authentication failed for user \"root\""
+          ]
         ]
       }
     },
@@ -77,18 +77,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "cnt": 7200,
-            "first_seen": "2026-06-29T20:02:33.764Z",
-            "last_seen": "2026-06-29T21:02:23.774Z",
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
-          },
-          {
-            "cnt": 7200,
-            "first_seen": "2026-06-29T20:02:33.764Z",
-            "last_seen": "2026-06-29T21:02:23.774Z",
-            "message": "password authentication failed for user \"root\""
-          }
+          [
+            7200,
+            "2026-06-29T20:02:33.764Z",
+            "2026-06-29T21:02:23.774Z",
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+          ],
+          [
+            7200,
+            "2026-06-29T20:02:33.764Z",
+            "2026-06-29T21:02:23.774Z",
+            "password authentication failed for user \"root\""
+          ]
         ]
       }
     },
@@ -122,18 +122,18 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "cnt": 7200,
-            "first_seen": "2026-06-22T20:02:33.761Z",
-            "last_seen": "2026-06-22T21:02:23.772Z",
-            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
-          },
-          {
-            "cnt": 7200,
-            "first_seen": "2026-06-22T20:02:33.761Z",
-            "last_seen": "2026-06-22T21:02:23.772Z",
-            "message": "password authentication failed for user \"root\""
-          }
+          [
+            7200,
+            "2026-06-22T20:02:33.761Z",
+            "2026-06-22T21:02:23.772Z",
+            "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+          ],
+          [
+            7200,
+            "2026-06-22T20:02:33.761Z",
+            "2026-06-22T21:02:23.772Z",
+            "password authentication failed for user \"root\""
+          ]
         ]
       }
     }

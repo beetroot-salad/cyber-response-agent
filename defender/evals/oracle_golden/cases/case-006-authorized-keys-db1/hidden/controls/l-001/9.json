@@ -28,11 +28,11 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "message": "(root) CMD (   cd / && run-parts --report /etc/cron.hourly)"
-          }
+          [
+            7,
+            "CRON",
+            "(root) CMD (   cd / && run-parts --report /etc/cron.hourly)"
+          ]
         ]
       }
     },
@@ -62,11 +62,11 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 7,
-            "process.name": "CRON",
-            "message": "(root) CMD (   cd / && run-parts --report /etc/cron.hourly)"
-          }
+          [
+            7,
+            "CRON",
+            "(root) CMD (   cd / && run-parts --report /etc/cron.hourly)"
+          ]
         ]
       }
     },
@@ -96,11 +96,11 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 8,
-            "process.name": "CRON",
-            "message": "(root) CMD (   cd / && run-parts --report /etc/cron.hourly)"
-          }
+          [
+            8,
+            "CRON",
+            "(root) CMD (   cd / && run-parts --report /etc/cron.hourly)"
+          ]
         ]
       }
     }

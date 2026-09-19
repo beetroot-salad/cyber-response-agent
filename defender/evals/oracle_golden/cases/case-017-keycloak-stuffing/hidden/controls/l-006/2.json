@@ -44,24 +44,24 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "events": 60,
-            "first_seen": "2026-07-07T06:15:23.362Z",
-            "last_seen": "2026-07-07T07:14:40.032Z",
-            "rule": "Launch Sensitive Mount Container",
-            "proc": "tini",
-            "parent": "containerd-shim",
-            "container": "e1dc89faaa8b"
-          },
-          {
-            "events": 9,
-            "first_seen": "2026-07-07T06:16:10.371Z",
-            "last_seen": "2026-07-07T06:16:10.371Z",
-            "rule": "Read sensitive file untrusted",
-            "proc": "9",
-            "parent": "<NA>",
-            "container": "host"
-          }
+          [
+            60,
+            "2026-07-07T06:15:23.362Z",
+            "2026-07-07T07:14:40.032Z",
+            "Launch Sensitive Mount Container",
+            "tini",
+            "containerd-shim",
+            "e1dc89faaa8b"
+          ],
+          [
+            9,
+            "2026-07-07T06:16:10.371Z",
+            "2026-07-07T06:16:10.371Z",
+            "Read sensitive file untrusted",
+            "9",
+            "<NA>",
+            "host"
+          ]
         ]
       }
     },
@@ -107,15 +107,15 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 60,
-            "first_seen": "2026-06-30T06:15:32.548Z",
-            "last_seen": "2026-06-30T07:14:56.425Z",
-            "rule": "Launch Sensitive Mount Container",
-            "proc": "tini",
-            "parent": "containerd-shim",
-            "container": "e1dc89faaa8b"
-          }
+          [
+            60,
+            "2026-06-30T06:15:32.548Z",
+            "2026-06-30T07:14:56.425Z",
+            "Launch Sensitive Mount Container",
+            "tini",
+            "containerd-shim",
+            "e1dc89faaa8b"
+          ]
         ]
       }
     },
@@ -161,24 +161,24 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "events": 59,
-            "first_seen": "2026-06-23T06:15:55.962Z",
-            "last_seen": "2026-06-23T07:14:21.845Z",
-            "rule": "Launch Sensitive Mount Container",
-            "proc": "tini",
-            "parent": "containerd-shim",
-            "container": "e1dc89faaa8b"
-          },
-          {
-            "events": 36,
-            "first_seen": "2026-06-23T06:23:36.070Z",
-            "last_seen": "2026-06-23T06:51:48.494Z",
-            "rule": "Read sensitive file untrusted",
-            "proc": "9",
-            "parent": "systemd",
-            "container": "host"
-          }
+          [
+            59,
+            "2026-06-23T06:15:55.962Z",
+            "2026-06-23T07:14:21.845Z",
+            "Launch Sensitive Mount Container",
+            "tini",
+            "containerd-shim",
+            "e1dc89faaa8b"
+          ],
+          [
+            36,
+            "2026-06-23T06:23:36.070Z",
+            "2026-06-23T06:51:48.494Z",
+            "Read sensitive file untrusted",
+            "9",
+            "systemd",
+            "host"
+          ]
         ]
       }
     }

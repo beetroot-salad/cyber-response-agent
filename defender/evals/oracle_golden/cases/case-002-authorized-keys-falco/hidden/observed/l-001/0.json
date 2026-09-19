@@ -32,14 +32,14 @@
   ],
   "row_count": 1,
   "values": [
-    {
-      "@timestamp": "2026-07-25T09:29:02.246Z",
-      "falco.rule": "Adding ssh keys to authorized_keys",
-      "falco.output_fields.fd.name": "/root/.ssh/authorized_keys",
-      "falco.output_fields.user.name": "root",
-      "falco.output_fields.proc.cmdline": "bash -lc mkdir -p /root/.ssh && chmod 700 /root/.ssh\nts=$(date +%s)\necho \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker attacker@elsewhere\" \\\n  >> /root/.ssh/authorized_keys\nchmod 600 /root/.ssh/authorized_keys\nls -la /root/.ssh/authorized_keys\n",
-      "falco.output_fields.container.id": "1df4bcd65ee4",
-      "falco.output_fields.evt.type": "openat"
-    }
+    [
+      "2026-07-25T09:29:02.246Z",
+      "Adding ssh keys to authorized_keys",
+      "/root/.ssh/authorized_keys",
+      "root",
+      "bash -lc mkdir -p /root/.ssh && chmod 700 /root/.ssh\nts=$(date +%s)\necho \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker attacker@elsewhere\" \\\n  >> /root/.ssh/authorized_keys\nchmod 600 /root/.ssh/authorized_keys\nls -la /root/.ssh/authorized_keys\n",
+      "1df4bcd65ee4",
+      "openat"
+    ]
   ]
 }

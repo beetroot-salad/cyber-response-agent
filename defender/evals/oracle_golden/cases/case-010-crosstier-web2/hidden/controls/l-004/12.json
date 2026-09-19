@@ -28,41 +28,41 @@
         ],
         "row_count": 7,
         "values": [
-          {
-            "accepted": 28374,
-            "failed": 0,
-            "user.name": null
-          },
-          {
-            "accepted": 10312,
-            "failed": 0,
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 4400,
-            "failed": 0,
-            "user.name": "svc.deploy"
-          },
-          {
-            "accepted": 1561,
-            "failed": 0,
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 1549,
-            "failed": 0,
-            "user.name": "sre.chen"
-          },
-          {
-            "accepted": 1399,
-            "failed": 0,
-            "user.name": "sre.alice"
-          },
-          {
-            "accepted": 0,
-            "failed": 29040,
-            "user.name": "svc.reports"
-          }
+          [
+            28374,
+            0,
+            null
+          ],
+          [
+            10312,
+            0,
+            "svc.config-mgmt"
+          ],
+          [
+            4400,
+            0,
+            "svc.deploy"
+          ],
+          [
+            1561,
+            0,
+            "sre.ben"
+          ],
+          [
+            1549,
+            0,
+            "sre.chen"
+          ],
+          [
+            1399,
+            0,
+            "sre.alice"
+          ],
+          [
+            0,
+            29040,
+            "svc.reports"
+          ]
         ]
       }
     },
@@ -92,41 +92,41 @@
         ],
         "row_count": 7,
         "values": [
-          {
-            "accepted": 33712,
-            "failed": 0,
-            "user.name": null
-          },
-          {
-            "accepted": 10062,
-            "failed": 0,
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 5257,
-            "failed": 0,
-            "user.name": "svc.deploy"
-          },
-          {
-            "accepted": 1700,
-            "failed": 0,
-            "user.name": "sre.chen"
-          },
-          {
-            "accepted": 1643,
-            "failed": 0,
-            "user.name": "sre.alice"
-          },
-          {
-            "accepted": 1499,
-            "failed": 0,
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 0,
-            "failed": 33696,
-            "user.name": "svc.reports"
-          }
+          [
+            33712,
+            0,
+            null
+          ],
+          [
+            10062,
+            0,
+            "svc.config-mgmt"
+          ],
+          [
+            5257,
+            0,
+            "svc.deploy"
+          ],
+          [
+            1700,
+            0,
+            "sre.chen"
+          ],
+          [
+            1643,
+            0,
+            "sre.alice"
+          ],
+          [
+            1499,
+            0,
+            "sre.ben"
+          ],
+          [
+            0,
+            33696,
+            "svc.reports"
+          ]
         ]
       }
     },
@@ -156,41 +156,41 @@
         ],
         "row_count": 7,
         "values": [
-          {
-            "accepted": 40592,
-            "failed": 0,
-            "user.name": null
-          },
-          {
-            "accepted": 13260,
-            "failed": 0,
-            "user.name": "svc.config-mgmt"
-          },
-          {
-            "accepted": 6348,
-            "failed": 0,
-            "user.name": "svc.deploy"
-          },
-          {
-            "accepted": 2388,
-            "failed": 0,
-            "user.name": "sre.chen"
-          },
-          {
-            "accepted": 2251,
-            "failed": 0,
-            "user.name": "sre.alice"
-          },
-          {
-            "accepted": 2240,
-            "failed": 0,
-            "user.name": "sre.ben"
-          },
-          {
-            "accepted": 0,
-            "failed": 46008,
-            "user.name": "svc.reports"
-          }
+          [
+            40592,
+            0,
+            null
+          ],
+          [
+            13260,
+            0,
+            "svc.config-mgmt"
+          ],
+          [
+            6348,
+            0,
+            "svc.deploy"
+          ],
+          [
+            2388,
+            0,
+            "sre.chen"
+          ],
+          [
+            2251,
+            0,
+            "sre.alice"
+          ],
+          [
+            2240,
+            0,
+            "sre.ben"
+          ],
+          [
+            0,
+            46008,
+            "svc.reports"
+          ]
         ]
       }
     }

@@ -56,16 +56,16 @@
         ],
         "row_count": 2,
         "values": [
-          {
-            "events": 5,
-            "kibana.alert.rule.name": "v2 sshd success after failures",
-            "kibana.alert.severity": "high"
-          },
-          {
-            "events": 1,
-            "kibana.alert.rule.name": "v2 sshd failed-auth burst",
-            "kibana.alert.severity": "medium"
-          }
+          [
+            5,
+            "v2 sshd success after failures",
+            "high"
+          ],
+          [
+            1,
+            "v2 sshd failed-auth burst",
+            "medium"
+          ]
         ]
       }
     },

@@ -46,13 +46,13 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total_failed": 0,
-            "distinct_src_ips": 0,
-            "distinct_users": 0,
-            "first_seen": null,
-            "last_seen": null
-          }
+          [
+            0,
+            0,
+            0,
+            null,
+            null
+          ]
         ]
       }
     },
@@ -90,13 +90,13 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "total_failed": 0,
-            "distinct_src_ips": 0,
-            "distinct_users": 0,
-            "first_seen": null,
-            "last_seen": null
-          }
+          [
+            0,
+            0,
+            0,
+            null,
+            null
+          ]
         ]
       }
     }

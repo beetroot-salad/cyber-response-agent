@@ -24,30 +24,30 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "events": 20160,
-            "data_stream.dataset": "postgresql.log"
-          },
-          {
-            "events": 1800,
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 672,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 14,
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 7,
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 6,
-            "data_stream.dataset": "elastic_agent.filebeat"
-          }
+          [
+            20160,
+            "postgresql.log"
+          ],
+          [
+            1800,
+            "elastic_agent.metricbeat"
+          ],
+          [
+            672,
+            "system.auth"
+          ],
+          [
+            14,
+            "elastic_agent"
+          ],
+          [
+            7,
+            "system.syslog"
+          ],
+          [
+            6,
+            "elastic_agent.filebeat"
+          ]
         ]
       }
     },
@@ -73,30 +73,30 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "events": 20160,
-            "data_stream.dataset": "postgresql.log"
-          },
-          {
-            "events": 1800,
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 840,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 14,
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 7,
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 2,
-            "data_stream.dataset": "elastic_agent.filebeat"
-          }
+          [
+            20160,
+            "postgresql.log"
+          ],
+          [
+            1800,
+            "elastic_agent.metricbeat"
+          ],
+          [
+            840,
+            "system.auth"
+          ],
+          [
+            14,
+            "elastic_agent"
+          ],
+          [
+            7,
+            "system.syslog"
+          ],
+          [
+            2,
+            "elastic_agent.filebeat"
+          ]
         ]
       }
     },
@@ -122,30 +122,30 @@
         ],
         "row_count": 6,
         "values": [
-          {
-            "events": 23040,
-            "data_stream.dataset": "postgresql.log"
-          },
-          {
-            "events": 1800,
-            "data_stream.dataset": "elastic_agent.metricbeat"
-          },
-          {
-            "events": 864,
-            "data_stream.dataset": "system.auth"
-          },
-          {
-            "events": 10,
-            "data_stream.dataset": "elastic_agent"
-          },
-          {
-            "events": 8,
-            "data_stream.dataset": "system.syslog"
-          },
-          {
-            "events": 2,
-            "data_stream.dataset": "elastic_agent.filebeat"
-          }
+          [
+            23040,
+            "postgresql.log"
+          ],
+          [
+            1800,
+            "elastic_agent.metricbeat"
+          ],
+          [
+            864,
+            "system.auth"
+          ],
+          [
+            10,
+            "elastic_agent"
+          ],
+          [
+            8,
+            "system.syslog"
+          ],
+          [
+            2,
+            "elastic_agent.filebeat"
+          ]
         ]
       }
     }

@@ -40,14 +40,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 0,
-            "logins": 0,
-            "login_error": 0,
-            "logouts": 0,
-            "first_seen": null,
-            "last_seen": null
-          }
+          [
+            0,
+            0,
+            0,
+            0,
+            null,
+            null
+          ]
         ]
       }
     },
@@ -89,14 +89,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 0,
-            "logins": 0,
-            "login_error": 0,
-            "logouts": 0,
-            "first_seen": null,
-            "last_seen": null
-          }
+          [
+            0,
+            0,
+            0,
+            0,
+            null,
+            null
+          ]
         ]
       }
     },
@@ -138,14 +138,14 @@
         ],
         "row_count": 1,
         "values": [
-          {
-            "events": 0,
-            "logins": 0,
-            "login_error": 0,
-            "logouts": 0,
-            "first_seen": null,
-            "last_seen": null
-          }
+          [
+            0,
+            0,
+            0,
+            0,
+            null,
+            null
+          ]
         ]
       }
     }

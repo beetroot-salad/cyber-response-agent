@@ -98,33 +98,33 @@
         ],
         "row_count": 3,
         "values": [
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-05T11:26:41.808Z",
-            "last_seen": "2026-07-05T11:26:41.808Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "dev-ws-1"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-05T11:26:41.809Z",
-            "last_seen": "2026-07-05T11:26:41.809Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": "web-2"
-          },
-          {
-            "alerts": 1,
-            "first_seen": "2026-07-05T11:26:41.811Z",
-            "last_seen": "2026-07-05T11:26:41.811Z",
-            "rule": "v2 cross-tier SSH pivot",
-            "rule_id": "v2-cross-tier-ssh-pivot",
-            "severity": "high",
-            "host.name": null
-          }
+          [
+            1,
+            "2026-07-05T11:26:41.808Z",
+            "2026-07-05T11:26:41.808Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "dev-ws-1"
+          ],
+          [
+            1,
+            "2026-07-05T11:26:41.809Z",
+            "2026-07-05T11:26:41.809Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            "web-2"
+          ],
+          [
+            1,
+            "2026-07-05T11:26:41.811Z",
+            "2026-07-05T11:26:41.811Z",
+            "v2 cross-tier SSH pivot",
+            "v2-cross-tier-ssh-pivot",
+            "high",
+            null
+          ]
         ]
       }
     }
