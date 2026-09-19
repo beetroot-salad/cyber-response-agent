@@ -5,13 +5,19 @@ description = "Defender / learning-loop agent (v2 environment)."
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
+    # The boundary-type decorator every `@dataclass` in the tree is migrating to (#1067,
+    # `defender/_model.py`). Was already an undeclared hard dependency of the learning loop —
+    # `learning/judge/__init__.py` imports it at module scope — so this is a declaration
+    # catching up to a fact, not a new pull. Core, not the `runtime` extra: a learning-loop /
+    # CI install that skips `runtime` needs it too.
+    "pydantic>=2",
 ]
 
 [project.optional-dependencies]
 # Runtime investigation loop (in-process PydanticAI). Kept out of the core deps so
-# learning-loop / CI installs (which are SIEM- and runtime-free) don't pull
-# the Anthropic + MCP stack. Slim variant + extras: anthropic is the default
-# provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.3, selected
+# learning-loop / CI installs (SIEM- and pydantic-ai-free, though not pydantic-free — see
+# `dependencies` above) don't pull the Anthropic + MCP stack. Slim variant + extras: anthropic
+# is the default provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.3, selected
 # via a `fireworks:`/`glm-*` model id). Install with: uv pip install -e '.[runtime]'.
 runtime = [
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.19",

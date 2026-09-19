@@ -27,13 +27,13 @@ from dataclasses import field
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import AfterValidator, ConfigDict, TypeAdapter, ValidationError
-from pydantic.dataclasses import dataclass
+from pydantic import AfterValidator, TypeAdapter, ValidationError
 
 
 # `JudgeRefused` lives in `_errors.py`, its own module, so every submodule below can import it
 # without a package-`__init__` import cycle; re-exported here as the ONE class object every
 # caller — including `_triplet_947.refusals()`'s `sym("learning.judge", "JudgeRefused")` — sees.
+from defender._model import model  # noqa: E402
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._io import Bound, bind, guarded_mkdir, write_guarded  # noqa: E402
@@ -94,7 +94,7 @@ def _judge_cap() -> int:
     return env_int(CAP_KNOB, 20000)
 
 
-@dataclass
+@model
 class NotGradedStamp:
     """Why the pass declined to grade an episode: the review's outcome word and its reason."""
 
@@ -119,16 +119,17 @@ def _rows_name_their_world(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-@dataclass(config=ConfigDict(strict=True))
+@model
 class EpisodeGrade:
     """`grade_episode`'s return value — the same shape `judge.yaml` is written as.
 
     THE SCHEMA OF THE RECORD, in both directions: `_write_judge_yaml` dumps this class and
     `_grade_from_document` constructs it from the file's keys, so the field list is spelled
-    here and nowhere else. A pydantic dataclass, STRICT: every construction — the live pass's
-    and the read-back's alike — validates each field by type, with no coercion (`"3"` is not
-    an `int`, a list is not a `frozenset`), and a document of the wrong shape is a
-    `ValidationError` at the constructor rather than a value of the wrong type in a field.
+    here and nowhere else. A pydantic dataclass, STRICT (`defender._model.model`): every
+    construction — the live pass's and the read-back's alike — validates each field by type,
+    with no coercion (`"3"` is not an `int`, a list is not a `frozenset`), and a document of
+    the wrong shape is a `ValidationError` at the constructor rather than a value of the wrong
+    type in a field.
     `episode_dir` and the three `frozenset` fields are DERIVED — never written, re-computed
     from the rows on every read (`_DERIVED`).
     """
@@ -852,8 +853,16 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
     # is not in `grade_episode`'s conversion set — the bare traceback this comment promises
     # never leaves.
     try:
-        record = EpisodeGrade(
-            **{k: v for k, v in doc.items() if k not in _DERIVED}, episode_dir=episode_dir)
+        fields = {k: v for k, v in doc.items() if k not in _DERIVED}
+        # The stamp is a NESTED strict dataclass, and this is Python-mode validation (the
+        # keys are a parsed YAML mapping, not JSON text): a strict nested dataclass admits
+        # only an instance of itself — a well-shaped `{outcome, reason}` mapping is refused
+        # as `dataclass_exact_type` before its keys are looked at. Built here, under the
+        # same refusal; a stamp of the wrong shape (no reason, an int outcome) still lands
+        # as `JudgeRefused` through the `except` below.
+        if isinstance(fields.get("not_graded"), dict):
+            fields["not_graded"] = NotGradedStamp(**fields["not_graded"])
+        record = EpisodeGrade(**fields, episode_dir=episode_dir)
     except (ValidationError, TypeError) as bad:
         raise JudgeRefused(f"{JUDGE_NAME} is not a family grade record: {bad}") from bad
     graded = frozenset(r["world"] for r in record.worlds if family_mod.is_gradable_row(r))
