@@ -138,7 +138,7 @@ class LoopPaths(DefenderPaths):
         name, kept because the live-run appender (`persist.append_findings`) reaches it
         off `paths` rather than off a channel.
 
-        The two lock roles are distinct — they are two FIELDS on `QueueChannel`, so a
+        The two lock roles are distinct — they are two FIELDS on `QueueChannel` (#719), so a
         channel's lock topology reads off one object."""
         return self.pending_dir / ".findings.lock"
 
