@@ -347,7 +347,7 @@ def test_a_questioner_tick_with_a_changed_file_citing_no_batch_finding_773(tmp_p
                               committed=["w1"]),
     )
     assert sc.run() == 2
-    assert sc.corpus_files() == [".gitkeep"]
+    assert sc.corpus_files() == []
 
 
 def test_a_questioner_tick_whose_curator_committed_nothing_773(tmp_path):
@@ -503,17 +503,17 @@ def test_a_channel_with_no_forward_check_on_a_host_with_no_verifier_key_773(tmp_
 
 
 def test_preflight_ordering_when_author_and_verifier_share_a_provider_773(tmp_path):
-    """On a shared-provider host the verifier key is NOT sourced separately: the pre-existing
-    differing-`api_key_var` condition survives the move to the drain (C16).
+    """The verifier-key preflight sources its key UNCONDITIONALLY — not gated on whether the
+    author and verifier share a provider — because the curator spawn it would otherwise ride
+    behind is `cfg.invoke_agent`, an injection seam the drain does not control the internals
+    of (`_verifier_key_preflight`'s own comment). Gating on provider match here would just
+    reintroduce "not checked before the first spawn" on exactly the shared-provider host this
+    test used to special-case, so the key is sourced once regardless of `author_var` vs
+    `verifier_var`.
 
-    §7 FK-27's second half — moving the preflight must not also widen it. Sourcing a key the
-    author will source anyway is a needless new failure mode, and on a shared-provider host
-    it changes which call sources first."""
+    §7 FK-27's second half — moving the preflight must not also widen it. It still must not
+    source the key TWICE (once here, once inside a spawn that reaches for it again)."""
     from defender.learning.core import config as core_config
-    from defender.runtime import providers
-
-    author_var = providers.provider_for(core_config.author_model()).api_key_var
-    verifier_var = providers.provider_for(core_config.verifier_model()).api_key_var
 
     sc = S.build_scene(
         tmp_path,
@@ -524,10 +524,7 @@ def test_preflight_ordering_when_author_and_verifier_share_a_provider_773(tmp_pa
     # The tick must actually have reached the verdict step, or "the key was not sourced" is
     # green on a drain with no preflight at all — which is HEAD's state.
     assert sc.verifier.call_count == 1
-    if author_var == verifier_var:
-        assert core_config.verifier_model() not in sc.keys.models
-    else:
-        assert sc.keys.models.count(core_config.verifier_model()) == 1
+    assert sc.keys.models.count(core_config.verifier_model()) == 1
 
 
 def test_a_lessons_tick_that_ends_on_a_configuration_fault_while_the_sibling_channel_has_work_773(

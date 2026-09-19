@@ -214,10 +214,19 @@ class Scene:
         Computed against the sha the scene was built at, so an empty list means "HEAD did
         not move". Reading the tip commit's own name list would answer the repo's whole
         file set on a tick that committed nothing, because the tip would still be the
-        fixture's initial commit — and `== []` would then never be true of anything."""
+        fixture's initial commit — and `== []` would then never be true of anything.
+
+        `--no-renames`: the commit itself never records a rename — `commit_corpus_paths`
+        stages an add and a delete as two independent index entries (M5) — a rename is
+        purely a similarity heuristic `git diff` applies after the fact, and the fixture
+        lessons here are near-identical short files (one frontmatter line differs) that
+        cross git's default 50% threshold easily. Without this flag a deletion this tick
+        genuinely made is silently absent from the list whenever its replacement happens
+        to read as similar, which answers a question about content resemblance, not about
+        which paths this operator's own instrument says the commit touched."""
         if self.head_sha() == self.base_sha:
             return []
-        out = git(self.repo, "diff", "--name-only", self.base_sha, "HEAD").stdout
+        out = git(self.repo, "diff", "--no-renames", "--name-only", self.base_sha, "HEAD").stdout
         return sorted(p for p in out.splitlines() if p.strip())
 
     def head_message(self) -> str:
