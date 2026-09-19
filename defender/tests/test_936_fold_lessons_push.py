@@ -214,8 +214,10 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
     the frontier row's block is byte-for-byte `render(match_lessons(frontier_from_text(doc),
     corpus), lead=FOLD_LEAD)` — the same top-k, the same ranking, the same lead the fold
     is documented to use. A fold that derived with its own `top_k`, or its own corpus, or a
-    lead that does not tell the model the turns are gone, differs here and nowhere else in
-    this file: every other scenario matches at most one lesson at mint."""
+    lead that does not tell the model its history was folded and this is what the record
+    matches NOW (not a re-show of what it was shown — the block is derived fresh and can name
+    a lesson it never saw), differs here and nowhere else in this file: every other scenario
+    matches at most one lesson at mint."""
     from defender.scripts.lessons.lessons_frontier import FOLD_LEAD, match_lessons, render
     from defender.skills.invlang.frontier import frontier_from_text
 
@@ -228,8 +230,10 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
     expected = render(match_lessons(frontier_from_text(doc), corpus), lead=FOLD_LEAD)
     assert CLASS_LESSON in expected, "control: two hits"
     assert LOGINUID_LESSON in expected, "control: two hits"
-    assert "no longer in the history" in FOLD_LEAD
+    assert "history was folded" in FOLD_LEAD
+    assert "matches now" in FOLD_LEAD
     assert "as it stands" in FOLD_LEAD
+    assert "already been shown" not in FOLD_LEAD, "the lead must not claim a re-show"
     assert WRITE_RETURN_HEADER not in FOLD_LEAD
 
     rd, _replay, store, _ = _fold_run(

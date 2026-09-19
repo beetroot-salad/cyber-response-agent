@@ -17,10 +17,10 @@ disagree on what "the lessons for this document" means:
 
 The gate that decides WHETHER to push stays with each caller — the write return diffs the
 hits of two documents and renders only when they differ, the fold composes only when the
-mint primitive asks it to (`selection.Composer`). So the shared steps are cut where the
-write return gates: corpus, walk, HITS, then render-with-lead and record as separate steps,
-so a caller can compare hits without paying for a block it will throw away. Fail-open,
-loud-empty and the resolved path come along by construction.
+mint primitive asks it to (`selection.Composer`). The walk, the match and the render are
+`_corpus.iter_lessons` and `lessons_frontier.match_loaded` / `render`, called directly by
+both — this module holds only what has logic of its own: the corpus check with its stderr
+line, the identity a block is compared on, the record, and the fold's composition.
 
 NOT gated by `permission.decide_read`, deliberately, on the same terms `_frontier_recall`
 states: the gate governs what the MODEL may read; this is the runtime composing text to hand
@@ -36,9 +36,7 @@ from typing import TYPE_CHECKING
 from defender.hooks.record_lesson_load import LOAD_KIND_PUSH
 
 if TYPE_CHECKING:
-    from defender._corpus import Lesson
     from defender.scripts.lessons.lessons_frontier import Hit
-    from defender.skills.invlang.frontier import Frontier
 
     from .tools._deps import AgentDeps
 
@@ -57,38 +55,12 @@ def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
     return corpus
 
 
-def walk_lessons(corpus: Path) -> list[Lesson]:
-    """ONE walk, materialized: `iter_lessons` re-opens and re-YAML-parses every file in the
-    corpus per call, and it is the dominant cost of a push — a caller scoring two frontiers
-    (the write return's `was` and `now`) must score them against the same list."""
-    from defender._corpus import iter_lessons
-
-    return list(iter_lessons(corpus))
-
-
 def shape(hits: Iterable[Hit]) -> list[tuple[str, int]]:
     """WHICH lessons, at what score — the identity a block is compared on. SORTED: the ranked
     list is re-ordered by which frontier item won (`_spread_over_items`, #935), so an
     unsorted comparison would re-emit a byte-identical block because one hit's winner moved.
     `_frontier_recall`'s own comment carries the full argument."""
     return sorted((str(h.path), h.score) for h in hits)
-
-
-def hits_for(frontier: Frontier, lessons: list[Lesson]) -> list[Hit]:
-    """WHICH lessons `frontier` matches over an already-walked corpus, ranked — the one
-    entry into the matcher for both pushes, so the write return's `was` and `now` and the
-    fold's block are the same derivation and `shape` compares like with like."""
-    from defender.scripts.lessons.lessons_frontier import match_loaded
-
-    return match_loaded(frontier, lessons)
-
-
-def render(hits: list[Hit], *, lead: str) -> str:
-    """The block for `hits` with the caller's lead on line 1 — a separate step from `hits_for`
-    because the write return decides on the hits and renders only when they moved."""
-    from defender.scripts.lessons.lessons_frontier import render as _render
-
-    return _render(hits, lead=lead)
 
 
 def record(deps: AgentDeps, hits: Iterable[Hit]) -> None:
@@ -127,7 +99,8 @@ def compose_fold(
     the record. One stderr line, never silence.
     """
     try:
-        from defender.scripts.lessons.lessons_frontier import FOLD_LEAD
+        from defender._corpus import iter_lessons
+        from defender.scripts.lessons.lessons_frontier import FOLD_LEAD, match_loaded, render
         from defender.skills.invlang.frontier import frontier_from_text
 
         corpus = corpus_dir(deps, lane=_FOLD_LANE)
@@ -136,7 +109,7 @@ def compose_fold(
         frontier = frontier_from_text(document)
         if frontier.is_empty():
             return record_text, None
-        hits = hits_for(frontier, walk_lessons(corpus))
+        hits = match_loaded(frontier, list(iter_lessons(corpus)))
         if not hits:
             return record_text, None
         block = render(hits, lead=FOLD_LEAD)

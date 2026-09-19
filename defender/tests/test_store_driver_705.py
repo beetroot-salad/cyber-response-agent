@@ -89,6 +89,19 @@ l-005|2|cmdb-ip|v-006||cmdb|w
 ```
 """
 
+
+def test_the_closed_loop_fixture_opens_no_slot():
+    """Pinned because since #936 the fold's mint walks `defender_dir/lessons` — the CHECKOUT's
+    live corpus here, since `drive` plants no tree — and would put real lesson paths into the
+    frontier row and `push` rows into the run dir for any slot this fixture opened. The
+    scenarios below name the corpus nowhere as an input; this keeps it out of them. A test
+    that wants a matching fold plants its own tree and corpus (`test_936_fold_lessons_push`)."""
+    from defender.skills.invlang.frontier import frontier_from_text
+
+    assert frontier_from_text(_CLOSED_LOOP_INVLANG).is_empty(), (
+        "the closed-loop fixture opens a slot; the fold would now match the live lessons corpus")
+
+
 #: A token the MAIN agent emits into its own history and that nothing else in the driven
 #: conversation contains. Probed, not assumed: the leak test below reads it back out of
 #: main's own next request as its positive control, and the string it replaced

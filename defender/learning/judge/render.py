@@ -27,6 +27,14 @@ import contextlib
 
 from defender._io import Bound, bind
 from defender._run_paths import PROVENANCE
+from defender.hooks.record_lesson_load import (
+    EVIDENCE_INDIRECT,
+    EVIDENCE_PUSH,
+    EVIDENCE_READ,
+    EVIDENCE_UNKNOWN,
+    LessonExposure,
+    exposures,
+)
 from defender.learning.branch.archive import (
     ALERT_NAME,
     LESSONS_LOADED_NAME,
@@ -258,10 +266,11 @@ def _render_lessons(lessons: list[dict[str, Any]]) -> str:
     lines = []
     for entry in lessons:
         name = entry.get("lesson_name")
+        head = f"### {name}\n({entry['exposure']})\n" if entry.get("exposure") else f"### {name}\n"
         if entry.get("body") is not None:
-            lines.append(f"### {name}\n{entry['body']}")
+            lines.append(f"{head}{entry['body']}")
         else:
-            lines.append(f"### {name}\n{entry.get('note')}")
+            lines.append(f"{head}{entry.get('note')}")
         # `is not False`, not truthiness. `dirty` is three-valued and `None` means the tree was
         # never measured, which is not a clean bill of health — the caveat belongs on that world
         # too, saying which of the two it is.
@@ -683,32 +692,25 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     dirty = provenance.get("dirty")
     lessons_loaded, _malformed, _rec = world.read_jsonl(LESSONS_LOADED_NAME)
     lessons: list[dict[str, Any]] = []
-    # ONE BODY PER LESSON, first occurrence's order. The file is an EVENT log — a row per
-    # time a lesson reached an agent, and since #936 the compaction fold writes a `push` row
-    # per matching lesson at every boundary on top of the read and write-return rows — while
-    # this view is a set of what was in front of the model; rendered per row, a lesson the
-    # run kept matching would repeat its whole body once per boundary in the judge's prompt.
-    seen: set[str] = set()
-    for entry in lessons_loaded:
-        name = entry.get("lesson_name")
-        # A malformed name (not a string) is not deduplicated — it renders as the
-        # "unavailable" row it always did, and a set lookup on it could raise.
-        if isinstance(name, str):
-            if name in seen:
-                continue
-            seen.add(name)
-        # DERIVED FROM THE NAME WHEN THE ROW CARRIES NO PATH, which on a real sibling is always.
-        # `lessons_loaded.jsonl` has exactly one production writer — `runtime/tools/_deps.
-        # _record_lesson_load` — and it writes `{lesson_name, ts, kind, role}` (#936 added the last
-        # two; this builder does not read them): no `path` column exists. Read
-        # as an absent path, EVERY lesson of EVERY real archived world rendered as "unavailable:
-        # no path is recorded", so VIEW 4 shipped with no bodies at all and the whole `git_show`
-        # /`lessons_commit` seam below was dead in production while green against fixtures that
-        # synthesise the column. The name IS the path: `hooks/record_lesson_load.lesson_name`
-        # returns `p.stem` of `defender/<corpus>/<name>.md`, and the runtime corpus is one
-        # directory (`RUNTIME_LESSON_CORPORA`), so the row's own name resolves it.
-        recorded = entry.get("path")
-        candidates = [recorded] if isinstance(recorded, str) else _lesson_paths_for(name)
+    # READ AS A SET through the record's one reader (`hooks.record_lesson_load.exposures`,
+    # the same call `learning/ops/trace_lesson.py` makes): the file is an EVENT log — a row per
+    # time a lesson reached an agent, one per matching lesson per compaction boundary since
+    # #936 — and this view is what was in front of the model. Rendered per row, a lesson the
+    # run kept matching repeated its whole body once per boundary in the judge's prompt; and
+    # a row that says `push` means the model saw the description and dimensions, not the body
+    # below, which the exposure line beside each lesson now says.
+    for exposure in exposures(lessons_loaded):
+        name = exposure.lesson_name
+        # DERIVED FROM THE NAME: `lessons_loaded.jsonl` has exactly one production writer —
+        # `runtime/tools/_deps._record_lesson_load` — and it writes `{lesson_name, ts, kind,
+        # role}`: no `path` column exists. Read as an absent path, EVERY lesson of EVERY real
+        # archived world rendered as "unavailable: no path is recorded", so VIEW 4 shipped with
+        # no bodies at all and the whole `git_show`/`lessons_commit` seam below was dead in
+        # production while green against fixtures that synthesise the column. The name IS the
+        # path: `hooks/record_lesson_load.lesson_name` returns `p.stem` of
+        # `defender/<corpus>/<name>.md`, and the runtime corpus is one directory
+        # (`RUNTIME_LESSON_CORPORA`), so the row's own name resolves it.
+        candidates = _lesson_paths_for(name)
         path = candidates[0] if candidates else None
         body = None
         note = None
@@ -725,7 +727,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
             if body is None:
                 note = f"unavailable: {path!r} at {commit!r} could not be read"
         lessons.append({"lesson_name": name, "path": path, "body": body, "note": note,
-                        "dirty": dirty})
+                        "dirty": dirty, "exposure": _exposure_line(exposure)})
 
     siblings, union_notes = union if union is not None else sibling_union(
         Path(runs_base) if runs_base is not None else None,
@@ -783,6 +785,26 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
         sample_text=sample_text, review_text=review_text,
         payload_cap=payload_cap,
     )
+
+
+#: What the judge is told about HOW a lesson reached the model, per `LessonExposure.evidence`.
+#: The body is rendered whichever class it is — the judge grades whether the model acted on
+#: what it was shown, and needs the lesson to grade that — but a `push` shows the model a
+#: description and dimensions, not this body, and the judge must not weigh the body as if
+#: the model had read it.
+_EXPOSURE_LINES = {
+    EVIDENCE_READ: "read by the model",
+    EVIDENCE_PUSH: "pushed by the runtime: the model saw this lesson's description and "
+                   "dimensions, never the body below",
+    EVIDENCE_INDIRECT: "reached another agent only, never the model",
+    EVIDENCE_UNKNOWN: "in context, but the record predates the read/push distinction and "
+                      "cannot say which",
+}
+
+
+def _exposure_line(exposure: LessonExposure) -> str:
+    when = f" at {exposure.evidence_at}" if exposure.evidence_at else ""
+    return f"{_EXPOSURE_LINES[exposure.evidence]}{when}"
 
 
 def _lesson_paths_for(lesson_name: Any) -> list[str]:

@@ -694,13 +694,16 @@ WRITE_RETURN_LEAD = (
     "### Lessons matched against your record — pushed because this write moved it. "
     + _READ_DISCIPLINE
 )
-#: The compaction fold's lead (#936): nothing moved — the turns that carried the earlier
-#: blocks were displaced by the fold, so the frontier row re-shows the current top three.
-#: A DIFFERENT sentence on purpose: told "this write moved it" on a row no write produced,
+#: The compaction fold's lead (#936): the turns that carried the earlier blocks were
+#: displaced by the fold, and the frontier row carries the top three the record matches NOW —
+#: derived fresh over the whole document, not copied from what the displaced turns showed,
+#: so it can name a lesson the model never saw (a return that failed open, a lesson added
+#: mid-run). The sentence says what the block is, not what it repeats. A DIFFERENT sentence
+#: from the write return's on purpose: told "this write moved it" on a row no write produced,
 #: the model would look for the write.
 FOLD_LEAD = (
-    "### Lessons matched against your record as it stands — the turns that carried these "
-    "are no longer in the history. " + _READ_DISCIPLINE
+    "### Lessons matched against your record as it stands — your history was folded, and "
+    "this is what the record matches now. " + _READ_DISCIPLINE
 )
 
 

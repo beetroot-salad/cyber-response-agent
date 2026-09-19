@@ -19,12 +19,15 @@ block, which pushes the same way and records nothing. So a lesson carrying ``fro
 difference in counts between two lessons with that in mind.
 
 The ``evidence`` column names the strongest class behind a case's "in context", from the
-CLOSED vocabulary ``read`` (a MAIN read) > ``push`` > ``indirect`` (a read by another role
+CLOSED vocabulary ``read`` (a MAIN read) > ``push`` (to MAIN) > ``indirect`` (another role
 only — a GATHER agent or a curator) > ``unknown`` (rows from before #936, which cannot say —
-an honest downgrade of history rather than an assumed read). Only qualifying rows count: a
-row outside the lesson's ``created_at`` window lifts nothing. The value is EMITTED from that
-vocabulary, never from the row's bytes: ``lessons_loaded.jsonl`` is a #1047 forgery
-universal, and a ``kind`` carrying a tab must not forge a column.
+an honest downgrade of history rather than an assumed read), and ``loaded_at`` is the
+earliest row OF THAT CLASS, so the two cells describe one event. Both come from the record's
+one reader, ``hooks.record_lesson_load.exposures`` — the judge's lessons view asks the same
+function, so the two cannot disagree about what was in front of the model. Only qualifying
+rows count: a row outside the lesson's ``created_at`` window lifts nothing. The value is
+EMITTED from that vocabulary, never from the row's bytes: ``lessons_loaded.jsonl`` is a
+#1047 forgery universal, and a ``kind`` carrying a tab must not forge a column.
 
 Usage:
   trace_lesson.py --all                 # <name>\\t<description>\\t<in_context_cases>\\t<main_read_cases>
@@ -54,8 +57,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._clock import parse_iso_utc
 from defender._corpus import iter_lessons
-from defender.hooks.record_lesson_load import LOAD_KIND_PUSH, LOAD_KIND_READ
-from defender.runtime.agent_role import AgentRole
+from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._report import UNKNOWN_DISPOSITION, read_report
@@ -65,8 +67,6 @@ from defender.learning.core.config import DEFAULT_PATHS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
-
-_DT_MAX = datetime.max.replace(tzinfo=UTC)
 
 
 def _echo_value(raw: object) -> str:
@@ -94,36 +94,6 @@ def _parse_dt(raw) -> datetime | None:
     if isinstance(raw, date):
         return datetime(raw.year, raw.month, raw.day, tzinfo=UTC)
     return parse_iso_utc(raw)
-
-
-#: The `evidence` vocabulary, strongest first. `read` and `push` ARE the writer's own `kind`
-#: values (aliased, not re-spelled, so the column and the match cannot drift apart);
-#: `indirect` and `unknown` are this reader's classifications of a row.
-EVIDENCE_READ = LOAD_KIND_READ
-EVIDENCE_PUSH = LOAD_KIND_PUSH
-EVIDENCE_INDIRECT = "indirect"
-EVIDENCE_UNKNOWN = "unknown"
-_EVIDENCE_RANK = {EVIDENCE_READ: 3, EVIDENCE_PUSH: 2, EVIDENCE_INDIRECT: 1, EVIDENCE_UNKNOWN: 0}
-
-
-def _row_evidence(row: dict) -> str:
-    """One row's class, from the closed vocabulary and nothing else. A `kind` or `role`
-    outside the writer's spelling — legacy rows, or bytes a forger put there — is `unknown`,
-    never echoed, never guessed: `role` is matched against the `AgentRole` values, so a read
-    under a role that is not one of them says "cannot say" rather than "another agent"."""
-    kind, role = row.get("kind"), row.get("role")
-    if kind == LOAD_KIND_PUSH:
-        return EVIDENCE_PUSH
-    if kind != LOAD_KIND_READ:
-        return EVIDENCE_UNKNOWN
-    # Membership answered by the enum itself, not a local copy of its values: `AgentRole(x)`
-    # raises `ValueError` for a string outside the vocabulary AND for a forged list, so the
-    # unhashable case that would cost the whole walk under a set lookup is the same branch.
-    try:
-        reader = AgentRole(role)
-    except ValueError:
-        return EVIDENCE_UNKNOWN
-    return EVIDENCE_READ if reader is AgentRole.MAIN else EVIDENCE_INDIRECT
 
 
 @dataclass
@@ -156,30 +126,6 @@ def _report_disposition(run_dir: Path) -> str:
     return read.disposition_or_unknown
 
 
-def _earliest_load(
-    loaded: Path, lesson_name: str, created_at: datetime | None
-) -> tuple[str, str] | None:
-    """`(loaded_at, evidence)` over the QUALIFYING rows — the earliest timestamp, and the
-    strongest evidence class any of them carries — or `None` when no row qualifies."""
-    qualifying: list[tuple[datetime | None, str]] = []
-    evidence = EVIDENCE_UNKNOWN
-    for row in read_jsonl_rows(loaded):
-        if row.get("lesson_name") != lesson_name:
-            continue
-        ts = _parse_dt(row.get("ts"))
-        if created_at is not None and (ts is None or ts < created_at):
-            continue
-        qualifying.append((ts, str(row.get("ts"))))
-        evidence = max(evidence, _row_evidence(row), key=_EVIDENCE_RANK.__getitem__)
-    if not qualifying:
-        return None
-    earliest = min(
-        qualifying,
-        key=lambda q: (q[0] is None, q[0] if q[0] is not None else _DT_MAX, q[1]),
-    )[1]
-    return earliest, evidence
-
-
 def in_context_cases(
     lesson_name: str, created_at: datetime | None, runs_dir: Path
 ) -> list[CaseHit]:
@@ -190,10 +136,10 @@ def in_context_cases(
         loaded = run_dir / "lessons_loaded.jsonl"
         if not loaded.is_file():
             continue
-        found = _earliest_load(loaded, lesson_name, created_at)
-        if found is not None:
-            earliest, evidence = found
-            hits.append(CaseHit(run_dir.name, _report_disposition(run_dir), earliest, evidence))
+        for exposure in exposures(read_jsonl_rows(loaded), since=created_at):
+            if exposure.lesson_name == lesson_name:
+                hits.append(CaseHit(run_dir.name, _report_disposition(run_dir),
+                                    str(exposure.evidence_at), exposure.evidence))
     return hits
 
 

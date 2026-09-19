@@ -305,16 +305,16 @@ def _summary_pointers(run_dir: Path) -> dict[str, str]:
 
 
 class _FoldDecision(NamedTuple):
-    #: The LOOP number (see `_fold_decision`), the frontier's record text, and the whole
-    #: document the record was cut from — the fold's lessons block keys on the document, not
-    #: the record (`lessons_push.compose_fold`).
+    #: The LOOP number (see `_fold_decision`) and the whole document at decision time. What
+    #: the frontier row CARRIES — the record cut from the document, plus the lessons block the
+    #: document matches — is composed by `_fold_composer` at mint only, not here on every render.
     boundary: int
-    text: str
     document: str
 
 
 def _fold_decision(run_dir: Path) -> _FoldDecision | None:
-    """WHEN to fold, and what the frontier carries — `None` for "not yet".
+    """WHEN to fold — `None` for "not yet". What the frontier carries is `_fold_composer`'s,
+    built at mint only.
 
     `compaction.fold_boundary` is the highest CONTIGUOUS closed investigation loop that
     produced a resolved lead, and `0` until one closes. That gate is the whole policy —
@@ -330,19 +330,22 @@ def _fold_decision(run_dir: Path) -> _FoldDecision | None:
     fold_through = compaction.fold_boundary(inv_text)
     if fold_through <= 0:
         return None
-    return _FoldDecision(fold_through, compaction.frontier_text(inv_text, fold_through), inv_text)
+    return _FoldDecision(fold_through, inv_text)
 
 
 def _fold_composer(deps: AgentDeps, decision: _FoldDecision) -> selection.Composer:
     """The frontier row's text, composed ONLY at mint (#936): the mint primitive calls this
-    on its append path and never on a reuse round, so the corpus is walked once per boundary
-    and the push recorded once, right after the row landed. The row carries the lessons
-    block the FULL document matches, because the fold displaces every turn before the
-    boundary — the write returns that carried earlier blocks go with them, and nothing else
-    would re-push them — and the record itself may be cut before the slot a lesson keys on
-    (`_frontier_through`), which is why the block keys on `decision.document` and not on
-    `decision.text`."""
-    return lambda: lessons_push.compose_fold(deps, decision.text, decision.document)
+    on its append path and never on a reuse round, so the record is cut once per boundary,
+    the corpus walked once, and the push recorded once, right after the row landed. The row
+    carries the record (`compaction.frontier_text`) and the lessons block the FULL document
+    matches — the fold displaces every turn before the boundary, the write returns that
+    carried earlier blocks go with them, and nothing else would re-push them; and the record
+    itself may be cut before the slot a lesson keys on (`_frontier_through`), which is why the
+    block keys on the document and not on the record."""
+    def compose():
+        record = compaction.frontier_text(decision.document, decision.boundary)
+        return lessons_push.compose_fold(deps, record, decision.document)
+    return compose
 
 
 def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation injector rides this seam

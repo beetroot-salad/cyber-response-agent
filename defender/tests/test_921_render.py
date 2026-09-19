@@ -500,13 +500,15 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
         "a lesson BODY was archived; D7 keeps them out of the archive on purpose")
 
 
-def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once(tmp_path):
+def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_how_it_reached_the_model(tmp_path):
     """`lessons_loaded.jsonl` is an EVENT log — a row per time a lesson reached an agent, and
     since #936 the compaction fold writes a `push` row per matching lesson at every boundary
     on top of the read and write-return rows — while this view is the SET of what was in
     front of the model. Rendered per row, a lesson the run kept matching would put its whole
-    body in the judge's prompt once per boundary, weighting the judge toward it by repetition.
-    Control on the same render: two DIFFERENT lessons still render two bodies."""
+    body in the judge's prompt once per boundary, weighting the judge toward it by repetition;
+    and a `push` row means the model saw a description, not the body, which the judge must be
+    told or it weighs the body as read. Control on the same render: two DIFFERENT lessons
+    still render two bodies."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     rows = [
@@ -529,6 +531,15 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once(tmp_path):
     assert lessons.count("the second body") == 1, "control: the other lesson still renders"
     assert lessons.index("the first body") < lessons.index("the second body"), (
         "first-occurrence order — the order the lessons reached the model")
+    # HOW each reached the model, beside its body — the record's one reader
+    # (`hooks.record_lesson_load.exposures`) says `read` for L1 and `push` for L2, and a push
+    # showed the model a description and dimensions, not the body the judge is handed here.
+    l1 = lessons[lessons.index("### L1"):lessons.index("### L2")]
+    l2 = lessons[lessons.index("### L2"):]
+    assert "read by the model at 2026-07-28T17:00:00Z" in l1, l1
+    assert "never the body below at 2026-07-28T17:02:00Z" in l2, l2
+    assert l2.index("never the body below") < l2.index("the second body"), (
+        "the exposure line must come before the body it qualifies")
 
 
 def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothing(tmp_path):

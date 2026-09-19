@@ -411,7 +411,12 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
     exact lie `_warn_over` fails open to avoid.
     """
     try:
-        from defender.scripts.lessons.lessons_frontier import WRITE_RETURN_LEAD
+        from defender._corpus import iter_lessons
+        from defender.scripts.lessons.lessons_frontier import (
+            WRITE_RETURN_LEAD,
+            match_loaded,
+            render,
+        )
         from defender.skills.invlang.frontier import frontier_from_text
 
         from .. import lessons_push
@@ -455,10 +460,11 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
             return ""
         if now_frontier.is_empty():
             return ""
-        # ONE walk for the two frontiers below — the two scores are pure functions of the
-        # same bytes, which cannot change between them.
-        lessons = lessons_push.walk_lessons(corpus)
-        hits = lessons_push.hits_for(now_frontier, lessons)
+        # ONE walk for the two frontiers below. `iter_lessons` re-opens and re-YAML-parses
+        # every file in the corpus per call, and it is the dominant cost here — the two scores
+        # are pure functions of the same bytes, which cannot change between them.
+        lessons = list(iter_lessons(corpus))
+        hits = match_loaded(now_frontier, lessons)
         # The second gate is what keeps a MOVE that changed no lesson quiet — the frontier can
         # open a slot no selector speaks to, and re-stapling the same three lines then teaches
         # the model to stop reading them.
@@ -493,13 +499,13 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # this `before` is, so "the top three moved from what the fold showed" and "the top
         # three moved from `before`" are the same question.
         if not hits or lessons_push.shape(hits) == lessons_push.shape(
-            lessons_push.hits_for(was_frontier, lessons)
+            match_loaded(was_frontier, lessons)
         ):
             return ""
         # Rendered only past the gate — the block is yaml over three frontmatters and three
         # resolved paths, built here and nowhere earlier so a write that moved the frontier
         # but not the top three pays for the comparison alone.
-        now = lessons_push.render(hits, lead=WRITE_RETURN_LEAD)
+        now = render(hits, lead=WRITE_RETURN_LEAD)
         lessons_push.record(deps, hits)
         return "\n\n" + now
     except Exception as e:  # noqa: BLE001 — fail open; the write already landed

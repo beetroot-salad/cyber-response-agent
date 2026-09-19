@@ -262,14 +262,77 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
     assert set(c[3] for c in cells.values()) <= EVIDENCE_VOCABULARY
 
 
+# the record's ONE reader — `hooks.record_lesson_load.exposures`
+
+def test_the_record_has_one_reader_and_both_consumers_ask_it():
+    """The judge's lessons view and the trace CLI both read `lessons_loaded.jsonl` through
+    `exposures` (and its classifier `row_evidence`) rather than each interpreting the rows —
+    #785's rule, one parser not several interpreters that drift. Pinned by identity: the
+    consumers import the function, not a copy of it, and neither keeps a classifier of its
+    own."""
+    import defender.hooks.record_lesson_load as reader
+    from defender.learning.judge import render as judge
+
+    tl = _tl()
+    assert tl.exposures is reader.exposures
+    assert judge.exposures is reader.exposures
+    for consumer in (tl, judge):
+        own = [n for n in vars(consumer) if "evidence" in n.lower() and callable(getattr(consumer, n))]
+        assert own == [], f"{consumer.__name__} keeps its own row classifier: {own}"
+
+
+def test_a_push_to_another_role_is_indirect_and_a_push_without_a_role_is_unknown():
+    """A `push` row says the runtime put the lesson in front of the role it names — it says
+    nothing about MAIN unless MAIN is that role. `record` writes whichever deps it is handed,
+    so a future push to GATHER, or a forged row, must rank `indirect`/`unknown`, not above a
+    genuine GATHER read."""
+    from defender.hooks.record_lesson_load import row_evidence
+
+    assert row_evidence({"kind": "push", "role": "main"}) == "push"
+    assert row_evidence({"kind": "push", "role": "gather"}) == "indirect"
+    assert row_evidence({"kind": "read", "role": "gather"}) == "indirect"
+    assert row_evidence({"kind": "push"}) == "unknown"
+    assert row_evidence({"kind": "push", "role": ["main"]}) == "unknown"
+    assert row_evidence({"kind": ["push"], "role": "main"}) == "unknown"
+
+
+def test_exposure_time_is_the_earliest_row_of_the_strongest_class():
+    """`evidence_at` and `evidence` describe ONE event: a case pushed at 10:00 and read by MAIN
+    at 11:00 is `read` at 11:00, never `read` at 10:00 (the earliest row of any class paired
+    with the strongest class read as "MAIN read it at 10:00"). Among rows of the strongest
+    class the earliest wins, by instant not string order; and the record is read as a set —
+    one exposure per lesson, first-occurrence order, however many rows."""
+    from defender.hooks.record_lesson_load import exposures
+
+    rows = [
+        _row("L", ts="2026-06-05T10:00:00+00:00", kind="push", role="main"),
+        _row("M", ts="2026-06-05T10:00:00+00:00", kind="push", role="main"),
+        _row("L", ts="2026-06-05T11:30:00+00:00", kind="read", role="main"),
+        _row("L", ts="2026-06-05T20:00:00+09:00", kind="read", role="main"),  # 11:00 UTC
+        _row("L", ts="2026-06-05T12:00:00+00:00", kind="push", role="main"),
+    ]
+    got = exposures(rows)
+    assert [(e.lesson_name, e.evidence, e.evidence_at, e.rows) for e in got] == [
+        ("L", "read", "2026-06-05T20:00:00+09:00", 4),
+        ("M", "push", "2026-06-05T10:00:00+00:00", 1),
+    ]
+    # the window drops a row entirely, so a stale read cannot lend its class OR its time
+    from datetime import UTC, datetime
+
+    windowed = exposures(rows, since=datetime(2026, 6, 5, 11, 45, tzinfo=UTC))
+    assert [(e.lesson_name, e.evidence, e.evidence_at) for e in windowed] == [
+        ("L", "push", "2026-06-05T12:00:00+00:00")]
+
+
 # O3 — the prose contract
 
 def test_skill_md_names_the_fold_push_and_what_no_block_means_after_it():
     """O3 / M4: SKILL.md §Lessons tells the model what the fold block is — a third push,
-    keyed on the record, re-showing the current top three because the turns that carried
-    them are gone — and that "no block" after a fold means unchanged since the fold showed
-    it. Pinned on distinctive substrings, not the sentence: the old "Two pushes" framing must
-    be gone and the fold must be named where the pushes are enumerated."""
+    keyed on the record, the top three the record matches at the fold (derived fresh, not a
+    re-show of what it was shown) — and that "no block" after a fold means unchanged since
+    the fold showed it. Pinned on distinctive substrings, not the sentence: the old "Two
+    pushes" framing must be gone, the fold must be named where the pushes are enumerated, and
+    the prose must not claim the block is what the model "had already been shown"."""
     text = (DEFENDER / "SKILL.md").read_text(encoding="utf-8")
     start = text.index("**Lessons.**")
     end = text.index("### GATHER", start)
@@ -280,3 +343,6 @@ def test_skill_md_names_the_fold_push_and_what_no_block_means_after_it():
         "SKILL.md does not say the fold push is keyed on the record (like push 2, not the alert)")
     assert "unchanged since the fold" in section.lower(), (
         "SKILL.md does not tell the model \"no block\" after a fold means unchanged since it")
+    assert "already been shown, put back" not in section, (
+        "SKILL.md claims the fold block is a re-show; it is derived fresh over the record")
+    assert "derived fresh" in section.lower()

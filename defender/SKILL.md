@@ -261,10 +261,11 @@ rather than a fact carries none and is reached by grep.
    carries its own read instructions.
 3. **The frontier message after a fold** — when your history is folded, the
    turns that carried earlier returns are gone, so the frontier message that
-   replaces them re-shows the current top three, matched against your record
-   as it stands. Keyed on the record like push 2, not on the alert like push 1.
-   Nothing moved: this is what you had already been shown, put back in front
-   of you.
+   replaces them carries the top three matched against your record as it
+   stands. Keyed on the record like push 2, not on the alert like push 1.
+   Derived fresh, not copied from what you were shown: usually the same three,
+   but a lesson you never saw can be there (a return that failed open, a lesson
+   added since) and one you did see can be gone. Judge them as you would push 2.
 
 **No block means nothing new reached the TOP THREE**, never that the corpus is
 exhausted and never that nothing matched: your write left the state where it
