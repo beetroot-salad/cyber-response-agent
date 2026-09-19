@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from defender._model import model
 
 from . import vocab
 from .corpus import Companion, LoadReport, load_corpus
@@ -34,7 +36,7 @@ CAVEAT = (
 
 
 
-@dataclass
+@model
 class AdvisorySection:
 
     name: str
@@ -46,7 +48,7 @@ class AdvisorySection:
         return not self.hits
 
 
-@dataclass
+@model
 class AdvisoryResult:
     corpus_root: str
     signature_id: str

@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass, field
-from typing import Any, TypeVar, cast
+from dataclasses import field
+from typing import Annotated, Any, TypeVar, cast
+
+from pydantic import SkipValidation
+
+from defender._model import model
 
 from .._cells import (
     _has_unbalanced_quote,
@@ -71,12 +75,21 @@ from ._rows import (
 _RowT = TypeVar("_RowT")
 
 
-@dataclass
+@model
 class _Projector:
 
     out: dict[str, Any] = field(default_factory=dict)
     warnings: list[ParseWarning] = field(default_factory=list)
-    hypotheses_by_id: dict[str, HypothesisRecord] = field(default_factory=dict)
+    #: `SkipValidation`, same reason `corpus.Companion.body` carries it (#1067 PR 4):
+    #: `HypothesisRecord` is a `TypedDict` written incrementally, one field at a time, across
+    #: many projector methods (`hyp.setdefault("predictions", []).append(...)`, `_attach_hyp_sub_rows`
+    #: above) — an intermediate value legitimately has none of its "required" keys yet, and
+    #: pydantic re-validating the mapping on every field access/append would both refuse those
+    #: intermediate states and rebuild the dict pydantic copies a plain `Mapping` into (the same
+    #: identity concern PR 2 hit on `RosterRead`'s `MappingProxyType` fields).
+    hypotheses_by_id: Annotated[dict[str, HypothesisRecord], SkipValidation] = field(
+        default_factory=dict
+    )
     #: Ids the `:H hypothesize.hypotheses` table declares. The table outranks a lead's
     #: `new_hypotheses` in `hypotheses_by_id` regardless of document order, because that is
     #: the precedence `_walkers.all_hypotheses` applies on the read side.

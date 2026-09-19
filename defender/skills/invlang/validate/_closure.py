@@ -7,7 +7,8 @@ its `deferred_*` table is projected, which is why `diagnose` runs them together 
 from __future__ import annotations
 
 from collections.abc import Container, Iterable, Iterator
-from dataclasses import dataclass
+
+from defender._model import model
 
 from .. import _walkers, vocab
 from ..parser import (
@@ -69,7 +70,7 @@ def _is_closing(companion: CompanionBody) -> bool:
     return isinstance(conclude, dict) and bool(set(conclude) - _NON_CLOSING_FIELDS)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Commitment:
     """One thing the document DECLARED, which a close therefore has to account for.
 

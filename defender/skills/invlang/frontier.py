@@ -51,7 +51,8 @@ This module must never be wired into that gate.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+
+from defender._model import model
 
 from . import _walkers, vocab
 from .parser import scan_fences
@@ -96,7 +97,7 @@ __all__ = [
 # reading.
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class OpenSlot:
     """One unresolved cell on one vertex, after every `:R attr_updates` row has been applied."""
 
@@ -107,7 +108,7 @@ class OpenSlot:
     value: str
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class HeldFact:
     """One cell on one vertex that the document has SETTLED — the mirror of `OpenSlot`.
 
@@ -137,7 +138,7 @@ class HeldFact:
     value: str
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class OpenContract:
     """One declared authorization contract with no discharging `:R authz` row.
 
@@ -156,7 +157,7 @@ class OpenContract:
     auth_kind: str | None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Frontier:
     """The investigation's retrieval state: what is still open, and what it now holds."""
 
@@ -338,7 +339,7 @@ def frontier_from_text(text: str) -> Frontier:
         return Frontier(slots=(), contracts=(), held=())
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class FrontierAt:
     """The frontier as of block `n`, and an honest account of which `n` that actually was."""
 

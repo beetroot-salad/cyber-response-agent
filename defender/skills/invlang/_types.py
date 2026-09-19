@@ -1,14 +1,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import field
+
+from defender._model import model
 
 
 class RowError(ValueError):
     pass
 
 
-@dataclass
+@model
 class Block:
     tag: str
     name: str
