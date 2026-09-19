@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from defender._model import model
 
 from defender.skills.invlang import _walkers
 from defender.skills.invlang.schema import CompanionBody
@@ -43,7 +43,7 @@ class Unreadable(RuntimeError):
     """A reply the gate cannot use. Never a finding about the evidence."""
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Ask:
     """The one measurement a challenged close wants before it can stand."""
 
@@ -63,7 +63,7 @@ GAP = "gap"
 FINDINGS: frozenset[str] = frozenset({HOLDS, GAP})
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Review:
     """The composer's whole output: its finding, its prose, and at most one ask."""
 

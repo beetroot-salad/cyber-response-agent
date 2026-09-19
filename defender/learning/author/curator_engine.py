@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
 from uuid import uuid4
 
+from defender._model import model
 from defender._text import is_content_less
 from defender._untrusted import wrap
 from defender.hooks.record_lesson_load import LESSON_CORPORA as _LESSON_CORPORA
@@ -127,7 +128,7 @@ def _corpus_author_write_shapes(roots: ResolvedRoots) -> tuple[re.Pattern[str], 
     return (build_scoped_write_allow(roots.corpus_dir, suffix=".md"),)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CuratorDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.CORPUS_AUTHOR
@@ -161,7 +162,7 @@ class CuratorDeps(AgentDeps):
         return deps
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CorpusRepairDeps(AgentDeps):
     """M4's repair spawn — a SEPARATE deps type from `CuratorDeps`, because `run_stage`
     resolves the effective `AgentDefinition` off `AGENTS[deps_type.role]`

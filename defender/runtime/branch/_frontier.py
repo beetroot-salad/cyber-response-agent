@@ -289,13 +289,10 @@ def _refuse_bad_as_of(spec: BranchSpec, derived: datetime) -> None:
     the host's offset, and nothing downstream can tell that from a correct stamp. A value that
     disagrees with `branch_point_time` is a spec carrying ANOTHER branch point's clock — the
     copy-paste case — and it lands as an episode whose siblings agree with each other and with
-    nothing else, which no comparison can detect from the inside.
+    nothing else, which no comparison can detect from the inside. (That `as_of` IS a datetime
+    is `BranchSpec`'s own construction-time refusal, not a third arm here.)
     """
     at = spec.as_of
-    if not isinstance(at, datetime):
-        raise BranchError(
-            f"as_of must be a datetime, got {at!r} — a branch point without a moment cannot "
-            "pin the clock its siblings resume into")
     if at.tzinfo is None or at.utcoffset() != timedelta(0):
         raise BranchError(
             f"as_of must be an aware UTC datetime, got {at!r} (offset {at.utcoffset()!r}) — a "

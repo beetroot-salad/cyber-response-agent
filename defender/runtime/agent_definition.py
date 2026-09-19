@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, fields
+from dataclasses import fields
+from defender._model import model
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,7 +23,7 @@ _DEFAULT_DENY_REASON = (
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ToolSet:
 
     read: bool = False
@@ -58,7 +59,28 @@ class ToolSet:
         return (f.name for f in fields(self) if getattr(self, f.name))
 
 
-@dataclass(frozen=True)
+# DEFINED BEFORE `AgentDefinition` (#1067), not after where it used to sit: a strict pydantic
+# dataclass resolves a field's annotation at DECORATION time, and `AgentDefinition.bash_shapes`/
+# `write_shapes` name `ResolvedRoots` — a forward reference to a class the stdlib `@dataclass`
+# never had to see resolved (annotations were never introspected), that pydantic could not yet
+# resolve while `ResolvedRoots` was defined later in this same module. It "worked" anyway —
+# pydantic retries the build lazily on first real construction, by which point the whole module
+# has finished importing — but left `AgentDefinition.__pydantic_complete__` False from
+# decoration until that first use. Defined here, the build completes at decoration time like
+# every other class in this file.
+@model(frozen=True)
+class ResolvedRoots:
+
+    run_dir: Path
+    defender_dir: Path
+    corpus_roots: tuple[Path, ...]
+    read_roots: tuple[Path, ...]
+    read_confine: tuple[Path, ...]
+    scripts: tuple[Path, ...]
+    corpus_dir: Path | None = None
+
+
+@model(frozen=True)
 class AgentDefinition:
 
     role: AgentRole
@@ -87,7 +109,7 @@ class AgentDefinition:
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class RunScope:
 
     add_dirs: tuple[Path, ...] = ()
@@ -97,18 +119,6 @@ class RunScope:
 
 
 _DEFAULT_SCOPE = RunScope()
-
-
-@dataclass(frozen=True)
-class ResolvedRoots:
-
-    run_dir: Path
-    defender_dir: Path
-    corpus_roots: tuple[Path, ...]
-    read_roots: tuple[Path, ...]
-    read_confine: tuple[Path, ...]
-    scripts: tuple[Path, ...]
-    corpus_dir: Path | None = None
 
 
 def _resolve_corpus_dir(name: str, defender_dir: Path) -> Path:

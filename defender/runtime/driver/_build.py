@@ -10,10 +10,13 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
+
+if TYPE_CHECKING:
+    from pydantic_ai.settings import ModelSettings
 
 
 from .. import compaction
@@ -107,8 +110,12 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     # Applied HERE and not inside `make_model`: the seam is a two-positional-argument callable
     # every engine in the tree (and a dozen test doubles) passes by that shape, and the key is
     # not a property of the model anyway.
+    # `built.settings` is `BuiltModel.settings`, typed `dict[str, Any] | None` (#1067) rather
+    # than the narrower `ModelSettings` so a provider's own extension keys survive the carrier
+    # untouched; real at runtime either way.
     settings = providers.cache_affinity(
-        model_name, built.settings, _affinity_key(agent_id, session_id, cache_key),
+        model_name, cast("ModelSettings | None", built.settings),
+        _affinity_key(agent_id, session_id, cache_key),
     )
     # The TOON view gate is installed UNCONDITIONALLY, at the single `Agent(...)` every one of
     # the five build paths reaches, so no build path can miss it. A gate already present in

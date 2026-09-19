@@ -6,12 +6,14 @@ import os
 import stat
 import sys
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass  # stdlib, deliberately — see the note below
 from pathlib import Path
 
 from defender._io import write_guarded
 
 
+# STDLIB `@dataclass`, not `defender._model.model`: this module is in the box entrypoint's
+# import closure — see `bash_exec._run_box_entrypoint` for the one note on why (#1067).
 @dataclass(frozen=True)
 class Finding:
     """One entry the walk refused, carrying what triage actually runs on.

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
+from defender._model import model
 from defender.learning.core.config import (
     StageContext,
     StageWiring,
@@ -28,7 +28,7 @@ _VERIFY_DENY_REASON = (
 )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class VerifierDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.VERIFIER

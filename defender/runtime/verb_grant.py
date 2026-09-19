@@ -8,7 +8,8 @@ matched by the read-endpoint allowlist's own constructor (`scripts/adapters/conf
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 
 VERB_CLASSES: frozenset[str] = frozenset({"r", "rw"})
 
@@ -17,7 +18,7 @@ class GrantError(Exception):
     """Raised for a verb_grant authoring defect, or a decision that fails closed."""
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class VerbGrant:
 
     role: str

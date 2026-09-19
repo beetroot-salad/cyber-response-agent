@@ -5,7 +5,7 @@ import errno
 import re
 import sys
 from collections.abc import Iterable
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,7 +39,7 @@ def _investigation_path(deps: AgentDeps) -> Path:
     return deps.run_dir / "investigation.md"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CompanionRead:
     """ONE reading of `investigation.md`, taken once and handed to every gate that judges the
     document as it stands — the repair window, the close's structure check, its entry price and

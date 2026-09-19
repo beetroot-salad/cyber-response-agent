@@ -16,7 +16,8 @@ delimiter of the frame its own output returns inside.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dc_fields, replace
+from dataclasses import fields as dc_fields, replace
+from defender._model import model
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -95,12 +96,12 @@ def bind_review_role(
     return bind(defn, run_dir, scope=RunScope(), defender_dir=defender_dir)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class SupportDeps(AgentDeps):
     role: ClassVar[AgentRole] = AgentRole.SUPPORT
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ComposerDeps(AgentDeps):
     role: ClassVar[AgentRole] = AgentRole.COMPOSER
 
@@ -185,7 +186,7 @@ def _make_live_stage(  # noqa: PLR0913 — one stage's full wiring, named once
     return call
 
 
-@dataclass
+@model
 class ReviewStages:
     """The injection bundle `run_investigation(review_stages=…)`/`close_investigation(stages=…)`
     take.

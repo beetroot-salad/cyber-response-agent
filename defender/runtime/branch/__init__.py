@@ -125,17 +125,10 @@ def validate(store: Any, spec: BranchSpec) -> None:
     document truncated or rewritten outside the append path is what remains.)
     """
     run_dir = Path(spec.source_run_dir)
-    # THE TYPE FIRST, because `BranchSpec` is a plain frozen dataclass and its `int` annotation
-    # is not a runtime check. A spec built from untyped input — a CLI flag, a JSON world file —
-    # carries `"59"`, and the comparison below then raises `TypeError`, which is not a
-    # `BranchError` and so escapes the driver's store-setup handler entirely: the sqlite
-    # connection stays open and `llm_requests.jsonl` stays registered in `observe._ACTIVE_PATHS`,
-    # which is the exact exit that handler was widened to close. `bool` is excluded because it
-    # is an `int` that names no message.
-    if not isinstance(spec.branch_message_id, int) or isinstance(spec.branch_message_id, bool):
-        raise BranchError(
-            f"branch_message_id must be an int, got {spec.branch_message_id!r} — a branch point "
-            "is a message id this run's own store holds, not a spelling of one")
+    # NOT the type: `BranchSpec` refuses a mistyped field at construction (#1067 — its own
+    # before-validator, as `BranchError`), so a spec built from untyped input — a CLI flag, a
+    # JSON world file carrying `"59"` — never reaches here. Every comparison below may assume
+    # a real `int`.
     if spec.branch_message_id <= 0:
         raise BranchError(
             f"branch_message_id must be a real message, got {spec.branch_message_id} — "
@@ -174,10 +167,10 @@ def validate(store: Any, spec: BranchSpec) -> None:
             "first request of the resumed run would carry a `tool_use` with no result. Branch "
             "at the tool RETURN that answers it instead")
 
-    # THE CLOCK, checked here rather than at construction because `BranchSpec` is a frozen
-    # dataclass whose annotations are not runtime checks, and because the only thing that can
-    # say whether a moment is THIS branch point's is the store. Cheap: the derivation reuses
-    # the slice already hydrated above rather than re-reading.
+    # THE CLOCK, checked here rather than at construction because the only thing that can say
+    # whether a moment is THIS branch point's is the store (that it IS a moment, the spec
+    # already refused at construction). Cheap: the derivation reuses the slice already
+    # hydrated above rather than re-reading.
     _refuse_bad_as_of(spec, _as_of_of(upto, run_dir, spec.branch_message_id))
 
     # A SESSION THAT HAS FOLDED CANNOT SAY WHAT IT DISPATCHED, and the failure is silent in the

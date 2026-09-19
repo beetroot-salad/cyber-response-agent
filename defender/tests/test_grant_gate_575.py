@@ -80,6 +80,7 @@ from defender.runtime.permission import (  # noqa: E402
     Route,
     under,
 )
+from defender.runtime.permission.grant import PathShapes  # noqa: E402
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 
 _DEFENDER = PATHS.defender_dir
@@ -677,7 +678,7 @@ def test_d4_read_and_bash_scopes_are_the_same_objects(env):
     assert same_objects(env.gather)
     forged = dataclasses.replace(
         env.main,
-        read_allow=tuple(env.main.read_allow),
+        read_allow=PathShapes(env.main.read_allow),  # equal content, a different object (#1067: a plain tuple no longer constructs)
     )
     assert not same_objects(forged)
 

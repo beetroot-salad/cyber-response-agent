@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -36,7 +36,7 @@ from defender.runtime.verbs import VerbContext
 from ._spec import ITEM1_SYSTEM, _ANY_RUN_TAG, _FENCE_RUN
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class LeadZeroResult:
     """Item 1's result: `text` is its rendered block — already sanitized, elided and wrapped —
     and it is also what item 3's contract carries, so the correlation lead reads the same bytes
@@ -92,7 +92,7 @@ def _sanitize(text: Any) -> str:
     return _FENCE_RUN.sub(lambda m: "ˋ" * len(m.group(0)), text)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _CaptureDeps:
     run_dir: Path
     defender_dir: Path

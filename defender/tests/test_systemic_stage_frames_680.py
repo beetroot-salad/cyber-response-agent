@@ -100,8 +100,16 @@ def test_main_uses_shared_bash_after_learning_stage_bash_protection_changes(tmp_
 
 
 def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
-    """A synthetic future non-runtime role registered with read+Bash inherits both framing paths by construction; an enum allowlist cannot satisfy this case."""
-    from typing import cast
+    """A synthetic future non-runtime role registered with read+Bash inherits both framing paths
+    by construction; an enum allowlist cannot satisfy this case.
+
+    The role is an `AgentRole` INSTANCE that is not a MEMBER: `AgentRole` cannot carry a
+    reserved test member (`set(AGENTS) == set(AgentRole)` is asserted, so every key must have
+    a definition behind it), and #1067 validates `AgentDefinition.role` as an `AgentRole`, so
+    the earlier `cast(AgentRole, object())` stand-in no longer constructs. A real shipped member
+    would weaken the claim — a table enumerating every member would pass — so the stand-in is
+    minted off the class without joining it: `x in AgentRole` is False and `AgentRole("future")`
+    raises, exactly as for a role the tree has not seen yet."""
     from defender.runtime.agent_definition import (
         AgentDefinition,
         ResolvedRoots,
@@ -118,8 +126,12 @@ def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
     )
     from defender.runtime.tools import AgentDeps
 
+    future_role = object.__new__(AgentRole)
+    future_role._name_, future_role._value_ = "FUTURE", "future"
+    assert future_role not in AgentRole
+
     class FutureDeps(AgentDeps):
-        role = cast(AgentRole, object())
+        role = future_role
 
     def bash_shapes(roots: ResolvedRoots):
         scope = PathShapes([under(root.resolve(), TREE) for root in roots.read_roots])

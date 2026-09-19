@@ -42,7 +42,7 @@ sidecar exactly as it copies the scrub verdict, never anything inside the run di
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +90,7 @@ def normalized_truncated_by(value: object) -> str | None:
     return value if value in TRUNCATED_BY_VALUES else None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class RunEnd:
     """How one MAIN run ended: its exit class (`None` when it ended cleanly) and whether the
     model had already closed when that exit was stamped."""
