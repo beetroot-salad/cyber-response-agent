@@ -35,13 +35,13 @@ import json
 import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender._model import model  # noqa: E402
 from defender.evals.oracle_golden import judge, score  # noqa: E402
 
 GOLDEN_DIR = Path(__file__).resolve().parent
@@ -111,7 +111,7 @@ def audit_set(case_names: tuple[str, ...]) -> list[tuple[Path, str, str, dict]]:
     return out
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Agreement:
     """What one lead answered most often, over `n` repeats of the same question."""
 

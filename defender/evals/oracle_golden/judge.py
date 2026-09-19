@@ -27,11 +27,12 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from defender._model import model
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 LABEL_PROMPT = GOLDEN_DIR / "prompts" / "label.md"
@@ -104,7 +105,7 @@ def tag_suffix(model: str, effort: str) -> str:
 
 # inputs
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class LeadInputs:
     """Everything both passes read, assembled once per lead."""
 
@@ -386,7 +387,7 @@ def parse_verdict_reply(raw: str) -> dict:
 
 # calls
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CallResult:
     """What one judge call produced, plus who actually produced it.
 
