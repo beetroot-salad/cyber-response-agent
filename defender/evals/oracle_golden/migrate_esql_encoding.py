@@ -74,25 +74,50 @@ def to_columnar(payload: dict) -> dict:
     whose `values` is empty, comes back equal to its input (this is what makes the
     transform a fixed point on its own output, and the migration idempotent).
 
-    Raises `ValueError` (message names "column") when a row's key list is not exactly
-    `[c["name"] for c in payload["columns"]]` — reordered, missing a column, or carrying
-    one the columns don't name. Re-zipping such a row by position would silently corrupt
-    it, so it is refused rather than guessed at.
+    Each row is judged on ITS OWN, not by inspecting `values[0]` alone and assuming the
+    rest match: a payload can hold a dict row after an already-positional one — the exact
+    shape a partially-applied hand edit or an interrupted `controls.py` rerun leaves behind
+    — and a first-row-only check would pass such a payload through with its dict row
+    untouched.
+
+    Raises `ValueError` (message names "column") when:
+      - a dict row's key list is not exactly `[c["name"] for c in payload["columns"]]` —
+        reordered, missing a column, or carrying one the columns don't name. Re-zipping
+        such a row by position would silently corrupt it.
+      - a row that is already a list is not exactly `len(columns)` cells wide — the wrong
+        width is not "already migrated", it is a truncated or corrupted row that must not
+        be waved through as a no-op.
+      - a row is neither a dict nor a list.
     """
     rows = payload.get("values") or []
-    if not rows or not isinstance(rows[0], dict):
+    if not rows:
         return payload
 
     names = [column["name"] for column in payload["columns"]]
     positional_rows = []
+    changed = False
     for row in rows:
-        keys = list(row.keys())
-        if keys != names:
+        if isinstance(row, dict):
+            keys = list(row.keys())
+            if keys != names:
+                raise ValueError(
+                    f"row's columns {keys!r} do not match payload columns {names!r}; "
+                    "refusing to re-zip a row the columns don't describe")
+            positional_rows.append([row[name] for name in names])
+            changed = True
+        elif isinstance(row, list):
+            if len(row) != len(names):
+                raise ValueError(
+                    f"a positional row has {len(row)} cell(s) but payload names "
+                    f"{len(names)} column(s) {names!r}; refusing a row the wrong width")
+            positional_rows.append(row)
+        else:
             raise ValueError(
-                f"row's columns {keys!r} do not match payload columns {names!r}; "
-                "refusing to re-zip a row the columns don't describe")
-        positional_rows.append([row[name] for name in names])
+                f"row is a {type(row).__name__}, not a dict or a positional list of "
+                f"cells; not a column-shaped row for columns {names!r}")
 
+    if not changed:
+        return payload
     return {**payload, "values": positional_rows}
 
 
@@ -121,16 +146,28 @@ def _migrate_document(doc: Any) -> int:
 
     Returns the number of payloads actually re-encoded (payloads that were already
     positional, or empty, don't count — nothing about them changed).
+
+    Before committing a change to this document, re-zips the NEW positional rows and
+    compares them against the rows that were ACTUALLY here before `to_columnar` ran — never
+    against a value re-derived from the transform's own output, which would confirm nothing
+    about a `to_columnar` bug that is consistent with itself (a reversed cell order, a
+    dropped row) but wrong about the data. `ValueError` here aborts the whole file (see
+    `migrate_file`) rather than writing a payload this check cannot vouch for.
     """
     rewritten = 0
     if isinstance(doc, dict):
         if is_esql_payload(doc):
-            rows = doc.get("values") or []
-            if rows and isinstance(rows[0], dict):
-                columnar = to_columnar(doc)
-                # Confirm losslessness before committing the change to this document.
-                assert to_dict_rows(columnar)["values"] == doc["values"]
-                doc["values"] = columnar["values"]
+            before_rows = doc.get("values") or []
+            after_rows = to_columnar(doc).get("values") or []
+            if after_rows != before_rows:
+                reconstructed = to_dict_rows({**doc, "values": after_rows})["values"]
+                for before_row, reconstructed_row in zip(before_rows, reconstructed,
+                                                          strict=True):
+                    if isinstance(before_row, dict) and reconstructed_row != before_row:
+                        raise ValueError(
+                            "lossy re-encode: re-zipping a migrated row did not reproduce "
+                            f"its original dict row {before_row!r}")
+                doc["values"] = after_rows
                 rewritten += 1
         for value in doc.values():
             rewritten += _migrate_document(value)
@@ -180,7 +217,11 @@ def migrate_file(path: Path) -> int:
             f"{path}: cannot reproduce this file's serialization from any known form; "
             "refusing to rewrite it (that would silently reformat it, not just migrate it)")
 
-    path.write_text(render(migrated_doc), encoding="utf-8")
+    # A one-shot local migration a developer runs by hand over the git-committed golden
+    # corpus, never a runtime/box writer — there is no adversarial actor able to race a
+    # symlink swap during this invocation the way write_guarded's callers (a live agent
+    # run's shared tree) must defend against.
+    path.write_text(render(migrated_doc), encoding="utf-8")  # lint-unguarded-tree-write: ok — local dev-run migration of the committed corpus, not a runtime/box writer
     return rewritten
 
 
