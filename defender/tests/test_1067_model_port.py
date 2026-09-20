@@ -286,3 +286,45 @@ def test_gate_wrapper_toolset_survives_replace():
 
     with pytest.raises(ValidationError):
         _GateWrapperToolset(wrapped=FunctionToolset())  # type: ignore[call-arg]
+
+
+# ---------------------------------------------------------------------------------------
+# PR5: the two model-facing validators batch every problem into one refusal
+# ---------------------------------------------------------------------------------------
+
+
+def test_validate_params_names_every_problem_once_in_one_refusal():
+    """Four categories at once — reserved, unknown, missing, mistyped — and the one refusal
+    names each ONCE. The exclusions are what a one-problem call cannot see: a reserved param
+    is never ALSO "unknown", and a param already refused as unknown is never ALSO mistyped."""
+    from defender.runtime.verbs import validate_params, verb
+
+    @verb(wrapper_only=("require_closed",))
+    def read(ctx, *, host: str, size: int = 10, require_closed: bool = False):  # noqa: ARG001
+        return None
+
+    refusal = validate_params(read, {"require_closed": True, "bogus": "x", "size": "10"})
+    assert refusal is not None
+    assert "param(s) ['require_closed'] are set by the first-party tool" in refusal
+    assert "unknown param(s) ['bogus']" in refusal
+    assert "missing required param(s) ['host']" in refusal
+    assert "'size' takes int, got str" in refusal
+    # The exclusions: the reserved name is not ALSO unknown, and the unknown one is not ALSO
+    # scanned for its type — a mistyped verdict for a param the model was just told to drop.
+    assert "unknown param(s) ['bogus']" in refusal  # not ['bogus', 'require_closed']
+    assert "'bogus' takes" not in refusal
+    assert "'require_closed' takes" not in refusal
+
+
+def test_validate_report_names_every_problem_in_one_refusal():
+    """A report wrong two ways — no disposition AND the judge's close delimiter in its body —
+    comes back as one refusal naming both, not the first alone."""
+    from defender._artifact_schema import REPORT_CLOSE_DELIMITER, validate_report
+
+    refusal = validate_report(f"---\ncase_id: c1\n---\nbody {REPORT_CLOSE_DELIMITER}\n")
+    assert refusal is not None
+    assert "must carry a top-level `disposition`" in refusal
+    assert f"contains the literal {REPORT_CLOSE_DELIMITER!r}" in refusal
+    # A malformed frontmatter is still its own gate ahead of the batch: nothing to check yet.
+    assert validate_report("---\n: [\n---\n") is not None
+    assert validate_report("---\ndisposition: benign\n---\nbody\n") is None

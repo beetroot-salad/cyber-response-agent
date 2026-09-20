@@ -47,19 +47,11 @@ top of a before-validator to get back the single `dict` of field name -> value a
 `BaseModel` validator would have seen, whichever calling convention the constructor was used
 with.
 
-**A domain exception that happens to subclass `ValueError` is NOT exempt.** The convention
-above assumes the tree's domain exceptions are not `ValueError`/`AssertionError` — true of
-`StoreAppendError`/`PayloadNotRepresentable`/`GrantError` (each ultimately an `Exception`), but
-`learning/judge/_errors.py`'s `JudgeRefused` is declared `class JudgeRefused(ValueError)`, predating
-this decorator (#1067 PR5, found porting `enqueue._validate_row`/`_validate_world_row` onto
-`QueueRow`/`WorldQueueRow`): raised inside a `model_validator`, pydantic wraps it into its own
-`ValidationError` exactly as it would a bare `ValueError`, silently defeating a caller's
-`except JudgeRefused` — `enqueue_report`'s own drop-and-name arm is one such caller. Pydantic
-still hands back the original instance, though: `ctx["error"]` on the `ValidationError`'s
-`.errors()` entry the raise produced. Call `original_or(e)` in the `except ValidationError:`
-around a constructor call whose validator might raise `JudgeRefused` (or any other domain
-exception a future `ValueError` subclass repeats this with) to recover and re-raise it, rather
-than letting the caller see pydantic's `ValidationError` instead of the exception it raised.
+The first bullet holds only for a domain exception that is NOT itself a `ValueError`: raised
+inside a validator, a `ValueError` subclass is wrapped like any other `ValueError`, and a
+caller's `except ThatClass` silently misses it. `learning/judge/_errors.py`'s `JudgeRefused`
+was one until #1067 PR5 found this porting `enqueue`'s row rules onto `QueueRow`; a domain
+exception meant to reach the caller unconverted derives from `Exception`, never `ValueError`.
 """
 
 from __future__ import annotations
@@ -68,11 +60,11 @@ import dataclasses
 from collections.abc import Callable
 from typing import Any, TypeVar, cast, dataclass_transform, overload
 
-from pydantic import ConfigDict, ValidationError
+from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass as _pydantic_dataclass
 from pydantic_core import ArgsKwargs
 
-__all__ = ["model", "original_or", "unwrap_before"]
+__all__ = ["model", "unwrap_before"]
 
 T = TypeVar("T")
 
@@ -103,20 +95,6 @@ def unwrap_before(cls: type, value: Any) -> Any:
         raise TypeError(f"{cls.__name__} got multiple values for argument(s) {twice}")
     merged.update(kwargs)
     return merged
-
-
-def original_or(e: ValidationError) -> Exception:
-    """The exception a raising `model_validator`/`field_validator` actually raised, recovered
-    from the `ValidationError` pydantic wrapped it into — see the module docstring's
-    `JudgeRefused` note. A `mode="before"` validator that raises fails the WHOLE validation
-    immediately, so there is exactly one error to look at; `e` itself comes back unchanged when
-    that one error carries no such original (a plain field-typing error pydantic raised on its
-    own, never a domain exception to begin with)."""
-    for err in e.errors():
-        original = err.get("ctx", {}).get("error")
-        if isinstance(original, Exception):
-            return original
-    return e
 
 
 #: The `ConfigDict` keys, read off the TypedDict itself so the refusal in `model` tracks the

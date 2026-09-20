@@ -1018,7 +1018,8 @@ def refusals() -> tuple[type[BaseException], ...]:
     ]
     for dotted, name in (("learning.branch.staging", "StagingRefused"),
                          ("runtime.branch._family", "FamilyError"),
-                         ("learning.branch.review", "ReviewError")):
+                         ("learning.branch.review", "ReviewError"),
+                         ("learning.judge", "JudgeRefused")):
         out.append(sym(dotted, name))
     return tuple(out)
 

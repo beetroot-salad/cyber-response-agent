@@ -936,3 +936,32 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
     for i in range(3):
         owner.append(quiet, [text_response(f"quiet-{i}")], agent_id=agent_id)
     assert len(sql(owner, "SELECT seq FROM message WHERE session_id = ?", (quiet,))) == 3
+
+
+@pytest.mark.parametrize("bad", [
+    True, "12.5", float("nan"), float("inf"), float("-inf"),
+    # Not `int`/`float` — pydantic's strict `float` ADMITS these (#1067 PR5 tried it), and
+    # sqlite3 then refuses to bind them inside the open transaction as a `ProgrammingError`
+    # no caller names. The boundary refuses them with the store's own class instead.
+    pytest.param(__import__("decimal").Decimal("1.5"), id="Decimal"),
+    pytest.param(__import__("fractions").Fraction(1, 2), id="Fraction"),
+])
+def test_duration_ms_is_refused_at_the_boundary_unless_a_finite_real_number(tmp_path, bad):
+    """`duration_ms` is bound straight into the INSERT and never meets the payload's
+    isfinite discipline, so its own check is the only one: a `bool`, a string, a NaN/inf, or
+    a numeric type sqlite3 cannot bind is `PayloadNotRepresentable` BEFORE the transaction
+    opens — never a `sqlite3` error out of a half-written batch, and never a NaN silently
+    stored as SQL NULL."""
+    ss = store_mod()
+    store = make_store(tmp_path)
+    session_id = store.new_session(agent_id="main")
+    message = ModelRequest(parts=[ToolReturnPart(tool_name="query", content="x",
+                                                 tool_call_id="c-1")])
+    with pytest.raises(ss.PayloadNotRepresentable):
+        store.append(session_id, [message], agent_id="main", duration_ms=bad)
+    assert sql(store, "SELECT COUNT(*) FROM message")[0][0] == 0
+    # The accepted shapes: `None`, a real `int`, a finite `float`.
+    store.append(session_id, [message], agent_id="main", duration_ms=None)
+    store.append(session_id, [message], agent_id="main", duration_ms=3)
+    store.append(session_id, [message], agent_id="main", duration_ms=12.5)
+    assert sql(store, "SELECT COUNT(*) FROM message")[0][0] == 3

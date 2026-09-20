@@ -17,10 +17,8 @@ import uuid
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
-from pydantic import Field, TypeAdapter
-from pydantic import ValidationError as PydanticValidationError
 from pydantic_ai.messages import (
     ModelMessagesTypeAdapter,
     ModelRequest,
@@ -514,29 +512,24 @@ def _validate_seq(seq: Any) -> None:
         raise StoreAppendError(f"seq must be a real int, got {seq!r}")
 
 
-#: `duration_ms` is bound straight into the INSERT, so it never meets `_find_nonrepresentable`
-#: — the isfinite discipline every other float in the row is held to. Unchecked, SQLite
-#: silently stores a NaN as SQL NULL and an inf round-trips verbatim, later serializing to the
-#: bare token `Infinity`, which is not valid JSON. `strict=True` keeps `bool` out (a `bool` is
-#: an `int` and pydantic's lax float would otherwise coerce `True` to `1.0`); `int` still
-#: passes, same as the hand-rolled check it replaces — `allow_inf_nan=False` is pydantic's own
-#: name for the isfinite half (#1067 PR5: a strict field type instead of a hand-rolled gate).
-_FiniteDurationMs = Annotated[float, Field(strict=True, allow_inf_nan=False)]
-_finite_duration_ms_or_none: TypeAdapter[float | None] = TypeAdapter(_FiniteDurationMs | None)
-
-
 def _validate_duration_ms(duration_ms: Any) -> None:
-    try:
-        _finite_duration_ms_or_none.validate_python(duration_ms)
-    except PydanticValidationError as e:
-        # Two distinct reasons, preserved from the hand-rolled check this replaces: pydantic's
-        # `finite_number` error is the isfinite refusal, everything else (wrong type, or a
-        # `bool`, which strict mode refuses under the same `float_type` error) is the "not a
-        # real number" refusal.
-        if e.errors()[0]["type"] == "finite_number":
-            raise PayloadNotRepresentable(f"cannot store {duration_ms!r} as duration_ms") from e
+    """`duration_ms` is bound straight into the INSERT, so it never meets
+    `_find_nonrepresentable` — the isfinite discipline every other float in the row is held
+    to. Unchecked, SQLite silently stores a NaN as SQL NULL and an inf round-trips verbatim,
+    later serializing to the bare token `Infinity`, which is not valid JSON.
+
+    Deliberately NOT a pydantic strict-`float` adapter (#1067 PR5 tried one and backed it out):
+    a bare scalar argument is not an object to hang a validator on, and pydantic's strict
+    `float` is WIDER than this `isinstance` — it admits `Decimal` and `Fraction`, which sqlite3
+    then refuses to bind, inside the open transaction, as a `ProgrammingError` no caller's
+    `except PayloadNotRepresentable` names."""
+    if duration_ms is None:
+        return
+    if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)):
         raise PayloadNotRepresentable(
-            f"duration_ms must be a real number, got {duration_ms!r}") from e
+            f"duration_ms must be a real number, got {duration_ms!r}")
+    if not math.isfinite(duration_ms):
+        raise PayloadNotRepresentable(f"cannot store {duration_ms!r} as duration_ms")
 
 
 def _validate_reason(reason: str | None) -> None:

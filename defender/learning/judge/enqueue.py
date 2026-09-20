@@ -22,10 +22,9 @@ from typing import Any
 
 import yaml
 from pydantic import model_validator
-from pydantic import ValidationError as PydanticValidationError
 
 from defender._io import bind, guarded_mkdir, read_guarded, read_jsonl_rows_report, write_guarded
-from defender._model import model, original_or, unwrap_before
+from defender._model import model, unwrap_before
 from defender._run_paths import artifact_dir, artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
@@ -82,13 +81,6 @@ def _questioner_queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
     return _queue_paths_for(loop_paths().questioner_findings, queue_dir)
 
 
-#: Distinguishes "not a key of the row at all" from "present with a falsy/`None` value" — the
-#: two `QueueRow`/`WorldQueueRow` presence screens below are about KEY PRESENCE (`key not in
-#: row`), which a plain `None` default on the field would collapse into "value is None" and
-#: silently accept a row that carries the key with an explicit `None` (#1067 PR5).
-_ABSENT = object()
-
-
 @model
 class QueueRow:
     """THE rule for what may go on the DEFENDER queue, as the object it guards (#1067 PR5) —
@@ -97,11 +89,16 @@ class QueueRow:
     itself IS the validation and a rule cannot silently drift from the shape it guards.
     `from_row` is the entry point: build one and discard it — the appender still writes the
     RAW dict it was handed (#921 M5's thirteen-key shape), this class exists only to gate it,
-    the same non-goal the function it replaces always had."""
+    the same non-goal the function it replaces always had.
 
-    finding_id: Any = _ABSENT
-    run_id: Any = _ABSENT
-    direction: Any = _ABSENT
+    The three required fields have no default on purpose: their screen is about KEY PRESENCE
+    (`key not in row`, an explicit `None` passes), and a `mode="before"` validator sees exactly
+    the constructor's own kwargs — never a field default — so `key not in data` there IS the
+    original check, and the class declaration says the same thing the screen enforces."""
+
+    finding_id: Any
+    run_id: Any
+    direction: Any
     subject: str | None = None
     type: str | None = None
     subject_anchor: str | None = None
@@ -123,7 +120,7 @@ class QueueRow:
         # `entry["run_id"]` probe. A row missing it therefore raises exactly the bare `KeyError` this
         # guard exists to keep off the queue, one line earlier than the two keys that were listed.
         for key in ("finding_id", "run_id", "direction"):
-            if data.get(key, _ABSENT) is _ABSENT:
+            if key not in data:
                 raise JudgeRefused(
                     f"{where}a family finding row is missing {key!r} — a row missing it raises a "
                     "bare KeyError inside the shared findings gate and stuck-records the whole "
@@ -180,32 +177,18 @@ class QueueRow:
                 f"{where}a family finding row's judge_outcome={outcome!r} is a word the family "
                 "record is the whole artifact for — such an episode is never a defender failure to "
                 "author from, so no row of it may reach the queue (O7)")
-        data["judge_outcome"] = outcome
         return data
 
     @classmethod
     def from_row(cls, row: dict[str, Any], *, episode_dir: Path | None = None) -> QueueRow:
         """The one call site `_validate_row` now is: extract the fields this gate cares about
         (everything else on `row` is the appender's business, not this class's — see the class
-        docstring) and let the `model_validator` above raise. `key in row` guards each `.get`
-        so a key genuinely absent from `row` stays `_ABSENT` rather than becoming a spurious
-        `None`, which the presence screen would then wrongly accept.
-
-        `JudgeRefused` is declared `ValueError` (predates #1067), so pydantic wraps it into its
-        own `ValidationError` same as it would a bare `ValueError` — recovered and re-raised via
-        `_model.original_or` so `enqueue_report`'s `except JudgeRefused` arm still catches it
-        (see `_model`'s module docstring)."""
-        fields: dict[str, Any] = {
-            key: row[key] for key in
-            ("finding_id", "run_id", "direction", "subject", "type",
-             "subject_anchor", "subject_topic", "judge_outcome")
-            if key in row
-        }
-        fields["episode_dir"] = episode_dir
-        try:
-            return cls(**fields)
-        except PydanticValidationError as e:
-            raise original_or(e) from e
+        docstring) and let the `model_validator` above raise. `if key in row` keeps a key
+        genuinely absent from `row` absent from the kwargs too, rather than a spurious `None`
+        the presence screen would then wrongly accept."""
+        keys = ("finding_id", "run_id", "direction", "subject", "type",
+                "subject_anchor", "subject_topic", "judge_outcome")
+        return cls(**{key: row[key] for key in keys if key in row}, episode_dir=episode_dir)
 
 
 def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
@@ -226,9 +209,9 @@ class WorldQueueRow:
     but `pattern`, `holding_system` and `subject` are required here because this appender is
     the LAST screen: the questioner curator's own gate is idempotency-only (M7)."""
 
-    finding_id: Any = _ABSENT
-    run_id: Any = _ABSENT
-    direction: Any = _ABSENT
+    finding_id: Any
+    run_id: Any
+    direction: Any
     subject: str | None = None
     pattern: str | None = None
     holding_system: str | None = None
@@ -244,7 +227,7 @@ class WorldQueueRow:
         episode_dir = data.get("episode_dir")
         where = f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
         for key in ("finding_id", "run_id", "direction"):
-            if data.get(key, _ABSENT) is _ABSENT:
+            if key not in data:
                 raise JudgeRefused(
                     f"{where}a questioner finding row is missing {key!r} — a row missing it raises "
                     "a bare KeyError inside the shared drain machinery")
@@ -289,18 +272,10 @@ class WorldQueueRow:
     @classmethod
     def from_row(cls, row: dict[str, Any], *, episode_dir: Path | None = None) -> WorldQueueRow:
         """`_validate_world_row`'s one call site — see `QueueRow.from_row`'s docstring, same
-        extract-then-let-the-validator-raise shape, `JudgeRefused`-recovery included."""
-        fields: dict[str, Any] = {
-            key: row[key] for key in
-            ("finding_id", "run_id", "direction", "subject", "pattern", "holding_system",
-             "type", "subject_anchor", "subject_topic")
-            if key in row
-        }
-        fields["episode_dir"] = episode_dir
-        try:
-            return cls(**fields)
-        except PydanticValidationError as e:
-            raise original_or(e) from e
+        extract-then-let-the-validator-raise shape."""
+        keys = ("finding_id", "run_id", "direction", "subject", "pattern", "holding_system",
+                "type", "subject_anchor", "subject_topic")
+        return cls(**{key: row[key] for key in keys if key in row}, episode_dir=episode_dir)
 
 
 def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
