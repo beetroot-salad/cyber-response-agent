@@ -37,11 +37,18 @@ def _load_inventory() -> None:
 
 
 def _effective(name: str) -> Optional[dict[str, Any]]:
+    overlay = OVERLAY.get(name)
+    # The chaos control plane's "missing-host" fault: an overlay tombstone
+    # ({"__absent__": True}) makes an otherwise-real host disappear, the same
+    # way a real CMDB silently drops a decommissioned or never-registered
+    # asset. No marker survives into any response — the host is just gone.
+    if overlay is not None and overlay.get("__absent__"):
+        return None
     base = BASE.get(name)
     if base is None and name not in OVERLAY:
         return None
     merged = dict(base or {"name": name})
-    merged.update(OVERLAY.get(name, {}))
+    merged.update(overlay or {})
     return merged
 
 
@@ -56,7 +63,11 @@ app = FastAPI(title="Playground CMDB stub", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "host_count": len(BASE), "overlay_count": len(OVERLAY)}
+    # overlay_count used to be returned here. It is an agent-reachable count
+    # of the chaos control plane's own edits — it rises the moment a
+    # stale-CMDB profile activates, which is a harness tell no non-harness
+    # consumer needs (issue #401, O6).
+    return {"status": "ok", "host_count": len(BASE)}
 
 
 @app.get("/hosts")

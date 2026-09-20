@@ -1,0 +1,14 @@
+id: cmdb-stale-owner
+description: >
+  One host's CMDB owner is stale, as if an ownership handoff was never
+  recorded — the common "who actually owns this box" gap.
+mode: cmdb-stale
+seed: 42
+params:
+  variant: field-flip
+  field: owner
+  hosts: 1
+cover: >
+  Ordinary CMDB decay: an asset record nobody updated after a team
+  reorganized. No detection rule reads CMDB fields, so this mode carries no
+  O4 exposure.

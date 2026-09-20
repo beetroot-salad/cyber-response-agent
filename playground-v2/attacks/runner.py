@@ -195,6 +195,16 @@ def docker_exec(
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def _default_chaos_ctl() -> Any:
+    """The real `chaos.ctl` module — lazy so a plain run never imports it."""
+    chaos_root = HERE.parent
+    if str(chaos_root) not in sys.path:
+        sys.path.insert(0, str(chaos_root))
+    from chaos import ctl as chaos_ctl_module
+
+    return chaos_ctl_module
+
+
 def run_scenario(
     scenario: dict,
     seed: int,
@@ -202,6 +212,11 @@ def run_scenario(
     dry_run: bool,
     cr_mode: str = "none",
     runs_dir: Path | None = None,
+    chaos: str = "none",
+    keep_chaos: bool = False,
+    chaos_ctl: Any = None,
+    post_cr: Any = _post_cr,
+    exec_fn: Any = docker_exec,
 ) -> tuple[str, Path, list[dict]]:
     intensity = int(overrides.get("intensity") or scenario.get("default_intensity", 1))
     source_user = overrides.get("user") or scenario.get("source_user", "root")
@@ -231,7 +246,7 @@ def run_scenario(
             pre_run["cr_post_rc"] = 0
             pre_run["cr_post_response"] = {"dry_run": True}
         else:
-            rc, resp = _post_cr(body)
+            rc, resp = post_cr(body)
             pre_run["cr_post_rc"] = rc
             pre_run["cr_post_response"] = resp
             if rc != 0:
@@ -241,59 +256,80 @@ def run_scenario(
                 )
             print(f"posted synthetic CR id={body['id']} hosts={body['hosts']} mode={cr_mode}")
 
+    # Activation happens only *after* a successful CR post — a CR failure
+    # above already raised, so it can never leak a live fault with no
+    # revert (issue #401, O2).
+    active_chaos: dict[str, Any] | None = None
+    if chaos and chaos != "none":
+        ctl_mod = chaos_ctl if chaos_ctl is not None else _default_chaos_ctl()
+        active_chaos = ctl_mod.activate(chaos, seed=seed)
+        pre_run["chaos"] = {
+            "profile": chaos,
+            "seed": seed,
+            "ledger_ref": active_chaos["ledger_ref"],
+        }
+
     step_log: list[dict] = []
     started_at = now_iso()
 
-    for step_index, step in enumerate(scenario["steps"]):
-        repeat_raw = step.get("repeat", 1)
-        repeats = intensity if repeat_raw == "${intensity}" else int(repeat_raw)
-        source_host = step.get("source_host") or source_host_resolved
-        step_user = step.get("source_user") or source_user
-        allow_fail = bool(step.get("allow_fail", False))
-        delay_s_between = float(step.get("delay_s_between", 0))
+    try:
+        for step_index, step in enumerate(scenario["steps"]):
+            repeat_raw = step.get("repeat", 1)
+            repeats = intensity if repeat_raw == "${intensity}" else int(repeat_raw)
+            source_host = step.get("source_host") or source_host_resolved
+            step_user = step.get("source_user") or source_user
+            allow_fail = bool(step.get("allow_fail", False))
+            delay_s_between = float(step.get("delay_s_between", 0))
 
-        for iteration in range(repeats):
-            # Per-iteration PRNG is available to downstream fixture-capture
-            # uses even if the current cmd doesn't reference it.
-            _ = random.Random(seed_for(scenario["id"], seed, step_index, iteration))
-            ctx = {
-                "host": target_host,
-                "target": target_host,
-                "user": step_user,
-                "iteration": iteration,
-                "intensity": intensity,
-            }
-            cmd = render(step["cmd"], ctx)
-            step_started = now_iso()
-            t0 = time.monotonic()
-            rc, out, err = docker_exec(source_host, cmd, step_user, dry_run)
-            step_log.append(
-                {
-                    "step_index": step_index,
+            for iteration in range(repeats):
+                # Per-iteration PRNG is available to downstream fixture-capture
+                # uses even if the current cmd doesn't reference it.
+                _ = random.Random(seed_for(scenario["id"], seed, step_index, iteration))
+                ctx = {
+                    "host": target_host,
+                    "target": target_host,
+                    "user": step_user,
                     "iteration": iteration,
-                    "source_host": source_host,
-                    "source_user": step_user,
-                    "cmd": cmd,
-                    "rc": rc,
-                    "stdout_tail": out[-500:],
-                    "stderr_tail": err[-500:],
-                    "started_at": step_started,
-                    "ended_at": now_iso(),
-                    "duration_s": round(time.monotonic() - t0, 3),
+                    "intensity": intensity,
                 }
-            )
-            if rc != 0 and not allow_fail and not dry_run:
-                finished_at = now_iso()
-                _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=True)
-                raise SystemExit(
-                    f"step {step_index}.{iteration} failed rc={rc} (allow_fail=false); "
-                    f"aborted; meta → {run_dir / 'meta.json'}"
+                cmd = render(step["cmd"], ctx)
+                step_started = now_iso()
+                t0 = time.monotonic()
+                rc, out, err = exec_fn(source_host, cmd, step_user, dry_run)
+                step_log.append(
+                    {
+                        "step_index": step_index,
+                        "iteration": iteration,
+                        "source_host": source_host,
+                        "source_user": step_user,
+                        "cmd": cmd,
+                        "rc": rc,
+                        "stdout_tail": out[-500:],
+                        "stderr_tail": err[-500:],
+                        "started_at": step_started,
+                        "ended_at": now_iso(),
+                        "duration_s": round(time.monotonic() - t0, 3),
+                    }
                 )
-            if delay_s_between and iteration + 1 < repeats and not dry_run:
-                time.sleep(delay_s_between)
+                if rc != 0 and not allow_fail and not dry_run:
+                    finished_at = now_iso()
+                    _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=True)
+                    raise SystemExit(
+                        f"step {step_index}.{iteration} failed rc={rc} (allow_fail=false); "
+                        f"aborted; meta → {run_dir / 'meta.json'}"
+                    )
+                if delay_s_between and iteration + 1 < repeats and not dry_run:
+                    time.sleep(delay_s_between)
 
-    finished_at = now_iso()
-    _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=False)
+        finished_at = now_iso()
+        _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=False)
+    finally:
+        # The fault never outlives the run — normal exit, abort, or any
+        # exception — unless the operator explicitly asked to keep it.
+        if active_chaos is not None and not keep_chaos:
+            ctl_mod = chaos_ctl if chaos_ctl is not None else _default_chaos_ctl()
+            ctl_mod.revert(active_chaos["ledger_ref"])
+
     return run_id, run_dir, step_log
 
 
@@ -355,8 +391,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         "target": args.target,
         "intensity": args.intensity,
     }
-    print(f"running {scenario['id']} (seed={args.seed}, cr_mode={args.cr_mode}) ...")
-    run_id, run_dir, step_log = run_scenario(scenario, args.seed, overrides, args.dry_run, args.cr_mode)
+    print(f"running {scenario['id']} (seed={args.seed}, cr_mode={args.cr_mode}, chaos={args.chaos}) ...")
+    run_id, run_dir, step_log = run_scenario(
+        scenario, args.seed, overrides, args.dry_run, args.cr_mode,
+        chaos=args.chaos, keep_chaos=args.keep_chaos,
+    )
     ok = sum(1 for s in step_log if s["rc"] == 0)
     print(f"finished: run_id={run_id} steps={len(step_log)} ok={ok}")
     print(f"meta → {run_dir / 'meta.json'}")
@@ -390,6 +429,19 @@ def main() -> int:
         ),
     )
     prun.add_argument("--dry-run", action="store_true", help="print dispatches without running")
+    prun.add_argument(
+        "--chaos",
+        default="none",
+        help=(
+            "activate this chaos profile (playground-v2/chaos/) before firing, "
+            "revert on every exit unless --keep-chaos. none (default): no fault."
+        ),
+    )
+    prun.add_argument(
+        "--keep-chaos",
+        action="store_true",
+        help="do not revert the --chaos profile after the run (leaves the fault live)",
+    )
 
     args = parser.parse_args()
     if args.command == "list":

@@ -1,0 +1,18 @@
+id: data-drop-syslog
+description: >
+  A quarter of syslog lines are silently dropped, as if a log shipper had a
+  coverage gap — corroborating telemetry, never the stream a detection rule
+  reads.
+mode: data-drop
+seed: 42
+params:
+  target_stream: logs-system.syslog-*
+  rate: 25
+cover: >
+  Day-one drop targets stay off any rule-read stream (logs-system.auth-*,
+  logs-falco.alerts-*) — dropping even one event on those breaks the two EQL
+  sequence rules at any nonzero rate (O4). Selective auth-stream drops are
+  deferred (see issue #401's non-obligations) until the guard can reason
+  about a rule's evidence window. The drop condition is null-guarded and
+  salted by the seed (O3), so a field-less line never throws into
+  pipeline_error (O6).
