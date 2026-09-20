@@ -1,0 +1,4 @@
+{
+  "//": "Baseline for scripts/lint/lint_run_records.py: file-access call sites with no row in defender/docs/run-records.tsv, and rows naming a call that is gone. Regenerate with --update-baseline; attribute the site instead wherever possible.",
+  "entries": {}
+}
