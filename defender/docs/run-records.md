@@ -3,8 +3,10 @@
 The inventory issue #1076 asked for: one page naming every record kind a run has, who writes
 it, who reads it, when in the run's life it is written, and which kinds cross a package
 boundary. It is the list the run handle (#1077) is built from. It moves nothing and renames
-nothing; the code is still the spec and every claim here carries the `file:line` it was read
-from. Tests are excluded throughout.
+nothing; the code is still the spec. **Citation convention:** every writer and reader cell
+cites the *call* that writes or reads (or the function that holds it), never the constant that
+spells the name; the constants are listed once under the `RunPaths` and `archive.py` name
+owners. Tests are excluded throughout. Cold-reviewed 2026-09-20; every cell was re-resolved.
 
 ## The model this page uses
 
@@ -22,111 +24,127 @@ from. Tests are excluded throughout.
   links to its world only through its run id, `<episode_id>-<label>` (`:920-922`).
 - **Run** — the unit of record. Every forked sibling is a run with its own run dir under the
   episode (`<episode>/runs/<run_id>`, `learning/branch/archive.py:74`). The archive's
-  `worlds/<label>/` is a screened *projection* of that run dir, not the run dir (see table 5).
+  `worlds/<label>/` is a screened *projection* of that run dir, not the run dir (section 5).
 - **Alert → run** is one-to-many.
 
-Locations below are relative to one of four roots: `<run>` (the run dir), `<runs_base>` (its
-parent), `<sessions>` (`<runs_base>/../sessions`, `runtime/session_store.py:677-682`), and
-`<episode>` (`<learning state>/runs/<episode_id>`).
+Locations are relative to one of four roots: `<run>` (the run dir), `<runs_base>` (its
+parent), `<sessions>` (`<runs_base>/../sessions`, `runtime/session_store.py:673-677`), and
+`<episode>` = `$DEFENDER_EPISODES_BASE/<episode_id>` (`learning/branch/cli.py:131-151,
+196-206`). The episodes base is a *configured* location with no default: it must sit outside the
+runs base, so no runs-base walker counts a sibling as an ordinary run, and outside the checkout.
+Two comments in the tree still describe it as under the learning state (`branch/capture.py:133`,
+`branch/ledger.py:526`); this page is the one place it is right.
 
-**"When"** is one of: *host* (written by the host before any agent exists, so the box can
+**"When"** is one of: *host* (written by host code before the agent's first turn, so the box can
 neither forge nor suppress it), *live* (during the run), *end* (at or after close), *later* (by
 a tool that runs over a finished run).
 
-**"Denied to"** carries the read gate's *mode*, from `runtime/permission/files.py`: *shape*
-(denied unless the role declares a matching read shape, `:203`), *outright* (every role, `:211`
-wire logs, `:213` provenance), *confined* (denied to the confined learning roles, `:241`), and
-the declarative secrets/ground-truth denylist (`:40`, applied `:250`). The handle must preserve
-these, so a kind with a deny is listed with it.
+**"Denied to"** carries the read gate's *mode*, from `runtime/permission/files.py::decide_read`:
+*shape* (a `gather_raw` payload is denied unless the role declares a matching read shape,
+`:202-203`), *outright* (every role: the wire-log dir `:210-211`, `provenance.json` `:212-213`),
+*confined* (the case answer key is denied to the confined learning roles, `:240-241`), and the
+declarative secrets/ground-truth denylist (`:40`, applied `:252-253`). *cap* means the read is
+admitted but goes through the payload read cap and untrusted frame (`is_captured_payload`
+`:452`, caller `runtime/tools/_deps.py:84`), which `decide_read` never consults. Sidecars outside
+the run dir are unreachable by root containment rather than by a named deny.
 
 ## 1. Records inside the run dir
 
 | kind | path under `<run>` | writer | when | readers | denied to | crosses boundary | archived as |
 |---|---|---|---|---|---|---|---|
-| alert | `alert.json` | `run_common.materialize_run_dir` copies the input (`run_common.py:80`) | host | runtime (`orient.py:51`), learning (`judge/family.py:634`, `lead_repository.py:523`, archive), scripts (`case_history/ticket_writer.py:99`, visualize), evals (`held_out.py:16`) | — (deliberately not in the answer key, `_run_paths.py:196`) | yes | `alert.json` |
-| report | `report.md` | runtime close tool, its only writer (`close_tool.py:1, 432`) | end | learning (`branch/episode.py:148`, judge, questioner, archive), scripts (`case_history/case_ticket.py:36`, visualize), evals (`held_out.py:158`) | confined | yes | `report.md` |
-| investigation | `investigation.md` | runtime document tool (`tools/_document.py:114-126`) | live | runtime (compaction, close gate, lead-zero), learning (judge, questioner, verify_forward), scripts (visualize, `lessons/lessons_frontier.py:761`), hooks (`budget_enforcer.py:36`) | confined | yes | `investigation.md` |
-| queries | `executed_queries.jsonl` | **scripts** `gather_tools/record_query.py:223-415` (append) | live | runtime (`query_tool.py:625`, `branch/_seed.py`, `branch/_frontier.py:454`, lead-zero), learning (`lead_repository.py:549`, `branch/ledger.py:150`, judge) | confined | yes | staged by `lead_repository.stage_tables` |
-| source_refs | `source_refs.yaml` | learning author lessons stage (`author/lessons/run.py:107-314`); no runtime writer | later | learning (`author/verify_forward/forward.py:16-35`, questioner) | confined (`_run_paths.py:203`) | no (learning only) | — |
-| gather_raw | `gather_raw/l-<lead>/<seq>.json` | scripts `gather_tools/record_query` (claim mints the payload) | live | runtime bash `cat` lane (`tools/_bash.py`, by-ref only), learning (`lead_repository.stage_tables`, judge) | shape | yes | staged as a table |
-| lead_claim | `gather_raw/<lead>.lead.json` | hooks `record_lead.py:53` | live | runtime (`branch/_frontier.py:442-469`, `branch/_seed.py:351`), learning (`lead_repository.py:37`, `judge/family.py:635`) | shape (same dir) | yes | with `gather_raw` |
-| gather_summaries | `gather_summaries/<lead>.md` | runtime `tools_gather.py:426` | live | runtime (`driver/_build.py:306`), learning (archive `:187`, judge, `lead_repository.py:602`) | — | yes | `gather_summaries/` |
-| lead_author | `lead_author/` | learning lead-author stage (`leads/lead_author/__init__.py:121`) | later | learning (same stage), evals (`harness_lead.py:80-169`) | — | yes (learning→evals) | — |
-| wire_log | `wire_logs/llm_requests.jsonl` | runtime `observe.RequestLogger` (`_run_paths.py:71`) | live | runtime (`review_roles.py:159`, `branch/__init__.py:346`), scripts (`visualize/visualize_messages.py`) | outright | yes | — (dropped) |
+| alert | `alert.json` | `run_common.materialize_run_dir` copies the input (`run_common.py:80`); a branch sibling's seed re-copies it (`runtime/branch/_seed.py:251`) | host | runtime (`orient.py:64, 73`), learning (`judge/render.py:749`, archive), scripts (`case_history/ticket_writer.py:99`, visualize), evals (`held_out.py:50`) | — (deliberately not in the answer key, `_run_paths.py:197-198`) | yes | `alert.json` |
+| report | `report.md` | runtime close tool, its only writer (`close_tool.py:432`); no role holds a write grant for it | end | learning (judge, questioner, archive `:176`; `branch/episode.py` reads the *archived* copy, `:12-13`), scripts (`case_history/case_ticket.py:196-205`, visualize), evals (`held_out.py:50, 155`) | confined | yes | `report.md` |
+| investigation | `investigation.md` | runtime document tool (`tools/_document.py:357, 729`, via the MAIN write grant `driver/_build.py:194`); the lead-0 seed (`lead_zero/_capture.py:389`) and a sibling's resume seed (`branch/_seed.py:205`) write it before the first turn | host + live | runtime (compaction, close gate, lead-zero), learning (judge, questioner, verify_forward), scripts (visualize, `lessons/lessons_frontier.py:781`) | confined | yes | `investigation.md` |
+| queries | `executed_queries.jsonl` | **scripts** `gather_tools/record_query.append_query_row` (`:300`, append at `:367`) | live | runtime (`query_tool.py:533, 831`, `branch/_seed.py`, `branch/_frontier.py:454`, lead-zero), learning (`lead_repository.py:549`, judge) | confined | yes | staged by `lead_repository.stage_tables` |
+| source_refs | `source_refs.yaml` | **no writer in this repo** — consumed only; test helpers fabricate it (`tests/conftest.py:202`), and `tests/test_orchestrate_thresholds.py:509` records that its writer is gone | — | learning (`author/lessons/run.py:106-115`, `author/verify_forward/forward.py:23-37`); the questioner explicitly does not (`author/questioner/run.py:8-10`) | confined (`_run_paths.py:202-204`) | no (learning only) | — |
+| gather_raw | `gather_raw/l-<lead>/<seq>.json` | scripts `gather_tools/record_query.persist_payload` (`:264-268`) | live | runtime bash `cat` lane (`tools/_bash.py`, by-ref only), learning (`lead_repository.stage_tables`, judge) | shape | yes | staged as a table |
+| lead_claim | `gather_raw/<lead>.lead.json` | hooks `record_lead.py:63` (exclusive create) | live | runtime (`branch/_frontier.py:442-469`), learning (`lead_repository.load_leads`, `:177-178`) | shape (same dir) | yes | with `gather_raw` |
+| gather_summaries | `gather_summaries/<lead>.md` | runtime `tools_gather.py:426` | live | runtime (`driver/_build.py:306`), learning (archive `:187`, judge) | — | yes | `gather_summaries/` |
+| lead_author | `lead_author/` | learning lead-author stage (`leads/lead_author/__init__.py:128-130`) | later | learning (same stage only; `evals/harness_lead.py` spawns the stage and reads nothing here) | — | no (learning only) | — |
+| wire_log | `wire_logs/llm_requests.jsonl` | runtime `observe.RequestLogger` (path `observe.py:257-269`) | live | scripts (`visualize/visualize_messages.py`); `review_roles.py` is a second *writer* into it | outright | yes | — (dropped) |
 | forward_check_trace | `wire_logs/<prefix>.<stem>.<n>.trace.jsonl` | **learning** forward-check verifier, written into the CITED run's dir (`author/verify_forward/checks.py:72`, `engine.py:66`) | later | operator debugging only | outright (dir) | yes (learning writes into a run) | — |
-| review_trace | `wire_logs/review_<role>_trace.jsonl` | runtime `challenge_gate._write_trace_row` | live | scripts (`visualize/visualize_runtime.py:480`) | outright (dir) | yes | — |
-| review_record | `review_record.<turn>.json` | runtime `challenge_gate.py:158-167`, `close_tool.py:406-410` | end (per close attempt) | learning (`judge/family.py:196-200`, `judge/__init__.py:555`), scripts (`visualize/visualize_runtime.py:396`, `visualize_episode.py:219`) | — | yes | — |
-| tool_trace | `tool_trace.jsonl` | runtime `observe.py:392` | live | runtime (`driver/__init__.py:709-717`), learning (`branch/timing.py:31`), scripts (visualize) | — | yes | — |
-| policy_denials | `policy_denials.jsonl` | runtime `observe.py:35` (`log_policy_denial`) | live | none outside the writer (the gather lane records a parallel denial row in `queries`, `record_query.py:697`) | — | no | — |
-| budget | `budget.json` | hooks `budget_enforcer.py:72-120` | live | runtime (`driver/__init__.py:232`), scripts (`workspace_map.py:33`, suppression only) | — | yes | — |
-| circuit_breaker | `circuit_breaker.json` | runtime `circuit_breaker.py:63` | live | runtime (`lead_zero/_capture.py:237`) | — | no | — |
-| lessons_loaded | `lessons_loaded.jsonl` | hooks `record_lesson_load.py:69` (via `runtime/tools/_deps.py:251`) | live | learning (archive `:164`, `judge/family.py:56`, `ops/trace_lesson.py`) | — | yes | `lessons_loaded.jsonl` |
+| review_trace | `wire_logs/review_<role>_trace.jsonl` | runtime `challenge_gate._write_trace_row` | live | scripts (`visualize/visualize_runtime.py:480-482`) | outright (dir) | yes | — |
+| review_record | `review_record.<turn>.json` | runtime `challenge_gate.write_review_record` (`:158-167`), called from `close_tool.py:406-410` and the CHALLENGED arm `:622-623` | end (per close attempt) | learning (`judge/family.py:196-200`, `judge/__init__.py:555`), scripts (`visualize/visualize_runtime.py:396`, `visualize_episode.py:219`) | — | yes | — |
+| tool_trace | `tool_trace.jsonl` | runtime `observe.write_trace` (`:339`), called once after the agent returns (`driver/__init__.py:705`; empty-trace fallback `:709`); a whole-file replace rebuilt from the session store | end | scripts only (`visualize_run.py:334`, `visualize_runtime.py:779`, `visualize_episode.py:88, 295`) | — | yes | — |
+| policy_denials | `policy_denials.jsonl` | runtime `observe.RequestLogger.log_policy_denial` (`:178`, path `:245-246`), from `query_tool.py:657` | live | scripts (`visualize/visualize_run.py:307-320`); the gather lane also records a parallel denial row in `queries` (`record_query.py:697`) | — | yes | — |
+| budget | `budget.json` | hooks `budget_enforcer.py:72-120` (through `hooks/_run_dir.update_json_locked`, `:28`) | live | runtime (`driver/_budget.py:49`, `lead_zero/_capture.py:317`), scripts (`workspace_map.py:33`, suppression only) | — | yes | — |
+| circuit_breaker | `circuit_breaker.json` | runtime `circuit_breaker.record_outcome` (`:130, 151`) | live | runtime (`lead_zero/_capture.py:237`) | — | no | — |
+| lessons_loaded | `lessons_loaded.jsonl` | runtime `tools/_deps.py:251`, "the ONE writer" (`:231`); `hooks/record_lesson_load` is the reader-side classifier | live | learning (`judge/render.py:699`, archive, `ops/trace_lesson.py`) | — | yes | `lessons_loaded.jsonl` |
 | ticket_write | `ticket_write.json` | scripts `case_history/ticket_writer.py:280` | end | none found | — | no | — |
-| ticket_reads | `ticket_reads/<seq>.json` | learning judge, into the shared learning run dir (`runtime/tools/_bash.py:372` docstring) | later | runtime by-ref read gate (`permission/files.py:399-439`, `_run_paths.py:190`) | shape | yes | — |
-| session_pointer | `session_store_pointer.json` | runtime `session_store.write_case_pointer` (`:735`) from the driver | live (driver start, before the first turn) | runtime (`branch/_spec.py:166-173`), learning (`branch/cli.py:602`) | — | yes | — |
-| runtime_html | `runtime.html` | scripts `visualize/visualize_run.py:55` | later | scripts (`visualize_episode.py:1780-1833`, links) | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:58-66`) | no | — |
-| box_sentinel | `.box-sentinel` | runtime `box/_lifecycle.py:95-116` | host | runtime (same module; left behind on a fault as evidence) | — | no | — |
+| ticket_reads | `ticket_reads/<seq>.json` | **retired** — the old pipeline judge's closed-ticket tool (`permission/files.py:394-395`); only the path shape (`_run_paths.py:190`) and the read cap survive | — | runtime read cap (`permission/files.py:452`) | cap | no | — |
+| session_pointer | `session_store_pointer.json` | runtime `session_store.write_case_pointer` (`:735`) from the driver at start | live (before the first turn) | runtime (`branch/_spec.py:166-173`), learning (`branch/cli.py:602`) | — | yes | — |
+| runtime_html | `runtime.html` | scripts `visualize/visualize_run.py:73` | later | scripts (`visualize_episode.py:1780-1833`, links); copied to `run-visualizations/` (`visualize_run.py:80`) | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:58-66`) | no | — |
+| box_sentinel | `.box-sentinel` | runtime `box/_lifecycle.py:73` (`unlink_on_fault=False`, `:105-106`; left behind on a fault as evidence, `:96-102`). The mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family | host | runtime (same module) | — | no | — |
 | provenance | `provenance.json` | `run_common.materialize_run_dir` (`run_common.py:98`) | host | runtime (read gate `permission/files.py:333`), learning (`branch/cli.verify_family`, archive `:178`), scripts (`workspace_map` suppression) | outright | yes | `provenance.json` |
 
 ## 2. Records beside the run dir (siblings under `<runs_base>`)
 
 All three are written outside the box's writable mount so the model can neither plant nor
-suppress them.
+suppress them. No read-gate deny names them; root containment keeps every role out.
 
 | kind | path | writer | when | readers | crosses boundary | archived as |
 |---|---|---|---|---|---|---|
-| run_end | `<run>.run-end.json` | runtime `run_end.py:113` (cleared by the host at `run_common.py:70-75` before a reused id) | end | learning (archive `:181`), learning judge via the `truncated_by` vocabulary | yes | `run_end.json` (renamed, `archive.py:148`) |
-| scrub_verdict | `<run>.scrub-verdict.json` | runtime `scrub.py:129` | end | learning (archive, `author/branch.py:185` unlinks, `core/quarantine.py:10`) | yes | `scrub_verdict.json` (renamed, `archive.py:79`) |
-| accounting | `<run>.accounting_failures.json` | hooks `budget_enforcer.py:153-217` | live | hooks (same module, `:167`) | no | — |
+| run_end | `<run>.run-end.json` | runtime `run_end.write_sidecar` (`:116, 125`; path `:113`); cleared by the host at `run_common.py:71-77` before a reused id | end | runtime (`scrub.tree_verified`), learning (archive `:181`; the judge via the `truncated_by` vocabulary) | yes | `run_end.json` (renamed, `archive.py:148`) |
+| scrub_verdict | `<run>.scrub-verdict.json` | runtime `scrub._write_verdict` (`:134, 139`; path `:129`) | end | runtime (`scrub.py:162`), learning (archive, `author/branch.py:185` unlinks, `core/quarantine.py:60`) | yes | `scrub_verdict.json` (renamed, `archive.py:79`) |
+| accounting | `<run>.accounting_failures.json` | hooks `budget_enforcer.py:204, 217` (path `:153-155`) | live | hooks (same module, `:167`) | no | — |
 
 ## 3. Session history
 
 | kind | path | writer | when | readers | crosses boundary |
 |---|---|---|---|---|---|
-| session_db | `<sessions>/<lineage id>.db` (SQLite) | runtime `session_store` (appends live, `driver/__init__.py:586-620`) | live | runtime (resume/fork join it), learning (`branch/cli.py`), scripts (`visualize/visualize_messages.py`, `visualize_run.py`) | yes |
+| session_db | `<sessions>/<lineage id>.db` (SQLite) | runtime `session_store.append` (`:370`) from `selection.py:90, 138` and `driver/_build.py:397`; opened and bound at `driver/__init__.py:586-620` | live | runtime (resume/fork join it), learning (`branch/cli.py`), scripts (`visualize/visualize_run.py:70-72`) | yes |
 
 The key is a **lineage** id: a fresh run mints `uuid4().hex` (`driver/__init__.py:586`); a
 resume or fork joins the source's store and rebinds to its id (`:593-620`). One DB spans a run
 and its resumes and forks. Two runs of one alert are two DBs. The pointer in the run dir
 (table 1, `session_pointer`) is how a run resolves to its transcript. The alert-derived
-`case-<sha256>` in `run_common.py:286` keys the curation queue and is unrelated. Session history
-is a **run record** (`run.session` in #1077); the shared file is a detail of the file backend.
+`case-<sha256[:16]>` in `run_common.py:286` keys the curation queue and is unrelated. Session
+history is a **run record** (`run.session` in #1077); the shared file is a detail of the file
+backend.
 
 ## 4. Episode-level records (under `<episode>`)
 
+The launcher's step order is QUESTIONER, STAGING, REVIEW, RUNS, VERIFY, JUDGE
+(`learning/branch/steps.py:52-57`); "host" below means before `RUNS`.
+
 | kind | path | writer | when | readers |
 |---|---|---|---|---|
-| family | `family.yaml` | branch launcher (`runtime/branch/_family.py:55`) | host (before siblings start) | every sibling, learning review/judge/archive, episode page |
-| family_stamp | `provenance.json` at the episode root | learning archive (`archive.py:104`; a different shape from the run stamp) | end of family | learning (`archive.py:106-120`, `branch/cli.verify_family`) |
-| review_yaml | `review.yaml` | learning `branch/review.py` | end of family | judge, episode page |
-| samples | `samples.yaml` | learning questioner (moved into the archive) | end of family | judge, episode page |
-| judge_yaml | `judge.yaml` | learning `judge/__init__.py` | after archive | enqueue re-read, episode page |
-| judge_draw | `worlds/<label>/judge/<n>.yaml`, `worlds/family/judge/<n>.yaml` | learning `judge/__init__.py` (`archive.py:98`) | after archive | episode page |
-| timing | `timing.json` | learning `branch/timing.py:49-53` | live (per launcher step) | episode page |
-| staged | `staged.yaml` | learning `branch/staging.py:72, 355-357` — the sole record that a cluster write happened | host (before siblings start) | review, judge |
-| served | `served/base.jsonl`, `served/<token>.jsonl` | learning `branch/ledger.py:97-114` (`_family.py:915-918`) | live (per sibling) | ledger readers, judge |
-| stage_trace | `wire_logs/<stage>.trace.jsonl`, `wire_logs/<agent>_framed_trace.jsonl` | learning stages via `runtime/observe.py:272-282` (`judge/__init__.py:412`) | live | visualizers | 
+| family | `family.yaml` | launcher, `runtime/branch/_family.py:656` via `learning/branch/cli.py:1677` (name `:55`) | host | every sibling, review, judge, archive, episode page |
+| family_stamp | `provenance.json` at the episode root (a different shape from the run stamp) | launcher `branch/cli._write_family_stamp` (`:1070`, write `:1101-1104`), called from `verify_family` (`:1062`) | end of family | learning (`archive.read_family_stamp`, `:107-131`), scripts (`visualize_episode.py:262`) |
+| review_yaml | `review.yaml` | learning `branch/review.py:328-330` | host (`Step.REVIEW`); the episode outcome is merged in at the end (`cli.py:1120`) | judge, episode page |
+| samples | `samples.yaml` | launcher `branch/cli.write_questioner_samples` (`:1563`, write `:1586`), inside `Step.QUESTIONER` before the model call | host | judge, episode page |
+| judge_yaml | `judge.yaml` | learning `judge/__init__._write_judge_yaml` (`:900, 908`) | after archive | enqueue re-read, episode page |
+| judge_draw | `worlds/<label>/judge/<n>.yaml`, `worlds/family/judge/<n>.yaml` | learning `judge/__init__.py:396` (dir name `archive.py:98`) | after archive | episode page |
+| timing | `timing.json` | learning `branch/timing.Timing.record` (`:70`, write `:96`) | live (per launcher step) | episode page |
+| staged | `staged.yaml` | learning `branch/staging.record_staged` (`:396`, write `:416-422`) — the sole record that a cluster write happened | host (`Step.STAGING`) | learning (`staging.py:548, 662`, `branch/cli.py:1401`), scripts (`visualize_episode.py:246`) |
+| served (base) | `served/base.jsonl` | learning `branch/capture.prime_base` (`:61`, append `:133`) from `cli.py:312`; empty-capture fallback `cli.py:339` | host, once | ledger (`ledger.py:450`), judge |
+| served (world) | `served/<token>.jsonl` | learning `branch/ledger.Ledger.record` (`:484`, append `:526`) | live (per sibling) | ledger, judge |
+| priming_lock | `served/.priming` | learning `branch/cli.prepare_episode` (`:303-305`, `O_CREAT\|O_EXCL`); never unlinked, so a crashed priming leaves the episode permanently claimed | host | same function |
+| stage_trace | `wire_logs/<stage>.trace.jsonl`, `wire_logs/<agent>_framed_trace.jsonl` | learning stages via `runtime/observe.py:272-282` (`judge/__init__.py:423-424`) | live | visualizers |
 | learning_html | `learning.html` | scripts `visualize/visualize_episode.py:85, 1389` | later | humans |
-| priming_lock | `served/.priming` | learning `branch/cli.prepare_episode` (`cli.py:303-305`, `O_CREAT\|O_EXCL`) | host (before siblings start) | same function; serializes concurrent priming |
 | episode_runs | `runs/<episode_id>-<label>/` | each sibling's own `materialize_run_dir` | host | as table 1 |
 
 ## 5. The archive projection (`<episode>/worlds/<label>/`)
 
-`learning/branch/archive.py:157-189` copies **exactly**: `report.md`, `investigation.md`,
-`provenance.json`, the scrub verdict (as `scrub_verdict.json`), the run-end record (as
-`run_end.json`), `lessons_loaded.jsonl`, `alert.json`, the `gather_summaries/` directory, the two
-tables through `lead_repository.stage_tables`, and a `run_dir` text pointer (`:82, 347`, never a
-link). Every read is lstat-screened first and a planted link archives nothing. Everything
-else in table 1 — wire logs, traces, counters, denials, review records, the session pointer,
-`runtime.html`, `ticket_write.json` — does not survive the copy. The "archived as" column in
-tables 1 and 2 records this per kind.
+`learning/branch/archive.archive_episode` (`:291-349`: `copy2` `:314`, `stage_tables` `:322`,
+`copytree` `:330`, pointer `:347`) copies **exactly** the set `_single_files` declares
+(`:157-184`): `report.md`, `investigation.md`, `provenance.json`, the scrub verdict (as
+`scrub_verdict.json`), the run-end record (as `run_end.json`), `lessons_loaded.jsonl`,
+`alert.json`; plus the `gather_summaries/` directory (`:187-189`), the two tables
+(`executed_queries.jsonl` and `gather_raw/`) through `lead_repository.stage_tables`
+(`:532-569`), and a `run_dir` text pointer (`:82, 347`, never a link). Every read is
+lstat-screened first and a planted link archives nothing. Everything else in table 1 — wire
+logs, traces, counters, denials, review records, the session pointer, `runtime.html`,
+`ticket_write.json` — does not survive the copy. The "archived as" column in tables 1 and 2
+records this per kind. The appendix tags the copy's call sites `archive_proj`.
 
 ## 6. Not a run record
 
 Marked here so the sweep can attribute a call site to them explicitly.
 
 - **Learning queues, locks and markers** under `LoopPaths` (`learning/core/config.py:72-133`):
-  `_pending*/`, `author-queue/`, `_pending_delivery/`, `.stuck.jsonl`, batch markers.
+  `_pending*/`, `author-queue/`, `_pending_delivery/`, `.stuck.jsonl`, batch markers
+  (`learning/core/markers.py:16, 35`).
 - **Quarantine** of a tainted worktree: tar + manifest (`learning/core/quarantine.py:40-60`).
 - **Checked-in corpora a run consumes**: lessons, knowledge, skills, the gather query catalog
   (`runtime/tools_gather.py:76`), `lead-zero.yaml` (`runtime/lead_zero_config.py:32`),
@@ -138,7 +156,8 @@ Marked here so the sweep can attribute a call site to them explicitly.
 - **Rendered pages outside a run or episode** (`queues.html`, `lessons.html`) and the checked-in
   `run-visualizations/` tree (#1084).
 - The corpus curators' own wire traces under `_pending/wire_logs/` (`learning/core/config.py:282`),
-  learning state rather than a run record.
+  learning state rather than a run record; the review step's scratch `served/` tree
+  (`learning/branch/review.py:163`), which is not the episode's.
 - Repo and worktree files, git plumbing, container identity files (`/etc/hostname`,
   `/proc/self/mountinfo`, `runtime/box/_docker.py:250-253`), stdio and subprocess pipes,
   scratch files.
@@ -151,17 +170,17 @@ Rows with *crosses boundary = yes*, grouped by the concept the handle names:
 |---|---|---|---|
 | `run.alert` | alert | host | yes |
 | `run.report` | report | runtime (end) | no |
-| `run.log` | investigation | runtime | yes |
-| `run.queries` | queries (+ the parallel denial rows) | scripts gather lane (append-only) | yes — must survive |
-| `run.leads` | lead_claim, gather_summaries, lead_author | hooks / runtime / learning | yes — must survive |
-| `run.payloads` | gather_raw, ticket_reads | scripts gather lane / learning judge | by-ref only, shape-gated |
+| `run.log` | investigation | runtime (seeds before the first turn, tool during) | yes |
+| `run.queries` | queries, policy_denials | scripts gather lane / runtime observe (append-only) | yes — must survive |
+| `run.leads` | lead_claim, gather_summaries | hooks / runtime | yes — must survive |
+| `run.payloads` | gather_raw | scripts gather lane | by-ref only, shape-gated |
 | `run.session` | session_db, session_pointer | runtime | yes |
-| `run.review` | review_record, review_trace | runtime | end |
-| `run.traces` | wire_log, tool_trace, lessons_loaded, budget, forward_check_trace | runtime / hooks; the learning verifier appends its own trace later | yes; the wire-log dir is denied outright |
-| `run.provenance` | provenance, run_end, scrub_verdict | host / runtime end | host-written, denied outright |
+| `run.review` | review_record, review_trace | runtime | trace live, record at close |
+| `run.traces` | wire_log, tool_trace, lessons_loaded, budget, forward_check_trace | runtime / hooks; the learning verifier appends its own trace later | wire log live but denied outright; tool trace only at end |
+| `run.provenance` | provenance, run_end, scrub_verdict | host / runtime end | `provenance.json` denied outright; the two sidecars unreachable by containment |
 
-Episode-level kinds (table 4) are records about a family of runs and hang off the episode, not
-the run handle.
+Learning-internal kinds (`source_refs`, `lead_author`, `ticket_reads`) and episode-level kinds
+(table 4) are not sub-collections of the run handle.
 
 ## Appendix — call-site attribution
 
@@ -171,9 +190,9 @@ Every raw file-access call site in `runtime/`, `learning/`, `scripts/`, `evals/`
 `write_bytes`, `shutil.copy*`, and `.jsonl` literals. Column 2 is a kind id from the tables
 above, `NOT:<tag>` for a non-record (tags follow section 6), or `NEW:<id>` for a kind the sweep
 found that no table named — after the sweep every `NEW:` was folded into a table row, so none
-remain. `tool_seam` marks the model's generic read and write tools (`runtime/tools/_files.py:54,
+remain; `archive_proj` tags the archive copy's own call sites (section 5). `tool_seam` marks the model's generic read and write tools (`runtime/tools/_files.py:54,
 157, 199`): the file they touch is whichever record the role's grant names (MAIN's
-`investigation.md` and `report.md`, a curator's corpus target), so the kind is decided by the
+`investigation.md`, a curator's corpus target; `report.md` is in no role's write grant), so the kind is decided by the
 read/write gate at the call, not by the seam.
 
 Tags: `not_file_io` = the match is a path builder, a constant, a docstring or an in-memory
@@ -342,7 +361,7 @@ buffer; `sysfile` = container identity files; the rest follow section 6.
 | `learning/author/verify_forward/forward.py:30` | source_refs | read | `load_run_context` | end | reads a cited case's source_refs.yaml disposition for forward-check |
 | `learning/author/verify_forward/forward.py:37` | investigation | read | `load_run_context` | end | reads a cited case's investigation.md transcript for forward-check |
 | `learning/branch/archive.py:29` | NOT:not_file_io | n-a | `n-a` | n-a | module docstring prose, not a call site |
-| `learning/branch/archive.py:153` | archive_proj | write | `_single_files` | end | names the archived lessons_loaded.jsonl copied into worlds/<label>/ |
+| `learning/branch/archive.py:153` | NOT:not_file_io | write | `_single_files` | end | names the archived lessons_loaded.jsonl copied into worlds/<label>/ |
 | `learning/branch/archive.py:314` | archive_proj | copy | `archive_episode` | end | copies a sibling's seven single-file roles into worlds/<label>/ |
 | `learning/branch/archive.py:330` | archive_proj | copy | `archive_episode` | end | copies gather_summaries/ into worlds/<label>/gather_summaries |
 | `learning/branch/archive.py:347` | archive_proj | write | `archive_episode` | end | writes the worlds/<label>/ text pointer naming the source run dir |
@@ -423,11 +442,11 @@ buffer; `sysfile` = container identity files; the rest follow section 6.
 | `learning/lead_repository.py:203` | lead_claim | read | `load_leads` | end | reads gather_raw/<lead>.lead.json claim sidecar |
 | `learning/lead_repository.py:253` | queries | read | `load_queries_report` | end | reads executed_queries.jsonl table rows |
 | `learning/lead_repository.py:487` | gather_raw | read | `corpus_samples` | host-before-agent | reads a query's raw payload for a corpus document sample |
-| `learning/lead_repository.py:552` | queries | copy | `stage_tables` | host-before-agent | copies executed_queries.jsonl into the learning run dir's table |
-| `learning/lead_repository.py:563` | gather_raw | copy | `stage_tables` | host-before-agent | copies gather_raw/ tree into the learning run dir's table |
+| `learning/lead_repository.py:552` | queries | copy | `stage_tables` | end | copies executed_queries.jsonl into the learning run dir's table |
+| `learning/lead_repository.py:563` | gather_raw | copy | `stage_tables` | end | copies gather_raw/ tree into the learning run dir's table |
 | `learning/lead_repository.py:573` | NOT:not_file_io | n-a | `n-a` | n-a | docstring prose describing copy2, not a call site |
 | `learning/lead_repository.py:578` | NOT:not_file_io | n-a | `n-a` | n-a | docstring prose describing copytree, not a call site |
-| `learning/lead_repository.py:593` | gather_raw | copy | `refusing_copy2` | host-before-agent | per-entry copy during stage_tables' gather_raw copytree |
+| `learning/lead_repository.py:593` | gather_raw | copy | `refusing_copy2` | end | per-entry copy during stage_tables' gather_raw copytree |
 | `learning/lead_repository.py:714` | investigation | read | `narration_crosscheck_from_run` | end | reads investigation.md for narration crosscheck |
 | `learning/leads/draft_synthesis.py:331` | NOT:corpus | write | `synthesize_drafts` | n-a | writes a new draft query template under the catalog's _draft/ dir |
 | `learning/leads/lead_author/__init__.py:130` | lead_author | write | `_write_state` | end | writes a lead_author/ stage output file under a run |
@@ -499,17 +518,17 @@ buffer; `sysfile` = container identity files; the rest follow section 6.
 | `runtime/run_end.py:125` | run_end | write | `write_sidecar` | end | writes <run>.run-end.json sidecar beside the run dir |
 | `runtime/scrub.py:139` | scrub_verdict | write | `_write_verdict` | end | writes <tree>.scrub-verdict.json beside the scanned tree |
 | `runtime/scrub.py:162` | scrub_verdict | read | `tree_verified` | end | reads scrub verdict sidecar to check ran:true |
-| `runtime/session_store.py:750` | session_pointer | write | `write_case_pointer` | host-before-agent | writes session_store_pointer.json naming the case/session |
-| `runtime/session_store.py:754` | session_pointer | read | `resolve_store_path` | host-before-agent | reads session_store_pointer.json for store_path |
-| `runtime/session_store.py:765` | session_pointer | read | `resolve_session_id` | host-before-agent | reads session_store_pointer.json for session_id |
+| `runtime/session_store.py:750` | session_pointer | write | `write_case_pointer` | live | writes session_store_pointer.json naming the case/session |
+| `runtime/session_store.py:754` | session_pointer | read | `resolve_store_path` | live | reads session_store_pointer.json for store_path |
+| `runtime/session_store.py:765` | session_pointer | read | `resolve_session_id` | live | reads session_store_pointer.json for session_id |
 | `runtime/tools/_deps.py:251` | lessons_loaded | append | `_record_lesson_load` | live | appends a row to lessons_loaded.jsonl on a corpus read/push |
 | `runtime/tools/_document.py:97` | investigation | read | `read_companion` | live | reads investigation.md once per model request via read_plain |
 | `runtime/tools/_document.py:357` | investigation | write | `_tool_append_block` | live | writes an appended block onto investigation.md |
 | `runtime/tools/_document.py:729` | investigation | write | `_tool_fix_row` | live | writes a repaired/deleted flagged row back into investigation.md |
 | `runtime/tools/_files.py:48` | NOT:not_file_io | read | `_probe_read_text` | n-a | docstring naming read_text_utf8(p), not the call itself |
-| `runtime/tools/_files.py:54` | tool_seam | read | `_probe_read_text` | live | NEW: model-declared read-allowed path; read by read/edit-file tools |
-| `runtime/tools/_files.py:157` | tool_seam | write | `_tool_write_file` | live | NEW: model-declared write_allow path (investigation.md/report.md/corpus outputs) |
-| `runtime/tools/_files.py:199` | tool_seam | write | `_tool_edit_file` | live | NEW: model-declared write_allow path, same target set as write_file |
+| `runtime/tools/_files.py:54` | tool_seam | read | `_probe_read_text` | live | model-declared read-allowed path; read by read/edit-file tools |
+| `runtime/tools/_files.py:157` | tool_seam | write | `_tool_write_file` | live | model-declared write_allow path (MAIN: investigation.md; curators: corpus targets) |
+| `runtime/tools/_files.py:199` | tool_seam | write | `_tool_edit_file` | live | model-declared write_allow path, same target set as write_file |
 | `runtime/tools_gather.py:428` | gather_summaries | write | `_persist_gather_summary` | live | writes gather_summaries/<lead_id>.md wrapped summary |
 | `runtime/verb_roster.py:94` | NOT:corpus | write | `generate_roster` | n-a | writes generated verb-roster.md under skills/<role>/ |
 | `runtime/verb_roster.py:105` | NOT:corpus | read | `load_roster` | n-a | reads committed verb-roster.md under skills/<role>/ |
