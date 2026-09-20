@@ -73,6 +73,75 @@ def test_model_still_passes_a_real_config_key_through():
         v.a = "2"  # type: ignore[assignment]
 
 
+def test_model_refuses_a_keyword_the_class_has_no_field_for():
+    """Stdlib `@dataclass` raised `TypeError` on an unknown keyword; pydantic's own default
+    (`extra="ignore"`) drops it in silence, so a typo in a constructor call — or in a
+    `dataclasses.replace`, which forwards its leftover keys to `__init__` — would have handed
+    back a record that quietly kept its old value. `@model` restores the refusal."""
+    @model(frozen=True)
+    class R:
+        worktree_root: Path
+        worktree_base: Path | None = None
+
+    with pytest.raises(ValidationError, match="unexpected_keyword_argument"):
+        R(worktree_root=Path("/x"), worktree_bsae=Path("/y"))  # type: ignore[call-arg]
+    good = R(worktree_root=Path("/x"))
+    with pytest.raises(ValidationError, match="unexpected_keyword_argument"):
+        replace(good, worktree_bsae=Path("/y"))
+    assert replace(good, worktree_base=Path("/y")).worktree_base == Path("/y")
+
+
+def test_complete_finishes_a_schema_that_names_a_later_class():
+    """Two records naming each other leave the first decorated one incomplete: pydantic then
+    builds its schema on the FIRST construction, from whichever thread gets there. `complete`
+    at module end finishes it at import, and the field validates strictly afterwards."""
+    from defender._model import complete
+
+    @model(frozen=True)
+    class Ctx:
+        check: Chk
+
+    @model(frozen=True)
+    class Chk:
+        name: str
+
+    assert Ctx.__pydantic_complete__ is False
+    assert complete(Ctx) is Ctx
+    assert Ctx.__pydantic_complete__ is True
+    chk = Chk(name="n")
+    assert Ctx(check=chk).check is chk
+    with pytest.raises(ValidationError):
+        Ctx(check="not a check")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("module", "name"), [
+    ("defender.learning.core.drains", "BatchDisposition"),
+    ("defender.learning.author.verify_forward.checks", "CheckContext"),
+    ("defender.learning.judge.family", "FamilyGrade"),
+])
+def test_every_ported_record_with_a_forward_reference_is_complete_at_import(module, name):
+    """The three records whose field names a class the module defines later, or another
+    module owns: `BatchDisposition.pitfalls` (now `core/pitfalls_disposition`, imported at
+    top), `CheckContext.check` (mutually referential with `ForwardCheck`, `complete`d at module
+    end) and `FamilyGrade.world_facts` (moved below `WorldFacts`). Each was left for pydantic
+    to finish on the first construction — for `CheckContext`, inside `_Judgement.mint`'s
+    worker pool, N threads at once with no lock.
+
+    IN A FRESH INTERPRETER, because the flag this reads flips to true on the first
+    construction anyway: in this process, any earlier test in the worker that built one of
+    these would make a class left lazily incomplete read as complete, and the fix could be
+    reverted with this arm still green."""
+    import subprocess
+    import sys
+
+    probe = (
+        f"import importlib; cls = getattr(importlib.import_module({module!r}), {name!r}); "
+        "assert cls.__pydantic_complete__ is True, 'left for the first construction to finish'"
+    )
+    subprocess.run([sys.executable, "-c", probe], check=True, cwd=Path(__file__).parents[2],
+                   timeout=120)
+
+
 # ---------------------------------------------------------------------------------------
 # the branch spec: every mistyped field is a `BranchError`, at construction
 # ---------------------------------------------------------------------------------------
@@ -218,6 +287,102 @@ def test_grant_pattern_refuses_a_bare_string():
         AgentPolicy(write_allow=("/tmp/x",))  # type: ignore[arg-type]
     shape = re.compile("z")
     assert AgentPolicy(write_allow=(shape,)).write_allow[0] is shape
+
+
+# ---------------------------------------------------------------------------------------
+# PR 3 — defender/learning/
+# ---------------------------------------------------------------------------------------
+
+
+def test_query_row_hands_back_the_record_it_was_read_from():
+    """`QueryRow.record()` is "the parsed JSON record, byte-for-byte what
+    `record_query.lead_rows` hands the guard live, never a re-projection of the typed fields"
+    (#1017 C16), and its docstring makes "`params` is the same object" part of that promise.
+    A validated `dict` field is REBUILT on every construction, which turns both into copies
+    in silence — the typed view then IS the re-projection the distinction exists to refuse."""
+    from defender.learning.lead_repository import QueryRow
+
+    rec = {"lead_id": "l-001", "params": {"host": "h1"}}
+    row = QueryRow(
+        lead_id="l-001", seq=1, system="cmdb", verb="get-host", query_id="cmdb.get-host",
+        params=rec["params"], raw_command="c", exit_code=0, error_class=None,
+        payload_status="ok", payload_digest="d", raw_ref=None, _record=rec,
+    )
+    assert row.record() is rec
+    assert row.params is rec["params"]
+
+
+def test_batch_disposition_validates_its_curator_type_without_loading_the_curator():
+    """`BatchDisposition.pitfalls` is typed `PitfallsDisposition`, validated strictly, and the
+    class it names lives in `core/pitfalls_disposition` — NOT the curator module, which the
+    lessons lane must never pay to import. Both halves matter: typed `Any` the record would
+    carry anything, and named under `TYPE_CHECKING` from the curator its schema was left
+    unfinished at import and completed by a frame-introspecting rebuild at the lane's entry."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys; from defender.learning.core import drains; "
+        "assert not [m for m in sys.modules if m.startswith('defender.learning.leads')], "
+        "sorted(m for m in sys.modules if m.startswith('defender.learning.leads'))"
+    )
+    # A fresh interpreter: this process has long since imported the curator for other tests
+    # (completeness at import is the census above's, in the same fresh-interpreter shape).
+    subprocess.run([sys.executable, "-c", probe], check=True, cwd=Path(__file__).parents[2],
+                   timeout=120)
+
+    from defender.learning.core import drains
+    from defender.learning.core.pitfalls_disposition import PitfallsDisposition
+    from defender.learning.leads import pitfalls_curator
+
+    assert pitfalls_curator.PitfallsDisposition is PitfallsDisposition
+    real = PitfallsDisposition(committed_ids=("c:l-000:0",), sha=None, held_ids=())
+    assert drains.BatchDisposition(
+        served=[], pitfalls=real, lock_wait_seconds=None).pitfalls is real
+    assert drains.BatchDisposition(
+        served=[], pitfalls=None, lock_wait_seconds=None).pitfalls is None
+    with pytest.raises(ValidationError):
+        drains.BatchDisposition(
+            served=[], pitfalls="a disposition", lock_wait_seconds=None)  # type: ignore[arg-type]
+
+
+def test_author_branch_accepts_any_structural_forge():
+    """`AuthorBranch.forge` is typed `Forge | None`, and `arbitrary_types_allowed` validates a
+    class annotation with `isinstance` — which a plain `Protocol` refuses to be the second
+    argument of (`SchemaError: 'cls' must be valid as the first argument to 'isinstance'`).
+    `@runtime_checkable` is what keeps the structural contract usable as a field type: the
+    production `GhForge` and the drain's own doubles both reach the field as themselves, and
+    an object holding none of the three methods still does not."""
+    from defender.learning.author.branch import AuthorBranch
+    from defender.learning.author.forge import GhForge
+
+    class _Forge:
+        def list_open_prs(self, head_prefix): return []
+        def list_prs_for_head(self, head): return []
+        def open_pr(self, *, base, head, title, body): return "url"
+
+    double = _Forge()
+    assert AuthorBranch(forge=double).forge is double
+    gh = GhForge()
+    assert AuthorBranch(forge=gh).forge is gh
+    with pytest.raises(ValidationError):
+        AuthorBranch(forge=object())  # type: ignore[arg-type]
+
+
+def test_drain_judgement_resolves_its_counter_annotation():
+    """`itertools.count` is generic to a type checker and a plain class at runtime, where
+    `itertools.count[int]` raises `TypeError: not subscriptable` — and a pydantic dataclass
+    evaluates its field annotations at DECORATION time, which `from __future__ import
+    annotations` no longer hides. The whole `author.drain` import tree (the drain, both
+    curators' runners, the queue page) failed to load until the alias split the two
+    readings, and the field must still reach pydantic as the real class."""
+    import itertools
+
+    from defender.learning.author.drain import _Judgement
+
+    counter = _Judgement.__pydantic_fields__["counter"]
+    assert counter.annotation is itertools.count
+    assert counter.default_factory is itertools.count
 
 
 # ---------------------------------------------------------------------------------------

@@ -36,7 +36,7 @@ import json
 import os
 import urllib.parse
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -433,7 +433,7 @@ def _row(*, world: str, name: str, kind: str, derived_from: str) -> dict:
 # ---------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Plan:
     """One declared base pattern, resolved into the two names it stages."""
 
@@ -714,7 +714,7 @@ def _checked(value: str, allowed: frozenset[str], what: str) -> str:
     return value
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Door:
     """The cluster's write surface, as an object the launcher holds and no verb can name.
 
@@ -946,7 +946,7 @@ def write_door(*, ctx: Any = None, container: str, transport: Any = docker_exec_
 _DOOR_CONFIG_KEYS = ("ELASTICSEARCH_URL", "ELASTIC_SSL_VERIFY")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _HostContext:
     """The two fields `docker_exec_curl` reads off a context, for a caller that has no run.
 

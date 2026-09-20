@@ -44,9 +44,10 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 import dataclasses
-from dataclasses import dataclass, replace
+from dataclasses import replace
+from defender._model import model
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic_ai.exceptions import ModelRetry
 
@@ -124,7 +125,7 @@ def _git_read(what: str, fn: Callable[..., _T], *args: Any) -> _T:
         raise GitProbeError(f"read-only git probe ({what}) failed: {e}") from e
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class PairVerdict:
     """#773's Data model: one (changed corpus file, this-batch cited finding) pair's
     outcome, minted by the drain and by nothing else (O5).
@@ -221,7 +222,7 @@ def stuck_report_file(channel: QueueChannel) -> Path:
     return channel.file.with_suffix(".stuck.jsonl")
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class RetireOutcome:
     #: id -> the attempt count the row now carries, for every row in the batch.
     bumped: dict[str, int]
@@ -229,7 +230,7 @@ class RetireOutcome:
     retired: tuple[str, ...]
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class DrainOutcome:
     """What one completed tick did, handed to `cfg.post_rotate` after the rotation."""
 
@@ -320,7 +321,7 @@ def retire(
     )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Bumped:
     #: the bumped rows still under the ceiling, each carrying its new count.
     survivors: list[dict]
@@ -535,7 +536,7 @@ def _verifier_key_preflight(cfg: CorpusAuthorConfig) -> None:
         )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _PreState:
     """The worktree's shape just before the agent runs, so a fault after it can put the
     worktree back the way the agent found it. Otherwise the agent's edits stay
@@ -567,7 +568,7 @@ def _capture_pre_state(cfg: CorpusAuthorConfig) -> _PreState:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Tree:
     """The corpus after a spawn has been settled (`_settle_tree`): the repo-relative paths
     whose bytes differ from HEAD, and the paths deleted. The one input every later step
@@ -622,7 +623,7 @@ def _settle_tree(
     return _git_read("settle tree", settle)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Judged:
     """One judgement of the tree: every (finding, file) verdict for the CURRENT bytes of the
     files judged, and what each of those files cites from this batch."""
@@ -640,7 +641,18 @@ class _Judged:
 _JUDGE_ROUNDS = 4
 
 
-@dataclass
+if TYPE_CHECKING:
+    #: `itertools.count` is generic to a type checker and a plain class at runtime, where
+    #: `itertools.count[int]` raises `TypeError: not subscriptable` — and a pydantic dataclass
+    #: EVALUATES its field annotations at decoration time (#1067), where `from __future__ import
+    #: annotations` no longer hides that. The alias keeps the `[int]` parameter for mypy and
+    #: hands pydantic the bare class, which `arbitrary_types_allowed` checks with `isinstance`.
+    CheckCounter = itertools.count[int]
+else:
+    CheckCounter = itertools.count
+
+
+@model
 class _Judgement:
     """The verdict memo for one tick.
 
@@ -662,7 +674,7 @@ class _Judgement:
     history: list[PairVerdict] = dataclasses.field(default_factory=list)
     #: the check index every `CheckContext` this tick carries is drawn from — one counter,
     #: so two concurrently-minted checks never share one.
-    counter: itertools.count[int] = dataclasses.field(default_factory=itertools.count)
+    counter: CheckCounter = dataclasses.field(default_factory=itertools.count)
 
     def judge(
         self, files: tuple[str, ...], pass_no: int, *, before: _Judged | None = None,
@@ -754,7 +766,7 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Fates:
     """Every row the batch read, sorted into exactly one ending (O9's conservation)."""
 
@@ -794,7 +806,7 @@ def _decide_fates(
     return _Fates(committed=committed, terminal=terminal, deferred=deferred)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _BatchOutcome:
     commit_sha: str | None
     committed: list[dict]

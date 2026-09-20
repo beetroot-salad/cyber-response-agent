@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import yaml
+from pydantic import SkipValidation
 
 from defender._io import (
     load_json_artifact,
@@ -46,7 +48,7 @@ def _as_int(value, default: int = 0) -> int:
         return default
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class QueryRow:
     """One queries-table row as the canonical surface reads it: EVERY column
     `record_query.QUERY_ROW_COLUMNS` declares, with the writer's own coercions, and
@@ -62,7 +64,13 @@ class QueryRow:
     system: str
     verb: str
     query_id: str
-    params: dict
+    #: `SkipValidation` for the same reason `_record` below carries it: `load_queries` passes
+    #: `rec["params"]` itself, and `record()`'s docstring makes "`params` is the same object"
+    #: a promise this row keeps. A validated `dict` field is rebuilt on every construction,
+    #: which quietly makes the typed view a COPY of the record — the one thing #1017 C16 says
+    #: this row must never hand back. The loader already refuses a non-dict at the seam
+    #: (`params if isinstance(params, dict) else {}`).
+    params: Annotated[dict, SkipValidation]
     raw_command: str
     exit_code: int
     error_class: str | None
@@ -93,7 +101,12 @@ class QueryRow:
     system_key: str = ""
     #: The parsed JSON record this row was read from, untouched — see `record()`. Excluded from
     #: equality and repr because it is the SOURCE of the typed fields, not a fifteenth column.
-    _record: dict | None = field(default=None, repr=False, compare=False)
+    #: `SkipValidation` (#1067): this field IS the parsed record, by identity — strict
+    #: validation rebuilds a `dict` field on every construction, and `record()` would then
+    #: return a re-projection of the row rather than "byte-for-byte what `record_query.
+    #: lead_rows` hands the guard live", which is the whole distinction #1017 C16 draws.
+    _record: Annotated[dict | None, SkipValidation] = field(
+        default=None, repr=False, compare=False)
 
     def record(self) -> dict:
         """The row AS READ — the parsed JSON record, byte-for-byte what `record_query.lead_rows`
@@ -135,7 +148,7 @@ class QueryRow:
         return is_reserved_query_id(self.query_id)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class JoinedLead:
 
     lead_id: str

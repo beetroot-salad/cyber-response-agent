@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from defender._io import append_jsonl, read_jsonl_rows
 from defender.learning.branch.ledger import (
@@ -173,7 +174,12 @@ def test_a_ledger_without_a_primed_base_does_not_construct(tmp_path):
     would look complete and measure the estate's drift."""
     root = episode(tmp_path)
 
-    with pytest.raises(TypeError):
+    # 1067: a missing required field on a strict pydantic dataclass raises pydantic's
+    # `ValidationError`, not stdlib `@dataclass`'s `TypeError`. The demand is unchanged —
+    # the constructor refuses a ledger with no capture named — and `ValidationError` ALONE
+    # is what is expected: a `TypeError` here would be some other fault raised before the
+    # field check (a positional-argument mismatch, a broken `__post_init__`), not this one.
+    with pytest.raises(ValidationError, match="base_path"):
         Ledger(root / SERVED_DIRNAME / "w1.jsonl")
 
 
