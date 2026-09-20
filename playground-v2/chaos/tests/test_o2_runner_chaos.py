@@ -21,6 +21,7 @@ unchanged. The two failure shapes the design calls out by line number:
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 from pathlib import Path
@@ -210,6 +211,90 @@ def test_keep_chaos_holds_the_fault_open(runner, scenario, tmp_path):
 
     assert len(chaos_ctl.activate_calls) == 1
     assert chaos_ctl.revert_calls == []
+
+
+def test_a_keyboard_interrupt_mid_run_still_reverts(runner, scenario, tmp_path):
+    """O2 names this exit by keyboard shortcut, not just 'any exception': a
+    bare except-tuple that omits BaseException would leak the fault here
+    while every other exit test in this file stays green."""
+    chaos_ctl = FakeChaosCtl(ledger_ref="ledger-ref-sigint")
+
+    def interrupted_exec(host, command, user, dry_run):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        runner.run_scenario(
+            scenario,
+            seed=42,
+            overrides={},
+            dry_run=False,
+            cr_mode="none",
+            runs_dir=tmp_path,
+            chaos=PROFILE,
+            chaos_ctl=chaos_ctl,
+            post_cr=lambda body: (0, {}),
+            exec_fn=interrupted_exec,
+        )
+
+    assert [c["ledger_ref"] for c in chaos_ctl.revert_calls] == ["ledger-ref-sigint"]
+
+
+def test_cli_run_forwards_chaos_and_keep_chaos_to_run_scenario(runner, tmp_path):
+    """O2/M1's CLI half: `run_scenario` gaining the parameters means nothing
+    if `cmd_run`'s argparse wiring never forwards them."""
+    captured: dict = {}
+
+    def fake_run_scenario(scenario, seed, overrides, dry_run, cr_mode, **kwargs):
+        captured.update(kwargs)
+        return "run-id", tmp_path, []
+
+    original_run_scenario = runner.run_scenario
+    original_load_catalog = runner.load_catalog
+    runner.run_scenario = fake_run_scenario
+    runner.load_catalog = lambda: {
+        "demo": {
+            "id": "demo",
+            "category": "auth-metadata",
+            "description": "cli-forwarding fixture\n",
+            "target_host": "canary-1",
+            "source_host": "office-ws-1",
+            "steps": [],
+        }
+    }
+    try:
+        args = argparse.Namespace(
+            scenario="demo",
+            seed=7,
+            user=None,
+            source=None,
+            target=None,
+            intensity=None,
+            cr_mode="none",
+            dry_run=False,
+            chaos="cmdb-stale-owner",
+            keep_chaos=True,
+        )
+        rc = runner.cmd_run(args)
+    finally:
+        runner.run_scenario = original_run_scenario
+        runner.load_catalog = original_load_catalog
+
+    assert rc == 0
+    assert captured.get("chaos") == "cmdb-stale-owner"
+    assert captured.get("keep_chaos") is True
+
+
+def test_cli_parser_accepts_chaos_flags(runner):
+    """The argparse wiring itself: `--chaos`/`--keep-chaos` must not be
+    'unrecognized arguments' on the real `run` subcommand."""
+    parser = runner.build_arg_parser()
+    args = parser.parse_args(["run", "some-scenario", "--chaos", "cmdb-stale-owner", "--keep-chaos"])
+    assert args.chaos == "cmdb-stale-owner"
+    assert args.keep_chaos is True
+
+    defaults = parser.parse_args(["run", "some-scenario"])
+    assert defaults.chaos == "none"
+    assert defaults.keep_chaos is False
 
 
 def test_no_chaos_flag_means_no_chaos_calls_at_all(runner, scenario, tmp_path):

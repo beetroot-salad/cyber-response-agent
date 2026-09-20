@@ -105,12 +105,14 @@ def test_data_drop_condition_is_null_guarded_and_salted(profiles_dir, rules_dir,
 
     drop = _sole_processor(_pipeline_put(execer, SYSLOG_PIPELINE), "drop")
     condition = drop["if"]
-    # Field-less lines must survive untouched — a throw here becomes a
-    # pipeline_error doc in an index the agent reads.
-    assert condition.startswith("ctx.message != null")
-    assert "(ctx.message + '7')" in condition
-    assert "& 0x7fffffff" in condition
-    assert "% 100 < 30" in condition
+    # Pinned to the design's exact formula — not just substrings of it. A
+    # trailing extra clause (e.g. an unsatisfiable conjunct silently turning
+    # the processor into a no-op) would still contain every one of these
+    # substrings while dropping nothing.
+    assert condition == (
+        "ctx.message != null && ((ctx.message + '7').hashCode() "
+        "& 0x7fffffff) % 100 < 30"
+    )
     assert "tag" not in drop
     assert "description" not in drop
 
@@ -124,16 +126,27 @@ def test_data_drop_never_touches_the_auth_pipeline(profiles_dir, rules_dir, ledg
     assert execer.calls_for(path_contains=AUTH_PIPELINE) == []
 
 
-def test_no_captured_payload_names_the_harness(profiles_dir, rules_dir, ledger_dir):
+@pytest.mark.parametrize(
+    ("profile_id", "mode", "params"),
+    [
+        ("drift-rename3", "schema-drift", {"rename": {"from": "user.name", "to": "user.id"}}),
+        ("drop-marker-sweep", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 25}),
+    ],
+)
+def test_no_captured_payload_names_the_harness(profiles_dir, rules_dir, ledger_dir, profile_id, mode, params):
     """O6 by construction: nothing the controller writes into the stack may
-    carry a word that identifies it as a test harness."""
-    write_profile(
-        profiles_dir, "drift-rename3", "schema-drift", {"rename": {"from": "user.name", "to": "user.id"}}
-    )
+    carry a word that identifies it as a test harness — swept over every
+    mode that PUTs a pipeline body, and over the whole captured call
+    (including the body's top level, not just the nested processor dict a
+    stray top-level "description" could sit next to)."""
+    write_profile(profiles_dir, profile_id, mode, params)
     execer = FakeExecSeam()
-    _activate("drift-rename3", profiles_dir, rules_dir, ledger_dir, execer)
+    _activate(profile_id, profiles_dir, rules_dir, ledger_dir, execer)
 
     blob = repr(execer.calls).lower()
     # Word-boundary matched: "default" is a legitimate word in a pipeline body.
     for marker in ("chaos", "fault", "inject", "injected", "harness", "defender"):
         assert not re.search(rf"\b{marker}\b", blob), f"{marker!r} leaked into a payload: {blob}"
+
+    for call in execer.calls_for(target="es", method="PUT"):
+        assert set(call["body"]) == {"processors"}, f"harness-named top-level key: {call['body']}"

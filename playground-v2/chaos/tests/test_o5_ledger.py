@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
 from _fakes import FakeExecSeam, write_profile
 
 from chaos import ctl
@@ -56,6 +57,7 @@ def test_activate_appends_a_full_record(profiles_dir, rules_dir, ledger_dir):
     assert record["resolved_mutations"] == returned["resolved_mutations"]
     assert record["ledger_ref"] == returned["ledger_ref"]
     _iso(record["activated_at"])  # parseable timestamp, not a bare marker
+    assert record["live_fingerprint"], "live_fingerprint must carry real content, not a null placeholder"
     assert not record.get("reverted_at"), "a fresh activation is not already reverted"
 
 
@@ -103,6 +105,27 @@ def test_revert_stamps_reverted_at_on_the_same_record(profiles_dir, rules_dir, l
     record = reverted[0]
     assert _iso(record["reverted_at"]) >= _iso(record["activated_at"])
     assert record["resolved_mutations"] == activated["resolved_mutations"]
+
+
+def test_a_failed_mutation_is_never_recorded_as_ground_truth(profiles_dir, rules_dir, ledger_dir):
+    """A non-zero rc from the exec seam means the mutation never actually
+    landed — `_fakes.py`'s own seam contract says so ('rc is 0 on success,
+    non-zero otherwise'). Recording a ledger entry anyway would tell the
+    scorer a fault was injected that the stack never received."""
+    _stale_profile(profiles_dir, "stale-owner-fails")
+    execer = FakeExecSeam(cmdb={"POST /admin/overlay/*": (1, {"error": "cmdb 500"})})
+
+    with pytest.raises(Exception):
+        ctl.activate(
+            "stale-owner-fails",
+            seed=42,
+            execer=execer,
+            profiles_dir=profiles_dir,
+            rules_dir=rules_dir,
+            ledger_dir=ledger_dir,
+        )
+
+    assert read_records(ledger_dir) == [], "a failed activation still wrote ground truth"
 
 
 def test_a_second_profile_appends_rather_than_overwrites(profiles_dir, rules_dir, ledger_dir):

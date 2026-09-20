@@ -16,6 +16,9 @@ The scanner must also be discriminating: `canary-1` is a real inventory host and
 """
 from __future__ import annotations
 
+from _fakes import FakeExecSeam
+
+from chaos import ctl
 from chaos.audit import audit_payloads
 
 CLEAN_AUTH_DOC = {
@@ -74,6 +77,47 @@ def test_harness_markers_are_flagged_wherever_they_sit():
     ]
     for payload in cases:
         assert audit_payloads([payload]), f"not flagged: {payload}"
+
+
+def test_ctl_audit_actually_samples_and_runs_its_own_canary_control(ledger_dir):
+    """`ctl.audit`'s live half: `audit_payloads` being well-tested says
+    nothing if `ctl.run_audit` never calls the seam at all. This drives it
+    through a fake seam and checks it (a) samples real payloads and (b)
+    actually performs M7's positive control — inject, confirm flagged,
+    remove — rather than returning a vacuous clean report."""
+    execer = FakeExecSeam(
+        cmdb={
+            "GET /health": (0, {"status": "ok", "host_count": 11}),
+            "GET /hosts": (0, {"total": 1, "hosts": [CLEAN_CMDB_PAYLOAD]}),
+            "GET /hosts/audit-canary-host": (0, {"name": "audit-canary-host", "owner": "chaos-harness-canary"}),
+        }
+    )
+
+    result = ctl.run_audit(execer=execer, ledger_dir=ledger_dir)
+
+    assert result["findings"] == []
+    assert result["sampled"] >= 2, "the audit never sampled the health/hosts payloads"
+    assert result["canary_control_passed"] is True, "the audit's own positive control did not fire"
+
+    posted = execer.calls_for(target="cmdb", method="POST", path_contains="audit-canary-host")
+    deleted = execer.calls_for(target="cmdb", method="DELETE", path_contains="audit-canary-host")
+    assert posted, "the canary was never actually injected"
+    assert deleted, "the canary was injected but never cleaned up"
+
+
+def test_ctl_audit_reports_a_real_finding_from_a_sampled_payload(ledger_dir):
+    execer = FakeExecSeam(
+        cmdb={
+            "GET /health": (0, {"status": "ok", "host_count": 11}),
+            "GET /hosts": (
+                0,
+                {"total": 1, "hosts": [dict(CLEAN_CMDB_PAYLOAD, owner="chaos-harness-canary")]},
+            ),
+            "GET /hosts/audit-canary-host": (0, {"name": "audit-canary-host", "owner": "chaos-harness-canary"}),
+        }
+    )
+    result = ctl.run_audit(execer=execer, ledger_dir=ledger_dir)
+    assert result["findings"], "a harness-tagged sampled payload was not flagged"
 
 
 def test_real_inventory_vocabulary_does_not_trip_the_scanner():

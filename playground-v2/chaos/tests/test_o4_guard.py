@@ -102,6 +102,48 @@ def test_data_drop_on_the_day_one_safe_stream_is_accepted(profiles_dir, rules_di
     check_profile(load_profile("drop-ok", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
 
+def test_rule_key_fields_and_streams_are_empty_for_an_empty_rules_dir(tmp_path):
+    """The guard must actually read `rules_dir`, not answer from a fixed
+    table hand-transcribed from today's committed rules — a hardcoded set
+    would return the same fields regardless of what's on disk."""
+    empty = tmp_path / "no-rules"
+    empty.mkdir()
+    assert rule_key_fields(empty) == set()
+    assert rule_read_streams(empty) == set()
+
+
+def test_guard_reacts_to_a_rule_not_in_the_committed_set(tmp_path, profiles_dir):
+    """A synthetic rule the committed detection-rules/ doesn't have, keying on
+    a field this suite otherwise treats as safe (user.name) over a stream
+    this suite otherwise treats as safe (logs-system.syslog-*). If the guard
+    answers from the real committed rules alone rather than `rules_dir`, both
+    profiles below wrongly activate."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "new-rule.json").write_text(
+        json.dumps(
+            {
+                "rule_id": "new-rule",
+                "query": "",
+                "threshold": {"field": ["user.name"]},
+                "index": ["logs-system.syslog-*"],
+            }
+        )
+    )
+
+    write_profile(
+        profiles_dir, "drift-newly-bad", "schema-drift", {"rename": {"from": "user.name", "to": "user.id"}}
+    )
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drift-newly-bad", profiles_dir=profiles_dir), rules_dir=rules_dir)
+
+    write_profile(
+        profiles_dir, "drop-newly-bad", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 10}
+    )
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drop-newly-bad", profiles_dir=profiles_dir), rules_dir=rules_dir)
+
+
 def test_activate_runs_the_guard_before_touching_the_stack(profiles_dir, rules_dir, ledger_dir):
     """A refused profile must mutate nothing — the guard is a precondition of
     activate, not a report written after the fact."""

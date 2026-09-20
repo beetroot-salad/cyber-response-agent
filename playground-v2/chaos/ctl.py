@@ -73,7 +73,19 @@ def _read_inventory(inventory_path: Optional[Path] = None) -> dict[str, Any]:
 
 
 class DockerExecSeam:
-    """The real exec seam. Nothing else in this module talks to the stack."""
+    """The real exec seam. Nothing else in this module talks to the stack.
+
+    Every call shells `docker --context soc-playground exec` into the target
+    container itself; there is no host-side network path to the stub or to
+    Elasticsearch (O7 — a direct host-side HTTP call would show up as a
+    gateway-IP flow in the agent's own Zeek telemetry, which is exactly what
+    keeps the controller invisible to the agent-under-test). `run=` is an
+    injection seam over `subprocess.run` so a test can assert on the argv
+    without actually shelling out — see chaos/tests/test_m1_real_seam.py.
+    """
+
+    def __init__(self, run: Any = subprocess.run) -> None:
+        self._run = run
 
     def cmdb_request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
         script = (
@@ -95,7 +107,7 @@ class DockerExecSeam:
             "docker", "--context", DOCKER_CONTEXT, "exec", "-i",
             "cmdb", "python3", "-c", script,
         ]
-        proc = subprocess.run(args, input=payload, capture_output=True, text=True)
+        proc = self._run(args, input=payload, capture_output=True, text=True)
         return self._parse(proc)
 
     def es_request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
@@ -108,12 +120,12 @@ class DockerExecSeam:
             for part in parts
         )
         args = ["docker", "--context", DOCKER_CONTEXT, "exec", "elasticsearch", "bash", "-lc", quoted]
-        proc = subprocess.run(args, capture_output=True, text=True)
+        proc = self._run(args, capture_output=True, text=True)
         return self._parse(proc)
 
     def read_container_file(self, container: str, path: str) -> str:
         args = ["docker", "--context", DOCKER_CONTEXT, "exec", container, "cat", path]
-        proc = subprocess.run(args, capture_output=True, text=True)
+        proc = self._run(args, capture_output=True, text=True)
         if proc.returncode != 0:
             raise FileNotFoundError(f"{container}:{path}: {proc.stderr.strip()}")
         return proc.stdout
@@ -129,27 +141,48 @@ class DockerExecSeam:
             return proc.returncode, {"raw": text}
 
 
+class ChaosApplyError(RuntimeError):
+    """A mutation did not reach the stack — nothing about it may be recorded
+    as ground truth (O5): a failed injection is not an injection."""
+
+
 def _apply_mutations(mode: str, mutations: list[dict[str, Any]], execer: Any) -> None:
     if mode == "cmdb-stale":
         for m in mutations:
             body = {m["field"]: m["new_value"]} if m["kind"] == "field-flip" else m["new_value"]
-            execer.cmdb_request("POST", f"/admin/overlay/{m['host']}", body)
+            rc, resp = execer.cmdb_request("POST", f"/admin/overlay/{m['host']}", body)
+            if rc != 0:
+                raise ChaosApplyError(f"POST /admin/overlay/{m['host']} failed rc={rc}: {resp}")
     else:
         for m in mutations:
-            execer.es_request("PUT", f"/_ingest/pipeline/{m['pipeline']}", {"processors": [m["processor"]]})
+            rc, resp = execer.es_request(
+                "PUT", f"/_ingest/pipeline/{m['pipeline']}", {"processors": [m["processor"]]}
+            )
+            if rc != 0:
+                raise ChaosApplyError(f"PUT /_ingest/pipeline/{m['pipeline']} failed rc={rc}: {resp}")
 
 
 def _undo_mutations(mode: str, mutations: list[dict[str, Any]], execer: Any) -> None:
+    # Best-effort: attempt every undo before raising, so one failed DELETE
+    # doesn't strand the others live. A revert failure is still surfaced —
+    # never swallowed — so it isn't mistaken for a clean revert.
+    errors: list[str] = []
     if mode == "cmdb-stale":
         for m in mutations:
-            execer.cmdb_request("DELETE", f"/admin/overlay/{m['host']}")
+            rc, resp = execer.cmdb_request("DELETE", f"/admin/overlay/{m['host']}")
+            if rc != 0:
+                errors.append(f"DELETE /admin/overlay/{m['host']} failed rc={rc}: {resp}")
     else:
         seen: set[str] = set()
         for m in mutations:
             if m["pipeline"] in seen:
                 continue
             seen.add(m["pipeline"])
-            execer.es_request("DELETE", f"/_ingest/pipeline/{m['pipeline']}")
+            rc, resp = execer.es_request("DELETE", f"/_ingest/pipeline/{m['pipeline']}")
+            if rc != 0:
+                errors.append(f"DELETE /_ingest/pipeline/{m['pipeline']} failed rc={rc}: {resp}")
+    if errors:
+        raise ChaosApplyError("; ".join(errors))
 
 
 def activate(
@@ -246,60 +279,86 @@ def status(
     drift: list[dict[str, Any]] = []
     expected_pipelines: dict[str, str] = {}  # pipeline name -> owning profile_id
 
+    # The reconciled expectation: baked inventory, with every active
+    # cmdb-stale record's mutations applied on top. Diffing *this* against
+    # live — rather than only checking each record's own claimed mutation —
+    # is what catches drift the ledger never predicted: a stray overlay
+    # nobody's ledger entry explains is exactly the asymmetric-persistence
+    # case M5 exists to catch, and a ledger-only check can't see it when the
+    # ledger itself is what went stale (e.g. lost on a restart, or simply
+    # empty because the mutation was made by hand).
+    expected_hosts: dict[str, dict[str, Any]] = {name: dict(rec) for name, rec in baked_hosts.items()}
+    # (host, field) -> owning record, for attributing a mismatch; "*" means
+    # "this host's very presence/absence is owned by this record".
+    owner_of: dict[tuple[str, str], dict[str, Any]] = {}
+
     for record in active_records:
-        if record["mode"] == "cmdb-stale":
-            for m in record["resolved_mutations"]:
-                host = m["host"]
-                live = live_hosts.get(host)
-                if m["kind"] == "field-flip":
-                    live_value = (live or {}).get(m["field"])
-                    if live_value != m["new_value"]:
-                        drift.append(
-                            {
-                                "type": "cmdb-field-mismatch",
-                                "profile_id": record["profile_id"],
-                                "ledger_ref": record["ledger_ref"],
-                                "host": host,
-                                "field": m["field"],
-                                "expected": m["new_value"],
-                                "live": live_value,
-                            }
-                        )
-                    # The image itself can move independent of the overlay
-                    # (a rebuild) — catch the ledger's premise going stale.
-                    baked_value = baked_hosts.get(host, {}).get(m["field"])
-                    if baked_value != m["old_value"]:
-                        drift.append(
-                            {
-                                "type": "baked-inventory-moved",
-                                "profile_id": record["profile_id"],
-                                "host": host,
-                                "field": m["field"],
-                                "ledger_old_value": m["old_value"],
-                                "baked_value": baked_value,
-                            }
-                        )
-                elif m["kind"] == "phantom-host" and live is None:
-                    drift.append(
-                        {
-                            "type": "phantom-host-missing",
-                            "profile_id": record["profile_id"],
-                            "ledger_ref": record["ledger_ref"],
-                            "host": host,
-                        }
-                    )
-                elif m["kind"] == "missing-host" and live is not None:
-                    drift.append(
-                        {
-                            "type": "missing-host-reappeared",
-                            "profile_id": record["profile_id"],
-                            "ledger_ref": record["ledger_ref"],
-                            "host": host,
-                        }
-                    )
-        else:
+        if record["mode"] != "cmdb-stale":
             for m in record["resolved_mutations"]:
                 expected_pipelines[m["pipeline"]] = record["profile_id"]
+            continue
+        for m in record["resolved_mutations"]:
+            host = m["host"]
+            if m["kind"] == "field-flip":
+                expected_hosts.setdefault(host, dict(baked_hosts.get(host, {"name": host})))
+                expected_hosts[host][m["field"]] = m["new_value"]
+                owner_of[(host, m["field"])] = record
+                # The image itself can move independent of the overlay (a
+                # rebuild) — catch the ledger's premise going stale.
+                baked_value = baked_hosts.get(host, {}).get(m["field"])
+                if baked_value != m["old_value"]:
+                    drift.append(
+                        {
+                            "type": "baked-inventory-moved",
+                            "profile_id": record["profile_id"],
+                            "host": host,
+                            "field": m["field"],
+                            "ledger_old_value": m["old_value"],
+                            "baked_value": baked_value,
+                        }
+                    )
+            elif m["kind"] == "phantom-host":
+                expected_hosts[host] = dict(m["new_value"])
+                owner_of[(host, "*")] = record
+            elif m["kind"] == "missing-host":
+                expected_hosts.pop(host, None)
+                owner_of[(host, "*")] = record
+
+    for name in sorted(set(expected_hosts) | set(live_hosts)):
+        expected = expected_hosts.get(name)
+        live = live_hosts.get(name)
+        owner = owner_of.get((name, "*"))
+        if expected is None and live is not None:
+            drift.append(
+                {
+                    "type": "unexpected-live-host",
+                    "host": name,
+                    "profile_id": owner["profile_id"] if owner else None,
+                }
+            )
+        elif expected is not None and live is None:
+            drift.append(
+                {
+                    "type": "cmdb-host-missing",
+                    "host": name,
+                    "profile_id": owner["profile_id"] if owner else None,
+                }
+            )
+        elif expected is not None and live is not None:
+            for field in sorted(set(expected) | set(live)):
+                if expected.get(field) == live.get(field):
+                    continue
+                field_owner = owner_of.get((name, field)) or owner
+                drift.append(
+                    {
+                        "type": "cmdb-field-mismatch",
+                        "host": name,
+                        "field": field,
+                        "expected": expected.get(field),
+                        "live": live.get(field),
+                        "profile_id": field_owner["profile_id"] if field_owner else None,
+                    }
+                )
 
     rc, pipelines_payload = execer.es_request("GET", "/_ingest/pipeline/*@custom")
     live_pipelines = set(pipelines_payload) if rc == 0 and isinstance(pipelines_payload, dict) else set()

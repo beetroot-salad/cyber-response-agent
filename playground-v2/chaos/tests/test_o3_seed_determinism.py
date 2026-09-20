@@ -127,7 +127,12 @@ def test_data_drop_salt_is_the_seed_and_every_seed_gives_a_distinct_hash(profile
         condition = _drop_condition(mutations)
         # The seed is the salt inside the drop hash (design's live check: salt 7
         # dropped 1 of 4 lines, salt 42 dropped 2 of 4 — the seed selects the subset).
-        assert f"(ctx.message + '{seed}')" in condition, f"seed {seed} is not the salt: {condition}"
+        # Pinned exactly, not just "contains the salt" — an unrelated appended
+        # clause would still satisfy a substring check.
+        assert condition == (
+            f"ctx.message != null && ((ctx.message + '{seed}').hashCode() "
+            "& 0x7fffffff) % 100 < 25"
+        ), f"seed {seed}: {condition}"
         conditions[seed] = condition
 
     assert len(set(conditions.values())) == len(SEEDS), "different seeds produced the same drop hash"
@@ -157,9 +162,15 @@ def test_the_emitted_condition_really_selects_a_seed_dependent_subset(profiles_d
 
     def dropped(seed: int) -> set[str]:
         condition = _drop_condition(resolve_mutations(profile, seed=seed, inventory=inventory))
-        assert "ctx.message != null" in condition
-        assert "% 100 < 50" in condition
-        salt = condition.split("(ctx.message + '", 1)[1].split("'", 1)[0]
+        # Pinned to the whole formula, not fragments of it — a trailing extra
+        # conjunct (e.g. one that never evaluates true) would still contain
+        # every substring a looser check might assert, while silently
+        # dropping nothing.
+        assert condition == (
+            f"ctx.message != null && ((ctx.message + '{seed}').hashCode() "
+            "& 0x7fffffff) % 100 < 50"
+        )
+        salt = str(seed)
         return {m for m in messages if (java_hash_code(m + salt) & 0x7FFFFFFF) % 100 < 50}
 
     assert dropped(7) == dropped(7)

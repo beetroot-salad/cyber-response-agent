@@ -402,7 +402,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -443,6 +443,11 @@ def main() -> int:
         help="do not revert the --chaos profile after the run (leaves the fault live)",
     )
 
+    return parser
+
+
+def main() -> int:
+    parser = build_arg_parser()
     args = parser.parse_args()
     if args.command == "list":
         return cmd_list(args)

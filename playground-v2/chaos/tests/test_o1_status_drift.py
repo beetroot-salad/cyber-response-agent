@@ -67,6 +67,27 @@ def test_status_flags_a_silently_reverted_overlay(
     assert record["resolved_mutations"][0]["host"] in blob
 
 
+def test_status_flags_a_stray_overlay_no_ledger_record_explains(
+    profiles_dir, rules_dir, ledger_dir, inventory, inventory_text
+):
+    """An empty ledger — nothing was ever activated through this controller —
+    but the live overlay disagrees with the baked inventory anyway (a manual
+    admin edit, or a ledger that was lost). A status that only checks each
+    ledger record's own claimed mutation sees nothing here; status must not
+    trust the ledger's silence either."""
+    live = FakeExecSeam(
+        cmdb={"GET /hosts": (0, _hosts_payload(inventory, {"db-1": {"owner": "team.mystery"}}))},
+        es={"GET /_ingest/pipeline/*": (1, {"error": "not found"})},
+        files={BAKED_INVENTORY: inventory_text},
+    )
+
+    result = ctl.status(execer=live, profiles_dir=profiles_dir, ledger_dir=ledger_dir)
+
+    drift = result["drift"]
+    assert drift, "an unattributed CMDB change was not reported just because no ledger record predicted it"
+    assert "db-1" in json.dumps(drift, default=str)
+
+
 def test_status_flags_a_pipeline_that_outlived_its_revert(
     profiles_dir, rules_dir, ledger_dir, inventory, inventory_text
 ):

@@ -102,6 +102,52 @@ def test_field_flip_activation_posts_the_overlay_patch_through_the_seam(
     assert execer.calls_for(target="es") == []
 
 
+def test_phantom_host_activation_posts_the_full_record_through_the_seam(
+    profiles_dir, rules_dir, ledger_dir
+):
+    """`resolve_mutations` producing a phantom-host mutation is not the same
+    claim as `ctl.activate` actually pushing it — a controller that only
+    wires up field-flip would still write an "active" ledger record here
+    while touching the stack not at all."""
+    write_profile(profiles_dir, "stale-phantom-activate", "cmdb-stale", {"variant": "phantom-host", "hosts": 1})
+    execer = FakeExecSeam()
+    record = ctl.activate(
+        "stale-phantom-activate",
+        seed=42,
+        execer=execer,
+        profiles_dir=profiles_dir,
+        rules_dir=rules_dir,
+        ledger_dir=ledger_dir,
+    )
+    mutation = record["resolved_mutations"][0]
+
+    posts = execer.calls_for(target="cmdb", method="POST", path_contains="/admin/overlay/")
+    assert len(posts) == 1, f"phantom-host activation pushed nothing: {execer.calls}"
+    assert posts[0]["path"] == f"/admin/overlay/{mutation['host']}"
+    assert posts[0]["body"] == mutation["new_value"]
+
+
+def test_missing_host_activation_posts_the_tombstone_through_the_seam(
+    profiles_dir, rules_dir, ledger_dir
+):
+    write_profile(profiles_dir, "stale-missing-activate", "cmdb-stale", {"variant": "missing-host", "hosts": 1})
+    execer = FakeExecSeam()
+    record = ctl.activate(
+        "stale-missing-activate",
+        seed=42,
+        execer=execer,
+        profiles_dir=profiles_dir,
+        rules_dir=rules_dir,
+        ledger_dir=ledger_dir,
+    )
+    mutation = record["resolved_mutations"][0]
+
+    posts = execer.calls_for(target="cmdb", method="POST", path_contains="/admin/overlay/")
+    assert len(posts) == 1, f"missing-host activation pushed nothing: {execer.calls}"
+    assert posts[0]["path"] == f"/admin/overlay/{mutation['host']}"
+    assert posts[0]["body"] == TOMBSTONE
+
+
 def test_revert_deletes_exactly_the_overlays_activation_created(
     profiles_dir, rules_dir, ledger_dir
 ):
