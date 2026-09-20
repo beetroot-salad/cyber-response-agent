@@ -640,11 +640,12 @@ jobs:
 
       # The run-records inventory (#1076): defender/docs/run-records.md is RENDERED from
       # defender/docs/run-records.tsv (one row per file-access call site) and
-      # run-records-kinds.tsv. Fails on a call site with no row, a row whose call is gone
-      # (both baseline-ratcheted), or a page that differs from its tables (never ratcheted —
-      # run `--render` and commit). The seed of #1077's file backend until the handle owns
-      # every path, at which point this gate retires with the page.
-      - name: Run-records inventory gate (#1076 — baseline-ratcheted + rendered page)
+      # run-records-kinds.tsv. Fails on a call site with no row, a row whose call is gone, a
+      # row whose op does not fit its callee, a kind no table knows, or a page that differs
+      # from its tables. NO baseline and no inline suppression: the gate's product is
+      # completeness, so an unattributed site gets a row, never a waiver. The seed of #1077's
+      # file backend until the handle owns every path, at which point it retires with the page.
+      - name: Run-records inventory gate (#1076 — hard, rendered page)
         run: defender/.venv/bin/python scripts/lint/lint_run_records.py
 
       # The READ-side twin of the gate above. #771 M3 settled writing into a box-writable tree

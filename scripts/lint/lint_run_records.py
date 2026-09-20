@@ -51,11 +51,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from _astlib import ScanBlind, callee, module_env, read_and_parse
-from _baseline import Finding, gate
+from _baseline import Finding
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
-BASELINE_PATH = Path(__file__).with_name("lint_run_records_baseline.json")
 SITES_TSV = DEFENDER / "docs" / "run-records.tsv"
 KINDS_TSV = DEFENDER / "docs" / "run-records-kinds.tsv"
 PAGE = DEFENDER / "docs" / "run-records.md"
@@ -93,6 +92,15 @@ CALLEES: dict[str, str] = {
     "defender._io.open_nofollow_fd": "open",
     "defender._io.guarded_mkdir": "write",
     "sqlite3.connect": "open",
+    "os.unlink": "write",
+    "os.remove": "write",
+    "os.replace": "write",
+    "os.link": "write",
+    "os.mkdir": "write",
+    "os.makedirs": "write",
+    "shutil.rmtree": "write",
+    "shutil.move": "write",
+    "tarfile.open": "open",
 }
 #: Duck-typed attribute calls on a value (`p.read_text()`): `callee()` is None there by
 #: design, so the attribute NAME is the key.
@@ -102,22 +110,40 @@ DUCK_ATTRS: dict[str, str] = {
     "write_text": "write",
     "read_bytes": "read",
     "write_bytes": "write",
+    # `_io.Bound` — the repo's own guarded read seam (`_io.py:440-535`) — and the plain
+    # directory/unlink calls on a path value. `.read` also matches a stream's `.read()`, which
+    # is attributed `NOT:not_file_io` rather than hidden from the sweep.
+    "read": "read",
+    "read_jsonl": "read",
+    "entries": "read",
+    "mkdir": "write",
+    "unlink": "write",
+    "rmdir": "write",
+    "touch": "write",
+    "rename": "write",
+    # not `.replace`: on a path value it is a rename, but the same attribute on a str is the
+    # tree's commonest call, and `callee()` cannot tell them apart. `os.replace` is resolved.
 }
+#: Row `op` values a site of each op class may carry. `open` is ambiguous at the call (mode is
+#: a runtime value), so any op fits it; a `copy` site is a write on one side and a read on the
+#: other and the row says which record it is attributed to.
+OP_CLASSES: dict[str, frozenset[str]] = {
+    "read": frozenset({"read"}),
+    "write": frozenset({"write", "append", "mkdir", "unlink"}),
+    "copy": frozenset({"copy", "read"}),
+    "open": frozenset({"open", "read", "write", "append"}),
+}
+#: Kinds the appendix may carry that no rendered table lists. Everything else must be a row
+#: of `run-records-kinds.tsv` or a `NOT:<tag>`.
+APPENDIX_ONLY_KINDS = frozenset({"tool_seam"})
 WRITE_OPS = frozenset({"write", "append", "copy", "mkdir", "unlink"})
 #: `names`: not a call — the one line that MINTS a record's filename for a shared writer seam
 #: (a stage's `trace_name`, a ledger's file name). Rendered as evidence, never checked against
 #: the sweep, and never the only row a kind may have if a real call exists.
 NAMES_OP = "names"
-WHEN_ORDER = ("host", "live", "end")
+WHEN_ORDER = ("host", "live", "end", "later")
 WHEN_ALIASES = {"host-before-agent": "host", "n-a": ""}
 
-SUPPRESS = "lint-run-records: ok"
-
-HEADER = (
-    "Baseline for scripts/lint/lint_run_records.py: file-access call sites with no row in "
-    "defender/docs/run-records.tsv, and rows naming a call that is gone. Regenerate with "
-    "--update-baseline; attribute the site instead wherever possible."
-)
 
 
 @dataclass(frozen=True)
@@ -130,22 +156,27 @@ class Site:
 
     @property
     def key(self) -> str:
-        return f"{self.path}::{self.function}"
+        return f"{self.path}::{self.function}::{self.what}"
 
 
 @dataclass
 class Row:
     path: str
     line: int
-    kind: str
+    kind: str      # one kind id, or several comma-separated when one helper touches several
     op: str
     function: str
+    callee: str    # the resolved callee (`Site.what`), so the row names the CALL
     when: str
     note: str
 
     @property
     def key(self) -> str:
-        return f"{self.path}::{self.function}"
+        return f"{self.path}::{self.function}::{self.callee}"
+
+    @property
+    def kinds(self) -> list[str]:
+        return [k.strip() for k in self.kind.split(",") if k.strip()]
 
     @property
     def opclass(self) -> str:
@@ -182,8 +213,7 @@ def _enclosing(tree: ast.Module) -> dict[ast.AST, str]:
 
 
 def scan_file(path: Path, rel: str) -> list[Site]:
-    text, tree = read_and_parse(path, rel)
-    lines = text.splitlines()
+    _text, tree = read_and_parse(path, rel)
     env = module_env(tree)
     owner = _enclosing(tree)
     out: list[Site] = []
@@ -197,9 +227,6 @@ def scan_file(path: Path, rel: str) -> list[Site]:
         elif origin is None and isinstance(node.func, ast.Attribute) and node.func.attr in DUCK_ATTRS:
             what, opclass = f".{node.func.attr}", DUCK_ATTRS[node.func.attr]
         if what is None:
-            continue
-        line = lines[node.lineno - 1] if node.lineno - 1 < len(lines) else ""
-        if SUPPRESS in line:
             continue
         out.append(Site(rel, node.lineno, owner.get(node, "<module>"), what, opclass))
     return out
@@ -220,7 +247,7 @@ def scan(root: Path = DEFENDER) -> list[Site]:
 def load_rows(path: Path = SITES_TSV) -> list[Row]:
     with path.open(encoding="utf-8", newline="") as fh:
         return [
-            Row(r["path"], int(r["line"]), r["kind"], r["op"], r["function"], r["when"], r["note"])
+            Row(r["path"], int(r["line"]), r["kind"], r["op"], r["function"], r["callee"], r["when"], r["note"])
             for r in csv.DictReader(fh, delimiter="\t")
         ]
 
@@ -229,9 +256,9 @@ def save_rows(rows: list[Row], path: Path = SITES_TSV) -> None:
     rows = sorted(rows, key=lambda r: (r.path, r.line, r.kind))
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh, delimiter="\t", lineterminator="\n")
-        w.writerow(["path", "line", "kind", "op", "function", "when", "note"])
+        w.writerow(["path", "line", "kind", "op", "function", "callee", "when", "note"])
         for r in rows:
-            w.writerow([r.path, r.line, r.kind, r.op, r.function, r.when, r.note])
+            w.writerow([r.path, r.line, r.kind, r.op, r.function, r.callee, r.when, r.note])
 
 
 def load_kinds(path: Path = KINDS_TSV) -> list[dict[str, str]]:
@@ -246,15 +273,13 @@ def refresh_lines(rows: list[Row], sites: list[Site]) -> int:
     by_key: dict[str, list[Site]] = defaultdict(list)
     for s in sites:
         by_key[s.key].append(s)
-    grouped: dict[tuple[str, str], list[Row]] = defaultdict(list)
+    grouped: dict[str, list[Row]] = defaultdict(list)
     for r in rows:
-        grouped[(r.key, r.opclass)].append(r)
+        if r.op != NAMES_OP:
+            grouped[r.key].append(r)
     changed = 0
-    for (key, opclass), rs in grouped.items():
-        cands = sorted(
-            (s for s in by_key.get(key, ()) if (s.opclass in WRITE_OPS or s.opclass == "write") == (opclass == "write") or s.opclass == "open"),
-            key=lambda s: s.line,
-        )
+    for key, rs in grouped.items():
+        cands = sorted(by_key.get(key, ()), key=lambda s: s.line)
         for r, s in zip(sorted(rs, key=lambda r: r.line), cands):
             if r.line != s.line:
                 r.line = s.line
@@ -297,7 +322,8 @@ def _esc(s: str) -> str:
 def render(rows: list[Row], kinds: list[dict[str, str]]) -> str:
     by_kind: dict[str, list[Row]] = defaultdict(list)
     for r in rows:
-        by_kind[r.kind].append(r)
+        for k in r.kinds:
+            by_kind[k].append(r)
     facts: dict[str, dict[str, object]] = {}
     for k in kinds:
         rs = by_kind.get(k["kind"], [])
@@ -379,18 +405,44 @@ def render_appendix(rows: list[Row]) -> str:
 # the gate
 # ---------------------------------------------------------------------------------------
 
-def findings(sites: list[Site], rows: list[Row]) -> list[Finding]:
-    have = {r.key for r in rows}
-    seen = {s.key for s in sites}
-    out: list[Finding] = []
+def findings(sites: list[Site], rows: list[Row], kinds: list[dict[str, str]] | None = None) -> list[Finding]:
+    """Three checks, all keyed on the CALL (`path::function::callee`), as multisets, so a
+    second call of the same helper in an attributed function is not hidden by the first:
+
+      - a site with more calls than rows      -> unattributed
+      - a row with more entries than calls     -> stale (its call is gone)
+      - a row whose `op` does not fit the callee's op class, or whose kind no table knows
+    """
+    site_n: dict[str, int] = defaultdict(int)
+    site_class: dict[str, str] = {}
     for s in sites:
-        if s.key not in have:
-            out.append(Finding(f"{s.key}::{s.what}", f"{s.path}:{s.line} {s.function}: {s.what} has no row in run-records.tsv"))
+        site_n[s.key] += 1
+        site_class[s.key] = s.opclass
+    row_n: dict[str, int] = defaultdict(int)
+    for r in rows:
+        if r.op != NAMES_OP:
+            row_n[r.key] += 1
+    known = {k["kind"] for k in kinds} if kinds is not None else None
+    out: list[Finding] = []
+    for key, n in site_n.items():
+        if n > row_n.get(key, 0):
+            path, fn, what = key.split("::", 2)
+            out.append(Finding(key, f"{path} {fn}: {what} called {n}x, {row_n.get(key, 0)} row(s) in run-records.tsv"))
+    for key, n in row_n.items():
+        if n > site_n.get(key, 0):
+            path, fn, what = key.split("::", 2)
+            out.append(Finding(f"stale::{key}", f"{path} {fn}: {n} row(s) for {what}, {site_n.get(key, 0)} call(s) in the tree"))
     for r in rows:
         if r.op == NAMES_OP:
             continue
-        if r.key not in seen and not r.kind.startswith("NOT:not_file_io"):
-            out.append(Finding(f"stale::{r.key}", f"{r.path}:{r.line} {r.function}: row names a call that is gone"))
+        cls = site_class.get(r.key)
+        if cls is not None and r.op not in OP_CLASSES[cls]:
+            out.append(Finding(f"op::{r.key}::{r.op}", f"{r.path}:{r.line} {r.function}: op {r.op!r} does not fit a {cls} call ({r.callee})"))
+    if known is not None:
+        for r in rows:
+            for k in r.kinds:
+                if not (k in known or k.startswith("NOT:") or k in APPENDIX_ONLY_KINDS):
+                    out.append(Finding(f"kind::{r.key}::{k}", f"{r.path}:{r.line}: kind {k!r} is in no table"))
     return out
 
 
@@ -412,20 +464,27 @@ def main(argv: list[str] | None = None) -> int:
     appendix_mark = "## Appendix — call-site attribution"
     if appendix_mark in rendered:
         head, _, _ = rendered.partition(appendix_mark)
-        pre = "".join(_appendix_preamble())
-        rendered = head + appendix_mark + "\n\n" + pre + render_appendix(rows) + "\n"
+        rendered = head + appendix_mark + "\n\n" + "".join(_appendix_preamble()) + render_appendix(rows) + "\n"
     if "--render" in args:
         PAGE.write_text(rendered, encoding="utf-8")
         print(f"[lint_run_records] rendered -> {PAGE.relative_to(REPO_ROOT)}")
         page = rendered
-    found = findings(sites, rows)
-    rc = gate(found, BASELINE_PATH, args, label="lint_run_records", header=HEADER)
-    if page != rendered and "--update-baseline" not in args:
+    found = findings(sites, rows, kinds)
+    # NO BASELINE and no inline suppression, deliberately: this gate's product is
+    # completeness, and a fingerprint accepted once would cover every future call of that
+    # callee in that function. An unattributed site gets a row — `NOT:<tag>` if it is not a
+    # run record — never a waiver.
+    if found:
+        print(f"\n[lint_run_records] {len(found)} finding(s):")
+        for f in found:
+            print(f"  {f.display}")
+        print("\nAttribute the site in defender/docs/run-records.tsv (a NOT:<tag> row if it is not a "
+              "run record), then run `python scripts/lint/lint_run_records.py --render`.")
+    if page != rendered:
         print("\n[lint_run_records] STALE RENDER: docs/run-records.md differs from its tables — "
               "run `python scripts/lint/lint_run_records.py --render` and commit.")
-        rc = 1
-    print(f"[lint_run_records] {len(sites)} call site(s) in scope, {len(rows)} row(s).")
-    return rc
+    print(f"[lint_run_records] {len(sites)} call site(s) in scope, {len(rows)} row(s), {len(found)} finding(s).")
+    return 1 if (found or page != rendered) else 0
 
 
 def _appendix_preamble() -> list[str]:
