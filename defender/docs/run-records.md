@@ -293,7 +293,7 @@ themselves, attributed at their callers.
 | `evals/oracle_golden/generate_case.py:354` | NOT:eval_case | write | `write_environment` | n-a | writes the case's environment.yaml from the template |
 | `evals/oracle_golden/generate_case.py:363` | NOT:eval_case | write | `write_manifest` | n-a | writes the case's manifest.yaml |
 | `evals/oracle_golden/generate_case.py:485` | NOT:eval_case | mkdir | `_recruit` | n-a | mkdir case_dir/.generate scratch dir while generating golden case |
-| `evals/oracle_golden/generate_case.py:491` | NOT:eval_case | read | `_recruit` | n-a | reads the playground-v2 runner record's meta.json for case generation |
+| `evals/oracle_golden/generate_case.py:491` | NOT:eval_case | read | `_recruit` | n-a | reads the playground-v2 runner record's metadata file for case generation |
 | `evals/oracle_golden/generate_case.py:514` | NOT:eval_case | write | `_recruit` | n-a | writes the case's controls.yaml provenance note |
 | `evals/oracle_golden/judge.py:95` | NOT:corpus | read | `prompts_sha8` | n-a | hashes the label/verdict prompt files |
 | `evals/oracle_golden/judge.py:165` | NOT:eval_case | read | `_payload_entry` | n-a | reads one observed payload under hidden/observed/<lead_id> |
@@ -323,7 +323,7 @@ themselves, attributed at their callers.
 | `evals/oracle_golden/score.py:584` | NOT:eval_case | read | `forbidden_values` | n-a | reads a case's expected.yaml for its must_not_emit clause |
 | `evals/oracle_golden/score.py:728` | NOT:eval_result | mkdir | `main` | n-a | mkdir parent dir before writing case score summary json |
 | `evals/oracle_golden/score.py:729` | NOT:eval_case | write | `main` | n-a | writes the score summary to case_dir/scores/<tag>.json |
-| `evals/oracle_golden/story_from_run.py:109` | NOT:eval_case | read | `main` | n-a | reads playground-v2 attack runner's meta.json to render a story |
+| `evals/oracle_golden/story_from_run.py:109` | NOT:eval_case | read | `main` | n-a | reads the playground-v2 attack runner's metadata file to render a story |
 | `evals/oracle_golden/story_from_run.py:121` | NOT:eval_case | mkdir | `main` | n-a | mkdir parent dir before writing story.md for golden case |
 | `evals/oracle_golden/story_from_run.py:122` | NOT:eval_case | write | `main` | n-a | writes rendered story.md, an oracle_visible case input |
 | `evals/oracle_golden/validate_cases.py:80` | NOT:eval_case | read | `_leads_of` | n-a | reads a case's oracle_visible/leads.jsonl |
