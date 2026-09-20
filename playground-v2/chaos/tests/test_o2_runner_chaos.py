@@ -89,9 +89,46 @@ def test_cr_failure_happens_before_chaos_is_ever_activated(runner, scenario, tmp
             exec_fn=_ok_exec,
         )
 
-    assert order == ["post_cr"], "activation must come after a successful CR post"
-    assert chaos_ctl.activate_calls == []
+    # Planning (profile lookup, guard, resolution) is a read and runs first
+    # so a bad profile never leaves a CR behind; the push waits for the CR.
+    assert order == ["plan", "post_cr"], "the push must come after a successful CR post"
+    assert chaos_ctl.apply_calls == []
     assert chaos_ctl.revert_calls == []
+
+
+def test_a_bad_profile_fails_before_the_cr_is_posted(runner, scenario, tmp_path):
+    """A typo'd `--chaos` value (or a guard refusal, or an unreachable stack)
+    must surface before the synthetic CR goes to change-mgmt — otherwise
+    the CR window stays open, agent-visible, for a run that never fired."""
+    order: list[str] = []
+
+    class _PlanFailsChaosCtl(FakeChaosCtl):
+        def plan(self, *args, **kwargs):
+            super().plan(*args, **kwargs)
+            raise FileNotFoundError("no chaos profile 'cmdb-stale-ownr'")
+
+    chaos_ctl = _PlanFailsChaosCtl(order=order)
+
+    def post_cr(body):
+        order.append("post_cr")
+        return 0, {}
+
+    with pytest.raises(FileNotFoundError):
+        runner.run_scenario(
+            scenario,
+            seed=42,
+            overrides={},
+            dry_run=False,
+            cr_mode="valid",
+            runs_dir=tmp_path,
+            chaos="cmdb-stale-ownr",
+            chaos_ctl=chaos_ctl,
+            post_cr=post_cr,
+            exec_fn=_ok_exec,
+        )
+
+    assert order == ["plan"], "the CR was posted for a run whose profile could not even be resolved"
+    assert chaos_ctl.apply_calls == []
 
 
 def test_step_failure_after_activation_still_reverts(runner, scenario, tmp_path):
@@ -114,7 +151,7 @@ def test_step_failure_after_activation_still_reverts(runner, scenario, tmp_path)
             exec_fn=failing_exec,
         )
 
-    assert len(chaos_ctl.activate_calls) == 1
+    assert len(chaos_ctl.apply_calls) == 1
     assert len(chaos_ctl.revert_calls) == 1
     # The revert must undo *that* activation, not some other bookkeeping.
     assert chaos_ctl.revert_calls[0]["ledger_ref"] == "ledger-ref-step-fail"
@@ -159,8 +196,8 @@ def test_normal_exit_reverts_and_records_the_join_key(runner, scenario, tmp_path
         exec_fn=_ok_exec,
     )
 
-    assert [c["profile_id"] for c in chaos_ctl.activate_calls] == [PROFILE]
-    assert [c["seed"] for c in chaos_ctl.activate_calls] == [42]
+    assert [c["profile_id"] for c in chaos_ctl.apply_calls] == [PROFILE]
+    assert [c["seed"] for c in chaos_ctl.apply_calls] == [42]
     assert [c["ledger_ref"] for c in chaos_ctl.revert_calls] == ["ledger-ref-clean"]
 
     chaos_block = _meta(tmp_path)["pre_run"]["chaos"]
@@ -209,7 +246,7 @@ def test_keep_chaos_holds_the_fault_open(runner, scenario, tmp_path):
         exec_fn=_ok_exec,
     )
 
-    assert len(chaos_ctl.activate_calls) == 1
+    assert len(chaos_ctl.apply_calls) == 1
     assert chaos_ctl.revert_calls == []
 
 
@@ -330,6 +367,32 @@ def test_a_revert_failure_does_not_mask_the_original_step_failure(runner, scenar
     assert len(chaos_ctl.revert_calls) == 1  # revert was still attempted
 
 
+def test_a_revert_failure_on_a_clean_run_is_the_runs_failure(runner, scenario, tmp_path):
+    """Every step succeeded, meta.json is written — and then the fault could
+    not be taken back off the stack. Nothing else is propagating, so there
+    is nothing to mask: a warning on stderr and a zero exit would let a
+    scripted loop of runs carry on under a live fault it never asked for."""
+    chaos_ctl = _RevertFailsChaosCtl(ledger_ref="ledger-ref-clean-revert-fails")
+
+    with pytest.raises(KeyError, match="vanished"):
+        runner.run_scenario(
+            scenario,
+            seed=42,
+            overrides={},
+            dry_run=False,
+            cr_mode="none",
+            runs_dir=tmp_path,
+            chaos=PROFILE,
+            chaos_ctl=chaos_ctl,
+            post_cr=lambda body: (0, {}),
+            exec_fn=_ok_exec,
+        )
+
+    assert len(chaos_ctl.revert_calls) == 1
+    # The run itself completed — its record exists and is not marked aborted.
+    assert _meta(tmp_path)["aborted"] is False
+
+
 def test_dry_run_never_activates_a_real_fault(runner, scenario, tmp_path):
     """--dry-run's documented contract is 'print dispatches without running' —
     activating a real fault under it would silently mutate the live stack
@@ -349,7 +412,7 @@ def test_dry_run_never_activates_a_real_fault(runner, scenario, tmp_path):
         exec_fn=_ok_exec,
     )
 
-    assert chaos_ctl.activate_calls == []
+    assert chaos_ctl.apply_calls == []
     assert chaos_ctl.revert_calls == []
 
 
@@ -369,6 +432,6 @@ def test_no_chaos_flag_means_no_chaos_calls_at_all(runner, scenario, tmp_path):
         exec_fn=_ok_exec,
     )
 
-    assert chaos_ctl.activate_calls == []
+    assert chaos_ctl.apply_calls == []
     assert chaos_ctl.revert_calls == []
     assert not _meta(tmp_path)["pre_run"].get("chaos")

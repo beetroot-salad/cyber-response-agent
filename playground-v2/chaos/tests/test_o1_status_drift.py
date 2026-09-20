@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import json
 
-from _fakes import FakeExecSeam, write_profile
+import pytest
+
+from _fakes import NOT_FOUND, FakeExecSeam, write_profile
 
 from chaos import ctl
+from chaos.seam import SeamError
 
 BAKED_INVENTORY = "/opt/cmdb/inventory.yaml"
 
@@ -54,7 +57,7 @@ def test_status_flags_a_silently_reverted_overlay(
     record = _activate_stale(profiles_dir, rules_dir, ledger_dir)
     live = FakeExecSeam(
         cmdb={"GET /hosts": (0, _hosts_payload(inventory))},  # pure base — overlay lost
-        es={"GET /_ingest/pipeline/*": (1, {"error": "not found"})},
+        es={"GET /_ingest/pipeline/*": NOT_FOUND},
         files={BAKED_INVENTORY: inventory_text},
     )
 
@@ -77,7 +80,7 @@ def test_status_flags_a_stray_overlay_no_ledger_record_explains(
     trust the ledger's silence either."""
     live = FakeExecSeam(
         cmdb={"GET /hosts": (0, _hosts_payload(inventory, {"db-1": {"owner": "team.mystery"}}))},
-        es={"GET /_ingest/pipeline/*": (1, {"error": "not found"})},
+        es={"GET /_ingest/pipeline/*": NOT_FOUND},
         files={BAKED_INVENTORY: inventory_text},
     )
 
@@ -125,7 +128,7 @@ def test_status_is_quiet_when_live_state_matches_the_ledger(
                 _hosts_payload(inventory, {mutation["host"]: {"owner": mutation["new_value"]}}),
             )
         },
-        es={"GET /_ingest/pipeline/*": (1, {"error": "not found"})},
+        es={"GET /_ingest/pipeline/*": NOT_FOUND},
         files={BAKED_INVENTORY: inventory_text},
     )
 
@@ -143,7 +146,7 @@ def test_status_reads_the_baked_inventory_not_the_working_tree(
     _activate_stale(profiles_dir, rules_dir, ledger_dir, "stale-owner-baked")
     live = FakeExecSeam(
         cmdb={"GET /hosts": (0, _hosts_payload(inventory))},
-        es={"GET /_ingest/pipeline/*": (1, {"error": "not found"})},
+        es={"GET /_ingest/pipeline/*": NOT_FOUND},
         files={BAKED_INVENTORY: inventory_text},
     )
 
@@ -155,11 +158,134 @@ def test_status_reads_the_baked_inventory_not_the_working_tree(
     assert all(c["container"] == "cmdb" for c in reads)
 
 
+def test_status_raises_on_an_unreachable_backend_rather_than_reporting_drift(
+    profiles_dir, rules_dir, ledger_dir, inventory_text
+):
+    """cmdb down for a moment used to read as 'no live hosts' — eleven
+    `cmdb-host-missing` entries indistinguishable from real drift, and an
+    operator's `revert --all` on that output stamps still-live faults as
+    reverted. A backend that cannot be read is an error, not a finding."""
+    _activate_stale(profiles_dir, rules_dir, ledger_dir, "stale-owner-down")
+    cmdb_down = FakeExecSeam(
+        cmdb={"GET /hosts": (500, {"error": "connection refused"})},
+        es={"GET /_ingest/pipeline/*": NOT_FOUND},
+        files={BAKED_INVENTORY: inventory_text},
+    )
+    with pytest.raises(SeamError):
+        ctl.status(execer=cmdb_down, profiles_dir=profiles_dir, ledger_dir=ledger_dir)
+
+    es_down = FakeExecSeam(
+        cmdb={"GET /hosts": (0, {"total": 0, "hosts": []})},
+        es={"GET /_ingest/pipeline/*": (500, {"error": "transport"})},
+        files={BAKED_INVENTORY: inventory_text},
+    )
+    with pytest.raises(SeamError):
+        ctl.status(execer=es_down, profiles_dir=profiles_dir, ledger_dir=ledger_dir)
+
+
+def test_status_flags_a_pipeline_whose_body_no_longer_matches_the_record(
+    profiles_dir, rules_dir, ledger_dir, inventory, inventory_text
+):
+    """Presence is not enough: the pipeline exists but somebody (a Fleet
+    upgrade, a hand edit) replaced its processors. The record's after-state
+    is what the stack must still hold."""
+    write_profile(
+        profiles_dir, "drop-syslog", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 25}
+    )
+    record = ctl.activate(
+        "drop-syslog", seed=42, execer=FakeExecSeam(), profiles_dir=profiles_dir,
+        rules_dir=rules_dir, ledger_dir=ledger_dir,
+    )
+    pipeline = record["resources"][0]["name"]
+    overwritten = {pipeline: {"processors": [{"set": {"field": "x", "value": "y"}}]}}
+    live = FakeExecSeam(
+        cmdb={"GET /hosts": (0, _hosts_payload(inventory))},
+        es={"GET /_ingest/pipeline/*": (0, overwritten)},
+        files={BAKED_INVENTORY: inventory_text},
+    )
+    drift = ctl.status(execer=live, profiles_dir=profiles_dir, ledger_dir=ledger_dir)["drift"]
+    assert [d["type"] for d in drift] == ["pipeline-mismatch"]
+    assert drift[0]["pipeline"] == pipeline and drift[0]["profile_id"] == "drop-syslog"
+
+    matching = FakeExecSeam(
+        cmdb={"GET /hosts": (0, _hosts_payload(inventory))},
+        es={"GET /_ingest/pipeline/*": (0, {pipeline: record["resources"][0]["after"]})},
+        files={BAKED_INVENTORY: inventory_text},
+    )
+    assert ctl.status(execer=matching, profiles_dir=profiles_dir, ledger_dir=ledger_dir)["drift"] == []
+
+
+def test_status_reports_a_record_whose_activation_never_completed(
+    profiles_dir, rules_dir, ledger_dir, inventory, inventory_text
+):
+    """A pending record (the controller died between writing intent and
+    finishing the push) is neither active nor absent; status names it so
+    the operator reverts it rather than wondering why nothing is live."""
+    from chaos.ledger import write_record
+
+    write_record(
+        ledger_dir,
+        {
+            "ledger_ref": "chaos-pending01",
+            "profile_id": "stale-owner-pending",
+            "seed": 1,
+            "mode": "cmdb-stale",
+            "resolved_mutations": [],
+            "resources": [{"kind": "cmdb-overlay", "name": "web-1", "before": None, "after": {"owner": "x"},
+                           "patches": [{"owner": "x"}], "applied": False}],
+            "status": "pending",
+            "activated_at": None,
+            "live_fingerprint": "abc",
+        },
+    )
+    live = FakeExecSeam(
+        cmdb={"GET /hosts": (0, _hosts_payload(inventory))},
+        es={"GET /_ingest/pipeline/*": NOT_FOUND},
+        files={BAKED_INVENTORY: inventory_text},
+    )
+    drift = ctl.status(execer=live, profiles_dir=profiles_dir, ledger_dir=ledger_dir)["drift"]
+    assert [d["type"] for d in drift] == ["incomplete-record"]
+    assert drift[0]["ledger_ref"] == "chaos-pending01"
+    # An unapplied resource is not expected on the stack — no phantom drift for it.
+
+
+def test_activate_resolves_against_the_baked_inventory_not_the_working_tree(
+    profiles_dir, rules_dir, ledger_dir, inventory
+):
+    """The image was built from an older inventory: one host has a different
+    owner there, and one working-tree host does not exist in the container
+    at all. The mutation must be resolved against what the stack serves —
+    otherwise the ledger's old_value is wrong from the start and status
+    immediately reports `baked-inventory-moved` against the controller's own
+    record."""
+    import copy
+
+    import yaml
+
+    stale = copy.deepcopy(inventory)
+    stale["hosts"] = [h for h in stale["hosts"] if h["name"] != "office-ws-1"]
+    for h in stale["hosts"]:
+        h["owner"] = f"old.{h['owner']}"
+    write_profile(
+        profiles_dir, "stale-owner-baked", "cmdb-stale",
+        {"variant": "field-flip", "field": "owner", "hosts": len(stale["hosts"])},
+    )
+    execer = FakeExecSeam(files={BAKED_INVENTORY: yaml.safe_dump(stale)})
+    record = ctl.activate(
+        "stale-owner-baked", seed=42, execer=execer, profiles_dir=profiles_dir,
+        rules_dir=rules_dir, ledger_dir=ledger_dir,
+    )
+    hosts = {m["host"] for m in record["resolved_mutations"]}
+    assert "office-ws-1" not in hosts, "resolved against a host the container does not have"
+    assert all(m["old_value"].startswith("old.") for m in record["resolved_mutations"])
+    assert all(m["new_value"].startswith("old.") for m in record["resolved_mutations"])
+
+
 def test_status_never_mutates(profiles_dir, rules_dir, ledger_dir, inventory, inventory_text):
     _activate_stale(profiles_dir, rules_dir, ledger_dir, "stale-owner-ro")
     live = FakeExecSeam(
         cmdb={"GET /hosts": (0, _hosts_payload(inventory))},
-        es={"GET /_ingest/pipeline/*": (1, {"error": "not found"})},
+        es={"GET /_ingest/pipeline/*": NOT_FOUND},
         files={BAKED_INVENTORY: inventory_text},
     )
     ctl.status(execer=live, profiles_dir=profiles_dir, ledger_dir=ledger_dir)

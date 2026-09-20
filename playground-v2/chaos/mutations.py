@@ -27,7 +27,14 @@ TOMBSTONE: dict[str, Any] = {"__absent__": True}
 AUTH_PIPELINE = "logs-system.auth@custom"
 
 
-def _pipeline_name(target_stream: str) -> str:
+class UnresolvableProfile(ValueError):
+    """The profile cannot produce a real fault against this inventory — e.g.
+    a field-flip on a field every host shares. A no-op must never be pushed
+    and recorded as an injected fault."""
+
+
+def pipeline_for_stream(target_stream: str) -> str:
+    """The `@custom` pipeline Fleet calls for a data-stream glob."""
     base = target_stream[:-2] if target_stream.endswith("-*") else target_stream
     return f"{base}@custom"
 
@@ -55,7 +62,12 @@ def _resolve_cmdb_stale(profile: Any, seed: int, inventory: dict[str, Any]) -> l
         mutations = []
         for host in chosen:
             old = host.get(field)
-            candidates = [v for v in pool if v != old] or pool
+            candidates = [v for v in pool if v != old]
+            if not candidates:
+                raise UnresolvableProfile(
+                    f"field-flip on {field!r}: every host in the inventory has {old!r}, "
+                    "so there is no other real value to flip to"
+                )
             new = rng.choice(candidates)
             mutations.append(
                 {
@@ -164,7 +176,7 @@ def _resolve_data_drop(profile: Any, seed: int) -> list[dict[str, Any]]:
         {
             "kind": "data-drop",
             "target_stream": target_stream,
-            "pipeline": _pipeline_name(target_stream),
+            "pipeline": pipeline_for_stream(target_stream),
             "processor": {"drop": {"if": condition}},
         }
     ]

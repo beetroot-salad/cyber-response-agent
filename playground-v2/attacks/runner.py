@@ -236,6 +236,18 @@ def run_scenario(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     pre_run: dict[str, Any] = {"cr_mode": cr_mode}
+
+    # Resolve the chaos profile *before* anything is posted anywhere: a
+    # misspelt profile, a guard refusal or an unreachable stack fails here,
+    # with no synthetic CR left open in change-mgmt for a run that never
+    # fired. Planning reads the stack but writes nothing; the push itself
+    # happens only after the CR (below).
+    chaos_plan: dict[str, Any] | None = None
+    ctl_mod: Any = None
+    if chaos and chaos != "none" and not dry_run:
+        ctl_mod = chaos_ctl if chaos_ctl is not None else _default_chaos_ctl()
+        chaos_plan = ctl_mod.plan(chaos, seed=seed)
+
     if cr_mode != "none":
         inv = _load_inventory()
         body = _build_cr_body(cr_mode, run_id, target_host, source_user, scenario["id"], inv)
@@ -256,7 +268,7 @@ def run_scenario(
                 )
             print(f"posted synthetic CR id={body['id']} hosts={body['hosts']} mode={cr_mode}")
 
-    # Activation happens only *after* a successful CR post — a CR failure
+    # The push happens only *after* a successful CR post — a CR failure
     # above already raised, so it can never leak a live fault with no
     # revert (issue #401, O2).
     active_chaos: dict[str, Any] | None = None
@@ -268,8 +280,7 @@ def run_scenario(
             print(f"DRY-RUN: would activate chaos profile {chaos!r} (seed={seed}), revert after")
             pre_run["chaos"] = {"profile": chaos, "seed": seed, "dry_run": True}
         else:
-            ctl_mod = chaos_ctl if chaos_ctl is not None else _default_chaos_ctl()
-            active_chaos = ctl_mod.activate(chaos, seed=seed)
+            active_chaos = ctl_mod.apply(chaos_plan)
             pre_run["chaos"] = {
                 "profile": chaos,
                 "seed": seed,
@@ -278,6 +289,7 @@ def run_scenario(
 
     step_log: list[dict] = []
     started_at = now_iso()
+    run_failed = False
 
     try:
         for step_index, step in enumerate(scenario["steps"]):
@@ -330,18 +342,23 @@ def run_scenario(
 
         finished_at = now_iso()
         _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=False)
+    except BaseException:
+        run_failed = True
+        raise
     finally:
         # The fault never outlives the run — normal exit, abort, or any
-        # exception — unless the operator explicitly asked to keep it. A
-        # revert failure here must not replace whatever real exception (a
-        # step failure, a Ctrl-C) is already propagating through this
-        # `finally` — it's reported, not raised, so the original failure
-        # reason survives.
+        # exception — unless the operator explicitly asked to keep it. When
+        # a real failure (a step abort, a Ctrl-C) is already propagating, a
+        # revert failure is reported rather than raised, so the original
+        # reason the run stopped survives. On a clean run there is nothing
+        # to mask: a fault left live on the stack *is* the failure, and the
+        # run exits non-zero for it.
         if active_chaos is not None and not keep_chaos:
-            ctl_mod = chaos_ctl if chaos_ctl is not None else _default_chaos_ctl()
             try:
                 ctl_mod.revert(active_chaos["ledger_ref"])
-            except Exception as revert_exc:  # deliberately broad: report, never mask
+            except Exception as revert_exc:
+                if not run_failed:
+                    raise
                 print(
                     f"WARNING: chaos revert failed for {active_chaos['ledger_ref']} "
                     f"(profile={chaos}): {revert_exc}",

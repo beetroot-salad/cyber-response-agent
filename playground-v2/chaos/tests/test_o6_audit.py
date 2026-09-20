@@ -121,6 +121,59 @@ def test_ctl_audit_surfaces_a_failed_canary_cleanup_as_a_finding(ledger_dir):
     assert any("cleanup failed" in f for f in result["findings"]), result["findings"]
 
 
+def test_a_vacuous_audit_is_not_clean(ledger_dir):
+    """cmdb down: nothing sampled, the canary could not even be injected.
+    That is not a pass — an exit-code gate keyed on 'no findings' would let
+    a run with zero payloads inspected through as clean."""
+    execer = FakeExecSeam(
+        cmdb={
+            "GET /health": (500, {"error": "down"}),
+            "GET /hosts": (500, {"error": "down"}),
+            "POST /admin/overlay/audit-canary-host": (500, {"error": "down"}),
+            "GET /hosts/audit-canary-host": (500, {"error": "down"}),
+            "DELETE /admin/overlay/audit-canary-host": (500, {"error": "down"}),
+        }
+    )
+    result = ctl.run_audit(execer=execer, ledger_dir=ledger_dir)
+    assert result["canary_control_passed"] is False
+    assert result["sampled"] == 0
+    assert result["errors"], "a sample that could not be taken vanished silently"
+    assert ctl.audit_is_clean(result) is False
+
+    healthy = {"findings": [], "canary_control_passed": True, "sampled": 12, "errors": []}
+    assert ctl.audit_is_clean(healthy) is True
+    assert ctl.audit_is_clean({**healthy, "canary_control_passed": False}) is False
+    assert ctl.audit_is_clean({**healthy, "errors": ["search logs-x: HTTP 500"]}) is False
+    assert ctl.audit_is_clean({**healthy, "findings": ["marker"]}) is False
+
+
+def test_ctl_audit_samples_the_newest_documents_since_activation(profiles_dir, rules_dir, ledger_dir):
+    """An unsorted `match_all` returns a stream's oldest documents — from
+    long before the fault was live, where a controller-stamped error cannot
+    be. The sample must be the window that matters: newest first, from the
+    record's activation onward."""
+    from _fakes import write_profile
+
+    write_profile(profiles_dir, "drop", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 10})
+    record = ctl.activate(
+        "drop", seed=1, execer=FakeExecSeam(), profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
+    )
+    execer = FakeExecSeam(
+        cmdb={
+            "GET /health": (0, {"status": "ok"}),
+            "GET /hosts": (0, {"total": 0, "hosts": []}),
+            "GET /hosts/audit-canary-host": (0, {"name": "audit-canary-host", "owner": "chaos-harness-canary"}),
+        },
+        es={"POST /logs-system.syslog-*/_search": (0, {"hits": {"hits": []}})},
+    )
+    ctl.run_audit(execer=execer, ledger_dir=ledger_dir)
+
+    (search,) = execer.calls_for(target="es", method="POST", path_contains="_search")
+    body = search["body"]
+    assert body["sort"] == [{"@timestamp": {"order": "desc"}}]
+    assert body["query"] == {"range": {"@timestamp": {"gte": record["activated_at"]}}}
+
+
 def test_ctl_audit_reports_a_real_finding_from_a_sampled_payload(ledger_dir):
     execer = FakeExecSeam(
         cmdb={

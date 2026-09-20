@@ -560,8 +560,9 @@ Shared healthcheck pattern via a `&stub-health` YAML anchor on `cmdb` (reused by
 FastAPI over `hosts/inventory.yaml`. Loads the `hosts:` list into an immutable `BASE` dict at startup; an in-memory `OVERLAY` dict shallow-merges over `BASE` on every read. The overlay exists as a scaffold for the stale-CMDB chaos modes in batch 11 — batch 9 ships the surface (`POST /admin/overlay/{name}`, `DELETE /admin/overlay/{name}`, `POST /admin/reset`), not a driver.
 
 - Build context is `playground-v2/` (not `./cmdb`) because the image must COPY `hosts/inventory.yaml` from outside its own dir. `playground-v2/.dockerignore` whitelists `cmdb/**` alongside the existing `hosts/**` + `keycloak/realm.yaml` so the root-context tar stays small.
-- Endpoints: `GET /health`, `GET /hosts[?role&criticality&owner]`, `GET /hosts/{name}`, `GET /roles`, `POST/DELETE /admin/overlay/{name}`, `POST /admin/reset`.
+- Endpoints: `GET /health`, `GET /hosts[?role&criticality&owner]`, `GET /hosts/{name}`, `GET /roles`, `GET/POST/PUT/DELETE /admin/overlay/{name}`, `POST /admin/reset`.
 - Merge is shallow on purpose — chaos scenarios flip a single field (owner, criticality). Deep-merging nested `os` / `service` dicts can come if a scenario needs it.
+- `POST` on an overlay merges (a patch); `PUT` replaces; `GET` returns the overlay as stored (`null` when none). The chaos controller (`chaos/ctl.py`) snapshots with `GET` before it patches a host and restores with `PUT`/`DELETE`, so its revert puts back exactly what was there — including overlay fields it did not create.
 
 #### threat-intel (batch 9)
 
@@ -697,7 +698,7 @@ http://identity:8080/openapi.json
 
 In the UI: **Apps → Create app → Generate from OpenAPI**, paste the URL, validate, submit. This is a UI action; Shuffle documents no API for it.
 
-**Trim the `/admin/*` routes from every generated app.** `POST /admin/reset` on any stub, and `POST|DELETE /admin/overlay/{name}` on cmdb, are chaos/reset controls. Generating from the full spec pulls them in, and a mis-wired playbook — or an LLM-authored one — can wipe environment state.
+**Trim the `/admin/*` routes from every generated app.** `POST /admin/reset` on any stub, and `GET|POST|PUT|DELETE /admin/overlay/{name}` on cmdb, are chaos/reset controls. Generating from the full spec pulls them in, and a mis-wired playbook — or an LLM-authored one — can wipe environment state.
 
 ## Detection rules
 

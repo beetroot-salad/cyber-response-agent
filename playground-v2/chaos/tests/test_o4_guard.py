@@ -102,6 +102,89 @@ def test_data_drop_on_the_day_one_safe_stream_is_accepted(profiles_dir, rules_di
     check_profile(load_profile("drop-ok", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
 
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"remove": "event"},  # takes event.outcome with it: both EQL sequence rules + both sshd thresholds
+        {"rename": {"from": "process", "to": "proc"}},  # takes process.name
+        {"remove": "source"},  # takes source.ip (v2-bulk-ssh-success, threshold-only)
+        {"rename": {"from": "falco", "to": "falco_legacy"}},  # takes falco.rule
+    ],
+)
+def test_schema_drift_on_an_ancestor_of_a_rule_key_field_is_refused(profiles_dir, rules_dir, params):
+    """A rename/remove of an object field takes every field nested under it.
+    An exact-string compare of the profile's target against the rules' field
+    names accepted all of these — none of them is literally a rule-key field,
+    every one of them silences a rule."""
+    write_profile(profiles_dir, "drift-ancestor", "schema-drift", params)
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drift-ancestor", profiles_dir=profiles_dir), rules_dir=rules_dir)
+
+
+def test_schema_drift_on_a_sibling_with_a_shared_prefix_is_not_refused(profiles_dir, rules_dir):
+    """`source.port` is not under `source.ip` (and `sourcefile` would not be
+    under `source`): the ancestor test is on dotted path segments, not on
+    string prefixes."""
+    write_profile(profiles_dir, "drift-sibling", "schema-drift", {"remove": "source.port"})
+    check_profile(load_profile("drift-sibling", profiles_dir=profiles_dir), rules_dir=rules_dir)
+
+
+@pytest.mark.parametrize("stream", ["logs-*", "logs-system.*", "*", "logs-system.auth-default"])
+def test_data_drop_on_a_glob_that_reaches_a_rule_read_stream_is_refused(profiles_dir, rules_dir, stream):
+    """The rules read `logs-system.auth-*`; a wider target glob reaches the
+    same documents, and a concrete stream name under the rule's glob is the
+    same stream. A literal string compare accepted every one of these."""
+    write_profile(profiles_dir, "drop-wide", "data-drop", {"target_stream": stream, "rate": 25})
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drop-wide", profiles_dir=profiles_dir), rules_dir=rules_dir)
+
+
+def test_data_drop_that_resolves_to_a_fleet_parent_pipeline_is_refused(tmp_path, profiles_dir):
+    """Even with no rule reading any stream, `logs-*` resolves to the
+    `logs@custom` pipeline, which every Fleet-managed integration pipeline
+    calls — a drop there is not scoped to any stream at all."""
+    empty_rules = tmp_path / "rules"
+    empty_rules.mkdir()
+    write_profile(profiles_dir, "drop-parent", "data-drop", {"target_stream": "logs-*", "rate": 5})
+    with pytest.raises(GuardRefused, match="logs@custom"):
+        check_profile(load_profile("drop-parent", profiles_dir=profiles_dir), rules_dir=empty_rules)
+
+
+def test_check_mutations_gates_on_what_was_actually_resolved(rules_dir):
+    """The push is gated on the resolved mutations, not on the profile text:
+    a mutation whose processor targets a rule-key ancestor is refused even
+    if some future resolver produced it from an innocent-looking profile."""
+    from chaos.guard import check_mutations
+
+    with pytest.raises(GuardRefused):
+        check_mutations(
+            [
+                {
+                    "kind": "schema-drift",
+                    "pipeline": "logs-system.auth@custom",
+                    "processor": {"remove": {"field": "event", "ignore_missing": True, "ignore_failure": True}},
+                }
+            ],
+            rules_dir=rules_dir,
+        )
+    with pytest.raises(GuardRefused):
+        check_mutations(
+            [{"kind": "data-drop", "target_stream": "logs-*", "pipeline": "logs@custom", "processor": {}}],
+            rules_dir=rules_dir,
+        )
+    check_mutations(
+        [
+            {
+                "kind": "data-drop",
+                "target_stream": "logs-system.syslog-*",
+                "pipeline": "logs-system.syslog@custom",
+                "processor": {"drop": {"if": "true"}},
+            }
+        ],
+        rules_dir=rules_dir,
+    )
+
+
 def test_rule_key_fields_and_streams_are_empty_for_an_empty_rules_dir(tmp_path):
     """The guard must actually read `rules_dir`, not answer from a fixed
     table hand-transcribed from today's committed rules — a hardcoded set

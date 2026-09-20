@@ -18,13 +18,16 @@ import ast
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from chaos import ctl
+from chaos.seam import SeamError, SeamNotFound
 
 
 def _fake_run(calls):
     def run(args, **kwargs):
         calls.append(list(args))
-        return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="{}\n200", stderr="")
 
     return run
 
@@ -63,6 +66,61 @@ def test_es_request_execs_inside_the_elasticsearch_container():
 
     args = calls[0]
     assert "elasticsearch" in args, args
+
+
+def _run_returning(stdout: str, rc: int = 0, stderr: str = ""):
+    def run(args, **kwargs):
+        return subprocess.CompletedProcess(args, rc, stdout=stdout, stderr=stderr)
+
+    return run
+
+
+def test_an_http_error_from_elasticsearch_is_raised_not_returned():
+    """curl exits 0 on a 4xx/5xx. Under the old `(rc, body)` contract a
+    wrong password came back as rc 0 with `{"error":..., "status":401}`,
+    and the controller recorded a fault that never landed. The seam's only
+    outcomes are a payload or an exception."""
+    seam = ctl.DockerExecSeam(run=_run_returning('{"error": {"type": "security_exception"}, "status": 401}\n401'))
+    with pytest.raises(SeamError) as info:
+        seam.es_request("PUT", "/_ingest/pipeline/logs-system.auth@custom", {"processors": []})
+    assert info.value.status == 401
+    assert not isinstance(info.value, SeamNotFound)
+
+
+def test_a_404_is_the_distinguishable_not_found_error():
+    seam = ctl.DockerExecSeam(run=_run_returning("{}\n404"))
+    with pytest.raises(SeamNotFound):
+        seam.es_request("GET", "/_ingest/pipeline/logs-system.syslog@custom")
+    cmdb = ctl.DockerExecSeam(run=_run_returning('{"detail": "host x not found"}\n404'))
+    with pytest.raises(SeamNotFound):
+        cmdb.cmdb_request("GET", "/hosts/x")
+
+
+def test_a_transport_failure_is_raised_not_returned_as_empty():
+    """`docker exec` failing (container down, curl rc 7) must not read as
+    'nothing there' — that is how an unreachable backend became a page of
+    synthesized drift."""
+    seam = ctl.DockerExecSeam(run=_run_returning("", rc=7, stderr="curl: (7) Failed to connect"))
+    with pytest.raises(SeamError, match="transport"):
+        seam.es_request("GET", "/_ingest/pipeline/*@custom")
+    with pytest.raises(SeamError):
+        ctl.DockerExecSeam(run=_run_returning("", rc=1, stderr="no such container")).read_container_file(
+            "cmdb", "/opt/cmdb/inventory.yaml"
+        )
+
+
+def test_a_2xx_returns_the_parsed_body():
+    seam = ctl.DockerExecSeam(run=_run_returning('{"acknowledged": true}\n200'))
+    assert seam.es_request("PUT", "/_ingest/pipeline/x", {"processors": []}) == {"acknowledged": True}
+    assert ctl.DockerExecSeam(run=_run_returning("\n200")).cmdb_request("DELETE", "/admin/overlay/x") == {}
+
+
+def test_es_request_asks_curl_for_the_http_status():
+    """The status line is what the whole contract rests on; curl only emits
+    it when asked."""
+    calls: list[list[str]] = []
+    ctl.DockerExecSeam(run=_fake_run(calls)).es_request("GET", "/_ingest/pipeline/*@custom")
+    assert "%{http_code}" in " ".join(calls[0])
 
 
 def test_ctl_module_imports_no_host_side_http_client():

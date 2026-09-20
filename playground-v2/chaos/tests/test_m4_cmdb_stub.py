@@ -81,3 +81,24 @@ def test_a_tombstoned_host_never_leaks_through_a_filtered_listing(cmdb_client):
     prod = cmdb_client.get("/hosts", params={"criticality": "prod"}).json()["hosts"]
     assert "db-1" not in {h["name"] for h in prod}
     assert "web-1" in {h["name"] for h in prod}
+
+
+def test_overlay_can_be_read_back_as_stored(cmdb_client):
+    """The controller snapshots a host's overlay before touching it. That
+    is the overlay as stored — not merged over BASE — and `null` when none
+    is set, so 'absent' and 'empty' are distinguishable."""
+    assert cmdb_client.get("/admin/overlay/web-1").json() == {"name": "web-1", "overlay": None}
+    cmdb_client.post("/admin/overlay/web-1", json={"owner": "team.x"})
+    assert cmdb_client.get("/admin/overlay/web-1").json() == {"name": "web-1", "overlay": {"owner": "team.x"}}
+
+
+def test_overlay_put_replaces_rather_than_merges(cmdb_client):
+    """POST merges (a patch); PUT replaces (a restore). Restoring a snapshot
+    through POST would leave every field the patch added."""
+    cmdb_client.post("/admin/overlay/web-1", json={"owner": "team.x"})
+    cmdb_client.post("/admin/overlay/web-1", json={"criticality": "sandbox"})
+    assert cmdb_client.get("/admin/overlay/web-1").json()["overlay"] == {"owner": "team.x", "criticality": "sandbox"}
+
+    assert cmdb_client.put("/admin/overlay/web-1", json={"owner": "team.x"}).status_code == 200
+    assert cmdb_client.get("/admin/overlay/web-1").json()["overlay"] == {"owner": "team.x"}
+    assert cmdb_client.get("/hosts/web-1").json()["criticality"] == "prod"

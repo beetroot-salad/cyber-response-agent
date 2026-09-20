@@ -178,3 +178,18 @@ def test_revert_deletes_exactly_the_overlays_activation_created(
     deletes = reverter.calls_for(target="cmdb", method="DELETE", path_contains="/admin/overlay/")
     assert sorted(c["path"] for c in deletes) == [f"/admin/overlay/{h}" for h in hosts]
     assert reverter.mutating_calls() == deletes, "revert did more than undo the activation"
+
+
+def test_a_field_flip_with_no_other_value_to_flip_to_is_refused(profiles_dir):
+    """Two hosts, both owned by the same team: there is no real value to
+    flip to. Falling back to the same value would push an overlay that
+    changes nothing and record a stale-owner fault the stack never had."""
+    import pytest
+
+    from chaos.mutations import UnresolvableProfile
+
+    write_profile(profiles_dir, "flip-single", "cmdb-stale", {"variant": "field-flip", "field": "owner", "hosts": 1})
+    profile = load_profile("flip-single", profiles_dir=profiles_dir)
+    single_valued = {"hosts": [{"name": "web-1", "owner": "t"}, {"name": "web-2", "owner": "t"}]}
+    with pytest.raises(UnresolvableProfile):
+        resolve_mutations(profile, seed=42, inventory=single_valued)

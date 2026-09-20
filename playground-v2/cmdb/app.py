@@ -108,9 +108,24 @@ class OverlayBody(BaseModel):
     model_config = {"extra": "allow"}
 
 
+@app.get("/admin/overlay/{name}")
+def get_overlay(name: str):
+    # The overlay as stored (not merged over BASE) — what the chaos control
+    # plane snapshots before it touches a host, and restores afterwards.
+    # `overlay: null` means no overlay is set.
+    return {"name": name, "overlay": OVERLAY.get(name)}
+
+
 @app.post("/admin/overlay/{name}")
 def set_overlay(name: str, body: dict[str, Any]):
     OVERLAY[name] = {**OVERLAY.get(name, {}), **body}
+    return {"name": name, "overlay": OVERLAY[name]}
+
+
+@app.put("/admin/overlay/{name}")
+def replace_overlay(name: str, body: dict[str, Any]):
+    # Replace, not merge: the exact inverse of whatever POSTs came before.
+    OVERLAY[name] = dict(body)
     return {"name": name, "overlay": OVERLAY[name]}
 
 

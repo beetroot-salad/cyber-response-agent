@@ -9,11 +9,14 @@ cmdb/app.py) or a tmp dir. Everything that would otherwise need
 The CMDB-stub fixtures import the real FastAPI app, whose deps the devcontainer's
 bare python3 does not carry. Run the suite with:
 
-    uv run --no-project --python 3.12 \
+    flock /tmp/defender-pytest.lock uv run --no-project --python 3.12 \
         --with 'fastapi==0.115.*' --with pyyaml --with httpx --with pytest \
         -m pytest playground-v2/chaos/tests
 
-(fastapi is pinned to the version cmdb/Dockerfile installs.)
+(fastapi is pinned to the version cmdb/Dockerfile installs. The flock is the
+machine-wide pytest lock every pytest invocation on this box goes through —
+ad-hoc subsets included — so this suite never runs alongside another
+session's xdist fleet.)
 """
 from __future__ import annotations
 
@@ -34,7 +37,8 @@ if str(PLAYGROUND_ROOT) not in sys.path:
     sys.path.insert(0, str(PLAYGROUND_ROOT))
 
 UV_HINT = (
-    "needs the CMDB stub's runtime deps; run: uv run --no-project --python 3.12 "
+    "needs the CMDB stub's runtime deps; run: flock /tmp/defender-pytest.lock "
+    "uv run --no-project --python 3.12 "
     "--with 'fastapi==0.115.*' --with pyyaml --with httpx --with pytest "
     "-m pytest playground-v2/chaos/tests"
 )

@@ -18,6 +18,7 @@ from _fakes import FakeExecSeam, write_profile
 
 from chaos import ctl
 from chaos.ledger import read_records
+from chaos.seam import SeamError
 
 REQUIRED_KEYS = {"profile_id", "seed", "mode", "resolved_mutations", "activated_at", "live_fingerprint"}
 
@@ -108,10 +109,10 @@ def test_revert_stamps_reverted_at_on_the_same_record(profiles_dir, rules_dir, l
 
 
 def test_a_failed_mutation_is_never_recorded_as_ground_truth(profiles_dir, rules_dir, ledger_dir):
-    """A non-zero rc from the exec seam means the mutation never actually
-    landed — `_fakes.py`'s own seam contract says so ('rc is 0 on success,
-    non-zero otherwise'). Recording a ledger entry anyway would tell the
-    scorer a fault was injected that the stack never received."""
+    """The seam raising means the mutation never actually landed (an HTTP
+    500 here; the seam contract has no other way to say so). Recording a
+    ledger entry anyway would tell the scorer a fault was injected that the
+    stack never received."""
     _stale_profile(profiles_dir, "stale-owner-fails")
     execer = FakeExecSeam(cmdb={"POST /admin/overlay/*": (1, {"error": "cmdb 500"})})
 
@@ -148,7 +149,8 @@ def test_a_partial_multi_host_failure_rolls_back_the_hosts_that_did_land(profile
                 if first_host_path is None:
                     first_host_path = path
                     return super().cmdb_request(method, path, body)
-                return 1, {"error": "boom"}
+                self.calls.append({"target": "cmdb", "method": "POST", "path": path, "body": body})
+                raise SeamError("cmdb POST: HTTP 500: boom", status=500)
             return super().cmdb_request(method, path, body)
 
     execer = _FailSecondSeam()
