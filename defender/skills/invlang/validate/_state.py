@@ -13,8 +13,9 @@ an edge endpoint left honestly `??` connects, a phantom `v-` id does not, and no
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
 from typing import Any
+
+from defender._model import model
 
 from .. import _walkers, vocab
 from .._cells import _row_cells, _row_dict, _split_cells, _split_cells_raw, _unquote
@@ -160,7 +161,7 @@ def _candidate_refusal(
     return None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _DeclaredTypes:
     """Every `:V`-declared id mapped to EVERY type its rows give it, in declaration order.
 
@@ -1081,7 +1082,7 @@ CELL_HELD = "held"
 CELL_EMPTY = "empty"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class VertexCell:
     """One `(vertex, slot)` cell of the folded document, classified open / held / empty.
 

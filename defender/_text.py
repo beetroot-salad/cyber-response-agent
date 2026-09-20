@@ -40,6 +40,18 @@ def as_str(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+def as_int(value: Any) -> int | None:
+    """`value` when it is an `int` and NOT a `bool`, else `None` — `as_str`'s sibling for a
+    value typed as a count that arrives from JSON/YAML a caller cannot vouch for.
+
+    `bool` excluded explicitly: `True` passes `isinstance(_, int)`, and since #1067 the records
+    these values land in (`RepeatTrip.first_seq`, ...) are strict, so a planted `"seq": true`
+    that slipped through an `isinstance` filter turns a trip into a `ValidationError`. The
+    tree spelled this predicate inline in eight places before it had a home; new boundaries
+    take it from here, and the old copies migrate as they are touched."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def is_content_less(text: str) -> bool:
     """Whether `text` carries no visible character. Empty text is content-less.
 

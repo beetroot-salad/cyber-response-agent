@@ -19,7 +19,8 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass, field, replace
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +77,7 @@ def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
     return git_show_file(cwd, rev, path)
 
 
-@dataclass
+@model
 class JudgeInput:
     """The judge's whole rendered input for one (world, pass). Never stored — derived fresh
     on every `render()` call from the archive, the runs base and the checkout."""
@@ -621,10 +622,11 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     world = bound.under(f"{WORLDS_DIRNAME}/{world_label}")
     # `leads_by_id` is `lead_repository`'s surface, shared with the live run dir, and takes the
     # world's directory — the one path on this lane, behind the same listing gate the
-    # mechanical pass keeps (`family._repository_leads`; the orchestration hands `facts` over).
-    record = facts if facts is not None else replace(
-        read_world_facts(bound, world_label, episode_token=episode_token),
-        leads=_repository_leads(world, episode_dir, world_label))
+    # mechanical pass keeps (`family._repository_leads`, run by `read_world_facts` once its
+    # own reads have passed; the orchestration hands `facts` over).
+    record = facts if facts is not None else read_world_facts(
+        bound, world_label, episode_token=episode_token,
+        leads=lambda: _repository_leads(world, episode_dir, world_label))
 
     text = record.investigation_text
     resolutions_by_lead = record.resolutions_by_lead

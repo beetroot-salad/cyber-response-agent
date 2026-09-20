@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base clas
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class QueueChannel:
     """One file-backed queue, with its LOCK TOPOLOGY and its row key as data.
 
@@ -50,7 +51,7 @@ def provenance_field(id_key: str) -> str:
 QUARANTINE_DIRNAME = "quarantine"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class LoopPaths(DefenderPaths):
     """The loop's paths: every checked-in tree `DefenderPaths` locates, PLUS the mutable
     learning state (queues, locks, run artifacts) rooted at `state_root`.
@@ -242,7 +243,7 @@ def judge_effort() -> str:
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class StageWiring:
     """How one in-process stage is wired, handed down to `run_stage` unchanged.
 
@@ -286,7 +287,7 @@ class StageWiring:
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class StageContext:
     """What one spawn of a stage is about: the per-call transport `run_stage` consumes.
 
@@ -423,6 +424,10 @@ def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:
 
 
 _log = make_logger("loop")
+#: The lead-author lane's ONE logger — every module of the lane, and the disposition the drain
+#: carries for it (`core/pitfalls_disposition`), binds this rather than minting its own, so the
+#: lane's prefix is spelled once and its lines grep as one vocabulary.
+lead_author_log = make_logger("lead-author", flush=True)
 
 
 def source_first_party_key(model: str, *, label: str = "judge") -> None:

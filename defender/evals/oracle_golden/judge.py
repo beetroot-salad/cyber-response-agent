@@ -27,11 +27,12 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from defender._model import model
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 LABEL_PROMPT = GOLDEN_DIR / "prompts" / "label.md"
@@ -104,7 +105,7 @@ def tag_suffix(model: str, effort: str) -> str:
 
 # inputs
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class LeadInputs:
     """Everything both passes read, assembled once per lead."""
 
@@ -255,6 +256,15 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
 
     sample_path = case_dir / "oracle_visible" / "samples" / f"{lead_id}.txt"
     env_path = case_dir / "environment.yaml"
+    # A mapping by contract — `validate_cases.check_environment` reads `capture_environment`
+    # and `unstable_identifiers.columns` off it — and `LeadInputs.environment_notes: dict`
+    # checks that since #1067. A list- or scalar-rooted file is refused here, naming the file,
+    # rather than as a `ValidationError` from the record's constructor a few lines down.
+    environment_notes = yaml.safe_load(env_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(environment_notes, dict):
+        raise ValueError(
+            f"{env_path}: environment.yaml must be a YAML mapping, "
+            f"got {type(environment_notes).__name__}")
     return LeadInputs(
         case_id=case_dir.name,
         lead_id=lead_id,
@@ -262,7 +272,7 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
         sample=sample_path.read_text(encoding="utf-8") if sample_path.exists() else "",
         observed=observed,
         baseline=baseline,
-        environment_notes=yaml.safe_load(env_path.read_text(encoding="utf-8")) or {},
+        environment_notes=environment_notes,
         story=(case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8"),
     )
 
@@ -386,7 +396,7 @@ def parse_verdict_reply(raw: str) -> dict:
 
 # calls
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CallResult:
     """What one judge call produced, plus who actually produced it.
 

@@ -131,6 +131,9 @@ GENERIC_NAMES = {
     "successful", "interrupted",
     "Callable", "Iterable", "Iterator", "Optional", "Union", "Any",
     "typing", "dataclass", "field", "Path", "List", "Dict",
+    # A stdlib PROTOCOL method: a test's `sys.meta_path` finder defines it, and deleting that
+    # finder condemned every `importlib.util.find_spec(...)` call in the tree (15 on #1075).
+    "find_spec",
 }
 
 # Trees that hold FROZEN copies of things the live tree may since have deleted: a name

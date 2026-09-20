@@ -29,12 +29,12 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
 from defender._corpus import QueryTemplate
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
+from defender._model import model
 from defender._paths import adapters_under
 from defender.runtime.verb_grant import DENY_ALL
 from defender.runtime.verbs import (
@@ -65,7 +65,7 @@ def placeholders(text: str) -> set[str]:
     return set(_PLACEHOLDER_RE.findall(text))
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Finding:
     """One violated invariant. `code` is the stable machine name (tests bind to it); `message` is
     the operator-facing sentence, naming the offending symbol but never the file."""

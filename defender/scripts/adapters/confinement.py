@@ -10,13 +10,14 @@ import fnmatch
 import sys as _sys
 import urllib.parse
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import field
 from pathlib import Path as _Path
 from typing import Any
 
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender._model import model
 from defender.scripts.adapters.faults import AdapterFault
 
 
@@ -141,7 +142,7 @@ def confine_read_endpoint(system: str, url: str, *, method: str, verb_class: str
 # the transport capture seam
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CapturedRequest:
 
     system: str
@@ -149,7 +150,7 @@ class CapturedRequest:
     method: str
 
 
-@dataclass
+@model
 class TransportCapture:
 
     requests: list[CapturedRequest] = field(default_factory=list)

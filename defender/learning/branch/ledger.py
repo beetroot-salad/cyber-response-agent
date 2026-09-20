@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -187,7 +187,7 @@ def correlation_key_of(row: Any) -> str | None:
     return request_key(system, verb, params if isinstance(params, dict) else {})
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ServedCall:
     """One served call, under BOTH the question asked and the question run.
 
@@ -282,7 +282,7 @@ class ServedCall:
         return row
 
 
-@dataclass
+@model
 class Ledger:
     """The append-only record of one world's served calls, and the family's shared base.
 

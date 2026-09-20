@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import sys
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,7 @@ AuthorError = _shared.AuthorError
 _LOG_PREFIX = "questioner_curator"
 
 
-@dataclass(frozen=True, kw_only=True)
+@model(frozen=True, kw_only=True)
 class QuestionerAuthorConfig(CorpusAuthorConfig):
     """The questioner curator's drain config: the shared corpus-author core, its own skip
     report, and the same env-backed model knobs the defender curator carries.

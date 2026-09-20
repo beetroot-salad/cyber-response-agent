@@ -9,12 +9,12 @@ from __future__ import annotations
 import datetime as dt
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 import yaml
 
 from defender import _clock
+from defender._model import model
 from defender._text import strip_zero_width
 from defender._vocab import DISPOSITION_ENUM
 from defender.runtime.verbs import RosterRead
@@ -643,7 +643,7 @@ def _check_authz_basis(companion: CompanionBody) -> list[str]:
     return errors
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Price:
     """What a keyword costs, and why it costs it.
 
@@ -744,7 +744,7 @@ _LEAD_ANCHORED_STATES: tuple[str, ...] = (CEILING_QUERY_FAILED, CEILING_QUERY_EM
 _LEAD_REF_RE = re.compile(r"l-[A-Za-z0-9]+")
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CeilingReceipt:
     """One parsed `ceiling_test` row. `state`/`ref`/`cap` are the STRUCTURED half — closed
     vocabulary plus an id, mechanically checked against this run's own transcript — and the
@@ -1060,7 +1060,7 @@ def _check_ceiling_receipt(companion: CompanionBody, receipt: CeilingReceipt) ->
     return _check_nothing_to_try_receipt(receipt)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _CeilingWalk:
     """The result of walking a `:T conclude.ceiling_test` list once: every row that PAYS, in
     document order and deduplicated, and every row-level complaint. THE one walk — the gate
@@ -1217,7 +1217,7 @@ _DISPOSITION_GATES: dict[str, _Price] = {
 }
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class EntryPrice:
     """What a close still owes for its keyword, and why that keyword owes anything.
 
@@ -1262,7 +1262,7 @@ def conclude_ceiling_test_rows(companion: CompanionBody) -> tuple[CeilingReceipt
     return _walk_ceiling_rows(companion, conclude.get("ceiling_test")).paying
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class RuntimeEvidenceReceipt:
     """One parsed `:R consultations` BASELINE row (#983 mechanism A).
 
@@ -1401,7 +1401,7 @@ _RENDERED_BASELINE_CELLS: tuple[str, ...] = (
 )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _BaselineWalk:
     """One walk of the `:R consultations` baseline rows: the receipts that PAY, in document
     order, and every row-level refusal. THE one walk, for the reason `_CeilingWalk` is: the

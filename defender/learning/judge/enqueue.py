@@ -16,7 +16,8 @@ finding, not a reason to discard every other world's good ones.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -524,7 +525,7 @@ def _first_nonempty(*values: Any) -> Any:
     return values[-1] if values else None
 
 
-@dataclass
+@model
 class DrawsSkipReport:
     """What `draws_on_disk_report` did NOT turn into a draw document, classified (#1025 J9d):
     `unreadable` is a FAULT — torn, undecodable, symlinked/hard-linked, or a stem outside the
@@ -760,7 +761,7 @@ def route_finding(  # noqa: PLR0911, PLR0913 — one decision, one return per la
     return ROUTE_DEFENDER, None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class EnqueueReport:
     """What one enqueue did, on BOTH channels (#1007 M6): rows appended, findings it could not
     make a row of, and the malformed lines already on each queue when it appended."""

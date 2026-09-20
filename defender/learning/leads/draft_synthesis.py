@@ -21,7 +21,7 @@ from defender.runtime.verbs import body_param_for, engine_for
 if TYPE_CHECKING:
     from defender.learning.leads.lead_extraction import ExecutedLead
 
-_log = _loop_config.make_logger("lead-author", flush=True)
+_log = _loop_config.lead_author_log
 
 
 #: The sink-side hostile-id guard on a MODEL-COINED `query_id` segment, anchored with

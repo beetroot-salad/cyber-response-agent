@@ -180,7 +180,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
 # ---------------------------------------------------------------------------------------
 
 
-class _QueueFileThatLetsAnAppenderIn:
+class _QueueFileThatLetsAnAppenderIn(type(Path())):
     """The queue file, plus one callback fired at the single instant an appender can arrive
     with no race to lose.
 
@@ -213,30 +213,30 @@ class _QueueFileThatLetsAnAppenderIn:
     and answers with real `Path` objects.
 
     It enters through `dataclasses.replace(cfg.channel, file=...)`, the config seam, not
-    through `monkeypatch.setattr`."""
+    through `monkeypatch.setattr` — and so it IS a `Path` (#1067: `QueueChannel.file` is
+    validated strictly, and a duck with `__fspath__` is refused at that seam), the concrete
+    class `Path()` builds on this platform, with the one method overridden. Built through
+    `over`, not a constructor of its own: `Path`'s own construction differs between 3.11
+    (`__new__`) and 3.12 (`__init__`), and a factory needs to know neither. The hook lives on
+    the instance; a path derived from this one (`.parent`, `with_name`) carries the class
+    defaults below and never fires."""
 
-    def __init__(self, real: Path, on_graveyard_path: Callable[[], None]) -> None:
-        self._real = real
+    _on_graveyard_path: Callable[[], None] | None = None
+    _fired: bool = False
+
+    @classmethod
+    def over(cls, real: Path, on_graveyard_path: Callable[[], None]) -> Path:
+        self = cls(real)
         self._on_graveyard_path = on_graveyard_path
-        self._fired = False
+        return self
 
     def with_suffix(self, suffix: str) -> Path:
-        derived = self._real.with_suffix(suffix)
-        if suffix == _GRAVEYARD_SUFFIX and not self._fired:
+        # A REAL `Path`, as every other operation on this one answers with.
+        derived = Path(str(self)).with_suffix(suffix)
+        if suffix == _GRAVEYARD_SUFFIX and not self._fired and self._on_graveyard_path:
             self._fired = True
             self._on_graveyard_path()
         return derived
-
-    def __fspath__(self) -> str:
-        return str(self._real)
-
-    def __str__(self) -> str:
-        return str(self._real)
-
-    def __getattr__(self, name):
-        # Everything else — `is_file`, `read_text`, `parent` — is the real path's, and
-        # answers with real `Path` objects.
-        return getattr(object.__getattribute__(self, "_real"), name)
 
 
 def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseException | None:
@@ -259,7 +259,7 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseExce
         appender.__enter__()
 
     watched = dataclasses.replace(
-        ch, file=_QueueFileThatLetsAnAppenderIn(ch.file, _an_appender_arrives)
+        ch, file=_QueueFileThatLetsAnAppenderIn.over(ch.file, _an_appender_arrives)
     )
     cfg = h.cfg_for(
         paths, "findings", channel=watched, repo_lock_wait_seconds=1,

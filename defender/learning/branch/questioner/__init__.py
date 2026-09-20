@@ -56,7 +56,7 @@ what makes the contract's "matching run-salted frame tags in this message" true 
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from collections.abc import Sequence
 from typing import Any, ClassVar
@@ -119,7 +119,7 @@ def questioner_effort() -> str:
     return env_str("QUESTIONER_EFFORT", "medium")
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class QuestionerDeps:
     """Frozen, and carrying NOTHING but its role — zero fields, deliberately.
 
@@ -213,7 +213,7 @@ def _corpus_section(samples: Any) -> str:
         "\n\n".join(lines))
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Capture:
     """The three captured inputs as rendered SECTION BODIES, ready to be framed.
 

@@ -22,7 +22,8 @@ import hashlib
 import json
 import sys
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import fields, is_dataclass, replace
+from defender._model import model
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -94,7 +95,7 @@ def validate_world_touches(derived: Any, grant: VerbGrant) -> tuple[str, ...]:
     return names
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ServingWorld:
     """A world as the serving path needs it: a token, the systems it touches, its difference.
 
@@ -215,7 +216,7 @@ def _names_the_namespace(params: Mapping) -> bool:
     return any(prefix in value for value in params.values() if isinstance(value, str))
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Served:
     """One call's whole passage through the serve point, as the order produced it.
 

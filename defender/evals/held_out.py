@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -42,6 +41,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._yaml import safe_load
+from defender._model import model
 from defender._report import read_report
 from defender._run_paths import RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR, resolve_runs_base
@@ -57,7 +57,7 @@ def predicted_disposition(run_dir: Path) -> str | None:
     return read_report(RunPaths(run_dir).report).disposition
 
 
-@dataclass
+@model
 class HeldOutAlert:
     slug: str
     alert_path: Path
@@ -125,7 +125,7 @@ def index_runs(slugs: list[str], runs_dir: Path) -> dict[str, Path]:
     return {slug: v[2] for slug, v in best.items()}
 
 
-@dataclass
+@model
 class Scored:
 
     by_class: dict[str, list[tuple[str, str | None, str]]]

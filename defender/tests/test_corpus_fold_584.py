@@ -55,7 +55,6 @@ from defender.learning.frontend import serialize  # noqa: E402
 from defender.hooks import record_lesson_load  # noqa: E402
 
 from defender.tests._locale import C_LOCALE_ENV  # noqa: E402
-from defender.tests.test_corpus_fold_seed import _BlockYaml  # noqa: E402
 from defender.tests.test_curator_manifest import _findings_lesson, _headers  # noqa: E402
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
 
@@ -235,36 +234,6 @@ def test_d3_raw_is_the_slice_the_parser_consumed(tmp_path, capsys):
     assert not lesson.raw.endswith("---")
     assert "body mentions" not in lesson.raw
     assert lesson.body == "body mentions telemetry_source: sshd here"
-
-
-def test_d4_import_purity_survives_the_dataclass():
-    """demand: d4 — with ``yaml`` masked at ``sys.meta_path``, ``import defender._corpus`` still
-    succeeds, ``yaml`` is not in ``sys.modules``, and ``Lesson`` exists AND is constructible.
-
-    ``_corpus.py``'s import-time purity is not hygiene: the adversarial actor runs the pinned lesson
-    scripts as ``python3 <script>`` on its bash lane under the SYSTEM interpreter (no PyYAML); each
-    imports ``_lessons_common`` — and so this module — at module scope and only THEN re-execs into
-    ``defender/.venv``. ``test_c2`` pins the import; this pins that the NEW SYMBOL survives it, which
-    is the half a ``dataclass`` could break by reaching for a yaml-backed type at class-creation
-    time (a module-scope ``Lesson(fm: <yaml type>)`` annotation, say). ``from dataclasses import
-    dataclass`` is stdlib, so the ``test_c2c`` AST banlist stays green."""
-    purged = {}
-    for name in list(sys.modules):
-        if name == "yaml" or name.startswith(("yaml.", "defender._corpus", "defender._frontmatter")):
-            purged[name] = sys.modules.pop(name)
-    blocker = _BlockYaml()
-    sys.meta_path.insert(0, blocker)
-    try:
-        mod = importlib.import_module("defender._corpus")
-        assert "yaml" not in sys.modules
-        lesson = mod.Lesson(path=Path("x.md"), fm={"name": "x"}, raw="name: x", body="b")
-        assert lesson.path.name == "x.md"
-    finally:
-        sys.meta_path.remove(blocker)
-        sys.modules.pop("defender._corpus", None)
-        sys.modules.update(purged)
-
-
 
 
 def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):

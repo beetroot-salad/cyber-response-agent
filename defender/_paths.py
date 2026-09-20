@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
 from defender._git import REPO_ROOT
+from defender._model import model
 
 
 def adapters_under(defender_dir: Path) -> Path:
@@ -24,7 +24,7 @@ def adapters_under(defender_dir: Path) -> Path:
     return defender_dir / "scripts" / "adapters"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class DefenderPaths:
 
     repo_root: Path

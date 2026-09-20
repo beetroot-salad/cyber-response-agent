@@ -1,10 +1,18 @@
 """The one dataclass decorator every boundary type in the tree is built with (#1067).
 
 `@model` wraps `pydantic.dataclasses.dataclass`: STRICT by default (no coercion — `"3"` is
-never an `int`), `arbitrary_types_allowed` by default (many fields here are typed `Any` /
-`Callable` / a Protocol / another arbitrary class), and `frozen` passed through exactly as the
-caller spells it — same shape as stdlib `@dataclass`, usable bare or with keyword config
-(`@model` or `@model(frozen=True)`).
+never an `int`), `extra="forbid"` by default (a keyword the class has no field for is refused,
+as stdlib `@dataclass` refuses it with a `TypeError` — pydantic's own default is to drop it in
+silence, which turns a typo in a constructor call or a `dataclasses.replace` into a record
+that quietly kept its old value), `arbitrary_types_allowed` by default (many fields here are
+typed `Any` / `Callable` / a Protocol / another arbitrary class), and `frozen` passed through
+exactly as the caller spells it — same shape as stdlib `@dataclass`, usable bare or with
+keyword config (`@model` or `@model(frozen=True)`).
+
+**A field that names a class defined LATER in the same module** (two records that refer to
+each other) leaves the schema incomplete at decoration — pydantic then finishes it on the
+first construction, from whichever thread gets there first. `complete(cls)` at the module's
+end, once the later class exists, finishes it at import instead, deterministically.
 
 **Exception-class convention for a `model_validator`/`field_validator` this decorates:**
 pydantic wraps a validator's raised exception into its own `ValidationError` ONLY when that
@@ -62,11 +70,32 @@ from typing import Any, TypeVar, cast, dataclass_transform, overload
 
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass as _pydantic_dataclass
+from pydantic.dataclasses import rebuild_dataclass as _rebuild_dataclass
 from pydantic_core import ArgsKwargs
 
-__all__ = ["model", "unwrap_before"]
+__all__ = ["complete", "model", "unwrap_before"]
 
 T = TypeVar("T")
+
+
+def complete(cls: type[T]) -> type[T]:
+    """Finish the schema of a `@model` class whose field names a class defined AFTER it in the
+    same module — call once, at module end, when that class exists. Returns `cls`, so it reads
+    the same bare or as an assignment.
+
+    Without this the class is left `__pydantic_complete__ = False` at import and pydantic
+    builds the schema lazily on the first construction: two threads constructing at once each
+    delete and reassign the class's validator with no lock between them. `cast(Any, ...)`
+    because `@model` is typed `type[T] -> type[T]` (that is what keeps the decorated class's
+    own constructor signature for the type checker), so the `PydanticDataclass` protocol
+    `rebuild_dataclass` declares is not visible statically — and pydantic publishes that
+    protocol only from `_internal`, which is not a name to import. `_parent_namespace_depth=3`
+    (one past pydantic's default) because the frame pydantic reads a later class's name from is
+    the frame that calls IT, which here is this function's — the depth is the caller's frame,
+    so a record defined inside a function (a test's) resolves too, and a module-level call
+    falls through to the module's globals exactly as a direct `rebuild_dataclass` would."""
+    _rebuild_dataclass(cast(Any, cls), _parent_namespace_depth=3)
+    return cls
 
 
 def unwrap_before(cls: type, value: Any) -> Any:
@@ -150,8 +179,12 @@ def model(cls: type[T] | None = None, *, frozen: bool = False, strict: bool = Tr
             f"@model got {unknown} — not a stdlib @dataclass knob this decorator forwards "
             f"({sorted(_STDLIB_KNOBS)}) and not a pydantic ConfigDict key, so pydantic would "
             "have ignored it in silence")
+    # `extra="forbid"` restores the stdlib refusal of an unknown keyword; pydantic's own
+    # default (`"ignore"`) drops it in silence, and `dataclasses.replace` forwards its leftover
+    # keys to `__init__`, so `replace(cfg, bx=box)` would have returned an unchanged copy.
     config = cast(ConfigDict,
-                 {"strict": strict, "arbitrary_types_allowed": True, **config_kwargs})
+                 {"strict": strict, "extra": "forbid", "arbitrary_types_allowed": True,
+                  **config_kwargs})
 
     # Not named `wrap`: `defender._untrusted.wrap` is the tree's one frame primitive, and
     # `test_systemic_stage_frames_680`'s AST census counts every `def wrap` as a second one.

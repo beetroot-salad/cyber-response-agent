@@ -6,9 +6,9 @@ import importlib
 import json
 import subprocess
 import uuid
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from collections.abc import Callable
 
 from defender.learning.core.config import (
@@ -43,12 +43,8 @@ from defender.learning.core.persist import (
     pitfalls_lane_is_open,
     read_pitfalls,
 )
+from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 from defender.learning.core.quarantine import preserve_tainted_tree
-
-if TYPE_CHECKING:
-    # A type only: every curator module is loaded lazily through `_CURATOR_MODULES`, and
-    # the lessons lane must not pay for the lead-author package's import tree.
-    from defender.learning.leads.pitfalls_curator import PitfallsDisposition
 
 
 class _LeadAuthorRetry(Exception):
@@ -358,7 +354,7 @@ def _requeue_or_drop(claim: ClaimedMarker, *, note: str) -> None:
         claim.path.unlink()
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ServedMarker:
     """One lead-author request the tick served cleanly: the claim still sitting in
     `inflight/`, whether the curator reached the exit that records the run done (the one
@@ -370,7 +366,7 @@ class ServedMarker:
     sha: str | None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class BatchDisposition:
     """Everything a lead-author tick consumes from SHARED state, collected during `do_work`
     and applied only once the batch's tree has passed the scrub (#952 M1).
@@ -626,7 +622,7 @@ def _drain_box_request(
     )
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class PendingDelivery:
     """One batch whose commit is on a local branch and whose push or PR has not yet
     landed. Written by the tick that failed to deliver it; read, and removed once delivered,

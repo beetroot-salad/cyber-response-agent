@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
 from functools import lru_cache
+
+from defender._model import model
 
 from .._cells import (
     _row_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
@@ -36,7 +37,7 @@ _HEADER_ATTEMPT_RE = re.compile(r"^:[A-Z]")
 _LEAD_PREFIX_RE = re.compile(r"^l-(?P<id>[A-Za-z0-9]+)\.(?P<sub>.+)$")
 
 
-@dataclass
+@model
 class ParseWarning:
     block: str
     row_index: int
@@ -195,7 +196,7 @@ def _tokenize_fence(body: str) -> tuple[list[Block], list[ParseWarning]]:
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class FenceScan:
     """What a document's ```invlang fences enclose, AND what they leave out.
 

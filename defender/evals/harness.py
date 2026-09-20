@@ -9,12 +9,12 @@ import os
 import shutil
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 from _harness_util import init_git
 
 from defender import _git
+from defender._model import model
 
 
 HERE = Path(__file__).resolve().parent
@@ -23,7 +23,7 @@ RESULTS_DIR = HERE / "results"
 MANIFEST_SEED = "eval-harness"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class AuthorRun:
 
     returncode: int

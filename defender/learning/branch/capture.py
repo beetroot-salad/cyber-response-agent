@@ -21,7 +21,7 @@ world's own file, and counting them across a family is its size.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 
 from defender._io import append_jsonl, load_json_artifact, read_text_soft
@@ -30,7 +30,7 @@ from defender.learning.lead_repository import QueryRow, load_queries_report
 from .ledger import CAPTURED, LedgerError, ServedCall, payload_text
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class PrimeReport:
     """What the capture yielded, and what it did not.
 

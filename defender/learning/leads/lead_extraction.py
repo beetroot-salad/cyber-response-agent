@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ class LeadAuthorError(Exception):
     pass
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ExecutedLead:
     lead_id: str
     query_index: int
