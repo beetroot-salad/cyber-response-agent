@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import datetime as _dt
 from collections.abc import Callable
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 
 from defender._clock import z_seconds
@@ -41,7 +41,7 @@ from defender.learning.core.config import LoopPaths, QueueChannel, loop_paths
 from defender.learning.core.markers import FAILED_MARKER_DIRNAME
 from defender.learning.core.quarantine import held_archives, quarantine_cap
 from defender.learning.frontend.serialize import _json_safe, dump_contract
-from defender.learning.leads.pitfalls_curator import OFFERS_DECLINED_KEY
+from defender.learning.core.pitfalls_disposition import OFFERS_DECLINED_KEY
 
 __all__ = ["build_view", "stamped_view", "dump_contract"]
 
@@ -77,7 +77,7 @@ def _str_list(value: object) -> list[str]:
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _ChannelSpec:
     name: str
     #: The run-visualizer accent the card takes (`.q-card.t-<accent>` in the page's CSS).

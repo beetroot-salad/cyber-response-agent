@@ -17,7 +17,8 @@ what keeps it so.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import field
+from defender._model import model
 from typing import Any
 
 from ..ledger import PASSTHROUGH, PATCHED, STAGED
@@ -131,7 +132,7 @@ def unnameable(world: Any) -> list[str]:
     return reasons
 
 
-@dataclass
+@model
 class WorldApplier:
     """Stage where a system can be staged, patch where it cannot, and record which.
 

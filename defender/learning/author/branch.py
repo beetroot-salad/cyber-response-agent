@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import shutil
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from collections.abc import Callable
 
@@ -41,7 +41,7 @@ def _is_non_fast_forward(err: GitError) -> bool:
     return "non-fast-forward" in blob or "fetch first" in blob
 
 
-@dataclass
+@model
 class AuthorBranch:
     forge: Forge | None = None
     repo_root: Path = REPO_ROOT

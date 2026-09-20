@@ -6,7 +6,7 @@ import math
 import re
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -21,7 +21,7 @@ PLUMBING_TOKENS = frozenset({"run_dir", "position", "window"})
 
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Template:
     id: str
     system: str
@@ -131,7 +131,7 @@ def _max_variant_score(
     return best
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Neighbor:
     template_id: str
     template_path: Path

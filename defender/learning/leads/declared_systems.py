@@ -37,7 +37,7 @@ from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, re
 ADAPTERS_REL = DefenderPaths.adapters_rel
 SKILLS_REL = DefenderPaths.skills_rel
 
-_log = _loop_config.make_logger("lead-author", flush=True)
+_log = _loop_config.lead_author_log
 
 
 class AdaptersUnreadable(LeadAuthorError, RegistryError):

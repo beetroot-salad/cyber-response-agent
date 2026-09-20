@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from defender._model import model
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +10,7 @@ from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.core.config import QueueChannel, source_first_party_key
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class BucketSpec:
     """One bucket of an AUTHOR_RESULT, as data.
 
@@ -29,7 +29,7 @@ class BucketSpec:
     formatter: Callable[[str], str]
 
 
-@dataclass(frozen=True, kw_only=True)
+@model(frozen=True, kw_only=True)
 class CorpusAuthorConfig:
     """What every corpus-authoring drain needs, in one shape.
 
