@@ -278,19 +278,29 @@ def _ann_name(ann: Any) -> str:
 
 
 def validate_params(fn: Verb, params: Mapping[str, Any]) -> str | None:
+    """Model-facing (#1067 PR5): every param problem in one turn, not one problem per turn — a
+    row missing two required params AND carrying an unknown one used to cost three retries, one
+    reason at a time. The four categories (reserved, unknown, missing, mistyped) are still
+    computed in the same dependency order the single-reason version needed — reserved BEFORE
+    unknown, so a wrapper-only param it refuses is never ALSO reported as unknown; reserved
+    and unknown excluded from the mistyped scan, so a param this call already refused for a
+    different reason doesn't get a second, confusing verdict on its type (a missing param is
+    not in `params` to scan) — but every non-empty category now joins the others instead of
+    returning first."""
     declared = model_facing_params(fn)
+    problems: list[str] = []
     # BEFORE the unknown check, which would otherwise absorb these: a wrapper-only param is
     # declared on the signature, so "unknown param" would be a lie about why it was refused
     # and would send the model looking for a typo it did not make.
     reserved = sorted(set(params) & wrapper_only_params(fn))
     if reserved:
-        return (
+        problems.append(
             f"param(s) {reserved} are set by the first-party tool that owns this read, never "
             f"by you — this verb's caller-settable params are {sorted(declared)}."
         )
-    unknown = sorted(set(params) - set(declared))
+    unknown = sorted(set(params) - set(declared) - set(reserved))
     if unknown:
-        return (
+        problems.append(
             f"unknown param(s) {unknown} — this verb declares "
             f"{sorted(declared)} and nothing else."
         )
@@ -299,21 +309,25 @@ def validate_params(fn: Verb, params: Mapping[str, Any]) -> str | None:
         if p.default is inspect.Parameter.empty and name not in params
     )
     if missing:
-        return f"missing required param(s) {missing} (declared params: {sorted(declared)})."
+        problems.append(
+            f"missing required param(s) {missing} (declared params: {sorted(declared)}).")
 
     hints = _resolved_hints(fn)
+    already_named = set(reserved) | set(unknown)
     mistyped = sorted(
         f"{name!r} takes {_ann_name(hints[name])}, got "
         f"{type(params[name]).__name__} ({params[name]!r})"
         for name in params
-        if name in hints and not _matches(params[name], hints[name])
+        if name in hints and name not in already_named and not _matches(params[name], hints[name])
     )
     if mistyped:
-        return (
+        problems.append(
             f"wrong param type(s): {'; '.join(mistyped)}. Pass JSON values of the declared "
             "type — a number is a number, not a quoted string, and a boolean is true/false."
         )
-    return None
+    if not problems:
+        return None
+    return " ".join(problems)
 
 
 

@@ -785,3 +785,15 @@ def _never_verifies(*_a, **_k) -> str:
     """A verify seam that must not be reached: both cases above are settled before the check
     runs, and reaching it would mean the exemption or the queued-set guard did not."""
     raise AssertionError("the forward check ran for a pair it should have settled first")
+
+
+
+def test_the_row_rule_screens_key_presence_not_the_value():
+    """`finding_id`/`run_id`/`direction` are screened for KEY PRESENCE: an explicit `None`
+    passes that screen (and is refused, if at all, by a later rule), a missing key does not."""
+    JudgeRefused = J.sym("learning.judge", "JudgeRefused")
+    row = _family_row()
+    del row["run_id"]
+    with pytest.raises(JudgeRefused, match="missing 'run_id'"):
+        _enqueue()._validate_row(row)
+    assert _enqueue()._validate_row(_family_row(run_id=None)) is None

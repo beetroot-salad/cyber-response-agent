@@ -516,7 +516,15 @@ def _validate_duration_ms(duration_ms: Any) -> None:
     """`duration_ms` is bound straight into the INSERT, so it never meets
     `_find_nonrepresentable` — the isfinite discipline every other float in the row is held
     to. Unchecked, SQLite silently stores a NaN as SQL NULL and an inf round-trips verbatim,
-    later serializing to the bare token `Infinity`, which is not valid JSON."""
+    later serializing to the bare token `Infinity`, which is not valid JSON.
+
+    Deliberately NOT a pydantic strict-`float` adapter (#1067 PR5 tried one and backed it out):
+    a bare scalar argument is not an object to hang a validator on, and pydantic's strict
+    `float` is WIDER than this `isinstance` — it ACCEPTS a `Decimal` or a `Fraction`, silently
+    coercing it to `float` in the value it returns. A check that validates and then binds the
+    ORIGINAL argument (as a gate that returns nothing must) lets the un-coerced value through
+    to sqlite3, which refuses to bind it inside the open transaction as a `ProgrammingError`
+    no caller's `except PayloadNotRepresentable` names."""
     if duration_ms is None:
         return
     if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)):

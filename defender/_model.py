@@ -22,7 +22,11 @@ picks its failure mode by which it raises:
 - **A domain exception** (`JudgeRefused`, `StoreAppendError`, `PayloadNotRepresentable`,
   `GrantError`, ...) — for a validator whose reader is a human with a traceback. It reaches the
   caller unconverted, first-fail, in whatever order the checks are written, exactly like a
-  hand-written `__post_init__`.
+  hand-written `__post_init__`. ONLY if it is not itself a `ValueError`: a `ValueError`
+  subclass is wrapped like any other `ValueError`, and a caller's `except ThatClass` silently
+  misses it (`FatalConfigError`, `FrontmatterError` and `RowError` are such subclasses today;
+  `JudgeRefused` was one until #1067 PR5). A domain exception meant for this bullet derives
+  from `Exception`.
 - **`ValueError`** — for a validator whose reader is a model reading the message back as a tool
   result. Pydantic batches every failed check into one `ValidationError` naming every field
   path, and passes the `ValueError` text through verbatim — the gain is the batching, not the
