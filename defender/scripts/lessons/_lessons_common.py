@@ -6,10 +6,12 @@ from pathlib import Path
 
 from defender._corpus import iter_lessons
 from defender._io import use_utf8_stdio
-from defender.scripts._venv import reexec_into_venv
 
+# No `reexec_into_venv` re-export: this module resolves pydantic through `_corpus`/`_io` at
+# import, so a script that fetched the guard from here would have already imported what the
+# guard exists to route around. The guard comes from `defender.scripts._venv` alone.
 __all__ = [
-    "reexec_into_venv", "iter_lessons", "use_utf8_stdio",
+    "iter_lessons", "use_utf8_stdio",
     "as_list", "as_str_set", "csv_set", "rel_to_repo", "resolve_corpus",
 ]
 

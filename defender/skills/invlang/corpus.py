@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-from dataclasses import dataclass, field
+from dataclasses import field
 from pathlib import Path
+from typing import Annotated
+
+from pydantic import SkipValidation
 
 from defender._io import read_text_soft
+from defender._model import model
 from defender._run_paths import RunPaths
 
 from .parser import ParseWarning, parse_dense_companion
@@ -17,11 +21,18 @@ from .schema import (
 )
 
 
-@dataclass
+@model
 class Companion:
     case_id: str
     source_path: Path
-    body: CompanionBody
+    #: `SkipValidation`: `CompanionBody` is a `TypedDict` used as a STATIC typing aid over a
+    #: dict the projector builds incrementally and field by field (`_Projector.out`) — nothing
+    #: in the design ever promised every declared key is present at every point a `Companion`
+    #: is constructed with it, and `validate.diagnose`'s `Diagnostic`s are the one deliberate
+    #: well-formedness check over a document, not pydantic re-deriving one from the TypedDict's
+    #: required keys. Without this, every fixture and production document missing an optional
+    #: key pydantic's schema now treats as required refuses construction outright (#1067 PR 4).
+    body: Annotated[CompanionBody, SkipValidation]
     signature_id: str | None = None
     created_at: str | None = None
     parse_warnings: list[ParseWarning] = field(default_factory=list)
@@ -35,7 +46,7 @@ class Companion:
         return self.body.get("conclude", {})
 
 
-@dataclass
+@model
 class LoadReport:
     root: Path
     scanned: int = 0

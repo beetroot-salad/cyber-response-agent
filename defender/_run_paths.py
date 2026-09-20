@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 import stat
-from dataclasses import dataclass
 from pathlib import Path
 
 from defender._io import is_plain_entry
+from defender._model import model
 
 
 #: The run's ONE wire log, and the subdirectory that holds it — the layout fact, spelled here
@@ -87,7 +87,7 @@ PROVENANCE = "provenance.json"
 GATE_METADATA_KEY = "json"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class RunPaths:
     """One run's directories and its seven accessors: the alert, the report, the
     investigation log, the executed-queries table, the raw-payload dir, the wire log — and the

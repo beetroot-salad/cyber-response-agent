@@ -71,6 +71,12 @@ from ._rows import (
 _RowT = TypeVar("_RowT")
 
 
+# Stdlib `@dataclass`, not `@model`, by #1067's own rule for the invlang parser: this is not a
+# boundary type but the parser's mutable scratch object — every field is an accumulator its
+# methods fill in one entry at a time (`hypotheses_by_id` holds `HypothesisRecord` TypedDicts
+# that legitimately have none of their required keys yet mid-projection), constructed exactly
+# once as `_Projector()` and never from external data, so a constructor-time check has nothing
+# to check and a pydantic import here buys the parser nothing.
 @dataclass
 class _Projector:
 

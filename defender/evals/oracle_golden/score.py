@@ -71,11 +71,11 @@ import re
 import sys
 from collections.abc import Mapping, Set
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender._model import model  # noqa: E402
 from defender._yaml import safe_load, safe_load_typed_and_spelled  # noqa: E402
 from defender.evals.oracle_golden import judge  # noqa: E402
 
@@ -402,7 +402,7 @@ def _mechanical_row(lead_id: str, system: str, label: dict, cause: str, note: st
     }
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Mechanical:
     """`_measured` output: the score as far as it goes with no model in the loop, plus the
     three inputs the judged half then reads again."""

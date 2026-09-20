@@ -20,12 +20,13 @@ proof of completeness.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from defender._clock import parse_iso_utc
 from defender._env import env_int
+from defender._model import model
+from defender._text import as_int
 
 #: The in-context ceiling for ONE captured payload. 8 KB because in the recorded corpus only SIEM
 #: payloads exceed it — identity profiles, host records, tickets, package and key listings pass
@@ -58,7 +59,7 @@ _MIN_CLIP_PREFIX = 8
 ELISION_PREFIX = "<<ELIDED"
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Elision:
     """One region this VIEW dropped. Never a statement about the payload on disk, which is
     always whole: `kept`/`total` are counts of elements (a list) or characters (a string)."""
@@ -69,7 +70,7 @@ class Elision:
     total: int
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Completeness:
     """What the SERVER returned, read off the envelope's own scalars — never inferred from how
     much of it this view happens to show. `unknown` when the payload declares nothing; most
@@ -99,8 +100,7 @@ def _dumps(value: Any) -> str:
 
 
 def _int(obj: dict, key: str) -> int | None:
-    v = obj.get(key)
-    return v if isinstance(v, int) and not isinstance(v, bool) else None
+    return as_int(obj.get(key))
 
 
 def _lists(obj: dict) -> list[list]:
@@ -212,7 +212,7 @@ def _returned_records(obj: Any, comp: Completeness) -> list:
 
 # The walk.
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class _Node:
     """One bulk region: a list, or a string long enough to be bulk in its own right."""
 

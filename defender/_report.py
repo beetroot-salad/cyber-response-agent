@@ -26,13 +26,13 @@ reading (`f"{case_id}/{read.reason}"`) and get a sentence that names the file.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from defender._artifact_schema import REPORT_NAME
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._io import read_text_soft
+from defender._model import model
 # Straight from the owner, not via `_artifact_schema`: the report's SCHEMA is not its
 # VOCABULARY. The placeholder in particular cannot live here — the invlang corpus surfaces
 # need the same one and cannot import this module (`_artifact_schema` imports invlang's
@@ -45,7 +45,7 @@ class ReportUnreadable(ValueError):
     that must refuse re-wrap it in their own domain error rather than restating it."""
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Report:
     """A report that HAS a headline. `disposition` is a `DISPOSITION_ENUM` member, already
     zero-width-stripped — the type carries that guarantee, so a consumer holding one never
@@ -56,7 +56,7 @@ class Report:
     body: str
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ReportRead:
     """One read of a `report.md`, whether or not it produced a headline.
 
@@ -67,7 +67,12 @@ class ReportRead:
 
     disposition: str | None
     reason: str | None
-    frontmatter: Mapping[str, Any]
+    #: Keys `Any`, not `str`: this is the mapping AS YAML BUILT IT, and YAML builds `on:` as
+    #: `True`, a bare date as a `date`, `1:` as an `int`. The report write gate accepts those
+    #: (`test_permission_report_629` pins that a `1:`/`"1":` pair and a date key both commit),
+    #: so a `str` claim here — which `@model` CHECKS (#1067) — would turn a reader documented
+    #: "never raises" into a `ValidationError` over a file the gate let through.
+    frontmatter: Mapping[Any, Any]
     body: str
     text: str
     #: Was there nothing at the name at all (#1049)? `False` for every reader that predates the

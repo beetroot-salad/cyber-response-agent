@@ -440,6 +440,34 @@ def test_providers_imports_without_pydantic_ai():
     assert out.stdout.strip() == "True"
 
 
+def test_box_entrypoint_closure_imports_without_pydantic():
+    """The process inside the sandbox runs with only the tree on its path — no venv, no
+    pydantic — so nothing in `defender.runtime.box`'s import closure may import
+    `defender._model` (`bash_exec._run_box_entrypoint` is the one home for the rule). The
+    `box-native`/`box-dood` CI jobs are the live pin; this is the static one, because the
+    port has now broken the rule twice (`box/_spec.py` in PR 2, `_io.py` in PR 4) and each
+    time it surfaced only as every box test failing with `ModuleNotFoundError`."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys\n"
+        "class _Block:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name == 'pydantic' or name.startswith(('pydantic.', 'pydantic_core')):\n"
+        "            raise ModuleNotFoundError(name)\n"
+        "sys.meta_path.insert(0, _Block())\n"
+        "from defender.runtime import box  # the entrypoint's one import\n"
+        "print(sorted(m for m in sys.modules if m.startswith('defender.')))\n"
+    )
+    from defender._paths import PATHS
+
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=False, cwd=str(PATHS.repo_root))
+    assert out.returncode == 0, out.stderr
+    assert "defender._io" in out.stdout, "the closure changed shape — `_io` should be in it"
+
+
 def test_gate_wrapper_toolset_survives_replace():
     """`WrapperToolset` rebuilds itself through `dataclasses.replace(self, ...)` on every
     `for_run`/`for_run_step`, re-passing every field explicitly — so a field whose default

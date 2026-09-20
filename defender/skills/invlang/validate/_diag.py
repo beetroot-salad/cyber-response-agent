@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import field
 from typing import Literal
+
+from defender._model import model
 
 from .. import vocab
 from ..parser import (
@@ -29,7 +31,7 @@ _YAML_FENCE_RE = re.compile(r"```ya?ml\b")
 Severity = Literal["error", "warning"]
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Locus:
     """Where a diagnostic's offending row actually is, when there is one row to point at.
 
@@ -43,7 +45,7 @@ class Locus:
     row_index: int | None = None
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class Diagnostic:
     """One validation failure. `message` is the prose the model sees; `locus` and `fix` are
     optional structure alongside it.

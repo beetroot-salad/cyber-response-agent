@@ -39,13 +39,11 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._tsv import flatten_cell
-from defender.scripts.lessons._lessons_common import (
-    as_list,
-    iter_lessons,
-    reexec_into_venv,
-    use_utf8_stdio,
-)
+# The one `defender.*` import allowed above the guard: `_venv` is stdlib-only by contract, and
+# every other module in the tree may resolve pydantic (#1067) or PyYAML at import — packages the
+# bare interpreter this script is first launched under does not have.
+# `test_corpus_fold_seed.test_c2c` pins that ordering for every script that calls the guard.
+from defender.scripts._venv import reexec_into_venv
 
 if __name__ == "__main__":
     reexec_into_venv(__file__)
@@ -54,6 +52,8 @@ import argparse
 import re
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender._tsv import flatten_cell
+from defender.scripts.lessons._lessons_common import as_list, iter_lessons, use_utf8_stdio
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"

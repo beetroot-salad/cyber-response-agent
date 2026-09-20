@@ -6,10 +6,11 @@ import os
 import sys
 import urllib.parse
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
 from defender._io import write_guarded
+from defender._model import model
 from defender._run_paths import RunPaths
 from defender.run_common import run_env
 from defender.runtime import run_end
@@ -79,7 +80,7 @@ def _request(
     return status, body_text
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class TicketWriterDeps:
     load_config: Callable[[], dict[str, str] | None] = _load_config
     request: Callable[..., tuple[str | None, str]] = _request

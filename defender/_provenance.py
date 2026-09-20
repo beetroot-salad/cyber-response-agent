@@ -85,11 +85,11 @@ import json
 import os
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _git
 from defender._io import load_json_artifact, read_guarded, write_guarded
+from defender._model import model
 
 #: The dirty-path sample's ceiling. The paths are a debugging affordance — `dirty` is the bit
 #: that carries meaning — and `--untracked-files=all` over a tree with a vendored directory in
@@ -130,7 +130,7 @@ _GIT_UNREACHABLE: tuple[type[BaseException], ...] = (subprocess.SubprocessError,
 _GIT_FAILED: tuple[type[BaseException], ...] = (_git.GitError, *_GIT_UNREACHABLE)
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class RunProvenance:
     """The recorded answer to "what code was this run made against?".
 

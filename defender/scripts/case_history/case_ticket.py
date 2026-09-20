@@ -6,10 +6,10 @@ import copy
 import json
 import os
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from defender._model import model
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
 
@@ -57,7 +57,7 @@ class ReportNotParsable(CaseTicketError):
     unreadable-report branch, never a mapping or template defect (§7 R10)."""
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class CaseRecord:
 
     case_id: str
@@ -391,7 +391,7 @@ def escalation_comment_payload(truncated_by: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@model(frozen=True)
 class ReleasePredicate:
     """A case is RELEASED when a person has moved it to the mapping's `released.status` —
     the lifecycle state the vendor's own store enforces as a closed vocabulary. One question,

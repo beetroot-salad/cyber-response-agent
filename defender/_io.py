@@ -14,6 +14,10 @@ from collections.abc import Callable, Iterator
 from pathlib import Path, PurePath
 from typing import Any
 
+# STDLIB `@dataclass`, not `defender._model.model`: this module is in the box entrypoint's
+# import closure (`runtime/box/__init__.py` imports it) — see `bash_exec._run_box_entrypoint`
+# for the one note on why (#1067). `test_1067_model_port` pins the closure statically.
+
 TEXT_READ_ERRORS: tuple[type[Exception], ...] = (OSError, UnicodeDecodeError)
 """What reading a text file can raise: unreadable (``OSError``) or undecodable
 (``UnicodeDecodeError``, a ``ValueError``).

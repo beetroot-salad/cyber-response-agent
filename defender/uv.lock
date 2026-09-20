@@ -499,6 +499,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
@@ -534,6 +535,7 @@ requires-dist = [
     { name = "radon", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "toons", marker = "extra == 'runtime'", specifier = ">=0.7,<0.8" },
+    { name = "typing-extensions", specifier = ">=4.12" },
     { name = "vulture", marker = "extra == 'dev'" },
 ]
 provides-extras = ["runtime", "dev"]
