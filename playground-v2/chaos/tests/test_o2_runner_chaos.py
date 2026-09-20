@@ -297,6 +297,62 @@ def test_cli_parser_accepts_chaos_flags(runner):
     assert defaults.keep_chaos is False
 
 
+class _RevertFailsChaosCtl(FakeChaosCtl):
+    def revert(self, *args, **kwargs):
+        super().revert(*args, **kwargs)
+        raise KeyError("ledger record vanished mid-revert")
+
+
+def test_a_revert_failure_does_not_mask_the_original_step_failure(runner, scenario, tmp_path):
+    """A bare `finally: ctl_mod.revert(...)` would let a revert-time
+    exception replace whatever real failure (here, the step abort) was
+    already propagating — the operator would see the wrong reason the run
+    stopped."""
+    chaos_ctl = _RevertFailsChaosCtl(ledger_ref="ledger-ref-mask-check")
+
+    def failing_exec(host, command, user, dry_run):
+        return 1, "", "boom"
+
+    with pytest.raises(SystemExit, match="step 0.0 failed"):
+        runner.run_scenario(
+            scenario,
+            seed=42,
+            overrides={},
+            dry_run=False,
+            cr_mode="none",
+            runs_dir=tmp_path,
+            chaos=PROFILE,
+            chaos_ctl=chaos_ctl,
+            post_cr=lambda body: (0, {}),
+            exec_fn=failing_exec,
+        )
+
+    assert len(chaos_ctl.revert_calls) == 1  # revert was still attempted
+
+
+def test_dry_run_never_activates_a_real_fault(runner, scenario, tmp_path):
+    """--dry-run's documented contract is 'print dispatches without running' —
+    activating a real fault under it would silently mutate the live stack
+    under a flag an operator trusts as a no-op preview."""
+    chaos_ctl = FakeChaosCtl()
+
+    runner.run_scenario(
+        scenario,
+        seed=42,
+        overrides={},
+        dry_run=True,
+        cr_mode="none",
+        runs_dir=tmp_path,
+        chaos=PROFILE,
+        chaos_ctl=chaos_ctl,
+        post_cr=lambda body: (0, {}),
+        exec_fn=_ok_exec,
+    )
+
+    assert chaos_ctl.activate_calls == []
+    assert chaos_ctl.revert_calls == []
+
+
 def test_no_chaos_flag_means_no_chaos_calls_at_all(runner, scenario, tmp_path):
     """Default behaviour is unchanged: a plain run touches the controller never."""
     chaos_ctl = FakeChaosCtl()

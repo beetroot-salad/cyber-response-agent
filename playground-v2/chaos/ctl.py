@@ -147,19 +147,35 @@ class ChaosApplyError(RuntimeError):
 
 
 def _apply_mutations(mode: str, mutations: list[dict[str, Any]], execer: Any) -> None:
-    if mode == "cmdb-stale":
-        for m in mutations:
-            body = {m["field"]: m["new_value"]} if m["kind"] == "field-flip" else m["new_value"]
-            rc, resp = execer.cmdb_request("POST", f"/admin/overlay/{m['host']}", body)
-            if rc != 0:
-                raise ChaosApplyError(f"POST /admin/overlay/{m['host']} failed rc={rc}: {resp}")
-    else:
-        for m in mutations:
-            rc, resp = execer.es_request(
-                "PUT", f"/_ingest/pipeline/{m['pipeline']}", {"processors": [m["processor"]]}
-            )
-            if rc != 0:
-                raise ChaosApplyError(f"PUT /_ingest/pipeline/{m['pipeline']} failed rc={rc}: {resp}")
+    # A multi-mutation profile (hosts: >1) can fail partway through. Track
+    # what actually landed and roll it back on failure — otherwise a partial
+    # success is left live on the stack with no ledger record pointing at it
+    # (activate() only writes the record after this returns cleanly), which
+    # neither `status` nor `revert --all` can ever find.
+    applied: list[dict[str, Any]] = []
+    try:
+        if mode == "cmdb-stale":
+            for m in mutations:
+                body = {m["field"]: m["new_value"]} if m["kind"] == "field-flip" else m["new_value"]
+                rc, resp = execer.cmdb_request("POST", f"/admin/overlay/{m['host']}", body)
+                if rc != 0:
+                    raise ChaosApplyError(f"POST /admin/overlay/{m['host']} failed rc={rc}: {resp}")
+                applied.append(m)
+        else:
+            for m in mutations:
+                rc, resp = execer.es_request(
+                    "PUT", f"/_ingest/pipeline/{m['pipeline']}", {"processors": [m["processor"]]}
+                )
+                if rc != 0:
+                    raise ChaosApplyError(f"PUT /_ingest/pipeline/{m['pipeline']} failed rc={rc}: {resp}")
+                applied.append(m)
+    except ChaosApplyError:
+        if applied:
+            try:
+                _undo_mutations(mode, applied, execer)
+            except ChaosApplyError:
+                pass  # best effort — the original failure is what activate() raises
+        raise
 
 
 def _undo_mutations(mode: str, mutations: list[dict[str, Any]], execer: Any) -> None:
@@ -421,7 +437,15 @@ def run_audit(
     execer.cmdb_request("POST", f"/admin/overlay/{canary_host}", {"owner": "chaos-harness-canary"})
     rc, canary_payload = execer.cmdb_request("GET", f"/hosts/{canary_host}")
     canary_caught = rc == 0 and bool(audit_payloads([canary_payload]))
-    execer.cmdb_request("DELETE", f"/admin/overlay/{canary_host}")
+    cleanup_rc, cleanup_resp = execer.cmdb_request("DELETE", f"/admin/overlay/{canary_host}")
+    if cleanup_rc != 0:
+        # A failed cleanup leaves a literal "chaos-harness-canary" marker
+        # live in the CMDB — exactly the kind of leak this audit exists to
+        # catch, so it belongs in `findings`, not swallowed.
+        findings.append(
+            f"canary control cleanup failed rc={cleanup_rc}: could not remove "
+            f"the {canary_host!r} overlay — {cleanup_resp}"
+        )
 
     return {"findings": findings, "canary_control_passed": canary_caught, "sampled": len(payloads)}
 

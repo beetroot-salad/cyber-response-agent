@@ -128,6 +128,45 @@ def test_a_failed_mutation_is_never_recorded_as_ground_truth(profiles_dir, rules
     assert read_records(ledger_dir) == [], "a failed activation still wrote ground truth"
 
 
+def test_a_partial_multi_host_failure_rolls_back_the_hosts_that_did_land(profiles_dir, rules_dir, ledger_dir):
+    """hosts: 2 resolves two mutations; the first POST succeeds and the
+    second fails. Without rollback, the first host is left stale on the
+    live stack with no ledger record pointing at it — invisible to both
+    `status` and `revert --all`."""
+    write_profile(
+        profiles_dir,
+        "stale-owner-partial",
+        "cmdb-stale",
+        {"variant": "field-flip", "field": "owner", "hosts": 2},
+    )
+    first_host_path = None
+
+    class _FailSecondSeam(FakeExecSeam):
+        def cmdb_request(self, method, path, body=None):
+            nonlocal first_host_path
+            if method.upper() == "POST" and path.startswith("/admin/overlay/"):
+                if first_host_path is None:
+                    first_host_path = path
+                    return super().cmdb_request(method, path, body)
+                return 1, {"error": "boom"}
+            return super().cmdb_request(method, path, body)
+
+    execer = _FailSecondSeam()
+    with pytest.raises(Exception):
+        ctl.activate(
+            "stale-owner-partial",
+            seed=42,
+            execer=execer,
+            profiles_dir=profiles_dir,
+            rules_dir=rules_dir,
+            ledger_dir=ledger_dir,
+        )
+
+    assert read_records(ledger_dir) == []
+    deletes = execer.calls_for(target="cmdb", method="DELETE", path_contains="/admin/overlay/")
+    assert [d["path"] for d in deletes] == [first_host_path], "the first host's mutation was never rolled back"
+
+
 def test_a_second_profile_appends_rather_than_overwrites(profiles_dir, rules_dir, ledger_dir):
     _stale_profile(profiles_dir, "stale-a")
     write_profile(

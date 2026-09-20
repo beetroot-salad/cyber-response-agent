@@ -105,6 +105,22 @@ def test_ctl_audit_actually_samples_and_runs_its_own_canary_control(ledger_dir):
     assert deleted, "the canary was injected but never cleaned up"
 
 
+def test_ctl_audit_surfaces_a_failed_canary_cleanup_as_a_finding(ledger_dir):
+    """If the canary overlay's DELETE fails, a literal 'chaos-harness-canary'
+    marker is now permanently live in the CMDB — a self-inflicted leak that
+    must not be silently swallowed."""
+    execer = FakeExecSeam(
+        cmdb={
+            "GET /health": (0, {"status": "ok", "host_count": 11}),
+            "GET /hosts": (0, {"total": 0, "hosts": []}),
+            "GET /hosts/audit-canary-host": (0, {"name": "audit-canary-host", "owner": "chaos-harness-canary"}),
+            "DELETE /admin/overlay/audit-canary-host": (1, {"error": "cmdb unreachable"}),
+        }
+    )
+    result = ctl.run_audit(execer=execer, ledger_dir=ledger_dir)
+    assert any("cleanup failed" in f for f in result["findings"]), result["findings"]
+
+
 def test_ctl_audit_reports_a_real_finding_from_a_sampled_payload(ledger_dir):
     execer = FakeExecSeam(
         cmdb={
@@ -118,6 +134,18 @@ def test_ctl_audit_reports_a_real_finding_from_a_sampled_payload(ledger_dir):
     )
     result = ctl.run_audit(execer=execer, ledger_dir=ledger_dir)
     assert result["findings"], "a harness-tagged sampled payload was not flagged"
+
+
+def test_ordinary_words_containing_a_marker_as_a_substring_do_not_trip_it():
+    """A plain substring check would flag 'default' (contains 'fault') and
+    'evaluate'/'medieval' (contain 'eval') — ordinary vocabulary an ES
+    pipeline body or a real payload can legitimately carry."""
+    docs = [
+        {"pipeline": "default"},
+        {"note": "the team will evaluate the medieval-era migration plan"},
+        {"outcome": "failure"},
+    ]
+    assert audit_payloads(docs) == []
 
 
 def test_real_inventory_vocabulary_does_not_trip_the_scanner():

@@ -261,13 +261,20 @@ def run_scenario(
     # revert (issue #401, O2).
     active_chaos: dict[str, Any] | None = None
     if chaos and chaos != "none":
-        ctl_mod = chaos_ctl if chaos_ctl is not None else _default_chaos_ctl()
-        active_chaos = ctl_mod.activate(chaos, seed=seed)
-        pre_run["chaos"] = {
-            "profile": chaos,
-            "seed": seed,
-            "ledger_ref": active_chaos["ledger_ref"],
-        }
+        if dry_run:
+            # --dry-run's contract is "print dispatches without running" —
+            # activating a real fault here would mutate the live stack under
+            # a flag documented as a no-op preview.
+            print(f"DRY-RUN: would activate chaos profile {chaos!r} (seed={seed}), revert after")
+            pre_run["chaos"] = {"profile": chaos, "seed": seed, "dry_run": True}
+        else:
+            ctl_mod = chaos_ctl if chaos_ctl is not None else _default_chaos_ctl()
+            active_chaos = ctl_mod.activate(chaos, seed=seed)
+            pre_run["chaos"] = {
+                "profile": chaos,
+                "seed": seed,
+                "ledger_ref": active_chaos["ledger_ref"],
+            }
 
     step_log: list[dict] = []
     started_at = now_iso()
@@ -325,10 +332,21 @@ def run_scenario(
         _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=False)
     finally:
         # The fault never outlives the run — normal exit, abort, or any
-        # exception — unless the operator explicitly asked to keep it.
+        # exception — unless the operator explicitly asked to keep it. A
+        # revert failure here must not replace whatever real exception (a
+        # step failure, a Ctrl-C) is already propagating through this
+        # `finally` — it's reported, not raised, so the original failure
+        # reason survives.
         if active_chaos is not None and not keep_chaos:
             ctl_mod = chaos_ctl if chaos_ctl is not None else _default_chaos_ctl()
-            ctl_mod.revert(active_chaos["ledger_ref"])
+            try:
+                ctl_mod.revert(active_chaos["ledger_ref"])
+            except Exception as revert_exc:  # deliberately broad: report, never mask
+                print(
+                    f"WARNING: chaos revert failed for {active_chaos['ledger_ref']} "
+                    f"(profile={chaos}): {revert_exc}",
+                    file=sys.stderr,
+                )
 
     return run_id, run_dir, step_log
 

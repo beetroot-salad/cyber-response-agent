@@ -17,9 +17,21 @@ must never trip it, or every audit becomes noise. `ctl.py audit`'s live half
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
 
-HARNESS_MARKERS = ("chaos", "fault", "inject", "harness", "defender", "eval")
+HARNESS_MARKERS = frozenset({"chaos", "fault", "injected", "harness", "defender", "eval"})
+# Underscore-separated compound keys (defender_eval) are the whole reason this
+# isn't a plain substring/`\b` check: `\b` treats `_` as a word character, so
+# it would never fire inside "defender_eval". Splitting into letter-only
+# tokens and requiring an EXACT match against a marker is what lets a
+# compound key still count while "default" (contains "fault") and
+# "evaluate"/"failure" (contain "eval"/no relation to "fault") do not.
+_TOKEN_RE = re.compile(r"[a-z]+")
+
+
+def _tokens(text: str) -> Iterable[str]:
+    return _TOKEN_RE.findall(text.lower())
 
 
 def _walk_strings(node: Any) -> Iterable[str]:
@@ -65,8 +77,7 @@ def audit_payloads(payloads: list[dict[str, Any]]) -> list[str]:
         if _has_error_key(payload):
             findings.append(f"controller-caused error field in agent-reachable payload: {payload!r}")
         for text in _walk_strings(payload):
-            lowered = text.lower()
-            hit = next((marker for marker in HARNESS_MARKERS if marker in lowered), None)
+            hit = next((tok for tok in _tokens(text) if tok in HARNESS_MARKERS), None)
             if hit is not None:
                 findings.append(f"harness marker {hit!r} in agent-reachable payload: {payload!r}")
                 break
