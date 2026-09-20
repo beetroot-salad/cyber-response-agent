@@ -15,13 +15,14 @@ class JudgeRefused(Exception):
     and excluded rather than raised on. Raised only for a fault a human has to look at: the
     input exists and is not what this design can honestly read.
 
-    A bare `Exception`, NOT a `ValueError` (#1067 PR5; it was one from #1007 to here). Pydantic
-    wraps a `ValueError` raised inside a `model_validator` into its own `ValidationError`, so as
-    a `ValueError` this class could not be raised from `QueueRow`/`WorldQueueRow`'s validators
-    without a caller's `except JudgeRefused` silently missing it — `enqueue_report`'s
-    drop-and-name arm is one such caller. The one reason #1007 gave for the `ValueError` base
-    was that `tests/_triplet_947.refusals()` named `ValueError` and not this class; it names
-    this class now, as `tests/_judge_921.refusals()` always did. `grade_episode`'s conversion
-    set was never affected either way: its `except JudgeRefused: raise` sits ahead of the
+    A bare `Exception`, NOT a `ValueError` (#1067 PR5; it was one from #1007 to here).
+    `_model`'s convention lists this class among the domain exceptions a `@model` validator may
+    raise to reach the caller unconverted — but pydantic wraps a `ValueError` raised inside a
+    validator into its own `ValidationError`, so as a `ValueError` this class could never have
+    been raised from one without every caller's `except JudgeRefused` silently missing it. The
+    one reason #1007 gave for the `ValueError` base was that `tests/_triplet_947.refusals()`
+    named `ValueError` and not this class; it names this class now, as
+    `tests/_judge_921.refusals()` always did. `grade_episode`'s conversion set was never
+    affected either way: its `except JudgeRefused: raise` sits ahead of the
     `except (OSError, ValueError, ...)` arm.
     """

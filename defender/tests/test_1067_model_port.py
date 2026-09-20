@@ -496,16 +496,18 @@ def test_validate_params_names_every_problem_once_in_one_refusal():
     def read(ctx, *, host: str, size: int = 10, require_closed: bool = False):  # noqa: ARG001
         return None
 
-    refusal = validate_params(read, {"require_closed": True, "bogus": "x", "size": "10"})
+    # `require_closed="yes"` — a str where a bool is declared — so that ONLY the exclusion
+    # keeps it out of the mistyped category; a well-typed `True` would pass that scan on its
+    # own and the assertion below could never fail.
+    refusal = validate_params(read, {"require_closed": "yes", "bogus": "x", "size": "10"})
     assert refusal is not None
     assert "param(s) ['require_closed'] are set by the first-party tool" in refusal
-    assert "unknown param(s) ['bogus']" in refusal
+    assert "unknown param(s) ['bogus']" in refusal  # not ['bogus', 'require_closed']
     assert "missing required param(s) ['host']" in refusal
     assert "'size' takes int, got str" in refusal
-    # The exclusions: the reserved name is not ALSO unknown, and the unknown one is not ALSO
-    # scanned for its type — a mistyped verdict for a param the model was just told to drop.
-    assert "unknown param(s) ['bogus']" in refusal  # not ['bogus', 'require_closed']
-    assert "'bogus' takes" not in refusal
+    # The exclusions: the reserved name is not ALSO unknown (asserted above), and a name already
+    # refused as reserved is not ALSO scanned for its type — a second verdict on a param the
+    # model was just told to drop.
     assert "'require_closed' takes" not in refusal
 
 
@@ -518,6 +520,36 @@ def test_validate_report_names_every_problem_in_one_refusal():
     assert refusal is not None
     assert "must carry a top-level `disposition`" in refusal
     assert f"contains the literal {REPORT_CLOSE_DELIMITER!r}" in refusal
-    # A malformed frontmatter is still its own gate ahead of the batch: nothing to check yet.
-    assert validate_report("---\n: [\n---\n") is not None
+    # A malformed frontmatter is still its own gate AHEAD of the batch — there is nothing to
+    # check a disposition against until the parse succeeds — so it is the whole refusal.
+    malformed = validate_report(f"---\n: [\n---\nbody {REPORT_CLOSE_DELIMITER}\n")
+    assert malformed is not None
+    assert malformed.startswith("report.md frontmatter is malformed")
+    assert "disposition" not in malformed
+    assert "contains the literal" not in malformed
     assert validate_report("---\ndisposition: benign\n---\nbody\n") is None
+
+
+def test_a_domain_exception_raised_inside_a_model_validator_reaches_the_caller_unconverted():
+    """`_model`'s convention: a domain exception that is not a `ValueError` propagates out of
+    a validator as ITSELF; pydantic wraps only `ValueError`/`AssertionError`. `JudgeRefused`
+    is the one that was a `ValueError` until #1067 PR5 — every caller's `except JudgeRefused`
+    would have silently missed it out of any `@model` validator. Asked for the EXACT class:
+    `ValidationError` is itself a `ValueError`, so a looser `raises` cannot see the wrap."""
+    from pydantic import model_validator
+
+    from defender.learning.judge import JudgeRefused
+
+    @model
+    class Guarded:
+        a: int
+
+        @model_validator(mode="before")
+        @classmethod
+        def _refuse(cls, data):
+            raise JudgeRefused("refused by the rule")
+
+    with pytest.raises(JudgeRefused, match="refused by the rule") as raised:
+        Guarded(a=1)
+    assert type(raised.value) is JudgeRefused
+    assert not isinstance(raised.value, ValueError)

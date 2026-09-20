@@ -787,33 +787,13 @@ def _never_verifies(*_a, **_k) -> str:
     raise AssertionError("the forward check ran for a pair it should have settled first")
 
 
-@pytest.mark.parametrize("bad", [
-    {"subject": "world"},
-    {"type": "not-a-bucket"},
-    {"judge_outcome": "discard"},
-])
-def test_queue_row_refuses_as_judge_refused_itself_not_pydantics_wrapper(bad):
-    """The row rule is a pydantic `model_validator` since #1067 PR5, and pydantic wraps a
-    `ValueError` raised inside one into its own `ValidationError`. `JudgeRefused` must
-    therefore NOT be a `ValueError`, or `enqueue_report`'s `except JudgeRefused` drop-and-name
-    arm silently misses every refusal. `J.refusals()` cannot see this (it names `ValueError`,
-    which `ValidationError` subclasses), so this test asks for the exact class."""
-    from pydantic import ValidationError
 
-    JudgeRefused = J.sym("learning.judge", "JudgeRefused")
-    with pytest.raises(JudgeRefused) as raised:
-        _enqueue().QueueRow.from_row(_family_row(**bad))
-    assert type(raised.value) is JudgeRefused
-    assert not isinstance(raised.value, ValidationError)
-    assert not isinstance(raised.value, ValueError)
-
-
-def test_queue_row_presence_screen_is_about_the_key_not_its_value():
+def test_the_row_rule_screens_key_presence_not_the_value():
     """`finding_id`/`run_id`/`direction` are screened for KEY PRESENCE: an explicit `None`
     passes that screen (and is refused, if at all, by a later rule), a missing key does not."""
     JudgeRefused = J.sym("learning.judge", "JudgeRefused")
     row = _family_row()
     del row["run_id"]
     with pytest.raises(JudgeRefused, match="missing 'run_id'"):
-        _enqueue().QueueRow.from_row(row)
-    assert _enqueue().QueueRow.from_row(_family_row(run_id=None)).run_id is None
+        _enqueue()._validate_row(row)
+    assert _enqueue()._validate_row(_family_row(run_id=None)) is None

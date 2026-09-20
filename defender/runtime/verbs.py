@@ -282,10 +282,11 @@ def validate_params(fn: Verb, params: Mapping[str, Any]) -> str | None:
     row missing two required params AND carrying an unknown one used to cost three retries, one
     reason at a time. The four categories (reserved, unknown, missing, mistyped) are still
     computed in the same dependency order the single-reason version needed — reserved BEFORE
-    unknown, so a wrapper-only param it refuses is never ALSO reported as unknown; unknown and
-    missing excluded from the mistyped scan, so a param this call already refused for a
-    different reason doesn't get a second, confusing verdict on its type — but every
-    non-empty category now joins the others instead of returning first."""
+    unknown, so a wrapper-only param it refuses is never ALSO reported as unknown; reserved
+    and unknown excluded from the mistyped scan, so a param this call already refused for a
+    different reason doesn't get a second, confusing verdict on its type (a missing param is
+    not in `params` to scan) — but every non-empty category now joins the others instead of
+    returning first."""
     declared = model_facing_params(fn)
     problems: list[str] = []
     # BEFORE the unknown check, which would otherwise absorb these: a wrapper-only param is
