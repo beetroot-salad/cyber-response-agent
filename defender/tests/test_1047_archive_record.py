@@ -305,7 +305,12 @@ def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path
     run_dir = tmp_path / "defender-runs" / "2026-09-16T12-00-00Z_case-1047"
     run_dir.mkdir(parents=True, exist_ok=True)
     sidecar = S.sidecar_path(run_dir)
-    argv = _create_argv("defender-run-1047", run_dir, tmp_path / "srv" / "defender", BoxSpec(), ())
+    # An explicit rootfs: the tree is fake (no `box.Dockerfile`/`uv.lock`/`pyproject.toml`),
+    # and with `rootfs` unset the builder would resolve the image from it and refuse (#1092).
+    argv = _create_argv(
+        "defender-run-1047", run_dir, tmp_path / "srv" / "defender",
+        BoxSpec(rootfs="python:3.11-slim"), (),
+    )
     writable = [
         spec.split("target=", 1)[1].split(",", 1)[0]
         for spec in argv if spec.startswith("type=bind,") and "readonly" not in spec

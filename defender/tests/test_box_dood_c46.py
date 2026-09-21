@@ -48,6 +48,19 @@ MOUNTS: tuple[tuple[Path, Path], ...] = (
     (Path("/root/.claude"), Path("/home/dev/.claude")),
 )
 
+#: The real tree, for the two env-lever helpers below that cannot pass a `spec=`.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: #1092 (M3 revised): with `rootfs` unset the argv builders RESOLVE the image from the mounted
+#: tree — reading `box.Dockerfile`, `uv.lock` and `pyproject.toml` off it — and refuse a tree
+#: that lacks them. The fake trees below (`/srv/defender`, `/workspace/defender`) carry none,
+#: and these tests are about geography, not the image, so each argv-reading site pins a rootfs
+#: explicitly (the amendment's "tests that need a stock image pin one"; a stock name is for
+#: FAKE-docker sites only — a real-daemon test pins `image_tag(DEFENDER)`). The C46-refusal
+#: sites keep a bare `BoxSpec()`: their refusal fires BEFORE the resolver (MF1), which is
+#: exactly what they observe.
+PINNED = BoxSpec(rootfs="python:3.11-slim")
+
 
 # C46 — source translation
 def test_a_nested_path_is_rewritten_through_its_covering_mount():
@@ -87,7 +100,7 @@ def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
     the env must stay the path this process (and every downstream reader) uses."""
     argv = _create_argv(
         "defender-run-r1", Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"),
-        BoxSpec(), MOUNTS,
+        PINNED, MOUNTS,
     )
     joined = " ".join(argv)
     assert (
@@ -105,7 +118,7 @@ def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
 
 def test_create_argv_is_untouched_when_there_is_no_mount_table():
     argv = _create_argv(
-        "defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/srv/defender"), BoxSpec(), (),
+        "defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/srv/defender"), PINNED, (),
     )
     joined = " ".join(argv)
     assert "type=bind,source=/tmp/defender-runs/r1,target=/tmp/defender-runs/r1" in joined
@@ -137,6 +150,7 @@ def test_render_argv_translates_request_mounts_too():
             Mount(source=Path("/workspace/defender/lessons"), target=Path("/workspace/defender/lessons")),
         ),
         workdir=Path("/workspace"),
+        spec=PINNED,
     )
     joined = " ".join(_render_argv(request, MOUNTS))
     assert (
@@ -332,8 +346,10 @@ def _runtime_of(monkeypatch, value: str | None) -> str:
     else:
         monkeypatch.setenv(BoxSpec.ENV_VAR, value)
     rec = _CapturingDocker()
+    # The real tree: this helper tests the env lever, so it cannot pass a `spec=` to pin a
+    # rootfs, and an unset rootfs resolves from the tree the box would mount (#1092).
     with pytest.raises(BoxFault):
-        start_box(Path("/tmp/defender-runs/r1"), Path("/srv/defender"), docker=rec)
+        start_box(Path("/tmp/defender-runs/r1"), REPO_ROOT / "defender", docker=rec)
     assert rec.create_argv is not None
     return rec.create_argv[rec.create_argv.index("--runtime") + 1]
 
@@ -367,7 +383,9 @@ def test_a_typoed_lever_does_not_break_the_request_path_that_ignores_it(monkeypa
     from defender.runtime.box import BoxRequest
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-    request = BoxRequest(name="defender-runcycle-r1", workdir=Path("/workspace"))
+    # The real tree: the request's spec must come from its own factory (the thing under test),
+    # so no `spec=` pin — an unset rootfs resolves from `workdir / "defender"` (#1092).
+    request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT)
     monkeypatch.setenv(BoxSpec.ENV_VAR, "gvisor")  # AFTER the request is built
     with pytest.raises(BoxFault):  # the create fault, not a ValueError
         start_box(request, docker=_CapturingDocker())
@@ -385,7 +403,9 @@ def _request_runtime_of(monkeypatch, value: str | None) -> str:
     else:
         monkeypatch.setenv(BoxSpec.ENV_VAR, value)
     rec = _CapturingDocker()
-    request = BoxRequest(name="defender-runcycle-r1", workdir=Path("/workspace"))
+    # The real tree, for the reason `_runtime_of` gives: the lever is what the spec factory
+    # must read, so nothing here may pass a `spec=` (#1092).
+    request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT)
     with pytest.raises(BoxFault):
         start_box(request, docker=rec)
     assert rec.create_argv is not None
@@ -414,7 +434,7 @@ def test_the_discovered_table_reaches_the_run_dir_create_argv():
     with pytest.raises(BoxFault):  # the fake refuses create; the argv is already captured
         box_mod._start_boxed(
             Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"),
-            BoxSpec(), rec, lambda _docker: MOUNTS,
+            PINNED, rec, lambda _docker: MOUNTS,
         )
     joined = " ".join(rec.create_argv or [])
     assert (
@@ -436,6 +456,7 @@ def test_the_discovered_table_reaches_the_request_render_argv():
         mounts=(Mount(source=Path("/workspace/defender/lessons"),
                       target=Path("/workspace/defender/lessons")),),
         workdir=Path("/workspace"),
+        spec=PINNED,
     )
     with pytest.raises(BoxFault):
         box_mod._start_boxed_request(request, rec, lambda _docker: MOUNTS)

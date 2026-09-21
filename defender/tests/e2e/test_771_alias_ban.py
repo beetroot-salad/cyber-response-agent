@@ -101,6 +101,10 @@ def _request(tmp_path: Path, *, writable: bool = True) -> object:
         mounts=(box_mod.Mount(source=src, target=src, writable=writable),),
         workdir=src,
         env={},
+        # An explicit rootfs: `src` is a fake tree with none of the three hash inputs, and an
+        # unset rootfs resolves the image from `workdir / "defender"` and refuses (#1092).
+        # Every caller drives a scripted daemon, so the stock name is the right pin.
+        spec=box_mod.BoxSpec(rootfs="python:3.11-slim"),
     )
 
 

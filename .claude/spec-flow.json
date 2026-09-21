@@ -357,6 +357,24 @@
           "docker_exec_curl"
         ],
         "note": "Declared by #947's grounding as an EMPTY-WRITER root, which is the fact worth recording: at b8a63e66 nothing in defender/ creates an Elasticsearch index or alias (re-verified: the only `_aliases`/`put_alias` hits are a yaml dumper flag and the model-provider alias table). Every listed reader reaches the cluster through the one read-confined door, `elastic_adapter._http_json` -> `confinement.guard_outbound` -> `confine_read_endpoint(verb_class='r')`, whose elastic allowlist is exactly `/*/_search POST`, `/_query POST`, `/_cluster/health GET`, `/api/status GET`. #947's corpus staging is the FIRST writer; it must call `transport.docker_exec_curl` directly, and note that `guard_outbound` is also the capture recorder, so a write door that skips it records nothing anywhere but `staged.yaml`. #947 LANDS THAT FIRST WRITER and this row now names it: `staging._Door` reaches `docker_exec_curl` directly with PUT/POST/DELETE, outside `guard_outbound`, so `staged.yaml` is the only record any of these writes happened. The host-side reads are listed beside them because `_count` and `_resolve/index` are deliberately absent from the adapter's read allowlist — they exist only on this door."
+      },
+      "box_env": {
+        "writers": [
+          "defender/runtime/box/_lifecycle.py::_create_argv",
+          "defender/runtime/box/_docker.py::_render_env",
+          "defender/runtime/box/_docker.py::infra_env",
+          "defender/runtime/box/_lifecycle.py::_host_fallback_env",
+          "defender/run_common.py::run_env"
+        ],
+        "readers": [
+          "defender/runtime/bash_exec.py::_run_box_entrypoint"
+        ],
+        "grep": [
+          "BOX_ENV_ALLOWLIST",
+          "reexec_into_venv",
+          "_VENV_PY"
+        ],
+        "note": "DECLARED BY #1092's GROUNDING (base b016749c). The environment a granted program runs under inside a box: `BOX_ENV_ALLOWLIST` (box/_spec.py) is the ONE key set, rendered onto `docker run --env` by BOTH argv builders (`_create_argv` indexes `env_pairs[key]` for every allowlist key with NO default — a key added to the allowlist and not to `infra_env`/`_LOCALE_ENV` is a KeyError on every two-arg start; `_render_env` merges locale defaults, then the caller's allowlisted keys VALUE-BLIND, then the derived infra keys which win), inherited by every `docker exec`, and re-filtered from `os.environ` by the entrypoint (`bash_exec.py:645`) before any command runs. The two HOST lanes are writers of the same shape and are listed because the allowlist governs them too: `_host_fallback_env` copies every allowlisted key out of `request.env` and `run_env` inherits the operator's whole `os.environ` — so a key that joins the allowlist reaches the unsandboxed lane through those two copies whenever the caller or the shell carries it. The READERS the static walk cannot see are the three granted shell shims (`bin/defender-sql:9-10`, `bin/defender-invlang:7-8`, `bin/defender-lessons:8-9`; `bin/defender-policy:9-10` ungranted) — each `exec`s `${DEFENDER_DIR}/.venv/bin/python3` when it is executable, else bare `python3` — and `scripts/_venv.py::reexec_into_venv`, which `os.execv`s into `defender/.venv/bin/python3` when that path `is_file()`; both are cross-process edges classified by hand in #1092's brief."
       }
     }
   },
