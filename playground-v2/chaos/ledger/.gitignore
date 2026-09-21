@@ -1,0 +1,4 @@
+# The ledger's records are runtime state (O5) — a live, devcontainer-side
+# scorer input, not something committed. The package's own source
+# (__init__.py) and this file stay tracked.
+*.json

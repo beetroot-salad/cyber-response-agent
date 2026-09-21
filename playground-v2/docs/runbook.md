@@ -557,11 +557,12 @@ Shared healthcheck pattern via a `&stub-health` YAML anchor on `cmdb` (reused by
 
 #### cmdb (batch 9)
 
-FastAPI over `hosts/inventory.yaml`. Loads the `hosts:` list into an immutable `BASE` dict at startup; an in-memory `OVERLAY` dict shallow-merges over `BASE` on every read. The overlay exists as a scaffold for the stale-CMDB chaos modes in batch 11 — batch 9 ships the surface (`POST /admin/overlay/{name}`, `DELETE /admin/overlay/{name}`, `POST /admin/reset`), not a driver.
+FastAPI over `hosts/inventory.yaml`. Loads the `hosts:` list into an immutable `BASE` dict at startup; an in-memory `OVERLAY` dict shallow-merges over `BASE` on every read. The overlay is the surface the stale-CMDB chaos modes drive — the driver is the chaos control plane (`chaos/ctl.py`, issue #401; see §Chaos control plane below).
 
 - Build context is `playground-v2/` (not `./cmdb`) because the image must COPY `hosts/inventory.yaml` from outside its own dir. `playground-v2/.dockerignore` whitelists `cmdb/**` alongside the existing `hosts/**` + `keycloak/realm.yaml` so the root-context tar stays small.
-- Endpoints: `GET /health`, `GET /hosts[?role&criticality&owner]`, `GET /hosts/{name}`, `GET /roles`, `POST/DELETE /admin/overlay/{name}`, `POST /admin/reset`.
+- Endpoints: `GET /health`, `GET /hosts[?role&criticality&owner]`, `GET /hosts/{name}`, `GET /roles`, `GET/POST/PUT/DELETE /admin/overlay/{name}`, `POST /admin/reset`.
 - Merge is shallow on purpose — chaos scenarios flip a single field (owner, criticality). Deep-merging nested `os` / `service` dicts can come if a scenario needs it.
+- `POST` on an overlay merges (a patch); `PUT` replaces; `GET` returns the overlay as stored (`null` when none). The chaos controller (`chaos/ctl.py`) snapshots with `GET` before it patches a host and restores with `PUT`/`DELETE`, so its revert puts back exactly what was there — including overlay fields it did not create.
 
 #### threat-intel (batch 9)
 
@@ -660,8 +661,29 @@ cat runs/<run_id>/meta.json
 **Deferred to later batches:**
 
 - ILM retention pinning so the data streams the agent would query (`logs-system.*`, `logs-zeek.*`, `falco.alerts`, etc.) stay queryable for the fixture lifetime. Today the stack runs on default policies — replace with explicit retention before treating any run as a stable reference.
-- Chaos control plane that drives the CMDB overlay, toxiproxy-style service outages, schema drift, and data drops (docs/playground-environment-v2.md §Phased build Phase 4).
+- Toxiproxy-style service outages as a chaos mode (docs/playground-environment-v2.md §Phased build Phase 4). Stale CMDB, schema drift and data drops ship in the chaos control plane below.
 - MinIO-dependent data-access archetypes (blob enumeration, staged exfil) — MinIO is a Tier-2 dependency.
+
+### Chaos control plane (issue #401)
+
+`chaos/ctl.py` — devcontainer-side, never a container. Every mutation goes over `docker --context soc-playground exec` into the target container (CMDB stub via its `/admin/overlay` routes, Elasticsearch via `curl` in the `elasticsearch` container), so nothing the agent can see ever names it. Profiles are committed YAML under `chaos/profiles/`; the ground-truth ledger is gitignored under `chaos/ledger/`.
+
+```bash
+cd /workspace/playground-v2
+./chaos/ctl.py list                          # profile ids
+./chaos/ctl.py plan <profile> [--seed N]     # read-only: resolved mutations + before-state snapshots
+./chaos/ctl.py activate <profile> [--seed N] # plan + apply; prints the ledger record (keep its ledger_ref)
+./chaos/ctl.py status                        # ledger vs live state; exit 1 on drift, 3 if a backend is unreachable
+./chaos/ctl.py revert <ledger_ref> | --all   # restore the recorded before-state(s)
+./chaos/ctl.py audit [<profile>]             # agent-reachable payloads checked against the ledger
+./attacks/runner.py run <id> --chaos <profile> [--keep-chaos]   # fault around one attack run
+```
+
+- A fault is a change to named resources (a host's overlay, an ingest pipeline) with the before-state recorded *before* the push; revert restores it exactly, including overlay fields or processors the controller did not create. One active record per resource — a second activation touching an owned host or pipeline is refused.
+- `status` reports what it can attribute as `drift` (an owned resource that no longer matches, a reverted record's processor still live, a pending record) and what it cannot as `notes` (an unowned `@custom` pipeline — the controller has no pipeline baseline; a ledger file it could not parse). Only drift fails the exit code.
+- `audit` checks the sample against what the ledger says was written; harness-shaped words are advisories only. Its positive control is the fault's own observable effect, never something injected.
+- **The CMDB stub must carry `GET`/`PUT /admin/overlay/{name}`** (added with #401): `docker --context soc-playground compose up -d --build cmdb` before the first activation against a stack built earlier, or every activation fails at the snapshot with HTTP 405 (nothing pushed, no record written).
+- Unit suite: `chaos/tests/` — see its `conftest.py` for the `uv run` invocation (under the machine-wide pytest lock).
 
 ### Shuffle SOAR (batch 12)
 
@@ -697,7 +719,7 @@ http://identity:8080/openapi.json
 
 In the UI: **Apps → Create app → Generate from OpenAPI**, paste the URL, validate, submit. This is a UI action; Shuffle documents no API for it.
 
-**Trim the `/admin/*` routes from every generated app.** `POST /admin/reset` on any stub, and `POST|DELETE /admin/overlay/{name}` on cmdb, are chaos/reset controls. Generating from the full spec pulls them in, and a mis-wired playbook — or an LLM-authored one — can wipe environment state.
+**Trim the `/admin/*` routes from every generated app.** `POST /admin/reset` on any stub, and `GET|POST|PUT|DELETE /admin/overlay/{name}` on cmdb, are chaos/reset controls. Generating from the full spec pulls them in, and a mis-wired playbook — or an LLM-authored one — can wipe environment state.
 
 ## Detection rules
 

@@ -1,0 +1,17 @@
+id: schema-drift-username
+description: >
+  The auth pipeline's user.name field is renamed to user.id, as if a parser
+  or schema change quietly relabeled it — an investigation-read field, never
+  one a detection rule keys on.
+mode: schema-drift
+seed: 42
+params:
+  rename:
+    from: user.name
+    to: user.id
+cover: >
+  Guarded by chaos.guard.check_profile at activate time: refused if the
+  target field is ever added to a rule's threshold.field or query text
+  (O4). ignore_missing + ignore_failure are always set by
+  chaos.mutations — proven necessary so the field-less majority of auth
+  lines never pick up event.kind:pipeline_error (O6).

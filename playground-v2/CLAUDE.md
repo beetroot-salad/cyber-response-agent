@@ -28,7 +28,8 @@ Web UIs (Kibana 5601, Keycloak 8080, ES 9200, Fleet 8220) are loopback-only on t
 | fleet / enrollment / role policies | `hosts/base/agent-enroll.sh` + the `fleet-init` / `fleet-host-policies` one-shots in `compose.yml`; drift self-heals via the `fleet-outputs-reconciler` sidecar |
 | baseline / the activity generators | `hosts/base/baseline/catalog.yaml` (actions + Poisson schedules) + `scheduler.py`; seeded by `V2_BASELINE_SEED`, kill-switch `V2_BASELINE_ENABLED` |
 | the stubs (CMDB, TI, change-mgmt, identity, ticket-server) | `cmdb/` `threat-intel/` `change-mgmt/` `identity/` `ticket-server/` — auth-less FastAPI, reachable in-cluster by Docker DNS on :8080 |
-| attacks / the runner | `attacks/runner.py` + `attacks/catalog.yaml` (`./runner.py list`, `./runner.py run <id> --seed N`); see `attacks/README.md` |
+| attacks / the runner | `attacks/runner.py` + `attacks/catalog.yaml` (`./runner.py list`, `./runner.py run <id> --seed N [--chaos <profile>]`); see `attacks/README.md` |
+| chaos / fault injection (stale CMDB, schema drift, data drops) | `chaos/ctl.py` (`list`, `plan`, `activate`, `revert`, `status`, `audit`) + `chaos/profiles/*.yaml`; ledger in `chaos/ledger/` (gitignored). Runbook §Chaos control plane — note the cmdb rebuild it needs |
 | detection rules | `detection-rules/*.json`; install/refresh with `python3 scripts/install_detection_rules.py` (idempotent). Alerts land in `.internal.alerts-security.alerts-default-*` — the defender's `alert.json` input |
 | network/syscall telemetry | `unbound/` (DNS), `squid/` (auth'd proxy), `zeek/` (passive monitor), `falco/` (syscalls) |
 | the SOAR / automations | `soar/compose.yml` (four Shuffle services, `include:`d from `compose.yml`) + `soar/workflows/`; UI on `127.0.0.1:8006`. Lives on the isolated `soar` network with Kibana and the five stubs — the role hosts can't see it |
